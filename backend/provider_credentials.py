@@ -18,6 +18,7 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
+from datetime import date
 from pathlib import Path
 from typing import Any, cast
 
@@ -35,6 +36,8 @@ GARMIN_TOKENS_KEY = "garmin_oauth_tokens"
 # is not imported again on the next sync.
 GARMIN_TOKENSTORE_STATE_KEY = "garmin_tokenstore_state"
 GARMIN_TOKENSTORE_DISCONNECTED = "disconnected"
+# Set when Garmin rejected the Personal API key; a new or removed key clears it.
+GARMIN_PERSONAL_KEY_REJECTED_KEY = "garmin_personal_key_rejected"
 WAHOO_TOKENS_KEY = f"{ProviderId.WAHOO.value}_oauth_tokens"
 WAHOO_STATE_KEY = f"{ProviderId.WAHOO.value}_oauth_state"
 # Keys that must never leave the database through export, diagnostics or context.
@@ -43,6 +46,9 @@ CREDENTIAL_KV_KEYS = frozenset(
     {PROVIDER_CREDENTIALS_KEY, GARMIN_TOKENS_KEY, GARMIN_TOKENSTORE_STATE_KEY}
 ) | (WAHOO_SECRET_KEYS)
 
+PERSONAL_KEY_FIELD = "garmin_personal_api_key"
+# The athlete-entered expiry date of the Personal API key; it belongs to one key.
+PERSONAL_KEY_EXPIRES_FIELD = "garmin_personal_api_key_expires"
 # Secret values: never returned, only their source and presence.
 SECRET_FIELDS = frozenset(
     {
@@ -55,7 +61,12 @@ SECRET_FIELDS = frozenset(
 )
 # Non-secret values that the PWA may display.
 VISIBLE_FIELDS = frozenset(
-    {"openai_base_url", "intervals_athlete_id", "wahoo_client_id"}
+    {
+        "openai_base_url",
+        "intervals_athlete_id",
+        "wahoo_client_id",
+        PERSONAL_KEY_EXPIRES_FIELD,
+    }
 )
 # Reported as configured only; the address itself is not echoed back.
 MASKED_FIELDS = frozenset({"garmin_email", "yazio_email"})
@@ -98,6 +109,13 @@ def _with_values(config: Config, values: Mapping[str, Any]) -> Config:
     return cast(Config, dataclasses.replace(config, **values))
 
 
+def _unpaired_expiry(stored: Mapping[str, str]) -> dict[str, str]:
+    """A stored key without its own expiry must not take the environment's."""
+    if PERSONAL_KEY_FIELD in stored and PERSONAL_KEY_EXPIRES_FIELD not in stored:
+        return {PERSONAL_KEY_EXPIRES_FIELD: ""}
+    return {}
+
+
 def effective_config(env_config: Config, stored: Mapping[str, str]) -> Config:
     """Return the runtime configuration with stored credentials overlaid.
 
@@ -118,6 +136,7 @@ def effective_config(env_config: Config, stored: Mapping[str, str]) -> Config:
                 )
                 continue
         overrides[field] = value
+    overrides.update(_unpaired_expiry(stored))
     if not overrides:
         return env_config
     return _with_values(env_config, overrides)
@@ -135,6 +154,8 @@ def credential_status(
     for field in sorted(CREDENTIAL_FIELDS):
         if field in stored:
             source = SOURCE_DB
+        elif field in _unpaired_expiry(stored):
+            source = SOURCE_NONE
         elif str(getattr(env_config, field, "") or "").strip():
             source = SOURCE_ENV
         else:
@@ -195,6 +216,11 @@ def _validated_change(field: str, value: object) -> str | None:
             raise AppError(
                 400, "OPENAI_BASE_URL muss HTTPS oder HTTP auf Loopback verwenden."
             ) from exc
+    if field == PERSONAL_KEY_EXPIRES_FIELD:
+        try:
+            return date.fromisoformat(text).isoformat()
+        except ValueError as exc:
+            raise AppError(400, "Ungültiges Ablaufdatum.") from exc
     return text
 
 
@@ -288,7 +314,9 @@ class ProviderCredentialService:
                 {field: getattr(self._env_config, field) for field in self._overridden},
             )
             effective = effective_config(base, stored)
-            self._overridden = frozenset(stored) & CREDENTIAL_FIELDS
+            self._overridden = (
+                frozenset(stored) | frozenset(_unpaired_expiry(stored))
+            ) & CREDENTIAL_FIELDS
             if effective != current:
                 if any(
                     getattr(effective, field) != getattr(current, field)
@@ -323,6 +351,14 @@ class ProviderCredentialService:
                     self._key_values.get(db, PROVIDER_CREDENTIALS_KEY)
                 )
                 previous_athlete = self._athlete_id(current)
+                if (
+                    PERSONAL_KEY_FIELD in changes
+                    and PERSONAL_KEY_EXPIRES_FIELD not in changes
+                ):
+                    # A new or removed key never inherits the old key's expiry.
+                    current.pop(PERSONAL_KEY_EXPIRES_FIELD, None)
+                if PERSONAL_KEY_FIELD in changes:
+                    self._key_values.delete(db, GARMIN_PERSONAL_KEY_REJECTED_KEY)
                 for field, value in changes.items():
                     if value is None:
                         current.pop(field, None)

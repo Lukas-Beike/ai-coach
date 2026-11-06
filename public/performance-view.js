@@ -73,6 +73,15 @@ function renderUnavailableGarmin(garmin, status, detail, button, fullButton) {
   return true;
 }
 
+function renderGarminKeyHint(garmin) {
+  const node = $("#garminKeyHint");
+  if (!node) return;
+  const hint = garminKeyHint(garmin);
+  node.textContent = hint.text;
+  node.hidden = !hint.text;
+  node.classList.toggle("error", hint.urgent);
+}
+
 function renderGarmin(garmin) {
   const status = $("#garminStatus");
   const detail = $("#garminDetail");
@@ -80,6 +89,7 @@ function renderGarmin(garmin) {
   const fullButton = $("#garminFullResyncButton");
   const fullStatus = $("#garminFullResyncStatus");
   if (!status || !detail || !button) return;
+  renderGarminKeyHint(garmin);
   const fullResync = state.data?.provider_resync?.garmin || {};
   const fullRunning = Boolean(fullResync.running || state.localSync.garminFull);
   button.disabled = Boolean(state.data?.garmin_sync?.running || fullRunning);

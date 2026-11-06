@@ -47,6 +47,8 @@ MAX_ACTIVITY_PAGES: Final = 500
 SLEEP_RANGE_DAYS: Final = 31
 DAILY_SUMMARY_RANGE_DAYS: Final = 31
 BODY_BATTERY_RANGE_DAYS: Final = 31
+# AppError reason when Garmin rejected the Personal API key itself.
+PERSONAL_KEY_REJECTED_REASON: Final = "personal_key_rejected"
 
 # SDK method names the Personal API serves. With a Personal key these families
 # always use it; every other method stays on the SDK.
@@ -162,6 +164,7 @@ class GarminPersonalClient:
         opener: Opener | None = None,
         clock: Callable[[], float] = time.time,
         user_agent: str = "IntervalsCoach",
+        key_result: Callable[[bool], None] | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("The Garmin Personal API key is empty.")
@@ -173,6 +176,8 @@ class GarminPersonalClient:
         self._token: str | None = None
         self._token_expires_at = 0.0
         self._lock = threading.Lock()
+        # Told whether each key exchange was accepted (True) or rejected (False).
+        self._key_result = key_result
 
     def __repr__(self) -> str:
         return "GarminPersonalClient()"
@@ -213,7 +218,12 @@ class GarminPersonalClient:
                         "User-Agent": self._user_agent,
                     },
                 )
-                raw = self._open(request).decode("utf-8", "replace")
+                try:
+                    raw = self._open(request).decode("utf-8", "replace")
+                except provider_http.ProviderHTTPError as error:
+                    if error.status in {401, 403} and self._key_result is not None:
+                        self._key_result(False)
+                    raise
                 token = raw.strip().strip('"')
                 if not token or any(char.isspace() for char in token):
                     raise provider_http.ProviderInvalidResponse(
@@ -221,7 +231,13 @@ class GarminPersonalClient:
                     )
                 self._token = token
                 self._token_expires_at = _token_expiry(token, now)
+                if self._key_result is not None:
+                    self._key_result(True)
             return self._token
+
+    def verify_key(self) -> None:
+        """Exchange the key for a fresh token; a rejection raises HTTP 401/403."""
+        self._bearer(renew=True)
 
     def _read(
         self,

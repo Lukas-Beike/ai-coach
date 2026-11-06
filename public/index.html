@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=360">
+  <link rel="stylesheet" href="/styles.css?v=361">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -330,7 +330,7 @@
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small><small data-check-result="openai"></small></div><div class="connection-actions"><button data-check-button="openai" class="secondary-button" type="button">Verbindung prüfen</button><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></div></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small><small data-check-result="intervals"></small></div><label class="sync-period">Zeitraum (Tage)<input id="intervalsSyncDays" type="number" min="-1" max="365" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button data-check-button="intervals" class="secondary-button" type="button">Verbindung prüfen</button><button id="systemIntervalsSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="systemIntervalsFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="intervalsFullResyncStatus" class="connection-resync-status">Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.</small><p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege API-Schlüssel und Athlete ID im Bereich „Zugangsdaten“ oder als <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration.</p></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu-Aktivitätsdetails</strong><small>Neue Aktivitäten laden ihre Detaildaten ab diesem Tag automatisch.</small></div><label class="sync-period">Laden ab<input id="activityDetailFloorDate" type="date"><small>Ältere Aktivitäten lädst du in der Aktivität über „Detaildaten laden“.</small></label><div class="connection-actions"><button id="activityDetailFloorSaveButton" class="secondary-button" type="button">Datum speichern</button></div></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small><small data-check-result="garmin"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button data-check-button="garmin" data-check-group="garmin-login" class="secondary-button" type="button">Verbindung prüfen</button><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht verbunden. Melde dich im Bereich „Zugangsdaten“ an oder hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration (siehe README).</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small><small id="garminKeyHint" class="provider-key-hint" hidden></small><small data-check-result="garmin"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button data-check-button="garmin" data-check-group="garmin-login" class="secondary-button" type="button">Verbindung prüfen</button><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht verbunden. Melde dich im Bereich „Zugangsdaten“ an oder hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration (siehe README).</p></article>
             <article class="connection-card"><div class="connection-card-info"><strong id="wahooConnectionTitle">Wahoo</strong><span id="wahooConnectionStatus">Status wird geprüft…</span><small id="wahooConnectionDetail">Importiert Einheiten · schreibt nur bei ausdrücklichem Plan-Export</small><small data-check-result="wahoo"></small></div><div id="wahooConnectionActions" class="connection-actions" hidden><button id="wahooConnectButton" class="secondary-button" type="button" hidden>Wahoo verbinden</button><button id="wahooDisconnectButton" class="secondary-button danger-button" type="button" hidden>Wahoo trennen</button></div><div id="wahooSyncActions" class="connection-actions connection-sync-actions" hidden><button data-check-button="wahoo" data-check-group="wahoo wahoo-connection" class="secondary-button" type="button">Verbindung prüfen</button><button id="wahooSyncButton" class="secondary-button" type="button">Jetzt synchronisieren</button><button id="wahooFullResyncButton" class="secondary-button" type="button">Vollständig neu synchronisieren</button></div><small id="wahooFullResyncStatus" class="connection-resync-status" hidden></small><p id="wahooSetupHint" class="provider-setup-hint" hidden>Wahoo ist optional und nicht konfiguriert. Hinterlege Client-ID und Client-Secret im Bereich „Zugangsdaten“ oder als <code>WAHOO_CLIENT_ID</code> und <code>WAHOO_CLIENT_SECRET</code> in der Serverkonfiguration. <code>WAHOO_REDIRECT_URI</code> bleibt eine Serverkonfiguration (siehe README).</p></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Yazio</strong><span id="yazioConnectionStatus">Status wird geladen…</span><small id="yazioConnectionDetail"></small></div><button id="yazioCheckButton" class="secondary-button" type="button">Verbindung prüfen</button></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Kalender“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
@@ -406,6 +406,12 @@
                 <div class="credential-row-head"><label for="cred-garmin_personal_api_key">API-Schlüssel</label><span id="cred-source-garmin_personal_api_key" class="credential-source">Status wird geprüft…</span></div>
                 <input id="cred-garmin_personal_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Neuen Schlüssel eingeben">
                 <button id="cred-clear-garmin_personal_api_key" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+              </div>
+              <div class="credential-row">
+                <div class="credential-row-head"><label for="cred-garmin_personal_api_key_expires">Gültig bis</label><span id="cred-source-garmin_personal_api_key_expires" class="credential-source">Status wird geprüft…</span></div>
+                <input id="cred-garmin_personal_api_key_expires" type="date" autocomplete="off">
+                <small id="cred-current-garmin_personal_api_key_expires" class="credential-current"></small>
+                <button id="cred-clear-garmin_personal_api_key_expires" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
               </div>
               <p id="cred-error-garmin_personal" class="credential-error" role="alert" hidden></p>
               <button id="cred-submit-garmin_personal" class="secondary-button" type="submit">Speichern</button>
@@ -623,19 +629,19 @@
   <script src="/coach.js?v=51" defer></script>
   <script src="/shared.js?v=20" defer></script>
   <script src="/auth.js?v=13" defer></script>
-  <script src="/sync-status.js?v=14" defer></script>
+  <script src="/sync-status.js?v=15" defer></script>
   <script src="/view-refresh.js?v=3" defer></script>
   <script src="/notifications.js?v=6" defer></script>
   <script src="/nutrition.js?v=49" defer></script>
   <script src="/analysis.js?v=149" defer></script>
   <script src="/activity-details.js?v=28" defer></script>
   <script src="/activity-analysis.js?v=8" defer></script>
-  <script src="/performance-view.js?v=30" defer></script>
+  <script src="/performance-view.js?v=31" defer></script>
   <script src="/diagnostics.js?v=4" defer></script>
   <script src="/state-loader.js?v=24" defer></script>
   <script src="/sync-actions.js?v=5" defer></script>
   <script src="/wahoo-connection.js?v=5" defer></script>
-  <script src="/provider-connections.js?v=10" defer></script>
+  <script src="/provider-connections.js?v=11" defer></script>
   <script src="/provider-checks.js?v=4" defer></script>
   <script src="/weekly-plan.js?v=4" defer></script>
   <script src="/settings.js?v=17" defer></script>

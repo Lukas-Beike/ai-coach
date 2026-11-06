@@ -34,6 +34,7 @@ from backend.sync.garmin import (
     GarminPayloadService,
     GarminSyncStateService,
 )
+from backend.sync.garmin_personal_status import personal_key_state
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.metric_export_consent import enabled_fields, fields_view
 
@@ -161,6 +162,18 @@ class GarminProjectionService:
             "metric_export_enabled": bool(metric_export_fields),
             "metric_export_fields": fields_view(metric_export_fields),
             "last_error": parsed_error,
+            "personal_api": personal_key_state(
+                self._config,
+                today,
+                rejected=bool(self._config.garmin_personal_api_key)
+                and self._garmin_sync_state_service.personal_key_rejected(),
+            ),
+            "sdk_skipped": (
+                self._garmin_sync_state_service.sdk_skipped()
+                if self._config.garmin_personal_api_key
+                and (tokens_connected or self._config.garmin_email)
+                else None
+            ),
             "pagination": dict(status.pagination),
             "source_freshness": performance_freshness.garmin_source_freshness(
                 status, today

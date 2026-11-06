@@ -308,6 +308,7 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 | `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Read-only fallback used when no Garmin login is stored in the app. The UI login does not need it. |
 | `GARMIN_PASSWORD` | *None* | No | Garmin Connect account password. Read-only fallback for login; the UI never stores the password. Remove it once tokens are stored. |
 | `GARMIN_PERSONAL_API_KEY` | *None* | No | Garmin Personal API key (Garmin Connect Web > Settings > Personal API Key). Can also be set in **Mehr > Anbindungen > Zugangsdaten**. Exchanged server-side for a 24-hour access token on demand; never logged or returned. |
+| `GARMIN_PERSONAL_API_KEY_EXPIRES` | *None* | No | Expiry date (`YYYY-MM-DD`) of the Personal API key, shown in Garmin Connect Web. Can also be set as **Gültig bis** next to the key. The Garmin card warns 14 days ahead and when the key is rejected; saving or removing the key in the app clears its stored date. |
 | `GARMINTOKENS` | `/data/garmin_tokens` | No | Path of the legacy Garmin token file. It is imported once when the database has no Garmin tokens and is left in place. |
 | `GARMIN_FIXTURE_PATH` | *None* | No | Local mock JSON fixture path for development and testing without live Garmin credentials. |
 | `WAHOO_CLIENT_ID` | *None* | No | Wahoo Cloud API application client ID. Wahoo counts as configured only when all three `WAHOO_*` values are set. |

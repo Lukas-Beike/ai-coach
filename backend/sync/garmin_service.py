@@ -29,6 +29,7 @@ from backend.providers.garmin import (
 )
 from backend.providers.garmin_fields import GARMIN_EXTENDED_DATE_ALIASES
 from backend.providers.garmin_personal import (
+    PERSONAL_KEY_REJECTED_REASON,
     GarminPersonalClient,
     GarminTransportClient,
 )
@@ -109,10 +110,33 @@ def _garmin_sync_configured(config: Config, garmin_tokens: Any | None) -> bool:
     return bool(config.garmin_email)
 
 
-def _personal_client(config: Config) -> GarminPersonalClient | None:
+def _personal_client(
+    config: Config, key_result: Callable[[bool], None] | None = None
+) -> GarminPersonalClient | None:
     """The official Personal API client when its key is configured."""
     key = str(getattr(config, "garmin_personal_api_key", "") or "").strip()
-    return GarminPersonalClient(key) if key else None
+    return GarminPersonalClient(key, key_result=key_result) if key else None
+
+
+def _verify_personal_key(personal: GarminPersonalClient) -> None:
+    """Exchange the key as an AppError the provider transport passes through."""
+    try:
+        personal.verify_key()
+    except provider_http.ProviderHTTPError as error:
+        if error.status in {401, 403}:
+            raise AppError(
+                401,
+                "Der Garmin-Personal-API-Schlüssel wurde abgelehnt.",
+                reason=PERSONAL_KEY_REJECTED_REASON,
+            ) from None
+        raise AppError(
+            502,
+            "Garmin Personal API nicht erreichbar.",
+            upstream_status=error.status,
+        ) from None
+    except provider_http.ProviderInvalidResponse, OSError, ValueError:
+        # No answer about the key: unreachable, timed out or no token returned.
+        raise AppError(502, "Garmin Personal API nicht erreichbar.") from None
 
 
 def _garmin_tokenstore_present(config: Config, garmin_tokens: Any | None) -> bool:
@@ -359,12 +383,20 @@ class GarminRemoteReader:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
     def check_stored_login(self) -> None:
-        """Verify the stored tokens only; never fall back to a credential login.
+        """Verify the Personal API key, then the stored SDK tokens when connected.
 
-        The SDK reports every rejection as one generic failure, so a failure is
-        raised as ``reconnect_required`` without claiming the exact cause.
+        With a Personal API key, one fresh token exchange proves the key; the SDK
+        login is checked only when SDK tokens are stored. The SDK never falls back
+        to a credential login. It reports every rejection as one generic failure,
+        so an SDK failure is raised as ``reconnect_required`` without claiming the
+        exact cause.
         """
         tokens = self._garmin_tokens
+        personal = _personal_client(self._config, self._record_key_result)
+        if personal is not None:
+            self._check_personal_key(personal)
+            if tokens is None or not tokens.connected():
+                return
         if tokens is None or not tokens.connected():
             raise AppError(
                 401, "Garmin ist nicht angemeldet.", reason="reconnect_required"
@@ -392,6 +424,17 @@ class GarminRemoteReader:
             raise AppError(
                 401, GARMIN_MFA_REQUIRED_MESSAGE, reason="reconnect_required"
             )
+        if personal is not None:
+            self._state_service.clear_sdk_skipped()
+
+    def _check_personal_key(self, personal: GarminPersonalClient) -> None:
+        """Exchange the Personal API key once; a rejection names the key."""
+        self._external_call(None)(
+            GARMIN_ID,
+            "personal_api_token",
+            lambda: _verify_personal_key(personal),
+            None,
+        )
 
     def _external_call(self, cancel_event: threading.Event | None) -> ExternalCall:
         """Wrap SDK calls with the provider transport and cancellation checks."""
@@ -426,7 +469,7 @@ class GarminRemoteReader:
         any collection. With a key, a failed SDK login or pending MFA only drops
         the SDK-only families; the Personal API families still sync.
         """
-        personal = _personal_client(self._config)
+        personal = _personal_client(self._config, self._record_key_result)
         login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
         if personal is not None and not self._sdk_configured():
             return GarminTransportClient(personal, None), login_argument
@@ -459,7 +502,22 @@ class GarminRemoteReader:
                 raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
             self._log_sdk_skipped("mfa_required")
             return GarminTransportClient(personal, None), login_argument
+        if personal is not None:
+            self._state_service.clear_sdk_skipped()
         return GarminTransportClient(personal, sdk), login_argument
+
+    def _record_key_result(self, accepted: bool) -> None:
+        """Keep whether Garmin accepted the Personal API key for the card."""
+        try:
+            self._state_service.record_personal_key_result(accepted)
+        except Exception as error:  # noqa: BLE001 - a status write never fails a read
+            self._logger.warning(
+                "Garmin Personal API key state not stored",
+                extra={
+                    "event": "garmin_personal_key_state_failed",
+                    "context": {"error_type": type(error).__name__},
+                },
+            )
 
     def _log_sdk_skipped(self, reason: str) -> None:
         self._logger.warning(
@@ -469,6 +527,7 @@ class GarminRemoteReader:
                 "context": {"service": GARMIN_ID, "reason": reason},
             },
         )
+        self._state_service.record_sdk_skipped(reason)
 
     def _warn(self, source: str, _message: str, error: BaseException) -> None:
         self._logger.warning(

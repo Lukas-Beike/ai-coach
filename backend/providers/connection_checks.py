@@ -17,9 +17,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -78,6 +78,8 @@ class ProviderProbe:
     check: Callable[[], str | None]
     # Recovery guidance shown when the credentials were rejected.
     auth_hint: str = ""
+    # Guidance per rejection reason when one probe checks several credentials.
+    reason_hints: Mapping[str, str] = field(default_factory=dict)
 
 
 def simple_probe(
@@ -122,12 +124,17 @@ def classify_failure(error: AppError) -> str:
 
 
 def _result(
-    probe: ProviderProbe, status: str, checked_at: str | None
+    probe: ProviderProbe,
+    status: str,
+    checked_at: str | None,
+    guidance: str | None = None,
 ) -> dict[str, Any]:
+    if status != AUTH_FAILED:
+        guidance = ""
     return {
         "status": status,
         "checked_at": checked_at,
-        "guidance": probe.auth_hint if status == AUTH_FAILED else "",
+        "guidance": probe.auth_hint if guidance is None else guidance,
     }
 
 
@@ -168,7 +175,8 @@ class ProviderConnectionChecks:
         self._busy = {name: threading.Lock() for name in probes}
         self._deadline_seconds = deadline_seconds
         self._operation = operation
-        self._last: dict[str, tuple[str, str, str]] = {}
+        # provider -> (fingerprint, status, checked_at, guidance or None)
+        self._last: dict[str, tuple[str, str, str, str | None]] = {}
         self._at: dict[str, datetime] = {}
 
     def providers(self) -> tuple[str, ...]:
@@ -196,7 +204,7 @@ class ProviderConnectionChecks:
                 last = None
         if last is None:
             return _result(probe, UNCHECKED, None)
-        return _result(probe, last[1], last[2])
+        return _result(probe, last[1], last[2], last[3])
 
     def statuses(self) -> dict[str, dict[str, Any]]:
         return {name: self.status(name) for name in self._probes}
@@ -267,13 +275,15 @@ class ProviderConnectionChecks:
         ):
             # Repeated clicks must not become repeated provider requests;
             # transient outcomes are always retried.
-            return _result(probe, last[1], last[2])
+            return _result(probe, last[1], last[2], last[3])
         verified: str | None = None
+        guidance: str | None = None
         try:
             verified = probe.check()
             result = SUCCESS
         except AppError as error:
             result = classify_failure(error)
+            guidance = probe.reason_hints.get(str(error.reason or ""))
         except Exception as error:  # noqa: BLE001 - not a provider answer
             _LOGGER.warning(
                 "Provider connection check failed locally",
@@ -297,7 +307,7 @@ class ProviderConnectionChecks:
         if not configured_after and result == AUTH_FAILED:
             # The failed check itself invalidated the grant (Wahoo): keep the
             # reconnect guidance for this answer without storing a result.
-            return _result(probe, result, checked_at)
+            return _result(probe, result, checked_at, guidance)
         # A verified identity replaces the pre-check one: the check's own token
         # rotation must not discard the answer it produced.
         expected = _fingerprint(verified) if isinstance(verified, str) else fingerprint
@@ -308,9 +318,9 @@ class ProviderConnectionChecks:
             # The provider was never contacted; keep the previous result.
             return _result(probe, BUSY, None)
         with self._lock:
-            self._last[provider] = (expected, result, checked_at)
+            self._last[provider] = (expected, result, checked_at, guidance)
             self._at[provider] = self._now()
-        return _result(probe, result, checked_at)
+        return _result(probe, result, checked_at, guidance)
 
     def _probe(self, provider: str) -> ProviderProbe:
         probe = self._probes.get(provider)
