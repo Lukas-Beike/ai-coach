@@ -238,8 +238,8 @@ test("12-week body charts show the latest reading of each week and draw a single
   ];
   const weeks = bodyWeeklyPoints(points, "2026-10-24", "2026-11-06");
   assert.equal(weeks.length, 2);
-  assert.deepEqual([weeks[0].value, weeks[0].count], [null, 0], "a week without readings stays a gap");
-  assert.deepEqual([weeks[1].date, weeks[1].value, weeks[1].count], ["2026-11-06", 14.9, 3], "the week shows its last reading, not the median 15.2");
+  assert.deepEqual([weeks[0].value, weeks[0].weekReadings], [null, 0], "a week without readings stays a gap");
+  assert.deepEqual([weeks[1].date, weeks[1].value, weeks[1].weekReadings], ["2026-11-06", 14.9, 3], "the week shows its last reading, not the median 15.2");
   assert.equal(analysisPlottable({ points: weeks, minPoints: 1 }), true, "body charts draw one weekly value");
   assert.equal(analysisPlottable({ points: weeks }), false, "other charts still need two values");
 });

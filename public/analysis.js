@@ -182,6 +182,7 @@ function appendAnalysisReferenceNotes(section, series, unit) {
 
 function analysisReadingDetails(point, unit) {
   let details = point.count ? ` · ${point.count} Messungen` : "";
+  if (point.weekReadings > 1) details += ` · ${point.weekReadings} Messungen in der Woche`;
   if (point.observedDate && point.observedDate !== point.date) details += ` · letzter Messwert ${dateLabel(point.observedDate)}`;
   if (point.ftp_observed_at) details += ` · ${point.power_method || "FTP"} ${dateLabel(point.ftp_observed_at)}`;
   if (point.weight_observed_at) details += ` · Gewicht ${dateLabel(point.weight_observed_at)} (${point.weight_source || "Quelle unbekannt"})`;
@@ -193,7 +194,7 @@ function analysisValidPoint(point) {
   return point?.value != null && Number.isFinite(Number(point.value));
 }
 
-// Body charts set minPoints: 1 so a single weekly value is still drawn as a point.
+// A series may lower the default two-point minimum with minPoints.
 function analysisPlottable(item) {
   return item.bars || item.points.filter(analysisValidPoint).length >= (item.minPoints ?? 2);
 }
@@ -232,7 +233,7 @@ function appendAnalysisTable(section, title, series, unit) {
     series.forEach((item) => {
       const point = item.points.find((candidate) => candidate.date === date);
       let value = analysisValidPoint(point) ? analysisPointValue(item, point, unit) : "–";
-      if (point?.count || point?.observedDate) value += analysisReadingDetails(point, item.unit || unit);
+      if (point?.count || point?.weekReadings || point?.observedDate) value += analysisReadingDetails(point, item.unit || unit);
       row.append(reportNode("td", value));
     });
     body.append(row);
@@ -910,8 +911,8 @@ function bodyWeeklyPoints(points, start, end) {
     const readings = points.filter((point) => point.date >= weekStart && point.date <= boundedEnd && analysisValidPoint(point));
     const latest = readings.at(-1);
     weeks.push(latest
-      ? { ...latest, date: boundedEnd, count: readings.length, observedDate: latest.observed_at || latest.date }
-      : { date: boundedEnd, value: null, count: 0 });
+      ? { ...latest, date: boundedEnd, weekReadings: readings.length, observedDate: latest.observed_at || latest.date }
+      : { date: boundedEnd, value: null, weekReadings: 0 });
   }
   return weeks;
 }
@@ -933,7 +934,8 @@ function bodyMetricChart(metric, title, unit, window, period, preferred = {}) {
     color: index,
     noCurrentLine: true,
     sparse: true,
-    minPoints: 1,
+    // A single measured week is still drawn as a point.
+    minPoints: period === "twelveWeeks" ? 1 : 2,
     cadenceDays: period === "twelveWeeks" ? 7 : 1,
     explanation: metric === "cycling_w_per_kg"
       ? "Tageswert aus FTP oder eFTP geteilt durch das letzte Körpergewicht der vorherigen sieben Tage."
