@@ -83,9 +83,8 @@ def _garmin_exercise(item: Mapping[str, Any], result: dict[str, Any]) -> None:
 
     Without an explicit name nothing is stored; the export resolves the exercise
     name or an alias itself. The pair is always derived from the catalogue,
-    never taken from the request. A stored name that a later catalogue no
-    longer knows is dropped with its pair instead of failing the whole unit; a
-    new unknown name is rejected with suggestions.
+    never taken from the request. Any name the catalogue does not know is
+    rejected with suggestions, also one a later catalogue version renamed.
     """
     requested = " ".join(str(item.get("garmin_exercise") or "").split())[:80]
     if not requested:
@@ -96,8 +95,6 @@ def _garmin_exercise(item: Mapping[str, Any], result: dict[str, Any]) -> None:
         return
     found = garmin_catalogue.catalogue_exercise(requested)
     if found is None:
-        if "garmin_pair" in item:
-            return
         hint = garmin_catalogue.suggestions(requested)
         raise _invalid(
             f"Unbekannte Garmin-Übung: {requested}."
