@@ -47,6 +47,7 @@ class GarminJobDependencies:
     morning_body_battery_service: Callable[[], Any]
     fixture_loader: Callable[[], Any]
     activity_detail_service: Callable[[], Any] | None = None
+    strength_push_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)

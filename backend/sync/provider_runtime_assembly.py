@@ -181,7 +181,12 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
     def job_owner() -> ProviderJobOwner:
         historical_sync = build_historical_owner(deps.historical, deps.state)
         return GarminJobAdapter(
-            jobs=build_garmin_owner(historical_sync, garmin, all_sync_days)
+            jobs=build_garmin_owner(historical_sync, garmin, all_sync_days),
+            plan_push=(
+                garmin.strength_push_service()
+                if garmin.strength_push_service is not None
+                else None
+            ),
         )
 
     def schedule() -> GarminSchedulePolicy:

@@ -1623,6 +1623,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         morning_body_battery_service=morning_body_battery_service,
         fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
         activity_detail_service=GARMIN_ASSEMBLY.activity_detail_service,
+        strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,

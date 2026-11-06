@@ -174,6 +174,25 @@ class GarminAssembly:
             ),
         )
 
+    def strength_push_service(self) -> Any:
+        """Compose the explicit strength-workout push; it opens no connection yet."""
+        from backend.sync.garmin_strength_push import (
+            GarminSdkWriteSession,
+            GarminStrengthPushService,
+        )
+
+        return GarminStrengthPushService(
+            configured=lambda: bool(self.sync_service().configured()),
+            database_manager=self._database_manager,
+            sdk_session=GarminSdkWriteSession(
+                self.remote_reader(), self.fixture_loader(), self._garmin_tokens
+            ),
+            today=lambda: self._athlete_clock.now().date(),
+            now=self._datetime_now,
+            redactor=self._redactor.redact_text,
+            gate=self._resync_gate,
+        )
+
     def body_export(self, profile: Any) -> Any:
         from backend.sync.garmin_profile_body_export import GarminProfileBodyExport
 
