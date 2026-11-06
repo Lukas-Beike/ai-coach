@@ -1667,6 +1667,19 @@ class MorningReadinessTests(unittest.TestCase):
                         _find(result, MetricKind.READINESS).value.value, 78.0
                     )
 
+    def test_a_stored_re_score_alone_projects_no_readiness(self) -> None:
+        # The raw layer stores and re-projects each listed reading by itself.
+        for section in ("readiness", "training_readiness_history"):
+            with self.subTest(section=section):
+                result = _map({section: [_AFTERNOON]})
+                self.assertEqual(
+                    [o for o in result.records if o.kind is MetricKind.READINESS], []
+                )
+        self.assertEqual(
+            _find(_map({"readiness": [_MORNING]}), MetricKind.READINESS).value.value,
+            78.0,
+        )
+
     def test_without_a_wake_up_flag_the_earliest_reading_wins(self) -> None:
         late = {key: _AFTERNOON[key] for key in ("calendarDate", "score")}
         late["timestamp"] = "2026-10-10T13:00:00.0"
@@ -1676,8 +1689,9 @@ class MorningReadinessTests(unittest.TestCase):
 
     def test_an_unscored_wake_up_reading_does_not_hide_a_scored_one(self) -> None:
         unscored = {key: _MORNING[key] for key in ("calendarDate", "inputContext")}
-        result = _map({"readiness": [unscored, _AFTERNOON]})
-        self.assertEqual(_find(result, MetricKind.READINESS).value.value, 41.0)
+        later = {"calendarDate": DAY, "score": 52, "timestampLocal": "2026-10-10T09:00"}
+        result = _map({"readiness": [unscored, later]})
+        self.assertEqual(_find(result, MetricKind.READINESS).value.value, 52.0)
 
     def test_local_times_are_not_compared_with_utc_times(self) -> None:
         local = {"calendarDate": DAY, "score": 70, "timestampLocal": "2026-10-10T06:45"}

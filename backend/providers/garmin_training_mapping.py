@@ -115,6 +115,12 @@ _DAY_TEXT_LENGTH: Final = 10
 # The reading taken at wake-up is the day's morning value.
 _READINESS_CONTEXT: Final = "inputContext"
 _WAKE_CONTEXT: Final = "AFTER_WAKEUP_RESET"
+# Re-scores during the day. The raw layer stores and re-projects each listed
+# reading on its own, so such a reading is dropped by itself, without its
+# siblings; an unknown context is kept, as before this rule.
+_RESCORE_CONTEXTS: Final = frozenset(
+    {"AFTER_POST_EXERCISE_RESET", "UPDATE_REALTIME_VARIABLES"}
+)
 _LOCAL_TIME: Final = "timestampLocal"
 _UTC_TIME: Final = "timestamp"
 _CALENDAR_DATE: Final = "calendarDate"
@@ -191,15 +197,18 @@ def morning_readiness[T](
 ) -> list[T]:
     """Keep one readiness reading per day: the morning one, in the given order.
 
-    Garmin lists several readings per day. Among the readings with a score, the
-    one flagged as taken after waking wins; without one, the earliest timed
-    reading; without times, the first listed. Undated items are kept, so their
-    issues are still reported.
+    Garmin lists several readings per day. A reading flagged as a re-score during
+    the day is dropped even alone, since the raw layer projects each stored
+    reading by itself. Among the rest with a score, the one flagged as taken after
+    waking wins; without one, the earliest timed reading; without times, the
+    first listed. Undated items are kept, so their issues are still reported.
     """
     chosen: dict[date, tuple[_MorningRank, int]] = {}
     undated: set[int] = set()
     for position, item in enumerate(items):
         record = record_of(item)
+        if record.get(_READINESS_CONTEXT) in _RESCORE_CONTEXTS:
+            continue
         day = _readiness_day(record)
         if day is None:
             undated.add(position)

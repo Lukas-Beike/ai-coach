@@ -88,7 +88,7 @@ The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly
 
 #### Scenario: Several Garmin readiness readings per day
 - **WHEN** Garmin lists several training-readiness readings for one day
-- **THEN** READINESS and its level, in the canonical and legacy reads, come from the scored reading flagged as taken after waking, else the earliest timed scored reading, else the first listed, regardless of list order or sync time.
+- **THEN** a reading flagged as a re-score after exercise or a real-time update never becomes READINESS, even when stored and re-projected alone; of the rest, READINESS and its level, in the canonical and legacy reads, come from the scored reading flagged as taken after waking, else the earliest timed scored reading, else the first listed.
 
 #### Scenario: Manually entered Garmin weigh-in
 - **WHEN** a Garmin weigh-in declares `sourceType` `MANUAL`
