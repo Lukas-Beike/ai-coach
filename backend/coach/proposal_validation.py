@@ -44,17 +44,7 @@ def validated_coach_action_preview_input(
         raise AppError(
             400, "Die Aktionsvorschau benötigt Objekt-IDs, Diff und Payload."
         )
-    expected_target = (
-        ProviderId.INTERVALS.value
-        if action_type
-        in {
-            "delete_duplicate_intervals_activity",
-            "remote_coach_write",
-        }
-        else "local"
-    )
-    if action_type == "remote_coach_write":
-        expected_target = remote_write_target(payload.get("tool"))
+    expected_target = _expected_target(action_type, payload)
     if action_type == "local_coach_write":
         if target_system != "local" or not diff:
             raise AppError(
@@ -69,6 +59,14 @@ def validated_coach_action_preview_input(
     if action_type == "remote_coach_write":
         _validate_remote_coach_write(payload)
     return action_type, target_system, object_ids, diff, payload
+
+
+def _expected_target(action_type: str, payload: dict[str, Any]) -> str:
+    if action_type == "remote_coach_write":
+        return remote_write_target(payload.get("tool"))
+    if action_type == "delete_duplicate_intervals_activity":
+        return ProviderId.INTERVALS.value
+    return "local"
 
 
 def remote_write_target(tool: Any) -> str:

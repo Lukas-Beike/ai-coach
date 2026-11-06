@@ -370,23 +370,7 @@ class CoachDialogueActionService:
             )
             self._validate_repair_scope(arguments, action["request"], action)
         if name == "push_strength_to_garmin":
-            if action["request"]["sync_scope"] != "selected":
-                raise AppError(
-                    400, "Der Umfang der Synchronisierung fehlt.", reason="request_sync"
-                )
-            # Every unit must be in the validated request scope, as for an
-            # Intervals.icu selection; the model's entries grant nothing alone.
-            for entry in arguments.get("entries") or []:
-                local_id = (
-                    str(entry.get("local_id") or "") if isinstance(entry, dict) else ""
-                )
-                if not local_id:
-                    raise AppError(
-                        400,
-                        "Jede Einheit benötigt ihre local_id.",
-                        reason="request_scope",
-                    )
-                require_coach_scope(action, f"planned_unit:{local_id}")
+            _apply_garmin_scope(arguments, action)
         if name == "sync_nutrition":
             require_coach_scope(action, "local_nutrition", "intervals_sync")
         elif name == "delete_duplicate_intervals_activity":
@@ -455,3 +439,21 @@ class CoachDialogueActionService:
         payload = arguments.get("payload")
         template_id = str(payload.get("id") or "") if isinstance(payload, dict) else ""
         return template_id or None
+
+
+def _apply_garmin_scope(arguments: dict[str, Any], action: dict[str, Any]) -> None:
+    """Require a selected sync and every unit in the validated request scope.
+
+    As for an Intervals.icu selection, the model's entries grant nothing alone.
+    """
+    if action["request"]["sync_scope"] != "selected":
+        raise AppError(
+            400, "Der Umfang der Synchronisierung fehlt.", reason="request_sync"
+        )
+    for entry in arguments.get("entries") or []:
+        local_id = str(entry.get("local_id") or "") if isinstance(entry, dict) else ""
+        if not local_id:
+            raise AppError(
+                400, "Jede Einheit benötigt ihre local_id.", reason="request_scope"
+            )
+        require_coach_scope(action, f"planned_unit:{local_id}")

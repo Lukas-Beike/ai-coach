@@ -690,6 +690,31 @@ def illness_override_confirmed(
     ).illness_override
 
 
+def _check_garmin_write(
+    tool_name: str,
+    authority: TurnAuthority,
+    state: TurnGateState,
+    arguments: Mapping[str, Any] | None,
+) -> GateDecision:
+    """Allow a Garmin push only on the athlete's own Garmin wording.
+
+    Intervals.icu wording never grants it. A removal needs the athlete's own
+    removal wording; the classifier is not asked, so no local delete is
+    confirmed as a side effect.
+    """
+    if not authority.garmin_requested:
+        return GateDecision(
+            False, REMOTE_GARMIN, "remote_not_requested", state.classifier_used
+        )
+    if _removes_garmin(arguments) and not authority.garmin_removal_requested:
+        return GateDecision(
+            False, REMOTE_GARMIN, "impact_not_confirmed", state.classifier_used
+        )
+    state.writes_count += 1
+    state.records_count += record_count(tool_name, arguments)
+    return GateDecision(True, REMOTE_GARMIN, "ok", state.classifier_used)
+
+
 def check_write(
     tool_name: str,
     authority: TurnAuthority,
@@ -719,21 +744,7 @@ def check_write(
     if not authority.athlete_started:
         return GateDecision(False, domain, "no_athlete_message", state.classifier_used)
     if domain == REMOTE_GARMIN:
-        # Only the athlete naming Garmin grants it, never Intervals.icu wording.
-        # A removal needs the athlete's own removal wording; the classifier is
-        # not asked, so no local delete is confirmed as a side effect.
-        if not authority.garmin_requested:
-            return GateDecision(
-                False, domain, "remote_not_requested", state.classifier_used
-            )
-        if _removes_garmin(arguments) and not authority.garmin_removal_requested:
-            return GateDecision(
-                False, domain, "impact_not_confirmed", state.classifier_used
-            )
-        records = record_count(tool_name, arguments)
-        state.writes_count += 1
-        state.records_count += records
-        return GateDecision(True, domain, "ok", state.classifier_used)
+        return _check_garmin_write(tool_name, authority, state, arguments)
     remote = domain == REMOTE_INTERVALS or _remote_effect(arguments)
     if remote and not authority.remote_requested:
         return GateDecision(
