@@ -15,6 +15,7 @@ from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 from tests import run_tests
+from tools import bot_merge
 
 SPEC = importlib.util.spec_from_file_location(
     "release_source",
@@ -382,6 +383,32 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("docker buildx imagetools inspect", workflow)
         self.assertIn("Verify image signature", workflow)
         self.assertIn("cosign verify", workflow)
+
+    def test_openspec_update_runs_pinned_cli_before_any_write_token(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/openspec-update.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn("schedule:", workflow)
+        regenerate, publish = workflow.split("\n  publish:\n")
+        self.assertIn("npm ci --ignore-scripts", regenerate)
+        self.assertIn("npm run openspec -- update", regenerate)
+        self.assertNotIn("secrets.", regenerate)
+        self.assertNotIn("npm ", publish)
+        self.assertEqual(
+            workflow.count("uses: actions/checkout@"),
+            workflow.count("persist-credentials: false"),
+        )
+        self.assertLess(
+            publish.index("git apply --numstat"),
+            publish.index("create-github-app-token"),
+        )
+        # The workflow refuses the same files the bot merge would refuse.
+        self.assertIn(f"'^{bot_merge.OPENSPEC_FILES.pattern}$'", publish)
+        self.assertIn("core.hooksPath=/dev/null push", publish)
+        self.assertIn("--base develop", workflow)
+        self.assertIn("--auto --squash", workflow)
 
     def test_release_pr_dispatch_selects_its_own_branch_without_source_override(self):
         workflow = (
