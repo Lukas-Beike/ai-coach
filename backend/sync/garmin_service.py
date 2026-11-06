@@ -50,6 +50,7 @@ from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
 
 GARMIN_AUTOMATIC_SYNC_DAYS = 2
+GARMIN_NOT_CONFIGURED_MESSAGE = "Garmin ist nicht konfiguriert."
 
 GARMIN_SYNC_LOCK = threading.Lock()
 
@@ -346,9 +347,7 @@ class GarminRemoteReader:
         if source not in {"daily_stats", "weight"}:
             raise ValueError("Unsupported Garmin nutrition source")
         if not self.configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
         client, login_argument = self._authenticated_client(call_external)
         try:
@@ -374,9 +373,7 @@ class GarminRemoteReader:
         state, so a rate limit pauses this walk as it pauses the hourly sync.
         """
         if not self.configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
         client, login_argument = self._authenticated_client(call_external)
         try:
@@ -404,9 +401,7 @@ class GarminRemoteReader:
         if area not in sources or start > end or (end - start).days > 89:
             raise AppError(400, "Ungültiger Analyse-Aktualisierungsbereich.")
         if not self.configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
         client, login_argument = self._authenticated_client(call_external)
         try:
