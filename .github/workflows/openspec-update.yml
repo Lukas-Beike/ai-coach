@@ -1,0 +1,79 @@
+name: Daily OpenSpec update
+
+on:
+  schedule:
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: openspec-update
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # The pinned CLI runs before any write token exists.
+      - name: Check out develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: develop
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6.0.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install locked OpenSpec
+        run: npm ci --ignore-scripts
+      - name: Regenerate OpenSpec skills
+        id: regenerate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run openspec -- update
+          if [[ -z "$(git status --porcelain -- .agents/skills openspec)" ]]; then
+            echo "OpenSpec skills are current."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git status --short -- .agents/skills openspec
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create release GitHub App token
+        if: steps.regenerate.outputs.changed == 'true'
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.0.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Open or update the OpenSpec PR
+        if: steps.regenerate.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch=chore/openspec-update
+          version="$(node -p "require('./package-lock.json').packages['node_modules/@fission-ai/openspec'].version")"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -- .agents/skills openspec
+          git commit -m "chore(openspec): regenerate skills with OpenSpec $version"
+          git -c core.hooksPath=/dev/null push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY}.git" \
+            "HEAD:refs/heads/$branch"
+          pr="$(gh pr list --repo "$REPOSITORY" --base develop --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [[ -z "$pr" ]]; then
+            pr="$(gh pr create --repo "$REPOSITORY" --base develop --head "$branch" \
+              --title "chore(openspec): regenerate skills with OpenSpec $version" \
+              --body "Daily \`openspec update\` with the CLI pinned in \`package-lock.json\` changed the generated OpenSpec skills.")"
+          fi
+          gh pr merge "$pr" --repo "$REPOSITORY" --auto --squash

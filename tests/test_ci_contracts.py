@@ -383,6 +383,23 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("Verify image signature", workflow)
         self.assertIn("cosign verify", workflow)
 
+    def test_openspec_update_runs_pinned_cli_before_any_write_token(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/openspec-update.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn("schedule:", workflow)
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn("npm ci --ignore-scripts", workflow)
+        self.assertLess(
+            workflow.index("npm run openspec -- update"),
+            workflow.index("create-github-app-token"),
+        )
+        self.assertIn("core.hooksPath=/dev/null push", workflow)
+        self.assertIn("--base develop", workflow)
+        self.assertIn("--auto --squash", workflow)
+
     def test_release_pr_dispatch_selects_its_own_branch_without_source_override(self):
         workflow = (
             Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml"

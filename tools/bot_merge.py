@@ -24,7 +24,7 @@ def eligible(pr, repository):
     if author != "ai-coach-release-bot[bot]":
         return False
     patterns = {
-        "develop": r"chore/release-version-\d+\.\d+\.\d+",
+        "develop": r"chore/release-version-\d+\.\d+\.\d+|chore/openspec-update",
         "main": r"chore/release-promotion-\d+\.\d+\.\d+",
     }
     return bool(

@@ -63,6 +63,18 @@ class BotMergeTests(unittest.TestCase):
         pr["auto_merge"] = {}
         self.assertFalse(bot_merge.eligible(pr, "owner/repo"))
 
+    def test_release_bot_openspec_update_targets_develop_only(self):
+        branch = "chore/openspec-update"
+        bot = "ai-coach-release-bot[bot]"
+        self.assertTrue(bot_merge.eligible(pull(bot, "develop", branch), "owner/repo"))
+        self.assertFalse(bot_merge.eligible(pull(bot, "main", branch), "owner/repo"))
+        self.assertFalse(
+            bot_merge.eligible(pull(bot, "develop", branch + "-x"), "owner/repo")
+        )
+        self.assertFalse(
+            bot_merge.eligible(pull("human", "develop", branch), "owner/repo")
+        )
+
     def test_merge_uses_fresh_head_and_squash(self):
         pr = pull(sha="b" * 40)
         calls = []
