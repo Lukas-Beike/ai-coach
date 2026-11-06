@@ -9,7 +9,7 @@
 
 - [x] 2.1 Store, recompute and retire the derived observations in the local load stage and serve them on summaries; verify `tests/test_local_load_store.py`.
 - [x] 2.2 Trigger the stage after completed sync jobs and committed local zone changes; verify `tests/test_sync_executor.py` and `tests/test_zone_configuration_canonical.py`.
-- [x] 2.3 Map Garmin `avgGradeAdjustedSpeed` (mapper v14) and re-pin `tests/test_mapper_version_guard.py`.
+- [x] 2.3 Map Garmin `avgGradeAdjustedSpeed` (mapper v15) and re-pin `tests/test_mapper_version_guard.py`.
 
 ## 3. Integration
 
