@@ -55,20 +55,29 @@ def _activities_in(activities: list[Any], cutoff: date, anchor: date) -> list[di
 
 def _missing_load(
     window: list[dict], session_feedback: SessionFeedback
-) -> tuple[int, float | None]:
-    """Sessions without a TSS-scale load, and their known session-RPE load in AU."""
+) -> dict[str, Any]:
+    """The rollup keys of sessions without a TSS-scale load, empty without any.
+
+    Their known session-RPE load in AU keeps the labels of the RPE sources it
+    came from (athlete feedback, or the provider RPE as a fallback).
+    """
     missing = [row for row in window if _tss_load(row) is None]
-    rated = [
-        value
+    if not missing:
+        return {}
+    loads = [
+        session_load(row, session_feedback.get(stored_activity_key(row) or ""))
         for row in missing
-        if (
-            value := session_load(
-                row, session_feedback.get(stored_activity_key(row) or "")
-            )[1]
-        )
-        is not None
     ]
-    return len(missing), (sum(rated) if rated else None)
+    keys: dict[str, Any] = {"load_missing_sessions": len(missing)}
+    rated = [(entry, value) for entry, value in loads if value is not None]
+    if rated:
+        keys["load_missing_session_rpe_au"] = round(
+            math.fsum(value for _entry, value in rated), 1
+        )
+        keys["load_missing_session_rpe_source"] = ", ".join(
+            sorted({str(entry["rpe_source_label"]) for entry, _value in rated})
+        )
+    return keys
 
 
 def activity_rollup(
@@ -96,12 +105,7 @@ def activity_rollup(
         "duration_hours": round(moving_seconds / 3600, 1),
         "training_load": round(training_load, 1),
     }
-    missing, rpe_au = _missing_load(window, session_feedback or {})
-    if missing:
-        rollup["load_missing_sessions"] = missing
-    if rpe_au is not None:
-        rollup["load_missing_session_rpe_au"] = round(rpe_au, 1)
-    return rollup
+    return rollup | _missing_load(window, session_feedback or {})
 
 
 def _activity_load_by_date(activities: list[Any], anchor: date) -> dict[date, float]:

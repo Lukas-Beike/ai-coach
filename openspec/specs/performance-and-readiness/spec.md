@@ -52,7 +52,7 @@ The system SHALL calculate explicit current/previous 7- and 30-day completed-act
 
 #### Scenario: Sessions without a TSS-scale load
 - **WHEN** a rollup window holds sessions without an Intervals.icu training load or TSS, such as a Garmin-only session with only its EPOC-based Garmin load
-- **THEN** the rollup and the actual ATL report how many sessions were left out of the load sum, and the rollup reports their known session-RPE load in AU beside the sum, never added to it.
+- **THEN** the rollup and the actual ATL report how many sessions were left out of the load sum, and the rollup reports their known session-RPE load in AU beside the sum, with the labels of its RPE sources, never added to it.
 
 #### Scenario: Missing or conflicting Garmin acute load
 - **WHEN** no dated valid measured acute-load value exists or device values conflict

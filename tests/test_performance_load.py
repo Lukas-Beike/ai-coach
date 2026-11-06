@@ -105,6 +105,15 @@ class PerformanceLoadTests(unittest.TestCase):
         self.assertEqual(rollup["training_load"], 60.0)
         self.assertEqual(rollup["load_missing_sessions"], 2)
         self.assertEqual(rollup["load_missing_session_rpe_au"], 180.0)
+        self.assertEqual(rollup["load_missing_session_rpe_source"], "Athletenfeedback")
+        provider_rated = {
+            **activities[1],
+            "rpe": 5,
+            "sources": {"rpe": "Intervals.icu"},
+        }
+        fallback = activity_rollup([provider_rated], 7, anchor)
+        self.assertEqual(fallback["load_missing_session_rpe_au"], 150.0)
+        self.assertEqual(fallback["load_missing_session_rpe_source"], "Intervals.icu")
         self.assertNotIn(
             "load_missing_sessions",
             activity_rollup(activities[:1], 7, anchor, session_feedback=feedback),
