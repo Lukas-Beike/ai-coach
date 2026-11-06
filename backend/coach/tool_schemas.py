@@ -860,6 +860,31 @@ def build_structured_tool_schemas(
             },
         ),
         _canonical_coach_tool(
+            "push_strength_to_garmin",
+            "Send dated strength planned units with a strength_structure to the athlete's Garmin watch as structured strength workouts, scheduled on their date; only when the athlete's own message asks to send them to Garmin or the watch. Use target garmin, remote_write=true, sync_scope selected and the garmin_sync scope. Endurance units go through start_intervals_plan_sync instead. remove=true deletes only a workout this app sent and needs an explicit athlete request to remove it. The athlete approves a card before anything is sent; exercises without a Garmin match block that unit.",
+            {
+                "entries": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 28,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["local_id", "remove"],
+                        "properties": {
+                            "local_id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Exact local_id of a strength planned unit from read_training_state.",
+                            },
+                            "remove": {"type": "boolean"},
+                        },
+                    },
+                },
+                "reason": {"type": "string"},
+            },
+        ),
+        _canonical_coach_tool(
             "sync_competitions",
             "Queue an explicitly requested push of local target competitions to Intervals.icu.",
             {"reason": {"type": "string"}},

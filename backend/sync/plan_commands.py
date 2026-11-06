@@ -26,6 +26,7 @@ class PlanPushCommandService:
         *,
         reason: str,
         repair: bool = False,
+        provider: str = INTERVALS_ID,
     ) -> dict[str, Any]:
         jobs: list[dict[str, Any]] = []
         for offset in range(0, len(entries), 28):
@@ -36,16 +37,17 @@ class PlanPushCommandService:
             }
             if repair:
                 payload["repair"] = True
+            # A Garmin removal has no payload hash; the store derives one.
             item_operations = [
                 {
                     "item_key": entry["library_workout_id"],
                     "operation": "plan_push",
-                    "payload_hash": entry["expected_payload_hash"],
+                    "payload_hash": entry.get("expected_payload_hash") or "",
                 }
                 for entry in chunk
             ]
             job = self._queue_service.enqueue(
-                INTERVALS_ID,
+                provider,
                 "plan_push",
                 payload,
                 requested_by="coach",

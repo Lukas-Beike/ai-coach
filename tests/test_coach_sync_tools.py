@@ -30,6 +30,39 @@ class CoachSyncToolServiceTests(unittest.TestCase):
             nutrition_diary=self.nutrition,
         )
 
+    def test_garmin_push_needs_the_garmin_target_scope_and_approved_entries(self):
+        entry = {"library_workout_id": "u1", "expected_payload_hash": "a" * 64}
+        intent = {
+            "operation": "push_strength_to_garmin",
+            "target_system": "intervals",
+            "authorization_scope": ["garmin_sync"],
+        }
+        for denied, arguments in (
+            (dict(intent), {"entries": [entry]}),
+            (
+                {**intent, "target_system": "garmin", "authorization_scope": []},
+                {"entries": [entry]},
+            ),
+            (
+                {**intent, "target_system": "garmin"},
+                {"entries": [{"library_workout_id": "u1"}]},
+            ),
+        ):
+            with self.subTest(intent=denied), self.assertRaises(AppError):
+                self.service.execute(
+                    "push_strength_to_garmin", arguments, intent=denied, sync_job_ids=[]
+                )
+        self.plan_push.enqueue.assert_not_called()
+        self.plan_push.enqueue.return_value = {"ok": True, "status": "queued"}
+        jobs: list[str] = []
+        self.service.execute(
+            "push_strength_to_garmin",
+            {"entries": [entry, {"library_workout_id": "u2", "remove": True}]},
+            intent={**intent, "target_system": "garmin"},
+            sync_job_ids=jobs,
+        )
+        self.assertEqual("garmin", self.plan_push.enqueue.call_args.kwargs["provider"])
+
     def test_provider_refresh_checks_scope_and_preserves_cancel_and_job_tracking(self):
         intent = {
             "operation": "start_provider_refresh",

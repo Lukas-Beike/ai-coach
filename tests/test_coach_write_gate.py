@@ -89,8 +89,12 @@ class RegistryCoverageTests(unittest.TestCase):
         proposal_tools = REMOTE_COACH_WRITE_TOOLS | LOCAL_COACH_WRITE_TOOLS
         self.assertLessEqual(proposal_tools, set(gate.TOOL_DOMAIN))
         # Remote tools need a named sync; adaptive apply is local unless flagged.
-        for tool in REMOTE_COACH_WRITE_TOOLS - {"apply_adaptive_replan"}:
+        for tool in REMOTE_COACH_WRITE_TOOLS - {
+            "apply_adaptive_replan",
+            "push_strength_to_garmin",
+        }:
             self.assertEqual(gate.TOOL_DOMAIN[tool], "remote_intervals", tool)
+        self.assertEqual(gate.TOOL_DOMAIN["push_strength_to_garmin"], "remote_garmin")
         self.assertEqual(gate.TOOL_DOMAIN["apply_adaptive_replan"], "planning")
         self.assertEqual(gate.TOOL_DOMAIN["undo_training_change"], "undo")
         for tool in _DELETE_TOOLS:
@@ -312,7 +316,7 @@ class LocalTierTests(unittest.TestCase):
         )
         for text in ("danke", "Das war gestern lecker", "👍", ""):
             for tool in sorted(local_tools):
-                if gate.TOOL_DOMAIN[tool] == "remote_intervals":
+                if gate.TOOL_DOMAIN[tool] in gate.REMOTE_DOMAINS:
                     continue
                 with self.subTest(text=text, tool=tool):
                     decision = _check(tool, text, classifier=_Classifier())
@@ -933,7 +937,7 @@ class OpenAIClassifierTests(unittest.TestCase):
         self.assertEqual(items["required"], ["domain", "delete", "bulk"])
         self.assertEqual(
             set(items["properties"]["domain"]["enum"]),
-            gate.DOMAINS - {"remote_intervals"},
+            gate.DOMAINS - gate.REMOTE_DOMAINS,
         )
         self.assertIn("data", payload["instructions"])
         self.assertIn("explicitly", payload["instructions"])
@@ -1126,3 +1130,77 @@ class CoachToolPathDeleteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+GARMIN_PUSH = {"entries": [{"local_id": "u1", "remove": False}]}
+GARMIN_REMOVE = {"entries": [{"local_id": "u1", "remove": True}]}
+
+
+class GarminTierTests(unittest.TestCase):
+    def test_only_naming_garmin_with_a_transfer_verb_grants_a_push(self):
+        for text in (
+            "Schick die Krafteinheit an Garmin",
+            "Sync die Kraft auf meine Uhr",
+            "Kannst du sie an Garmin senden?",
+        ):
+            with self.subTest(text=text):
+                decision = _check(
+                    "push_strength_to_garmin", text, arguments=GARMIN_PUSH
+                )
+                self.assertTrue(decision.allowed, decision)
+                self.assertEqual("remote_garmin", decision.domain)
+        for text in (
+            "Synchronisiere den Plan mit Intervals",
+            "Trainiere um 7 Uhr und sync mit Intervals",
+            "Nicht an Garmin schicken",
+            "Wie sende ich an Garmin?",
+            "Garmin Daten aktualisieren",
+        ):
+            with self.subTest(text=text):
+                decision = _check(
+                    "push_strength_to_garmin", text, arguments=GARMIN_PUSH
+                )
+                self.assertFalse(decision.allowed)
+                self.assertEqual("remote_not_requested", decision.reason)
+
+    def test_a_yes_after_a_garmin_offer_grants_it_but_not_after_an_intervals_offer(
+        self,
+    ):
+        offer = "Soll ich die Krafteinheit an deine Garmin-Uhr senden?"
+        self.assertTrue(
+            _check(
+                "push_strength_to_garmin", "Ja", offer, arguments=GARMIN_PUSH
+            ).allowed
+        )
+        self.assertFalse(
+            _check(
+                "push_strength_to_garmin",
+                "Ja",
+                "Soll ich den Plan mit Intervals synchronisieren?",
+                arguments=GARMIN_PUSH,
+            ).allowed
+        )
+
+    def test_garmin_wording_never_grants_an_intervals_write(self):
+        decision = _check(
+            "start_intervals_plan_sync", "Schick die Krafteinheit an Garmin"
+        )
+        self.assertFalse(decision.allowed)
+
+    def test_removal_needs_a_confirmed_planning_delete(self):
+        text = "Entferne die Krafteinheit von meiner Garmin-Uhr"
+        denied = _check(
+            "push_strength_to_garmin",
+            text,
+            arguments=GARMIN_REMOVE,
+            classifier=_Classifier(_verdict({"planning"})),
+        )
+        self.assertFalse(denied.allowed)
+        self.assertEqual("impact_not_confirmed", denied.reason)
+        allowed = _check(
+            "push_strength_to_garmin",
+            text,
+            arguments=GARMIN_REMOVE,
+            classifier=_Classifier(_verdict({"planning"}, delete=True)),
+        )
+        self.assertTrue(allowed.allowed, allowed)

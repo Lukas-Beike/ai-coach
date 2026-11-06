@@ -5,6 +5,7 @@ Each coverage claim must be observed as a successful tool receipt at runtime.
 """
 
 import functools
+import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -70,6 +71,7 @@ REQUIRED_VARIANTS = {
     },
     "apply_adaptive_replan": {"local", "intervals"},
     "sync_nutrition": {"date", "pending"},
+    "push_strength_to_garmin": {"push", "remove"},
 }
 
 
@@ -108,6 +110,11 @@ def variants(name, arguments, result):
         return {"intervals" if arguments.get("sync_illness_to_intervals") else "local"}
     if name == "sync_nutrition":
         return {"date" if arguments.get("date") else "pending"}
+    if name == "push_strength_to_garmin":
+        return {
+            "remove" if entry.get("remove") else "push"
+            for entry in arguments["entries"]
+        }
     return {"success"}
 
 
@@ -1706,6 +1713,70 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual([item["date"] for item in manifests[0]], ["2026-09-08"])
         self.assertEqual(manifests[0][0]["total_kcal"], 600)
         self.assertEqual(manifests[0][0]["entry_count"], 1)
+
+    @covers("push_strength_to_garmin:push", "push_strength_to_garmin:remove")
+    def test_garmin_strength_push_is_bound_to_the_stored_units(self):
+        unit = {
+            **self.workout("2026-09-10", "Synthetic strength"),
+            "description": "",
+            "strength_structure": [{"name": "Kniebeuge", "sets": 3, "reps": 5}],
+        }
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save([unit])
+        planned = next(
+            row
+            for row in self.state()["planned_units"]
+            if row["name"] == "Synthetic strength"
+        )
+        local_id = planned["local_id"]
+        pushed = self.run_tool(
+            "push_strength_to_garmin",
+            {"entries": [{"local_id": local_id, "remove": False}]},
+            ["planned_unit:" + local_id, "garmin_sync"],
+            target="garmin",
+            remote_write=True,
+            sync_scope="selected",
+            message="Schick die Krafteinheit am Donnerstag an Garmin.",
+        )
+        removed = self.run_tool(
+            "push_strength_to_garmin",
+            {"entries": [{"local_id": local_id, "remove": True}]},
+            ["planned_unit:" + local_id, "garmin_sync"],
+            target="garmin",
+            remote_write=True,
+            sync_scope="selected",
+            message="Entferne die Krafteinheit wieder von meiner Garmin-Uhr.",
+        )
+        with server.database_manager().reader() as db:
+            jobs = [
+                db.execute(
+                    "SELECT provider, type, payload FROM sync_jobs WHERE id=?",
+                    (result["sync_job_ids"][0],),
+                ).fetchone()
+                for result in (pushed, removed)
+            ]
+            payload = db.execute(
+                "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
+            ).fetchone()["payload"]
+        self.assertEqual(
+            {("garmin", "plan_push")}, {(row["provider"], row["type"]) for row in jobs}
+        )
+        push_entries, remove_entries = (
+            json.loads(row["payload"])["entries"] for row in jobs
+        )
+        self.assertEqual(
+            [
+                {
+                    "library_workout_id": local_id,
+                    "expected_payload_hash": hashlib.sha256(
+                        payload.encode("utf-8")
+                    ).hexdigest(),
+                }
+            ],
+            push_entries,
+        )
+        self.assertEqual(
+            [{"library_workout_id": local_id, "remove": True}], remove_entries
+        )
 
     @covers(
         "read_training_records:success",

@@ -43,12 +43,14 @@ CHECKIN = "checkin"
 NUTRITION = "nutrition"
 UNDO = "undo"
 REMOTE_INTERVALS = "remote_intervals"
+REMOTE_GARMIN = "remote_garmin"
+REMOTE_DOMAINS = frozenset({REMOTE_INTERVALS, REMOTE_GARMIN})
 
 DOMAINS = frozenset(
-    {PLANNING, PROFILE, COMPETITION, CHECKIN, NUTRITION, UNDO, REMOTE_INTERVALS}
+    {PLANNING, PROFILE, COMPETITION, CHECKIN, NUTRITION, UNDO, *REMOTE_DOMAINS}
 )
 # The model classifier may never grant a remote write.
-CLASSIFIER_DOMAINS = DOMAINS - {REMOTE_INTERVALS}
+CLASSIFIER_DOMAINS = DOMAINS - REMOTE_DOMAINS
 
 DELETE = "delete"
 BULK = "bulk"
@@ -101,6 +103,7 @@ TOOL_DOMAIN: dict[str, str] = {
     "sync_nutrition": REMOTE_INTERVALS,
     "resolve_training_sync_conflict": REMOTE_INTERVALS,
     "delete_duplicate_intervals_activity": REMOTE_INTERVALS,
+    "push_strength_to_garmin": REMOTE_GARMIN,
 }
 
 # Registry-classified non-read tools that are not athlete-data writes:
@@ -276,6 +279,61 @@ def remote_requested(text: str) -> bool:
     return False
 
 
+# Garmin is named as the provider or as the athlete's watch ("auf meine Uhr");
+# a bare "Uhr" ("um 7 Uhr") names no target.
+_GARMIN_TARGET = re.compile(
+    r"(?<![a-z])(?:garmin|watch|(?:meine|die|der|auf|an|zur)\s+uhr)(?![a-z])"
+)
+# A Garmin push also accepts plain transfer verbs ("schick sie an Garmin") and,
+# for a removal that the delete check confirms as well, removal verbs.
+_GARMIN_TRANSFER = _compile(
+    [
+        stem
+        for stem in (
+            *_REMOTE_STEMS,
+            "schick",
+            "send",
+            "übertrag",
+            "spiel",
+            "push",
+            "entfern",
+            "lösch",
+            "remove",
+            "delete",
+        )
+        if stem not in _REPAIR_TOPICS
+    ]
+)
+
+
+def _mentions_garmin(text: str) -> bool:
+    return bool(_GARMIN_TARGET.search(normalize(text)))
+
+
+def garmin_requested(text: str) -> bool:
+    """Whether the athlete's own text asks to send something to Garmin.
+
+    The same sentence part must name Garmin (or the watch) and a transfer verb,
+    and must not be negated; information questions ask nothing, as for
+    ``remote_requested``.
+    """
+    for sentence in _SENTENCE.findall(normalize(text)):
+        if (
+            sentence.rstrip().endswith(("?", "？"))
+            and _INFORMATION_QUESTION.search(sentence)
+            and not _POLITE_REQUEST.search(sentence)
+        ):
+            continue
+        for part in _CONTRAST.split(sentence):
+            if (
+                _GARMIN_TARGET.search(part)
+                and _GARMIN_TRANSFER.search(_loose(part))
+                and not _negates(part)
+            ):
+                return True
+    return False
+
+
 def is_bare_affirmation(text: str) -> bool:
     """Short affirmation-only reply ("ja", "mach das"); never with negation."""
     value = normalize(text)
@@ -356,6 +414,8 @@ class TurnAuthority:
     remote_requested: bool
     # The pending request's original athlete text, for the classifier only.
     origin_text: str = ""
+    # The athlete's own text names a Garmin push; never granted by Intervals wording.
+    garmin_requested: bool = False
 
 
 def build_turn_authority(
@@ -371,10 +431,17 @@ def build_turn_authority(
             is_bare_affirmation(current_text) or is_contextual_affirmation(current_text)
         )
     )
+    garmin = garmin_requested(current_text) or (
+        _mentions_garmin(previous_assistant_text[-_HISTORY_TAIL:])
+        and (
+            is_bare_affirmation(current_text) or is_contextual_affirmation(current_text)
+        )
+    )
     message_ids = {current_message_id}
     origin_text = ""
     if pending_origin is not None:
         remote = remote or remote_requested(pending_origin.origin_text)
+        garmin = garmin or garmin_requested(pending_origin.origin_text)
         origin_text = pending_origin.origin_text
         message_ids.add(pending_origin.origin_message_id)
     return TurnAuthority(
@@ -382,6 +449,7 @@ def build_turn_authority(
         athlete_started=current_message_id > 0,
         remote_requested=remote,
         origin_text=origin_text,
+        garmin_requested=garmin,
     )
 
 
@@ -447,6 +515,13 @@ def _remote_effect(arguments: Mapping[str, Any] | None) -> bool:
     request = arguments.get("_request")
     return arguments.get("sync_illness_to_intervals") is True or (
         isinstance(request, Mapping) and request.get("remote_write") is True
+    )
+
+
+def _removes_garmin(arguments: Mapping[str, Any] | None) -> bool:
+    entries = arguments.get("entries") if isinstance(arguments, Mapping) else None
+    return isinstance(entries, list) and any(
+        isinstance(entry, Mapping) and entry.get("remove") is True for entry in entries
     )
 
 
@@ -600,6 +675,22 @@ def check_write(
         return GateDecision(False, domain, "cap_exceeded", state.classifier_used)
     if not authority.athlete_started:
         return GateDecision(False, domain, "no_athlete_message", state.classifier_used)
+    classified = (state, classifier, authority, current_text, previous_assistant_text)
+    if domain == REMOTE_GARMIN:
+        # Only the athlete naming Garmin grants it, never Intervals.icu wording;
+        # removing a pushed workout also needs a confirmed planning delete.
+        if not authority.garmin_requested:
+            return GateDecision(
+                False, domain, "remote_not_requested", state.classifier_used
+            )
+        records = record_count(tool_name, arguments)
+        impact = frozenset({DELETE}) if _removes_garmin(arguments) else frozenset()
+        denied = _classifier_denial(tool_name, PLANNING, impact, classified)
+        if denied:
+            return GateDecision(False, domain, denied, state.classifier_used)
+        state.writes_count += 1
+        state.records_count += records
+        return GateDecision(True, domain, "ok", state.classifier_used)
     remote = domain == REMOTE_INTERVALS or _remote_effect(arguments)
     if remote and not authority.remote_requested:
         return GateDecision(
@@ -611,12 +702,7 @@ def check_write(
         if domain == REMOTE_INTERVALS
         else call_impact(tool_name, arguments, state.records_count)
     )
-    denied = _classifier_denial(
-        tool_name,
-        domain,
-        impact,
-        (state, classifier, authority, current_text, previous_assistant_text),
-    )
+    denied = _classifier_denial(tool_name, domain, impact, classified)
     if denied:
         return GateDecision(False, domain, denied, state.classifier_used)
     state.writes_count += 1
