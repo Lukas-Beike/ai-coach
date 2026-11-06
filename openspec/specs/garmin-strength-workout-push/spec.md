@@ -39,6 +39,19 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 
 Evidence: `backend/sync/garmin_strength_push.py`, `backend/sync/jobs.py`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py` (PushTests, JobValidationTests).
 
+### Requirement: Calendar sync button
+The calendar list SHALL show one sync action on each future, not yet completed planned unit that still needs a push to a configured provider: Intervals.icu when its state is local, sync_error or remote_missing; Garmin when it is a strength unit with a valid structure whose name, date and structure differ from the pushed ones. It SHALL send one `plan_push` job per provider, Intervals.icu last, with the current payload hash.
+
+#### Scenario: Pending structured strength unit
+- **WHEN** a future strength unit with a structure is neither synced to Intervals.icu nor pushed to Garmin in its current version
+- **THEN** its calendar card shows "Synchronisieren", and a click queues an Intervals.icu and a Garmin `plan_push` job for it without opening the card.
+
+#### Scenario: Nothing pending
+- **WHEN** a unit is synced everywhere, in a sync conflict, in the past, already matched to a recorded activity, or its only pending provider is not configured
+- **THEN** no sync action is shown.
+
+Evidence: `backend/planning/push_state.py`, `backend/planning/planned_unit_service.py:PlannedUnitService.list`, `public/plan-views.js:plannedPushTargets`; `tests/test_planning_push_state.py`, `tests/plan-views-sync-button.test.cjs`.
+
 ### Requirement: Safe Garmin write outcomes
 A saved workout whose exercise steps differ from the sent ones SHALL be deleted when just created, or unscheduled when updated, and reported. Removal SHALL happen only for a `remove` entry, accepted for Garmin only, and SHALL delete only the linked workout and schedule. A non-client remote failure SHALL stop the remaining units; messages SHALL never contain Garmin's response text.
 

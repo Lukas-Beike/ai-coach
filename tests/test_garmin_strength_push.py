@@ -19,6 +19,7 @@ from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import session_focus, strength_structure
+from backend.planning.push_state import garmin_fingerprint
 from backend.providers import garmin_strength_workout as mapping
 from backend.sync.executor import GarminJobAdapter
 from backend.sync.garmin_strength_push import GarminStrengthPushService
@@ -402,8 +403,10 @@ class PushTests(unittest.TestCase):
             self.garmin.calls,
         )
         link = self.link(U1)
+        # The link keeps the Garmin fingerprint, not the payload hash, so later
+        # Intervals.icu rewrites of the unit do not mark it pending again.
         self.assertEqual(
-            ("501", "502", digest),
+            ("501", "502", garmin_fingerprint(UNIT)),
             (link.remote_id, link.remote_external_id, link.baseline_hash),
         )
         steps = self.garmin.workouts["501"]["workoutSegments"][0]["workoutSteps"]
@@ -454,7 +457,7 @@ class PushTests(unittest.TestCase):
         self.garmin.schedule_workout = original  # type: ignore[method-assign]
         self.assertEqual("ok", self.push((U1, digest))["status"])
         self.assertEqual(["501"], list(self.garmin.workouts))
-        self.assertEqual(digest, self.link(U1).baseline_hash)
+        self.assertEqual(garmin_fingerprint(UNIT), self.link(U1).baseline_hash)
 
     def test_a_schedule_without_id_is_looked_up_or_left_incomplete(self) -> None:
         digest = self.insert(U1, UNIT)

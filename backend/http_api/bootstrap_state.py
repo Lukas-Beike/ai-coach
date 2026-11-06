@@ -77,7 +77,7 @@ class PublicBootstrapService:
         # connection instead of racing.
         with deps.database_manager().read_snapshot() as db:
             sync_metadata = deps.sync_state_repository().sync_metadata(db)
-            local_planned = deps.planned_unit_service().list(250)
+            local_planned = deps.planned_unit_service().list(250, push_state=True)
             competitions = deps.competition_service().list(limit=100)
             relevant_external = deps.external_calendar_reader().list_events(
                 250, training_relevant_only=True

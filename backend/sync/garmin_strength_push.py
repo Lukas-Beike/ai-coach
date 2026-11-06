@@ -35,6 +35,7 @@ from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import strength_structure
+from backend.planning.push_state import garmin_fingerprint
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_personal import GarminTransportClient
 from backend.providers.garmin_strength_workout import (
@@ -68,6 +69,8 @@ class _Prepared:
     remove: bool
     plan_date: str = ""
     document: dict[str, Any] | None = None
+    # What the calendar compares to show the sync button again (push_state).
+    fingerprint: str | None = None
 
 
 def _status(error: BaseException) -> int | None:
@@ -208,7 +211,14 @@ class GarminStrengthPushService:
             plan_date, document = self._document(unit)
         except (AppError, GarminStrengthMappingError, TypeError, ValueError) as exc:
             return _error_result(local_id, self._redact(str(exc))[:500])
-        return _Prepared(local_id, payload_hash, False, plan_date, document)
+        return _Prepared(
+            local_id,
+            payload_hash,
+            False,
+            plan_date,
+            document,
+            garmin_fingerprint(unit),
+        )
 
     def _document(self, unit: Any) -> tuple[str, dict[str, Any]]:
         if (
@@ -283,7 +293,7 @@ class GarminStrengthPushService:
                 "Garmin-Kalender prüfen, bevor erneut gesendet wird.",
                 reason="garmin_schedule_unconfirmed",
             )
-        self._save_link(unit, workout_id, schedule_id, unit.payload_hash)
+        self._save_link(unit, workout_id, schedule_id, unit.fingerprint)
         return {
             "library_workout_id": unit.local_id,
             "status": "synced",
@@ -298,7 +308,7 @@ class GarminStrengthPushService:
         schedule_id: str | None,
         payload_hash: str | None,
     ) -> None:
-        """Store the workout and schedule ids; the hash only once fully pushed."""
+        """Store the workout and schedule ids; the fingerprint only once fully pushed."""
         with self._database_manager().unit_of_work() as db:
             _REMOTE_LINKS.upsert(
                 db,

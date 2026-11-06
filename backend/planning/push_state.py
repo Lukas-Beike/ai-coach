@@ -1,0 +1,110 @@
+"""Which explicit pushes a planned unit still needs, for the calendar sync button.
+
+Read-only projection over stored planned units and their remote links. A unit
+still needs Intervals.icu when it was never synced, failed or went missing
+remotely; it needs Garmin when it is a strength unit with a valid structure
+whose Garmin fingerprint differs from the pushed one. The payload hash is the
+one the ``plan_push`` jobs check, so the browser can send it back unchanged.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Iterable
+from typing import Any, Final
+
+from backend.canonical.planning_fields import STRENGTH_STRUCTURE
+from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
+from backend.db.remote_links import RemoteLinkRepository
+from backend.errors import AppError
+from backend.planning import strength_structure
+from backend.planning.library import library_payload_hash
+from backend.planning.sport import planned_sport_environment
+from backend.providers.garmin_strength_workout import (
+    GarminStrengthMappingError,
+    resolved_exercises,
+)
+
+# States from which an explicit Intervals.icu push helps; a conflict needs a
+# decision first, and "syncing" is already on its way.
+_INTERVALS_PENDING: Final = frozenset({"local", "sync_error", "remote_missing"})
+_REMOTE_LINKS = RemoteLinkRepository()
+
+
+def garmin_baselines(db: Any) -> dict[str, str | None]:
+    """Return the pushed Garmin fingerprint per planned unit linked at Garmin."""
+    return {
+        link.local_id: link.baseline_hash
+        for link in _REMOTE_LINKS.list_for_provider(
+            db, ProviderId.GARMIN.value, RemoteEntityKind.PLANNED_UNIT
+        )
+    }
+
+
+def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
+    """Fingerprint of what a Garmin push sends: name, date and the structure.
+
+    Intervals.icu syncs and focus edits rewrite other payload fields, so the
+    Garmin push state compares only this. ``None`` when the unit cannot be
+    pushed (not strength, or no valid structure).
+    """
+    sport, _environment = planned_sport_environment(payload)
+    if sport is not Sport.STRENGTH:
+        return None
+    try:
+        exercises = strength_structure.normalize_structure(
+            payload.get(STRENGTH_STRUCTURE)
+        )
+    except AppError:
+        return None
+    if not exercises:
+        return None
+    content = {
+        "name": str(payload.get("name") or ""),
+        "date": str(payload.get("date") or "")[:10],
+        "exercises": exercises,
+    }
+    serialized = json.dumps(content, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _pushable_fingerprint(payload: dict[str, Any]) -> str | None:
+    """The Garmin fingerprint, only when every exercise maps to Garmin.
+
+    An unmapped exercise would make every push fail, so no button is offered;
+    the Coach or the job still names the exercise with catalogue suggestions.
+    """
+    fingerprint = garmin_fingerprint(payload)
+    if fingerprint is None:
+        return None
+    try:
+        resolved_exercises(
+            strength_structure.normalize_structure(payload.get(STRENGTH_STRUCTURE))
+            or []
+        )
+    except AppError, GarminStrengthMappingError:
+        return None
+    return fingerprint
+
+
+def attach_push_state(
+    pairs: Iterable[tuple[Any, dict[str, Any]]], baselines: dict[str, str | None]
+) -> None:
+    """Add ``payload_hash`` and ``push_pending`` to each (row, payload) pair."""
+    for row, payload in pairs:
+        digest = library_payload_hash(row["payload"])
+        pending: dict[str, bool] = {
+            ProviderId.INTERVALS.value: str(row["sync_state"] or "local")
+            in _INTERVALS_PENDING
+        }
+        # A unit in a sync conflict needs the athlete's decision first; no
+        # provider is offered, so the conflicted version never reaches the watch.
+        conflicted = str(row["sync_state"] or "") == "conflict"
+        fingerprint = _pushable_fingerprint(payload)
+        if fingerprint is not None:
+            pending[ProviderId.GARMIN.value] = (
+                not conflicted and baselines.get(str(row["local_id"])) != fingerprint
+            )
+        payload["payload_hash"] = digest
+        payload["push_pending"] = pending
