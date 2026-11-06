@@ -272,7 +272,9 @@ def remote_requested(text: str) -> bool:
         ):
             continue
         if any(
-            _mentions_remote(part) and not _negates(part)
+            _mentions_remote(part)
+            and not _negates(part)
+            and not _names_garmin_only(part)
             for part in _CONTRAST.split(sentence)
         ):
             return True
@@ -284,38 +286,32 @@ def remote_requested(text: str) -> bool:
 _GARMIN_TARGET = re.compile(
     r"(?<![a-z])(?:garmin|watch|(?:meine|die|der|auf|an|zur)\s+uhr)(?![a-z])"
 )
-# A Garmin push also accepts plain transfer verbs ("schick sie an Garmin") and,
-# for a removal that the delete check confirms as well, removal verbs.
-_GARMIN_TRANSFER = _compile(
-    [
-        stem
-        for stem in (
-            *_REMOTE_STEMS,
-            "schick",
-            "send",
-            "übertrag",
-            "spiel",
-            "push",
-            "entfern",
-            "lösch",
-            "remove",
-            "delete",
-        )
-        if stem not in _REPAIR_TOPICS
-    ]
+# Verbs anchored at a word start, so "Beispiel" or "Entfernung" never count;
+# "lade ... hoch" and "pack ... drauf" are matched by their first part.
+_GARMIN_PUSH_VERBS = _compile(
+    "^" + stem
+    for stem in _words(
+        "sync,synchronisier,schick,send,übertrag,spiel,push,lad,hochlad,upload,pack"
+    )
 )
+_GARMIN_REMOVE_VERBS = _compile(
+    "^" + stem for stem in _words("entfern,lösch,remove,delete")
+)
+# The part must name what is sent, so "Sync meine Garmin-Daten" asks nothing.
+_GARMIN_OBJECT = _compile(
+    "^" + stem
+    for stem in _words(
+        "kraft,einheit,workout,training,übung,session,sie,diese,beide,alle"
+    )
+)
+_INTERVALS_NAME = re.compile(r"(?<![a-z])intervals(?![a-z])")
 
 
-def _mentions_garmin(text: str) -> bool:
-    return bool(_GARMIN_TARGET.search(normalize(text)))
+def _garmin_parts(text: str, verbs: re.Pattern[str]) -> bool:
+    """Whether one unnegated part names Garmin, a workout and one of ``verbs``.
 
-
-def garmin_requested(text: str) -> bool:
-    """Whether the athlete's own text asks to send something to Garmin.
-
-    The same sentence part must name Garmin (or the watch) and a transfer verb,
-    and must not be negated; information questions ask nothing, as for
-    ``remote_requested``.
+    A part that also names Intervals.icu asks for that provider, never Garmin;
+    information questions ask nothing, as for ``remote_requested``.
     """
     for sentence in _SENTENCE.findall(normalize(text)):
         if (
@@ -325,13 +321,53 @@ def garmin_requested(text: str) -> bool:
         ):
             continue
         for part in _CONTRAST.split(sentence):
+            loose = _loose(part)
             if (
                 _GARMIN_TARGET.search(part)
-                and _GARMIN_TRANSFER.search(_loose(part))
+                and verbs.search(loose)
+                and _GARMIN_OBJECT.search(loose)
+                and not _INTERVALS_NAME.search(part)
                 and not _negates(part)
             ):
                 return True
     return False
+
+
+def garmin_requested(text: str) -> bool:
+    """Whether the athlete's own text asks to send or remove workouts at Garmin."""
+    return _garmin_parts(text, _GARMIN_PUSH_VERBS) or garmin_removal_requested(text)
+
+
+def garmin_removal_requested(text: str) -> bool:
+    """Whether the athlete's own text asks to remove workouts from Garmin."""
+    return _garmin_parts(text, _GARMIN_REMOVE_VERBS)
+
+
+def _garmin_offer(previous_assistant_text: str) -> bool:
+    """Whether the assistant's last question offers to send workouts to Garmin.
+
+    A Garmin source label elsewhere in the reply is no offer.
+    """
+    questions = [
+        sentence
+        for sentence in _SENTENCE.findall(
+            normalize(previous_assistant_text[-_HISTORY_TAIL:])
+        )
+        if sentence.rstrip().endswith(("?", "？"))
+    ]
+    if not questions:
+        return False
+    last = questions[-1]
+    loose = _loose(last)
+    return bool(
+        _GARMIN_TARGET.search(last)
+        and _GARMIN_PUSH_VERBS.search(loose)
+        and not _INTERVALS_NAME.search(last)
+    )
+
+
+def _names_garmin_only(part: str) -> bool:
+    return bool(_GARMIN_TARGET.search(part)) and not _INTERVALS_NAME.search(part)
 
 
 def is_bare_affirmation(text: str) -> bool:
@@ -416,6 +452,8 @@ class TurnAuthority:
     origin_text: str = ""
     # The athlete's own text names a Garmin push; never granted by Intervals wording.
     garmin_requested: bool = False
+    # The athlete's own text asks to remove workouts from Garmin; a yes never does.
+    garmin_removal_requested: bool = False
 
 
 def build_turn_authority(
@@ -432,16 +470,20 @@ def build_turn_authority(
         )
     )
     garmin = garmin_requested(current_text) or (
-        _mentions_garmin(previous_assistant_text[-_HISTORY_TAIL:])
+        _garmin_offer(previous_assistant_text)
         and (
             is_bare_affirmation(current_text) or is_contextual_affirmation(current_text)
         )
     )
+    garmin_removal = garmin_removal_requested(current_text)
     message_ids = {current_message_id}
     origin_text = ""
     if pending_origin is not None:
         remote = remote or remote_requested(pending_origin.origin_text)
         garmin = garmin or garmin_requested(pending_origin.origin_text)
+        garmin_removal = garmin_removal or garmin_removal_requested(
+            pending_origin.origin_text
+        )
         origin_text = pending_origin.origin_text
         message_ids.add(pending_origin.origin_message_id)
     return TurnAuthority(
@@ -450,6 +492,7 @@ def build_turn_authority(
         remote_requested=remote,
         origin_text=origin_text,
         garmin_requested=garmin,
+        garmin_removal_requested=garmin_removal,
     )
 
 
@@ -675,19 +718,19 @@ def check_write(
         return GateDecision(False, domain, "cap_exceeded", state.classifier_used)
     if not authority.athlete_started:
         return GateDecision(False, domain, "no_athlete_message", state.classifier_used)
-    classified = (state, classifier, authority, current_text, previous_assistant_text)
     if domain == REMOTE_GARMIN:
-        # Only the athlete naming Garmin grants it, never Intervals.icu wording;
-        # removing a pushed workout also needs a confirmed planning delete.
+        # Only the athlete naming Garmin grants it, never Intervals.icu wording.
+        # A removal needs the athlete's own removal wording; the classifier is
+        # not asked, so no local delete is confirmed as a side effect.
         if not authority.garmin_requested:
             return GateDecision(
                 False, domain, "remote_not_requested", state.classifier_used
             )
+        if _removes_garmin(arguments) and not authority.garmin_removal_requested:
+            return GateDecision(
+                False, domain, "impact_not_confirmed", state.classifier_used
+            )
         records = record_count(tool_name, arguments)
-        impact = frozenset({DELETE}) if _removes_garmin(arguments) else frozenset()
-        denied = _classifier_denial(tool_name, PLANNING, impact, classified)
-        if denied:
-            return GateDecision(False, domain, denied, state.classifier_used)
         state.writes_count += 1
         state.records_count += records
         return GateDecision(True, domain, "ok", state.classifier_used)
@@ -702,7 +745,12 @@ def check_write(
         if domain == REMOTE_INTERVALS
         else call_impact(tool_name, arguments, state.records_count)
     )
-    denied = _classifier_denial(tool_name, domain, impact, classified)
+    denied = _classifier_denial(
+        tool_name,
+        domain,
+        impact,
+        (state, classifier, authority, current_text, previous_assistant_text),
+    )
     if denied:
         return GateDecision(False, domain, denied, state.classifier_used)
     state.writes_count += 1

@@ -374,9 +374,19 @@ class CoachDialogueActionService:
                 raise AppError(
                     400, "Der Umfang der Synchronisierung fehlt.", reason="request_sync"
                 )
+            # Every unit must be in the validated request scope, as for an
+            # Intervals.icu selection; the model's entries grant nothing alone.
             for entry in arguments.get("entries") or []:
-                local_id = str((entry or {}).get("local_id") or "")
-                action["authorization_scope"].append(f"planned_unit:{local_id}")
+                local_id = (
+                    str(entry.get("local_id") or "") if isinstance(entry, dict) else ""
+                )
+                if not local_id:
+                    raise AppError(
+                        400,
+                        "Jede Einheit benötigt ihre local_id.",
+                        reason="request_scope",
+                    )
+                require_coach_scope(action, f"planned_unit:{local_id}")
         if name == "sync_nutrition":
             require_coach_scope(action, "local_nutrition", "intervals_sync")
         elif name == "delete_duplicate_intervals_activity":

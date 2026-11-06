@@ -34,6 +34,7 @@ from backend.coach.proposal_validation import (
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import PlanAdjustmentRepository
 from backend.errors import AppError
+from backend.planning import library as planning_library
 from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
 
@@ -452,39 +453,57 @@ def _approved_garmin_arguments(
     """Bind each selected unit to its stored payload when the card is created.
 
     The model names only unit ids and the remove flag; the hash comes from the
-    stored unit, so an edit after the card was shown makes the push a conflict.
+    stored unit with the job's own formula, so an edit after the card was shown
+    makes the push a conflict.
     """
     raw = arguments.get("entries")
     if not isinstance(raw, list) or not 1 <= len(raw) <= 28:
         raise AppError(
             400, "Wähle 1 bis 28 Krafteinheiten.", reason="invalid_job_request"
         )
-    entries: list[dict[str, Any]] = []
-    with database_manager.reader() as db:
-        for item in raw:
-            local_id = str(item.get("local_id") or "") if isinstance(item, dict) else ""
-            row = db.execute(
-                "SELECT payload FROM planned_units WHERE local_id=?", (local_id,)
-            ).fetchone()
-            if row is None:
-                raise AppError(
-                    409,
-                    "Die ausgewählte Einheit ist nicht mehr verfügbar.",
-                    reason="request_object_missing",
-                )
-            if item.get("remove") is True:
-                entries.append({"library_workout_id": local_id, "remove": True})
-                continue
-            digest = hashlib.sha256(str(row["payload"] or "").encode("utf-8"))
-            entries.append(
-                {
-                    "library_workout_id": local_id,
-                    "expected_payload_hash": digest.hexdigest(),
-                }
-            )
-    if len({entry["library_workout_id"] for entry in entries}) != len(entries):
+    selected = [
+        (
+            planning_library.workout_library_entry_id(item.get("local_id")),
+            item.get("remove") is True,
+        )
+        for item in raw
+        if isinstance(item, dict)
+    ]
+    if len(selected) != len(raw) or len({i for i, _ in selected}) != len(selected):
         raise AppError(400, "Eine Einheit darf nur einmal ausgewählt werden.")
+    rows = _planned_rows([local_id for local_id, _ in selected], database_manager)
+    payloads = {str(row["local_id"]): row["payload"] for row in rows}
+    if len(payloads) != len(selected):
+        raise AppError(
+            409,
+            "Die ausgewählte Einheit ist nicht mehr verfügbar.",
+            reason="request_object_missing",
+        )
+    entries: list[dict[str, Any]] = [
+        {"library_workout_id": local_id, "remove": True}
+        if remove
+        else {
+            "library_workout_id": local_id,
+            "expected_payload_hash": planning_library.library_payload_hash(
+                payloads[local_id]
+            ),
+        }
+        for local_id, remove in selected
+    ]
     return {"entries": entries, "reason": str(arguments.get("reason") or "")[:200]}
+
+
+def _planned_rows(
+    identifiers: list[str], database_manager: DatabaseManager
+) -> list[Any]:
+    placeholders = ",".join("?" for _ in identifiers)
+    with database_manager.reader() as db:
+        return db.execute(
+            "SELECT local_id, payload FROM planned_units WHERE local_id IN ("
+            + placeholders
+            + ") ORDER BY local_id",
+            tuple(identifiers),
+        ).fetchall()
 
 
 def _garmin_approval_details(
@@ -494,15 +513,9 @@ def _garmin_approval_details(
     removals = {
         entry["library_workout_id"] for entry in entries if entry.get("remove") is True
     }
-    identifiers = [entry["library_workout_id"] for entry in entries]
-    placeholders = ",".join("?" for _ in identifiers)
-    with database_manager.reader() as db:
-        rows = db.execute(
-            "SELECT local_id, payload FROM planned_units WHERE local_id IN ("
-            + placeholders
-            + ") ORDER BY local_id",
-            tuple(identifiers),
-        ).fetchall()
+    rows = _planned_rows(
+        [entry["library_workout_id"] for entry in entries], database_manager
+    )
     details = _plan_workout_details(rows)
     for detail in details:
         detail["sport"] = (

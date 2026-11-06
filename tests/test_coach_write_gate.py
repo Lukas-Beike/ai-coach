@@ -1128,20 +1128,18 @@ class CoachToolPathDeleteTests(unittest.TestCase):
         self.assertEqual(library.updated, [("x", " Archive ")])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 GARMIN_PUSH = {"entries": [{"local_id": "u1", "remove": False}]}
 GARMIN_REMOVE = {"entries": [{"local_id": "u1", "remove": True}]}
 
 
 class GarminTierTests(unittest.TestCase):
-    def test_only_naming_garmin_with_a_transfer_verb_grants_a_push(self):
+    def test_only_naming_garmin_a_workout_and_a_transfer_verb_grants_a_push(self):
         for text in (
             "Schick die Krafteinheit an Garmin",
             "Sync die Kraft auf meine Uhr",
             "Kannst du sie an Garmin senden?",
+            "Lade die Kraft auf meine Garmin-Uhr hoch",
+            "Pack die Einheit auf die Uhr",
         ):
             with self.subTest(text=text):
                 decision = _check(
@@ -1155,6 +1153,12 @@ class GarminTierTests(unittest.TestCase):
             "Nicht an Garmin schicken",
             "Wie sende ich an Garmin?",
             "Garmin Daten aktualisieren",
+            "Synchronisiere meine Garmin-Daten mit Intervals",
+            "Sync meine Garmin-Daten",
+            "Lade die Garmin-Aktivität zu Intervals hoch",
+            "Meine Uhr zeigt die falsche Entfernung an",
+            "Zum Beispiel misst meine Uhr den Puls",
+            "Push-ups mit der Garmin gezählt",
         ):
             with self.subTest(text=text):
                 decision = _check(
@@ -1163,44 +1167,64 @@ class GarminTierTests(unittest.TestCase):
                 self.assertFalse(decision.allowed)
                 self.assertEqual("remote_not_requested", decision.reason)
 
-    def test_a_yes_after_a_garmin_offer_grants_it_but_not_after_an_intervals_offer(
-        self,
-    ):
+    def test_a_yes_grants_it_only_after_a_garmin_offer(self):
         offer = "Soll ich die Krafteinheit an deine Garmin-Uhr senden?"
         self.assertTrue(
             _check(
                 "push_strength_to_garmin", "Ja", offer, arguments=GARMIN_PUSH
             ).allowed
         )
+        for previous in (
+            "Soll ich den Plan mit Intervals synchronisieren?",
+            (
+                "Laut Garmin war dein Schlaf kurz. Soll ich den Plan mit Intervals "
+                "synchronisieren?"
+            ),
+        ):
+            with self.subTest(previous=previous):
+                self.assertFalse(
+                    _check(
+                        "push_strength_to_garmin", "Ja", previous, arguments=GARMIN_PUSH
+                    ).allowed
+                )
+
+    def test_garmin_wording_never_grants_an_intervals_write(self):
+        for text in (
+            "Schick die Krafteinheit an Garmin",
+            "Synchronisiere die Krafteinheit mit Garmin",
+            "Sync die Kraft auf meine Uhr",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(_check("start_intervals_plan_sync", text).allowed)
+
+    def test_removal_needs_the_athletes_own_removal_wording(self):
+        classifier = _Classifier(_verdict({"planning"}, delete=True))
+        denied = _check(
+            "push_strength_to_garmin",
+            "Schick die Krafteinheit an Garmin",
+            arguments=GARMIN_REMOVE,
+            classifier=classifier,
+        )
+        self.assertFalse(denied.allowed)
+        self.assertEqual("impact_not_confirmed", denied.reason)
         self.assertFalse(
             _check(
                 "push_strength_to_garmin",
                 "Ja",
-                "Soll ich den Plan mit Intervals synchronisieren?",
-                arguments=GARMIN_PUSH,
+                "Soll ich die Krafteinheit von deiner Garmin-Uhr entfernen?",
+                arguments=GARMIN_REMOVE,
             ).allowed
         )
-
-    def test_garmin_wording_never_grants_an_intervals_write(self):
-        decision = _check(
-            "start_intervals_plan_sync", "Schick die Krafteinheit an Garmin"
-        )
-        self.assertFalse(decision.allowed)
-
-    def test_removal_needs_a_confirmed_planning_delete(self):
-        text = "Entferne die Krafteinheit von meiner Garmin-Uhr"
-        denied = _check(
-            "push_strength_to_garmin",
-            text,
-            arguments=GARMIN_REMOVE,
-            classifier=_Classifier(_verdict({"planning"})),
-        )
-        self.assertFalse(denied.allowed)
-        self.assertEqual("impact_not_confirmed", denied.reason)
         allowed = _check(
             "push_strength_to_garmin",
-            text,
+            "Entferne die Krafteinheit von meiner Garmin-Uhr",
             arguments=GARMIN_REMOVE,
-            classifier=_Classifier(_verdict({"planning"}, delete=True)),
+            classifier=classifier,
         )
         self.assertTrue(allowed.allowed, allowed)
+        # No classifier verdict is cached, so no local delete is confirmed.
+        self.assertEqual([], classifier.calls)
+
+
+if __name__ == "__main__":
+    unittest.main()
