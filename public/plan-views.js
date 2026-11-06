@@ -20,7 +20,7 @@ function plannedPushTargets(entry, dateKey, todayKey, { configured = {}, complet
   if (!entry?.local_id || !entry.payload_hash || entry.is_completed_activity || completed) return [];
   if (!pending || typeof pending !== "object" || !dateKey || dateKey < todayKey) return [];
   const targets = Object.keys(pending).filter((provider) => pending[provider] === true && configured[provider] === true);
-  return [...targets.filter((provider) => provider !== intervals).sort(), ...targets.filter((provider) => provider === intervals)];
+  return [...targets.filter((provider) => provider !== intervals).sort((a, b) => a.localeCompare(b)), ...targets.filter((provider) => provider === intervals)];
 }
 
 const CALENDAR_MARKERS = [
