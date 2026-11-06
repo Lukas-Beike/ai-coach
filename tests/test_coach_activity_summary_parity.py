@@ -51,6 +51,8 @@ RIDE_SUMMARY = {
     "training_load": 82.0,
     "load_branch": "power",
     "load_threshold_after_session": True,
+    # Shape only: a strength session's calibration basis (M6 v2).
+    "load_calibration": {"tss_per_au": 0.33, "pairs": 20, "session_rpe_au": 270.0},
     "rpe": 6.0,
     "feel": 3,
     "planned_event_id": "evt-1",
@@ -103,6 +105,11 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
                 "training_load": 82.0,
                 "load_branch": "power",
                 "load_threshold_after_session": True,
+                "load_calibration": {
+                    "tss_per_au": 0.33,
+                    "pairs": 20,
+                    "session_rpe_au": 270.0,
+                },
                 "aerobic_training_effect": 3.2,
                 "anaerobic_training_effect": 0.8,
                 "intensity": 71.0,
