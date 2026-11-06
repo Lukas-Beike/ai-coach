@@ -1312,7 +1312,7 @@ function coachActionDescription(proposal) {
       : "Diese Mahlzeitvorlage wird lokal gespeichert. Sie wird erst nach deiner Bestätigung angelegt.";
   }
   if (proposal.action_type === "remote_coach_write") {
-    const target = proposal.target_system === "garmin" ? "deine Garmin-Uhr" : "Intervals.icu";
+    const target = proposal.target_system === providerIds().garmin ? "deine Garmin-Uhr" : "Intervals.icu";
     return `Diese Änderung wird an ${target} gesendet. Sie wird erst ausgeführt, wenn du sie hier freigibst.`;
   }
   return "Diese Garmin-Aufzeichnung ist nahezu identisch mit der Wahoo-Einheit. Nur das Garmin-Duplikat aus Intervals.icu löschen?";

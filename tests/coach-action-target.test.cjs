@@ -9,7 +9,7 @@ const start = source.indexOf("function coachActionDescription");
 const end = source.indexOf("\nfunction coachActionStatus", start);
 
 function describe(proposal) {
-  const context = vm.createContext({});
+  const context = vm.createContext({ providerIds: () => ({ garmin: "garmin", intervals: "intervals" }) });
   vm.runInContext(source.slice(start, end) + ";globalThis.describe = coachActionDescription;", context);
   return context.describe(proposal);
 }
