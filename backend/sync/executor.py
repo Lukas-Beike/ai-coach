@@ -30,6 +30,7 @@ from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
     BACKFILL_JOB_TYPES,
+    WELLNESS_BACKFILL,
     JobValidationError,
     decode_job_payload,
     normalize_sync_job_request,
@@ -44,8 +45,6 @@ from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
 
 _LOGGER = logging.getLogger(__name__)
-
-WELLNESS_BACKFILL = "wellness_backfill"
 
 # Consecutive chunks without any fetched record (2 x 90 days) end a backfill.
 EMPTY_BACKFILL_CHUNK_LIMIT = 2
@@ -388,6 +387,9 @@ class GarminSyncJobOwner:
         """Run one insert-only wellness history chunk (no activities, no deletion)."""
         if self._wellness_history_service is None:
             raise AppError(503, "Der Wellness-Backfill ist nicht verfügbar.")
+        if not self._wellness_history_service.available():
+            # Fixture mode: no remote read, no cursor move, no continuation.
+            return {"status": "ok", "reason": "not_configured", "window_records": 0}
         days, end = self._historical_sync.window(
             payload, WELLNESS_BACKFILL, lambda: GARMIN_AUTOMATIC_SYNC_DAYS
         )
@@ -396,10 +398,7 @@ class GarminSyncJobOwner:
         )
         if floor_result is not None:
             return floor_result
-        if end is None:  # window() always ends a backfill chunk
-            raise AppError(
-                400, "Ungültiger Backfill-Zeitraum.", reason="invalid_job_request"
-            )
+        assert end is not None  # window() always ends a backfill chunk
         result = self._wellness_history_service.backfill(days, end)
         self._historical_sync.add_next_end(
             GARMIN_ID, payload, result, end, days, WELLNESS_BACKFILL
@@ -415,6 +414,8 @@ class GarminSyncJobOwner:
 
 class GarminWellnessBackfill(Protocol):
     """Backfills one window of Garmin wellness history."""
+
+    def available(self) -> bool: ...
 
     def backfill(self, days: int, end: date) -> dict[str, Any]: ...
 

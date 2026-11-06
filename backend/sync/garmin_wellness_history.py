@@ -26,7 +26,10 @@ from backend.db import garmin_store
 from backend.errors import AppError
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin import merge_weight_snapshots
-from backend.providers.garmin_wellness_history import has_night_values
+from backend.providers.garmin_wellness_history import (
+    WellnessSourcePaused,
+    has_night_values,
+)
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.jobs import WELLNESS_HISTORY_CURSOR
 
@@ -37,7 +40,9 @@ LOCK_WAIT_SECONDS: Final = 120.0
 
 
 class WellnessHistoryReader(Protocol):
-    def fetch_wellness_history(self, start: date, end: date) -> dict[str, Any]: ...
+    def fetch_wellness_history(
+        self, start: date, end: date, *, needs_night: Callable[[str], bool]
+    ) -> dict[str, Any]: ...
 
 
 class SyncCoordination(Protocol):
@@ -80,8 +85,16 @@ class GarminWellnessHistoryService:
         self._utc_now = utc_now
         self._configured = configured
 
+    def available(self) -> bool:
+        """Return whether a real Garmin read is configured (never in fixture mode)."""
+        return self._configured()
+
     def backfill(self, days: int, end: date) -> dict[str, Any]:
-        """Backfill ``days`` days ending on ``end``; return the job result."""
+        """Backfill ``days`` days ending on ``end``; return the job result.
+
+        A paused source or a retryable provider error fails the job, so the
+        worker retries it later and the cursor stays where it is.
+        """
         if not self._configured():
             raise AppError(
                 503, "Garmin ist nicht konfiguriert.", reason="not_configured"
@@ -93,30 +106,39 @@ class GarminWellnessHistoryService:
                     503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
                 )
             try:
-                payload = self._reader.fetch_wellness_history(start, end)
+                payload = self._reader.fetch_wellness_history(
+                    start, end, needs_night=self._needs_night
+                )
                 fetched_at = self._utc_now()
                 written = self._write(payload, fetched_at)
+            except WellnessSourcePaused as paused:
+                raise AppError(
+                    429,
+                    "Garmin pausiert nach wiederholten Fehlern.",
+                    reason="rate_limited",
+                ) from paused
             finally:
                 self._coordination.release()
-        pagination = payload["provider_sync"]["pagination"]
-        complete = not payload["errors"] and all(
-            details.get("complete") is True for details in pagination.values()
+        self._sync_state.update_cursor(
+            GARMIN_ID, WELLNESS_HISTORY_CURSOR, start.isoformat(), fetched_at
         )
-        if complete:
-            self._sync_state.update_cursor(
-                GARMIN_ID, WELLNESS_HISTORY_CURSOR, start.isoformat(), fetched_at
-            )
+        pagination = payload["provider_sync"]["pagination"]
         return {
-            "status": "ok" if complete else "partial",
+            "status": "ok",
             "synced_at": fetched_at,
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "errors": len(payload["errors"]),
+            "skipped_sources": list(payload["skipped_sources"]),
             "window_records": sum(
                 int(details.get("records") or 0) for details in pagination.values()
             ),
             "written": written,
         }
+
+    def _needs_night(self, day: str) -> bool:
+        """A night needs its full element unless the stored one has night values."""
+        with self._database_manager.reader() as db:
+            return not has_night_values(garmin_store.read_item(db, "sleep", day))
 
     def _write(self, payload: Mapping[str, Any], fetched_at: str) -> dict[str, int]:
         """Write the new elements in one transaction; return their count per source."""
@@ -133,11 +155,9 @@ class GarminWellnessHistoryService:
                 ]
                 if kept:
                     sections[source] = kept
-            weigh_ins = payload.get("weight")
-            if weigh_ins:
-                stored = garmin_store.read_view(db, ["weight"]).get("weight")
-                # The stored envelope is the incoming side here: its readings win.
-                sections["weight"] = merge_weight_snapshots(stored, weigh_ins)
+            weight = _merged_weight(db, payload.get("weight"))
+            if weight is not None:
+                sections["weight"] = weight
             if sections:
                 self._snapshot_writer.write_refresh(
                     db,
@@ -151,6 +171,21 @@ class GarminWellnessHistoryService:
             source: len(value) if source != "weight" else 1
             for source, value in sections.items()
         }
+
+
+def _merged_weight(db: Any, weigh_ins: Any) -> list[Any] | None:
+    """Return the stored envelope plus new readings, or None when nothing is new.
+
+    The stored envelope is the incoming side of the merge, so its readings win.
+    """
+    if not weigh_ins:
+        return None
+    stored = garmin_store.read_view(db, ["weight"]).get("weight")
+    merged = merge_weight_snapshots(stored, weigh_ins)
+    # The same merge without new weigh-ins is the stored stock in envelope form.
+    if stored and merged == merge_weight_snapshots(stored, None):
+        return None
+    return merged
 
 
 def _insertable(db: Any, source: str, item: SectionItem) -> bool:

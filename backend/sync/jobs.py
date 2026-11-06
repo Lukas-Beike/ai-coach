@@ -37,13 +37,17 @@ JOB_TYPES = frozenset(
     }
 )
 # Backfill chains and the sync-state cursor stream each one walks back.
+WELLNESS_BACKFILL = "wellness_backfill"
 WELLNESS_HISTORY_CURSOR = "wellness_history"
 BACKFILL_CURSOR_STREAMS: dict[str, str] = {
     "historical_backfill": "historical",
-    "wellness_backfill": WELLNESS_HISTORY_CURSOR,
+    WELLNESS_BACKFILL: WELLNESS_HISTORY_CURSOR,
 }
 BACKFILL_JOB_TYPES = frozenset(BACKFILL_CURSOR_STREAMS)
-_BACKFILL_TYPES_SQL = "('historical_backfill', 'wellness_backfill')"
+# Built from the fixed type names above, never from request data.
+_BACKFILL_TYPES_SQL = "({})".format(
+    ", ".join(f"'{job_type}'" for job_type in sorted(BACKFILL_JOB_TYPES))
+)
 JOB_STATUSES = frozenset({"queued", "running", "completed", "partial", "failed"})
 ALLOWED_JOB_TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"running"}),

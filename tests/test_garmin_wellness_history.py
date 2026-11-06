@@ -20,6 +20,8 @@ from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.providers.garmin_wellness_history import (
+    WellnessHistoryHooks,
+    WellnessSourcePaused,
     collect_wellness_history,
     has_night_values,
 )
@@ -37,6 +39,13 @@ def _external_call(_service: str, _operation: str, call: Any, _details: Any) -> 
     return call()
 
 
+def _skippable(error: BaseException) -> bool:
+    return isinstance(error, ValueError)
+
+
+HOOKS = WellnessHistoryHooks(skippable=_skippable)
+
+
 def _night_dto(day: str, spo2: float = 95.0) -> dict[str, Any]:
     return {
         "id": 1,
@@ -50,33 +59,38 @@ def _night_dto(day: str, spo2: float = 95.0) -> dict[str, Any]:
     }
 
 
+def _bare_night(day: str, seconds: int) -> dict[str, Any]:
+    return {"calendarDate": day, "values": {"totalSleepTimeInSeconds": seconds}}
+
+
 class SdkClient:
     """The SDK shape: the sleep range carries statistics only."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self.failing_night: str | None = None
+        self.night_error: Exception = ValueError("night unreadable")
 
     def get_sleep_daily(self, start: str, end: str) -> list[dict[str, Any]]:
         self.calls.append(("get_sleep_daily", (start, end)))
         return [
-            {"calendarDate": "2021-03-01", "values": {"totalSleepTimeInSeconds": 1}},
-            {"calendarDate": "2021-03-02", "values": {"totalSleepTimeInSeconds": 2}},
+            _bare_night("2021-03-01", 1),
+            _bare_night("2021-03-02", 2),
             # Outside the window: never read again or stored.
-            {"calendarDate": "2021-02-27", "values": {"totalSleepTimeInSeconds": 3}},
+            _bare_night("2021-02-27", 3),
         ]
 
     def get_sleep_data(self, day: str) -> dict[str, Any]:
         self.calls.append(("get_sleep_data", (day,)))
         if day == self.failing_night:
-            raise RuntimeError("night unavailable")
+            raise self.night_error
         return {
             "dailySleepDTO": _night_dto(day),
             "wellnessEpochSPO2DataDTOList": [{"spo2Reading": 93}],
             "restingHeartRate": 45,
         }
 
-    def get_hrv_data_range(self, start: str, end: str) -> dict[str, Any]:
+    def get_hrv_data_range(self, start: str, end: str) -> Any:
         self.calls.append(("get_hrv_data_range", (start, end)))
         return {
             "hrvSummaries": [
@@ -124,20 +138,23 @@ class PersonalClient(SdkClient):
         ]
 
 
+def _night_reads(client: SdkClient) -> list[tuple[Any, ...]]:
+    return [args for name, args in client.calls if name == "get_sleep_data"]
+
+
 class CollectorTests(unittest.TestCase):
-    def collect(self, client: Any) -> dict[str, Any]:
+    def collect(
+        self, client: Any, hooks: WellnessHistoryHooks = HOOKS
+    ) -> dict[str, Any]:
         return collect_wellness_history(
-            client, START, END, external_call=_external_call, redact=str
+            client, START, END, external_call=_external_call, hooks=hooks
         )
 
     def test_sdk_statistics_nights_are_read_as_full_night_elements(self) -> None:
         client = SdkClient()
         payload = self.collect(client)
 
-        self.assertEqual(
-            [call for call in client.calls if call[0] == "get_sleep_data"],
-            [("get_sleep_data", ("2021-03-01",)), ("get_sleep_data", ("2021-03-02",))],
-        )
+        self.assertEqual(_night_reads(client), [("2021-03-01",), ("2021-03-02",)])
         self.assertEqual(
             payload["sleep"],
             [
@@ -145,15 +162,25 @@ class CollectorTests(unittest.TestCase):
                 for day in ("2021-03-01", "2021-03-02")
             ],
         )
-        self.assertTrue(all(has_night_values(night) for night in payload["sleep"]))
-        self.assertEqual(payload["errors"], [])
+        self.assertEqual(payload["skipped_sources"], [])
 
     def test_personal_range_nights_with_night_values_need_no_night_read(self) -> None:
         client = PersonalClient()
         payload = self.collect(client)
 
-        self.assertNotIn("get_sleep_data", [name for name, _ in client.calls])
+        self.assertEqual(_night_reads(client), [])
         self.assertEqual(len(payload["sleep"]), 2)
+
+    def test_nights_with_stored_night_values_are_not_read_again(self) -> None:
+        client = SdkClient()
+        self.collect(
+            client,
+            WellnessHistoryHooks(
+                skippable=_skippable, needs_night=lambda day: day != "2021-03-01"
+            ),
+        )
+
+        self.assertEqual(_night_reads(client), [("2021-03-02",)])
 
     def test_resting_heart_rate_comes_from_the_daily_summaries(self) -> None:
         payload = self.collect(SdkClient())
@@ -173,7 +200,7 @@ class CollectorTests(unittest.TestCase):
             date(2021, 1, 1),
             date(2021, 3, 31),
             external_call=_external_call,
-            redact=str,
+            hooks=HOOKS,
         )
 
         self.assertEqual(
@@ -196,17 +223,52 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(payload["weight"], [])
         self.assertEqual(payload["provider_sync"]["pagination"]["weight"]["records"], 0)
 
-    def test_a_failed_night_marks_only_the_sleep_incomplete(self) -> None:
+    def test_a_skippable_night_failure_keeps_its_range_row(self) -> None:
         client = SdkClient()
         client.failing_night = "2021-03-02"
         payload = self.collect(client)
 
-        pagination = payload["provider_sync"]["pagination"]
-        self.assertFalse(pagination["sleep"]["complete"])
-        self.assertNotIn("sleep", payload)
-        self.assertEqual([error["source"] for error in payload["errors"]], ["sleep"])
-        self.assertTrue(pagination["hrv"]["complete"])
+        self.assertEqual(payload["sleep"][1], _bare_night("2021-03-02", 2))
+        self.assertTrue(has_night_values(payload["sleep"][0]))
+        self.assertEqual(payload["skipped_sources"], [])
+
+    def test_a_skippable_source_failure_skips_only_that_source(self) -> None:
+        client = SdkClient()
+        client.get_hrv_data_range = lambda *_: "not a range"  # type: ignore[method-assign]
+        failures: list[str] = []
+        payload = self.collect(
+            client,
+            WellnessHistoryHooks(
+                skippable=_skippable,
+                capability_failure=lambda source, _error: failures.append(source),
+            ),
+        )
+
+        self.assertEqual(payload["skipped_sources"], ["hrv"])
+        self.assertNotIn("hrv", payload)
+        self.assertEqual(failures, ["hrv"])
         self.assertIn("resting_hr", payload)
+
+    def test_a_retryable_failure_ends_the_read(self) -> None:
+        client = SdkClient()
+        client.failing_night = "2021-03-02"
+        client.night_error = RuntimeError("rate limited")
+
+        with self.assertRaises(RuntimeError):
+            self.collect(client)
+
+    def test_a_paused_source_ends_the_read_before_any_call(self) -> None:
+        client = SdkClient()
+
+        with self.assertRaises(WellnessSourcePaused):
+            self.collect(
+                client,
+                WellnessHistoryHooks(
+                    skippable=_skippable,
+                    capability_allowed=lambda source: source != "sleep",
+                ),
+            )
+        self.assertEqual(client.calls, [])
 
 
 class _Manager:
@@ -217,6 +279,10 @@ class _Manager:
     def unit_of_work(self):
         yield self.db
         self.db.commit()
+
+    @contextmanager
+    def reader(self):
+        yield self.db
 
 
 class _Coordination:
@@ -246,12 +312,21 @@ class _Cursors:
 
 
 class _Reader:
-    def __init__(self, client: Any) -> None:
+    def __init__(self, client: Any, paused: bool = False) -> None:
         self.client = client
+        self.paused = paused
 
-    def fetch_wellness_history(self, start: date, end: date) -> dict[str, Any]:
+    def fetch_wellness_history(
+        self, start: date, end: date, *, needs_night: Any
+    ) -> dict[str, Any]:
+        if self.paused:
+            raise WellnessSourcePaused("sleep")
         return collect_wellness_history(
-            self.client, start, end, external_call=_external_call, redact=str
+            self.client,
+            start,
+            end,
+            external_call=_external_call,
+            hooks=WellnessHistoryHooks(skippable=_skippable, needs_night=needs_night),
         )
 
 
@@ -270,9 +345,11 @@ class ServiceTests(unittest.TestCase):
         self.cursors = _Cursors()
         self.coordination = _Coordination()
 
-    def service(self, client: Any) -> GarminWellnessHistoryService:
+    def service(
+        self, client: Any, paused: bool = False
+    ) -> GarminWellnessHistoryService:
         return GarminWellnessHistoryService(
-            reader=_Reader(client),
+            reader=_Reader(client, paused),
             database_manager=_Manager(self.db),
             snapshot_writer=self.writer,
             sync_state_repository=self.cursors,
@@ -294,6 +371,15 @@ class ServiceTests(unittest.TestCase):
 
     def record_count(self) -> int:
         return self.db.execute("SELECT COUNT(*) FROM provider_records").fetchone()[0]
+
+    def weight_rows(self) -> list[tuple[Any, ...]]:
+        return [
+            tuple(row)
+            for row in self.db.execute(
+                "SELECT id, payload FROM provider_records "
+                "WHERE source_record_id LIKE 'weight%' ORDER BY id"
+            )
+        ]
 
     def metrics(self, day: str) -> dict[str, float]:
         return {
@@ -345,8 +431,9 @@ class ServiceTests(unittest.TestCase):
             }
         )
         before = self.record_count()
+        client = SdkClient()
 
-        self.service(SdkClient()).backfill(2, END)
+        self.service(client).backfill(2, END)
 
         self.assertGreaterEqual(self.record_count(), before)
         self.assertEqual(
@@ -357,23 +444,15 @@ class ServiceTests(unittest.TestCase):
             garmin_store.read_item(self.db, "resting_hr", "2021-03-01"),
             stored_resting,
         )
-        # A stored night that already has night values keeps them.
+        # A stored night that already has night values keeps them, unread.
         self.assertEqual(
             garmin_store.read_item(self.db, "sleep", "2021-03-02"), stored_night
         )
         self.assertEqual(self.metrics("2021-03-02")["spo2"], 91.0)
+        self.assertEqual(_night_reads(client), [("2021-03-01",)])
 
     def test_a_stored_night_without_night_values_gains_the_full_night(self) -> None:
-        self.store(
-            {
-                "sleep": [
-                    {
-                        "calendarDate": "2021-03-01",
-                        "values": {"totalSleepTimeInSeconds": 25_000},
-                    }
-                ]
-            }
-        )
+        self.store({"sleep": [_bare_night("2021-03-01", 25_000)]})
 
         self.service(SdkClient()).backfill(2, END)
 
@@ -402,16 +481,34 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.metrics("2026-11-04")["weight"], 88.0)
         self.assertEqual(self.metrics("2021-03-01")["weight"], 90.0)
 
-    def test_a_partial_window_keeps_the_cursor(self) -> None:
+    def test_weigh_ins_already_stored_rewrite_nothing(self) -> None:
+        self.service(SdkClient()).backfill(2, END)
+        stored = self.weight_rows()
+
+        result = self.service(SdkClient()).backfill(2, END)
+
+        self.assertNotIn("weight", result["written"])
+        self.assertEqual(self.weight_rows(), stored)
+
+    def test_a_retryable_failure_fails_the_chunk_and_keeps_the_cursor(self) -> None:
         client = SdkClient()
         client.failing_night = "2021-03-02"
+        client.night_error = RuntimeError("rate limited")
+        before = self.record_count()
 
-        result = self.service(client).backfill(2, END)
+        with self.assertRaises(RuntimeError):
+            self.service(client).backfill(2, END)
 
-        self.assertEqual(result["status"], "partial")
         self.assertEqual(self.cursors.writes, [])
-        # The other sources of the window are still stored.
-        self.assertEqual(self.metrics("2021-03-01")["resting_hr"], 46.0)
+        self.assertEqual(self.record_count(), before)
+        self.assertEqual(self.coordination.released, 1)
+
+    def test_a_paused_source_fails_the_chunk_as_rate_limited(self) -> None:
+        with self.assertRaises(AppError) as raised:
+            self.service(SdkClient(), paused=True).backfill(2, END)
+
+        self.assertEqual(raised.exception.reason, "rate_limited")
+        self.assertEqual(self.cursors.writes, [])
 
     def test_a_busy_garmin_sync_fails_the_chunk_without_a_read(self) -> None:
         self.coordination.free = False
@@ -452,9 +549,13 @@ class _Queue:
 
 
 class _Wellness:
-    def __init__(self, records: int = 3) -> None:
+    def __init__(self, records: int = 3, available: bool = True) -> None:
         self.records = records
+        self.is_available = available
         self.calls: list[tuple[int, date]] = []
+
+    def available(self) -> bool:
+        return self.is_available
 
     def backfill(self, days: int, end: date) -> dict[str, Any]:
         self.calls.append((days, end))
@@ -519,6 +620,18 @@ class ExecutorTests(unittest.TestCase):
             self.state.cursors, [("garmin", "wellness_history", "2020-01-01")]
         )
 
+    def test_fixture_mode_skips_without_cursor_or_continuation(self) -> None:
+        wellness = _Wellness(available=False)
+        owner, historical = self.owner(wellness)
+        job = {"id": "job-4", "type": "wellness_backfill", "provider": "garmin"}
+
+        result = owner.execute(job, {"days": 90}, "startup")
+        historical.queue_next(job, result, "completed")
+
+        self.assertEqual(wellness.calls, [])
+        self.assertEqual(self.state.cursors, [])
+        self.assertEqual(self.queue.calls, [])
+
     def test_a_window_below_the_floor_ends_without_a_read(self) -> None:
         wellness = _Wellness()
         owner, _ = self.owner(wellness)
@@ -526,7 +639,7 @@ class ExecutorTests(unittest.TestCase):
 
         result = owner.execute(job, {"end_date": "2019-12-31"}, "backfill")
 
-        self.assertEqual(result["historical_next_end"], None)
+        self.assertIsNone(result["historical_next_end"])
         self.assertEqual(wellness.calls, [])
         self.assertEqual(
             self.state.cursors, [("garmin", "wellness_history", "2020-01-01")]

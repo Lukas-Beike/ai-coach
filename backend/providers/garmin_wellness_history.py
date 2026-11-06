@@ -14,12 +14,15 @@ read them alike:
   with a resting value, so the history needs no read per day.
 * ``weight``: the raw weigh-in range response.
 
-A failed source is recorded in ``errors`` and marked incomplete; the others stay.
+A client error or an unreadable answer skips only that night or source; any
+other error (rate limit, network, rejected login) ends the read so the job is
+retried and its cursor stays.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import date, timedelta
 from functools import partial
 from typing import Any, Final
@@ -28,7 +31,6 @@ from backend.canonical.section_items import record_day
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin import (
     ExternalCall,
-    Redact,
     normalize_range_records,
     preserve_weight_response,
 )
@@ -42,7 +44,6 @@ SLEEP_NIGHT_FIELDS: Final = (
     "averageRespirationValue",
     "avgHeartRate",
 )
-WELLNESS_HISTORY_SOURCES: Final = ("sleep", "hrv", "daily_stats", "weight")
 # Weight range keys that list readings; the SDK and Personal API share them.
 _WEIGHT_READING_KEYS: Final = ("dailyWeightSummaries", "dateWeightList", "weighIns")
 
@@ -64,39 +65,70 @@ def has_night_values(element: object) -> bool:
     return False
 
 
+class WellnessSourcePaused(RuntimeError):
+    """A wellness source is paused after repeated Garmin failures; retry later."""
+
+
+@dataclass(frozen=True)
+class WellnessHistoryHooks:
+    """Policy the sync owner supplies to one wellness history read.
+
+    ``skippable`` names errors that only skip the failed night or source (a client
+    error, an unreadable answer); any other error (rate limit, network, rejected
+    login) ends the read so the job is retried and the cursor stays.
+    ``needs_night`` says whether a night still needs its full element.
+    """
+
+    skippable: Callable[[BaseException], bool]
+    needs_night: Callable[[str], bool] = lambda _day: True
+    capability_allowed: Callable[[str], bool] = lambda _source: True
+    capability_failure: Callable[[str, BaseException], None] = lambda *_: None
+    capability_success: Callable[[str], None] = lambda _source: None
+
+
 def collect_wellness_history(
     client: Any,
     start: date,
     end: date,
     *,
     external_call: ExternalCall,
-    redact: Redact,
+    hooks: WellnessHistoryHooks,
 ) -> dict[str, Any]:
-    """Return the wellness sections of ``start``..``end`` (inclusive days)."""
-    readers: dict[str, Callable[[Any, date, date, ExternalCall], list[Any]]] = {
-        "sleep": _sleep_nights,
-        "hrv": _hrv_summaries,
-        "daily_stats": _daily_summaries,
-        "weight": _weigh_ins,
+    """Return the wellness sections of ``start``..``end`` (inclusive days).
+
+    A paused source or an error that is not skippable raises. A skippable failure
+    lists its source in ``skipped_sources`` and stores nothing for it, so one
+    permanently failing window never blocks the walk; a failed night keeps its
+    range row.
+    """
+    readers: dict[str, Callable[[], list[Any]]] = {
+        "sleep": lambda: _sleep_nights(client, start, end, external_call, hooks),
+        "hrv": lambda: _hrv_summaries(client, start, end, external_call),
+        "daily_stats": lambda: _daily_summaries(client, start, end, external_call),
+        "weight": lambda: _weigh_ins(client, start, end, external_call),
     }
     payload: dict[str, Any] = {
         "start": start.isoformat(),
         "end": end.isoformat(),
-        "errors": [],
+        "skipped_sources": [],
     }
     pagination: dict[str, dict[str, Any]] = {}
     for source, read in readers.items():
+        if not hooks.capability_allowed(source):
+            raise WellnessSourcePaused(source)
         try:
-            records = read(client, start, end, external_call)
-        except Exception as exc:  # noqa: BLE001 - SDK errors vary; keep the other sources.
-            pagination[source] = {"complete": False, "records": 0}
-            payload["errors"].append(
-                {"source": source, "message": redact(str(exc))[:500]}
-            )
+            records = read()
+        except Exception as exc:
+            hooks.capability_failure(source, exc)
+            if not hooks.skippable(exc):
+                raise
+            payload["skipped_sources"].append(source)
+            pagination[source] = {"records": 0}
             continue
+        hooks.capability_success(source)
         payload[source] = records
-        pagination[source] = {"complete": True, "records": len(records)}
-    if pagination["daily_stats"]["complete"]:
+        pagination[source] = {"records": len(records)}
+    if "daily_stats" in payload:
         payload["resting_hr"] = _resting_rows(payload["daily_stats"])
     payload["provider_sync"] = {"pagination": pagination}
     return payload
@@ -108,7 +140,11 @@ def _in_window(record: object, start: date, end: date) -> bool:
 
 
 def _sleep_nights(
-    client: Any, start: date, end: date, external_call: ExternalCall
+    client: Any,
+    start: date,
+    end: date,
+    external_call: ExternalCall,
+    hooks: WellnessHistoryHooks,
 ) -> list[Any]:
     value = external_call(
         GARMIN_ID,
@@ -121,20 +157,33 @@ def _sleep_nights(
     for row in rows:
         if not _in_window(row, start, end):
             continue
-        if has_night_values(row):
+        day = str(record_day(row))
+        if has_night_values(row) or not hooks.needs_night(day):
             nights.append(row)
             continue
-        day = str(record_day(row))
-        full = external_call(
-            GARMIN_ID,
-            "sleep_night",
-            partial(client.get_sleep_data, day),
-            {"date": day},
-        )
-        dto = full.get("dailySleepDTO") if isinstance(full, Mapping) else None
-        element = wrap_daily_sleep(dict(dto)) if isinstance(dto, Mapping) else None
-        nights.append(element if element is not None else row)
+        nights.append(_full_night(client, day, row, external_call, hooks))
     return nights
+
+
+def _full_night(
+    client: Any,
+    day: str,
+    row: Any,
+    external_call: ExternalCall,
+    hooks: WellnessHistoryHooks,
+) -> Any:
+    """Return the full night element of ``day``, else its range row."""
+    try:
+        full = external_call(
+            GARMIN_ID, "sleep_night", partial(client.get_sleep_data, day), {"date": day}
+        )
+    except Exception as exc:
+        if not hooks.skippable(exc):
+            raise
+        return row
+    dto = full.get("dailySleepDTO") if isinstance(full, Mapping) else None
+    element = wrap_daily_sleep(dict(dto)) if isinstance(dto, Mapping) else None
+    return element if element is not None else row
 
 
 def _hrv_summaries(

@@ -90,7 +90,7 @@ The system SHALL walk Intervals and Garmin history in inclusive chunks of at mos
 
 #### Scenario: Garmin wellness history
 - **WHEN** Garmin is configured and its `wellness_history` cursor has not reached the floor
-- **THEN** startup queues one `wellness_backfill` chain that walks the same chunks and reads only sleep (one full night element per night, with SpO2, respiration and sleeping heart rate), HRV, daily summaries with their resting heart rate, and weigh-ins, through the Personal API or the SDK; it adds only days not stored yet, replaces a stored night only when it has no night values, merges weigh-ins with the stored readings winning, and never prunes or deletes.
+- **THEN** startup queues one `wellness_backfill` chain that walks the same chunks and reads only sleep (one full night element per night, with SpO2, respiration and sleeping heart rate), HRV, daily summaries with their resting heart rate, and weigh-ins, through the Personal API or the SDK; it adds only days not stored yet, replaces a stored night only when it has no night values, merges weigh-ins with the stored readings winning, and never prunes or deletes. A client error or an unreadable answer skips only that night or source; a paused source, rate limit or other provider error fails the chunk for a retry and keeps the cursor.
 
 Detailed contract: Historical work SHALL yield to non-backfill jobs and active foreground Coach work, and repeated completion SHALL not fork a second continuation chain. Each backfill chain keeps its own cursor (`historical` for activities, `wellness_history` for the Garmin wellness walk).
 
