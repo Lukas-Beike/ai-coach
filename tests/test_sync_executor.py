@@ -232,7 +232,7 @@ class SyncJobExecutorTests(unittest.TestCase):
             historical_sync=historical_sync,
             outcome_service=self.outcomes,
             all_sync_days=-1,
-            after_job=after_job or (lambda: self.after_job_calls.append(True)),
+            after_job=after_job or (lambda job: self.after_job_calls.append(True)),
         )
 
     def test_executor_has_concrete_owner_dependencies_not_parameter_bag(self) -> None:
@@ -758,7 +758,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(self.after_job_calls, [])
 
     def test_failing_after_job_hook_keeps_the_completed_outcome(self) -> None:
-        def broken() -> None:
+        def broken(job: Any) -> None:
             raise RuntimeError("hook failure")
 
         executor = self.make_executor(after_job=broken)

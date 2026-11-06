@@ -199,7 +199,7 @@ class ZoneConfigurationService:
         self._database_manager = database_manager
         self._reader = reader
         self._now = now
-        # Runs after a committed save or removal (the local load follows it).
+        # Runs after a save, a removal or an undo: the local load follows it.
         self._on_change = on_change
 
     def configurations(self) -> tuple[ZoneConfiguration, ...]:
@@ -283,6 +283,9 @@ class ZoneConfigurationService:
         ``target`` holds the changed fields only; the others keep their current
         value. None removes the local configuration again.
         """
+        # The undo commits after this returns; the requested pass waits for the
+        # writer, so it reads the restored configuration.
+        self._on_change()
         if target is None:
             canonical_domain_store.retire_local_zone_configuration(
                 db, key, now=self._now()

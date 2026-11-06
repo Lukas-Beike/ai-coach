@@ -45,7 +45,9 @@ branch that was (`load_branch`).
      computed by the device or provider. The app does not recompute it from
      streams.
    - `FTP`: the resolver's FTP for the session's sport on the session's local
-     day.
+     day. An indoor or virtual ride uses the locally confirmed indoor power
+     zone in effect that day when one exists (athlete decision 2026-11-06);
+     a provider indoor FTP is not read.
 2. **Pace** (run only, without power):
    `IF = v / v_threshold`, `TSS = hours × IF² × 100`.
    - `v`: Garmin's grade-adjusted average speed (`avgGradeAdjustedSpeed`,
@@ -215,6 +217,7 @@ hour, or a mix of branches on one scale.
 | Stored intensity | intensity_pct = IF × 100, power branch only | product assumption | Issue #1725 scope (NP/FTP); pace IF is not comparable. |
 | Sports without TSS | strength, yoga, alpine ski, walking | product assumption | HR load agrees poorly with sRPE in strength work (Dai et al. 2025, README); yoga and alpine ski are treated alike because their HR does not reflect endurance load; walking is everyday activity, not training load (athlete decision 2026-11-06). Hiking keeps the HR branch. |
 | HR thresholds of other sports | run values | product assumption | The resolver keeps HR thresholds for ride and run only. |
+| Indoor ride FTP | local indoor power zone of the day, else the ride FTP | product assumption | Athlete decision 2026-11-06 after review; plans also apply local indoor zones. |
 | Threshold after the session | earliest later threshold, flagged | product assumption | Athlete decision 2026-11-06; fills history before the first stored threshold. |
 | Duration | moving, else elapsed | product assumption | `summary_duration_s` in `backend/canonical/activity_summary.py:117`. |
 

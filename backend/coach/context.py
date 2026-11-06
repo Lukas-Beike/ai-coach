@@ -113,6 +113,7 @@ COACH_ACTIVITY_FIELDS = (
     "max_temp_c",
     "training_load",
     "load_branch",
+    "load_threshold_after_session",
     "aerobic_training_effect",
     "anaerobic_training_effect",
     "intensity",

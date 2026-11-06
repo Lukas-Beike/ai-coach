@@ -53,10 +53,15 @@ class SessionCorrectionService:
         database_manager: Any,
         clock: Callable[[], str],
         event_buffer: Any = None,
+        *,
+        on_change: Callable[[], None] = lambda: None,
     ) -> None:
         self._database_manager = database_manager
         self._clock = clock
         self._event_buffer = event_buffer
+        # A correction changes which records form a session: the local load
+        # (card M6) follows it.
+        self._on_change = on_change
         self._rows_cache: dict[str, dict[str, Any]] = {}
 
     def bundle(self, activity_id: str) -> dict[str, Any] | None:
@@ -241,6 +246,8 @@ class SessionCorrectionService:
             canonical_store.revive_deleted_copies(
                 db, session_id, exclude=restored, now=now
             )
+        # The undo commits after this returns; the pass waits for the writer.
+        self._on_change()
         return target
 
     def _correct(
@@ -275,6 +282,7 @@ class SessionCorrectionService:
                 source=source,
             )
         self._publish()
+        self._on_change()
         return {
             "status": status,
             "activity_id": survivor["activity_id"]

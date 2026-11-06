@@ -395,6 +395,7 @@ from backend.sync.library_assembly import (
     WorkoutLibraryState,
     WorkoutLibrarySyncAssembly,
 )
+from backend.sync.local_load import refresh_after_job
 from backend.sync.metric_export import MetricExportService
 from backend.sync.metric_export_assembly import build_metric_export_service
 from backend.sync.persistence_assembly import SyncPersistenceAssembly
@@ -706,7 +707,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             normalize_competition=planning_competitions.normalize_competition,
             uuid_factory=uuid.uuid4,
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
-            zones_changed=lambda: start_canonical_backfill(),
+            load_inputs_changed=lambda: start_canonical_backfill(),
         ),
     )
 )
@@ -1632,7 +1633,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     dependencies=SYNC_JOB_DEPENDENCIES,
     provider_runtime=provider_runtime,
-    after_job=lambda: start_canonical_backfill(),
+    after_job=refresh_after_job(lambda: start_canonical_backfill()),
 )
 
 

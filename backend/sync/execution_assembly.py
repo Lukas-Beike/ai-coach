@@ -137,7 +137,7 @@ class SyncJobExecutionAssembly:
         *,
         dependencies: SyncJobExecutionAssembly.Inputs,
         provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
-        after_job: Callable[[], None] = lambda: None,
+        after_job: Callable[[Mapping[str, Any]], None] = lambda _job: None,
     ) -> None:
         self._historical = dependencies.historical
         self._state = dependencies.state

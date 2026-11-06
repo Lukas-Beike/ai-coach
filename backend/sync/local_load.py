@@ -29,6 +29,7 @@ from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
     MetricKind,
+    ProviderId,
     RecordingOrigin,
     SourceKind,
     Sport,
@@ -123,6 +124,14 @@ def reconcile_local_loads(
     after_session = 0
     for session_id, load in loads.items():
         sport = by_sport.setdefault(str(by_id[session_id].get("sport")), Counter())
+        observations: list[Observation] = []
+        if isinstance(load, LocalLoad):
+            try:
+                observations = _observations(by_id[session_id], load)
+            except TypeError, ValueError:
+                # Outside the canonical bounds (e.g. an unstopped recording):
+                # this session gets no value, the others still do.
+                load = "invalid_value"
         if not isinstance(load, LocalLoad):
             missing[load] += 1
             sport["missing"] += 1
@@ -132,7 +141,7 @@ def reconcile_local_loads(
         if load.details.get("threshold_after_session"):
             after_session += 1
             sport["threshold_after_session"] += 1
-        for observation in _observations(by_id[session_id], load):
+        for observation in observations:
             keep.add(canonical_store.observation_natural_key(observation))
             outcome = canonical_store.upsert_observation(
                 db,
@@ -231,6 +240,22 @@ class LocalLoadStage:
         )
 
 
+# Providers whose completed jobs can change a session or a threshold.
+LOAD_INPUT_PROVIDERS: Final = frozenset(
+    {ProviderId.INTERVALS.value, ProviderId.GARMIN.value, ProviderId.WAHOO.value}
+)
+
+
+def refresh_after_job(start: Callable[[], None]) -> Callable[[Mapping[str, Any]], None]:
+    """A sync-job hook that requests a local load pass after an input provider's job."""
+
+    def after_job(job: Mapping[str, Any]) -> None:
+        if job.get("provider") in LOAD_INPUT_PROVIDERS:
+            start()
+
+    return after_job
+
+
 def summarize_local_load(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
     """Content-free status and counts of the last local load pass, for diagnostics."""
     raw = key_values.get(db, STATE_KEY)
@@ -247,10 +272,16 @@ def summarize_local_load(key_values: KeyValueRepository, db: Any) -> dict[str, A
     }
 
 
-def stored_local_loads(db: Any) -> dict[str, dict[str, Any]]:
-    """Map each session id to its stored local load and intensity rows."""
+def stored_local_loads(
+    db: Any, session_ids: Iterable[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    """Map each session id to its stored local load and intensity rows.
+
+    ``session_ids`` limits the read to those owners; None reads every row.
+    """
     result: dict[str, dict[str, Any]] = {}
-    for row in canonical_store.derived_observation_rows(db, METHOD_ID):
+    owners = None if session_ids is None else list(session_ids)
+    for row in canonical_store.derived_observation_rows(db, METHOD_ID, owners=owners):
         owner = row.get("owner_record_id")
         if not isinstance(owner, str):
             continue

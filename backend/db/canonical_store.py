@@ -46,6 +46,10 @@ from backend.canonical.vocabulary import (
 
 ACTIVITY_ID_PREFIX: Final = "act_"
 ATHLETE_SERIES: Final = "athlete"
+# Local per-session derived kinds, keyed by their owning session (card M6).
+SESSION_SERIES_KINDS: Final = frozenset(
+    {MetricKind.SESSION_LOAD, MetricKind.INTENSITY_FACTOR}
+)
 _ATHLETE_SERIES_KINDS: Final = frozenset(
     {MetricKind.WEIGHT, MetricKind.EFTP, MetricKind.BODY_FAT}
 )
@@ -976,7 +980,10 @@ def observation_natural_key(observation: Observation) -> str:
 
 
 def _observation_series(observation: Observation) -> str:
-    """Return ``athlete`` for an Intervals.icu athlete-profile value, else empty.
+    """Return the series part of an observation's natural key.
+
+    ``athlete`` marks an Intervals.icu athlete-profile value and
+    ``session:<id>`` a local per-session derived value (card M6); else empty.
 
     Weight, eFTP, body fat and the sport-less VO2max come from both records. A
     wellness row is identified by its ISO day, so such a value whose source record
@@ -996,6 +1003,13 @@ def _observation_series(observation: Observation) -> str:
         and provenance.source_record_id != observation.observed_on.isoformat()
     ):
         return ATHLETE_SERIES
+    if (
+        observation.kind in SESSION_SERIES_KINDS
+        and provenance.provider is None
+        and provenance.source_record_id
+    ):
+        # A local per-session value: two sessions may share sport and start.
+        return f"session:{provenance.source_record_id}"
     return ""
 
 
@@ -1062,20 +1076,38 @@ def upsert_observation(
     return WriteOutcome.UPDATED
 
 
-def derived_observation_rows(db: Any, method: str) -> list[dict[str, Any]]:
+def derived_observation_rows(
+    db: Any, method: str, *, owners: Sequence[str] | None = None
+) -> list[dict[str, Any]]:
     """Return the active local derived observations of ``method``.
 
     Each row has its natural key, metric, value, sport, observed day, owner
     (the canonical session id) and the parsed ``derivation`` details. Local
     derived rows carry no provider, so provider reads never return them.
+    ``owners`` limits the rows to those owner ids; None returns every row.
     """
-    rows = _fetch_all(
-        db,
+    sql = (
         "SELECT natural_key, metric, value, sport, observed_on, owner_record_id, "
         "details FROM observations WHERE provider IS NULL AND method = ? "
-        "AND source_kind = ? AND state = ? ORDER BY natural_key",
-        (method, SourceKind.DERIVED.value, ProjectionState.ACTIVE.value),
+        "AND source_kind = ? AND state = ?"
     )
+    params: tuple[object, ...] = (
+        method,
+        SourceKind.DERIVED.value,
+        ProjectionState.ACTIVE.value,
+    )
+    if owners is None:
+        rows = _fetch_all(db, sql + " ORDER BY natural_key", params)
+    else:
+        rows = []
+        unique = sorted(set(owners))
+        for start in range(0, len(unique), _RETIRE_BATCH):
+            batch = unique[start : start + _RETIRE_BATCH]
+            rows += _fetch_all(
+                db,
+                f"{sql} AND owner_record_id IN ({', '.join('?' * len(batch))})",
+                (*params, *batch),
+            )
     result = []
     for row in rows:
         details = json.loads(row.pop("details") or "{}")

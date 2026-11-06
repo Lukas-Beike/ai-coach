@@ -19,6 +19,7 @@ from typing import Any
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
+    Environment,
     MetricKind,
     ProviderId,
     RecordingOrigin,
@@ -250,11 +251,13 @@ class SessionLoadWorkedExampleTests(unittest.TestCase):
         self.assertRegex(first.fingerprint, r"^[0-9a-f]{64}$")
 
 
-def _local_ftp(value: float, valid_from: date) -> ZoneConfiguration:
+def _local_ftp(
+    value: float, valid_from: date, environment: Environment | None = None
+) -> ZoneConfiguration:
     return ZoneConfiguration(
         metric=ZoneConfigurationMetric.POWER,
         sport=Sport.RIDE,
-        environment=None,
+        environment=environment,
         valid_from=valid_from,
         valid_until=None,
         threshold=value,
@@ -332,6 +335,28 @@ class DatedThresholdTests(unittest.TestCase):
         )
         self.assertEqual((before.value, before.source), (240.0, "garmin"))
         self.assertEqual((after.value, after.source), (255.0, "local"))
+
+    def test_indoor_ride_uses_the_local_indoor_ftp(self) -> None:
+        # FTP 280 W outdoors, 260 W indoors: 1 h at NP 260 W indoors is 100 TSS.
+        thresholds = DatedThresholds(
+            [],
+            [
+                _local_ftp(280.0, date(2026, 1, 1)),
+                _local_ftp(260.0, date(2026, 1, 1), Environment.INDOOR),
+            ],
+        )
+        summary = _summary(
+            normalized_power=260.0, moving_duration_s=3600.0, environment="virtual"
+        )
+        loads = session_loads([summary], thresholds)
+        load = loads["act_1"]
+        assert isinstance(load, LocalLoad)
+        self.assertAlmostEqual(load.load, 100.0, places=9)
+        outdoor = session_loads([{**summary, "environment": "outdoor"}], thresholds)
+        outdoor_load = outdoor["act_1"]
+        assert isinstance(outdoor_load, LocalLoad)
+        # 260/280 = 0.9286, squared 0.8622 -> 86.22 TSS.
+        self.assertAlmostEqual(outdoor_load.load, 86.22, places=2)
 
     def test_resting_hr_from_the_last_week_garmin_first(self) -> None:
         thresholds = DatedThresholds(

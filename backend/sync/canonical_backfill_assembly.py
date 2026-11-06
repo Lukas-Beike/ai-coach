@@ -51,7 +51,8 @@ def build_canonical_backfill(
     )
     # Runs after the detail backfill: deletes the kv records canonical proves.
     detail_retirement = ActivityDetailRetirement(key_values=key_values, clock=clock)
-    # Runs last: reconciles the local session load (card M6) on every pass.
+    # Runs first after the canonical backfill, so a failing detail stage never
+    # blocks it: reconciles the local session load (card M6) on every pass.
     local_load = LocalLoadStage(
         key_values=key_values,
         zone_provider=zone_provider,
@@ -62,7 +63,7 @@ def build_canonical_backfill(
         backfill=backfill,
         database=database,
         maintenance_gate=maintenance_gate,
-        followups=(detail_backfill, detail_retirement, local_load),
+        followups=(local_load, detail_backfill, detail_retirement),
     )
     return CanonicalBackfillAssembly(
         worker=worker,

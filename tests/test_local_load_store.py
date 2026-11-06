@@ -28,6 +28,7 @@ from backend.providers.garmin_health_mapping import MAPPER_VERSION
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.local_load import (
     LocalLoadStage,
+    refresh_after_job,
     stored_local_loads,
     with_local_loads,
 )
@@ -170,3 +171,86 @@ class LocalLoadStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LocalLoadReviewRegressionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.manager = open_manager(directory.name)
+        self.addCleanup(self.manager.close)
+        self.stage = LocalLoadStage(
+            key_values=KeyValueRepository(lambda: NOW),
+            zone_provider=lambda: ZONE,
+            clock=lambda: NOW,
+        )
+        with self.manager.unit_of_work() as db:
+            _ftp(db, 250.0, date(2026, 9, 1))
+
+    def _run(self) -> dict[str, Any]:
+        with self.manager.unit_of_work() as db:
+            self.stage.run_batch(db)
+            return self.stage.summary(db)["counts"]
+
+    def test_two_sessions_with_the_same_start_keep_their_own_load(self) -> None:
+        # A split leaves two live sessions with the same sport and start.
+        for provider_id, session in (("g1", "act_g1"), ("g2", "act_g2")):
+            add_session_record(
+                self.manager,
+                ProviderId.GARMIN,
+                provider_id,
+                session,
+                normalized_power=230.0 if session == "act_g1" else 250.0,
+                moving_duration_s=4200.0 if session == "act_g1" else 3600.0,
+            )
+        self._run()
+        self.assertEqual(self._run()["written"], 0)
+        with self.manager.reader() as db:
+            stored = stored_local_loads(db)
+        self.assertAlmostEqual(stored["act_g1"]["session_load"]["value"], 98.75, 2)
+        self.assertAlmostEqual(stored["act_g2"]["session_load"]["value"], 100.0, 6)
+
+    def test_one_value_outside_the_bounds_does_not_stop_the_pass(self) -> None:
+        # 150,000 s at IF 1.6 is 41.7 h × 2.56 × 100 = 10,667 TSS > 10,000.
+        add_session_record(
+            self.manager,
+            ProviderId.GARMIN,
+            "g1",
+            "act_g1",
+            normalized_power=400.0,
+            moving_duration_s=150_000.0,
+        )
+        add_session_record(
+            self.manager,
+            ProviderId.GARMIN,
+            "g2",
+            "act_g2",
+            normalized_power=250.0,
+            moving_duration_s=3600.0,
+        )
+        counts = self._run()
+        self.assertEqual(counts["missing"], {"invalid_value": 1})
+        self.assertEqual(counts["branches"], {"power": 1})
+
+    def test_stored_loads_can_be_read_for_some_sessions_only(self) -> None:
+        add_session_record(
+            self.manager,
+            ProviderId.GARMIN,
+            "g1",
+            "act_g1",
+            normalized_power=250.0,
+            moving_duration_s=3600.0,
+        )
+        self._run()
+        with self.manager.reader() as db:
+            self.assertEqual(set(stored_local_loads(db, ["act_g1"])), {"act_g1"})
+            self.assertEqual(stored_local_loads(db, ["act_other"]), {})
+
+
+class RefreshAfterJobTests(unittest.TestCase):
+    def test_only_input_provider_jobs_request_a_pass(self) -> None:
+        calls: list[bool] = []
+        hook = refresh_after_job(lambda: calls.append(True))
+        for provider in ("intervals", "garmin", "wahoo", "weather", "calendar"):
+            hook({"provider": provider})
+        self.assertEqual(calls, [True, True, True])

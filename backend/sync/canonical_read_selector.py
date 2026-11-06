@@ -253,7 +253,10 @@ class CanonicalReadSelector(
         )
         return cast(
             tuple[ActivitySummary, ...],
-            with_local_loads(summaries, stored_local_loads(db)),
+            with_local_loads(
+                summaries,
+                stored_local_loads(db, (summary["id"] for summary in summaries)),
+            ),
         )
 
     def observations(

@@ -26,10 +26,21 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final
 
-from backend.canonical.activity_summary import summary_duration_s, summary_local_date
+from backend.activities.zone_settings import effective_zone_configuration
+from backend.canonical.activity_summary import (
+    summary_duration_s,
+    summary_is_indoor,
+    summary_local_date,
+)
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation, fingerprint_inputs
-from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.canonical.vocabulary import (
+    Environment,
+    MetricKind,
+    ProviderId,
+    Sport,
+    ZoneConfigurationMetric,
+)
 from backend.performance.current_thresholds import (
     local_thresholds,
     resolve_current_thresholds,
@@ -61,6 +72,7 @@ THRESHOLD_KINDS: Final = (
     MetricKind.MAX_HR,
 )
 LOCAL_SOURCE: Final = "local"
+LOCAL_INDOOR_SOURCE: Final = "local_indoor"
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,8 +338,17 @@ class DatedThresholds:
             sorted(
                 (item for item in observations if item.kind in THRESHOLD_KINDS),
                 key=lambda item: item.observed_on,
-                reverse=True,
             )
+        )
+        # Each provider's series of one kind and sport, oldest first, so a day
+        # finds its newest value by bisection instead of a scan.
+        groups: dict[tuple[Any, ...], list[Observation]] = {}
+        for item in self._observations:
+            key = (item.provenance.provider, item.kind, item.sport)
+            groups.setdefault(key, []).append(item)
+        self._series = tuple(
+            ([item.observed_on for item in series], series)
+            for series in groups.values()
         )
         self._configurations = tuple(configurations)
         self._preferences = preferences
@@ -351,7 +372,11 @@ class DatedThresholds:
         cached = self._days.get(day)
         if cached is not None:
             return cached
-        provider = [item for item in self._observations if item.observed_on <= day]
+        provider = [
+            series[index - 1]
+            for days, series in self._series
+            if (index := bisect.bisect_right(days, day))
+        ]
         resolved = resolve_current_thresholds(
             provider,
             local_thresholds(self._configurations, day),
@@ -410,14 +435,45 @@ class DatedThresholds:
             stand_in.value, stand_in.source, stand_in.observed_on, after_session=True
         )
 
-    def for_session(self, sport: Sport, day: date) -> SessionThresholds:
-        """The thresholds a session of ``sport`` on ``day`` reads."""
+    def indoor_ftp(self, day: date) -> Threshold | None:
+        """The local indoor ride FTP in effect on ``day``, if one is configured.
+
+        Only an athlete-confirmed configuration for the indoor environment
+        counts (athlete decision 2026-11-06); a provider indoor FTP is not read.
+        """
+        local = [
+            item for item in self._configurations if item.provenance.provider is None
+        ]
+        chosen = effective_zone_configuration(
+            local, ZoneConfigurationMetric.POWER, Sport.RIDE, indoor=True, day=day
+        )
+        if (
+            chosen is None
+            or chosen.environment is not Environment.INDOOR
+            or not chosen.threshold
+        ):
+            return None
+        return Threshold(
+            float(chosen.threshold), LOCAL_INDOOR_SOURCE, chosen.valid_from
+        )
+
+    def for_session(
+        self, sport: Sport, day: date, *, indoor: bool = False
+    ) -> SessionThresholds:
+        """The thresholds a session of ``sport`` on ``day`` reads.
+
+        An indoor or virtual ride uses the local indoor FTP of the day when one
+        is configured.
+        """
         heart = threshold_sport(sport)
         power_sport = sport if sport in _POWER_SPORTS else None
+        indoor_ftp = (
+            self.indoor_ftp(day) if indoor and power_sport is Sport.RIDE else None
+        )
         return SessionThresholds(
             ftp=None
             if power_sport is None
-            else self.threshold(MetricKind.FTP, power_sport, day),
+            else indoor_ftp or self.threshold(MetricKind.FTP, power_sport, day),
             threshold_pace=self.threshold(MetricKind.THRESHOLD_PACE, Sport.RUN, day)
             if sport is Sport.RUN
             else None,
@@ -449,6 +505,7 @@ def session_loads(
             result[session_id] = "sport_without_load"
             continue
         result[session_id] = session_local_load(
-            summary, thresholds.for_session(sport, day)
+            summary,
+            thresholds.for_session(sport, day, indoor=summary_is_indoor(summary)),
         )
     return result
