@@ -15,12 +15,13 @@ Mapped sections and their canonical kinds:
   from the weekly average; it covers a different window, so it is its own kind
   and never a stand-in for the last-night value.
 * ``resting_hr``: RESTING_HR.
-* ``readiness``: READINESS.
+* ``readiness``: READINESS of the day's morning reading: Garmin re-scores readiness
+  during the day, and only the wake-up reading (else the earliest) is kept.
 * ``max_metrics``: VO2MAX from the generic, cycling and running objects.
 * ``running_threshold``: THRESHOLD_PACE in m/s (Garmin's scaled speed below 1
   is multiplied by ten before storage; pace rounding belongs to the display),
   THRESHOLD_HR for running and THRESHOLD_HR for cycling. Its ``power`` object's
-  ``functionalThresholdPower`` is RUN_THRESHOLD_POWER for running: the collector
+  ``functionalThresholdPower`` is FTP for running: the collector
   requests the running lactate threshold and ``garmin_metrics`` shows it as running
   watts. Garmin may derive that power from cycling data; consumers keep their own
   plausibility window.
@@ -105,7 +106,9 @@ Ignored without an issue: sections with no canonical kind in this wave
 (``activities``, ``gear``) and unknown keys.
 
 Source kinds: sensor values (sleep duration, HRV, resting heart rate, scale weight
-and body fat, steps and floors) are DEVICE_MEASURED. Garmin's calculations (sleep
+and body fat, steps and floors) are DEVICE_MEASURED. A weigh-in whose
+``sourceType`` is ``MANUAL`` was typed in by the athlete: PROVIDER_REPORTED,
+recorded by MANUAL. Garmin's calculations (sleep
 score, readiness, VO2max, thresholds, FTP, daily energy, race predictions and the
 endurance score) are PROVIDER_REPORTED. The source record id is
 ``<section>:<calendarDate>``, with ``:<object>`` appended for nested objects, for
@@ -131,6 +134,7 @@ import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, tzinfo
+from operator import itemgetter
 from typing import Final
 
 from backend.canonical.local_time import local_date
@@ -188,6 +192,7 @@ from backend.providers.garmin_training_mapping import (
     TRAINING_SECTIONS,
     TrainingValue,
     endurance_group_values,
+    morning_readiness,
     training_values,
     unresolved_device_record,
 )
@@ -207,13 +212,18 @@ from backend.providers.garmin_weight_walk import (
 # Version 15: observations record their owning raw element, so re-projection
 # retires the values a stored element no longer carries (schema version 21).
 # Version 16: sleep periods are dated by the record's ``calendarDate``.
-MAPPER_VERSION: Final = 16
+# Version 17: running threshold power is FTP for running, manual weigh-ins and the
+# history weight are provider-reported, and readiness keeps the morning reading.
+MAPPER_VERSION: Final = 17
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
 _DAY_TEXT_LENGTH: Final = 10  # "YYYY-MM-DD"
 _DEVICE: Final = SourceKind.DEVICE_MEASURED
 _PROVIDER: Final = SourceKind.PROVIDER_REPORTED
+_READINESS: Final = "readiness"
+_WEIGHT_SOURCE_TYPE: Final = "sourceType"
+_MANUAL_WEIGH_IN: Final = "MANUAL"
 _GRAMS_PER_KILOGRAM: Final = 1000.0
 _GRAM_GUESS_THRESHOLD: Final = 300.0
 _KG_PER_POUND: Final = 0.45359237
@@ -264,8 +274,10 @@ _HISTORY_METRICS: Final = "metrics"
 _HISTORY_PACE: Final = "run_threshold_pace_seconds_per_km"
 _METRES_PER_KM: Final = 1000.0
 # Legacy performance-history keys and the kind, sport and source kind each holds.
+# The history weight copies the latest weigh-in without its source type, so it
+# may be a manual entry and is never claimed as a scale measurement.
 _HISTORY_KINDS: Final[Mapping[str, tuple[MetricKind, Sport | None, SourceKind]]] = {
-    "weight_kg": (MetricKind.WEIGHT, None, SourceKind.DEVICE_MEASURED),
+    "weight_kg": (MetricKind.WEIGHT, None, SourceKind.PROVIDER_REPORTED),
     "cycling_ftp_watts": (MetricKind.FTP, Sport.RIDE, SourceKind.PROVIDER_REPORTED),
     "cycling_vo2max_ml_kg_min": (
         MetricKind.VO2MAX,
@@ -278,7 +290,7 @@ _HISTORY_KINDS: Final[Mapping[str, tuple[MetricKind, Sport | None, SourceKind]]]
         SourceKind.PROVIDER_REPORTED,
     ),
     "run_threshold_watts": (
-        MetricKind.RUN_THRESHOLD_POWER,
+        MetricKind.FTP,
         Sport.RUN,
         SourceKind.PROVIDER_REPORTED,
     ),
@@ -593,7 +605,7 @@ _THRESHOLD_GROUPS: Final = (
         (
             _Field(
                 ("functionalThresholdPower",),
-                MetricKind.RUN_THRESHOLD_POWER,
+                MetricKind.FTP,
                 _PROVIDER,
                 Sport.RUN,
             ),
@@ -1122,7 +1134,22 @@ class _WeightWalk:
     ) -> None:
         prefix = _BODY_FAT_RECORD if kind is MetricKind.BODY_FAT else _WEIGHT
         entry = _entry(prefix, ref, day, str(index), observed_at=_observed_at(record))
-        self._mapping.emit(entry, kind, number, field, _DEVICE)
+        if _manual_weigh_in(record):
+            self._mapping.emit(
+                entry,
+                kind,
+                number,
+                field,
+                _PROVIDER,
+                recorded_by=RecordingOrigin.MANUAL,
+            )
+        else:
+            self._mapping.emit(entry, kind, number, field, _DEVICE)
+
+
+def _manual_weigh_in(record: Mapping[str, object]) -> bool:
+    source = record.get(_WEIGHT_SOURCE_TYPE)
+    return isinstance(source, str) and source.upper() == _MANUAL_WEIGH_IN
 
 
 class _HealthMapping:
@@ -1177,7 +1204,10 @@ class _HealthMapping:
         self, name: str, payload: object, groups: tuple[_Group, ...]
     ) -> None:
         section_date_keys = _SECTION_DATE_KEYS.get(name, (_DATE_FIELD,))
-        for ref, record, index in self._records(name, payload):
+        rows = self._records(name, payload)
+        if name == _READINESS:
+            rows = morning_readiness(rows, itemgetter(1))
+        for ref, record, index in rows:
             date_keys, record_groups = section_date_keys, groups
             if name == _DAILY_STATS:
                 record = flatten_daily_summary(record)
@@ -1511,6 +1541,7 @@ class _HealthMapping:
         method: str | None = None,
         aggregation: ObservationAggregation | None = None,
         context: MeasurementContext = UNKNOWN_CONTEXT,
+        recorded_by: RecordingOrigin = RecordingOrigin.GARMIN,
     ) -> None:
         if not _within_bounds(kind, number):
             self.issue(entry.ref, field, IssueReason.OUT_OF_RANGE)
@@ -1519,7 +1550,7 @@ class _HealthMapping:
             provider=ProviderId.GARMIN,
             source_kind=source_kind,
             source_record_id=entry.record_id,
-            recorded_by=RecordingOrigin.GARMIN,
+            recorded_by=recorded_by,
             retrieved_at=self._retrieved_at,
             label=GARMIN_LABEL,
             context=context,

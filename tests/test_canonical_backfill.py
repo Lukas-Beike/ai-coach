@@ -1184,8 +1184,9 @@ class ReprojectionTests(BackfillFixture):
         self.assertEqual(self.summary(backfill)["providers"][GARMIN]["reprojected"], 1)
         self.assertEqual(
             self.rows(
-                "SELECT value, unit, mapper_version FROM observations WHERE metric = ?",
-                (MetricKind.RUN_THRESHOLD_POWER.value,),
+                "SELECT value, unit, mapper_version FROM observations"
+                " WHERE metric = ? AND sport = ?",
+                (MetricKind.FTP.value, "run"),
             ),
             [{"value": 290.0, "unit": "W", "mapper_version": current}],
         )

@@ -86,6 +86,14 @@ The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly
 - **WHEN** a valid Garmin weigh-in explicitly declares pounds or grams
 - **THEN** canonical weight is converted once to kilograms and its dated provenance is retained.
 
+#### Scenario: Several Garmin readiness readings per day
+- **WHEN** Garmin lists several training-readiness readings for one day
+- **THEN** a reading flagged as a re-score after exercise or a real-time update never becomes READINESS, even when stored and re-projected alone; of the rest, READINESS and its level, in the canonical and legacy reads, come from the scored reading flagged as taken after waking, else the earliest timed scored reading, else the first listed.
+
+#### Scenario: Manually entered Garmin weigh-in
+- **WHEN** a Garmin weigh-in declares `sourceType` `MANUAL`
+- **THEN** its weight is provider-reported and recorded by manual entry rather than a device measurement; the performance-history weight copy, which carries no source type, is provider-reported too.
+
 #### Scenario: Different HRV windows
 - **WHEN** a payload has only a weekly HRV average and no last-night value
 - **THEN** the canonical last-night observation stays absent rather than borrowing the weekly statistic, and the weekly average is stored as its own weekly HRV observation.
@@ -96,7 +104,7 @@ The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly
 
 Detailed contract: Zero SHALL remain valid for sleep score, steps, floors, and active energy where implemented, while absent or invalid measurements remain unknown.
 
-Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
+Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_wake_up_reading_wins_regardless_of_list_order`, `tests/test_garmin_health_mapping.py:test_manual_weigh_in_is_provider_reported_and_recorded_by_manual`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
 
 ### Requirement: Current thresholds and dated special metrics
 The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed conversion to canonical m/s, display conversion to seconds/km, date-bearing historical FTP, running race-prediction seconds, and endurance-score wrapper normalization. An undated current Garmin FTP, running threshold, zone maximum, or prediction may use the fetch's local day only in its implemented current-value path. Undated current FTP SHALL never invent historical FTP.
@@ -109,13 +117,17 @@ The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed
 - **WHEN** stored Garmin FTP history holds biometric range records with `from` and `value`
 - **THEN** since Garmin health mapper version 14 each becomes a ride FTP observation on its `from` day, reprojected without a provider refetch; a bare `value` without `from` is not FTP.
 
+#### Scenario: Running threshold power under one kind
+- **WHEN** Garmin, Intervals.icu or Wahoo report a running threshold power
+- **THEN** since Garmin health mapper version 17 each is FTP with sport run; Garmin rows stored earlier under the legacy run threshold power kind stay readable as the run FTP until replay re-projects them.
+
 #### Scenario: Multiple Wahoo zone revisions
 - **WHEN** Wahoo returns multiple power-zone sets for one supported family
 - **THEN** the newest update time wins, later input wins an equal-time tie, and only that selected source row supplies the FTP observation.
 
 Detailed contract: Wahoo SHALL map the newest power-zone set per cycling/running family to FTP and current profile weight to the local fetch day; it SHALL not infer zone boundaries or other profile metrics from them.
 
-Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_ftp_history_reads_biometric_range_records`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
+Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/performance/garmin_canonical.py:garmin_thresholds`, `tests/test_current_thresholds.py:test_garmin_run_power_is_one_ftp_kind_with_the_legacy_kind_readable`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_ftp_history_reads_biometric_range_records`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
 
 ### Requirement: Metric-specific source priority and local authority
 The system SHALL apply per-metric source rules rather than a universal provider order. A locally confirmed zone configuration precedes every provider for thresholds. Current ride FTP prefers the athlete-maintained Intervals.icu setting before Garmin, with Wahoo last; threshold and maximum heart rate, threshold pace and run power prefer Garmin before Intervals.icu. VO2max prefers Garmin. Weight and body fat take the most recent measurement.

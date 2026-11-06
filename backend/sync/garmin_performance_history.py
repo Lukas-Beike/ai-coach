@@ -11,6 +11,7 @@ from backend.canonical.decimal_text import provider_number as _as_number
 from backend.performance import freshness as performance_freshness
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.garmin_fields import first_present as _first_present
+from backend.providers.garmin_training_mapping import morning_readiness_records
 from backend.sync import garmin_metric_history
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
@@ -136,7 +137,10 @@ def _provider_metric_state(
 def readiness_score_value(value: Any) -> float | int | None:
     """Extract a scalar readiness score from nested provider payloads."""
     if isinstance(value, list):
-        dated = [item for item in value if isinstance(item, dict)]
+        # One reading per day, the morning one, as the canonical mapper keeps.
+        dated = morning_readiness_records(
+            [item for item in value if isinstance(item, dict)]
+        )
         if not dated:
             return None
         dated.sort(

@@ -357,7 +357,7 @@ def _metrics(
         cycling_vo2max=_bounded(_latest_value(vo2, Sport.RIDE), _VO2MAX_RANGE),
         running_vo2max=_bounded(_running_vo2max(vo2), _VO2MAX_RANGE),
         run_threshold_watts=_bounded(
-            _latest_value(by_kind[MetricKind.RUN_THRESHOLD_POWER], Sport.RUN),
+            _latest_value(_run_threshold_power(by_kind), Sport.RUN),
             _RUN_THRESHOLD_POWER_RANGE,
         ),
         run_threshold_pace_seconds_per_km=_pace_seconds_per_km(
@@ -436,7 +436,7 @@ def _performance_history(
             lambda items: _bounded(_running_vo2max(items), _VO2MAX_RANGE),
         ),
         "run_threshold_watts": (
-            by_kind[MetricKind.RUN_THRESHOLD_POWER],
+            _run_threshold_power(by_kind),
             lambda items: _bounded(
                 _latest_value(items, Sport.RUN), _RUN_THRESHOLD_POWER_RANGE
             ),
@@ -509,6 +509,22 @@ def garmin_body(
     return tuple(result)
 
 
+def _run_threshold_power(
+    by_kind: Mapping[MetricKind, Iterable[Observation]],
+) -> tuple[Observation, ...]:
+    """Garmin's running threshold power: FTP for running, and the legacy kind.
+
+    Rows stored before Garmin health mapper 17 carry RUN_THRESHOLD_POWER until a
+    replay re-projects them as FTP.
+    """
+    return tuple(
+        item
+        for kind in (MetricKind.FTP, MetricKind.RUN_THRESHOLD_POWER)
+        for item in by_kind.get(kind, ())
+        if item.sport is Sport.RUN
+    )
+
+
 def garmin_thresholds(
     by_kind: Mapping[MetricKind, Iterable[Observation]],
 ) -> tuple[Observation, ...]:
@@ -532,11 +548,7 @@ def garmin_thresholds(
                 result.append(latest)
     # Garmin's run threshold power is the run FTP candidate.
     run_power = max(
-        (
-            item
-            for item in by_kind.get(MetricKind.RUN_THRESHOLD_POWER, ())
-            if item.sport is Sport.RUN
-        ),
+        (item for item in _run_threshold_power(by_kind) if item.sport is Sport.RUN),
         key=_order,
         default=None,
     )

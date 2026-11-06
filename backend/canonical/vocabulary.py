@@ -102,6 +102,8 @@ class MetricKind(StrEnum):
     TRAINING_LOAD = "training_load"
     FORM = "form"
     EFTP = "eftp"
+    # Legacy: running threshold power is FTP with sport RUN for every provider.
+    # Only rows stored before Garmin health mapper 17 still carry this kind.
     RUN_THRESHOLD_POWER = "run_threshold_power"
     DAILY_ENERGY_TOTAL = "daily_energy_total"
     DAILY_ENERGY_ACTIVE = "daily_energy_active"
@@ -228,6 +230,10 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
     MetricKind.TRAINING_LOAD: (
         "never produced: activity loads carry LoadModel and Garmin's daily load is "
         "ACUTE_LOAD; retained so a stored value stays readable"
+    ),
+    MetricKind.RUN_THRESHOLD_POWER: (
+        "no longer produced: running threshold power is FTP with sport RUN since "
+        "Garmin health mapper 17; retained so rows stored earlier stay readable"
     ),
 }
 # Kinds stored for export, backup and history that no reader uses yet. A kind

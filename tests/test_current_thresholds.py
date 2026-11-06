@@ -322,6 +322,20 @@ class ReviewGuardTests(unittest.TestCase):
         )
         self.assertNotIn((MetricKind.MAX_HR, Sport.RIDE), resolved)
 
+    def test_garmin_run_power_is_one_ftp_kind_with_the_legacy_kind_readable(
+        self,
+    ) -> None:
+        # #1672: Garmin health mapper 17 writes FTP/RUN; older rows keep the
+        # legacy kind until a replay, and both read as the run FTP.
+        for kind in (MetricKind.FTP, MetricKind.RUN_THRESHOLD_POWER):
+            with self.subTest(kind=kind):
+                power = _obs(kind, 290.0, GARMIN, Sport.RUN)
+                (found,) = read_garmin_thresholds(StubReader((power,)), None)
+                self.assertEqual(
+                    (found.kind, found.sport, found.value.value),
+                    (MetricKind.FTP, Sport.RUN, 290.0),
+                )
+
     def test_implausible_garmin_threshold_speed_is_dropped(self) -> None:
         slow = _obs(MetricKind.THRESHOLD_PACE, 0.4, GARMIN, Sport.RUN)
         self.assertEqual(read_garmin_thresholds(StubReader((slow,)), None), ())
