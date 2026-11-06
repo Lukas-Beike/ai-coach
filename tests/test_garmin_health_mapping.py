@@ -28,6 +28,7 @@ from backend.providers.garmin_health_mapping import (
     map_garmin_health,
 )
 from backend.providers.garmin_status_mapping import map_garmin_status_codes
+from backend.sync.garmin_metric_history import projected_metric
 from backend.sync.garmin_performance_history import readiness_score_value
 
 type Triple = tuple[str | None, str, IssueReason]
@@ -1686,6 +1687,18 @@ class MorningReadinessTests(unittest.TestCase):
 
     def test_legacy_readiness_reads_the_morning_reading(self) -> None:
         self.assertEqual(readiness_score_value([_MORNING, _AFTERNOON]), 78)
+
+    def test_legacy_readiness_history_keeps_the_morning_reading(self) -> None:
+        projected = projected_metric(
+            [_MORNING, _AFTERNOON],
+            start=date(2026, 10, 1),
+            end=date(2026, 10, 31),
+            aggregation="daily",
+            metric="training_readiness_history",
+            synced_at=None,
+        )
+        (point,) = projected["points"]
+        self.assertEqual(point["value"], 78)
 
     def test_readiness_level_follows_the_morning_reading(self) -> None:
         for section in ("readiness", "training_readiness_history"):
