@@ -717,12 +717,14 @@ precedence over remembered paths or stale operating assumptions.
 
 #### Optional local OpenSpec
 
-[OpenSpec](https://github.com/Fission-AI/OpenSpec) 1.14.3 is pinned as a local
-development dependency. It manages behavior specifications and change plans;
-the application does not load it. Node.js >=20.19.0 is required. Install and
-check it from the task worktree. The preparation entry point also sets up
-Graphify and generates its first graph; configure worktree creation to invoke it
-after the script reaches develop:
+[OpenSpec](https://github.com/Fission-AI/OpenSpec) is pinned in
+`package-lock.json` as a local development dependency. It manages behavior
+specifications and change plans; the application does not load it. Node.js
+must satisfy the `engines` ranges in `package-lock.json`. Install and check it
+from the task worktree. The preparation entry point also sets up
+Graphify, generates its first graph, and lists pinned Python and Node packages
+with a newer release; it still installs only the locked versions. Configure
+worktree creation to invoke it after the script reaches develop:
 
 ```powershell
 python scripts/prepare_worktree.py
@@ -753,9 +755,10 @@ npm.cmd run openspec -- init --tools agents --profile core --no-animation
 
 Review the generated diff and retain the project context/rules in
 `openspec/config.yaml`. Do not pass `--language` when regenerating an existing
-project; the language instruction is already in its context. Deliberate upgrades
-update the exact dependency pin, lockfile, generated skills, and their provenance
-together. Do not run the bare `openspec config profile`: that changes user-global
+project; the language instruction is already in its context. Dependabot bumps
+the pin; the daily `Daily OpenSpec update` workflow then runs `openspec update`
+with the locked CLI on `develop` and, when the generated skills change, opens a
+`chore/openspec-update` PR that merges automatically once `test` passes. Do not run the bare `openspec config profile`: that changes user-global
 configuration. Existing
 AGENTS boundaries and authorization take precedence over generated workflows;
 OpenSpec does not replace repository review, orchestration, or validation.
