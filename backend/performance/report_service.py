@@ -11,6 +11,7 @@ from typing import Any
 from backend.activities.activity_summary import (
     stored_activity_key,
     summary_duration_s,
+    summary_is_electric,
     summary_is_indoor,
     summary_local_date,
 )
@@ -167,6 +168,7 @@ class TrainingProfileSelectionService:
     def curve_records(self) -> list[dict[str, Any]]:
         """Ride and run sessions of the longest window with their session curves.
 
+        E-bike sessions (``summary_is_electric``) are left out.
         Sessions without full-resolution streams stay in the list with empty
         profiles, so the coverage counts them as unknown.
         """
@@ -184,6 +186,9 @@ class TrainingProfileSelectionService:
                 summary
                 for summary in reader.activity_summaries(db, start=first, end=last)
                 if summary.get("sport") in ("ride", "run")
+                # Motor assistance inflates speed and power: e-bike rides stay
+                # out of the best values, CP/CS fits and curve trends.
+                and not summary_is_electric(summary)
                 and start.isoformat()
                 <= summary_local_date(summary)
                 <= today.isoformat()
@@ -738,6 +743,7 @@ def _curve_record(
         profile = curve.power if fields["sport"] == "ride" else curve.running
     return {
         **fields,
+        "terrain": summary.get("terrain"),
         "activity_id": stored_activity_key(summary),
         "observed_at": summary.get("started_at"),
         # Best values are credited to the providers of the streams they read.

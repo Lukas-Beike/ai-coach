@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
+from backend.canonical.vocabulary import Terrain
 from backend.performance.session_execution import rounded_metric
 
 METHOD: Final = "comparable-sessions-v1"
@@ -273,6 +274,15 @@ def _effort_halves(
     }
 
 
+def _same_kind(row: Mapping[str, Any], sport: str, environment: str) -> bool:
+    """Same sport and place; trail runs are left out, their pace is not comparable."""
+    return (
+        row.get("sport") == sport
+        and row.get("environment") == environment
+        and not (sport == "run" and row.get("terrain") == Terrain.TRAIL.value)
+    )
+
+
 def _steady_sessions(
     records: Sequence[Mapping[str, Any]],
     sport: str,
@@ -285,8 +295,7 @@ def _steady_sessions(
     for row in records:
         summary = row.get("execution_summary")
         if (
-            row.get("sport") != sport
-            or row.get("environment") != environment
+            not _same_kind(row, sport, environment)
             or not first.isoformat() <= str(row.get("date") or "") <= last.isoformat()
             or not isinstance(summary, Mapping)
             or summary.get("output_unit") != _EFFORT_UNITS[sport]

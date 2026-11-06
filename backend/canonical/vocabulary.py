@@ -64,6 +64,33 @@ class Environment(StrEnum):
     UNKNOWN = "unknown"
 
 
+class Terrain(StrEnum):
+    """The surface an activity was done on, where the provider type names it.
+
+    Orthogonal to ``Sport`` and ``Environment``: a trail run is a RUN, OUTDOOR,
+    TRAIL. UNKNOWN when the type names no surface.
+    """
+
+    ROAD = "road"
+    TRAIL = "trail"
+    TRACK = "track"
+    GRAVEL = "gravel"
+    MOUNTAIN = "mountain"
+    TREADMILL = "treadmill"
+    POOL = "pool"
+    OPEN_WATER = "open_water"
+    UNKNOWN = "unknown"
+
+
+class Assist(StrEnum):
+    """Motor assistance: ELECTRIC for e-bikes, NONE when the provider type names a
+    sport without assistance, UNKNOWN when the type is not known."""
+
+    NONE = "none"
+    ELECTRIC = "electric"
+    UNKNOWN = "unknown"
+
+
 class LoadModel(StrEnum):
     """Provider model that produced an activity's reported training load.
 

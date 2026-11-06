@@ -18,6 +18,7 @@ from typing import Any, Final, NamedTuple
 
 from backend.canonical.local_time import valid_offset_minutes
 from backend.canonical.records import (
+    MAX_NATIVE_TYPE_LENGTH,
     MAX_TRAINING_EFFECT_LABEL_LENGTH,
     MAX_ZONE_COUNT,
     MAX_ZONE_ID_LENGTH,
@@ -33,11 +34,13 @@ from backend.canonical.vocabulary import (
     ActivityLinkKind,
     ActivityRecordState,
     ActivitySessionState,
+    Assist,
     DeviceType,
     MetricKind,
     ProjectionState,
     ProviderId,
     ProviderRecordState,
+    Terrain,
 )
 
 ACTIVITY_ID_PREFIX: Final = "act_"
@@ -64,6 +67,9 @@ _DEVICE_NAME_KEY: Final = "device_name"
 _TRAINING_EFFECT_LABEL_KEY: Final = "training_effect_label"
 _EXTERNAL_REF_KEY: Final = "external_ref"
 _LOCAL_OFFSET_KEY: Final = "local_offset_minutes"
+_TERRAIN_KEY: Final = "terrain"
+_ASSIST_KEY: Final = "assist"
+_NATIVE_TYPE_KEY: Final = "native_type"
 # ActivityRecord summary fields stored in the details under their own names.
 ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "intensity",
@@ -1496,6 +1502,9 @@ def _activity_details(record: ActivityRecord) -> str:
             ),
             (_CONTEXT_KEY, record.provenance.context.as_details() or None),
             (_LOCAL_OFFSET_KEY, record.local_offset_minutes),
+            (_TERRAIN_KEY, _known(record.terrain, Terrain.UNKNOWN)),
+            (_ASSIST_KEY, _known(record.assist, Assist.UNKNOWN)),
+            (_NATIVE_TYPE_KEY, record.native_type),
             *(
                 (field, getattr(record, field))
                 for field in ACTIVITY_SUMMARY_DETAIL_FIELDS
@@ -1510,6 +1519,10 @@ def _activity_details(record: ActivityRecord) -> str:
     if not details:
         return ACTIVITY_DETAILS
     return json.dumps(details, separators=(",", ":"))
+
+
+def _known(value: StrEnum, unknown: StrEnum) -> str | None:
+    return None if value is unknown else value.value
 
 
 def _zone_details(zones: Any) -> list[list[Any]] | None:
@@ -1545,7 +1558,32 @@ def activity_summary_values(details: object) -> dict[str, Any]:
         values[_TRAINING_EFFECT_LABEL_KEY] = label
     if valid_offset_minutes(offset := loaded.get(_LOCAL_OFFSET_KEY)):
         values[_LOCAL_OFFSET_KEY] = offset
+    return values | _activity_qualifiers(loaded)
+
+
+def _activity_qualifiers(loaded: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the stored terrain, assist and native type; invalid values are left out."""
+    values: dict[str, Any] = {}
+    for key, kind in ((_TERRAIN_KEY, Terrain), (_ASSIST_KEY, Assist)):
+        text = loaded.get(key)
+        if isinstance(text, str) and text in kind._value2member_map_:
+            values[key] = kind(text)
+    native = loaded.get(_NATIVE_TYPE_KEY)
+    if (
+        isinstance(native, str)
+        and native.strip()
+        and len(native) <= MAX_NATIVE_TYPE_LENGTH
+    ):
+        values[_NATIVE_TYPE_KEY] = native
     return values
+
+
+def activity_qualifiers(details: object) -> dict[str, Any]:
+    """Return the stored terrain, assist and native type of an activity's details.
+
+    Keys are ``ActivityRecord`` field names; a missing or invalid value is left out.
+    """
+    return _activity_qualifiers(_activity_details_object(details))
 
 
 def _stored_zones(value: object) -> tuple[tuple[str, float], ...] | None:
@@ -2228,7 +2266,7 @@ def session_member_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
     return _fetch_all(
         db,
         "SELECT r.activity_id AS session_id, r.provider, r.recorded_by, r.sport, "
-        "r.started_at, r.duration_s, r.distance_m, r.name FROM activity_records AS r "
+        "r.started_at, r.duration_s, r.distance_m, r.name, r.details FROM activity_records AS r "
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
         "WHERE r.state = ? AND ((s.activity_id = ? AND s.state = ?) "
         "OR (s.state = ? AND s.merged_into = ?)) "
@@ -2257,7 +2295,7 @@ def merge_candidate_rows(
     return _fetch_all(
         db,
         "SELECT s.activity_id AS session_id, r.provider, r.recorded_by, r.sport, "
-        "r.started_at, r.duration_s, r.distance_m, r.name FROM activity_sessions AS s "
+        "r.started_at, r.duration_s, r.distance_m, r.name, r.details FROM activity_sessions AS s "
         "JOIN activity_sessions AS m ON m.activity_id = s.activity_id "
         "OR (m.state = ? AND m.merged_into = s.activity_id) "
         "JOIN activity_records AS r ON r.activity_id = m.activity_id "

@@ -22,6 +22,7 @@ from backend.canonical.activity_detail import (
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
+    Assist,
     Environment,
     LapKind,
     LapSource,
@@ -32,6 +33,7 @@ from backend.canonical.vocabulary import (
     Sport,
     StreamChannel,
     StreamResolution,
+    Terrain,
 )
 from backend.db.activity_detail_store import StoredDetailSet
 from backend.performance.analysis_input import analysis_input
@@ -323,28 +325,42 @@ class AnalysisInputMappingTests(unittest.TestCase):
                 self.assertEqual(environment.value, adapted.activity["environment"])
                 self.assertNotIn("type", adapted.activity)
 
-    def test_intervals_outdoor_runs_are_trail_runs(self) -> None:
-        adapted = analysis_input(record(Sport.RUN), None, None)
-        self.assertTrue(adapted.activity["trail"])
+    def test_a_trail_terrain_marks_a_trail_run_for_every_provider(self) -> None:
+        for provider in (ProviderId.INTERVALS, ProviderId.GARMIN, ProviderId.WAHOO):
+            with self.subTest(provider=provider):
+                trail = dataclasses.replace(
+                    as_provider(record(Sport.RUN), provider), terrain=Terrain.TRAIL
+                )
+                adapted = analysis_input(trail, None, None)
+                self.assertTrue(adapted.activity["trail"])
+                self.assertEqual("trail", adapted.activity["terrain"])
 
-    def test_other_providers_outdoor_runs_are_not_trail_runs(self) -> None:
-        adapted = analysis_input(
-            as_provider(record(Sport.RUN), ProviderId.WAHOO), None, None
-        )
-        self.assertFalse(adapted.activity["trail"])
+    def test_an_outdoor_run_without_a_trail_terrain_is_not_a_trail_run(self) -> None:
+        # The provider no longer decides: an outdoor Intervals.icu or Garmin run
+        # is a trail run only when its type named the trail.
+        for provider in (ProviderId.INTERVALS, ProviderId.GARMIN, ProviderId.WAHOO):
+            with self.subTest(provider=provider):
+                adapted = analysis_input(
+                    as_provider(record(Sport.RUN), provider), None, None
+                )
+                self.assertFalse(adapted.activity["trail"])
 
-    def test_garmin_outdoor_runs_are_trail_runs(self) -> None:
-        # Garmin maps only trail_running to an outdoor run.
-        adapted = analysis_input(
-            as_provider(record(Sport.RUN), ProviderId.GARMIN), None, None
+    def test_session_terrain_and_assist_come_from_another_record_when_unknown(
+        self,
+    ) -> None:
+        primary = record(Sport.RIDE)
+        other = dataclasses.replace(
+            as_provider(primary, ProviderId.GARMIN),
+            terrain=Terrain.MOUNTAIN,
+            assist=Assist.ELECTRIC,
         )
-        self.assertTrue(adapted.activity["trail"])
-        unknown = analysis_input(
-            as_provider(record(Sport.RUN, Environment.UNKNOWN), ProviderId.GARMIN),
-            None,
-            None,
-        )
-        self.assertFalse(unknown.activity["trail"])
+        adapted = analysis_input(primary, None, None, members=(other,))
+        self.assertEqual("mountain", adapted.activity["terrain"])
+        self.assertEqual("electric", adapted.activity["assist"])
+        known = dataclasses.replace(primary, terrain=Terrain.ROAD, assist=Assist.NONE)
+        adapted = analysis_input(known, None, None, members=(other,))
+        self.assertEqual("road", adapted.activity["terrain"])
+        self.assertEqual("none", adapted.activity["assist"])
 
     def test_moving_flags_map_to_booleans_and_gaps(self) -> None:
         source = candidate(

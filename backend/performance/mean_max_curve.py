@@ -171,7 +171,7 @@ def _session_curve(
     ]
     merged = merge_details(detail_candidates(records, stored))
     primary = primary_analysis_record(records)
-    adapted = analysis_input(primary, merged.streams, merged.laps)
+    adapted = analysis_input(primary, merged.streams, merged.laps, members=records)
     return SessionCurve(
         power=power_profile(
             adapted.activity, source_label=adapted.label_for("watts", "moving")
@@ -211,7 +211,7 @@ def _fingerprint(
             PACE_METHOD,
             EXECUTION_METHOD,
             sorted([key.content_sha256, key.fetched_at] for key in laps),
-            analysis_sport(primary_analysis_record(records)),
+            analysis_sport(primary_analysis_record(records), records),
             sorted(
                 _canonical(
                     [
