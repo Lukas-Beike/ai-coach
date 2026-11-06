@@ -28,6 +28,9 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals import IntervalsSyncService
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import (
+    BACKFILL_CURSOR_STREAMS,
+    BACKFILL_JOB_TYPES,
+    WELLNESS_BACKFILL,
     JobValidationError,
     decode_job_payload,
     normalize_sync_job_request,
@@ -88,7 +91,7 @@ class HistoricalSyncJobOwner:
         resolved only when the payload does not carry its own value, so the
         state read happens exactly when it did before the provider was injected.
         """
-        if job_type != "historical_backfill":
+        if job_type not in BACKFILL_JOB_TYPES:
             days = int(payload.get("days") or sync_days())
             end_date = payload.get("end_date")
             return days, date.fromisoformat(
@@ -115,14 +118,16 @@ class HistoricalSyncJobOwner:
     ) -> dict[str, Any] | None:
         """End a backfill whose window lies wholly below the floor without a fetch."""
         if (
-            job_type != "historical_backfill"
+            job_type not in BACKFILL_JOB_TYPES
             or historical_end is None
             or historical_end >= self._sync_earliest_date
         ):
             return None
         # The cursor at the floor keeps a restart from resuming the walk.
         self._sync_state_repository.update_cursor(
-            provider, "historical", self._sync_earliest_date.isoformat()
+            provider,
+            BACKFILL_CURSOR_STREAMS[job_type],
+            self._sync_earliest_date.isoformat(),
         )
         return {"status": "ok", "window_records": 0, "historical_next_end": None}
 
@@ -133,6 +138,7 @@ class HistoricalSyncJobOwner:
         result: dict[str, Any],
         historical_end: date | None,
         days: int,
+        job_type: str = "historical_backfill",
     ) -> None:
         """Declare the next chunk, or end the chain at the floor or after empty history."""
         if historical_end is None:
@@ -149,7 +155,9 @@ class HistoricalSyncJobOwner:
             # The cursor at the floor keeps a restart from resuming the walk.
             result["historical_next_end"] = None
             self._sync_state_repository.update_cursor(
-                provider, "historical", self._sync_earliest_date.isoformat()
+                provider,
+                BACKFILL_CURSOR_STREAMS[job_type],
+                self._sync_earliest_date.isoformat(),
             )
         result["historical_empty_chunks"] = empty_chunks
 
@@ -158,8 +166,9 @@ class HistoricalSyncJobOwner:
     ) -> None:
         # A partial chunk stops the chain: providers advance their historical
         # cursor only for complete windows, so continuing would skip the gap.
+        job_type = str(job.get("type") or "")
         if not (
-            job.get("type") == "historical_backfill"
+            job_type in BACKFILL_JOB_TYPES
             and isinstance(result, dict)
             and result.get("historical_next_end")
             and fallback_status == "completed"
@@ -169,7 +178,7 @@ class HistoricalSyncJobOwner:
         # A chunk that ran again (a retry or a restart) may already have queued
         # its continuation; queuing again would start a second chain.
         if self._queue_service.backfill_continued(
-            job["provider"], next_end, str(job.get("created_at") or "")
+            job["provider"], next_end, str(job.get("created_at") or ""), job_type
         ):
             return
         payload: dict[str, Any] = {
@@ -181,7 +190,7 @@ class HistoricalSyncJobOwner:
             payload["empty_chunks"] = result["historical_empty_chunks"]
         self._queue_service.enqueue(
             job["provider"],
-            "historical_backfill",
+            job_type,
             payload,
             requested_by="backfill",
             available_at=(self._local_now() + BACKFILL_CONTINUATION_DELAY).isoformat(),
@@ -324,8 +333,10 @@ class GarminSyncJobOwner:
         garmin_fixture_loader: GarminFixtureLoader,
         all_sync_days: int,
         activity_detail_service: Any = None,
+        wellness_history_service: GarminWellnessBackfill | None = None,
     ) -> None:
         self._historical_sync = historical_sync
+        self._wellness_history_service = wellness_history_service
         self._garmin_sync_service = garmin_sync_service
         self._morning_body_battery_service = morning_body_battery_service
         self._garmin_fixture_loader = garmin_fixture_loader
@@ -341,6 +352,8 @@ class GarminSyncJobOwner:
             if self._activity_detail_service is None:
                 raise AppError(503, "Aktivitätsdetails sind nicht verfügbar.")
             return self._activity_detail_service.refresh(payload["activity_id"])
+        if job_type == WELLNESS_BACKFILL:
+            return self._wellness_backfill(payload)
         days, historical_end = self._historical_sync.window(
             payload, job_type, lambda: self._sync_days(job_type)
         )
@@ -370,11 +383,41 @@ class GarminSyncJobOwner:
             )
         return result
 
+    def _wellness_backfill(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run one insert-only wellness history chunk (no activities, no deletion)."""
+        if self._wellness_history_service is None:
+            raise AppError(503, "Der Wellness-Backfill ist nicht verfügbar.")
+        if not self._wellness_history_service.available():
+            # Fixture mode: no remote read, no cursor move, no continuation.
+            return {"status": "ok", "reason": "not_configured", "window_records": 0}
+        days, end = self._historical_sync.window(
+            payload, WELLNESS_BACKFILL, lambda: GARMIN_AUTOMATIC_SYNC_DAYS
+        )
+        floor_result = self._historical_sync.below_floor(
+            GARMIN_ID, WELLNESS_BACKFILL, end
+        )
+        if floor_result is not None:
+            return floor_result
+        assert end is not None  # window() always ends a backfill chunk
+        result = self._wellness_history_service.backfill(days, end)
+        self._historical_sync.add_next_end(
+            GARMIN_ID, payload, result, end, days, WELLNESS_BACKFILL
+        )
+        return result
+
     def _sync_days(self, job_type: str) -> int:
         """Return the default window: backfills use the automatic refresh span."""
         if job_type == "historical_backfill":
             return GARMIN_AUTOMATIC_SYNC_DAYS
         return self._historical_sync.sync_period(GARMIN_ID)
+
+
+class GarminWellnessBackfill(Protocol):
+    """Backfills one window of Garmin wellness history."""
+
+    def available(self) -> bool: ...
+
+    def backfill(self, days: int, end: date) -> dict[str, Any]: ...
 
 
 class CalendarWeatherSyncJobOwner:

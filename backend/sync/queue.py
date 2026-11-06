@@ -69,9 +69,15 @@ class SyncJobQueueService:
         return self._store.active(provider, job_type)
 
     def backfill_continued(
-        self, provider: str, end_date: str, created_since: str
+        self,
+        provider: str,
+        end_date: str,
+        created_since: str,
+        job_type: str = "historical_backfill",
     ) -> bool:
-        return self._store.has_backfill_continuation(provider, end_date, created_since)
+        return self._store.has_backfill_continuation(
+            provider, end_date, created_since, job_type
+        )
 
     def pending_performance_job_id(self, provider: str) -> str | None:
         return self._store.pending_performance_job_id(provider)

@@ -33,7 +33,20 @@ JOB_TYPES = frozenset(
         "competition_push",
         "nutrition_sync",
         "historical_backfill",
+        "wellness_backfill",
     }
+)
+# Backfill chains and the sync-state cursor stream each one walks back.
+WELLNESS_BACKFILL = "wellness_backfill"
+WELLNESS_HISTORY_CURSOR = "wellness_history"
+BACKFILL_CURSOR_STREAMS: dict[str, str] = {
+    "historical_backfill": "historical",
+    WELLNESS_BACKFILL: WELLNESS_HISTORY_CURSOR,
+}
+BACKFILL_JOB_TYPES = frozenset(BACKFILL_CURSOR_STREAMS)
+# Built from the fixed type names above, never from request data.
+_BACKFILL_TYPES_SQL = "({})".format(
+    ", ".join(f"'{job_type}'" for job_type in sorted(BACKFILL_JOB_TYPES))
 )
 JOB_STATUSES = frozenset({"queued", "running", "completed", "partial", "failed"})
 ALLOWED_JOB_TRANSITIONS: dict[str, frozenset[str]] = {
@@ -167,7 +180,7 @@ _SETTLED_ITEMS = "status NOT IN ('completed', 'skipped')"
 # queues. A "backfill" continuation carries the next chunk's end_date cursor, so it
 # is never folded into another job: that would drop the cursor and stop the chain.
 _COALESCED_REQUESTERS = frozenset({"scheduler", "startup"})
-_COALESCED_TYPES = frozenset({"refresh", "historical_backfill"})
+_COALESCED_TYPES = frozenset({"refresh", *BACKFILL_JOB_TYPES})
 
 
 def read_job(db: Any, job_id: str) -> tuple[Any | None, builtins.list[Any]]:
@@ -255,11 +268,13 @@ def normalize_sync_job_request(
     provider_value = envelope["provider"]
     type_value = envelope["type"]
     values = envelope["payload"]
-    if type_value == "historical_backfill" and not registry.supports_job(
+    if type_value in BACKFILL_JOB_TYPES and not registry.supports_job(
         provider_value, type_value
     ):
         raise JobValidationError(
             "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
+            if type_value == "historical_backfill"
+            else "Der Wellness-Backfill ist nur für Garmin zulässig."
         )
     if type_value == "activity_details":
         normalized_payload = _normalize_activity_details_job(
@@ -286,7 +301,7 @@ def normalize_sync_job_request(
             all_sync_days,
             registry,
             enforce_period_limit,
-            historical=type_value == "historical_backfill",
+            historical=type_value in BACKFILL_JOB_TYPES,
         )
     return {
         "provider": provider_value,
@@ -656,15 +671,19 @@ class SyncJobStore:
             return has_active_job(db, provider, job_type)
 
     def has_backfill_continuation(
-        self, provider: str, end_date: str, created_since: str
+        self,
+        provider: str,
+        end_date: str,
+        created_since: str,
+        job_type: str = "historical_backfill",
     ) -> bool:
         """Report whether a backfill chain already continued to ``end_date``."""
         with self._database_manager.reader() as db:
             row = db.execute(
-                "SELECT 1 FROM sync_jobs WHERE provider=? AND type='historical_backfill' "
+                "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? "
                 "AND requested_by='backfill' AND json_extract(payload, '$.end_date')=? "
                 "AND created_at>=? LIMIT 1",
-                (provider, end_date, created_since),
+                (provider, job_type, end_date, created_since),
             ).fetchone()
             return row is not None
 
@@ -814,8 +833,8 @@ class SyncJobStore:
             candidate = db.execute(
                 "SELECT id FROM sync_jobs WHERE status='queued' "
                 "AND (available_at IS NULL OR available_at<=?) "
-                + ("AND type<>'historical_backfill' " if hold_backfill else "")
-                + "ORDER BY type='historical_backfill', created_at, id LIMIT 1",
+                + (f"AND type NOT IN {_BACKFILL_TYPES_SQL} " if hold_backfill else "")
+                + f"ORDER BY type IN {_BACKFILL_TYPES_SQL}, created_at, id LIMIT 1",
                 (now,),
             ).fetchone()
             if not candidate:

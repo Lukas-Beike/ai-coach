@@ -33,6 +33,10 @@ from backend.providers.garmin_personal import (
     GarminPersonalClient,
     GarminTransportClient,
 )
+from backend.providers.garmin_wellness_history import (
+    WellnessHistoryHooks,
+    collect_wellness_history,
+)
 from backend.sync.garmin import GARMIN_RECONCILIATION_DAYS
 from backend.sync.garmin_snapshot_writer import (
     ANALYSIS_SOURCES,
@@ -46,6 +50,7 @@ from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
 
 GARMIN_AUTOMATIC_SYNC_DAYS = 2
+GARMIN_NOT_CONFIGURED_MESSAGE = "Garmin ist nicht konfiguriert."
 
 GARMIN_SYNC_LOCK = threading.Lock()
 
@@ -137,6 +142,13 @@ def _verify_personal_key(personal: GarminPersonalClient) -> None:
     except provider_http.ProviderInvalidResponse, OSError, ValueError:
         # No answer about the key: unreachable, timed out or no token returned.
         raise AppError(502, "Garmin Personal API nicht erreichbar.") from None
+
+
+def _skippable_history_error(error: BaseException) -> bool:
+    """Only a client error or an unreadable answer may skip history; others retry."""
+    return isinstance(error, (TypeError, ValueError)) or (
+        sync_job_error_class(error) == "client_error"
+    )
 
 
 def _garmin_tokenstore_present(config: Config, garmin_tokens: Any | None) -> bool:
@@ -335,9 +347,7 @@ class GarminRemoteReader:
         if source not in {"daily_stats", "weight"}:
             raise ValueError("Unsupported Garmin nutrition source")
         if not self.configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
         client, login_argument = self._authenticated_client(call_external)
         try:
@@ -354,6 +364,35 @@ class GarminRemoteReader:
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
+    def fetch_wellness_history(
+        self, start: date, end: date, *, needs_night: Callable[[str], bool]
+    ) -> dict[str, Any]:
+        """Read one wellness history window for the one-off backfill (#1730).
+
+        Paused sources and their failures share the regular sync's capability
+        state, so a rate limit pauses this walk as it pauses the hourly sync.
+        """
+        if not self.configured():
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
+        call_external = self._external_call(None)
+        client, login_argument = self._authenticated_client(call_external)
+        try:
+            return collect_wellness_history(
+                client,
+                start,
+                end,
+                external_call=call_external,
+                hooks=WellnessHistoryHooks(
+                    skippable=_skippable_history_error,
+                    needs_night=needs_night,
+                    capability_allowed=self._state_service.capability_allowed,
+                    capability_failure=self._state_service.record_capability_failure,
+                    capability_success=self._state_service.record_capability_success,
+                ),
+            )
+        finally:
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
+
     def fetch_analysis_data(
         self, area: str, start: date, end: date
     ) -> tuple[dict[str, Any], dict[str, bool]]:
@@ -362,9 +401,7 @@ class GarminRemoteReader:
         if area not in sources or start > end or (end - start).days > 89:
             raise AppError(400, "Ungültiger Analyse-Aktualisierungsbereich.")
         if not self.configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
         client, login_argument = self._authenticated_client(call_external)
         try:
