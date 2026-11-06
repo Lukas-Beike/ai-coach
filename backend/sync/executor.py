@@ -603,8 +603,11 @@ class SyncJobExecutor:
         all_sync_days: int,
         job_owners: Mapping[str, ProviderJobOwner],
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+        after_job: Callable[[Mapping[str, Any]], None] = lambda _job: None,
     ) -> None:
         self._job_owners = job_owners
+        # Runs with each completed job: refreshes derived local values (card M6).
+        self._after_job = after_job
         self._historical_sync = historical_sync
         self._outcome_service = outcome_service
         self._all_sync_days = all_sync_days
@@ -637,6 +640,21 @@ class SyncJobExecutor:
                         "sync job could not be marked failed",
                         extra={"event": "sync_job_last_resort_failed"},
                     )
+        else:
+            self._run_after_job(job)
+
+    def _run_after_job(self, job: Mapping[str, Any]) -> None:
+        """Run the completion hook; its failure never changes the job outcome."""
+        try:
+            self._after_job(job)
+        except Exception as exc:  # noqa: BLE001 - the worker must survive
+            _LOGGER.error(
+                "sync job completion hook failed",
+                extra={
+                    "event": "sync_job_after_job_failed",
+                    "error_class": type(exc).__name__,
+                },
+            )
 
     def execute(self, job: dict[str, Any]) -> dict[str, Any]:
         """Normalize and dispatch a persisted provider-job envelope."""

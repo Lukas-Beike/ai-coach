@@ -40,6 +40,8 @@ the same moment.
 * ``averageSpeed`` (m/s), ``elevationGain`` (m), ``normPower`` (W) and
   ``vO2MaxValue`` -> ``avg_speed_mps``, ``elevation_gain_m``,
   ``normalized_power`` and ``vo2max``.
+* ``avgGradeAdjustedSpeed`` (m/s) -> ``grade_adjusted_speed_mps``, the pace
+  input of the local session load (card M6).
 * ``activityName`` (text, stripped and truncated to 200 characters).
 * ``trainingEffectLabel`` (text, stripped, upper-cased and truncated to 50
   characters) -> ``training_effect_label``.
@@ -142,7 +144,9 @@ from backend.canonical.vocabulary import (
 # Version 14: maps HR and power zone times, aerobic and anaerobic training
 # effect, altitude extremes, elevation loss, temperature range, estimated sweat
 # loss, lap count and average cadence (#1724).
-MAPPER_VERSION: Final = 14
+# Version 15: maps avgGradeAdjustedSpeed, the pace input of the local session
+# load (card M6, #1725).
+MAPPER_VERSION: Final = 15
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -156,6 +160,7 @@ _MAX_SPEED_KEYS: Final = ("maxSpeed",)
 _MAX_POWER_KEYS: Final = ("maxPower",)
 _STEPS_KEYS: Final = ("steps",)
 _AVERAGE_SPEED_KEYS: Final = ("averageSpeed",)
+_GRADE_ADJUSTED_SPEED_KEYS: Final = ("avgGradeAdjustedSpeed",)
 _ELEVATION_GAIN_KEYS: Final = ("elevationGain",)
 _NORMALIZED_POWER_KEYS: Final = ("normPower",)
 _VO2MAX_KEYS: Final = ("vO2MaxValue",)
@@ -333,6 +338,9 @@ def _map_row(
     avg_speed = _optional_number(
         row, _AVERAGE_SPEED_KEYS, (0.0, MAX_ACTIVITY_SPEED_MPS), ref, issues
     )
+    grade_adjusted_speed = _optional_number(
+        row, _GRADE_ADJUSTED_SPEED_KEYS, (0.0, MAX_ACTIVITY_SPEED_MPS), ref, issues
+    )
     elevation_gain = _optional_number(
         row, _ELEVATION_GAIN_KEYS, (0.0, MAX_ACTIVITY_ELEVATION_M), ref, issues
     )
@@ -386,6 +394,7 @@ def _map_row(
         max_power_w=max_power,
         steps=steps,
         avg_speed_mps=avg_speed,
+        grade_adjusted_speed_mps=grade_adjusted_speed,
         elevation_gain_m=elevation_gain,
         normalized_power=normalized_power,
         vo2max=vo2max,

@@ -51,8 +51,12 @@ The system SHALL calculate explicit current/previous 7- and 30-day completed-act
 - **THEN** rollups sum known contributions and actual ATL evolves through the implemented decay rather than copying a future planned load.
 
 #### Scenario: Sessions without a TSS-scale load
-- **WHEN** a rollup window holds sessions without an Intervals.icu training load or TSS, such as a Garmin-only session with only its EPOC-based Garmin load
+- **WHEN** a rollup window holds sessions without a stored local TSS-scale load (M6), such as a strength session or a session without power, pace or heart-rate inputs
 - **THEN** the rollup and the actual ATL report how many sessions were left out of the load sum, and the rollup reports their known session-RPE load in AU beside the sum, with the labels of its RPE sources, never added to it.
+
+#### Scenario: Provider loads are not summed
+- **WHEN** a session carries an Intervals.icu training load, a Wahoo TSS or a Garmin load
+- **THEN** the rollup sums only the session's local load; the provider value stays on the summary as `provider_training_load` for cross-checking.
 
 #### Scenario: Missing or conflicting Garmin acute load
 - **WHEN** no dated valid measured acute-load value exists or device values conflict
@@ -66,7 +70,7 @@ The system SHALL calculate explicit current/previous 7- and 30-day completed-act
 - **WHEN** the latest wellness day has no form observation, including a reported form value that the mapper rejected as invalid, or no canonical inputs exist
 - **THEN** `tsb` is unknown instead of a snapshot value or a consumer-side derivation.
 
-Evidence: `backend/performance/load.py:activity_rollup`, `tests/test_performance_load.py:test_sessions_without_a_tss_scale_load_are_counted_with_their_rpe_load`, `backend/performance/load.py:actual_atl_series`, `backend/performance/load_context.py:performance_load_context`, `backend/performance/garmin_load.py:acute_load_value`; `tests/test_performance_load.py:test_actual_atl_decays_across_missing_days_and_is_sorted`, `tests/test_performance_chart_history.py:test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load`, `tests/test_performance_chart_history.py:test_acute_load_rejects_invalid_and_conflicting_device_values`. The form scenarios are verified by `tests/test_performance_canonical_load_metrics.py:FormTests`, `tests/test_performance_load_context.py:test_form_and_ramp_rate_come_from_the_canonical_inputs` and `tests/test_characterization_load_focus.py:test_carrier_form_fields_are_not_read_without_canonical_inputs`.
+Evidence: `backend/performance/load.py:activity_rollup`, `tests/test_performance_load.py:test_sessions_without_a_tss_scale_load_are_counted_with_their_rpe_load`, `tests/test_local_load_store.py`, `tests/test_intervals_mapping_parity.py:test_rollup_totals_match_the_mapped_records`, `backend/performance/load.py:actual_atl_series`, `backend/performance/load_context.py:performance_load_context`, `backend/performance/garmin_load.py:acute_load_value`; `tests/test_performance_load.py:test_actual_atl_decays_across_missing_days_and_is_sorted`, `tests/test_performance_chart_history.py:test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load`, `tests/test_performance_chart_history.py:test_acute_load_rejects_invalid_and_conflicting_device_values`. The form scenarios are verified by `tests/test_performance_canonical_load_metrics.py:FormTests`, `tests/test_performance_load_context.py:test_form_and_ramp_rate_come_from_the_canonical_inputs` and `tests/test_characterization_load_focus.py:test_carrier_form_fields_are_not_read_without_canonical_inputs`.
 
 ### Requirement: Training reports retain coverage and actual execution
 The system SHALL build local period reports from the neutral activity summaries, one per canonical session, using athlete-local dates, exclude future completed data, and expose measured-session coverage for duration, distance, and load. Reports SHALL include supported period comparisons, daily/cumulative load, eight calendar weeks of load, sports, key sessions, feedback, and plan-execution context with a common period. Unknown values SHALL stay unknown while valid zero load remains measured.
@@ -681,7 +685,27 @@ Detailed contract:
 | Power and running best-effort curve | `mean-max-curve` v1 | `ok`, `insufficient_data`; per running point also `unknown` | observed bests only, no FTP, CP or pace estimate | M4 card |
 | Critical Power and Critical Speed | `critical-power-speed` v1 | method `experimental`; per fit `ok`, `insufficient_data`, `withheld` | model estimate from the best 3/7/12-min efforts of 28 days; never FTP, threshold or zones | M4, released |
 | Short- and long-term session-RPE load (AU) | `smoothed-session-load` v1 | `estimate`, `insufficient_data` | smoothed subjective load; no fitness, form, ratio, risk or provider comparison | M5, released |
+| Session load and intensity factor (TSS scale) | `local-tss-load` v1 | stored per session with `load_branch` `power`, `pace` or `heart_rate`; none without inputs | branches are not equivalent; no fatigue, readiness or injury statement; IF = 1 is not a physiological threshold | M6, released |
 
-Passive CP/CS, TRIMP, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
+Passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
 
 Evidence: `docs/performance-methods/README.md`, `backend/coach/context.py:coach_performance_projection`, `backend/coach/context.py:coach_sleep_timing_projection`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `tests/test_performance_coach_ui_parity.py`.
+
+### Requirement: Local TSS-scale session load is a labelled model estimate
+The system SHALL compute each canonical session's load with M6 `local-tss-load` v1 from its summary and the thresholds valid on its local day: power (NP/FTP, ride and run), then run pace, then heart rate (Banister TRIMP, 60 min at threshold HR = 100). It SHALL store the load, and the power IF, as derived observations owned by the session and SHALL NOT use a provider load or intensity.
+
+#### Scenario: Garmin-only session with power
+- **WHEN** a Garmin-only ride reports NP 230 W for 70 minutes and the FTP valid that day is 250 W
+- **THEN** its summary serves `training_load` 98.75, `intensity` 92 and `load_branch` `power` with the source label `derived`, and the rollup sums it.
+
+#### Scenario: Threshold valid only after the session
+- **WHEN** no threshold is valid on the session day but a later one exists
+- **THEN** the earliest later threshold is used and the value is flagged `threshold_after_session`.
+
+#### Scenario: Changed input or method
+- **WHEN** a session's inputs, its dated thresholds or the method version change, or the session is gone
+- **THEN** the next stage pass rewrites only the values whose fingerprint changed and retires the values of gone sessions.
+
+Detailed contract: thresholds follow `resolve_current_thresholds` per day with the policy's age limits, and an indoor or virtual ride uses a local indoor power zone of the day first; resting HR comes from the session day or up to 7 days earlier, Garmin first, else the earliest later value, flagged. Strength, yoga, alpine ski and walking get no value; an IF above 2.0 is rejected. The pass runs as the first canonical backfill follow-up, triggered by worker start, completed Intervals.icu, Garmin and Wahoo jobs, local zone changes, session corrections and their undo, and a changed preferred threshold source; one invalid session value never stops the pass. It keeps content-free counts that diagnostics and the log (`local_load_reconciled`) report.
+
+Evidence: `backend/performance/local_tss.py`, `backend/sync/local_load.py`, `backend/sync/canonical_backfill_assembly.py`, `backend/sync/executor.py:SyncJobExecutor.run`, `backend/athlete/zones.py:ZoneConfigurationService`; `tests/test_local_tss.py`, `tests/test_local_load_store.py`, `tests/test_sync_executor.py`, `tests/test_zone_configuration_canonical.py`, `docs/performance-methods/m6-local-tss-load.md`.

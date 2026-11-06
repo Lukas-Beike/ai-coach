@@ -71,11 +71,18 @@ class ActivitySummary(TypedDict, total=False):
     weighted_avg_speed_mps: float
     pace_mps: float
     intensity: float
+    provider_intensity: float
+    grade_adjusted_speed_mps: float
     ftp_w: float
     eftp_w: float
     vo2max: float
     training_load: float
-    load_model: str
+    load_method: str
+    load_method_version: int
+    load_branch: str
+    load_threshold_after_session: bool
+    provider_training_load: float
+    provider_load_model: str
     training_effect_label: str
     training_effect_load: float
     aerobic_training_effect: float

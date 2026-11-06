@@ -81,8 +81,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_fourteen(self) -> None:
-        self.assertEqual(14, MAPPER_VERSION)
+    def test_mapper_version_is_fifteen(self) -> None:
+        self.assertEqual(15, MAPPER_VERSION)
 
     def test_strength_duration_is_the_whole_session_not_the_active_timer(
         self,
@@ -1164,3 +1164,14 @@ class ZoneEffectAndExtremeTests(unittest.TestCase):
             (3.3, 1.1),
             (record.aerobic_training_effect, record.anaerobic_training_effect),
         )
+
+    def test_grade_adjusted_speed_is_mapped(self) -> None:
+        # The run of 2026-11-03 reports averageSpeed and avgGradeAdjustedSpeed.
+        record, issues = _one(
+            typeKey="running", averageSpeed=3.1, avgGradeAdjustedSpeed=3.298
+        )
+
+        self.assertEqual((), issues)
+        assert record is not None
+        self.assertEqual(3.1, record.avg_speed_mps)
+        self.assertEqual(3.298, record.grade_adjusted_speed_mps)

@@ -40,11 +40,16 @@ from backend.canonical.vocabulary import (
     ProjectionState,
     ProviderId,
     ProviderRecordState,
+    SourceKind,
     Terrain,
 )
 
 ACTIVITY_ID_PREFIX: Final = "act_"
 ATHLETE_SERIES: Final = "athlete"
+# Local per-session derived kinds, keyed by their owning session (card M6).
+SESSION_SERIES_KINDS: Final = frozenset(
+    {MetricKind.SESSION_LOAD, MetricKind.INTENSITY_FACTOR}
+)
 _ATHLETE_SERIES_KINDS: Final = frozenset(
     {MetricKind.WEIGHT, MetricKind.EFTP, MetricKind.BODY_FAT}
 )
@@ -82,6 +87,7 @@ ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "feel",
     "avg_speed_mps",
     "weighted_avg_speed_mps",
+    "grade_adjusted_speed_mps",
     "pace_mps",
     "ftp_w",
     "eftp_w",
@@ -103,6 +109,7 @@ ACTIVITY_ZONE_DETAIL_FIELDS: Final = (
 _CONTEXT_KEY: Final = "context"
 _METHOD_VERSION_KEY: Final = "method_version"
 _INPUT_FINGERPRINT_KEY: Final = "input_fingerprint"
+_DERIVATION_KEY: Final = "derivation"
 _PERIOD_KEY: Final = "period"
 _MAX_MERGE_HOPS: Final = 64
 _PROVIDER_RECORD_EXISTS: Final = (
@@ -973,7 +980,10 @@ def observation_natural_key(observation: Observation) -> str:
 
 
 def _observation_series(observation: Observation) -> str:
-    """Return ``athlete`` for an Intervals.icu athlete-profile value, else empty.
+    """Return the series part of an observation's natural key.
+
+    ``athlete`` marks an Intervals.icu athlete-profile value and
+    ``session:<id>`` a local per-session derived value (card M6); else empty.
 
     Weight, eFTP, body fat and the sport-less VO2max come from both records. A
     wellness row is identified by its ISO day, so such a value whose source record
@@ -993,6 +1003,13 @@ def _observation_series(observation: Observation) -> str:
         and provenance.source_record_id != observation.observed_on.isoformat()
     ):
         return ATHLETE_SERIES
+    if (
+        observation.kind in SESSION_SERIES_KINDS
+        and provenance.provider is None
+        and provenance.source_record_id
+    ):
+        # A local per-session value: two sessions may share sport and start.
+        return f"session:{provenance.source_record_id}"
     return ""
 
 
@@ -1004,8 +1021,12 @@ def upsert_observation(
     now: str,
     fill_only: bool = False,
     owner: str | None = None,
+    derivation: Mapping[str, Any] | None = None,
 ) -> WriteOutcome:
     """Insert or update one observation by its natural key; the row becomes active.
+
+    ``derivation`` is stored under the details key ``derivation`` of a locally
+    derived observation (the branch and thresholds of a local method).
 
     ``owner`` is the source record id of the raw record whose projection emits the
     observation (see ``retire_unemitted_observations``); None keeps the stored
@@ -1018,6 +1039,10 @@ def upsert_observation(
     values = _observation_values(
         observation, mapper_version=mapper_version, owner=owner
     )
+    if derivation is not None:
+        values["details"] = canonical_json(
+            {**json.loads(values["details"]), _DERIVATION_KEY: dict(derivation)}
+        )
     existing = _fetch_row(
         db,
         "SELECT "
@@ -1049,6 +1074,73 @@ def upsert_observation(
         ),
     )
     return WriteOutcome.UPDATED
+
+
+def derived_observation_rows(
+    db: Any, method: str, *, owners: Sequence[str] | None = None
+) -> list[dict[str, Any]]:
+    """Return the active local derived observations of ``method``.
+
+    Each row has its natural key, metric, value, sport, observed day, owner
+    (the canonical session id) and the parsed ``derivation`` details. Local
+    derived rows carry no provider, so provider reads never return them.
+    ``owners`` limits the rows to those owner ids; None returns every row.
+    """
+    sql = (
+        "SELECT natural_key, metric, value, sport, observed_on, owner_record_id, "
+        "details FROM observations WHERE provider IS NULL AND method = ? "
+        "AND source_kind = ? AND state = ?"
+    )
+    params: tuple[object, ...] = (
+        method,
+        SourceKind.DERIVED.value,
+        ProjectionState.ACTIVE.value,
+    )
+    if owners is None:
+        rows = _fetch_all(db, sql + " ORDER BY natural_key", params)
+    else:
+        rows = []
+        unique = sorted(set(owners))
+        for start in range(0, len(unique), _RETIRE_BATCH):
+            batch = unique[start : start + _RETIRE_BATCH]
+            rows += _fetch_all(
+                db,
+                f"{sql} AND owner_record_id IN ({', '.join('?' * len(batch))})",
+                (*params, *batch),
+            )
+    result = []
+    for row in rows:
+        details = json.loads(row.pop("details") or "{}")
+        derivation = details.get(_DERIVATION_KEY)
+        row["derivation"] = derivation if isinstance(derivation, dict) else {}
+        row[_INPUT_FINGERPRINT_KEY] = details.get(_INPUT_FINGERPRINT_KEY)
+        row[_METHOD_VERSION_KEY] = details.get(_METHOD_VERSION_KEY)
+        result.append(row)
+    return result
+
+
+def retire_derived_observations(
+    db: Any, method: str, *, keep: Collection[str], now: str
+) -> int:
+    """Retire active local derived rows of ``method`` whose key is not in ``keep``."""
+    stale = [
+        row["natural_key"]
+        for row in _fetch_all(
+            db,
+            "SELECT natural_key FROM observations WHERE provider IS NULL "
+            "AND method = ? AND source_kind = ? AND state = ?",
+            (method, SourceKind.DERIVED.value, ProjectionState.ACTIVE.value),
+        )
+        if row["natural_key"] not in keep
+    ]
+    for start in range(0, len(stale), _RETIRE_BATCH):
+        batch = stale[start : start + _RETIRE_BATCH]
+        db.execute(
+            "UPDATE observations SET state = ?, updated_at = ? "
+            f"WHERE natural_key IN ({', '.join('?' * len(batch))})",
+            (ProjectionState.RETIRED.value, now, *batch),
+        )
+    return len(stale)
 
 
 def retire_unemitted_observations(

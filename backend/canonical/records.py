@@ -321,6 +321,7 @@ _SUMMARY_VALUE_BOUNDS: Final = (
     ("feel", 0.0, 10.0),
     ("avg_speed_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
     ("weighted_avg_speed_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
+    ("grade_adjusted_speed_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
     ("pace_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
     ("ftp_w", 0.0, MAX_ACTIVITY_POWER_W),
     ("eftp_w", 0.0, MAX_ACTIVITY_POWER_W),
@@ -436,6 +437,8 @@ class ActivityRecord:
     feel: float | None = None
     avg_speed_mps: float | None = None
     weighted_avg_speed_mps: float | None = None
+    # Average speed adjusted for gradient, as the provider computes it.
+    grade_adjusted_speed_mps: float | None = None
     pace_mps: float | None = None
     ftp_w: float | None = None
     eftp_w: float | None = None

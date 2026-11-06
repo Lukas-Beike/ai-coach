@@ -20,6 +20,7 @@ from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
 from backend.canonical.activity_summary import ActivitySummary
+from backend.performance.source_policy import PREFERENCE_PROFILE_FIELDS
 from backend.runtime.ports import ActivityRowAndSummaryReader, CanonicalTableServing
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.weather.cache import invalidate_for_location_change
@@ -45,6 +46,9 @@ class AthleteRuntime:
     normalize_competition: Callable[[Any], Any]
     uuid_factory: Callable[[], Any]
     read_planned_units: Callable[[], list[dict[str, Any]]] = list
+    # Called when an input of the local session load (card M6) changes: a local
+    # zone configuration, a session correction or a preferred threshold source.
+    load_inputs_changed: Callable[[], None] = lambda: None
 
 
 class AthleteDataAssembly:
@@ -80,6 +84,7 @@ class AthleteDataAssembly:
         self._normalize_competition = runtime.normalize_competition
         self._uuid_factory = runtime.uuid_factory
         self._read_planned_units = runtime.read_planned_units
+        self._load_inputs_changed = runtime.load_inputs_changed
 
     def activity_summaries(self) -> tuple[ActivitySummary, ...]:
         with self._database_manager().unit_of_work() as db:
@@ -106,7 +111,10 @@ class AthleteDataAssembly:
 
     def zones(self) -> ZoneConfigurationService:
         return ZoneConfigurationService(
-            self._database_manager(), CanonicalTableReader(), self._utc_now
+            self._database_manager(),
+            CanonicalTableReader(),
+            self._utc_now,
+            on_change=self._load_inputs_changed,
         )
 
     def activity_feedback(self) -> ActivityFeedbackService:
@@ -132,7 +140,10 @@ class AthleteDataAssembly:
 
     def session_corrections(self) -> SessionCorrectionService:
         return SessionCorrectionService(
-            self._database_manager(), self._utc_now, self._event_buffer
+            self._database_manager(),
+            self._utc_now,
+            self._event_buffer,
+            on_change=self._load_inputs_changed,
         )
 
     def duplicate_activity(self) -> DuplicateActivityService:
@@ -158,9 +169,20 @@ class AthleteDataAssembly:
             manager,
             self._profile_repository,
             self._key_value_repository,
-            on_location_changed=invalidate_for_location_change,
+            on_location_changed=self._profile_changed,
             mutation_coordinator=self._profile_mutation_coordinator,
         )
+
+    def _profile_changed(
+        self, previous: dict[str, Any], current: dict[str, Any], **kwargs: Any
+    ) -> None:
+        """Invalidate location caches; a new preferred source changes local loads."""
+        invalidate_for_location_change(previous, current, **kwargs)
+        if any(
+            previous.get(field) != current.get(field)
+            for field in PREFERENCE_PROFILE_FIELDS.values()
+        ):
+            self._load_inputs_changed()
 
     def context(self) -> AthleteContextService:
         return AthleteContextService(
