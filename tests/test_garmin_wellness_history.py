@@ -12,7 +12,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from backend.db import garmin_store
@@ -214,7 +214,7 @@ class CollectorTests(unittest.TestCase):
 
     def test_a_range_without_weigh_ins_is_no_record(self) -> None:
         client = SdkClient()
-        client.get_weigh_ins = lambda _start, _end: {  # type: ignore[method-assign]
+        client.get_weigh_ins = lambda _start, _end: {  # type: ignore[method-assign,assignment]
             "dailyWeightSummaries": [],
             "totalAverage": {"weight": None},
         }
@@ -264,7 +264,7 @@ class CollectorTests(unittest.TestCase):
         def fail(*_: Any) -> Any:
             raise RuntimeError("rate limited")
 
-        client.get_hrv_data_range = fail  # type: ignore[method-assign]
+        client.get_hrv_data_range = fail  # type: ignore[method-assign,assignment]
         failures: list[str] = []
 
         with self.assertRaises(RuntimeError):
@@ -592,8 +592,8 @@ class ExecutorTests(unittest.TestCase):
         self.state = _State()
         self.queue = _Queue()
         historical = HistoricalSyncJobOwner(
-            sync_state_repository=self.state,
-            queue_service=self.queue,
+            sync_state_repository=cast(Any, self.state),
+            queue_service=cast(Any, self.queue),
             local_now=lambda: datetime(2026, 11, 6, 12, tzinfo=UTC),
             sync_period_defaults={},
             all_sync_days=-1,
@@ -602,9 +602,9 @@ class ExecutorTests(unittest.TestCase):
         )
         owner = GarminSyncJobOwner(
             historical_sync=historical,
-            garmin_sync_service=_Unused(),
-            morning_body_battery_service=_Unused(),
-            garmin_fixture_loader=_Unused(),
+            garmin_sync_service=cast(Any, _Unused()),
+            morning_body_battery_service=cast(Any, _Unused()),
+            garmin_fixture_loader=cast(Any, _Unused()),
             all_sync_days=-1,
             wellness_history_service=wellness,
         )
