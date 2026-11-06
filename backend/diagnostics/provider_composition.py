@@ -15,6 +15,7 @@ from collections import Counter
 from typing import Any, Final
 
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.providers.intervals_activity_keys import ACTIVITY_SOURCES
 
 _INTERVALS: Final = ProviderId.INTERVALS.value
 _OTHER: Final = "other"
@@ -22,25 +23,6 @@ _UNKNOWN: Final = "unknown"
 _PROVIDERS: Final = frozenset(provider.value for provider in ProviderId)
 _METRICS: Final = frozenset(metric.value for metric in MetricKind)
 _SPORTS: Final = frozenset(sport.value for sport in Sport)
-# The ``source`` enum of the Intervals.icu Activity schema (GET /api/v1/docs).
-_INTERVALS_SOURCES: Final = frozenset(
-    (
-        "STRAVA",
-        "UPLOAD",
-        "MANUAL",
-        "GARMIN_CONNECT",
-        "OAUTH_CLIENT",
-        "DROPBOX",
-        "POLAR",
-        "SUUNTO",
-        "COROS",
-        "WAHOO",
-        "ZWIFT",
-        "ZEPP",
-        "CONCEPT2",
-        "HUAWEI",
-    )
-)
 # Domain tables projected per provider; each is reported as active rows per
 # provider. A NULL provider is a local row.
 _DOMAIN_TABLES: Final = ("sleep_periods", "zone_configurations", "power_curve_points")
@@ -188,7 +170,7 @@ def _known(value: Any, allowed: frozenset[str], *, local: bool = False) -> str:
 def _source(value: Any) -> str:
     if value is None:
         return _UNKNOWN
-    if isinstance(value, str) and value.strip().upper() in _INTERVALS_SOURCES:
+    if isinstance(value, str) and value.strip().upper() in ACTIVITY_SOURCES:
         return value.strip().upper()
     return _OTHER
 

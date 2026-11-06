@@ -22,6 +22,26 @@ ROLLING_FTP: Final = "icu_rolling_ftp"
 LACTATE_THRESHOLD_HR: Final = "lthr"
 
 TRAINING_LOAD_LOOKUP: Final = (TRAINING_LOAD, "training_load", "tss")
+# The ``source`` enum of the Intervals.icu Activity schema (GET /api/v1/docs):
+# the service an activity reached Intervals.icu from.
+ACTIVITY_SOURCES: Final = frozenset(
+    (
+        "STRAVA",
+        "UPLOAD",
+        "MANUAL",
+        "GARMIN_CONNECT",
+        "OAUTH_CLIENT",
+        "DROPBOX",
+        "POLAR",
+        "SUUNTO",
+        "COROS",
+        "WAHOO",
+        "ZWIFT",
+        "ZEPP",
+        "CONCEPT2",
+        "HUAWEI",
+    )
+)
 
 
 def activity_ftp(activity: Mapping[str, Any]) -> Any:
