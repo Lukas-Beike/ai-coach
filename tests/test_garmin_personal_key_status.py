@@ -6,10 +6,12 @@ import json
 import sqlite3
 import unittest
 from datetime import date
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from backend.backup.export import PrivacyArchiveExportService
+from backend.db.manager import DatabaseManager
+from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.provider_credentials import (
@@ -182,9 +184,9 @@ class KeyChangeClearsExpiryTests(unittest.TestCase):
         holder = {"config": _config(garmin_personal_api_key="")}
         service = ProviderCredentialService(
             env_config=holder["config"],
-            database_manager=Manager,
+            database_manager=lambda: cast(DatabaseManager, Manager()),
             database_lock=nullcontext,
-            key_values=key_values,  # type: ignore[arg-type]
+            key_values=cast(KeyValueRepository, key_values),
             apply_config=lambda config: holder.update(config=config),
             current_config=lambda: holder["config"],
         )
