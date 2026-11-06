@@ -10,7 +10,7 @@ Each strength exercise SHALL resolve to one Garmin catalogue exercise before exp
 
 #### Scenario: Explicit catalogue name
 - **WHEN** a strength unit is saved with `garmin_exercise` "barbell back squat"
-- **THEN** the stored exercise carries `garmin_exercise` "Barbell Back Squat" and the pair SQUAT/BARBELL_BACK_SQUAT, derived again on every write.
+- **THEN** the stored exercise carries `garmin_exercise` "Barbell Back Squat" and the pair SQUAT/BARBELL_BACK_SQUAT, derived again on every write; a stored name a later catalogue no longer knows keeps its stored pair.
 
 #### Scenario: Unmatched exercise
 - **WHEN** an exercise matches neither field, name nor alias at export
@@ -36,7 +36,7 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 Evidence: `backend/sync/garmin_strength_push.py`, `backend/sync/jobs.py`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py` (PushTests, JobValidationTests).
 
 ### Requirement: Safe Garmin write outcomes
-A saved workout whose exercise steps differ from the sent ones SHALL be deleted when it was just created and reported without scheduling. Removal SHALL happen only for a `remove` entry, accepted for Garmin only, and SHALL delete only the linked workout and schedule. A non-client remote failure SHALL stop the remaining units; messages SHALL never contain Garmin's response text.
+A saved workout whose exercise steps differ from the sent ones SHALL be deleted when just created, or unscheduled when updated, and reported. Removal SHALL happen only for a `remove` entry, accepted for Garmin only, and SHALL delete only the linked workout and schedule. A non-client remote failure SHALL stop the remaining units; messages SHALL never contain Garmin's response text.
 
 #### Scenario: Garmin blanks an exercise
 - **WHEN** the read-back workout lacks a sent exercise name

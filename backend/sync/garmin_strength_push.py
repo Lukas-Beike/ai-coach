@@ -255,15 +255,16 @@ class GarminStrengthPushService:
                 _call(client.update_workout, workout_id, unit.document)
             except _Missing:
                 workout_id = None
+        schedule_id = link.remote_external_id if link else None
         if not workout_id:
             saved = _call(client.upload_workout, unit.document)
             workout_id = _workout_id(saved)
             created = True
-        self._verify(client, workout_id, unit.document, created=created)
-        # Link the workout before scheduling, so a failure below never leads
-        # to a duplicate upload on the next push.
-        schedule_id = link.remote_external_id if link else None
+        # Link the workout at once, so a failure below never leads to a
+        # duplicate upload on the next push.
         self._save_link(unit, workout_id, schedule_id, None)
+        if not self._verified(client, workout_id, unit.document):
+            self._drop_broken(client, unit, workout_id, schedule_id, created=created)
         if schedule_id:
             try:
                 _call(client.unschedule_workout, schedule_id)
@@ -305,25 +306,47 @@ class GarminStrengthPushService:
             )
 
     @staticmethod
-    def _verify(
-        client: Any, workout_id: str, document: dict[str, Any], *, created: bool
-    ) -> None:
-        """Reject a saved workout whose exercise steps Garmin did not keep."""
+    def _verified(client: Any, workout_id: str, document: dict[str, Any]) -> bool:
+        """Whether the saved workout kept every sent exercise step."""
         saved = _call(client.get_workout_by_id, workout_id)
-        expected = workout_exercise_pairs(document)
-        if isinstance(saved, dict) and workout_exercise_pairs(saved) == expected:
-            return
-        if created:
-            try:
+        return isinstance(saved, dict) and workout_exercise_pairs(
+            saved
+        ) == workout_exercise_pairs(document)
+
+    def _drop_broken(
+        self,
+        client: Any,
+        unit: _Prepared,
+        workout_id: str,
+        schedule_id: str | None,
+        *,
+        created: bool,
+    ) -> None:
+        """Keep a blanked workout off the watch, then report the failure.
+
+        A new workout is deleted again; an updated one is unscheduled so its
+        planned day shows no broken steps, and the next push updates it.
+        """
+        try:
+            if created:
                 _call(client.delete_workout, workout_id)
-            except Exception:  # noqa: BLE001 - the verification error is reported
-                _LOGGER.warning(
-                    "Garmin workout cleanup failed",
-                    extra={"event": "garmin_workout_cleanup_failed"},
-                )
+                with self._database_manager().unit_of_work() as db:
+                    _REMOTE_LINKS.delete(
+                        db, RemoteEntityKind.PLANNED_UNIT, unit.local_id, GARMIN
+                    )
+            elif schedule_id:
+                _call(client.unschedule_workout, schedule_id)
+                self._save_link(unit, workout_id, None, None)
+        except _Missing:
+            pass
+        except Exception:  # noqa: BLE001 - the verification error is reported
+            _LOGGER.warning(
+                "Garmin workout cleanup failed",
+                extra={"event": "garmin_workout_cleanup_failed"},
+            )
         raise AppError(
             502,
-            "Garmin hat nicht alle Übungen übernommen.",
+            "Garmin hat nicht alle Übungen übernommen; nichts terminiert.",
             reason="garmin_workout_verification_failed",
         )
 
@@ -345,7 +368,12 @@ class GarminStrengthPushService:
             _REMOTE_LINKS.delete(
                 db, RemoteEntityKind.PLANNED_UNIT, unit.local_id, GARMIN
             )
-        return {"library_workout_id": unit.local_id, "status": "removed"}
+        # "synced" is the job store's success state; "action" tells the cases apart.
+        return {
+            "library_workout_id": unit.local_id,
+            "status": "synced",
+            "action": "removed",
+        }
 
 
 class _Missing(Exception):

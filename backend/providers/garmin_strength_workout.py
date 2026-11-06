@@ -134,7 +134,7 @@ class GarminExercise:
 def _fold(text: Any) -> str:
     value = unicodedata.normalize("NFKD", str(text or "").casefold())
     value = "".join(char for char in value if not unicodedata.combining(char))
-    return " ".join(value.replace("ß", "ss").split())
+    return " ".join(value.split())
 
 
 def catalogue_available() -> bool:
@@ -160,11 +160,33 @@ def catalogue_exercise(name: Any) -> GarminExercise | None:
     return _INDEX.get(_fold(name))
 
 
+_IDENTIFIER: Final = re.compile(r"[A-Z0-9_]{1,64}")
+
+
+def stored_pair(item: Mapping[str, Any]) -> GarminExercise | None:
+    """Return a well-formed stored ``garmin_pair`` with its catalogue name."""
+    pair = item.get("garmin_pair")
+    name = str(item.get("garmin_exercise") or "").strip()
+    if not isinstance(pair, Mapping) or not name:
+        return None
+    category, exercise = (str(pair.get(key) or "") for key in ("category", "exercise"))
+    if not (_IDENTIFIER.fullmatch(category) and _IDENTIFIER.fullmatch(exercise)):
+        return None
+    return GarminExercise(name[:_NAME_LIMIT], category, exercise)
+
+
 def resolve_exercise(item: Mapping[str, Any]) -> GarminExercise | None:
-    """Resolve one structure exercise: catalogue field, then its name, then an alias."""
-    for candidate in (item.get("garmin_exercise"), item.get("name")):
-        if candidate and (found := catalogue_exercise(candidate)):
-            return found
+    """Resolve one exercise: catalogue field, stored pair, its name, then an alias.
+
+    The stored pair keeps a resolution valid when a later catalogue renames
+    the exercise; Garmin's read-back check still catches a pair it dropped.
+    """
+    if (explicit := catalogue_exercise(item.get("garmin_exercise"))) is not None:
+        return explicit
+    if (stored := stored_pair(item)) is not None:
+        return stored
+    if (by_name := catalogue_exercise(item.get("name"))) is not None:
+        return by_name
     alias = _ALIASES.get(_fold(item.get("name")))
     return catalogue_exercise(alias) if alias else None
 

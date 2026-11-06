@@ -140,13 +140,27 @@ class StructureTests(unittest.TestCase):
         assert stored is not None
         self.assertEqual("Barbell Back Squat", stored[0]["garmin_exercise"])
         self.assertEqual(
-            {"category": "SQUAT", "exercise": "BARBELL_BACK_SQUAT"}, stored[0]["garmin_pair"]
+            {"category": "SQUAT", "exercise": "BARBELL_BACK_SQUAT"},
+            stored[0]["garmin_pair"],
         )
         # A stored pair is derived again, never trusted.
         again = strength_structure.normalize_structure(
             [{**stored[0], "garmin_pair": {"category": "X", "exercise": "Y"}}]
         )
         self.assertEqual(stored, again)
+
+    def test_a_name_the_catalogue_dropped_keeps_its_stored_pair(self) -> None:
+        stored = {
+            **SQUAT,
+            "garmin_exercise": "Retired Squat",
+            "garmin_pair": {"category": "SQUAT", "exercise": "RETIRED_SQUAT"},
+        }
+        kept = strength_structure.normalize_structure([stored])
+        assert kept is not None
+        self.assertEqual(stored["garmin_pair"], kept[0]["garmin_pair"])
+        found = mapping.resolve_exercise(kept[0])
+        assert found is not None
+        self.assertEqual("RETIRED_SQUAT", found.exercise)
 
     def test_unknown_garmin_exercise_is_rejected_with_suggestions(self) -> None:
         with self.assertRaises(AppError) as raised:
@@ -210,6 +224,15 @@ class JobValidationTests(unittest.TestCase):
         entries = [{"library_workout_id": U1, "remove": True}]
         adapter.execute({"id": "j"}, {"entries": entries}, "r", job_type="plan_push")
         push.sync.assert_called_once_with({"entries": entries})
+        adapter.execute(
+            {"id": "j"},
+            {"entries": entries, "repair": True},
+            "r",
+            job_type="plan_push",
+        )
+        self.assertEqual(
+            {"entries": entries, "repair": True}, push.sync.call_args.args[0]
+        )
         adapter.execute({"id": "j"}, {}, "r", job_type="refresh")
         jobs.execute.assert_called_once()
 
@@ -428,6 +451,41 @@ class PushTests(unittest.TestCase):
         self.assertNotIn("schedule", [call[0] for call in self.garmin.calls])
         self.assertIsNone(self.link(U1))
 
+    def test_a_failed_read_back_keeps_the_new_workout_linked(self) -> None:
+        digest = self.insert(U1, UNIT)
+        original = self.garmin.get_workout_by_id
+        self.garmin.get_workout_by_id = Mock(side_effect=_http_error(503))  # type: ignore[method-assign]
+
+        self.assertEqual("error", self.push((U1, digest))["status"])
+        self.assertEqual("501", self.link(U1).remote_id)
+
+        self.garmin.get_workout_by_id = original  # type: ignore[method-assign]
+        self.push((U1, digest))
+        self.assertEqual(["501"], list(self.garmin.workouts))
+
+    def test_a_blanked_update_is_unscheduled_and_kept_linked(self) -> None:
+        digest = self.insert(U1, UNIT)
+        self.push((U1, digest))
+        original = self.garmin.update_workout
+
+        def blanking_update(workout_id, document):
+            original(workout_id, document)
+            group = self.garmin.workouts[workout_id]["workoutSegments"][0]
+            group["workoutSteps"][0]["workoutSteps"][0]["exerciseName"] = None
+            return {}
+
+        self.garmin.update_workout = blanking_update  # type: ignore[method-assign]
+
+        result = self.push((U1, digest))
+
+        self.assertEqual("error", result["status"])
+        self.assertEqual({}, self.garmin.schedules)
+        link = self.link(U1)
+        self.assertEqual(
+            ("501", None, None),
+            (link.remote_id, link.remote_external_id, link.baseline_hash),
+        )
+
     def test_local_problems_write_nothing_and_skip_the_login(self) -> None:
         cases = {
             U1: {
@@ -505,7 +563,10 @@ class PushTests(unittest.TestCase):
             {"entries": [{"library_workout_id": U1, "remove": True}]}
         )
 
-        self.assertEqual("removed", result["results"][0]["status"])
+        self.assertEqual(
+            ("synced", "removed"),
+            (result["results"][0]["status"], result["results"][0]["action"]),
+        )
         self.assertEqual([("unschedule", "502"), ("delete", "501")], self.garmin.calls)
         self.assertEqual(["999"], list(self.garmin.workouts))
         self.assertEqual(["998"], list(self.garmin.schedules))

@@ -500,7 +500,10 @@ class GarminJobAdapter:
         job_type: str,
     ) -> dict[str, Any]:
         if job_type == "plan_push" and self._plan_push is not None:
-            return self._plan_push.sync({"entries": payload.get("entries")})
+            selected_payload = {"entries": payload.get("entries")}
+            if payload.get("repair"):
+                selected_payload["repair"] = True
+            return self._plan_push.sync(selected_payload)
         _reject_plan_push(job_type)
         return self._jobs.execute(job, payload, reason)
 

@@ -24,8 +24,9 @@ MAX_REST_S: Final = 600
 MAX_RPE: Final = 10
 MAX_RIR: Final = 10
 LOAD_KEYS: Final = ("kg", "pct_1rm", "rpe", "rir")
-# ``garmin_exercise`` names a Garmin catalogue exercise; ``garmin_pair`` is the
-# resolved category/exercise pair, derived on every write and never trusted.
+# ``garmin_exercise`` names a Garmin catalogue exercise; ``garmin_pair`` is its
+# resolved category/exercise pair, re-derived from the catalogue on every write
+# and kept only while the catalogue no longer knows the stored name.
 GARMIN_KEYS: Final = ("garmin_exercise", "garmin_pair")
 EXERCISE_KEYS: Final = ("name", "sets", "reps", *LOAD_KEYS, "rest_s", *GARMIN_KEYS)
 # Heavy from 80 % 1RM, RPE 8 or 2 reps in reserve; moderate from 65 %, RPE 6, RIR 4.
@@ -82,16 +83,19 @@ def _garmin_exercise(item: Mapping[str, Any], result: dict[str, Any]) -> None:
     """Store an explicit Garmin catalogue exercise with its resolved pair.
 
     Without an explicit name nothing is stored; the export resolves the exercise
-    name or an alias itself.
+    name or an alias itself. A stored name the current catalogue no longer
+    knows keeps its stored pair, so a catalogue update never breaks saved units.
     """
     requested = " ".join(str(item.get("garmin_exercise") or "").split())[:80]
     if not requested:
         return
-    if not garmin_catalogue.catalogue_available():
+    found = garmin_catalogue.catalogue_exercise(
+        requested
+    ) or garmin_catalogue.stored_pair({**item, "garmin_exercise": requested})
+    if found is None and not garmin_catalogue.catalogue_available():
         # Without the catalogue the name is kept and checked again on export.
         result["garmin_exercise"] = requested
         return
-    found = garmin_catalogue.catalogue_exercise(requested)
     if found is None:
         hint = garmin_catalogue.suggestions(requested)
         raise _invalid(
