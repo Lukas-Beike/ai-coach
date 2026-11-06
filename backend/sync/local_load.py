@@ -18,6 +18,7 @@ summary builder keeps provider values under ``provider_training_load``,
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime, tzinfo
@@ -46,6 +47,7 @@ from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
+_LOGGER = logging.getLogger(__name__)
 STAGE: Final = "local_load"
 STATE_KEY: Final = "local_load_state"
 DERIVED_LABEL: Final = "derived"
@@ -205,6 +207,11 @@ class LocalLoadStage:
                 "completed_at": now,
                 "counts": counts,
             },
+        )
+        # Counts only: branch, reason and sport identifiers, never values.
+        _LOGGER.info(
+            "Local session load reconciled",
+            extra={"event": "local_load_reconciled", "context": counts},
         )
         return BatchReport(items=counts["sessions"], done=True)
 
