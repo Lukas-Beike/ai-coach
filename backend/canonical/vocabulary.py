@@ -231,6 +231,10 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
         "never produced: activity loads carry LoadModel and Garmin's daily load is "
         "ACUTE_LOAD; retained so a stored value stays readable"
     ),
+    MetricKind.RUN_THRESHOLD_POWER: (
+        "no longer produced: running threshold power is FTP with sport RUN since "
+        "Garmin health mapper 17; retained so rows stored earlier stay readable"
+    ),
 }
 # Kinds stored for export, backup and history that no reader uses yet. A kind
 # leaves this list when a consumer reads it; the vocabulary accountability test
