@@ -1477,26 +1477,8 @@ def _collect_activity_ratings(
     fetch = getattr(client, "get_activity", None)
     if not callable(fetch):
         return
-    recheck_from = (today - timedelta(days=ACTIVITY_RATING_RECHECK_DAYS)).isoformat()
-    candidates = sorted(
-        (
-            (str(row.get("startTimeLocal") or ""), str(row["activityId"]))
-            for row in payload.get("activities") or []
-            if isinstance(row, dict)
-            and row.get("activityId") is not None
-            and row.get("manualActivity") is not True
-        ),
-        reverse=True,
-    )
-    new_from = (today - timedelta(days=ACTIVITY_RATING_NEW_DAYS)).isoformat()
-    wanted = [
-        (started, activity_id)
-        for started, activity_id in candidates
-        if started[:10] >= recheck_from
-        or (started[:10] >= new_from and activity_id not in rated_activity_ids)
-    ][:MAX_ACTIVITY_RATING_READS]
     ratings: list[dict[str, Any]] = []
-    for started, activity_id in wanted:
+    for started, activity_id in _rating_candidates(payload, today, rated_activity_ids):
         try:
             value = external_call(
                 GARMIN_ID,
@@ -1508,19 +1490,50 @@ def _collect_activity_ratings(
             if warn:
                 warn(ACTIVITY_RATINGS_SECTION, redact(str(exc))[:500], exc)
             break
-        summary = value.get("summaryDTO") if isinstance(value, dict) else None
-        if not isinstance(summary, dict):
-            continue
-        # Every key is present, so a rating cleared on the watch clears the stored one.
-        ratings.append(
-            {
-                "activityId": activity_id,
-                "startTimeLocal": started,
-                **{key: summary.get(key) for key in ACTIVITY_RATING_KEYS},
-            }
-        )
+        row = _rating_row(value, activity_id, started)
+        if row is not None:
+            ratings.append(row)
     if ratings:
         payload[ACTIVITY_RATINGS_SECTION] = ratings
+
+
+def _rating_candidates(
+    payload: dict[str, Any], today: date, rated_activity_ids: frozenset[str]
+) -> list[tuple[str, str]]:
+    """(start, id) of the activities whose rating is read, newest first, capped."""
+    recheck_from = (today - timedelta(days=ACTIVITY_RATING_RECHECK_DAYS)).isoformat()
+    new_from = (today - timedelta(days=ACTIVITY_RATING_NEW_DAYS)).isoformat()
+    candidates = sorted(
+        (
+            (str(row.get("startTimeLocal") or ""), str(row["activityId"]))
+            for row in payload.get("activities") or []
+            if isinstance(row, dict)
+            and row.get("activityId") is not None
+            and row.get("manualActivity") is not True
+        ),
+        reverse=True,
+    )
+    return [
+        (started, activity_id)
+        for started, activity_id in candidates
+        if started[:10] >= recheck_from
+        or (started[:10] >= new_from and activity_id not in rated_activity_ids)
+    ][:MAX_ACTIVITY_RATING_READS]
+
+
+def _rating_row(value: Any, activity_id: str, started: str) -> dict[str, Any] | None:
+    """The stored rating row of one single-activity read, or None without a summary.
+
+    Every key is present, so a rating cleared on the watch clears the stored one.
+    """
+    summary = value.get("summaryDTO") if isinstance(value, dict) else None
+    if not isinstance(summary, dict):
+        return None
+    return {
+        "activityId": activity_id,
+        "startTimeLocal": started,
+        **{key: summary.get(key) for key in ACTIVITY_RATING_KEYS},
+    }
 
 
 def collect_garmin_data(
