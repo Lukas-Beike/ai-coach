@@ -82,6 +82,8 @@ test("@responsive nutrition product library supports review, local save, favorit
   let card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
   await expect(card).toContainText("380 kcal");
   await page.reload();
+  await expect(page.locator("#nutritionProducts .nutrition-product-others")).not.toHaveAttribute("open", "");
+  await page.locator("#nutritionProducts .nutrition-product-others > summary").click();
   card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
   await expect(card).toContainText("72 g");
 
@@ -101,13 +103,23 @@ test("@responsive nutrition product library supports review, local save, favorit
   await page.locator("#nutritionProductUseCoach").click();
   await expect.poll(() => page.locator("#messageInput").evaluate((input) => input.value)).toMatch(/^Bestehender Entwurf\nDazu 25 g \(Produkt-ID: /);
   await page.goto("/#nutrition/products");
+  await page.locator("#nutritionProducts .nutrition-product-others").evaluate((group) => { group.open = true; });
+  card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
+  await card.getByRole("button", { name: "Verwenden" }).click();
+  await page.locator("#nutritionProductUseAmount").fill("50");
+  await expect(page.locator("#nutritionProductUseMeal")).toHaveValue("");
+  await page.locator("#nutritionProductUseAdd").click();
+  await expect(page.locator("#nutritionProductStatus")).toContainText("als Snack erfasst");
+  await page.goto("/#nutrition/diary");
+  await expect(page.locator("#nutritionEntries .nutrition-card").filter({ hasText: "Snack" }).filter({ hasText: productName })).toHaveCount(1);
+  await page.goto("/#nutrition/products");
   card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
   await card.getByRole("button", { name: /Als Favorit markieren/ }).click();
   card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
   await expect(card.getByRole("button", { name: /Favorit entfernen/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#nutritionProducts .nutrition-product-card").first()).toContainText(productName);
 
-  await card.getByRole("button", { name: "Archivieren" }).click();
+  await card.getByRole("button", { name: "Löschen" }).click();
   await expect(page.locator("#confirmationDialog")).toBeVisible();
   await page.locator("#confirmationDialogAccept").click();
   await expect(page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName })).toHaveCount(0);
