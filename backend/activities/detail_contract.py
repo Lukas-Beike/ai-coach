@@ -30,6 +30,7 @@ from backend.canonical.activity_detail import (
     ZoneDistribution,
 )
 from backend.canonical.local_time import wall_time
+from backend.canonical.rating_scales import ACTIVITY_RATING_SCALES, rating_fields
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import ProviderId, StreamChannel, ZoneMetric
 from backend.db.activity_detail_store import StoredDetailSet
@@ -111,6 +112,32 @@ def measured_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
     newest retrieval, then the provider activity id.
     """
     return sorted(records, key=lambda record: (_own_rank(record), *_tie_break(record)))
+
+
+# The provider where the athlete rates a session first; Intervals.icu copies it.
+_RATING_RANK: Final[Mapping[ProviderId, int]] = {
+    ProviderId.GARMIN: 0,
+    ProviderId.INTERVALS: 1,
+}
+_RATING_KEYS: Final = ("rpe", "feel")
+
+
+def rating_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
+    """Order records for the athlete's provider ratings: Garmin, Intervals.icu, rest.
+
+    The athlete rates on the watch; Intervals.icu imports that rating. Within one
+    provider the derived order (newest retrieval, id) decides.
+    """
+
+    def rank(record: ActivityRecord) -> int:
+        provider = record.provenance.provider
+        return (
+            len(_RATING_RANK)
+            if provider is None
+            else _RATING_RANK.get(provider, len(_RATING_RANK))
+        )
+
+    return sorted(derived_order(records), key=rank)
 
 
 def derived_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
@@ -230,6 +257,17 @@ def _metrics(
         )
         if entry is not None:
             metrics[key] = entry
+    rated = rating_order(measured)
+    for key in _RATING_KEYS:
+        entry = _record_metric(rated, key, None, "athlete_entered")
+        if entry is None:
+            continue
+        record = next(record for record in rated if getattr(record, key) is not None)
+        provider = record.provenance.provider
+        scale = ACTIVITY_RATING_SCALES.get(provider, {}).get(key) if provider else None
+        if scale is not None:
+            entry.update(rating_fields(scale, entry["value"]))
+        metrics[key] = entry
     return metrics
 
 

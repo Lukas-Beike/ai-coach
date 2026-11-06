@@ -60,10 +60,15 @@ the same moment.
   zones) -> ``hr_zone_times_s`` and ``power_zone_times_s`` as zones ``Z<n>``.
   One invalid zone drops that distribution with one issue.
 
-A dedicated ``training_load_activities`` row of the same ``activityId`` supplies
-``activityTrainingLoad``, ``trainingEffectLabel`` and the training-effect values
-before the activity is stored (``merge_training_load_rows``), so a re-projection
-of the stored row reads them too.
+* ``directWorkoutRpe`` (10..100) / 10 -> ``rpe`` (1..10); ``directWorkoutFeel``
+  (0 very weak .. 100 very strong) -> ``feel`` on the 1 (strong) .. 5 (weak)
+  scale, as Intervals.icu imports it; ``minHR`` (bpm) -> ``min_hr``.
+
+Dedicated rows of the same ``activityId`` supply values before the activity is
+mapped (``merge_training_load_rows``): a ``training_load_activities`` row
+``activityTrainingLoad``, ``trainingEffectLabel`` and the training-effect values,
+an ``activity_ratings`` row (from the single-activity ``summaryDTO``) the RPE,
+feel and minimum heart rate; a re-projection of the stored row reads them too.
 
 Sport and environment. A known ``typeKey`` uses ``GARMIN_ACTIVITY_TYPES``. An
 environment that the key leaves UNKNOWN may be named by the activity name.
@@ -146,7 +151,9 @@ from backend.canonical.vocabulary import (
 # loss, lap count and average cadence (#1724).
 # Version 15: maps avgGradeAdjustedSpeed, the pace input of the local session
 # load (card M6, #1725).
-MAPPER_VERSION: Final = 15
+# Version 16: maps the athlete's RPE and feel and the minimum heart rate from the
+# merged activity_ratings rows (#1724).
+MAPPER_VERSION: Final = 16
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -170,12 +177,21 @@ _AEROBIC_EFFECT_KEYS: Final = ("aerobicTrainingEffect", "trainingEffect")
 _ANAEROBIC_EFFECT_KEYS: Final = ("anaerobicTrainingEffect",)
 # The dedicated training-load rows override these activity fields, each named
 # by its aliases.
+_RPE_KEY: Final = "directWorkoutRpe"
+_FEEL_KEY: Final = "directWorkoutFeel"
+_MIN_HR_KEYS: Final = ("minHR",)
 _TRAINING_LOAD_FIELDS: Final = (
     (_TRAINING_LOAD_KEY,),
     (_TRAINING_EFFECT_LABEL_KEY,),
     _AEROBIC_EFFECT_KEYS,
     _ANAEROBIC_EFFECT_KEYS,
+    # The activity_ratings rows (single-activity summaryDTO).
+    (_RPE_KEY,),
+    (_FEEL_KEY,),
+    _MIN_HR_KEYS,
 )
+# Garmin rates RPE 10..100 and feel 0 (very weak) .. 100 (very strong).
+_RATING_BOUNDS: Final = (0.0, 100.0)
 _TRAINING_EFFECT_BOUNDS: Final = (0.0, MAX_TRAINING_EFFECT)
 _ALTITUDE_BOUNDS: Final = (MIN_ACTIVITY_ALTITUDE_M, MAX_ACTIVITY_ALTITUDE_M)
 _BIKE_CADENCE_KEYS: Final = ("averageBikingCadenceInRevPerMinute",)
@@ -325,6 +341,9 @@ def _map_row(
     training_effect_label = _training_effect_label(row, ref, issues)
     avg_hr = _optional_number(row, ("averageHR",), HEART_RATE_BOUNDS, ref, issues)
     max_hr = _optional_number(row, _MAX_HR_KEYS, HEART_RATE_BOUNDS, ref, issues)
+    min_hr = _optional_number(row, _MIN_HR_KEYS, HEART_RATE_BOUNDS, ref, issues)
+    raw_rpe = _optional_number(row, (_RPE_KEY,), _RATING_BOUNDS, ref, issues)
+    raw_feel = _optional_number(row, (_FEEL_KEY,), _RATING_BOUNDS, ref, issues)
     max_speed = _optional_number(
         row, _MAX_SPEED_KEYS, (0.0, MAX_ACTIVITY_SPEED_MPS), ref, issues
     )
@@ -390,6 +409,9 @@ def _map_row(
         avg_power=avg_power,
         name=name,
         max_hr=max_hr,
+        min_hr=min_hr,
+        rpe=None if raw_rpe is None else raw_rpe / 10,
+        feel=None if raw_feel is None else garmin_feel(raw_feel),
         max_speed_mps=max_speed,
         max_power_w=max_power,
         steps=steps,
@@ -418,6 +440,15 @@ def _map_row(
     )
 
 
+def garmin_feel(value: float) -> float:
+    """Garmin feel 0..100 (higher = stronger) on the 1..5 feel scale, 1 = strong.
+
+    This is the conversion Intervals.icu applies when it imports the rating
+    (100 -> 1), so both copies of one session carry the same value.
+    """
+    return 5.0 - value / 25.0
+
+
 def merge_training_load_rows(activities: object, training_loads: object) -> object:
     """Return the activity rows with the dedicated training-load values merged in.
 
@@ -427,12 +458,15 @@ def merge_training_load_rows(activities: object, training_loads: object) -> obje
     """
     if not isinstance(activities, list) or not isinstance(training_loads, list):
         return activities
-    by_id = {
-        str(identity): row
-        for row in training_loads
-        if isinstance(row, dict)
-        and not _is_absent(identity := row.get("activityId") or row.get("id"))
-    }
+    # Rows of one id combine in order: a later row's value replaces an earlier one.
+    by_id: dict[str, dict[str, object]] = {}
+    for row in training_loads:
+        if isinstance(row, dict) and not _is_absent(
+            identity := row.get("activityId") or row.get("id")
+        ):
+            by_id.setdefault(str(identity), {}).update(
+                {key: value for key, value in row.items() if value is not None}
+            )
     if not by_id:
         return activities
     merged: list[object] = []

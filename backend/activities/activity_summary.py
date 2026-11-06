@@ -7,6 +7,11 @@ and takes it from the best-ranked record that has it: measured values in
 ``derived_order`` (provider rank). ``sources`` names the source label of every
 value, so consumers never read provider rows or provider field names.
 
+The athlete's provider ratings ``rpe`` and ``feel`` follow ``rating_order``:
+Garmin Connect, where the athlete rates on the watch, before the Intervals.icu
+copy. ``rpe_conflict`` marks only copies of one provider that disagree; the local
+session RPE of the feedback stays authoritative over both (M1).
+
 A provider's own load and intensity are never the session's load: the first
 TSS-like provider load is kept as ``provider_training_load`` (its model in
 ``provider_load_model``) and the provider intensity as ``provider_intensity``,
@@ -28,6 +33,7 @@ from typing import Any, Final
 from backend.activities.detail_contract import (
     derived_order,
     measured_order,
+    rating_order,
     session_local_start,
 )
 from backend.canonical.activity_summary import (
@@ -64,10 +70,10 @@ _MEASURED: Final = (
     ("avg_temp_c", "avg_temp_c"),
     ("min_temp_c", "min_temp_c"),
     ("max_temp_c", "max_temp_c"),
-    ("rpe", "rpe"),
-    ("feel", "feel"),
     ("device_name", "device_name"),
 )
+# Summary key -> ActivityRecord field, in rating order.
+_RATINGS: Final = (("rpe", "rpe"), ("feel", "feel"))
 # Summary key -> ActivityRecord field, in derived order.
 _DERIVED: Final = (
     ("normalized_power", "normalized_power"),
@@ -118,8 +124,10 @@ def activity_summary(
         summary["assist"] = assist.value
     if offset is not None:
         summary["local_offset_minutes"] = offset
-    sources = _values(summary, measured, _MEASURED) | _values(
-        summary, derived, _DERIVED
+    sources = (
+        _values(summary, measured, _MEASURED)
+        | _values(summary, derived, _DERIVED)
+        | _values(summary, rating_order(records), _RATINGS)
     )
     load = next(
         (
@@ -129,7 +137,7 @@ def activity_summary(
         ),
         None,
     )
-    if len({record.rpe for record in records if record.rpe is not None}) > 1:
+    if _rpe_conflict(records):
         summary["rpe_conflict"] = True
     if load is not None:
         summary["provider_training_load"] = load.load
@@ -187,6 +195,15 @@ def _values(
         summary[key] = _zones(value) if key in _ZONE_KEYS else value
         sources[key] = _label(record)
     return sources
+
+
+def _rpe_conflict(records: Sequence[ActivityRecord]) -> bool:
+    """Whether copies of one provider report different RPE values."""
+    seen: dict[ProviderId | None, set[float]] = {}
+    for record in records:
+        if record.rpe is not None:
+            seen.setdefault(record.provenance.provider, set()).add(record.rpe)
+    return any(len(values) > 1 for values in seen.values())
 
 
 def _record_ids(measured: Sequence[ActivityRecord]) -> dict[str, str]:

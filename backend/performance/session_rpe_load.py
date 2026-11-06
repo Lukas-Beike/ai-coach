@@ -2,9 +2,9 @@
 
 Evidence card: ``docs/performance-methods/m1-session-rpe-load.md``. The rating
 is the athlete's local feedback ``session_rpe`` of the canonical session; only
-without one, the provider RPE of that session is a labelled fallback, never
-averaged with it. Provider ratings that disagree within one session give no
-value. The duration is the session's elapsed duration; a session with only a
+without one, the provider RPE of that session (Garmin Connect before its
+Intervals.icu copy) is a labelled fallback, never averaged with it. Copies of one
+provider that disagree within one session give no value. The duration is the session's elapsed duration; a session with only a
 moving time gets no value. RPE 0 is valid, a missing RPE is unknown. Sums keep
 the known partial value and the count of rated and open sessions; values are
 rounded only for output. AU are never added to TSS, Garmin load or TRIMP.
@@ -22,7 +22,11 @@ from backend.canonical.activity_summary import (
     stored_activity_key,
     summary_local_date,
 )
-from backend.canonical.rating_scales import INTERVALS_RPE_SCALE, LOCAL_SESSION_RPE_SCALE
+from backend.canonical.rating_scales import (
+    GARMIN_RPE_SCALE,
+    INTERVALS_RPE_SCALE,
+    LOCAL_SESSION_RPE_SCALE,
+)
 
 METRIC_ID: Final = "session_rpe_load"
 METHOD_ID: Final = "session-rpe-load"
@@ -61,11 +65,21 @@ def _finite(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-# The scale of each RPE source; provider RPE is the Intervals.icu 1-10 rating.
+# The scale of each RPE source; provider RPE is Garmin's or Intervals.icu's 1-10
+# rating, told apart by the summary's source label.
 _RPE_SCALES: Final = {
     SOURCE_ATHLETE: LOCAL_SESSION_RPE_SCALE.scale_id,
     SOURCE_PROVIDER: INTERVALS_RPE_SCALE.scale_id,
 }
+_GARMIN_LABEL: Final = "Garmin Connect"
+
+
+def _rpe_scale(source: str | None, label: str | None) -> str | None:
+    if source is None:
+        return None
+    if source == SOURCE_PROVIDER and label == _GARMIN_LABEL:
+        return GARMIN_RPE_SCALE.scale_id
+    return _RPE_SCALES[source]
 
 
 def _rating(
@@ -136,7 +150,7 @@ def session_load(
         "rpe": rpe,
         "rpe_source": source,
         "rpe_source_label": label,
-        "rpe_scale": None if source is None else _RPE_SCALES[source],
+        "rpe_scale": _rpe_scale(source, label),
         "duration_min": None if elapsed is None else round(elapsed / 60, 1),
         "rated_minutes_after_end": rated_after_end,
         "status": "descriptive" if value is not None else "insufficient_data",

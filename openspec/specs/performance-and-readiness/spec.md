@@ -344,7 +344,11 @@ Every method with an evidence card SHALL have synthetic input fixtures for one c
 - **WHEN** an Intervals.icu activity reports `icu_rpe` beside a local session RPE
 - **THEN** the canonical activity record keeps the provider RPE with its provenance and the M1 result uses the local rating.
 
-Evidence: `tests/test_performance_method_inputs.py`.
+#### Scenario: Garmin watch RPE without a local rating
+- **WHEN** a session has a Garmin Connect RPE from the single-activity read and an Intervals.icu copy with another RPE, and no local rating
+- **THEN** the summary and M1 use the Garmin RPE labelled "Garmin Connect" on its 1-10 scale, no RPE conflict is raised between the two providers, and a local rating would still win.
+
+Evidence: `tests/test_performance_method_inputs.py`, `tests/test_garmin_activity_ratings.py:PrecedenceTests`.
 
 ### Requirement: Method input trace and gaps
 A document SHALL trace each method's inputs from canonical storage to its HTTP, UI and Coach consumers and SHALL map each data gap to an owning issue. A reader that bypasses an available canonical input SHALL be pinned by a fixture assertion naming that issue.

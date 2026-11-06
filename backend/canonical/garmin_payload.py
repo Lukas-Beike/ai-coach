@@ -33,6 +33,7 @@ MERGE_SECTIONS: Final = (
     "resting_hr",
     "training_status",
     "training_load_activities",
+    "activity_ratings",
     "cycling_ftp_history",
     "activity_matches",
 )

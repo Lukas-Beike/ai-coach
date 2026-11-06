@@ -1445,6 +1445,81 @@ def _validate_current_metrics(
             )
 
 
+# The athlete's own ratings live only in the single-activity read (summaryDTO).
+ACTIVITY_RATINGS_SECTION = "activity_ratings"
+ACTIVITY_RATING_KEYS = ("directWorkoutRpe", "directWorkoutFeel", "minHR")
+# Activities that started this many days ago or later are read again, so a
+# rating corrected after the save is picked up; older ones only when new.
+ACTIVITY_RATING_RECHECK_DAYS = 3
+MAX_ACTIVITY_RATING_READS = 30
+
+
+def _collect_activity_ratings(
+    client: Any,
+    payload: dict[str, Any],
+    today: date,
+    known_activity_ids: frozenset[str] | None,
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None,
+) -> None:
+    """Read the ratings of new and recent activities into ``activity_ratings``.
+
+    At most ``MAX_ACTIVITY_RATING_READS`` reads, newest first. A failed read
+    keeps the stored rating and is recorded once in ``errors``.
+    """
+    fetch = getattr(client, "get_activity", None)
+    if not callable(fetch):
+        return
+    recheck_from = (today - timedelta(days=ACTIVITY_RATING_RECHECK_DAYS)).isoformat()
+    candidates = sorted(
+        (
+            (str(row.get("startTimeLocal") or ""), str(row["activityId"]))
+            for row in payload.get("activities") or []
+            if isinstance(row, dict)
+            and row.get("activityId") is not None
+            and row.get("manualActivity") is not True
+        ),
+        reverse=True,
+    )
+    wanted = [
+        activity_id
+        for started, activity_id in candidates
+        if started[:10] >= recheck_from
+        or (known_activity_ids is not None and activity_id not in known_activity_ids)
+    ][:MAX_ACTIVITY_RATING_READS]
+    ratings: list[dict[str, Any]] = []
+    failure: BaseException | None = None
+    for activity_id in wanted:
+        try:
+            value = external_call(
+                GARMIN_ID,
+                ACTIVITY_RATINGS_SECTION,
+                partial(fetch, activity_id),
+                {"activity_id": activity_id},
+            )
+        except Exception as exc:  # noqa: BLE001 - keep the other activities.
+            failure = exc
+            continue
+        summary = value.get("summaryDTO") if isinstance(value, dict) else None
+        if not isinstance(summary, dict):
+            continue
+        ratings.append(
+            {
+                "activityId": activity_id,
+                **{
+                    key: summary[key]
+                    for key in ACTIVITY_RATING_KEYS
+                    if summary.get(key) is not None
+                },
+            }
+        )
+    if ratings:
+        payload[ACTIVITY_RATINGS_SECTION] = ratings
+    if failure is not None:
+        _add_error(payload, ACTIVITY_RATINGS_SECTION, failure, redact, warn)
+
+
 def collect_garmin_data(
     client: Any,
     windows: Iterable[tuple[date, date]],
@@ -1504,6 +1579,15 @@ def collect_garmin_data(
             source="training_status",
             method="get_training_status",
         )
+    _collect_activity_ratings(
+        client,
+        payload,
+        today,
+        collection_options.known_activity_ids,
+        external_call,
+        redact,
+        warn,
+    )
     read_daily = collection_options.include_daily_metrics or _reads_new_activity(
         payload, collection_options.known_activity_ids
     )
