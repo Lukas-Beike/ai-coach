@@ -15,6 +15,7 @@ from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 from tests import run_tests
+from tools import bot_merge
 
 SPEC = importlib.util.spec_from_file_location(
     "release_source",
@@ -390,13 +391,22 @@ class WorkflowSourceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("permissions:\n  contents: read", workflow)
         self.assertIn("schedule:", workflow)
-        self.assertIn("persist-credentials: false", workflow)
-        self.assertIn("npm ci --ignore-scripts", workflow)
-        self.assertLess(
-            workflow.index("npm run openspec -- update"),
-            workflow.index("create-github-app-token"),
+        regenerate, publish = workflow.split("\n  publish:\n")
+        self.assertIn("npm ci --ignore-scripts", regenerate)
+        self.assertIn("npm run openspec -- update", regenerate)
+        self.assertNotIn("secrets.", regenerate)
+        self.assertNotIn("npm ", publish)
+        self.assertEqual(
+            workflow.count("uses: actions/checkout@"),
+            workflow.count("persist-credentials: false"),
         )
-        self.assertIn("core.hooksPath=/dev/null push", workflow)
+        self.assertLess(
+            publish.index("git apply --numstat"),
+            publish.index("create-github-app-token"),
+        )
+        # The workflow refuses the same files the bot merge would refuse.
+        self.assertIn(f"'^{bot_merge.OPENSPEC_FILES.pattern}$'", publish)
+        self.assertIn("core.hooksPath=/dev/null push", publish)
         self.assertIn("--base develop", workflow)
         self.assertIn("--auto --squash", workflow)
 

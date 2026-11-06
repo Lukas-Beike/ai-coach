@@ -9,12 +9,14 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 QUALITY_TOOLS = ("ruff", "mypy")
 PIP_INPUTS = ("requirements.in", "requirements-dev.in", "requirements-graphify.in")
 PYPI_URL = "https://pypi.org/pypi/{}/json"
-CHECK_TIMEOUT = 10
+CHECK_TIMEOUT = 5
+NPM_TIMEOUT = 30
 
 
 def quality_requirements(lock_text: str) -> str:
@@ -59,18 +61,20 @@ def install_quality_tools(root: Path) -> int:
         return subprocess.run(command, cwd=root, check=False).returncode
 
 
-def _newer(latest: str, pinned: str) -> bool:
-    def key(version: str) -> tuple[int, ...] | None:
-        return (
-            tuple(map(int, version.split(".")))
-            if re.fullmatch(r"\d+(?:\.\d+)*", version)
-            else None
-        )
+def _release_key(version: str) -> tuple[int, ...] | None:
+    """Return a comparable final-release key, or None for anything else."""
+    if not re.fullmatch(r"\d+(?:\.\d+)*", version):
+        return None
+    parts = [int(part) for part in version.split(".")]
+    while len(parts) > 1 and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts)
 
-    latest_key, pinned_key = key(latest), key(pinned)
-    if latest_key is None or pinned_key is None:
-        return latest != pinned
-    return latest_key > pinned_key
+
+def _newer(latest: str, pinned: str) -> bool:
+    """Report only final releases that compare higher; skip anything unclear."""
+    latest_key, pinned_key = _release_key(latest), _release_key(pinned)
+    return latest_key is not None and pinned_key is not None and latest_key > pinned_key
 
 
 def pip_pins(root: Path) -> dict[str, str]:
@@ -97,54 +101,66 @@ def npm_outdated(root: Path, npm: str) -> dict[str, tuple[str, str]]:
         cwd=root,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=NPM_TIMEOUT,
         check=False,
     )
     data = json.loads(result.stdout or "{}")
+    if not isinstance(data, dict) or "error" in data:
+        raise ValueError("npm outdated reported an error")
     return {
-        name: (str(info.get("current") or info.get("wanted")), str(info["latest"]))
+        name: (str(info.get("current")), str(info.get("latest")))
         for name, info in data.items()
-        if info.get("latest")
+        if isinstance(info, dict)
     }
+
+
+def _pip_notes(root: Path) -> list[str]:
+    try:
+        pins = sorted(pip_pins(root).items())
+    except OSError as exc:
+        return [f"Python packages: check unavailable ({type(exc).__name__})"]
+
+    def check(item: tuple[str, str]) -> str | None:
+        package, pinned = item
+        try:
+            latest = pypi_latest(package)
+        except Exception as exc:  # noqa: BLE001 - advisory only
+            return f"{package}: check unavailable ({type(exc).__name__})"
+        return f"{package} {pinned} -> {latest}" if _newer(latest, pinned) else None
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return [note for note in pool.map(check, pins) if note]
+
+
+def _npm_notes(root: Path, npm: str | None) -> list[str]:
+    if not npm:
+        return ["npm packages: not checked (Node dependencies not prepared)"]
+    try:
+        outdated = npm_outdated(root, npm)
+    except Exception as exc:  # noqa: BLE001 - advisory only
+        return [f"npm packages: check unavailable ({type(exc).__name__})"]
+    return [
+        f"{name} {current} -> {latest}"
+        for name, (current, latest) in sorted(outdated.items())
+        if _newer(latest, current)
+    ]
 
 
 def newer_versions(root: Path, npm: str | None) -> list[str]:
     """Return pinned packages with a newer release; installs stay lock-based."""
-    notes = []
-    for package, pinned in sorted(pip_pins(root).items()):
-        try:
-            latest = pypi_latest(package)
-        except (OSError, ValueError, KeyError) as exc:
-            notes.append(f"{package}: check unavailable ({type(exc).__name__})")
-            continue
-        if _newer(latest, pinned):
-            notes.append(f"{package} {pinned} -> {latest}")
-    if npm:
-        try:
-            outdated = npm_outdated(root, npm)
-        except (OSError, ValueError, subprocess.SubprocessError) as exc:
-            notes.append(f"npm: check unavailable ({type(exc).__name__})")
-        else:
-            notes.extend(
-                f"{name} {current} -> {latest}"
-                for name, (current, latest) in sorted(outdated.items())
-                if _newer(latest, current)
-            )
-    return notes
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        npm_notes = pool.submit(_npm_notes, root, npm)
+        return _pip_notes(root) + npm_notes.result()
 
 
 def report_newer_versions(root: Path, npm: str | None) -> None:
     """Print available updates without changing lockfiles or the exit code."""
     print("Checking for newer package versions", flush=True)
-    try:
-        notes = newer_versions(root, npm)
-    except Exception as exc:  # noqa: BLE001 - advisory only
-        print(f"Version check skipped: {type(exc).__name__}")
-        return
+    notes = newer_versions(root, npm)
     if not notes:
         print("All pinned packages are current")
         return
-    print("Newer versions available (installed from the lockfiles):")
+    print("Package versions (installs stay on the lockfiles):")
     for note in notes:
         print(f"  {note}")
 
@@ -176,6 +192,8 @@ def main() -> int:
         if code:
             print(f"{label} failed (exit {code})", file=sys.stderr)
             failed = True
+            if label == "Node dependencies":
+                npm = None
     report_newer_versions(root, npm)
     return int(failed)
 

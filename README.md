@@ -757,8 +757,10 @@ Review the generated diff and retain the project context/rules in
 `openspec/config.yaml`. Do not pass `--language` when regenerating an existing
 project; the language instruction is already in its context. Dependabot bumps
 the pin; the daily `Daily OpenSpec update` workflow then runs `openspec update`
-with the locked CLI on `develop` and, when the generated skills change, opens a
-`chore/openspec-update` PR that merges automatically once `test` passes. Do not run the bare `openspec config profile`: that changes user-global
+with the locked CLI on `develop` in a job without write credentials and, when
+the generated skills change, opens a `chore/openspec-update` PR. It merges
+automatically once `test` passes and only if every changed file is a generated
+`openspec-*` skill. Do not run the bare `openspec config profile`: that changes user-global
 configuration. Existing
 AGENTS boundaries and authorization take precedence over generated workflows;
 OpenSpec does not replace repository review, orchestration, or validation.

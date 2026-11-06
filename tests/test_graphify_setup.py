@@ -567,24 +567,63 @@ class WorktreePreparationTests(unittest.TestCase):
             root = Path(temp)
             for name in prepare.PIP_INPUTS:
                 (root / name).write_text("ruff==0.17.3\n")
-            with (
-                patch.object(prepare, "pypi_latest", side_effect=OSError("offline")),
-                patch.object(prepare.subprocess, "run", side_effect=OSError("no npm")),
+            npm_error = json.dumps({"error": {"code": "ENOTFOUND"}})
+            for npm_result, npm_note in (
+                (OSError("no npm"), "npm packages: check unavailable (OSError)"),
+                (
+                    subprocess.CompletedProcess([], 1, stdout=npm_error),
+                    "npm packages: check unavailable (ValueError)",
+                ),
             ):
+                with (
+                    self.subTest(npm_note=npm_note),
+                    patch.object(prepare, "pypi_latest", side_effect=OSError),
+                    patch.object(prepare.subprocess, "run", side_effect=[npm_result]),
+                ):
+                    self.assertEqual(
+                        prepare.newer_versions(root, "npm.cmd"),
+                        ["ruff: check unavailable (OSError)", npm_note],
+                    )
+            with patch.object(prepare, "pypi_latest", return_value="0.17.3"):
+                self.assertEqual(
+                    prepare.newer_versions(root, None),
+                    ["npm packages: not checked (Node dependencies not prepared)"],
+                )
+            (root / "requirements.in").unlink()
+            with patch.object(prepare.subprocess, "run", side_effect=OSError):
                 self.assertEqual(
                     prepare.newer_versions(root, "npm.cmd"),
                     [
-                        "ruff: check unavailable (OSError)",
-                        "npm: check unavailable (OSError)",
+                        "Python packages: check unavailable (FileNotFoundError)",
+                        "npm packages: check unavailable (OSError)",
                     ],
                 )
-            output = io.StringIO()
-            with (
-                patch.object(prepare, "newer_versions", side_effect=RuntimeError),
-                contextlib.redirect_stdout(output),
-            ):
-                prepare.report_newer_versions(root, None)
-            self.assertIn("Version check skipped", output.getvalue())
+
+    def test_version_check_reports_only_higher_final_releases(self):
+        for latest, pinned, expected in (
+            ("0.17.10", "0.17.3", True),
+            ("1.0.0", "1.0", False),
+            ("0.9.0", "1.0.0rc1", False),
+            ("1.2.0", "None", False),
+            ("2026.6", "2026.6", False),
+        ):
+            with self.subTest(latest=latest, pinned=pinned):
+                self.assertEqual(prepare._newer(latest, pinned), expected)
+
+    def test_failed_node_preparation_skips_the_npm_version_check(self):
+        with (
+            patch.object(prepare.shutil, "which", return_value="npm.cmd"),
+            patch.object(prepare, "report_newer_versions") as report,
+            patch.object(
+                prepare.subprocess,
+                "run",
+                side_effect=[
+                    subprocess.CompletedProcess([], code) for code in (1, 0, 0, 0)
+                ],
+            ),
+        ):
+            self.assertEqual(prepare.main(), 1)
+        self.assertIsNone(report.call_args.args[1])
 
 
 if __name__ == "__main__":

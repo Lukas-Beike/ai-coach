@@ -75,6 +75,66 @@ class BotMergeTests(unittest.TestCase):
             bot_merge.eligible(pull("human", "develop", branch), "owner/repo")
         )
 
+    def test_openspec_update_merges_only_generated_skill_files(self):
+        allowed = [
+            {"filename": ".agents/skills/.openspec-target", "status": "modified"},
+            {
+                "filename": ".agents/skills/openspec-explore/SKILL.md",
+                "status": "modified",
+            },
+        ]
+        for files, merged in (
+            (allowed, True),
+            ([], False),
+            (
+                allowed + [{"filename": "tools/bot_merge.py", "status": "modified"}],
+                False,
+            ),
+            (
+                [{"filename": ".agents/skills/pr/SKILL.md", "status": "modified"}],
+                False,
+            ),
+            (
+                [
+                    {
+                        "filename": ".agents/skills/openspec-explore/SKILL.md",
+                        "status": "removed",
+                    }
+                ],
+                False,
+            ),
+        ):
+            pr = pull("ai-coach-release-bot[bot]", "develop", "chore/openspec-update")
+            calls = []
+
+            def api(path, token, payload=None, pr=pr, files=files, calls=calls):
+                calls.append(path)
+                if "pulls?" in path:
+                    return [{"number": 1}] if path.endswith("&page=1") else []
+                if "/files?" in path:
+                    return files if path.endswith("&page=1") else []
+                if "check-runs" in path:
+                    return {
+                        "check_runs": [
+                            {
+                                "name": "test",
+                                "status": "completed",
+                                "conclusion": "success",
+                                "app": {"id": 15368},
+                            }
+                        ]
+                    }
+                if path.endswith("/merge"):
+                    return {"merged": True}
+                return pr
+
+            with (
+                self.subTest(files=[item["filename"] for item in files]),
+                patch.object(bot_merge, "request", side_effect=api),
+            ):
+                bot_merge.run("owner/repo", "fake")
+                self.assertEqual(calls[-1].endswith("/merge"), merged)
+
     def test_merge_uses_fresh_head_and_squash(self):
         pr = pull(sha="b" * 40)
         calls = []
