@@ -54,6 +54,7 @@ class ActivitySummary(TypedDict, total=False):
     elapsed_duration_s: float
     distance_m: float
     elevation_gain_m: float
+    elevation_loss_m: float
     avg_hr: float
     max_hr: float
     avg_power: float
@@ -61,6 +62,8 @@ class ActivitySummary(TypedDict, total=False):
     avg_speed_mps: float
     max_speed_mps: float
     avg_temp_c: float
+    min_temp_c: float
+    max_temp_c: float
     rpe: float
     rpe_conflict: bool
     feel: float
@@ -75,6 +78,8 @@ class ActivitySummary(TypedDict, total=False):
     load_model: str
     training_effect_label: str
     training_effect_load: float
+    aerobic_training_effect: float
+    anaerobic_training_effect: float
     power_zone_times: list[dict[str, Any]]
     heart_rate_zone_times: list[dict[str, Any]]
     pace_zone_times: list[dict[str, Any]]

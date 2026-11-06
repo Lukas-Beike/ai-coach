@@ -9,9 +9,10 @@ value, so consumers never read provider rows or provider field names.
 
 ``training_load`` is filled only from TSS-like load models, so loads of different
 scales are never added up; ``load_model`` names the model it came from.
-``training_effect_label`` is the provider's training-effect category and
-``training_effect_load`` the training load on that provider's own scale, from the
-same record.
+``training_effect_label`` is the provider's training-effect category,
+``training_effect_load`` the training load on that provider's own scale, and
+``aerobic_training_effect``/``anaerobic_training_effect`` its effect values, all
+from the same record.
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ _MEASURED: Final = (
     ("elapsed_duration_s", "elapsed_duration_s"),
     ("distance_m", "distance_m"),
     ("elevation_gain_m", "elevation_gain_m"),
+    ("elevation_loss_m", "elevation_loss_m"),
     ("avg_hr", "avg_hr"),
     ("max_hr", "max_hr"),
     ("avg_power", "avg_power"),
@@ -56,6 +58,8 @@ _MEASURED: Final = (
     ("avg_speed_mps", "avg_speed_mps"),
     ("max_speed_mps", "max_speed_mps"),
     ("avg_temp_c", "avg_temp_c"),
+    ("min_temp_c", "min_temp_c"),
+    ("max_temp_c", "max_temp_c"),
     ("rpe", "rpe"),
     ("feel", "feel"),
     ("device_name", "device_name"),
@@ -126,20 +130,41 @@ def activity_summary(
         summary["training_load"] = load.load
         summary["load_model"] = load.load_model.value
         sources["training_load"] = _label(load)
-    effect = _first(derived, "training_effect_label")
+    effect = next(
+        (record for record in derived if record.training_effect_label is not None),
+        None,
+    ) or next(
+        (
+            record
+            for record in derived
+            if record.aerobic_training_effect is not None
+            or record.anaerobic_training_effect is not None
+        ),
+        None,
+    )
     if effect is not None:
-        record, label = effect
-        summary["training_effect_label"] = label
-        sources["training_effect_label"] = _label(record)
-        if (
-            record.load is not None
-            and record.load_model is LoadModel.GARMIN_TRAINING_LOAD
-        ):
-            summary["training_effect_load"] = record.load
+        _training_effect(summary, sources, effect)
     summary["source"] = _label(primary)
     summary["sources"] = sources
     summary["record_ids"] = _record_ids(measured)
     return summary  # type: ignore[return-value]
+
+
+def _training_effect(
+    summary: dict[str, Any], sources: dict[str, str], record: ActivityRecord
+) -> None:
+    """Set the training-effect label, values and load of one record."""
+    for key in (
+        "training_effect_label",
+        "aerobic_training_effect",
+        "anaerobic_training_effect",
+    ):
+        value = getattr(record, key)
+        if value is not None:
+            summary[key] = value
+            sources[key] = _label(record)
+    if record.load is not None and record.load_model is LoadModel.GARMIN_TRAINING_LOAD:
+        summary["training_effect_load"] = record.load
 
 
 def _values(

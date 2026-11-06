@@ -57,6 +57,7 @@ _MEASURED_METRICS: Final[tuple[tuple[str, str], ...]] = (
     ("elapsed_duration_s", "s"),
     ("distance_m", "m"),
     ("elevation_gain_m", "m"),
+    ("elevation_loss_m", "m"),
     ("elevation_high_m", "m"),
     ("elevation_low_m", "m"),
     ("avg_hr", "bpm"),
@@ -66,12 +67,23 @@ _MEASURED_METRICS: Final[tuple[tuple[str, str], ...]] = (
     ("max_power_w", "W"),
     ("avg_cadence", "rpm"),
     ("max_speed_mps", "m/s"),
+    ("min_temp_c", "°C"),
+    ("max_temp_c", "°C"),
     ("steps", "count"),
+    ("lap_count", "count"),
     ("energy_kj", "kJ"),
 )
 _DERIVED_METRICS: Final[tuple[tuple[str, str | None], ...]] = (
     ("normalized_power", "W"),
     ("load", None),
+    ("aerobic_training_effect", None),
+    ("anaerobic_training_effect", None),
+    ("water_estimated_ml", "ml"),
+)
+# Record values the Intervals.icu summary scalars also report (#1724); the
+# scalar is kept as an alternative instead of being dropped.
+_SUMMARY_ALTERNATIVE_KEYS: Final = frozenset(
+    {"min_temp_c", "max_temp_c", "elevation_loss_m"}
 )
 # Measured averages that fall back to the merged stream mean when no record has them.
 _GAP_FILL: Final[Mapping[str, tuple[StreamChannel, str]]] = {
@@ -133,7 +145,12 @@ def activity_detail_contract(
     measured = measured_order(records)
     metrics = _metrics(measured, derived_order(records), merged)
     for key, entry in (summary_metrics or {}).items():
-        metrics.setdefault(key, dict(entry))
+        if key not in metrics:
+            metrics[key] = dict(entry)
+        elif key in _SUMMARY_ALTERNATIVE_KEYS:
+            metrics[key].setdefault("alternatives", []).append(
+                {"value": entry.get("value"), "source": entry.get("source")}
+            )
     document = {
         "contract": ACTIVITY_DETAIL_CONTRACT,
         "session": _session(session_id, measured, zone),

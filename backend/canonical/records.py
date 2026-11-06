@@ -310,6 +310,11 @@ MAX_ZONE_COUNT: Final = 20
 MAX_TRAINING_EFFECT_LABEL_LENGTH: Final = 50
 MAX_NATIVE_TYPE_LENGTH: Final = 64
 MAX_ZONE_ID_LENGTH: Final = 20
+MAX_LAP_COUNT: Final = 10_000.0
+TEMPERATURE_C_BOUNDS: Final = (-60.0, 70.0)
+# Garmin's training effect runs 0.0 (none) to 5.0 (overreaching).
+MAX_TRAINING_EFFECT: Final = 5.0
+MAX_WATER_ESTIMATE_ML: Final = 50_000.0
 _SUMMARY_VALUE_BOUNDS: Final = (
     ("intensity", 0.0, 1_000.0),
     ("rpe", 0.0, 10.0),
@@ -320,7 +325,14 @@ _SUMMARY_VALUE_BOUNDS: Final = (
     ("ftp_w", 0.0, MAX_ACTIVITY_POWER_W),
     ("eftp_w", 0.0, MAX_ACTIVITY_POWER_W),
     ("vo2max", 0.0, 100.0),
-    ("avg_temp_c", -60.0, 70.0),
+    ("avg_temp_c", *TEMPERATURE_C_BOUNDS),
+    ("min_temp_c", *TEMPERATURE_C_BOUNDS),
+    ("max_temp_c", *TEMPERATURE_C_BOUNDS),
+    ("elevation_loss_m", 0.0, MAX_ACTIVITY_ELEVATION_M),
+    ("lap_count", 0.0, MAX_LAP_COUNT),
+    ("aerobic_training_effect", 0.0, MAX_TRAINING_EFFECT),
+    ("anaerobic_training_effect", 0.0, MAX_TRAINING_EFFECT),
+    ("water_estimated_ml", 0.0, MAX_WATER_ESTIMATE_ML),
 )
 _ZONE_FIELDS: Final = ("power_zone_times_s", "hr_zone_times_s", "pace_zone_times_s")
 
@@ -429,6 +441,15 @@ class ActivityRecord:
     eftp_w: float | None = None
     vo2max: float | None = None
     avg_temp_c: float | None = None
+    min_temp_c: float | None = None
+    max_temp_c: float | None = None
+    elevation_loss_m: float | None = None
+    lap_count: float | None = None
+    # The provider's own training-effect estimates (Garmin 0.0-5.0) of the session.
+    aerobic_training_effect: float | None = None
+    anaerobic_training_effect: float | None = None
+    # The provider's estimated sweat loss of the session.
+    water_estimated_ml: float | None = None
     # Seconds per zone as (zone id, seconds) pairs, ids such as "Z1".
     power_zone_times_s: ZoneSeconds | None = None
     hr_zone_times_s: ZoneSeconds | None = None

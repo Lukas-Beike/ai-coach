@@ -43,10 +43,25 @@ the same moment.
 * ``activityName`` (text, stripped and truncated to 200 characters).
 * ``trainingEffectLabel`` (text, stripped, upper-cased and truncated to 50
   characters) -> ``training_effect_label``.
+* ``aerobicTrainingEffect`` (legacy ``trainingEffect``) and
+  ``anaerobicTrainingEffect`` (Garmin's 0.0-5.0 scale) ->
+  ``aerobic_training_effect`` and ``anaerobic_training_effect``.
+* ``maxElevation`` and ``minElevation`` (metres) -> ``elevation_high_m`` and
+  ``elevation_low_m``; ``elevationLoss`` (m) -> ``elevation_loss_m``.
+* ``minTemperature`` and ``maxTemperature`` (°C) -> ``min_temp_c``, ``max_temp_c``.
+  A minimum above its maximum drops both of the pair with one issue.
+* ``waterEstimated`` (ml, Garmin's estimate) -> ``water_estimated_ml``;
+  ``lapCount`` -> ``lap_count``.
+* ``averageBikingCadenceInRevPerMinute`` (rpm) -> ``avg_cadence``; else
+  ``averageRunningCadenceInStepsPerMinute`` (steps/min) halved to one-leg rpm.
+* ``hrTimeInZone_<n>`` and ``powerTimeInZone_<n>`` (seconds, by Garmin's own
+  zones) -> ``hr_zone_times_s`` and ``power_zone_times_s`` as zones ``Z<n>``.
+  One invalid zone drops that distribution with one issue.
 
 A dedicated ``training_load_activities`` row of the same ``activityId`` supplies
-``activityTrainingLoad`` and ``trainingEffectLabel`` before the activity is stored
-(``merge_training_load_rows``), so a re-projection of the stored row reads them too.
+``activityTrainingLoad``, ``trainingEffectLabel`` and the training-effect values
+before the activity is stored (``merge_training_load_rows``), so a re-projection
+of the stored row reads them too.
 
 Sport and environment. A known ``typeKey`` uses ``GARMIN_ACTIVITY_TYPES``. An
 environment that the key leaves UNKNOWN may be named by the activity name.
@@ -73,8 +88,13 @@ from backend.canonical.mapping import (
     coerce_number,
 )
 from backend.canonical.records import (
+    MAX_LAP_COUNT,
     MAX_NATIVE_TYPE_LENGTH,
+    MAX_TRAINING_EFFECT,
     MAX_TRAINING_EFFECT_LABEL_LENGTH,
+    MAX_WATER_ESTIMATE_ML,
+    MAX_ZONE_COUNT,
+    TEMPERATURE_C_BOUNDS,
     ActivityRecord,
     Provenance,
     activity_duration_s,
@@ -82,6 +102,8 @@ from backend.canonical.records import (
 from backend.canonical.sports import classify_environment_text, classify_sport_text
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
+    MAX_ACTIVITY_ALTITUDE_M,
+    MAX_ACTIVITY_CADENCE_RPM,
     MAX_ACTIVITY_DISTANCE_M,
     MAX_ACTIVITY_DURATION_S,
     MAX_ACTIVITY_ELEVATION_M,
@@ -89,6 +111,7 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_POWER_W,
     MAX_ACTIVITY_SPEED_MPS,
     MAX_ACTIVITY_STEPS,
+    MIN_ACTIVITY_ALTITUDE_M,
     require_aware_datetime,
 )
 from backend.canonical.vocabulary import (
@@ -116,7 +139,10 @@ from backend.canonical.vocabulary import (
 # Version 13: maps terrain, motor assistance and the native type key, and knows
 # the cyclocross, BMX, track cycling, e-MTB, skate and backcountry skiing,
 # indoor and treadmill walking, Pilates, HIIT and indoor cardio keys (#1670).
-MAPPER_VERSION: Final = 13
+# Version 14: maps HR and power zone times, aerobic and anaerobic training
+# effect, altitude extremes, elevation loss, temperature range, estimated sweat
+# loss, lap count and average cadence (#1724).
+MAPPER_VERSION: Final = 14
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -135,8 +161,23 @@ _NORMALIZED_POWER_KEYS: Final = ("normPower",)
 _VO2MAX_KEYS: Final = ("vO2MaxValue",)
 _TRAINING_EFFECT_LABEL_KEY: Final = "trainingEffectLabel"
 _TRAINING_LOAD_KEY: Final = "activityTrainingLoad"
-# The dedicated training-load rows override these activity fields.
-_TRAINING_LOAD_FIELDS: Final = (_TRAINING_LOAD_KEY, _TRAINING_EFFECT_LABEL_KEY)
+_AEROBIC_EFFECT_KEYS: Final = ("aerobicTrainingEffect", "trainingEffect")
+_ANAEROBIC_EFFECT_KEYS: Final = ("anaerobicTrainingEffect",)
+# The dedicated training-load rows override these activity fields, each named
+# by its aliases.
+_TRAINING_LOAD_FIELDS: Final = (
+    (_TRAINING_LOAD_KEY,),
+    (_TRAINING_EFFECT_LABEL_KEY,),
+    _AEROBIC_EFFECT_KEYS,
+    _ANAEROBIC_EFFECT_KEYS,
+)
+_TRAINING_EFFECT_BOUNDS: Final = (0.0, MAX_TRAINING_EFFECT)
+_ALTITUDE_BOUNDS: Final = (MIN_ACTIVITY_ALTITUDE_M, MAX_ACTIVITY_ALTITUDE_M)
+_BIKE_CADENCE_KEYS: Final = ("averageBikingCadenceInRevPerMinute",)
+_RUN_CADENCE_KEYS: Final = ("averageRunningCadenceInStepsPerMinute",)
+# Garmin reports zone times as numbered keys, zone 1 first.
+_HR_ZONE_PREFIX: Final = "hrTimeInZone_"
+_POWER_ZONE_PREFIX: Final = "powerTimeInZone_"
 
 # Exact Garmin activityType.typeKey values. The environment is set only where the
 # key names it;
@@ -299,6 +340,28 @@ def _map_row(
         row, _NORMALIZED_POWER_KEYS, (0.0, MAX_ACTIVITY_POWER_W), ref, issues
     )
     vo2max = _optional_number(row, _VO2MAX_KEYS, (0.0, 100.0), ref, issues)
+    aerobic_effect = _optional_number(
+        row, _AEROBIC_EFFECT_KEYS, _TRAINING_EFFECT_BOUNDS, ref, issues
+    )
+    anaerobic_effect = _optional_number(
+        row, _ANAEROBIC_EFFECT_KEYS, _TRAINING_EFFECT_BOUNDS, ref, issues
+    )
+    elevation_low, elevation_high = _ordered_pair(
+        row, ("minElevation", "maxElevation"), _ALTITUDE_BOUNDS, ref, issues
+    )
+    min_temp, max_temp = _ordered_pair(
+        row, ("minTemperature", "maxTemperature"), TEMPERATURE_C_BOUNDS, ref, issues
+    )
+    elevation_loss = _optional_number(
+        row, ("elevationLoss",), (0.0, MAX_ACTIVITY_ELEVATION_M), ref, issues
+    )
+    water = _optional_number(
+        row, ("waterEstimated",), (0.0, MAX_WATER_ESTIMATE_ML), ref, issues
+    )
+    lap_count = _optional_number(row, ("lapCount",), (0.0, MAX_LAP_COUNT), ref, issues)
+    cadence = _cadence(row, ref, issues)
+    hr_zones = _zone_times(row, _HR_ZONE_PREFIX, ref, issues)
+    power_zones = _zone_times(row, _POWER_ZONE_PREFIX, ref, issues)
     if activity_id is None or started_at is None:
         return None
     return ActivityRecord(
@@ -327,6 +390,18 @@ def _map_row(
         normalized_power=normalized_power,
         vo2max=vo2max,
         training_effect_label=training_effect_label,
+        aerobic_training_effect=aerobic_effect,
+        anaerobic_training_effect=anaerobic_effect,
+        elevation_high_m=elevation_high,
+        elevation_low_m=elevation_low,
+        elevation_loss_m=elevation_loss,
+        min_temp_c=min_temp,
+        max_temp_c=max_temp,
+        water_estimated_ml=water,
+        lap_count=lap_count,
+        avg_cadence=cadence,
+        hr_zone_times_s=hr_zones,
+        power_zone_times_s=power_zones,
         local_offset_minutes=_local_offset(row, started_at),
         terrain=terrain,
         assist=assist,
@@ -361,17 +436,24 @@ def merge_training_load_rows(activities: object, training_loads: object) -> obje
         if not isinstance(activity, dict) or load_row is None:
             merged.append(activity)
             continue
-        merged.append(
-            {
-                **activity,
-                **{
-                    key: load_row[key]
-                    for key in _TRAINING_LOAD_FIELDS
-                    if load_row.get(key) is not None
-                },
-            }
-        )
+        merged.append(_with_load_fields(activity, load_row))
     return merged
+
+
+def _with_load_fields(
+    activity: dict[str, object], load_row: dict[str, object]
+) -> dict[str, object]:
+    """Replace each field the load row carries, dropping the activity's aliases."""
+    result = dict(activity)
+    for aliases in _TRAINING_LOAD_FIELDS:
+        carried = {
+            key: load_row[key] for key in aliases if load_row.get(key) is not None
+        }
+        if carried:
+            for key in aliases:
+                result.pop(key, None)
+            result.update(carried)
+    return result
 
 
 def _training_effect_label(
@@ -536,6 +618,56 @@ def _optional_number(
         issues.append(MappingIssue(ref, field, IssueReason.OUT_OF_RANGE))
         return None
     return number
+
+
+def _ordered_pair(
+    row: dict[str, object],
+    keys: tuple[str, str],
+    bounds: tuple[float, float],
+    ref: str | None,
+    issues: list[MappingIssue],
+) -> tuple[float | None, float | None]:
+    """Return a (minimum, maximum) pair; a minimum above its maximum drops both."""
+    low_key, high_key = keys
+    low = _optional_number(row, (low_key,), bounds, ref, issues)
+    high = _optional_number(row, (high_key,), bounds, ref, issues)
+    if low is not None and high is not None and low > high:
+        issues.append(MappingIssue(ref, low_key, IssueReason.OUT_OF_RANGE))
+        return None, None
+    return low, high
+
+
+def _cadence(
+    row: dict[str, object], ref: str | None, issues: list[MappingIssue]
+) -> float | None:
+    """Bike rpm as reported; run steps per minute halved to one-leg rpm."""
+    bike = _optional_number(
+        row, _BIKE_CADENCE_KEYS, (0.0, MAX_ACTIVITY_CADENCE_RPM), ref, issues
+    )
+    if bike:
+        return bike
+    steps = _optional_number(
+        row, _RUN_CADENCE_KEYS, (0.0, 2 * MAX_ACTIVITY_CADENCE_RPM), ref, issues
+    )
+    return bike if steps is None else steps / 2
+
+
+def _zone_times(
+    row: dict[str, object], prefix: str, ref: str | None, issues: list[MappingIssue]
+) -> tuple[tuple[str, float], ...] | None:
+    """Return ``<prefix><n>`` seconds as ``Z<n>`` zones; one bad zone drops all."""
+    zones: list[tuple[str, float]] = []
+    for number in range(1, MAX_ZONE_COUNT + 1):
+        key = f"{prefix}{number}"
+        if _is_absent(row.get(key)):
+            continue
+        seconds = _optional_number(
+            row, (key,), (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
+        )
+        if seconds is None:
+            return None
+        zones.append((f"Z{number}", seconds))
+    return tuple(zones) or None
 
 
 def _recorded_by(row: dict[str, object]) -> RecordingOrigin:
