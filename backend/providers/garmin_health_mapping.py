@@ -8,7 +8,15 @@ raw value.
 
 Mapped sections and their canonical kinds:
 
-* ``sleep``: SLEEP_DURATION (seconds) and SLEEP_SCORE.
+* ``sleep``: SLEEP_DURATION (seconds) and SLEEP_SCORE, and the night values
+  SPO2 (``averageSpO2Value``, aggregation MEAN), SPO2_LOWEST
+  (``lowestSpO2Value``, MINIMUM), RESPIRATION_RATE (``averageRespirationValue``,
+  MEAN) and SLEEPING_HR (``avgHeartRate``, MEAN), each with the ``overnight``
+  window. Fields are read from the record, else from its ``dailySleepDTO``, so the
+  SDK element and the wrapped flat Personal API ``dailySleep`` map alike. Garmin's
+  whole-day pulse-ox and respiration summaries cover another window and are not
+  mapped (athlete decision 2026-11-06). A 0 night value means "not measured" and
+  is skipped without an issue.
 * ``hrv``: HRV_RMSSD from the last-night average, with method ``rmssd``,
   aggregation MEAN and the ``overnight`` window. Garmin reports no device,
   firmware or sensor with it, so those stay unknown. HRV_WEEKLY_AVERAGE comes
@@ -214,7 +222,8 @@ from backend.providers.garmin_weight_walk import (
 # Version 16: sleep periods are dated by the record's ``calendarDate``.
 # Version 17: running threshold power is FTP for running, manual weigh-ins and the
 # history weight are provider-reported, and readiness keeps the morning reading.
-MAPPER_VERSION: Final = 17
+# Version 18: night SpO2, lowest SpO2, respiration rate and sleeping heart rate.
+MAPPER_VERSION: Final = 18
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -265,6 +274,16 @@ _STRESS_ALIASES: Final = ("averageStressLevel",)
 # Garmin's last-night HRV is the mean RMSSD of the overnight recording; the
 # device, firmware and sensor are not reported with it, so they stay unknown.
 _HRV_CONTEXT: Final = MeasurementContext(window="overnight")
+_NIGHT_CONTEXT: Final = _HRV_CONTEXT
+# Night values whose 0 means "not measured" (pulse ox off, no recording).
+_UNSET_WHEN_ZERO: Final = frozenset(
+    {
+        MetricKind.SPO2,
+        MetricKind.SPO2_LOWEST,
+        MetricKind.RESPIRATION_RATE,
+        MetricKind.SLEEPING_HR,
+    }
+)
 _DAILY_STATS: Final = "daily_stats"
 _ENDURANCE_SCORE: Final = "endurance_score"
 _RACE_PREDICTIONS: Final = "race_predictions"
@@ -431,6 +450,8 @@ class _Entry:
 
 
 _VO2MAX_NAMES: Final = GARMIN_VO2MAX_ALIASES
+_MEAN: Final = ObservationAggregation.MEAN
+_MINIMUM: Final = ObservationAggregation.MINIMUM
 
 _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
     "sleep": (
@@ -446,6 +467,25 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
                     GARMIN_SLEEP_SCORE_ALIASES,
                     MetricKind.SLEEP_SCORE,
                     _PROVIDER,
+                ),
+                *(
+                    _Field(
+                        (name,),
+                        kind,
+                        _DEVICE,
+                        aggregation=aggregation,
+                        context=_NIGHT_CONTEXT,
+                    )
+                    for name, kind, aggregation in (
+                        ("averageSpO2Value", MetricKind.SPO2, _MEAN),
+                        ("lowestSpO2Value", MetricKind.SPO2_LOWEST, _MINIMUM),
+                        (
+                            "averageRespirationValue",
+                            MetricKind.RESPIRATION_RATE,
+                            _MEAN,
+                        ),
+                        ("avgHeartRate", MetricKind.SLEEPING_HR, _MEAN),
+                    )
                 ),
             ),
         ),
@@ -808,6 +848,20 @@ def _measure(
         field = f"{field}.{inner[0]}"
         raw = inner[1]
     return field, raw, unit
+
+
+def _field_value(field: _Field, number: float | None) -> float | None:
+    """Return a grouped field's value as stored, or None when it is unset.
+
+    Garmin's scaled threshold speed below 1 is multiplied by ten (0 and negative
+    speeds stay out of range), whole fields are rounded, and a 0 night value
+    means "not measured".
+    """
+    if number is None or (number == 0 and field.kind in _UNSET_WHEN_ZERO):
+        return None
+    if field.kind == MetricKind.THRESHOLD_PACE and number < 1:
+        number *= 10
+    return float(round(number)) if field.whole else number
 
 
 def _within_bounds(kind: MetricKind, number: float) -> bool:
@@ -1421,15 +1475,9 @@ class _HealthMapping:
             return
         entry = _entry(name, ref, day, group.key, index=index)
         for field in group.fields:
-            number = self._group_number(name, group, record, source, field, ref)
-            if (
-                number is not None
-                and field.kind is MetricKind.THRESHOLD_PACE
-                and 0 < number < 1
-            ):
-                number *= 10
-            if number is not None and field.whole:
-                number = float(round(number))
+            number = _field_value(
+                field, self._group_number(name, group, record, source, field, ref)
+            )
             if number is not None:
                 self.emit(
                     entry,

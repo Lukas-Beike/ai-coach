@@ -10,12 +10,14 @@ import json
 import unittest
 from datetime import UTC, date, datetime, tzinfo
 from pathlib import Path
+from typing import Final
 from zoneinfo import ZoneInfo
 
 from backend.canonical.mapping import IssueReason, MappingResult
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
     MetricKind,
+    ObservationAggregation,
     ProviderId,
     RecordingOrigin,
     SourceKind,
@@ -27,6 +29,7 @@ from backend.providers.garmin_health_mapping import (
     MAPPER_VERSION,
     map_garmin_health,
 )
+from backend.providers.garmin_personal import wrap_daily_sleep
 from backend.providers.garmin_status_mapping import map_garmin_status_codes
 from backend.sync.garmin_metric_history import projected_metric
 from backend.sync.garmin_performance_history import readiness_score_value
@@ -1309,6 +1312,112 @@ class SleepScoreZeroTests(unittest.TestCase):
         )
 
 
+# Synthetic night values in the shape of the sanitized 2026-11-03 sleep payloads.
+_NIGHT_DTO: Final = {
+    "calendarDate": DAY,
+    "sleepTimeSeconds": 27_000,
+    "averageSpO2Value": 95.0,
+    "lowestSpO2Value": 84,
+    "highestSpO2Value": 100,
+    "averageSpO2HRSleep": 47.0,
+    "averageRespirationValue": 14.0,
+    "lowestRespirationValue": 8.0,
+    "avgHeartRate": 48.0,
+}
+_NIGHT_ROWS: Final = [
+    ("respiration_rate", 14.0, DAY, "-"),
+    ("sleep_duration", 27_000.0, DAY, "-"),
+    ("sleeping_hr", 48.0, DAY, "-"),
+    ("spo2", 95.0, DAY, "-"),
+    ("spo2_lowest", 84.0, DAY, "-"),
+]
+
+
+class SleepNightValueTests(unittest.TestCase):
+    def test_sdk_and_personal_sleep_elements_map_the_same_night_values(self) -> None:
+        sdk = {"calendarDate": DAY, "dailySleepDTO": dict(_NIGHT_DTO)}
+        personal = wrap_daily_sleep(dict(_NIGHT_DTO))
+        for name, element in (("sdk", sdk), ("personal", personal)):
+            with self.subTest(transport=name):
+                result = _map({"sleep": [element]})
+
+                self.assertEqual(_rows(result), _NIGHT_ROWS)
+                self.assertEqual(_issues(result), [])
+
+    def test_night_values_carry_aggregation_window_and_device_source(self) -> None:
+        result = _map({"sleep": [{"calendarDate": DAY, "dailySleepDTO": _NIGHT_DTO}]})
+
+        for kind, aggregation in (
+            (MetricKind.SPO2, ObservationAggregation.MEAN),
+            (MetricKind.SPO2_LOWEST, ObservationAggregation.MINIMUM),
+            (MetricKind.RESPIRATION_RATE, ObservationAggregation.MEAN),
+            (MetricKind.SLEEPING_HR, ObservationAggregation.MEAN),
+        ):
+            with self.subTest(kind=kind):
+                observation = _find(result, kind)
+                self.assertEqual(observation.aggregation, aggregation)
+                self.assertEqual(observation.provenance.context.window, "overnight")
+                self.assertIs(
+                    observation.provenance.source_kind, SourceKind.DEVICE_MEASURED
+                )
+                self.assertEqual(observation.value.unit, kind.unit)
+
+    def test_zero_night_values_are_unset_without_an_issue(self) -> None:
+        night = {
+            "calendarDate": DAY,
+            "averageSpO2Value": 0,
+            "lowestSpO2Value": 0,
+            "averageRespirationValue": 0,
+            "avgHeartRate": 0,
+        }
+        result = _map({"sleep": [{"calendarDate": DAY, "dailySleepDTO": night}]})
+
+        self.assertEqual(result.records, ())
+        self.assertEqual(_issues(result), [])
+
+    def test_missing_night_values_yield_nothing_and_implausible_ones_an_issue(
+        self,
+    ) -> None:
+        missing = _map({"sleep": [{"calendarDate": DAY, "dailySleepDTO": {}}]})
+        implausible = _map(
+            {
+                "sleep": [
+                    {"calendarDate": DAY, "dailySleepDTO": {"averageSpO2Value": 30}}
+                ]
+            }
+        )
+
+        self.assertEqual(missing.records, ())
+        self.assertEqual(implausible.records, ())
+        self.assertEqual(
+            _issues(implausible),
+            [("sleep[0]", "averageSpO2Value", IssueReason.OUT_OF_RANGE)],
+        )
+
+    def test_whole_day_pulse_ox_and_respiration_summaries_are_not_mapped(self) -> None:
+        row = {
+            "calendarDate": DAY,
+            "pulseOx": {"avgValue": 95, "minValue": 82},
+            "respiration": {"avgValue": 16, "minValue": 7, "maxValue": 40},
+            "heartRate": {"minValue": 45, "maxValue": 136, "restingValue": 46},
+        }
+        result = _map({"daily_stats": [row]})
+
+        self.assertFalse(
+            [
+                obs
+                for obs in result.records
+                if obs.kind
+                in {
+                    MetricKind.SPO2,
+                    MetricKind.SPO2_LOWEST,
+                    MetricKind.RESPIRATION_RATE,
+                    MetricKind.SLEEPING_HR,
+                }
+            ]
+        )
+
+
 class DailyStatsTests(unittest.TestCase):
     def test_daily_stats_map_counts_and_energy_with_units(self) -> None:
         result = _map(
@@ -1728,7 +1837,7 @@ class MorningReadinessTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 17)
+        self.assertEqual(MAPPER_VERSION, 18)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):

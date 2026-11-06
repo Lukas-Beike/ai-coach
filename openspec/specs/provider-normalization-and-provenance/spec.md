@@ -121,7 +121,7 @@ The system SHALL map the Garmin activity list's zone times, training-effect valu
 Evidence: `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/activities/activity_summary.py:activity_summary`, `backend/activities/detail_contract.py:activity_detail_contract`; `tests/test_garmin_activity_mapping.py:ZoneEffectAndExtremeTests`, `tests/test_activity_summary.py:test_effect_values_and_garmin_extremes_reach_the_summary`, `tests/test_activity_detail_contract.py:test_garmin_summary_values_are_labelled_metrics`.
 
 ### Requirement: Health and body unit normalization
-The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.
+The system SHALL normalize Garmin sleep duration/score, night SpO2/respiration/sleeping HR, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.
 
 #### Scenario: Declared weight unit
 - **WHEN** a valid Garmin weigh-in explicitly declares pounds or grams
@@ -139,13 +139,17 @@ The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly
 - **WHEN** a payload has only a weekly HRV average and no last-night value
 - **THEN** the canonical last-night observation stays absent rather than borrowing the weekly statistic, and the weekly average is stored as its own weekly HRV observation.
 
+#### Scenario: Garmin night SpO2, respiration and sleeping heart rate
+- **WHEN** a Garmin sleep element carries `averageSpO2Value`, `lowestSpO2Value`, `averageRespirationValue` or `avgHeartRate`, at top level or in its `dailySleepDTO` (the SDK element and the wrapped flat Personal API `dailySleep` alike)
+- **THEN** each becomes a device-measured SPO2 (mean), SPO2_LOWEST (minimum), RESPIRATION_RATE (mean) or SLEEPING_HR (mean) observation with the `overnight` window on the night's date; a 0 value is "not measured" and yields nothing without an issue, and Garmin's whole-day pulse-ox and respiration summaries are not mapped to these kinds.
+
 #### Scenario: Stored Garmin health records after the weekly HRV mapping
 - **WHEN** the Garmin health mapper version changes to add the weekly HRV kind
 - **THEN** stored Garmin health records are reprojected through the existing canonical backfill without a provider refetch, schema change or remote write.
 
 Detailed contract: Zero SHALL remain valid for sleep score, steps, floors, and active energy where implemented, while absent or invalid measurements remain unknown.
 
-Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_wake_up_reading_wins_regardless_of_list_order`, `tests/test_garmin_health_mapping.py:test_manual_weigh_in_is_provider_reported_and_recorded_by_manual`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
+Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_wake_up_reading_wins_regardless_of_list_order`, `tests/test_garmin_health_mapping.py:test_manual_weigh_in_is_provider_reported_and_recorded_by_manual`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:SleepNightValueTests`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
 
 ### Requirement: Current thresholds and dated special metrics
 The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed conversion to canonical m/s, display conversion to seconds/km, date-bearing historical FTP, running race-prediction seconds, and endurance-score wrapper normalization. An undated current Garmin FTP, running threshold, zone maximum, or prediction may use the fetch's local day only in its implemented current-value path. Undated current FTP SHALL never invent historical FTP.

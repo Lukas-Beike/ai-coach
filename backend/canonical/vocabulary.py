@@ -120,6 +120,12 @@ class MetricKind(StrEnum):
     HRV_WEEKLY_AVERAGE = "hrv_weekly_average"
     SLEEP_DURATION = "sleep_duration"
     SLEEP_SCORE = "sleep_score"
+    # Night values of the Garmin sleep record (mapper 18): mean and lowest SpO2,
+    # mean respiration rate and mean heart rate while asleep.
+    SPO2 = "spo2"
+    SPO2_LOWEST = "spo2_lowest"
+    RESPIRATION_RATE = "respiration_rate"
+    SLEEPING_HR = "sleeping_hr"
     VO2MAX = "vo2max"
     THRESHOLD_PACE = "threshold_pace"
     BODY_BATTERY = "body_battery"
@@ -201,6 +207,10 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.HRV_WEEKLY_AVERAGE: "ms",
     MetricKind.SLEEP_DURATION: "s",
     MetricKind.SLEEP_SCORE: "score",
+    MetricKind.SPO2: "%",
+    MetricKind.SPO2_LOWEST: "%",
+    MetricKind.RESPIRATION_RATE: "brpm",
+    MetricKind.SLEEPING_HR: "bpm",
     MetricKind.VO2MAX: "ml/kg/min",
     MetricKind.THRESHOLD_PACE: "m/s",
     MetricKind.BODY_BATTERY: "score",

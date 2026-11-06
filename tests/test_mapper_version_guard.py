@@ -66,19 +66,19 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "0a3135dee53ae9d558fcd026e19d61436c0315f47d3db0b5462f84c28b6cdb0c",
     ),
     "garmin_gear_mapping": (
-        (17,),
+        (18,),
         "c1065949991a138dd91ec1b96da88939bf8c847e52ef550dc32a665cce0e1b7c",
     ),
     "garmin_health_mapping": (
-        (17,),
-        "60043de739cfbbf163d613af7a01709d6e8341f2e5de761462d3935ba2081050",
+        (18,),
+        "82def055aaf35effcb453e42c26f943167b16d5ac2054c5e099651de819cc788",
     ),
     "garmin_status_mapping": (
-        (17,),
+        (18,),
         "6eb0749c1fee8ce3f6ccf61c5620475b7eea3eac353aab4be5e58f1d866be8f5",
     ),
     "garmin_training_mapping": (
-        (17,),
+        (18,),
         "34fd2a6d7884c0b54f9b87ccba040fb83f5cc7c481c69776edbd71c30e87be0e",
     ),
     "intervals_activity_detail_mapping": (
@@ -102,7 +102,7 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "6d741d7c81757d9149da43d1f0635532ef181918a47c6da3485f396eb229ca75",
     ),
     "sleep_period_mapping": (
-        (17, 12),
+        (18, 12),
         "77efab15de0cda5414ed02c0d5005a9fe6fb1a650ec103bdb40e01cef065cf0f",
     ),
     "wahoo_activity_mapping": (
