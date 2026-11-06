@@ -38,6 +38,7 @@ from backend.performance import garmin_metrics, garmin_observations
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
+    read_garmin_recovery,
     read_garmin_sleep_day,
     read_garmin_state,
 )
@@ -477,6 +478,57 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
                 label=None,
             ),
         )
+
+    def test_sleep_record_carries_night_values_and_their_window_means(self) -> None:
+        nights = (
+            (date(2026, 10, 8), 97.0, 15.0, 50.0),
+            (date(2026, 10, 9), 96.0, 14.0, 48.0),
+            (date(2026, 10, 10), 92.0, 17.0, 55.0),
+        )
+        items = [
+            self._observation(kind, value, day=day)
+            for day, spo2, respiration, heart_rate in nights
+            for kind, value in (
+                (MetricKind.SPO2, spo2),
+                (MetricKind.RESPIRATION_RATE, respiration),
+                (MetricKind.SLEEPING_HR, heart_rate),
+            )
+        ]
+        items.append(self._observation(MetricKind.SPO2_LOWEST, 83.0))
+        # Another provider's value never enters the Garmin record or its means.
+        items.append(
+            self._observation(MetricKind.SPO2, 80.0, provider=ProviderId.INTERVALS)
+        )
+
+        sleep = read_garmin_recovery(
+            _Observations(items), object(), start=date(2026, 9, 27)
+        )["sleep"]
+
+        self.assertEqual(
+            sleep,
+            {
+                "date": "2026-10-10",
+                "avg_spo2_pct": 92,
+                "lowest_spo2_pct": 83,
+                "avg_respiration_brpm": 17,
+                "avg_sleeping_hr_bpm": 55,
+                "night_means": {
+                    "avg_spo2_pct": {"mean": 95.0, "nights": 3},
+                    "lowest_spo2_pct": {"mean": 83.0, "nights": 1},
+                    "avg_respiration_brpm": {"mean": 15.3, "nights": 3},
+                    "avg_sleeping_hr_bpm": {"mean": 51.0, "nights": 3},
+                },
+            },
+        )
+
+    def test_sleep_record_without_night_values_has_no_means(self) -> None:
+        sleep = read_garmin_recovery(
+            _Observations([self._observation(MetricKind.SLEEP_SCORE, 80.0)]),
+            object(),
+            start=date(2026, 9, 27),
+        )["sleep"]
+
+        self.assertEqual(sleep, {"date": "2026-10-10", "sleep_score": 80})
 
     def _metrics(self, items: list[Observation]) -> GarminCanonicalMetrics:
         return read_garmin_state(_Observations(items), object()).metrics

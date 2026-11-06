@@ -1191,6 +1191,57 @@ class ReprojectionTests(BackfillFixture):
             [{"value": 290.0, "unit": "W", "mapper_version": current}],
         )
 
+    def test_garmin_sleep_stored_at_the_previous_version_gains_night_values(
+        self,
+    ) -> None:
+        current = canonical_plans.current_mapper_versions()[f"{GARMIN}.{HEALTH_KIND}"]
+        night = {
+            "calendarDate": "2026-11-03",
+            "averageSpO2Value": 95.0,
+            "lowestSpO2Value": 84,
+            "averageRespirationValue": 14.0,
+            "avgHeartRate": 48.0,
+        }
+        with self.manager.unit_of_work() as db:
+            canonical_store.upsert_provider_record(
+                db,
+                provider=GARMIN,
+                record_kind=HEALTH_KIND,
+                source_record_id="sleep",
+                payload={
+                    "sleep": [{"calendarDate": "2026-11-03", "dailySleepDTO": night}]
+                },
+                mapper_version=current - 1,
+                fetched_at=NOW,
+                now=NOW,
+            )
+
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        self.assertEqual(self.summary(backfill)["providers"][GARMIN]["reprojected"], 1)
+        self.assertEqual(
+            self.rows(
+                "SELECT metric, value, unit, mapper_version FROM observations"
+                " WHERE provider = ? ORDER BY metric",
+                (GARMIN,),
+            ),
+            [
+                {
+                    "metric": metric,
+                    "value": value,
+                    "unit": unit,
+                    "mapper_version": current,
+                }
+                for metric, value, unit in (
+                    (MetricKind.RESPIRATION_RATE.value, 14.0, "brpm"),
+                    (MetricKind.SLEEPING_HR.value, 48.0, "bpm"),
+                    (MetricKind.SPO2.value, 95.0, "%"),
+                    (MetricKind.SPO2_LOWEST.value, 84.0, "%"),
+                )
+            ],
+        )
+
     def test_garmin_snapshot_backfill_writes_the_new_health_sections(self) -> None:
         sections = ("daily_stats", "race_predictions", "endurance_score")
         self.set_garmin(
