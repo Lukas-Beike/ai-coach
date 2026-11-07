@@ -211,7 +211,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
                 "changes": [],
                 "workouts": [
                     self.workout(name="One"),
-                    {**self.workout(name="Two"), "sport": "Run"},
+                    self.workout(name="Two", sport="Run"),
                 ],
                 "plan_name": "Synthetic multiple workouts plan",
             },

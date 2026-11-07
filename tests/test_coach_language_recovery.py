@@ -217,8 +217,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self,
     ):
         original = {
-            **self.workout("2026-09-14", "Optionaler Recovery Run"),
-            "sport": "Run",
+            **self.workout("2026-09-14", "Optionaler Recovery Run", sport="Run"),
             "description": "- 6km Z1 HR",
             "target": "HR",
             "duration_minutes": 40,
@@ -289,8 +288,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
             with self.subTest(spelling=spelling):
                 workout = planning_workouts.normalize_workout(
                     {
-                        **self.workout(),
-                        "sport": "Run",
+                        **self.workout(sport="Run"),
                         "target": "HR",
                         "description": "- 8km " + spelling,
                     },
