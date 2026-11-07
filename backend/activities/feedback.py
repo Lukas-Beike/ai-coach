@@ -367,7 +367,14 @@ class ActivityFeedbackService:
                     "Zu viele Rückmeldungen für diese Einheit, um sie mit Undo zu ändern.",
                 )
             existing = _ordered(group, group_key)[0] if group else {}
-            if existing and origin != key:
+            rekey = (
+                bool(existing)
+                and origin == key
+                and existing["activity_id"] != key
+                and self._feedback_repository.get(db, key) is None
+            )
+            if existing and not rekey and existing["activity_id"] != key:
+                # Another row of the group is the one shown: edit it in place.
                 feedback["activity_id"] = existing["activity_id"]
             own_row = feedback["activity_id"] == key
             _keep_omitted_fields(feedback, value, existing)
@@ -380,14 +387,9 @@ class ActivityFeedbackService:
                     self._feedback_repository.delete(db, row["activity_id"])
                 change = self._record(db, group_key, group, None)
                 return {"status": "ok", "activity_feedback": None, "change": change}
-            if (
-                existing
-                and origin == key
-                and existing["activity_id"] != key
-                and self._feedback_repository.get(db, key) is None
-            ):
-                # An ordinary edit moves the effective row to the session id
-                # instead of adding a second row to the group.
+            if rekey:
+                # An ordinary edit moves the effective row to the session it was
+                # written for instead of adding a second row to the group.
                 self._feedback_repository.rekey(db, existing["activity_id"], key)
             self._feedback_repository.upsert(
                 db,

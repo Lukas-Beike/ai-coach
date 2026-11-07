@@ -54,6 +54,16 @@ def session_of(
         return canonical_store.effective_session_ids(db, [local])[local]
 
 
+def canonical_store_local_id(
+    manager: Any, provider_activity_id: str, provider: str = "intervals"
+) -> str:
+    """The session id of the record itself, before any merge."""
+    with manager.reader() as db:
+        return canonical_store.activity_local_ids(db, provider, [provider_activity_id])[
+            provider_activity_id
+        ]
+
+
 def stored_summaries(manager: Any) -> Any:
     with manager.reader() as db:
         return activity_summaries(CanonicalTableReader().activity_sessions(db), ZONE)
@@ -581,8 +591,10 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         self.assertIsNotNone(session)
         bike = self.local_bike()
         saved = self.service.assign({"activity_id": "910", "equipment_id": bike["id"]})
+        # Stored under the session of the record named, not the survivor.
         self.assertEqual(
-            saved["assignment"]["activity_id"], session_of(self.manager, "i1")
+            saved["assignment"]["activity_id"],
+            canonical_store_local_id(self.manager, "910", "garmin"),
         )
 
     def test_wahoo_only_session_counts_in_usage_hours_distance_and_maintenance(
@@ -745,6 +757,27 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         (listed,) = self.service.read(activity_id=session)["assignments"]
 
         self.assertEqual(listed["equipment_id"], new["id"])
+
+    def test_an_assignment_is_stored_under_the_session_it_was_made_through(
+        self,
+    ) -> None:
+        bike = self.local_bike()
+        own = canonical_store_local_id(self.manager, "i1")
+
+        saved = self.service.assign({"activity_id": "i1", "equipment_id": bike["id"]})
+
+        self.assertEqual(saved["assignment"]["activity_id"], own)
+        (listed,) = self.service.read(activity_id=session_of(self.manager, "i1"))[
+            "assignments"
+        ]
+        self.assertEqual(listed["equipment_id"], bike["id"])
+        # A later assignment through the other copy replaces it, never doubles it.
+        other = self.local_bike(name="Other bike")
+        self.service.assign({"activity_id": "910", "equipment_id": other["id"]})
+        (listed,) = self.service.read(activity_id=session_of(self.manager, "i1"))[
+            "assignments"
+        ]
+        self.assertEqual(listed["equipment_id"], other["id"])
 
     def test_a_legacy_unassignment_still_overrides_the_garmin_link(self) -> None:
         with self.manager.reader() as db:

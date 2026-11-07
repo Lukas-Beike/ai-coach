@@ -155,15 +155,22 @@ class ActivityReferenceResolverTests(_Fixture):
             ActivityReference(garmin), references.resolve_reference(garmin)
         )
 
-    def test_any_reference_resolves_to_the_live_effective_session(self) -> None:
+    def test_a_reference_resolves_to_the_session_it_names_not_the_survivor(
+        self,
+    ) -> None:
         intervals = self.seed("ride-merged")
         garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
         self.merge(intervals, garmin)
         references = ActivityReferences(self.manager)
-        for reference in (garmin, intervals, "ride-merged", "garmin-survivor"):
+        for reference, session in (
+            (garmin, garmin),
+            ("garmin-survivor", garmin),
+            (intervals, intervals),
+            ("ride-merged", intervals),
+        ):
             with self.subTest(reference):
                 self.assertEqual(
-                    ActivityReference(garmin), references.resolve_reference(reference)
+                    ActivityReference(session), references.resolve_reference(reference)
                 )
 
     def test_references_follow_the_survivor_a_deleted_alias_retained(self) -> None:

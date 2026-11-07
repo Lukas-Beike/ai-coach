@@ -332,6 +332,7 @@ class EquipmentService:
         requested = str(payload["activity_id"])
         with self._manager.reader() as db:
             session = canonical_store.live_session_id(db, requested)
+            origins = canonical_store.feedback_origin_sessions(db, [(requested, None)])
         references = {
             requested,
             str(self._resolve_activity(payload["activity_id"])),
@@ -362,15 +363,31 @@ class EquipmentService:
                 or _item_pair(equipment) != _stored_pair(_row_sport(row))
             ):
                 raise AppError(400, "Aktive passende Hauptausrüstung erforderlich.")
+            # The assignment belongs to the session it was made for, so it stays
+            # with that copy when a bundle is split; it replaces any other
+            # assignment of the same session family.
+            family = {
+                str(row["id"]),
+                *canonical_store.session_legacy_keys(db, [str(row["id"])]).get(
+                    str(row["id"]), ()
+                ),
+            }
+            key = str(origins.get(requested) or row["id"])
+            if key not in family:
+                key = str(row["id"])
+            for other in family - {key}:
+                db.execute(
+                    "DELETE FROM kv WHERE key = ?", ("equipment_assignment:" + other,)
+                )
             saved = {
-                "activity_id": str(row["id"]),
+                "activity_id": key,
                 "equipment_id": equipment["id"] if equipment else None,
                 "observed_at": self._utc_now(),
             }
             db.execute(
                 "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
                 (
-                    "equipment_assignment:" + str(row["id"]),
+                    "equipment_assignment:" + key,
                     json.dumps(saved),
                     saved["observed_at"],
                 ),

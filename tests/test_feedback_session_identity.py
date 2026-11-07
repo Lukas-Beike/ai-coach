@@ -150,7 +150,8 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.service.save(INTERVALS_ID, {"notes": "Heavy legs", "session_rpe": 6})
         saved = self.service.save(GARMIN_ID, {"session_rpe": 5})["activity_feedback"]
 
-        session = merged_session_id(self)
+        # The edit through the Garmin id moves the one row to the Garmin session.
+        session = self.sessions["garmin"]
         self.assertEqual(
             (saved["activity_id"], saved["notes"], saved["session_rpe"]),
             (session, "Heavy legs", 5),
@@ -163,6 +164,36 @@ class FeedbackSessionTests(FeedbackSessionFixture):
             for item in self.service.for_activity_ids([INTERVALS_ID, GARMIN_ID])
         }
         self.assertEqual(by_id[GARMIN_ID]["notes"], by_id[INTERVALS_ID]["notes"])
+
+    def test_feedback_stays_with_the_copy_it_was_written_through(self) -> None:
+        # Whichever session survives the bundle, the row is stored under the
+        # session of the id it was saved through, so a split keeps it there.
+        for written_through, own, other in (
+            (INTERVALS_ID, self.sessions["intervals"], self.sessions["garmin"]),
+            (GARMIN_ID, self.sessions["garmin"], self.sessions["intervals"]),
+        ):
+            with self.subTest(written_through):
+                self.service.save(written_through, {"notes": "Heavy legs"})
+                self.assertEqual(
+                    [row["activity_id"] for row in stored_rows(self)], [own]
+                )
+                with self.manager.unit_of_work() as db:
+                    db.execute(
+                        "UPDATE activity_sessions SET state = 'active', "
+                        "merged_into = NULL, athlete_confirmed = 1"
+                    )
+                self.assertEqual(
+                    [i["notes"] for i in self.service.for_activity_ids([own])],
+                    ["Heavy legs"],
+                )
+                self.assertEqual(self.service.for_activity_ids([other]), [])
+                self.service.save(own, {"notes": ""})
+                with self.manager.unit_of_work() as db:
+                    db.execute(
+                        "UPDATE activity_sessions SET state = 'duplicate', "
+                        "merged_into = ? WHERE activity_id = ?",
+                        (own, other),
+                    )
 
     def test_a_legacy_row_under_the_intervals_id_is_found_for_the_session(self) -> None:
         session = merged_session_id(self)
@@ -220,9 +251,8 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         for rpe in (5, 6, 7):
             self.service.save(session, {"session_rpe": rpe})
             self.service.save(INTERVALS_ID, {"notes": f"note {rpe}"})
-            self.assertEqual(
-                [row["activity_id"] for row in stored_rows(self)], [session]
-            )
+            # One row, whichever copy the last edit was written through.
+            self.assertEqual(len(stored_rows(self)), 1)
             (effective,) = self.service.list()
             self.assertNotIn("conflicting_feedback", effective)
             (found,) = self.service.for_activity_ids([session])

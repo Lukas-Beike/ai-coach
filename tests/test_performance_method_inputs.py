@@ -156,16 +156,17 @@ class M1SessionRpeInputs(linking.LinkingCase):
         self.assertIsNone(canonical_store.activity_device_type(garmin["details"]))
 
         saved = self._feedback().save(alias["activity_id"], {"session_rpe": 5})
-        # Feedback is stored under the live session id, whichever id named it.
+        # Feedback is stored under the session it was written for, here the
+        # alias named by the request, not the survivor.
         self.assertEqual(
-            saved["activity_feedback"]["activity_id"], survivor["activity_id"]
+            saved["activity_feedback"]["activity_id"], alias["activity_id"]
         )
         self.assertEqual(
-            self._stored_feedback(survivor["activity_id"])[0]["session_rpe"], 5
+            self._stored_feedback(alias["activity_id"])[0]["session_rpe"], 5
         )
+        self.assertEqual(self._stored_feedback(survivor["activity_id"]), [])
         self.assertEqual(self._stored_feedback(linking.INTERVALS_ID), [])
         self.assertEqual(self._stored_feedback(linking.GARMIN_ID), [])
-        self.assertEqual(self._stored_feedback(alias["activity_id"]), [])
 
     def test_incomplete(self) -> None:
         workout = linking.wahoo_workout()

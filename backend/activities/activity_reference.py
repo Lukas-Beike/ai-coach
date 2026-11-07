@@ -63,19 +63,35 @@ class ActivityReferences(ActivityReferenceResolver):
         return self._provider(reference, merged_copies=True)
 
     def resolve_reference(self, reference: Any) -> ActivityReference:
-        """Return the live effective session id a reference leads to, else the input."""
+        """Return the session a reference was written for, else the input.
+
+        A provider record id leads to the session of that record, an ``act_`` id
+        stays as given, so athlete data is stored under the session it belongs
+        to and stays with it when a bundle is split. A deleted alias leads to
+        the live survivor it retained. Readers resolve merges themselves.
+        """
         if not isinstance(reference, str) or not reference.strip():
             return ActivityReference(reference)
         text = reference.strip()
         with self._database_manager.reader() as db:
             # An id that names several records stays unresolved.
             origin = canonical_store.feedback_origin_sessions(db, [(text, None)])
-            session = (
+            live = (
                 canonical_store.live_session_id(db, origin[text])
                 if text in origin
                 else None
             )
-        return ActivityReference(reference if session is None else session)
+            state = (
+                canonical_store.activity_sessions_by_ids(db, [origin[text]])[
+                    origin[text]
+                ]["state"]
+                if live is not None
+                else None
+            )
+        if live is None:
+            return ActivityReference(reference)
+        deleted = state == ActivitySessionState.DELETED.value
+        return ActivityReference(live if deleted else origin[text])
 
     def _provider(self, reference: Any, *, merged_copies: bool) -> ActivityReference:
         """Resolve a local ``act_`` id to its Intervals.icu record id.
