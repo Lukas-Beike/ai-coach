@@ -81,8 +81,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_seventeen(self) -> None:
-        self.assertEqual(17, MAPPER_VERSION)
+    def test_mapper_version_is_eighteen(self) -> None:
+        self.assertEqual(18, MAPPER_VERSION)
 
     def test_strength_duration_is_the_whole_session_not_the_active_timer(
         self,
@@ -1103,6 +1103,19 @@ class ZoneEffectAndExtremeTests(unittest.TestCase):
         self.assertEqual(
             {"minElevation", "minTemperature"}, {issue.field for issue in issues}
         )
+
+    def test_calories_become_the_energy_estimate(self) -> None:
+        record, issues = _one(calories=771.0)
+        assert record is not None
+        self.assertEqual(771.0, record.energy_kcal)
+        self.assertEqual((), issues)
+        zero, _ = _one(calories=0)
+        assert zero is not None
+        self.assertIsNone(zero.energy_kcal)
+        wrong, issues = _one(calories=-5)
+        assert wrong is not None
+        self.assertIsNone(wrong.energy_kcal)
+        self.assertEqual({"calories"}, {issue.field for issue in issues})
 
     def test_wrong_types_and_ranges_become_none_with_issues(self) -> None:
         record, issues = _one(

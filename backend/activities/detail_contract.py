@@ -78,6 +78,7 @@ _MEASURED_METRICS: Final[tuple[tuple[str, str], ...]] = (
     ("steps", "count"),
     ("lap_count", "count"),
     ("energy_kj", "kJ"),
+    ("energy_kcal", "kcal"),
 )
 _DERIVED_METRICS: Final[tuple[tuple[str, str | None], ...]] = (
     ("normalized_power", "W"),

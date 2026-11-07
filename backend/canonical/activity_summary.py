@@ -66,6 +66,14 @@ class ActivitySummary(TypedDict, total=False):
     avg_temp_c: float
     min_temp_c: float
     max_temp_c: float
+    energy_kj: float
+    energy_kcal: float
+    # Local session metrics (card M8), stored as derived observations.
+    efficiency_factor: float
+    efficiency_factor_unit: str
+    variability_index: float
+    work_kj: float
+    decoupling_pct: float
     rpe: float
     rpe_conflict: bool
     feel: float

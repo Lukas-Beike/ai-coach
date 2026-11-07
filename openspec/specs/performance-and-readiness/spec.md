@@ -665,6 +665,7 @@ Detailed contract:
 | Short- and long-term session-RPE load (AU) | `smoothed-session-load` v1 | `estimate`, `insufficient_data` | smoothed subjective load; no fitness, form, ratio, risk or provider comparison | M5, released |
 | Session load and intensity factor (TSS scale) | `local-tss-load` v2 | stored per session with `load_branch` `power`, `pace`, `heart_rate` or `session_rpe` (strength); none without inputs | branches are not equivalent; strength TSS is a personal sRPE scaling; no fatigue, readiness or injury statement; IF = 1 is not a physiological threshold | M6, released |
 | Local fitness, fatigue and form (TSS/d) | `local-fitness-fatigue` v1 | `estimate`, `insufficient_data` | model estimate from the local load; never mixed with Intervals.icu CTL/ATL/form; no performance, risk or readiness prediction | M7, released |
+| Efficiency factor, variability index, work and aerobic decoupling | `local-session-metrics` v1 | stored per ride or run; none without inputs or full-resolution streams (work, decoupling) | descriptive; no fixed decoupling limit, no fitness, durability or threshold verdict; run and ride values never compared; work is not energy expenditure | M8, released |
 
 Passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
 
@@ -692,6 +693,21 @@ The system SHALL compute each canonical session's load with M6 `local-tss-load` 
 Detailed contract: thresholds follow `resolve_current_thresholds` per day with the policy's age limits, and an indoor or virtual ride uses a local indoor power zone of the day first; resting HR comes from the session day or up to 7 days earlier, Garmin first, else the earliest later value, flagged. The strength factor is the median TSS per AU of the locally or Garmin-rated ride and run sessions with a local load in the 365 days up to the session day, from at least 20 pairs. Yoga and alpine ski get no value, walking takes the heart-rate branch; an IF above 2.0 is rejected. The pass runs as the first canonical backfill follow-up, triggered by worker start, completed Intervals.icu, Garmin and Wahoo jobs, local zone changes, session corrections and their undo, a changed session RPE and its undo, and a changed preferred threshold source; one invalid session value never stops the pass. It keeps content-free counts that diagnostics and the log (`local_load_reconciled`) report.
 
 Evidence: `backend/performance/local_tss.py`, `backend/sync/local_load.py`, `backend/sync/canonical_backfill_assembly.py`, `backend/sync/executor.py:SyncJobExecutor.run`, `backend/athlete/zones.py:ZoneConfigurationService`, `backend/activities/feedback.py:ActivityFeedbackService`; `tests/test_local_tss.py`, `tests/test_activity_feedback.py`, `tests/test_local_load_store.py`, `tests/test_sync_executor.py`, `tests/test_zone_configuration_canonical.py`, `docs/performance-methods/m6-local-tss-load.md`.
+
+### Requirement: Local session metrics are stored descriptive values
+The system SHALL compute M8 `local-session-metrics` v1 for each canonical ride and run: EF (ride NP / average HR in W/bpm; run grade-adjusted, else average, speed × 60 / average HR in (m/min)/bpm), VI (ride NP / average power), mechanical work (the device work total, else the integrated full-resolution power stream with at least 85 % coverage of the moving duration) and aerobic decoupling (the drift of the session analysis `aerobic_analysis`). It SHALL store each value as a derived observation owned by the session with method version and input fingerprint, and SHALL NOT use a provider EF, VI, decoupling or work.
+
+#### Scenario: Ride with stored streams
+- **WHEN** a Garmin ride with NP 210 W, average power 200 W and average HR 142 bpm has 50 minutes of steady full-resolution power and heart-rate streams
+- **THEN** its summary serves `efficiency_factor`, `variability_index` 1.05, `work_kj` from the stream and `decoupling_pct`, each labelled `derived`, and the detail document shows the same values.
+
+#### Scenario: Unchanged inputs
+- **WHEN** a pass finds every stored fingerprint equal to the current one
+- **THEN** it decodes no stream and writes nothing.
+
+Detailed contract: the fingerprint covers the method version, the session-analysis method, the summary inputs (start, local day, recording origin, sport, environment, durations, HR, power, speeds, device work), the content hashes of the full-resolution stream sets and the session's records in merge order. The pass runs as a canonical backfill follow-up after the local load, at most 100 recomputed sessions per transaction, and keeps the fingerprint of sessions computed without a value so they are not decoded again. Missing streams are not fetched by this stage. Diagnostics report content-free counts (`session_metrics`); the log event is `session_metrics_reconciled`. The device energy estimate is mapped separately as `energy_kcal` (Garmin `calories`, Wahoo `calories_accum`).
+
+Evidence: `backend/performance/session_metrics.py`, `backend/performance/session_metrics_reads.py`, `backend/sync/session_metrics.py`, `backend/sync/canonical_backfill_assembly.py`, `backend/performance/canonical_detail.py`; `tests/test_session_metrics.py`, `docs/performance-methods/m8-local-session-metrics.md`.
 
 ### Requirement: Local fitness, fatigue and form are a labelled model estimate
 The system SHALL compute M7 `local-fitness-fatigue` v1 on read as the exponentially smoothed stored M6 load per local day with τ 42 days (fitness) and 7 days (fatigue), and form as fitness minus fatigue of the same day. The curves SHALL start at 0 before the first day with a stored local load of the whole history and SHALL NOT be stored, seeded, corrected or mixed with Intervals.icu CTL, ATL or form.

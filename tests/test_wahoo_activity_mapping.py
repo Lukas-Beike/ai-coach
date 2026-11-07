@@ -334,9 +334,12 @@ class SummaryMetricTests(unittest.TestCase):
                     "power_bike_np_last": "231.7",
                     "work_accum": "1500000",
                     "power_bike_tss_last": "76.3",
+                    "calories_accum": "812.0",
                 }
             )
         ).records[0]
+
+        self.assertEqual(812.0, record.energy_kcal)
 
         self.assertEqual(3600.4, record.moving_duration_s)
         self.assertEqual(412.5, record.elevation_gain_m)
@@ -431,14 +434,16 @@ class SummaryMetricTests(unittest.TestCase):
         self.assertEqual(3900.0, record.duration_s)
         self.assertIsNone(record.moving_duration_s)
 
-    def test_calories_and_speed_stay_out_of_the_canonical_record(self) -> None:
+    def test_calories_are_the_energy_estimate_and_speed_stays_out(self) -> None:
         record = mapped(
             row(workout_summary={"calories_accum": "700", "speed_avg": "8.2"})
         ).records[0]
 
         self.assertIsNone(record.energy_kj)
-        self.assertNotIn("700", repr(record))
+        self.assertEqual(700.0, record.energy_kcal)
         self.assertNotIn("8.2", repr(record))
+        zero = mapped(row(workout_summary={"calories_accum": "0"})).records[0]
+        self.assertIsNone(zero.energy_kcal)
 
 
 class PlaceholderWorkoutTests(unittest.TestCase):
@@ -541,11 +546,11 @@ class StoredRawRecordTests(unittest.TestCase):
 
 
 class ReprojectionTests(unittest.TestCase):
-    def test_mapper_version_is_six_and_newer_than_the_stored_version_one(
+    def test_mapper_version_is_seven_and_newer_than_the_stored_version_one(
         self,
     ) -> None:
-        self.assertEqual(6, MAPPER_VERSION)
-        self.assertEqual(6, reprojection_mapper_version("wahoo", "activity"))
+        self.assertEqual(7, MAPPER_VERSION)
+        self.assertEqual(7, reprojection_mapper_version("wahoo", "activity"))
 
     def test_a_stored_version_one_row_reprojects_the_new_metrics(self) -> None:
         stored = {

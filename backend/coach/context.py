@@ -127,6 +127,12 @@ COACH_ACTIVITY_FIELDS = (
     "max_hr",
     "avg_power",
     "normalized_power",
+    # Local session metrics (card M8): descriptive, no fitness verdict.
+    "efficiency_factor",
+    "efficiency_factor_unit",
+    "variability_index",
+    "decoupling_pct",
+    "work_kj",
     "avg_speed_mps",
     "weighted_avg_speed_mps",
     "pace_mps",
