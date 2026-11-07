@@ -30,7 +30,12 @@ from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
 from backend.planning import running_week
 from backend.planning.season import target_phase
-from backend.planning.session_focus import SessionFocus, session_focus
+from backend.planning.session_focus import (
+    SessionFocus,
+    session_focus,
+    structure_intensity,
+    text_intensity,
+)
 from backend.planning.sport import planned_sport_environment
 
 BEFORE_KEY = "leg_strength_before_key_session"
@@ -54,9 +59,6 @@ NOTE = (
 Predicate = Callable[[Mapping[str, Any]], bool]
 Draft = tuple[str, list[Mapping[str, Any]], str, dict[str, Any]]
 _ENDURANCE = frozenset({Sport.RUN, Sport.RIDE})
-_HEAVY = re.compile(r"\b(?:heavy|schwer|[1-6]\s*rm)\b", re.IGNORECASE)
-_MODERATE = re.compile(r"\b(?:moderate|moderat|mittel(?:schwer)?)\b", re.IGNORECASE)
-_LIGHT = re.compile(r"\b(?:light|leicht)\b", re.IGNORECASE)
 # A profile answer that says no strength is wanted.
 _NO_STRENGTH = re.compile(
     r"^\s*(?:-+\s*$|(?:kein\w*|nein|no|none|ohne|nicht)\b)", re.IGNORECASE
@@ -86,28 +88,20 @@ def _grade(value: float, heavy: float, moderate: float) -> str:
     return "moderate" if value >= moderate else "light"
 
 
-def _text_intensity(unit: Mapping[str, Any]) -> str | None:
-    text = f"{unit.get('name') or ''} {unit.get('description') or ''}"
-    for label, pattern in (
-        ("heavy", _HEAVY),
-        ("moderate", _MODERATE),
-        ("light", _LIGHT),
-    ):
-        if pattern.search(text):
-            return label
-    return None
-
-
 def _intensity(unit: Mapping[str, Any], focus: SessionFocus) -> str | None:
-    if focus.strength_intensity is not None:
+    """Set intensity, the structure's, the planned factor, RPE, then the text."""
+    if focus.intensity_origin == "set":
         return focus.strength_intensity
+    structured = structure_intensity(unit)
+    if structured is not None:
+        return structured
     factor = planned_intensity_factor(unit)
     if factor is not None:
         return _grade(factor, HEAVY_FACTOR, MODERATE_FACTOR)
     rpe = number(unit.get("rpe"))
     if rpe is not None:
         return _grade(rpe, HEAVY_RPE, MODERATE_RPE)
-    return _text_intensity(unit)
+    return text_intensity(unit)
 
 
 def classify(unit: Mapping[str, Any]) -> StrengthClass | None:
