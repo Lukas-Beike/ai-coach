@@ -544,7 +544,13 @@ class PlannedUnitService:
         *,
         skip_calendar_conflict: bool,
         bump_planning_revision: bool,
+        remote_neutral: bool = False,
     ) -> dict[str, Any]:
+        """Apply one update; ``remote_neutral`` keeps the provider sync state.
+
+        A remote-neutral change (focus only, or a Garmin exercise pick that the
+        Intervals.icu description never carries) leaves the sync state as is.
+        """
         normalized_id, values, action = planned_units.planned_workout_update_request(
             local_id, values
         )
@@ -611,7 +617,8 @@ class PlannedUnitService:
             updated,
             before,
             bump_planning_revision=bump_planning_revision,
-            focus_only=action == "update" and _is_focus_only(values),
+            focus_only=action == "update"
+            and (remote_neutral or _is_focus_only(values)),
         )
         return {
             "status": "local",
@@ -626,16 +633,22 @@ class PlannedUnitService:
 
         The athlete's pick is stored like a Coach ``garmin_exercise`` (checked
         against the catalogue, pair derived), so it is remembered for the same
-        exercise name in other units. A unit changed since the browser read it
-        is refused.
+        exercise name in other units. It keeps the Intervals.icu sync state,
+        whose content it does not change. A unit changed since the browser read
+        it, or one in a sync conflict, is refused.
         """
         with self._database_manager.unit_of_work() as db:
             row = db.execute(
-                "SELECT payload FROM planned_units WHERE local_id=? AND tombstone=0",
+                "SELECT payload, sync_state FROM planned_units "
+                "WHERE local_id=? AND tombstone=0",
                 (str(local_id),),
             ).fetchone()
             if row is None:
                 raise AppError(404, "Einheit nicht gefunden.")
+            if row["sync_state"] == "conflict":
+                raise AppError(
+                    409, "Erst den Sync-Konflikt lösen.", reason="sync_conflict"
+                )
             if library_payload_hash(row["payload"]) != expected_hash:
                 raise AppError(
                     409,
@@ -661,6 +674,7 @@ class PlannedUnitService:
                 {STRENGTH_STRUCTURE: exercises},
                 skip_calendar_conflict=True,
                 bump_planning_revision=True,
+                remote_neutral=True,
             )
         self._publish_change()
         return result
