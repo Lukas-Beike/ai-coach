@@ -362,3 +362,24 @@ class IntervalsCopyOrderTests(unittest.TestCase):
         self.assertEqual({"intervals": "i200"}, summary["record_ids"])
         self.assertEqual("wahoo", summary["recorded_by"])
         self.assertEqual("Synthetic ride", summary["name"])
+
+
+class WahooRecordingOrderTests(unittest.TestCase):
+    """A Wahoo recording wins its measured values over its Garmin copy (#1686)."""
+
+    def test_wahoo_recording_beats_its_garmin_copy(self) -> None:
+        wahoo = record(ProviderId.WAHOO, "w1", avg_power=210.0)
+        # Garmin mapper v19 names the relayed copy's origin from its manufacturer.
+        garmin_copy = record(
+            ProviderId.GARMIN,
+            "g1",
+            recorded_by=RecordingOrigin.WAHOO,
+            avg_power=205.0,
+            name="Garmin copy",
+        )
+
+        summary = activity_summary("act_1", [garmin_copy, wahoo], BERLIN)
+
+        self.assertEqual("wahoo", summary["recorded_by"])
+        self.assertEqual(210.0, summary["avg_power"])
+        self.assertEqual("Synthetic ride", summary["name"])

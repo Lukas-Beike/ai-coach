@@ -449,9 +449,19 @@ def _with_live_zones(
 
 
 def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
-    """Attach the record's provenance label; stored sets do not keep labels."""
+    """Attach the record's label and origin; stored sets do not keep labels.
+
+    The origin follows the current record, so a set stored before a mapper
+    re-named the origin (a Wahoo ride relayed through Garmin Connect, #1686)
+    ranks like its record without a re-fetch.
+    """
     provenance = cast(
-        Provenance, replace(item.detail.provenance, label=record.provenance.label)
+        Provenance,
+        replace(
+            item.detail.provenance,
+            label=record.provenance.label,
+            recorded_by=record.provenance.recorded_by,
+        ),
     )
     return StoredDetailSet(
         provider=item.provider,

@@ -6,11 +6,15 @@ workout is validated and mapped locally before the first remote write, so a
 Wahoo that is not connected, or a request that is stale, writes nothing. The
 Wahoo plan id lives in ``remote_links`` (provider ``wahoo``); the Intervals.icu
 slots of the library row are never touched. A second run updates the plan it
-created instead of uploading a duplicate.
+created instead of uploading a duplicate. The link's baseline also covers the
+header references the plan was sent with (#1686), so a later threshold change
+leaves a trace a status view can compare against; a re-run sends the current
+values.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from collections.abc import Callable
@@ -29,6 +33,8 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.wahoo_workout_export import WahooWorkoutExport
 
 _RETRY_SCOPE = "Nur fehlgeschlagene Objekte erneut auswählen."
+# Plan header fields that carry the athlete references of relative steps.
+_REFERENCE_KEYS = ("ftp", "max_hr", "threshold_hr", "threshold_speed")
 _REMOTE_LINKS = RemoteLinkRepository()
 
 
@@ -191,7 +197,9 @@ class WahooPlanPushService:
                     sync_state=RemoteLinkState.SYNCED,
                     remote_id=stored_id,
                     remote_external_id=envelope["external_id"],
-                    baseline_hash=item["expected_payload_hash"],
+                    baseline_hash=sent_baseline(
+                        item["expected_payload_hash"], envelope["plan"]
+                    ),
                     last_synced_at=self._now().astimezone(UTC).isoformat(),
                 ),
             )
@@ -207,6 +215,22 @@ class WahooPlanPushService:
             "status": "error",
             "error": self._redact(str(error))[:500],
         }
+
+
+def sent_baseline(payload_hash: str, plan: dict[str, Any]) -> str:
+    """Return the link baseline: the payload hash, plus the sent references.
+
+    A plan without header references keeps the bare payload hash; one with
+    references hashes both, so a changed FTP or threshold gives a new baseline.
+    """
+    header = plan.get("header") or {}
+    references = {key: header[key] for key in _REFERENCE_KEYS if key in header}
+    if not references:
+        return payload_hash
+    content = json.dumps(
+        {"payload": payload_hash, "references": references}, sort_keys=True
+    )
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _earlier_upload(plans: list[dict[str, Any]], external_id: str) -> str | None:

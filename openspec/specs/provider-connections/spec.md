@@ -150,7 +150,11 @@ The system SHALL export local library workouts to Wahoo only through an explicit
 - **WHEN** a workout uses another sport, zones, ramps, unsupported pace units, or a relative target without its required athlete reference
 - **THEN** Wahoo mapping rejects that entry; supported biking/running time or distance steps can use absolute power/HR/pace and relative FTP/max-HR/threshold-HR/threshold-speed targets with the needed header reference.
 
-Evidence: `backend/sync/wahoo_plan_push.py:WahooPlanPushService`, `backend/sync/wahoo_workout_export.py:WahooWorkoutExport`, `backend/providers/wahoo_plan_mapping.py:wahoo_plan`; `tests/test_wahoo_plan_push.py:test_second_push_updates_the_same_plan_without_duplicating`, `tests/test_wahoo_plan_push.py:test_changed_workout_is_a_conflict_and_nothing_is_written`, `tests/test_wahoo_plan_push_jobs.py:test_coach_and_replanning_never_reference_the_wahoo_export`, `tests/test_wahoo_plan_mapping.py:test_zone_targets_are_rejected_instead_of_guessed`.
+#### Scenario: Header references from resolved thresholds
+- **WHEN** a library workout with relative steps is serialized for Wahoo
+- **THEN** its header references are the plan sport's export thresholds (local zones, else Garmin, else Wahoo, never Intervals.icu; threshold speed from the run threshold pace), read at serialization time.
+
+Evidence: `backend/sync/wahoo_plan_push.py:WahooPlanPushService`, `backend/sync/wahoo_workout_export.py:WahooWorkoutExport`, `backend/sync/wahoo_workout_export.py:plan_references`, `backend/providers/wahoo_plan_mapping.py:wahoo_plan`; `tests/test_wahoo_plan_mapping.py:ExportReferenceTests`, `tests/test_wahoo_plan_mapping.py:AssemblyReferenceTests`, `tests/test_wahoo_plan_push.py:test_second_push_updates_the_same_plan_without_duplicating`, `tests/test_wahoo_plan_push.py:test_changed_workout_is_a_conflict_and_nothing_is_written`, `tests/test_wahoo_plan_push_jobs.py:test_coach_and_replanning_never_reference_the_wahoo_export`, `tests/test_wahoo_plan_mapping.py:test_zone_targets_are_rejected_instead_of_guessed`.
 
 ### Requirement: Optional Yazio configuration
 The system SHALL treat Yazio as an optional read-only food source configured by server-side environment values, with account email, password and application client identifiers overridable from the PWA provider settings. Stored values SHALL take precedence, clearing them SHALL restore the environment value, and Yazio SHALL be configured only when all four values exist. Status SHALL report only presence and source, never a value.
