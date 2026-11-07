@@ -248,10 +248,11 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         )
         intervals_session = references.local_ids(["i-1"])["i-1"]
 
-        # Intervals id, its local id, a Garmin-only local id and provider id.
+        # Intervals id, its local id, a Garmin-only local id and provider id:
+        # every one is stored under the live session id.
         for activity_id, stored in (
-            ("i-1", "i-1"),
-            (intervals_session, "i-1"),
+            ("i-1", intervals_session),
+            (intervals_session, intervals_session),
             ("act_garmin", "act_garmin"),
             # The provider id joins its session's feedback group.
             ("g-only", "act_garmin"),
@@ -300,8 +301,8 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(result[0]["activity_feedback"]["notes"], "note")
         self.assertEqual(self.service.attach_to_activities("not a list"), [])
 
-    def test_attach_uses_the_stored_key_of_a_summary(self) -> None:
-        self.service.save("i7", {"notes": "intervals note"})
+    def test_attach_uses_the_session_id_of_a_summary(self) -> None:
+        self.service.save("act_1", {"notes": "intervals note"})
         summary = {"id": "act_1", "record_ids": {"intervals": "i7"}}
         no_intervals = {"id": "act_2", "record_ids": {"garmin": "g1"}}
 

@@ -118,7 +118,7 @@ class SeasonPreparationTests(unittest.TestCase):
             "moving_duration_s": 3600,
             "record_ids": {"intervals": "i-1"},
         }
-        analyses = [{"activity_id": "i-1", "aerobic": {"status": "ok"}}]
+        analyses = [{"activity_id": "act_1", "aerobic": {"status": "ok"}}]
         result = _season([row], [event], self.today, analyses)["events"][0]
         preparation = result["preparation"]
         self.assertEqual("act_1", preparation["long_sessions"][0]["activity_id"])

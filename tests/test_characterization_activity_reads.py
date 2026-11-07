@@ -306,7 +306,8 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
             }
 
         result = self._detail([self.RAW], read_equipment)
-        self.assertEqual(["ride-1"], requested)
+        self.assertEqual([result["session"]["activity_id"]], requested)
+        self.assertTrue(requested[0].startswith("act_"))
         self.assertEqual(["bike", "meter"], [row["id"] for row in result["equipment"]])
 
     def _save_analysis(self, **overrides: Any) -> None:

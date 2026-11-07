@@ -156,12 +156,14 @@ class M1SessionRpeInputs(linking.LinkingCase):
         self.assertIsNone(canonical_store.activity_device_type(garmin["details"]))
 
         saved = self._feedback().save(alias["activity_id"], {"session_rpe": 5})
+        # Feedback is stored under the live session id, whichever id named it.
         self.assertEqual(
-            saved["activity_feedback"]["activity_id"], linking.INTERVALS_ID
+            saved["activity_feedback"]["activity_id"], survivor["activity_id"]
         )
         self.assertEqual(
-            self._stored_feedback(linking.INTERVALS_ID)[0]["session_rpe"], 5
+            self._stored_feedback(survivor["activity_id"])[0]["session_rpe"], 5
         )
+        self.assertEqual(self._stored_feedback(linking.INTERVALS_ID), [])
         self.assertEqual(self._stored_feedback(linking.GARMIN_ID), [])
         self.assertEqual(self._stored_feedback(alias["activity_id"]), [])
 
@@ -192,7 +194,8 @@ class M1SessionRpeInputs(linking.LinkingCase):
 
         service = self._feedback()
         service.save(linking.WAHOO_ID, {"session_rpe": 0})
-        self.assertEqual(self._stored_feedback(linking.WAHOO_ID)[0]["session_rpe"], 0)
+        self.assertEqual(self._stored_feedback(local_id)[0]["session_rpe"], 0)
+        self.assertEqual(self._stored_feedback(linking.WAHOO_ID), [])
         for invalid in (-1, 10.5, math.nan):
             with self.subTest(rpe=invalid), self.assertRaises(AppError):
                 service.save(linking.WAHOO_ID, {"session_rpe": invalid})
@@ -211,9 +214,8 @@ class M1SessionRpeInputs(linking.LinkingCase):
             ],
             linking.THIRD,
         )
-        self.assertEqual(
-            self._stored_feedback(linking.INTERVALS_ID)[0]["session_rpe"], 5
-        )
+        session = self._sessions()[linking.INTERVALS_ID]["activity_id"]
+        self.assertEqual(self._stored_feedback(session)[0]["session_rpe"], 5)
         with self.manager.reader() as db:
             payloads = canonical_store.active_activity_payload_texts(
                 db, provider=INTERVALS, record_kind=ACTIVITY_RECORD_KIND

@@ -561,9 +561,16 @@ class AliasResolutionTests(LinkingCase):
         self._ingest_all_three()
         wahoo_alias = self._sessions()[WAHOO_ID]["activity_id"]
         garmin_alias = self._sessions()[GARMIN_ID]["activity_id"]
+        survivor = next(
+            row["activity_id"]
+            for row in self._sessions().values()
+            if row["state"] == "active"
+        )
         reference = self._references().resolve_reference(wahoo_alias)
+        self.assertEqual((reference.activity_id, reference.provider), (survivor, None))
+        provider = self._references().provider_reference(wahoo_alias)
         self.assertEqual(
-            (reference.activity_id, reference.provider),
+            (provider.activity_id, provider.provider),
             (INTERVALS_ID, ProviderId.INTERVALS.value),
         )
         self.assertEqual(self._references().resolve(garmin_alias), INTERVALS_ID)

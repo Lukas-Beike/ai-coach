@@ -227,7 +227,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         self.assertEqual([200, 250], result["streams"]["channels"]["power_w"]["values"])
         self.assertEqual(
             "bounded sanitized activity_detail.v1 document of exactly one local "
-            "session; providers: Intervals.icu, Garmin Connect; recorded by: garmin",
+            "session; providers: Garmin Connect, Intervals.icu; recorded by: garmin",
             result["data_scope"],
         )
         self.assertTrue(result["activity_validation"]["available"])

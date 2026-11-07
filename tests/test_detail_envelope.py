@@ -73,7 +73,7 @@ class DetailEnvelopeTests(unittest.TestCase):
         feedback = self.feedback = _Feedback(
             [
                 {"activity_id": reference, "notes": reference}
-                for reference in ("i1", "act_g", "act_w")
+                for reference in ("act_i", "act_g", "act_w")
             ]
         )
         self.assembly = ActivityReadAssembly(
@@ -104,7 +104,7 @@ class DetailEnvelopeTests(unittest.TestCase):
 
     def test_envelope_is_filled_for_intervals_garmin_and_wahoo_sessions(self):
         for activity_id, reference in (
-            ("act_i", "i1"),
+            ("act_i", "act_i"),
             ("act_g", "act_g"),
             ("act_w", "act_w"),
         ):
