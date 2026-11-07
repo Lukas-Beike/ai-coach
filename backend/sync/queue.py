@@ -6,12 +6,7 @@ import builtins
 import threading
 from typing import Any
 
-from backend.activities.activity_reference import (
-    ActivityReferenceResolver,
-    NoActivityReferences,
-)
 from backend.errors import AppError
-from backend.providers.descriptors import INTERVALS_ID
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
@@ -40,7 +35,6 @@ class SyncJobQueueService:
         daily_sync_markers: DailySyncMarkerService,
         *,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
-        references: ActivityReferenceResolver | None = None,
     ) -> None:
         self._store = store
         self._publisher = publisher
@@ -49,7 +43,6 @@ class SyncJobQueueService:
         self._all_sync_days = all_sync_days
         self._daily_sync_markers = daily_sync_markers
         self._registry = registry
-        self._references = NoActivityReferences() if references is None else references
 
     def state(self, job_id: str) -> dict[str, Any]:
         """Return one job or the existing localized not-found error."""
@@ -79,9 +72,6 @@ class SyncJobQueueService:
             provider, end_date, created_since, job_type
         )
 
-    def pending_performance_job_id(self, provider: str) -> str | None:
-        return self._store.pending_performance_job_id(provider)
-
     def enqueue(
         self,
         provider: str,
@@ -94,7 +84,6 @@ class SyncJobQueueService:
     ) -> dict[str, Any]:
         """Validate and persist a job while maintenance drains all side effects."""
         with self._maintenance_gate.operation():
-            payload = self._resolve_activity_reference(provider, job_type, payload)
             try:
                 envelope = normalize_sync_job_request(
                     provider,
@@ -125,25 +114,6 @@ class SyncJobQueueService:
             ):
                 self._daily_sync_markers.mark_attempt(envelope["provider"])
             return result
-
-    def _resolve_activity_reference(
-        self, provider: str, job_type: str, payload: Any
-    ) -> Any:
-        """Store Intervals activity jobs under the provider id so duplicates coalesce.
-
-        Garmin ids are already provider ids, so their payloads pass unchanged.
-        """
-        if (
-            provider != INTERVALS_ID
-            or job_type != "activity_details"
-            or not isinstance(payload, dict)
-            or "activity_id" not in payload
-        ):
-            return payload
-        return {
-            **payload,
-            "activity_id": self._references.resolve(payload["activity_id"]),
-        }
 
     def resume_interrupted(self) -> int:
         """Make interrupted jobs eligible and wake the worker only when needed."""

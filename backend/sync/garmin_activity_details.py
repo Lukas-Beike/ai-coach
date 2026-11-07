@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
@@ -52,11 +53,11 @@ from backend.providers.garmin_activity_detail_mapping import (
     MAPPER_VERSION,
     map_garmin_activity_detail,
 )
-from backend.sync.activity_details import normalize_activity_id
 from backend.sync.garmin import GARMIN_CAPABILITY_PAUSE_SECONDS
 from backend.sync.refresh import sync_job_error_class
 
 _LOGGER = logging.getLogger(__name__)
+ACTIVITY_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9_-]{1,200}")
 COOLDOWN: Final = timedelta(minutes=10)
 BACKFILL_BATCH_SIZE: Final = 10
 BACKFILL_WINDOW: Final = timedelta(days=90)
@@ -91,6 +92,13 @@ class _BatchOutcome:
     marked: int = 0
     skipped: int = 0
     paused_until: datetime | None = None
+
+
+def normalize_activity_id(value: Any) -> str:
+    """Reject path syntax and ambiguous IDs before provider access."""
+    if not isinstance(value, str) or not ACTIVITY_ID_PATTERN.fullmatch(value):
+        raise ValueError("Die Aktivitäts-ID ist ungültig.")
+    return value
 
 
 class GarminActivityDetailService:

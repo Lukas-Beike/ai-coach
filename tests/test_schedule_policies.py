@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -18,15 +17,12 @@ from backend.providers.descriptors import (
     INTERVALS_ID,
     WEATHER_ID,
 )
-from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.schedule_policies import (
     CalendarSchedulePolicy,
     GarminSchedulePolicy,
-    IntervalsSchedulePolicy,
     WeatherSchedulePolicy,
     build_schedule_policies,
-    intervals_busy,
 )
 from backend.sync.scheduler import (
     DailySyncScheduler,
@@ -171,85 +167,8 @@ class GarminSchedulePolicyTests(unittest.TestCase):
         )
 
 
-class IntervalsSchedulePolicyTests(unittest.TestCase):
-    def make_policy(
-        self, *, enabled: bool = True, blocked: bool = False
-    ) -> tuple[IntervalsSchedulePolicy, _SyncState]:
-        sync_state = _SyncState()
-        policy = IntervalsSchedulePolicy(
-            enabled=enabled,
-            sync_state=cast(Any, sync_state),
-            sync_period_defaults={INTERVALS_ID: 84},
-            all_sync_days=-1,
-            blocked_by=lambda: blocked,
-        )
-        return policy, sync_state
-
-    def test_configured_follows_build_time_snapshot(self) -> None:
-        self.assertTrue(self.make_policy(enabled=True)[0].configured())
-        self.assertFalse(self.make_policy(enabled=False)[0].configured())
-
-    def test_blocked_delegates_to_probe(self) -> None:
-        self.assertFalse(self.make_policy(blocked=False)[0].blocked())
-        self.assertTrue(self.make_policy(blocked=True)[0].blocked())
-
-    def test_payload_uses_sync_period_for_both_triggers(self) -> None:
-        policy, sync_state = self.make_policy()
-        self.assertEqual(
-            policy.refresh_payload("daily", "auto"),
-            {"days": 21, "reason": "auto", "automatic": True},
-        )
-        self.assertEqual(
-            policy.refresh_payload("startup", "startup"),
-            {"days": 21, "reason": "startup", "automatic": True},
-        )
-        self.assertEqual(
-            sync_state.period_reads,
-            [
-                (INTERVALS_ID, {INTERVALS_ID: 84}, -1),
-                (INTERVALS_ID, {INTERVALS_ID: 84}, -1),
-            ],
-        )
 
 
-class IntervalsBusyTests(unittest.TestCase):
-    def test_running_sync_blocks_without_consulting_gate(self) -> None:
-        gate = _Gate(resetting=False)
-        database = _Database()
-        busy = intervals_busy(
-            cast(Any, database),
-            cast(Any, _KeyValues("1")),
-            threading.Lock(),
-            cast(Any, gate),
-        )
-        self.assertTrue(busy)
-        self.assertEqual(gate.checks, 0)
-        self.assertEqual(database.opened, 1)
-
-    def test_idle_sync_defers_to_resync_gate(self) -> None:
-        for resetting in (False, True):
-            with self.subTest(resetting=resetting):
-                gate = _Gate(resetting=resetting)
-                busy = intervals_busy(
-                    cast(Any, _Database()),
-                    cast(Any, _KeyValues("0")),
-                    threading.Lock(),
-                    cast(Any, gate),
-                )
-                self.assertEqual(busy, resetting)
-                self.assertEqual(gate.checks, 1)
-
-    def test_real_resync_gate_reports_reset_in_progress(self) -> None:
-        gate = ProviderResyncGate("Intervals.icu")
-        self.assertTrue(gate.begin_reset())
-        self.addCleanup(gate.end_reset)
-        busy = intervals_busy(
-            cast(Any, _Database()),
-            cast(Any, _KeyValues(None)),
-            threading.Lock(),
-            gate,
-        )
-        self.assertTrue(busy)
 
 
 class BuildSchedulePoliciesTests(unittest.TestCase):
@@ -257,13 +176,8 @@ class BuildSchedulePoliciesTests(unittest.TestCase):
         policies = build_schedule_policies(
             profile=cast(Any, _Profile()),
             garmin=cast(Any, _Garmin()),
-            sync_state=cast(Any, _SyncState()),
             calendar_enabled=True,
-            intervals_enabled=False,
             garmin_automatic_sync_days=7,
-            sync_period_defaults={},
-            all_sync_days=-1,
-            intervals_blocked=lambda: False,
         )
         self.assertEqual(
             set(policies), {WEATHER_ID, CALENDAR_ID, GARMIN_ID, INTERVALS_ID}
@@ -334,13 +248,8 @@ def _policies(acme: FakeSchedulePolicy) -> dict[str, Any]:
     built = build_schedule_policies(
         profile=cast(Any, _Profile()),
         garmin=cast(Any, _Garmin()),
-        sync_state=cast(Any, _SyncState()),
         calendar_enabled=True,
-        intervals_enabled=True,
         garmin_automatic_sync_days=7,
-        sync_period_defaults={},
-        all_sync_days=-1,
-        intervals_blocked=lambda: False,
     )
     return {**built, ACME_ID: acme}
 
@@ -357,19 +266,11 @@ def _daily(
         cast(Any, queue),
         cast(Any, markers),
         cast(Any, _Garmin()),
-        cast(Any, None),
-        cast(Any, None),
-        threading.Lock(),
-        cast(Any, _SyncState()),
-        ProviderResyncGate(INTERVALS_ID),
         cast(Any, _ScheduleGate()),
         config=DailySyncSchedulerConfig(
             calendar_url_enabled=True,
-            intervals_key_enabled=True,
             garmin_automatic_sync_days=7,
             auto_update_label="auto-label",
-            sync_period_defaults={},
-            all_sync_days=-1,
         ),
         schedule_policies=policies,
         registry=_registry(),
@@ -384,10 +285,7 @@ def _startup(policies: dict[str, Any], queue: _ScheduleQueue) -> StartupSyncSche
         cast(Any, _SyncState()),
         config=StartupSyncSchedulerConfig(
             calendar_enabled=True,
-            intervals_enabled=True,
             garmin_automatic_sync_days=7,
-            sync_period_defaults={},
-            all_sync_days=-1,
             sync_chunk_days=30,
             sync_earliest_date=date(2020, 1, 1),
         ),

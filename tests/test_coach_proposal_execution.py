@@ -39,7 +39,6 @@ class CoachProposalExecutionTests(unittest.TestCase):
         self.client_factory = Mock(return_value=self.client)
         self.service = CoachProposalExecutionService(
             self.manager,
-            self.duplicate_service,
             self.undo_service,
             self.client_factory,
             MaintenanceGate(),

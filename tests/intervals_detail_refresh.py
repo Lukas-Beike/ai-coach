@@ -1,5 +1,4 @@
-"""Read-only loading of full-resolution Intervals activity data.
-
+"""Test fixture: load one Intervals.icu activity detail the way the retired refresh did.
 Every activity from the prefetch floor onward loads after an Intervals refresh;
 activities before the floor load on the athlete's explicit request.
 """
@@ -17,13 +16,14 @@ from itertools import islice, pairwise
 from typing import Any
 from urllib.parse import quote
 
+from intervals_detail_fingerprints import intervals_detail_fingerprints
+
 from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
-from backend.db.activity_detail_fingerprints import intervals_detail_fingerprints
 from backend.errors import AppError, public_error_contract
 from backend.providers.intervals_activity_detail_projection import (
     COACH_ACTIVITY_DETAIL_STREAM_FIELDS,
@@ -41,7 +41,8 @@ from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,
 )
-from backend.sync.intervals_ingest import INGEST_OFF_REASON
+
+INGEST_OFF_REASON = "intervals_ingest_off"
 
 _LOGGER = logging.getLogger(__name__)
 

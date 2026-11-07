@@ -298,9 +298,6 @@ class IntervalsClient:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         return self.delete(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
 
-    def delete_activity(self, activity_id: str) -> Any:
-        return self.delete(f"/activity/{quote(activity_id, safe='')}")
-
     def get_wellness(self, day: str) -> Any:
         athlete = quote(self.config.intervals_athlete_id, safe="")
         return self.get(f"/athlete/{athlete}/wellness/{quote(day, safe='')}")

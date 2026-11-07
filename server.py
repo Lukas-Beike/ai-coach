@@ -381,15 +381,6 @@ from backend.sync.gates import (
     INTERVALS_RESYNC_GATE,
     WAHOO_RESYNC_GATE,
 )
-from backend.sync.intervals_assembly import (
-    IntervalsLibraryDependencies,
-    IntervalsOperationDependencies,
-    IntervalsPersistenceDependencies,
-    IntervalsProviderDependencies,
-    IntervalsSyncAssembly,
-    IntervalsWaitSettings,
-    IntervalsWindowSettings,
-)
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.intervals_purge import BACKUP_LABEL as INTERVALS_PURGE_BACKUP
 from backend.sync.intervals_purge import IntervalsPurgeRunner
@@ -501,7 +492,6 @@ EXPORT_TIME_LIMIT_SECONDS = 120
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
-INTERVALS_SYNC_WAIT_SECONDS = 120
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -610,7 +600,6 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                 database_manager=database_manager,
                 key_values=KEY_VALUE_REPOSITORY,
                 database_lock=DB_LOCK,
-                intervals_sync_lock=lambda: INTERVALS_SYNC_LOCK,
                 garmin_resync_gate=GARMIN_RESYNC_GATE,
                 garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
                 historical=jobs.historical,
@@ -1154,58 +1143,6 @@ EXTERNAL_CALENDAR = ExternalCalendarAssembly(
 )
 
 
-INTERVALS_SYNC = IntervalsSyncAssembly(
-    dependencies=IntervalsSyncAssembly.Inputs(
-        provider=IntervalsProviderDependencies(
-            config=lambda: CONFIG,
-            request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
-            athlete_clock=lambda: ATHLETE_CLOCK,
-            utc_now=runtime_clock.utc_now,
-        ),
-        persistence=IntervalsPersistenceDependencies(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            state_repository=sync_state_repository,
-            daily_markers=sync_daily_markers,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            redact_text=REDACTOR.redact_text,
-            logger=LOGGER,
-            activity_rows=lambda: CANONICAL_READ,
-            table_serving=lambda: CANONICAL_READ,
-            data_dir=lambda: DATA_DIR,
-        ),
-        operations=IntervalsOperationDependencies(
-            operation_observer=PROVIDER_SYNC.operation_observer,
-            resync_gate=INTERVALS_RESYNC_GATE,
-            sync_lock=INTERVALS_SYNC_LOCK,
-            sync_job_queue=SYNC_JOB_QUEUE.service,
-        ),
-        library=IntervalsLibraryDependencies(
-            remote_planned_unit_reconciler=lambda: (
-                PLANNED_UNIT_SYNC.remote_reconciler()
-            ),
-            workout_library_refresh_service=lambda: (
-                WORKOUT_LIBRARY_SYNC.refresh_service()
-            ),
-            workout_library_service=PLANNING_DATA.workout_library,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-        ),
-        window=IntervalsWindowSettings(
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
-            sync_chunk_days=SYNC_CHUNK_DAYS,
-            sync_earliest_date=SYNC_EARLIEST_DATE,
-            calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
-            calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-        ),
-        waits=IntervalsWaitSettings(
-            performance_wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
-            poll_seconds=SYNC_JOB_POLL_SECONDS,
-        ),
-    )
-)
-
-
 PROVIDER_TRANSPORT = ProviderTransportAssembly(
     dependencies=ProviderTransportAssembly.Inputs(
         http=ProviderHttpSettings(
@@ -1430,8 +1367,6 @@ SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
         ),
         controls=SelectedWorkoutControls(
             redactor=REDACTOR.redact_text,
-            lock=INTERVALS_SYNC_LOCK,
-            wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
             provider_resync_gate=INTERVALS_RESYNC_GATE,
         ),
     )
@@ -1572,12 +1507,10 @@ COACH_PROPOSALS = CoachProposalAssembly(
     dependencies=CoachProposalAssembly.Inputs(
         persistence=ProposalPersistence(
             database_manager=database_manager,
-            duplicate_inspector=ATHLETE_DATA.duplicate_inspector,
             nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
             nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         ),
         execution=ProposalExecutionOwners(
-            duplicate_activity_service=ATHLETE_DATA.duplicate_activity,
             history_undo_service=HISTORY.undo_service,
             intervals_client_factory=PROVIDER_TRANSPORT.intervals_client,
             maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
@@ -1599,10 +1532,7 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
             competition_service=PLANNING_DATA.competition,
         ),
         resync=ResyncProviderOwners(
-            config=lambda: CONFIG,
-            intervals_sync_service=INTERVALS_SYNC.sync_service,
             garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
-            intervals_resync_gate=INTERVALS_RESYNC_GATE,
             garmin_resync_gate=GARMIN_RESYNC_GATE,
             all_sync_days=ALL_SYNC_DAYS,
         ),
@@ -1639,15 +1569,11 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         outcome_service=SYNC_JOB_QUEUE.outcome_service,
     ),
     intervals=IntervalsJobDependencies(
-        sync_service=INTERVALS_SYNC.sync_service,
-        activity_detail_service=INTERVALS_SYNC.activity_detail_service,
-        performance_refresh_service=INTERVALS_SYNC.performance_service,
         selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
         competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
         nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
         operation_observer=PROVIDER_SYNC.operation_observer,
         resync_gate=INTERVALS_RESYNC_GATE,
-        ingest_enabled=lambda: INTERVALS_SYNC.ingest_switch().enabled(),
     ),
     garmin=GarminJobDependencies(
         sync_service=GARMIN_ASSEMBLY.sync_service,
@@ -1692,13 +1618,9 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
             garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
         ),
         persistence=SyncSchedulePersistence(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            database_lock=DB_LOCK,
             sync_state_repository=sync_state_repository,
         ),
         controls=SyncScheduleControls(
-            intervals_resync_gate=INTERVALS_RESYNC_GATE,
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
             sleep=time.sleep,
         ),
@@ -1706,8 +1628,6 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
             config=lambda: CONFIG,
             garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
             auto_update_label=sync_scheduler_runtime.AUTO_UPDATE_LABEL,
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
             sync_chunk_days=SYNC_CHUNK_DAYS,
             sync_earliest_date=SYNC_EARLIEST_DATE,
         ),
@@ -1723,14 +1643,12 @@ SYNC_COMMANDS = SyncCommandAssembly(
     core=SyncCommandCore(
         database_manager=database_manager,
         queue_service=SYNC_JOB_QUEUE.service,
-        intervals_sync=INTERVALS_SYNC.sync_service,
         planned_unit_service=PLANNING_DATA.planned_unit,
         competition_service=PLANNING_DATA.competition,
         workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
         planning_revision=PLANNING_REVISION_SERVICE,
         utc_now=runtime_clock.utc_now,
         training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-        all_sync_days=ALL_SYNC_DAYS,
     ),
     illness_pause=IllnessPauseDependencies(
         config=lambda: CONFIG,
@@ -1873,7 +1791,6 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         plan_repair_manifest=SYNC_COMMANDS.repair_manifest,
         plan_push_command=SYNC_COMMANDS.plan_push,
         provider_refresh_command=SYNC_COMMANDS.provider_refresh,
-        duplicate_activity=ATHLETE_DATA.duplicate_activity,
     ),
     sync_provider=CoachSyncProvider(
         intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
@@ -1957,7 +1874,6 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
             plan_guard_service=_plan_guard_service,
         ),
         state=StructuredToolRoundState(
-            duplicate_inspector=ATHLETE_DATA.duplicate_inspector,
             job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
         ),
         conversation=StructuredToolRoundConversation(
@@ -2087,7 +2003,6 @@ PUBLIC_STATE = PublicStateAssembly(
             diagnostic_capture=lambda: DIAGNOSTIC_CAPTURE,
         ),
         operations=PublicStateOperationalServices(
-            intervals_sync_lock=lambda: INTERVALS_SYNC_LOCK,
             workout_library_sync_running=lambda: workout_library_sync_running,
             daily_planning_context_service=PLANNING_WORKFLOWS.daily_planning_context_service,
             adaptive_preview_followup_service=lambda: AdaptivePreviewFollowupService(
@@ -2371,8 +2286,6 @@ HTTP_API = HttpApiAssembly(
             sync=HttpSyncServices(
                 job_queue=SYNC_JOB_QUEUE.service,
                 state_repository=sync_state_repository,
-                performance_refresh=INTERVALS_SYNC.performance_service,
-                analysis_sessions_refresh=INTERVALS_SYNC.analysis_sessions_service,
                 garmin_analysis_refresh=GARMIN_ASSEMBLY.analysis_refresh_service,
                 full_resync=PROVIDER_RESYNC.full_resync_service,
                 period_defaults=SYNC_PERIOD_DEFAULTS,
@@ -2391,10 +2304,6 @@ HTTP_API = HttpApiAssembly(
             provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
             garmin_login=lambda: GARMIN_LOGIN,
             connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
-            intervals_ingest=INTERVALS_SYNC.ingest_switch,
-            resume_provider_schedule=lambda provider: (
-                SYNC_SCHEDULERS.startup_scheduler().resume_provider(provider)
-            ),
         ),
     ),
 )

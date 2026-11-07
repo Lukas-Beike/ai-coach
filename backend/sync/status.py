@@ -12,7 +12,6 @@ from backend.db.repositories import KeyValueRepository
 from backend.provider_credentials import garmin_tokens_connected
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.freshness import ProviderFreshnessService
-from backend.sync.freshness_sources import default_running_probes
 from backend.sync.garmin import GarminSyncStateService
 from backend.sync.queue import SyncJobQueueService
 
@@ -144,7 +143,6 @@ class SyncPublicStateService:
         maintenance_gate: MaintenanceGate,
         sync_job_queue_service: SyncJobQueueService,
         state_version_service: _StateVersionProvider,
-        intervals_sync_lock: Any,
         *,
         running_probes: Mapping[str, Callable[[], bool]] | None = None,
     ) -> None:
@@ -157,14 +155,8 @@ class SyncPublicStateService:
         self._maintenance_gate = maintenance_gate
         self._sync_job_queue_service = sync_job_queue_service
         self._state_version_service = state_version_service
-        self._intervals_sync_lock = intervals_sync_lock
         self._running_probes: Mapping[str, Callable[[], bool]] = (
-            default_running_probes(
-                intervals_sync_lock=intervals_sync_lock,
-                get_value=self._get_value,
-            )
-            if running_probes is None
-            else running_probes
+            {} if running_probes is None else running_probes
         )
 
     def _get_value(self, key: str) -> str | None:

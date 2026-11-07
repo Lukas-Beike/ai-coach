@@ -52,8 +52,6 @@ class ServerProvidersTests(ServerTestCase):
                     outcome_service=deferred,
                 ),
                 intervals=IntervalsJobDependencies(
-                    sync_service=deferred,
-                    performance_refresh_service=deferred,
                     selected_workout_sync_service=deferred,
                     competition_sync_service=deferred,
                     nutrition_sync_service=deferred,

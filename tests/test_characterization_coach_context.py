@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import FixedActivityRows
 from canonical_recovery_support import NoActivityRows, recovery_only_inputs
+from intervals_compaction import compact_snapshot
 from performance_day_support import (
     SYNCED_AT,
     StubReader,
@@ -47,7 +48,6 @@ from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
 )
-from backend.sync.intervals_compaction import compact_snapshot
 
 TODAY = date(2026, 5, 4)
 GARMIN_SOURCE = "Garmin Connect"

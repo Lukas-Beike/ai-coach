@@ -827,7 +827,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "start_provider_refresh",
-            "Queue an explicitly requested read-only provider refresh. For a Garmin catch-up after an outage or when the athlete asks for a 30-day refresh, pass days=30; otherwise use the saved provider window.",
+            "Run an explicitly requested read-only provider refresh (Garmin, Wahoo, calendar, weather). For a Garmin catch-up after an outage or when the athlete asks for a 30-day refresh, pass days=30; otherwise use the saved provider window.",
             {
                 "days": {
                     "anyOf": [
@@ -838,11 +838,6 @@ def build_structured_tool_schemas(
                 },
                 "reason": {"type": "string"},
             },
-        ),
-        _canonical_coach_tool(
-            "refresh_current_performance",
-            "Queue an explicit Intervals.icu performance-metrics refresh without reloading activities.",
-            {"reason": {"type": "string"}},
         ),
         _canonical_coach_tool(
             "start_intervals_plan_sync",
@@ -968,20 +963,6 @@ def build_structured_tool_schemas(
                 "apply": {
                     "type": "boolean",
                     "description": "Apply the undo directly after explicit athlete confirmation or request; ignored when undoing a creation.",
-                },
-            },
-        ),
-        _canonical_coach_tool(
-            "delete_duplicate_intervals_activity",
-            "Delete a duplicate Garmin cycling activity from Intervals.icu after explicit athlete confirmation or request, retaining the canonical Wahoo recording.",
-            {
-                "duplicate_id": {
-                    "type": "string",
-                    "description": "Optional Intervals.icu activity ID of the duplicate to delete. Omit to delete the latest detected duplicate.",
-                },
-                "canonical_id": {
-                    "type": "string",
-                    "description": "Optional Intervals.icu activity ID of the canonical Wahoo activity to retain.",
                 },
             },
         ),

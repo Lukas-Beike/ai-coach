@@ -4,7 +4,6 @@ import dataclasses
 import json
 import sqlite3
 import tempfile
-import threading
 import unittest
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -41,8 +40,6 @@ from backend.sync.freshness_sources import (
     GARMIN_TOKENSTORE_SIGNAL,
     WEATHER_CACHE_KEY,
     WEATHER_FAILURE_KEY,
-    default_running_probes,
-    intervals_running_probe,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_runtime import FreshnessInputs, ProviderRuntimeRegistry
@@ -214,34 +211,6 @@ def _getter(values: dict[str, Any]) -> Callable[[str], Any]:
     return lambda key: values.get(key)
 
 
-class RunningProbeTests(unittest.TestCase):
-    def test_intervals_probe_is_true_while_its_sync_lock_is_held(self) -> None:
-        lock = threading.Lock()
-        probe = intervals_running_probe(lock, _getter({}))
-        self.assertFalse(probe())
-        lock.acquire()
-        try:
-            self.assertTrue(probe())
-        finally:
-            lock.release()
-
-    def test_intervals_probe_treats_only_the_exact_stored_flag_as_running(self) -> None:
-        lock = threading.Lock()
-        cases = (("1", True), ("0", False), ("true", False), (None, False))
-        for value, expected in cases:
-            with self.subTest(value=value):
-                probe = intervals_running_probe(lock, _getter({"sync_running": value}))
-                self.assertIs(probe(), expected)
-
-    def test_default_probes_name_only_intervals_and_are_read_only(self) -> None:
-        lock = threading.Lock()
-        probes = default_running_probes(
-            intervals_sync_lock=lock,
-            get_value=_getter({"sync_running": "1"}),
-        )
-        self.assertIsInstance(probes, MappingProxyType)
-        self.assertEqual(list(probes), [INTERVALS_ID])
-        self.assertTrue(probes[INTERVALS_ID]())
 
 
 def _acme_runtime(*, running: Any = None) -> ProviderRuntimeRegistry:
@@ -412,7 +381,6 @@ class AcmeMockStatusTests(_DatabaseCase):
             MaintenanceGate(),
             jobs,
             versions,
-            threading.Lock(),
             running_probes=runtime.running_probes(),
         )
 

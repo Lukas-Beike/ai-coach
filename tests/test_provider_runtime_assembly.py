@@ -93,7 +93,6 @@ def _builtin_deps(
         database_manager=mock.Mock(name="database_manager"),
         key_values=mock.Mock(name="key_values"),
         database_lock=mock.Mock(name="database_lock"),
-        intervals_sync_lock=mock.Mock(name="intervals_sync_lock"),
         garmin_resync_gate=mock.Mock(name="garmin_resync_gate"),
         garmin_automatic_sync_days=7,
         historical=mock.Mock(
@@ -182,14 +181,12 @@ def _command_assembly(
     core = SyncCommandCore(
         database_manager=lambda: None,
         queue_service=lambda: queue,
-        intervals_sync=lambda: None,
         planned_unit_service=lambda: None,
         competition_service=lambda: None,
         workout_library_sync_state=lambda: None,
         planning_revision=None,
         utc_now=lambda: NOW,
         training_change_limit=10,
-        all_sync_days=60,
     )
     illness_pause = IllnessPauseDependencies(
         config=lambda: None,

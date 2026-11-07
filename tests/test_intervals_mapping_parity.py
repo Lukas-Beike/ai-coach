@@ -22,6 +22,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import mapped_recovery_inputs
+from intervals_compaction import compact_snapshot
 from performance_day_support import snapshot_metrics
 
 from backend.activities.activity_summary import activity_summaries
@@ -38,7 +39,6 @@ from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
-from backend.sync.intervals_compaction import compact_snapshot
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "providers" / "intervals"
 BERLIN = ZoneInfo("Europe/Berlin")

@@ -7,7 +7,6 @@ are synthetic and mocked; no account, network or real data directory is used.
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 import tempfile
 import unittest
@@ -15,6 +14,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+import intervals_compaction as intervals_fixture
 
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
@@ -28,7 +29,6 @@ from backend.db.schema import initialize_schema
 from backend.providers.canonical_plans import IngestPlan, ObservationItem
 from backend.sync import canonical_ingest as ingest
 from backend.sync.garmin import activity_deletion_window
-from backend.sync.snapshots import historical_chunk_snapshot, merge_historical_snapshot
 
 ZONE = ZoneInfo("Europe/Berlin")
 NOW = "2026-09-20T08:00:00+00:00"
@@ -148,7 +148,7 @@ class CounterTests(unittest.TestCase):
 
 class DeletionWindowTests(unittest.TestCase):
     def test_full_fetch_covers_the_inner_days_from_the_earliest_date(self) -> None:
-        window = ingest.intervals_deletion_window(
+        window = intervals_fixture.intervals_deletion_window(
             today=TODAY, activity_days=3, all_sync_days=3, earliest_date=EARLIEST
         )
         self.assertEqual(
@@ -157,7 +157,7 @@ class DeletionWindowTests(unittest.TestCase):
         )
 
     def test_partial_fetch_excludes_both_edge_days(self) -> None:
-        window = ingest.intervals_deletion_window(
+        window = intervals_fixture.intervals_deletion_window(
             today=TODAY, activity_days=14, all_sync_days=3, earliest_date=EARLIEST
         )
         self.assertEqual(window.start, date(2026, 9, 8))
@@ -175,7 +175,7 @@ class DeletionWindowTests(unittest.TestCase):
     def test_one_or_zero_days_leave_an_empty_window(self) -> None:
         for days in (0, 1, 2):
             with self.subTest(days=days):
-                window = ingest.intervals_deletion_window(
+                window = intervals_fixture.intervals_deletion_window(
                     today=TODAY,
                     activity_days=days,
                     all_sync_days=3,
@@ -188,7 +188,7 @@ class IntervalsIngestTests(IngestFixture):
     def ingest(
         self, snapshot: dict[str, Any], activity_days: int | None
     ) -> ingest.CanonicalIngestCounters:
-        return ingest.ingest_intervals_snapshot(
+        return intervals_fixture.ingest_intervals_snapshot(
             self.db,
             snapshot,
             zone=ZONE,
@@ -197,18 +197,6 @@ class IntervalsIngestTests(IngestFixture):
             earliest_date=EARLIEST,
         )
 
-    def test_snapshot_without_a_sync_time_writes_nothing(self) -> None:
-        counters = ingest.ingest_intervals_snapshot(
-            self.db,
-            {"raw_provider_data": {"activities": [intervals_row("i-1")]}},
-            zone=ZONE,
-            activity_days=3,
-            all_sync_days=3,
-            earliest_date=EARLIEST,
-        )
-        self.assertEqual(counters, ingest.CanonicalIngestCounters())
-        self.assertEqual(self.count("provider_records"), 0)
-        self.assertEqual(self.count("activity_records"), 0)
 
     def test_valid_activity_is_written_and_its_raw_record_stored(self) -> None:
         counters = self.ingest(intervals_snapshot([intervals_row("i-1")]), 3)
@@ -246,90 +234,6 @@ class IntervalsIngestTests(IngestFixture):
             ],
         )
 
-    def test_chunked_historical_ingest_matches_one_full_ingest(self) -> None:
-        def snapshot(activities: list[str], wellness: list[str]) -> dict[str, Any]:
-            return {
-                "synced_at": NOW,
-                "raw_provider_data": {
-                    "athlete": {"id": "athlete-1"},
-                    "activities": [
-                        intervals_row(name, day=f"2026-09-{index + 2:02d}")
-                        for index, name in enumerate(activities)
-                    ],
-                    "wellness": [
-                        {"id": f"2026-09-{index + 2:02d}", "weight": 70.0 + index}
-                        for index, _ in enumerate(wellness)
-                    ],
-                },
-            }
-
-        base = snapshot(["i-1", "i-2"], ["w-1", "w-2"])
-        older = snapshot(["i-0", "i-2"], ["w-0"])
-        older["raw_provider_data"]["wellness"][0]["id"] = "2026-09-01"
-        oldest = snapshot(["i-3"], [])
-        merged = base
-        chunks = []
-        for incoming in (older, oldest):
-            current = merged
-            merged = merge_historical_snapshot(current, incoming)
-            chunks.append(historical_chunk_snapshot(current, merged))
-        self.assertEqual(
-            [len(chunk["raw_provider_data"]["activities"]) for chunk in chunks],
-            [1, 1],
-        )
-
-        def dump(db: sqlite3.Connection) -> dict[str, list[str]]:
-            tables = [
-                row[0]
-                for row in db.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table' "
-                    "AND name NOT LIKE 'sqlite_%' ORDER BY name"
-                )
-            ]
-            # Generated ids (uuid text, autoincrement integers) depend on the
-            # insertion order; compare everything else.
-            generated = re.compile(r"[a-z]+_[0-9a-f]{32}")
-
-            def stable_rows(table: str) -> list[str]:
-                info = db.execute(f"PRAGMA table_info({table})").fetchall()
-                keep = [
-                    index
-                    for index, column in enumerate(info)
-                    if not (column[5] and column[2].upper() == "INTEGER")
-                ]
-                return sorted(
-                    generated.sub("<id>", repr(tuple(row[i] for i in keep)))
-                    for row in db.execute(f"SELECT * FROM {table}")
-                )
-
-            return {table: stable_rows(table) for table in tables}
-
-        def ingest_all(db: sqlite3.Connection, snapshots: list[dict[str, Any]]):
-            for item in snapshots:
-                ingest.ingest_intervals_snapshot(
-                    db,
-                    item,
-                    zone=ZONE,
-                    activity_days=None,
-                    all_sync_days=3,
-                    earliest_date=EARLIEST,
-                )
-
-        ingest_all(self.db, [base, *chunks])
-        with tempfile.TemporaryDirectory() as directory:
-            full = sqlite3.connect(Path(directory) / "full.db")
-            try:
-                initialize_schema(full)
-                ingest_all(full, [merged])
-                expected = dump(full)
-            finally:
-                full.close()
-
-        actual = dump(self.db)
-        self.assertGreater(len(actual["activity_records"]), 0)
-        self.assertEqual(actual.keys(), expected.keys())
-        for table in expected:
-            self.assertEqual(actual[table], expected[table], table)
 
     def test_historical_fetch_never_deletes(self) -> None:
         self.ingest(intervals_snapshot([intervals_row("i-1"), intervals_row("i-2")]), 3)

@@ -430,7 +430,7 @@ class CoachUndoToolPersistenceTests(unittest.TestCase):
             revisions,
             profile_mutation_coordinator=threading.RLock(),
         )
-        proposals = CoachProposalCreationService(self.manager, Mock())
+        proposals = CoachProposalCreationService(self.manager, )
         self.service = CoachPlanningActionToolService(
             Mock(), Mock(), Mock(), lambda: self.undo, lambda: proposals
         )

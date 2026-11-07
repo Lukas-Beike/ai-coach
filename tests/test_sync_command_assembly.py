@@ -36,14 +36,12 @@ class SyncCommandAssemblyTests(unittest.TestCase):
             core=SyncCommandCore(
                 database_manager=self.database_manager,
                 queue_service=self.queue_service,
-                intervals_sync=self.intervals_sync,
                 planned_unit_service=self.planned_unit_service,
                 competition_service=self.competition_service,
                 workout_library_sync_state=self.library_sync_state,
                 planning_revision=self.revision,
                 utc_now=self.clock,
                 training_change_limit=24,
-                all_sync_days=-1,
             ),
             illness_pause=IllnessPauseDependencies(
                 config=self.config,

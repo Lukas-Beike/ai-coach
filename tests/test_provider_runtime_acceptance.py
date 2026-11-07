@@ -234,7 +234,6 @@ class AcmeOrchestrationCase(unittest.TestCase):
         self.endpoint = SyncCommandEndpoint(
             self.queue,
             self.period_state,
-            Mock(),
             self.full_resync,
             lambda: "operation-1",
             {ACME_ID: 14},
@@ -269,7 +268,6 @@ class AcmeOrchestrationCase(unittest.TestCase):
             self.gate,
             self.queue,
             self.state_versions,
-            Mock(),
             running_probes={},
         )
         self.get_routes = SyncGetRoutes(
@@ -284,8 +282,6 @@ class AcmeOrchestrationCase(unittest.TestCase):
         self.synchronous.refresh.return_value = {"ok": True, "status": "completed"}
         self.refresh = ProviderRefreshCommandService(
             self.queue,
-            Mock(),
-            -1,
             synchronous_refreshes={ACME_ID: self.synchronous},
         )
 
@@ -295,19 +291,11 @@ class AcmeOrchestrationCase(unittest.TestCase):
             self.queue,
             self.markers,
             Mock(),
-            self.database,
-            self.key_values,
-            threading.Lock(),
-            Mock(),
-            Mock(),
             self.gate,
             config=DailySyncSchedulerConfig(
                 calendar_url_enabled=False,
-                intervals_key_enabled=False,
                 garmin_automatic_sync_days=-1,
                 auto_update_label=AUTO_UPDATE_LABEL,
-                sync_period_defaults={},
-                all_sync_days=-1,
             ),
             schedule_policies=policies,
             registry=REGISTRY,
@@ -321,10 +309,7 @@ class AcmeOrchestrationCase(unittest.TestCase):
             Mock(),
             config=StartupSyncSchedulerConfig(
                 calendar_enabled=False,
-                intervals_enabled=False,
                 garmin_automatic_sync_days=-1,
-                sync_period_defaults={},
-                all_sync_days=-1,
                 sync_chunk_days=30,
                 sync_earliest_date=date(2026, 1, 1),
             ),
@@ -606,9 +591,7 @@ class AcmeCoachRefreshTests(AcmeOrchestrationCase):
         self.assertEqual(job_rows(self), [])
 
     def test_coach_wait_without_a_synchronous_refresh_is_refused(self) -> None:
-        service = ProviderRefreshCommandService(
-            self.queue, Mock(), -1, synchronous_refreshes={}
-        )
+        service = ProviderRefreshCommandService(self.queue, {})
 
         with self.assertRaises(AppError) as raised:
             service.start(ACME_ID, {"days": 7, "_wait_for_completion": True})

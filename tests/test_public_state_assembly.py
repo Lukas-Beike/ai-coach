@@ -108,7 +108,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
                     diagnostic_capture=deps["diagnostic_capture"],
                 ),
                 operations=PublicStateOperationalServices(
-                    intervals_sync_lock=deps["intervals_sync_lock"],
                     workout_library_sync_running=deps["workout_library_sync_running"],
                     daily_planning_context_service=deps["daily_context"],
                     adaptive_preview_followup_service=deps["adaptive_followup"],

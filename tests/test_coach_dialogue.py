@@ -22,7 +22,6 @@ from backend.coach.outcomes import unresolved_coach_steps
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.errors import AppError
 from backend.sync import queue as sync_queue
-from backend.sync.intervals import IntervalsSyncService
 
 server = fixtures.server
 WRITE_IMPACT = "write_impact"  # name of the write gate's classifier schema
@@ -1425,31 +1424,6 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         enqueue.assert_not_called()
         self.assertEqual(result["status"], "failed")
 
-    def test_current_refresh_runs_before_next_model_response_without_trigger_gate(self):
-        with patch.object(
-            IntervalsSyncService,
-            "sync",
-            return_value={"status": "ok", "activity_days": 7},
-        ) as sync:
-            result, model = self.turn(
-                "Sind die Zahlen wirklich von heute? Bitte damit bewerten.",
-                [
-                    lambda _: self.call(
-                        "start_provider_refresh",
-                        {"days": 7},
-                        ["intervals_refresh"],
-                        target="intervals",
-                    ),
-                    lambda _: (
-                        {"output_text": "Aktuelle Daten bewertet."}
-                        if sync.called
-                        else self.fail("refresh must finish first")
-                    ),
-                ],
-            )
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(model.call_count, 2)
-        sync.assert_called_once()
 
     def test_idempotent_client_turn_does_not_repeat_effect(self):
         steps = [
@@ -1945,43 +1919,6 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             ).fetchone()
         self.assertEqual(len(json.loads(job["payload"])["entries"]), 1)
 
-    def test_sync_followup_can_read_job_and_inspect_duplicates(self):
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-08")]
-        )
-        result, _ = self.turn(
-            "Sync zu intervals.icu durchführen",
-            [
-                lambda _: self.call(
-                    "start_intervals_plan_sync",
-                    {},
-                    ["local_plan", "intervals_sync"],
-                    target="intervals",
-                    remote_write=True,
-                    sync_scope="all_pending",
-                ),
-                {"output_text": "Synchronisierung beauftragt."},
-            ],
-        )
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(len(result["sync_job_ids"]), 1)
-        followup, _ = self.turn(
-            "Zeig den Sync-Status.",
-            [
-                lambda _: self.call(
-                    "get_sync_job", {"job_id": result["sync_job_ids"][0]}
-                ),
-                lambda _: self.call("inspect_activity_duplicates"),
-                {"output_text": "Status gelesen."},
-            ],
-        )
-        self.assertTrue(
-            all(step["result"]["ok"] for step in followup["command_receipts"])
-        )
-        self.assertEqual(
-            server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],
-            "queued",
-        )
 
     def test_sync_followup_failure_distinguishes_coach_interruption_and_keeps_job(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(

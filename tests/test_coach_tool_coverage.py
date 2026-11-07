@@ -12,17 +12,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from canonical_detail_support import seed_intervals_activity
-from duplicate_support import mark_tables_serving
+from support import mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
 from backend.planning import library as planning_library
 from backend.providers import http as provider_http
-from backend.providers import intervals_client as intervals_client_module
 from backend.providers import openai as openai_provider
 from backend.sync.adaptive import IllnessPauseSyncService
-from backend.sync.intervals import IntervalsSyncService
 
 
 def covers(*cases):
@@ -711,74 +709,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.PLANNING_DATA.competition().list(), [])
         self.assertEqual(len(server.SYNC_JOB_QUEUE.service().list()), 1)
 
-    @covers(
-        "start_provider_refresh:intervals",
-        "start_provider_refresh:garmin",
-        "start_provider_refresh:calendar",
-        "start_provider_refresh:weather",
-        "refresh_current_performance:success",
-        "get_sync_job:success",
-    )
-    def test_provider_reads_and_job_status_use_correct_provider(self):
-        with patch.object(
-            IntervalsSyncService,
-            "sync",
-            return_value={"status": "ok", "activity_days": 7},
-        ) as sync:
-            result = self.run_tool(
-                "start_provider_refresh",
-                {"days": 7},
-                ["intervals_refresh"],
-                target="intervals",
-            )
-            self.assertEqual(result["status"], "completed")
-            sync.assert_called_once()
-            self.assertEqual(sync.call_args.kwargs["activity_days"], 7)
-        with (
-            patch(
-                "backend.sync.garmin_service.GarminSyncService.sync",
-                return_value={"status": "ok"},
-            ) as garmin_sync,
-            patch(
-                "backend.performance.morning_battery_service."
-                "MorningBodyBatteryService.refresh"
-            ),
-        ):
-            result = self.run_tool(
-                "start_provider_refresh",
-                {"days": 7},
-                ["garmin_refresh"],
-                target="garmin",
-            )
-            self.assertEqual(result["status"], "completed")
-            garmin_sync.assert_called_once()
-        for provider in ("calendar", "weather"):
-            result = self.run_tool(
-                "start_provider_refresh",
-                {},
-                [provider + "_refresh"],
-                target=provider,
-            )
-            job = self.run_tool("get_sync_job", {"job_id": result["sync_job_id"]})[
-                "job"
-            ]
-            self.assertEqual(
-                (job["provider"], job["type"], job["status"]),
-                (provider, "refresh", "queued"),
-            )
-        result = self.run_tool(
-            "refresh_current_performance", {}, ["intervals_refresh"], target="intervals"
-        )
-        self.assertEqual(
-            server.SYNC_JOB_QUEUE.service().state(result["sync_job_id"])["type"],
-            "performance_refresh",
-        )
-        self.assertTrue(
-            all(
-                job["type"] not in {"plan_push", "competition_push"}
-                for job in server.SYNC_JOB_QUEUE.service().list()
-            )
-        )
 
     @covers(
         "start_intervals_plan_sync:created",
@@ -1106,37 +1036,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 **{**common, "source": source},
             )
 
-    @covers("inspect_activity_duplicates:success")
-    def test_duplicate_inspection_returns_preview_without_deleting_provider_data(self):
-        common = {
-            "type": "Ride",
-            "start_date_local": "2026-09-06T10:00:00",
-            "moving_time": 3600,
-            "distance": 30000,
-        }
-        snapshot = {
-            "recent_activities": [
-                {**common, "id": "synthetic-wahoo", "source": "Wahoo"},
-                {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"},
-            ]
-        }
-        server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
-        self.seed_duplicate_pair(common)
-        result = self.run_tool(
-            "inspect_activity_duplicates",
-            message="Ist die letzte Radausfahrt doppelt vorhanden?",
-        )
-        self.assertIsNotNone(result["duplicate"])
-        self.assertEqual(result["duplicate"]["canonical_id"], "synthetic-wahoo")
-        self.assertNotIn("proposed_action", result)
-        self.assertNotIn("proposal", result)
-        self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
-                "recent_activities"
-            ],
-            snapshot["recent_activities"],
-        )
-        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers(
         "confirm_activity_session:success",
@@ -1185,38 +1084,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(merged["status"], "merged")
         self.assertEqual(len(sessions.bundle(first)["members"]), 2)
 
-    @covers("delete_duplicate_intervals_activity:success")
-    def test_delete_duplicate_intervals_activity(self):
-        common = {
-            "type": "Ride",
-            "start_date_local": "2026-09-06T10:00:00",
-            "moving_time": 3600,
-            "distance": 30000,
-        }
-        snapshot = {
-            "synced_at": "2026-09-06T12:00:00+00:00",
-            "recent_activities": [
-                {**common, "id": "synthetic-wahoo", "source": "Wahoo"},
-                {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"},
-            ],
-        }
-        server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
-        self.seed_duplicate_pair(common)
-        with patch.object(
-            intervals_client_module.IntervalsClient,
-            "delete_activity",
-            return_value=None,
-        ):
-            result = self.run_tool(
-                "delete_duplicate_intervals_activity",
-                {"duplicate_id": "synthetic-garmin", "canonical_id": "synthetic-wahoo"},
-                ["intervals_sync"],
-                target="intervals",
-                remote_write=True,
-                message="Lösche das Garmin-Duplikat für die Wahoo-Ausfahrt aus Intervals.",
-            )
-            self.assertTrue(result["ok"])
-            self.assertEqual(result["status"], "deleted")
 
     @covers("clarify_coach_request:success", "cancel_coach_request:success")
     def test_clarification_and_cancellation_preserve_athlete_data(self):
@@ -2192,210 +2059,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             json.loads(server.key_value_service().get("coach_pending_request"))
         )
 
-    def test_invalid_arguments_and_missing_objects_do_not_partially_write(self):
-        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout()], plan_name="Synthetic validation plan"
-        )[0]
-        server.PLANNING_DATA.workout_library().create_template(
-            {
-                "name": "Synthetic template",
-                "description": "- 30m 60% Easy",
-                "duration_minutes": 30,
-            }
-        )
-        template_id = server.PLANNING_DATA.workout_library().list()[0]["id"]
-        plan_id = server.PLANNING_DATA.training_plan().list()[0]["id"]
-        period = {"start": "2026-09-09", "end": "2026-09-09"}
-        cases = [
-            (
-                "update_profile",
-                {"changes": [{"field": "name", "expected_value": "", "value": None}]},
-                ["local_profile"],
-                {},
-            ),
-            (
-                "manage_training_templates",
-                {
-                    "templates": [
-                        {
-                            "action": "create",
-                            "name": "Must roll back",
-                            "description": "Easy",
-                        },
-                        {"action": "invalid"},
-                    ]
-                },
-                ["local_template"],
-                {},
-            ),
-            ("save_checkin", {"payload": {"soreness": 11}}, ["local_checkin"], {}),
-            (
-                "save_checkin",
-                {
-                    "payload": {
-                        "illness": "Synthetic cold",
-                        "clear_fields": ["illness"],
-                    }
-                },
-                ["local_checkin"],
-                {},
-            ),
-            (
-                "save_activity_feedback",
-                {"payload": {"activity_id": "missing", "notes": "Synthetic"}},
-                ["activity_feedback"],
-                {},
-            ),
-            (
-                "delete_activity_feedback",
-                {"activity_id": ""},
-                ["activity_feedback"],
-                {},
-            ),
-            (
-                "save_competition",
-                {
-                    "payload": {
-                        "name": "Synthetic",
-                        "event_date": "2026-99-99",
-                        "sport": "Run",
-                    }
-                },
-                ["local_competitions"],
-                {},
-            ),
-            (
-                "delete_competition",
-                {"competition_id": "missing"},
-                ["competition:missing"],
-                {},
-            ),
-            (
-                "stage_training_plan",
-                {
-                    "payload": {
-                        "plan_name": "Invalid draft",
-                        "goal": "Synthetic",
-                        "workouts": [],
-                    }
-                },
-                ["local_plan"],
-                {"period": period},
-            ),
-            (
-                "commit_training_plan",
-                {"artifact_id": "missing"},
-                ["artifact:missing"],
-                {"period": period},
-            ),
-            (
-                "replace_training_plan",
-                {
-                    "payload": {
-                        "plan_name": "Invalid replacement",
-                        "goal": "Synthetic",
-                        "workouts": [self.workout()],
-                    },
-                    "expected_revision": -1,
-                },
-                ["local_plan"],
-                {"period": period},
-            ),
-            (
-                "apply_training_patch",
-                {"workouts": [self.workout()], "expected_revision": -1},
-                ["local_plan"],
-                {"period": period},
-            ),
-            (
-                "apply_workout_library_plan",
-                {
-                    "entries": [
-                        {"library_workout_id": template_id, "date": "2026-99-99"}
-                    ]
-                },
-                ["library_workout:" + template_id],
-                {"period": period},
-            ),
-            (
-                "update_training_plan",
-                {"payload": {"plan_id": plan_id, "start_date": "invalid"}},
-                ["training_plan:" + plan_id],
-                {},
-            ),
-            ("undo_training_change", {"change_id": "missing"}, ["change:missing"], {}),
-            (
-                "resolve_training_sync_conflict",
-                {"local_id": unit["id"], "strategy": "keep_local"},
-                ["planned_unit:" + unit["id"]],
-                {},
-            ),
-            (
-                "apply_adaptive_replan",
-                {"adjustment_id": "missing"},
-                ["adaptive_replan:missing"],
-                {},
-            ),
-            (
-                "start_provider_refresh",
-                {"days": 4000},
-                ["garmin_refresh"],
-                {"target": "garmin"},
-            ),
-            (
-                "refresh_current_performance",
-                {},
-                ["weather_refresh"],
-                {"target": "weather"},
-            ),
-            (
-                "start_intervals_plan_sync",
-                {
-                    "entries": [
-                        {
-                            "library_workout_id": unit["id"],
-                            "expected_payload_hash": "invalid",
-                        }
-                    ]
-                },
-                ["intervals_sync", "planned_unit:" + unit["id"]],
-                {"target": "intervals", "remote_write": True, "sync_scope": "selected"},
-            ),
-            (
-                "sync_competitions",
-                {},
-                ["intervals_sync"],
-                {"target": "intervals", "remote_write": True},
-            ),
-        ]
-        for name, args, scope, kwargs in cases:
-            with self.subTest(tool=name):
-                before = self.athlete_state()
-                previous_auto_approval = self.auto_approve_remote_proposals
-                if kwargs.get("remote_write"):
-                    self.auto_approve_remote_proposals = False
-                result, _ = self.turn(
-                    message_for(name),
-                    [
-                        lambda _, n=name, a=args, s=scope, k=kwargs: self.call(
-                            n, a, s, **k
-                        ),
-                        {"output_text": "Nicht ausgeführt."},
-                    ],
-                )
-                self.auto_approve_remote_proposals = previous_auto_approval
-                if kwargs.get("remote_write"):
-                    self.assertEqual(
-                        result["command_receipts"][0]["result"]["status"],
-                        "approval_required",
-                    )
-                    after = self.athlete_state()
-                    before.pop("coach_action_proposals")
-                    after.pop("coach_action_proposals")
-                    self.assertEqual(after, before)
-                else:
-                    self.assertEqual(result["status"], "failed")
-                    self.assertEqual(self.athlete_state(), before)
 
     def test_adaptive_proposal_cannot_approve_itself_in_the_same_turn(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(

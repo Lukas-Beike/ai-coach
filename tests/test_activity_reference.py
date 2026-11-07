@@ -25,10 +25,8 @@ from backend.activities.activity_reference import (
     ActivityReference,
     ActivityReferences,
     NoActivityReferences,
-    resolve_duplicate_ids,
 )
 from backend.activities.detail_store import ActivityDetailStore
-from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.athlete.equipment import EquipmentService
 from backend.canonical.records import ActivityRecord, Provenance
@@ -41,7 +39,6 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.db import DatabaseManager, canonical_store, row_factory
-from backend.db.activity_detail_store import detail_sets_for
 from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -49,8 +46,6 @@ from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.detail_envelope import DetailEnvelopeReader
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
-from backend.sync.activity_detail_canonical import CanonicalDetailWriter
-from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.queue import SyncJobQueueService
 
@@ -301,25 +296,6 @@ class ActivityReferenceResolverTests(_Fixture):
         self.assertEqual({}, references.local_ids(["ride-1"]))
 
 
-class DuplicateIdResolutionTests(unittest.TestCase):
-    def test_resolves_only_present_duplicate_fields(self) -> None:
-        references = Mock()
-        references.resolve.side_effect = lambda value: f"resolved-{value}"
-
-        self.assertEqual(
-            resolve_duplicate_ids(
-                {"canonical_id": "act_a", "snapshot_synced_at": "t"}, references
-            ),
-            {"canonical_id": "resolved-act_a", "snapshot_synced_at": "t"},
-        )
-
-    def test_non_mapping_payload_is_returned_unchanged(self) -> None:
-        references = Mock()
-
-        self.assertIsNone(resolve_duplicate_ids(None, references))
-        references.resolve.assert_not_called()
-
-
 class ActivityCallerResolutionTests(_Fixture):
     def test_detail_resolves_local_id_and_reports_it(self) -> None:
         local = self.seed("ride-1")
@@ -423,31 +399,6 @@ class ActivityCallerResolutionTests(_Fixture):
         with self.assertRaises(AppError):
             service.assign({"activity_id": "act_missing", "equipment_id": "bike-1"})
 
-    def test_duplicate_delete_validates_resolved_provider_ids(self) -> None:
-        canonical = self.seed("wahoo-1")
-        duplicate = self.seed("garmin-1")
-        service = DuplicateActivityService(
-            self.manager,
-            Mock(latest=Mock(return_value=None)),
-            Mock(),
-            Mock(),
-            references=ActivityReferences(self.manager),
-        )
-        with (
-            patch(
-                "backend.activities.duplicate_service.validate_duplicate_delete",
-                side_effect=RuntimeError("stop after resolution"),
-            ) as validate,
-            self.assertRaises(RuntimeError),
-        ):
-            service.delete(
-                {"canonical_id": canonical, "duplicate_id": duplicate},
-                intervals_client=Mock(),
-            )
-        self.assertEqual(
-            {"canonical_id": "wahoo-1", "duplicate_id": "garmin-1"},
-            validate.call_args.args[0],
-        )
 
     def test_activity_detail_job_is_stored_under_the_provider_id(self) -> None:
         local = self.seed("ride-1")
@@ -476,30 +427,6 @@ class ActivityCallerResolutionTests(_Fixture):
             )
         self.assertEqual({"activity_id": "ride-1"}, normalize.call_args.args[2])
 
-    def test_detail_refresh_fetches_the_provider_activity(self) -> None:
-        local = self.seed("ride-1")
-        api = Mock()
-        api.get.side_effect = [
-            {"id": "ride-1", "name": "Synthetic ride"},
-            [
-                {"type": "time", "data": [0, 1, 2]},
-                {"type": "watts", "data": [200, 210, 220]},
-            ],
-        ]
-        service = ActivityDetailRefreshService(
-            api_client=api,
-            database_manager=self.manager,
-            row_reader=FixedActivityRows([{"id": "ride-1"}]),
-            store=ActivityDetailStore(self.manager),
-            utc_now=lambda: "2026-10-02T08:00:00Z",
-            configured=True,
-            references=ActivityReferences(self.manager),
-            canonical=CanonicalDetailWriter(),
-        )
-        service.refresh(local)
-        self.assertEqual("/activity/ride-1", api.get.call_args_list[0].args[0])
-        with self.manager.reader() as db:
-            self.assertTrue(detail_sets_for(db, "intervals", "ride-1"))
 
 
 class ActivityFeedbackKeyTests(_Fixture):

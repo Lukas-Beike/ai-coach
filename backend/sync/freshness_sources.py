@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import Any
 
 from backend.provider_credentials import WAHOO_TOKENS_KEY
 from backend.providers.descriptors import (
@@ -22,7 +22,6 @@ from backend.providers.descriptors import (
     WAHOO_ID,
     WEATHER_ID,
 )
-from backend.sync.intervals_ingest import INGEST_ENABLED_KEY, ingest_enabled_value
 from backend.sync.provider_runtime import FreshnessInputs, FreshnessSource
 from backend.sync.wahoo_connection import connection_status
 from backend.weather import cache as weather_cache
@@ -31,11 +30,8 @@ WEATHER_CACHE_KEY = weather_cache.CACHE_KEY
 WEATHER_FAILURE_KEY = weather_cache.FAILURE_KEY
 GARMIN_CORE_ERROR_SIGNAL = "garmin_has_core_error"
 GARMIN_TOKENSTORE_SIGNAL = "garmin_tokenstore_exists"
+# The retired ingest flag; the purge of the stored Intervals.icu data clears it.
 INTERVALS_RUNNING_FLAG = "sync_running"
-
-
-class _Lock(Protocol):
-    def locked(self) -> bool: ...
 
 
 def _stored_source(
@@ -53,13 +49,6 @@ def _stored_source(
 
 def _intervals_configured(inputs: FreshnessInputs) -> bool:
     return bool(inputs.config.intervals_api_key)
-
-
-def _intervals_ingest_configured(inputs: FreshnessInputs) -> bool:
-    """Ingest areas age only while the athlete reads Intervals.icu data."""
-    return _intervals_configured(inputs) and ingest_enabled_value(
-        inputs.get_value(INGEST_ENABLED_KEY)
-    )
 
 
 def _garmin_configured(inputs: FreshnessInputs) -> bool:
@@ -99,18 +88,10 @@ def _weather_cached_at(inputs: FreshnessInputs) -> Any:
 
 _INTERVALS_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
     {
-        "activities": _stored_source(
-            "last_sync_at", "last_sync_error", _intervals_ingest_configured
-        ),
         "competitions": _stored_source(
             "last_competition_sync_at",
             "last_competition_sync_error",
             _intervals_configured,
-        ),
-        "performance": _stored_source(
-            "last_performance_refresh_at",
-            "last_performance_error",
-            _intervals_ingest_configured,
         ),
     }
 )
@@ -162,35 +143,3 @@ DEFAULT_FRESHNESS_SOURCES: Mapping[str, Mapping[str, FreshnessSource]] = (
         }
     )
 )
-
-
-def intervals_sync_running(lock: _Lock, get_value: Callable[[str], Any]) -> bool:
-    """Return whether an Intervals.icu sync is running: lock held or flag set.
-
-    ``backend.sync.intervals`` delegates its runtime check here, so the lock and
-    stored-flag rule has one implementation. The flag lives in key-value state
-    and is compared exactly, so only the stored value ``"1"`` counts as running.
-    """
-    return bool(lock.locked()) or get_value(INTERVALS_RUNNING_FLAG) == "1"
-
-
-def intervals_running_probe(
-    lock: _Lock, get_value: Callable[[str], Any]
-) -> Callable[[], bool]:
-    """Return the Intervals.icu running check: its sync lock or the stored flag."""
-
-    def running() -> bool:
-        return intervals_sync_running(lock, get_value)
-
-    return running
-
-
-def default_running_probes(
-    *,
-    intervals_sync_lock: _Lock,
-    get_value: Callable[[str], Any],
-) -> Mapping[str, Callable[[], bool]]:
-    """Return the running probes of today's built-in providers."""
-    return MappingProxyType(
-        {INTERVALS_ID: intervals_running_probe(intervals_sync_lock, get_value)}
-    )

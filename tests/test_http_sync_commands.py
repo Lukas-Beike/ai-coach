@@ -23,7 +23,6 @@ class SyncCommandEndpointTests(unittest.TestCase):
         self.endpoint = SyncCommandEndpoint(
             self.queue,
             self.state,
-            self.performance,
             self.full_resync,
             lambda: "operation-1",
             {"intervals": 90, "garmin": 30},
@@ -126,7 +125,6 @@ class SyncCommandEndpointTests(unittest.TestCase):
                 SyncCommandEndpoint(
                     self.queue,
                     self.state,
-                    self.performance,
                     self.full_resync,
                     lambda: "operation-1",
                     {"intervals": 90, "garmin": 30},

@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import intervals_compaction as intervals_fixture
+
 from backend.activities.activity_summary import activity_summaries
 from backend.activities.session_linking import garmin_activity_matches
 from backend.athlete.equipment import EquipmentService
@@ -24,7 +26,6 @@ from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.sync import canonical_ingest
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
@@ -91,7 +92,7 @@ class EquipmentSessionTests(unittest.TestCase):
         key_values = KeyValueRepository(lambda: SYNCED)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-            canonical_ingest.ingest_intervals_partial_snapshot(
+            intervals_fixture.ingest_intervals_partial_snapshot(
                 db,
                 {
                     "synced_at": SYNCED,
@@ -272,7 +273,7 @@ class CanonicalGearParityTests(unittest.TestCase):
         self.rows = [intervals_row("i1"), intervals_row("i2")]
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-            canonical_ingest.ingest_intervals_partial_snapshot(
+            intervals_fixture.ingest_intervals_partial_snapshot(
                 db,
                 {"synced_at": SYNCED, "raw_provider_data": {"activities": self.rows}},
                 zone=ZONE,
@@ -359,7 +360,7 @@ class CanonicalDuplicatePairTests(unittest.TestCase):
         self.rows = [intervals_row("i1"), intervals_row("i2")]
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-            canonical_ingest.ingest_intervals_partial_snapshot(
+            intervals_fixture.ingest_intervals_partial_snapshot(
                 db,
                 {"synced_at": SYNCED, "raw_provider_data": {"activities": self.rows}},
                 zone=ZONE,
@@ -451,7 +452,7 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         self.wahoo: list[dict[str, Any]] = [wahoo_summary("w1")]
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-            canonical_ingest.ingest_intervals_partial_snapshot(
+            intervals_fixture.ingest_intervals_partial_snapshot(
                 db,
                 {
                     "synced_at": SYNCED,
@@ -535,53 +536,6 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         self.assertEqual(usage["assigned_sessions"], 2)
         self.assertEqual(usage["hours"], 1.5)
 
-    def test_garmin_gear_links_an_intervals_copy_named_by_its_external_id(
-        self,
-    ) -> None:
-        """An older Garmin ride outside the Garmin window exists only in Intervals.icu."""
-        with self.manager.unit_of_work() as db:
-            canonical_ingest.ingest_intervals_partial_snapshot(
-                db,
-                {
-                    "synced_at": SYNCED,
-                    "raw_provider_data": {
-                        "activities": [
-                            {
-                                **intervals_row("i-old"),
-                                "start_date_local": "2026-06-01T07:00:00",
-                                "source": "GARMIN_CONNECT",
-                                "external_id": "700",
-                            }
-                        ]
-                    },
-                },
-                zone=ZONE,
-            )
-            GarminSnapshotWriter(
-                KeyValueRepository(lambda: SYNCED), lambda: ZONE
-            ).write(
-                db,
-                {
-                    "synced_at": SYNCED,
-                    "activities": [garmin_activity(910)],
-                    "source_freshness": {"gear": {"freshness": "current"}},
-                    "gear": [
-                        {
-                            "gearUUID": "g1",
-                            "gearName": "Road bike",
-                            "gearTypeName": "Bike",
-                            "stats": {"totalDistance": 50000},
-                            "activity_ids": ["910", "700"],
-                        }
-                    ],
-                },
-            )
-        with self.manager.reader() as db:
-            from backend.db import garmin_store
-
-            self.service.sync_garmin_snapshot(garmin_store.read_state(db))
-        links = {row["activity_id"] for row in self.service.read()["assignments"]}
-        self.assertIn(session_of(self.manager, "i-old"), links)
 
     def test_a_second_bundled_intervals_id_names_the_session_for_assign(self) -> None:
         with self.manager.reader() as db:

@@ -240,9 +240,7 @@ only a draft actually referenced in this local dialogue; include the draft's
 source_message_id as well as the current acceptance in source_message_ids.
 Never choose arbitrary outstanding artifacts. Read related drafts by conversation context, never ask
 the user to type an artifact ID. You are as powerful as possible and proactively resolve all operations, conflicts,
-and errors. Use inspect_activity_duplicates when analysing the latest cycling activity;
-when confirmed or requested by the athlete, delete the duplicate Garmin activity from
-Intervals.icu with delete_duplicate_intervals_activity. For undo requests or confirmations,
+and errors. For undo requests or confirmations,
 use undo_training_change with apply=true to revert an update or deletion directly; undoing
 a creation returns a confirmation card for the athlete instead. For sync conflicts,
 use resolve_training_sync_conflict with keep_local or adopt_remote, asking the athlete if their

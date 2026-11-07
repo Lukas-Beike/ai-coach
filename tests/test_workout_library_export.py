@@ -34,8 +34,6 @@ from backend.planning import workouts as planning_workouts
 from backend.providers.intervals_client import IntervalsClient
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import (
-    WorkoutLibraryRefreshService,
-    WorkoutLibraryRemoteReconciler,
     WorkoutLibrarySyncService,
     WorkoutLibrarySyncStateService,
 )
@@ -358,34 +356,6 @@ class LibrarySyncThroughFakePortTests(_LibraryDatabase):
         )
 
 
-class LibraryRefreshThroughFakePortTests(_LibraryDatabase):
-    def test_refresh_reads_the_library_through_the_port_with_cancellation(
-        self,
-    ) -> None:
-        port = FakeLibraryPort()
-        port.remote = [{**strength("Remote"), "id": "remote-9"}]
-        reconciler = Mock()
-        reconciler.reconcile.return_value = [{"external_id": "remote-9"}]
-        sync_state = Mock()
-        sync_state.summary.return_value = {}
-        service = WorkoutLibraryRefreshService(
-            config(),
-            self.database_manager,
-            port,
-            reconciler,
-            Mock(),
-            sync_state,
-            KeyValueRepository(lambda: NOW),
-            Mock(),
-            lambda: NOW,
-        )
-        cancel_event = threading.Event()
-
-        result = service.refresh(cancel_event=cancel_event)
-
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(port.calls, [("library_list", cancel_event)])
-        reconciler.reconcile.assert_called_once_with(port.remote, remove_missing=True)
 
 
 class LibraryReadsResolveThroughRemoteLinksTests(_LibraryDatabase):
@@ -413,44 +383,7 @@ class LibraryReadsResolveThroughRemoteLinksTests(_LibraryDatabase):
         self.assertFalse(by_id["lib-unlinked-id"]["has_remote_id"])
         self.assertEqual(by_id["lib-unlinked-id"]["category"], "new")
 
-    def test_missing_remote_marking_resolves_the_external_id_through_the_link(
-        self,
-    ) -> None:
-        self.add_entry("lib-seen", state="synced", external_id="slot-seen", link=True)
-        self.add_entry("lib-gone", state="synced", external_id="slot-gone", link=True)
-        with self.database_manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE remote_links SET remote_external_id='link-seen' "
-                "WHERE local_id='lib-seen'"
-            )
-            db.execute(
-                "UPDATE workout_library SET sync_dirty=0 WHERE sync_state='synced'"
-            )
-        reconciler = WorkoutLibraryRemoteReconciler(
-            self.database_manager, lambda: NOW, lambda: OTHER_ID
-        )
 
-        reconciler.reconcile([], remove_missing=False)
-        with self.database_manager.unit_of_work() as db:
-            reconciler._mark_missing_remote_library_workouts(db, {"link-seen"}, NOW)
-
-        self.assertEqual(self.row("lib-seen")["sync_state"], "synced")
-        self.assertEqual(self.row("lib-gone")["sync_state"], "remote_missing")
-
-    def test_missing_remote_marking_covers_a_link_without_a_slot(self) -> None:
-        self.add_entry(
-            "lib-linked-only", state="synced", external_id="slot-x", link=True
-        )
-        with self.database_manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE workout_library SET external_id=NULL, sync_dirty=0 "
-                "WHERE local_id='lib-linked-only'"
-            )
-            WorkoutLibraryRemoteReconciler(
-                self.database_manager, lambda: NOW, lambda: OTHER_ID
-            )._mark_missing_remote_library_workouts(db, set(), NOW)
-
-        self.assertEqual(self.row("lib-linked-only")["sync_state"], "remote_missing")
 
 
 class IntervalsLibraryAdapterParityTests(unittest.TestCase):

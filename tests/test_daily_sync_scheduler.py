@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import unittest
 from contextlib import contextmanager
 from datetime import date
@@ -126,19 +125,11 @@ class DailySyncSchedulerTests(unittest.TestCase):
             self.queue,
             self.markers,
             garmin or _Garmin(),
-            _Database(),
-            _KeyValues(sync_running),
-            threading.Lock(),
-            _SyncState(),
-            reset_gate or ProviderResyncGate("Intervals.icu"),
             maintenance_gate or MaintenanceGate(),
             config=DailySyncSchedulerConfig(
                 calendar_url_enabled=calendar_enabled,
-                intervals_key_enabled=intervals_enabled,
                 garmin_automatic_sync_days=2,
                 auto_update_label="automatic refresh",
-                sync_period_defaults={"intervals": 90, "garmin": 30},
-                all_sync_days=-1,
             ),
         )
 

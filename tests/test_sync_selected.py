@@ -113,8 +113,6 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
             self.calendar_sync,
             self.repair_sync,
             redactor or (lambda text: text),
-            lock=lock or self.lock,
-            wait_seconds=wait_seconds,
             **(
                 {"provider_resync_gate": provider_resync_gate}
                 if provider_resync_gate is not None

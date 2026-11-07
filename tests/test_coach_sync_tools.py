@@ -240,8 +240,6 @@ class CoachSyncToolServiceTests(unittest.TestCase):
             self.plan_repair,
             self.plan_push,
             self.provider_refresh,
-            duplicate_activity=duplicate_service,
-            intervals_client_factory=lambda: intervals_client,
         )
         intent = {
             "operation": "delete_duplicate_intervals_activity",

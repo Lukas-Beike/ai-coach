@@ -5,7 +5,6 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from backend.activities.duplicates import duplicate_delete_action
 from backend.performance import (
     body,
     current_metrics,
@@ -44,18 +43,6 @@ class ExportedSourceConstantTests(unittest.TestCase):
 
 
 class EmittedSourceOutputTests(unittest.TestCase):
-    def test_duplicate_confirmation_payload_names_garmin_source(self):
-        pair = {
-            "canonical_id": "wahoo-1",
-            "canonical_name": "Wahoo ride",
-            "duplicate_id": "garmin-1",
-            "duplicate_name": "Garmin ride",
-            "start_date_local": "2026-09-20T07:12:00",
-            "snapshot_synced_at": "2026-09-20T08:00:00Z",
-        }
-        diff = duplicate_delete_action(pair)["diff"][0]
-        self.assertEqual("Garmin", diff["source"])
-        self.assertEqual("Wahoo", diff["kept_source"])
 
     def test_season_preparation_basis_names_the_local_curve(self):
         # Since #1726 the basis is yesterday's local fitness (M7), never

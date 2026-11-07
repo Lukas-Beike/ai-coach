@@ -111,10 +111,7 @@ class StartupSyncSchedulerTests(unittest.TestCase):
             self.sync_state,
             config=StartupSyncSchedulerConfig(
                 calendar_enabled=calendar_enabled,
-                intervals_enabled=intervals_enabled,
                 garmin_automatic_sync_days=9,
-                sync_period_defaults={"intervals": 90, "garmin": 30},
-                all_sync_days=-1,
                 sync_chunk_days=45,
                 sync_earliest_date=date(2000, 1, 1),
             ),

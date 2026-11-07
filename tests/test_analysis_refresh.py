@@ -20,7 +20,7 @@ class AnalysisRefreshTests(unittest.TestCase):
             "sources": {"activities": True},
         }
         service = AnalysisRefreshService(
-            lambda: intervals, lambda: sessions, lambda: garmin, lambda: today
+lambda: garmin, lambda: today
         )
         return service, intervals, sessions, garmin
 

@@ -11,19 +11,16 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
-from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
-from backend.sync.gates import ProviderResyncGate
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_runtime import ProviderSchedulePolicy
 from backend.sync.queue import SyncJobQueueService
-from backend.sync.schedule_policies import build_schedule_policies, intervals_busy
+from backend.sync.schedule_policies import build_schedule_policies
 from backend.sync.state import SyncStateRepository
 
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
@@ -33,11 +30,8 @@ _HISTORICAL_BACKFILL = "historical_backfill"
 @dataclass(frozen=True)
 class DailySyncSchedulerConfig:
     calendar_url_enabled: bool
-    intervals_key_enabled: bool
     garmin_automatic_sync_days: int
     auto_update_label: str
-    sync_period_defaults: Mapping[str, int]
-    all_sync_days: int
 
 
 class DailySyncScheduler:
@@ -49,11 +43,6 @@ class DailySyncScheduler:
         queue: SyncJobQueueService,
         markers: DailySyncMarkerService,
         garmin: GarminSyncService,
-        database: DatabaseManager,
-        key_values: KeyValueRepository,
-        database_lock: Any,
-        sync_state: SyncStateRepository,
-        intervals_resync_gate: ProviderResyncGate,
         maintenance_gate: MaintenanceGate,
         *,
         config: DailySyncSchedulerConfig,
@@ -62,10 +51,6 @@ class DailySyncScheduler:
     ) -> None:
         self._queue = queue
         self._markers = markers
-        self._database = database
-        self._key_values = key_values
-        self._database_lock = database_lock
-        self._intervals_resync_gate = intervals_resync_gate
         self._maintenance_gate = maintenance_gate
         self._config = config
         self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
@@ -74,13 +59,8 @@ class DailySyncScheduler:
             build_schedule_policies(
                 profile=profile,
                 garmin=garmin,
-                sync_state=sync_state,
                 calendar_enabled=config.calendar_url_enabled,
-                intervals_enabled=config.intervals_key_enabled,
                 garmin_automatic_sync_days=config.garmin_automatic_sync_days,
-                sync_period_defaults=config.sync_period_defaults,
-                all_sync_days=config.all_sync_days,
-                intervals_blocked=self._intervals_blocked,
             )
             if schedule_policies is None
             else schedule_policies
@@ -110,14 +90,6 @@ class DailySyncScheduler:
             "refresh",
             policy.refresh_payload("daily", self._config.auto_update_label),
             requested_by="scheduler",
-        )
-
-    def _intervals_blocked(self) -> bool:
-        return intervals_busy(
-            self._database,
-            self._key_values,
-            self._database_lock,
-            self._intervals_resync_gate,
         )
 
 
@@ -173,17 +145,9 @@ class DailySyncLoop:
 @dataclass(frozen=True)
 class StartupSyncSchedulerConfig:
     calendar_enabled: bool
-    intervals_enabled: bool
     garmin_automatic_sync_days: int
-    sync_period_defaults: Mapping[str, int]
-    all_sync_days: int
     sync_chunk_days: int
     sync_earliest_date: date
-
-
-def _never_blocked() -> bool:
-    # Startup never asks a policy whether it is blocked; see schedule_policies.
-    return False
 
 
 class StartupSyncScheduler:
@@ -208,13 +172,8 @@ class StartupSyncScheduler:
             build_schedule_policies(
                 profile=profile,
                 garmin=garmin,
-                sync_state=sync_state,
                 calendar_enabled=config.calendar_enabled,
-                intervals_enabled=config.intervals_enabled,
                 garmin_automatic_sync_days=config.garmin_automatic_sync_days,
-                sync_period_defaults=config.sync_period_defaults,
-                all_sync_days=config.all_sync_days,
-                intervals_blocked=_never_blocked,
             )
             if schedule_policies is None
             else schedule_policies
@@ -244,13 +203,6 @@ class StartupSyncScheduler:
         for job_type in BACKFILL_CURSOR_STREAMS:
             if self._registry.supports_job(provider_id, job_type):
                 self._enqueue_historical_backfill(provider_id, job_type)
-
-    def resume_provider(self, provider_id: str) -> None:
-        """Queue one provider's startup refresh and backfill again, e.g. when
-        the athlete turns its ingest back on."""
-        policy = self._policies.get(provider_id)
-        if policy is not None:
-            self._schedule_provider(provider_id, policy)
 
     def _enqueue_historical_backfill(
         self, provider: str, job_type: str = _HISTORICAL_BACKFILL

@@ -68,7 +68,6 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
                     planning_authority_service=dependencies["planning_authority"],
                 ),
                 state=StructuredToolRoundState(
-                    duplicate_inspector=dependencies["inspector"],
                     job_store=dependencies["job_store"],
                 ),
                 conversation=StructuredToolRoundConversation(

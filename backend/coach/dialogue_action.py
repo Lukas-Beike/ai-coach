@@ -170,7 +170,6 @@ class CoachDialogueActionService:
                 "push_strength_to_garmin",
                 "sync_competitions",
                 "sync_nutrition",
-                "delete_duplicate_intervals_activity",
             }
             or (
                 name == "apply_adaptive_replan"
@@ -178,10 +177,7 @@ class CoachDialogueActionService:
             )
             or retry_push
         )
-        refresh = bool(retry_job and not retry_push) or name in {
-            "start_provider_refresh",
-            "refresh_current_performance",
-        }
+        refresh = bool(retry_job and not retry_push) or name == "start_provider_refresh"
         return remote_write, refresh
 
     def _validate_target(
@@ -373,8 +369,6 @@ class CoachDialogueActionService:
             _apply_garmin_scope(arguments, action)
         if name == "sync_nutrition":
             require_coach_scope(action, "local_nutrition", "intervals_sync")
-        elif name == "delete_duplicate_intervals_activity":
-            require_coach_scope(action, "intervals_sync")
 
     @staticmethod
     def _apply_object_scope(

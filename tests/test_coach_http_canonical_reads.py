@@ -17,6 +17,7 @@ from unittest.mock import Mock
 
 from activity_row_support import summaries_of_rows
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
+from intervals_compaction import compact_activity_rows
 
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.context import CoachPerformanceContextReader
@@ -31,7 +32,6 @@ from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
     intervals_snapshot_coverage,
 )
-from backend.sync.intervals_compaction import compact_activity_rows
 
 TODAY = date(2026, 10, 13)
 CANONICAL_SECTIONS = ("recent_activities", "recent_wellness", "raw_provider_data")

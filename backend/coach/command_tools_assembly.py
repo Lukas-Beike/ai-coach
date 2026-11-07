@@ -24,7 +24,6 @@ class CoachSyncMutationTools:
     plan_repair_manifest: Callable[[], Any]
     plan_push_command: Callable[[], Any]
     provider_refresh_command: Callable[[], Any]
-    duplicate_activity: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -77,8 +76,6 @@ class CoachCommandToolsAssembly:
             self._sync_mutations.plan_repair_manifest(),
             self._sync_mutations.plan_push_command(),
             self._sync_mutations.provider_refresh_command(),
-            duplicate_activity=self._sync_mutations.duplicate_activity(),
-            intervals_client_factory=self._sync_provider.intervals_client,
             nutrition_diary=self._athlete_tools.nutrition_diary_service(),
         )
 

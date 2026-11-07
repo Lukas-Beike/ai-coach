@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
+import intervals_compaction
 from canonical_detail_support import seed_intervals_activity
 from canonical_recovery_support import RecordingReader, recovery_only_inputs
-from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
 from performance_day_support import (
     canonical_from_snapshot,
@@ -23,7 +23,7 @@ from server_test_support import (
     _garmin_metrics,
     server,
 )
-from support import complete_canonical_backfill
+from support import complete_canonical_backfill, mark_tables_serving
 
 from backend.performance import activity_validation
 from backend.performance import context as performance_context
@@ -35,13 +35,7 @@ from backend.performance.morning_battery_service import MORNING_BATTERY_HISTORY_
 from backend.providers import garmin as garmin_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
-from backend.sync import garmin_payload_metrics, intervals_compaction
-from backend.sync import queue as sync_queue
-from backend.sync.garmin_activity_duplicates import (
-    garmin_activity_duplicates_intervals,
-)
-from backend.sync.intervals import IntervalsSnapshotReader
-from backend.sync.performance import PerformanceRefreshService
+from backend.sync import garmin_payload_metrics
 from backend.weather import history as weather_history
 
 
@@ -102,19 +96,6 @@ class ServerPerformanceTests(ServerTestCase):
                 1,
             )
 
-    def test_automatic_performance_follow_up_skips_direct_refresh(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(PerformanceRefreshService, "running", return_value=True),
-            patch.object(sync_queue.SyncJobQueueService, "enqueue") as enqueue,
-        ):
-            self.assertIsNone(
-                server.INTERVALS_SYNC.performance_followup().enqueue_after_sync(
-                    "startup"
-                )
-            )
-        enqueue.assert_not_called()
 
     def test_performance_refresh_timestamp_and_initial_loading_state_are_rendered(self):
         root = Path(__file__).resolve().parents[1] / "public"
@@ -977,92 +958,9 @@ class ServerPerformanceTests(ServerTestCase):
         # The Intervals.icu athlete height is no source; the profile's stands.
         self.assertEqual(metric["value"], 181)
 
-    def test_performance_refresh_only_requests_provider_data(self):
-        calls = []
 
-        def fetch_performance_snapshot(_reader, existing):
-            calls.append(existing)
-            return {
-                "synced_at": "2026-08-28T08:00:00+00:00",
-                "athlete": {},
-                "recent_wellness": [],
-                "recent_activities": [],
-                "upcoming_calendar": [],
-            }
 
-        with (
-            patch.object(
-                IntervalsSnapshotReader,
-                "fetch_performance_snapshot",
-                fetch_performance_snapshot,
-            ),
-            patch.object(
-                server.MODEL_TRANSPORT, "openai_responses_client"
-            ) as openai_client,
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-        ):
-            result = server.INTERVALS_SYNC.performance_service().refresh()
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(len(calls), 1)
-        openai_client.assert_not_called()
 
-    def test_garmin_near_duplicate_allows_thirty_minute_start_difference(self):
-        garmin = {
-            "activityId": 3,
-            "activityType": "cycling",
-            "activityName": "Ride",
-            "startTimeLocal": "2026-08-29T07:30:00",
-            "duration": 3600,
-            "distance": 30000,
-        }
-        intervals = [
-            {
-                "type": "Ride",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 30000,
-            }
-        ]
-        self.assertTrue(garmin_activity_duplicates_intervals(garmin, intervals))
-
-    def test_garmin_activity_more_than_thirty_minutes_apart_is_kept(self):
-        garmin = {
-            "activityId": 4,
-            "activityType": "cycling",
-            "activityName": "Ride",
-            "startTimeLocal": "2026-08-29T07:31:00",
-            "duration": 3600,
-            "distance": 30000,
-        }
-        intervals = [
-            {
-                "type": "Ride",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 30000,
-            }
-        ]
-        self.assertFalse(garmin_activity_duplicates_intervals(garmin, intervals))
-
-    def test_garmin_different_activity_is_kept(self):
-        garmin = {
-            "activityId": 2,
-            "activityType": "cycling",
-            "startTimeLocal": "2026-08-29T07:05:00",
-            "duration": 3600,
-            "distance": 30000,
-        }
-        intervals = [
-            {
-                "type": "Run",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 10000,
-            }
-        ]
-        self.assertFalse(garmin_activity_duplicates_intervals(garmin, intervals))
 
     def test_confirmed_duplicate_delete_removes_only_garmin_copy_and_keeps_the_snapshot(
         self,

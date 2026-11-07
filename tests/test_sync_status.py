@@ -157,7 +157,6 @@ class SyncPublicStateServiceTests(unittest.TestCase):
             self.maintenance,
             self.jobs,
             self.versions,
-            self.intervals_lock,
         )
 
     def tearDown(self) -> None:

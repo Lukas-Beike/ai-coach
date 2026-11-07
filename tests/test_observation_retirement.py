@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import intervals_compaction as intervals_fixture
+
 from backend.db import canonical_store, garmin_store
 from backend.db.schema import initialize_schema
 from backend.providers.canonical_plans import (
@@ -56,7 +58,7 @@ class ObservationRetirementTests(unittest.TestCase):
     def ingest_intervals(
         self, snapshot: dict[str, Any]
     ) -> ingest.CanonicalIngestCounters:
-        return ingest.ingest_intervals_snapshot(
+        return intervals_fixture.ingest_intervals_snapshot(
             self.db,
             snapshot,
             zone=ZONE,

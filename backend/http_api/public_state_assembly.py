@@ -94,7 +94,6 @@ class PublicStateProjectionOwners:
 
 @dataclass(frozen=True)
 class PublicStateOperationalServices:
-    intervals_sync_lock: Callable[[], Any]
     workout_library_sync_running: Callable[[], Callable[[], bool]]
     daily_planning_context_service: Callable[[], Any]
     adaptive_preview_followup_service: Callable[[], Any]
@@ -168,7 +167,6 @@ class PublicStateAssembly:
         self._planning_season = projections.planning_season
         self._intervals_state = projections.intervals_state
         self._diagnostic_capture = projections.diagnostic_capture
-        self._intervals_sync_lock = operations.intervals_sync_lock
         self._workout_library_sync_running = operations.workout_library_sync_running
         self._daily_planning_context_service = operations.daily_planning_context_service
         self._adaptive_preview_followup_service = (
@@ -283,7 +281,6 @@ class PublicStateAssembly:
             self._maintenance_gate(),
             self._sync_job_queue().service(),
             self.state_version_service(),
-            self._intervals_sync_lock(),
             running_probes=running_probes,
         )
 
@@ -324,12 +321,9 @@ class PublicStateAssembly:
                 adaptive_replan_preview_service=self._adaptive_replan_preview_service,
                 external_calendar_sync_service=calendar.sync_service,
                 external_calendar_window_days=self._external_calendar_window_days(),
-                planned_calendar_history_days=self._calendar_history_days(),
-                planned_calendar_future_days=self._calendar_future_days(),
                 garmin_projection_service=garmin.projection_service,
                 diagnostic_capture=self._diagnostic_capture(),
                 intervals_public_state=self._intervals_state().public_state,
-                intervals_sync_lock=self._intervals_sync_lock(),
                 workout_library_sync_running=self._workout_library_sync_running(),
                 workout_library_sync_state_service=self._workout_library_sync().sync_state_service,
                 full_provider_resync_service=self._provider_resync().full_resync_service,
@@ -446,7 +440,6 @@ class PublicStateAssembly:
                     provider_freshness=provider.freshness_service(),
                     garmin_sync_state=garmin.sync_state_service(),
                     sync_public_state=self.sync_public_state_service(),
-                    intervals_sync_lock=self._intervals_sync_lock(),
                     workout_library_sync_running=self._workout_library_sync_running(),
                     workout_library_sync_state=self._workout_library_sync().sync_state_service(),
                     garmin_sync=garmin.sync_service(),
@@ -457,8 +450,6 @@ class PublicStateAssembly:
                     provider_state=self._provider_state_service(),
                     sync_period_defaults=self._sync_period_defaults(),
                     all_sync_days=self._all_sync_days(),
-                    calendar_history_days=self._calendar_history_days(),
-                    calendar_future_days=self._calendar_future_days(),
                     local_now=self._local_now(),
                     provider_credentials=self._provider_credentials,
                 )

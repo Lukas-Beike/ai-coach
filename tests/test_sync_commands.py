@@ -29,9 +29,7 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
         self.queue = Mock()
         self.intervals = Mock()
         self.queue.enqueue.return_value = {"id": "job-123"}
-        self.service = ProviderRefreshCommandService(
-            self.queue, self.intervals, all_sync_days=-1
-        )
+        self.service = ProviderRefreshCommandService(self.queue, {})
 
     def test_queues_provider_refresh_without_persisting_internal_wait_flag(self):
         arguments = {"days": 7, "_wait_for_completion": False}
@@ -200,18 +198,6 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
         self.assertEqual(error.exception.reason, "invalid_refresh_request")
         self.intervals.sync.assert_not_called()
 
-    def test_queues_performance_refresh_as_coach_and_returns_job_id(self):
-        result = self.service.queue_performance_refresh({"reason": "fresh data"})
-
-        self.assertEqual(
-            result, {"ok": True, "status": "queued", "sync_job_id": "job-123"}
-        )
-        self.queue.enqueue.assert_called_once_with(
-            "intervals",
-            "performance_refresh",
-            {"reason": "fresh data"},
-            requested_by="coach",
-        )
 
 
 class GarminSynchronousRefreshTests(unittest.TestCase):
@@ -406,8 +392,6 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
         queue = Mock()
         service = ProviderRefreshCommandService(
             queue,
-            Mock(),
-            all_sync_days=-1,
             synchronous_refreshes={"garmin": self.refresh},
         )
 

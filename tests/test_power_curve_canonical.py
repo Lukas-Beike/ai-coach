@@ -18,6 +18,11 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_compaction import (
+    ingest_intervals_partial_snapshot,
+    ingest_intervals_snapshot,
+)
+
 from backend.canonical.domain_records import (
     EMPTY_POWER_CURVE,
     PowerCurve,
@@ -35,18 +40,14 @@ from backend.providers.canonical_plans import (
     POWER_CURVE_RECORD_KIND,
     reprojection_plan,
 )
-from backend.providers.intervals_power import POWER_CURVE_LABEL
 from backend.providers.intervals_power_curve_mapping import (
+    POWER_CURVE_LABEL,
     PowerCurveMapping,
     map_intervals_power_curve,
 )
 from backend.runtime.ports import PowerCurveReader
 from backend.sync.canonical_backfill import CanonicalBackfill
 from backend.sync.canonical_backfill import _ingest_work as backfill_ingest_work
-from backend.sync.canonical_ingest import (
-    ingest_intervals_partial_snapshot,
-    ingest_intervals_snapshot,
-)
 from backend.sync.canonical_read_selector import PENDING_READER, CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
 

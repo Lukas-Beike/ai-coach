@@ -47,12 +47,10 @@ class CoachProposalAssemblyTests(unittest.TestCase):
             dependencies=CoachProposalAssembly.Inputs(
                 persistence=ProposalPersistence(
                     dependencies["manager_provider"],
-                    dependencies["inspector_provider"],
                     dependencies["nutrition_diary_provider"],
                     dependencies["nutrition_meal_library_provider"],
                 ),
                 execution=ProposalExecutionOwners(
-                    dependencies["duplicate_provider"],
                     dependencies["history_provider"],
                     dependencies["intervals"],
                     dependencies["gate"],

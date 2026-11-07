@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from intervals_detail_refresh import normalize_streams
+
 from backend.activities.detail_merge import (
     ChannelChoice,
     DetailCandidate,
@@ -44,7 +46,6 @@ from backend.providers.intervals_activity_detail_mapping import (
 from backend.providers.intervals_activity_detail_projection import detailed_activity
 from backend.providers.intervals_activity_fields import activity_detail_laps
 from backend.providers.intervals_activity_mapping import intervals_analysis_sport
-from backend.sync.activity_details import normalize_streams
 
 RETRIEVED = datetime(2026, 10, 19, 8, 0, tzinfo=UTC)
 STARTED = datetime(2026, 10, 19, 7, 0, tzinfo=UTC)

@@ -137,11 +137,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         )
         gates = {INTERVALS_ID: self.intervals_gate, GARMIN_ID: self.garmin_gate}
         handlers = full_resync_handlers(
-            config=config or SimpleNamespace(intervals_api_key="fake-key"),
-            intervals_service=self.intervals_service,
             garmin_service=self.garmin_service,
-            competition_service=self.competition_service,
-            gates=gates,
             all_sync_days=-1,
         )
         return FullProviderResyncService(

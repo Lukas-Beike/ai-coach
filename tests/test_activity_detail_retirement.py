@@ -13,6 +13,7 @@ from canonical_detail_support import (
     open_manager,
     seed_intervals_activity,
 )
+from intervals_detail_refresh import ActivityDetailRefreshService
 
 from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.vocabulary import LapKind
@@ -26,7 +27,6 @@ from backend.sync.activity_detail_retirement import (
     STATE_KEY,
     ActivityDetailRetirement,
 )
-from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker

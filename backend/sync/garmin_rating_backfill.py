@@ -54,7 +54,6 @@ from backend.providers.garmin_rating_history import (
 )
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
-from backend.sync.intervals_ingest import INGEST_ENABLED_KEY, ingest_enabled_value
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS, RATING_HISTORY_CURSOR
 
 BATCH_LIMIT: Final = 30
@@ -65,10 +64,7 @@ STATE_KEY: Final = "garmin_rating_backfill_state"
 ALLOWED_SOURCES: Final = frozenset({ACTIVITY_RATINGS_SECTION, ACTIVITIES_SECTION})
 _SESSION_CHUNK: Final = 500
 _HISTORY_STREAM: Final = BACKFILL_CURSOR_STREAMS["historical_backfill"]
-_HISTORY_CHAINS: Final = (
-    (GARMIN_ID, _HISTORY_STREAM),
-    (ProviderId.INTERVALS.value, _HISTORY_STREAM),
-)
+_HISTORY_CHAINS: Final = ((GARMIN_ID, _HISTORY_STREAM),)
 _RATED_SQL: Final = (
     "(json_extract(details, '$.rpe') IS NOT NULL "
     "OR json_extract(details, '$.feel') IS NOT NULL)"
@@ -406,16 +402,11 @@ class GarminRatingBackfillService:
     def _history_complete(self, db: Any) -> bool:
         """Return whether the activity chains that can still add sessions hit the floor.
 
-        The Intervals.icu chain counts only while its ingest is on: with it off no
-        Intervals.icu session arrives any more, so its cursor never moves.
+        Intervals.icu is not read any more, so no Intervals.icu session arrives
+        and its history cursor never moves; only Garmin counts.
         """
         floor = self._earliest_date.isoformat()
-        intervals_on = ingest_enabled_value(
-            self._key_values.get(db, INGEST_ENABLED_KEY)
-        )
         for provider, stream in _HISTORY_CHAINS:
-            if provider == ProviderId.INTERVALS.value and not intervals_on:
-                continue
             cursor = read_cursor(db, provider, stream).get("cursor")
             if not cursor or str(cursor) > floor:
                 return False

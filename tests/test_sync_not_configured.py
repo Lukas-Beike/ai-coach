@@ -8,12 +8,12 @@ import unittest
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock
 
+from intervals_detail_refresh import ActivityDetailRefreshService
+
 from backend.errors import AppError, public_error_contract
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
-from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
-from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.full_resync import FullProviderResyncService
 from backend.sync.garmin_service import GarminSyncService
@@ -37,11 +37,7 @@ def _resync_service(
     garmin_service = Mock()
     garmin_service.configured.return_value = garmin_configured
     handlers = full_resync_handlers(
-        config=config,
-        intervals_service=Mock(),
         garmin_service=garmin_service,
-        competition_service=Mock(),
-        gates={INTERVALS_ID: Mock(), GARMIN_ID: Mock()},
         all_sync_days=-1,
     )
     return FullProviderResyncService(handlers, Mock(), Mock())

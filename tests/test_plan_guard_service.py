@@ -92,7 +92,6 @@ class PlanGuardWriteTests(unittest.TestCase):
             Mock(),
             Mock(),
             Mock(),
-            Mock(),
             self.dispatch,
             threading.RLock(),
             lambda: self.guard,

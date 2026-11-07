@@ -38,9 +38,6 @@ from backend.runtime import clock as runtime_clock
 from backend.runtime import events as runtime_events
 from backend.sync import queue as sync_queue
 from backend.sync.authority import competition_push_manifest
-from backend.sync.intervals import IntervalsSnapshotReader
-from backend.sync.library import WorkoutLibraryRefreshService
-from backend.sync.planned_units import RemotePlannedUnitReconciler
 
 
 class ServerPlanningTests(ServerTestCase):
@@ -95,56 +92,6 @@ class ServerPlanningTests(ServerTestCase):
             enqueue.call_args.kwargs["item_operations"][0]["item_key"], local_id
         )
 
-    def test_structured_performance_refresh_and_competition_push_are_queued_jobs(self):
-        refresh_intent = {
-            "intent": "remote_sync",
-            "operation": "refresh_current_performance",
-            "target_system": "intervals",
-            "artifact_id": None,
-            "ambiguities": [],
-            "authorization_scope": ["intervals_refresh"],
-        }
-        competition_intent = {
-            "intent": "remote_sync",
-            "operation": "sync_competitions",
-            "target_system": "intervals",
-            "artifact_id": None,
-            "ambiguities": [],
-            "authorization_scope": ["local_competitions"],
-        }
-        with patch.object(
-            sync_queue.SyncJobQueueService,
-            "enqueue",
-            side_effect=[{"id": "job-performance"}, {"id": "job-competition"}],
-        ) as enqueue:
-            performance = server.COACH_TOOL_DISPATCH.service().execute(
-                "refresh_current_performance",
-                {},
-                intent=refresh_intent,
-                conversation_id="conversation-jobs",
-                client_turn_id="turn-performance",
-                session_csrf_hash="",
-                sync_job_ids=[],
-            )
-            with server.database_manager().reader() as db:
-                approval_manifest = competition_push_manifest(db)
-            competition = server.COACH_TOOL_DISPATCH.service().execute(
-                "sync_competitions",
-                {"_approval_manifest": approval_manifest},
-                intent=competition_intent,
-                conversation_id="conversation-jobs",
-                client_turn_id="turn-competition",
-                session_csrf_hash="",
-                sync_job_ids=[],
-            )
-        self.assertEqual(performance["sync_job_id"], "job-performance")
-        self.assertEqual(competition["sync_job_id"], "job-competition")
-        self.assertEqual(
-            enqueue.call_args_list[0].args[:2], ("intervals", "performance_refresh")
-        )
-        self.assertEqual(
-            enqueue.call_args_list[1].args[:2], ("intervals", "competition_push")
-        )
 
     def test_explicit_competition_push_preserves_provider_id_for_ordinary_edits(self):
         competition = server.PLANNING_DATA.competition().save(
@@ -3121,60 +3068,6 @@ class ServerPlanningTests(ServerTestCase):
         self.assertIs(seen["cancel_event"], cancel_event)
         get_workout_library.assert_called_once_with(cancel_event=cancel_event)
 
-    def test_initial_planning_import_retries_after_import_failure(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
-        snapshot = {
-            "synced_at": "retryable",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [
-                {
-                    "id": "retry-plan",
-                    "category": "WORKOUT",
-                    "type": "Ride",
-                    "name": "Retry Plan",
-                    "start_date_local": tomorrow + "T08:00:00",
-                    "moving_time": 1800,
-                }
-            ],
-        }
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader,
-                "fetch_snapshot",
-                side_effect=[snapshot, snapshot],
-            ),
-            patch.object(
-                RemotePlannedUnitReconciler,
-                "reconcile",
-                side_effect=[
-                    RuntimeError("import failed"),
-                    {"imported": 1, "updated": 0, "conflicts": 0},
-                ],
-            ) as import_units,
-            patch.object(
-                WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}
-            ),
-        ):
-            with self.assertRaises(RuntimeError):
-                server.INTERVALS_SYNC.sync_service().sync(
-                    "initial attempt", activity_days=42
-                )
-            self.assertIsNone(
-                server.key_value_service().get("planned_units_initial_import_at")
-            )
-            server.INTERVALS_SYNC.sync_service().sync("retry", activity_days=42)
-
-        self.assertEqual(import_units.call_count, 2)
-        self.assertEqual(
-            server.key_value_service().get("planned_units_initial_import_at"),
-            "retryable",
-        )
 
     def test_library_refresh_is_read_only_even_with_pending_local_entries(self):
         server.PLANNING_DATA.workout_library().create_local_entry(

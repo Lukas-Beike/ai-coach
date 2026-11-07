@@ -31,10 +31,7 @@ def _build_assembly(
                 competition_service=Mock(),
             ),
             resync=ResyncProviderOwners(
-                config=Mock(return_value=Mock(intervals_api_key="key")),
-                intervals_sync_service=Mock(),
                 garmin_sync_service=Mock(),
-                intervals_resync_gate=intervals_gate,
                 garmin_resync_gate=garmin_gate,
                 all_sync_days=-1,
             ),
@@ -58,11 +55,7 @@ def _build_assembly(
 class FullResyncHandlerWiringTests(unittest.TestCase):
     def test_built_in_handlers_are_keyed_by_provider_identifier(self):
         handlers = full_resync_handlers(
-            config=Mock(intervals_api_key="key"),
-            intervals_service=Mock(),
             garmin_service=Mock(),
-            competition_service=Mock(),
-            gates={INTERVALS_ID: Mock(), GARMIN_ID: Mock()},
             all_sync_days=-1,
         )
 
@@ -74,11 +67,7 @@ class FullResyncHandlerWiringTests(unittest.TestCase):
         garmin.configured.return_value = True
         garmin.sync.return_value = {"records": 4}
         handlers = full_resync_handlers(
-            config=Mock(intervals_api_key="key"),
-            intervals_service=Mock(),
             garmin_service=garmin,
-            competition_service=Mock(),
-            gates={INTERVALS_ID: Mock()},
             all_sync_days=-1,
         )
 
@@ -100,11 +89,7 @@ class FullResyncHandlerWiringTests(unittest.TestCase):
         competition = Mock()
         competition.sync.side_effect = competition_sync
         handlers = full_resync_handlers(
-            config=Mock(intervals_api_key="key"),
-            intervals_service=intervals,
             garmin_service=Mock(),
-            competition_service=competition,
-            gates={INTERVALS_ID: gate},
             all_sync_days=-1,
         )
 
@@ -188,10 +173,7 @@ class ProviderResyncAssemblyTests(unittest.TestCase):
                     competition_service=Mock(),
                 ),
                 resync=ResyncProviderOwners(
-                    config=Mock(return_value=Mock()),
-                    intervals_sync_service=Mock(),
                     garmin_sync_service=Mock(),
-                    intervals_resync_gate=Mock(),
                     garmin_resync_gate=Mock(),
                     all_sync_days=90,
                 ),

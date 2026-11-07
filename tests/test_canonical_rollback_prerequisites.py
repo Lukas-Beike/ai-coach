@@ -6,14 +6,9 @@ All storage is temporary and the provider client is a mock.
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
-import threading
 import unittest
-from datetime import date, datetime
-from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from canonical_read_support import (
@@ -27,10 +22,6 @@ from canonical_read_support import (
 from support import load_provider_fixture
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.config import load_config
-from backend.db import DatabaseManager, canonical_store, row_factory
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
-from backend.db.schema import initialize_schema
 from backend.providers import canonical_plans
 from backend.sync.canonical_backfill import STATE_KEY, backfill_complete
 from backend.sync.canonical_coverage_store import (
@@ -42,11 +33,8 @@ from backend.sync.canonical_coverage_store import (
     intervals_snapshot_coverage,
     wahoo_payload_coverage,
 )
-from backend.sync.canonical_ingest import ingest_intervals_snapshot
 from backend.sync.canonical_read_selector import PENDING_READER, CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.performance import PerformanceRefreshService
-from backend.sync.state import SyncStateRepository
 
 NOW = "2026-10-10T06:30:00+00:00"
 ZONE = ZoneInfo("Europe/Berlin")
@@ -67,178 +55,6 @@ def performance_response() -> dict[str, Any]:
     }
 
 
-class PerformanceCanonicalIngestTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        root = Path(self.temporary.name)
-        self.manager = self.open_database(root / "performance.db")
-        self.key_values = KeyValueRepository(lambda: NOW)
-        self.sync_state = SyncStateRepository(
-            self.manager, self.key_values, SnapshotRepository(), lambda: NOW
-        )
-        self.provider = Mock()
-        self.provider.fetch_performance_snapshot.return_value = performance_response()
-        self.service = PerformanceRefreshService(
-            load_config(root, root, {"INTERVALS_API_KEY": "fake-key"}),
-            self.manager,
-            self.sync_state,
-            self.key_values,
-            self.provider,
-            Mock(),
-            lambda text: text,
-            Mock(),
-            MagicMock(),
-            MagicMock(),
-            threading.Lock(),
-            zone_provider=lambda: ZONE,
-        )
-
-    def open_database(self, path: Path) -> DatabaseManager:
-        manager = DatabaseManager(path, sqlite3, row_factory=row_factory)
-        self.addCleanup(manager.close)
-        with manager.unit_of_work() as db:
-            initialize_schema(db)
-        return manager
-
-    def table_rows(self, manager: DatabaseManager, sql: str) -> list[dict[str, Any]]:
-        with manager.reader() as db:
-            return [dict(row) for row in db.execute(sql).fetchall()]
-
-    def observations(self, manager: DatabaseManager) -> list[dict[str, Any]]:
-        return self.table_rows(
-            manager,
-            f"SELECT {OBSERVATION_COLUMNS} FROM observations ORDER BY natural_key",
-        )
-
-    def test_refresh_writes_the_observations_a_full_sync_maps(self) -> None:
-        self.service._refresh_inner()
-
-        full = self.open_database(Path(self.temporary.name) / "full.db")
-        with full.unit_of_work() as db:
-            ingest_intervals_snapshot(
-                db,
-                performance_response(),
-                zone=ZONE,
-                activity_days=42,
-                all_sync_days=42,
-                earliest_date=date(2026, 1, 1),
-            )
-
-        refreshed = self.observations(self.manager)
-        self.assertGreater(len(refreshed), 0)
-        self.assertEqual(refreshed, self.observations(full))
-        self.assertEqual(
-            self.table_rows(
-                self.manager, "SELECT record_kind FROM provider_records ORDER BY 1"
-            ),
-            self.table_rows(
-                full, "SELECT record_kind FROM provider_records ORDER BY 1"
-            ),
-        )
-        self.assertIsNotNone(self.sync_state.latest_snapshot())
-
-    def test_ingest_failure_leaves_neither_the_snapshot_nor_canonical_rows(
-        self,
-    ) -> None:
-        with (
-            patch.object(
-                canonical_store, "upsert_observation", side_effect=RuntimeError("boom")
-            ),
-            self.assertRaises(RuntimeError),
-        ):
-            self.service._refresh_inner()
-
-        self.assertIsNone(self.sync_state.latest_snapshot())
-        self.assertEqual(self.observations(self.manager), [])
-        self.assertEqual(
-            self.table_rows(self.manager, "SELECT 1 FROM provider_records"), []
-        )
-        with self.manager.reader() as db:
-            self.assertIsNone(
-                self.key_values.get(db, coverage_key(ProviderId.INTERVALS))
-            )
-
-    def test_refresh_never_marks_stored_activities_deleted(self) -> None:
-        seed = {
-            "synced_at": "2026-10-09T06:00:00+00:00",
-            "raw_provider_data": {
-                "activities": [
-                    {
-                        "id": "i-1",
-                        "start_date_local": "2026-10-05T07:00:00",
-                        "type": "Ride",
-                    }
-                ]
-            },
-        }
-        with self.manager.unit_of_work() as db:
-            ingest_intervals_snapshot(
-                db,
-                seed,
-                zone=ZONE,
-                activity_days=None,
-                all_sync_days=42,
-                earliest_date=date(2026, 1, 1),
-            )
-        before = self.table_rows(
-            self.manager, "SELECT provider_activity_id, state FROM activity_records"
-        )
-        self.assertEqual(len(before), 1)
-
-        self.service._refresh_inner()
-
-        self.assertEqual(
-            self.table_rows(
-                self.manager, "SELECT provider_activity_id, state FROM activity_records"
-            ),
-            before,
-        )
-
-    def test_performance_coverage_keeps_activity_freshness_while_updating_wellness(
-        self,
-    ):
-        activity_time = "2026-10-09T06:00:00+00:00"
-        snapshot = {
-            "synced_at": activity_time,
-            "activities_synced_at": activity_time,
-            "raw_provider_data": {
-                "activities": [
-                    {
-                        "id": "i-1",
-                        "start_date_local": "2026-10-05T07:00:00",
-                        "type": "Ride",
-                    }
-                ]
-            },
-        }
-        self.sync_state.save_snapshot(snapshot)
-
-        self.service._refresh_inner()
-
-        with self.manager.reader() as db:
-            stored = CanonicalCoverageStore(self.key_values).load(
-                db, ProviderId.INTERVALS, zone=ZONE
-            )
-        self.assertIsNotNone(stored)
-        self.assertEqual(
-            datetime.fromisoformat(activity_time), stored.activities_retrieved_at
-        )
-        self.assertEqual(datetime.fromisoformat(NOW), stored.observations_retrieved_at)
-        self.assertGreater(stored.observation_count, 0)
-
-    def test_refresh_persists_the_coverage_of_the_stored_snapshot(self) -> None:
-        self.service._refresh_inner()
-        expected = intervals_snapshot_coverage(
-            self.sync_state.latest_snapshot(), zone=ZONE
-        )
-        with self.manager.reader() as db:
-            stored = CanonicalCoverageStore(self.key_values).load(
-                db, ProviderId.INTERVALS, zone=ZONE
-            )
-        self.assertIsNotNone(stored)
-        self.assertEqual(stored, expected)
-        self.assertGreater(stored.observation_count, 0)  # type: ignore[union-attr]
 
 
 class PersistedCoverageTests(CanonicalReadFixture):

@@ -9,7 +9,6 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from backend.activities.duplicate_service import DuplicateActivityService
 from backend.coach.proposal_models import (
     LOCAL_COACH_WRITE_TOOLS,
     REMOTE_COACH_WRITE_TOOLS,
@@ -44,7 +43,6 @@ class CoachProposalExecutionService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        duplicate_activity_service: DuplicateActivityService,
         history_undo_service: HistoryUndoService,
         intervals_client_factory: Callable[[], Any],
         maintenance_gate: MaintenanceGate,
@@ -54,7 +52,6 @@ class CoachProposalExecutionService:
         utc_now: Callable[[], str] = _utc_now,
     ) -> None:
         self._database_manager = database_manager
-        self._duplicate_activity_service = duplicate_activity_service
         self._history_undo_service = history_undo_service
         self._intervals_client_factory = intervals_client_factory
         self._maintenance_gate = maintenance_gate
@@ -132,7 +129,7 @@ class CoachProposalExecutionService:
         """Reject stale provenance before consuming the one-shot token."""
         if action_type in {"remote_coach_write", "local_coach_write"}:
             return self._validate_remote_write_context(payload, session_csrf_hash)
-        if action_type not in {"delete_duplicate_intervals_activity", "undo_change"}:
+        if action_type not in {"undo_change"}:
             raise AppError(
                 400, "Unbekannte Coach-Aktion.", reason="unknown_coach_action"
             )
@@ -159,14 +156,7 @@ class CoachProposalExecutionService:
         session_csrf_hash: str,
         validated_context: tuple[str, dict[str, Any], dict[str, Any], str, str] | None,
     ) -> dict[str, Any]:
-        if action_type == "delete_duplicate_intervals_activity":
-            result = {
-                "ok": True,
-                **self._duplicate_activity_service.delete(
-                    payload, self._intervals_client_factory()
-                ),
-            }
-        elif action_type == "undo_change":
+        if action_type == "undo_change":
             result = self._history_undo_service.apply(payload)
         elif action_type in {"remote_coach_write", "local_coach_write"}:
             assert validated_context is not None

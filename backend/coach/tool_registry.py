@@ -109,13 +109,8 @@ def build_tool_contracts(
                 "cancel_coach_request",
                 "Close the pending request when the athlete cancels it; completed effects remain recorded.",
             ),
-            _canonical_coach_tool(
-                "inspect_activity_duplicates",
-                "Inspect the latest cycling activity for duplicate Wahoo/Garmin recordings. Prefer Wahoo for analysis. A returned removal preview still requires the athlete's explicit confirmation; this tool never deletes remotely.",
-            ),
         ]
     )
-    structured_read_only_tools.add("inspect_activity_duplicates")
     capabilities = build_capability_catalog(
         coach_structured_tools,
         coach_dialogue_tools,
