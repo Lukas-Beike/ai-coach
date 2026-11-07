@@ -133,7 +133,8 @@ function changedSyncAreas(nextVersions) {
   // A version that a load was already requested for is not requested again.
   const previous = { ...state.data?.state_versions, ...state.requestedStateVersions };
   const areaMap = {
-    activities: ["plan", "performance"],
+    // Race results of past competitions come with the profile read.
+    activities: ["plan", "performance", "profile"],
     performance: ["performance", "plan"],
     ...(providerIds().garmin ? { [providerIds().garmin]: ["performance", "plan"] } : {}),
     chat: ["chat"],
