@@ -658,6 +658,23 @@ class MetricExportServiceTests(unittest.TestCase):
         )
         self.assertEqual(self.items()["ftp|ride"]["source_provider"], None)
 
+    def test_an_automatic_run_reads_only_consented_records(self):
+        self.configure(enabled=True, fields=["threshold_hr"])
+        self.add(
+            obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.GARMIN),
+            obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN),
+            obs(
+                MetricKind.THRESHOLD_HR, 170, TODAY, ProviderId.GARMIN, sport=Sport.RUN
+            ),
+        )
+        self.client.get_wellness.side_effect = RuntimeError(RAW)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
+        self.client.get_wellness.assert_not_called()
+        self.assertEqual(
+            [call.args for call in self.client.get_sport_settings.call_args_list],
+            [("Run",), ("Run",)],
+        )
+
     def test_running_ftp_needs_its_own_consent(self):
         self.add(obs(MetricKind.FTP, 310, TODAY, ProviderId.GARMIN, sport=Sport.RUN))
         # The legacy flag covers the fields of its time, not running FTP.
@@ -690,6 +707,13 @@ class MetricExportServiceTests(unittest.TestCase):
         self.assertEqual(
             [(item["entity_id"], item["source"]) for item in self.history()][1],
             ("intervals:wellness/2026-10-10", "manual"),
+        )
+        self.assertEqual(
+            {
+                key: change_history.public_view(row)[key]
+                for key in ("remote_sync", "undoable")
+            },
+            {"remote_sync": "remote", "undoable": False},
         )
         undo = HistoryUndoService(
             self.database, *([Mock()] * 7), profile_mutation_coordinator=Mock()

@@ -127,6 +127,38 @@ class MetricExportRunnerTests(unittest.TestCase):
         hook({"provider": "wahoo"})
         self.assertEqual(seen, [("load", "wahoo"), ("export", "wahoo")])
 
+        def fail(_job) -> None:
+            raise RuntimeError("boom")
+
+        seen.clear()
+        with self.assertLogs("backend.sync.executor", "ERROR"):
+            chained_after_job(fail, lambda job: seen.append(("export", "x")))({})
+        self.assertEqual(seen, [("export", "x")])
+
+    def test_a_failing_service_factory_never_blocks_later_runs(self) -> None:
+        service = _Service({"exported": 0, "failed": 0, "conflicts": 0})
+        calls = {"count": 0}
+
+        def factory():
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("wiring")
+            return service
+
+        runner = MetricExportRunner(
+            factory,
+            enabled=lambda: True,
+            maintenance_gate=lambda: self.gate,
+            delay_seconds=0,
+            thread_factory=self._thread,
+        )
+        with self.assertLogs("intervals_coach", "WARNING"):
+            runner.request()
+            self._join()
+        runner.request()
+        self._join()
+        self.assertEqual(service.runs, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -350,8 +350,7 @@ class MetricExportService:
             port = self._port(target)
             candidates = [
                 candidate
-                for candidate in self._candidates(target, port, automatic=True)
-                if consent_key(candidate.field.kind, candidate.field.sport) in consented
+                for candidate in self._candidates(target, port, consented=consented)
             ]
             groups: dict[str, list[_Candidate]] = {}
             conflicts = 0
@@ -562,12 +561,14 @@ class MetricExportService:
         target: ProviderId,
         port: MetricExportPort,
         *,
-        automatic: bool = False,
+        consented: frozenset[str] | None = None,
     ) -> list[_Candidate]:
         """Return the body-metric and threshold candidates with their live status.
 
-        ``automatic`` offers Garmin measurements only for the body metrics.
+        ``consented`` (automatic runs) keeps only those fields, so only their
+        records are read, and offers Garmin measurements only for body metrics.
         """
+        automatic = consented is not None
         kinds = self._registry.get(target.value).metric_exports
         start = self._today() - timedelta(days=_LOOKBACK_DAYS)
         reader = self._observation_reader()
@@ -596,6 +597,11 @@ class MetricExportService:
                 )
             sources |= self._threshold_sources(db, kinds, target, port)
             for key, (field, source) in sorted(sources.items()):
+                if (
+                    consented is not None
+                    and consent_key(field.kind, field.sport) not in consented
+                ):
+                    continue
                 offered.append(
                     (
                         key,

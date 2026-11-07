@@ -44,6 +44,7 @@ from backend.sync.garmin_snapshot_writer import (
     GarminSnapshotWriter,
 )
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.metric_export import STATUS_KEY as METRIC_EXPORT_STATUS_KEY
 from backend.sync.metric_export import automatic_export_message
 from backend.sync.observation import SyncOperationObserver, operation_context
 from backend.sync.refresh import sync_job_error_class
@@ -1131,7 +1132,7 @@ class GarminSyncLifecycleState:
         self._set("sync_operation_finished_at", self._utc_now())
 
     def record_metric_export_status(self, message: str) -> None:
-        self._set("last_garmin_metric_export_status", f"{self._utc_now()}: {message}")
+        self._set(METRIC_EXPORT_STATUS_KEY, f"{self._utc_now()}: {message}")
 
     def log_configuration_skip(self, reason: str) -> None:
         self._logger.warning(

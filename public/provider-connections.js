@@ -150,7 +150,8 @@ function renderGarminCard(data) {
   setCredentialHidden("garmin-login-form", view.mode !== "login");
   setCredentialHidden("garmin-mfa-form", view.mode !== "mfa");
   setCredentialHidden("garmin-connected", view.mode !== "connected");
-  setCredentialHidden("garmin-metric-export", view.mode !== "connected");
+  // Stored consent stays visible and revocable while Garmin is disconnected.
+  setCredentialHidden("garmin-metric-export", view.mode !== "connected" && !data.garmin?.metric_export_enabled);
   for (const id of ["garmin-login-submit", "garmin-mfa-submit", "garmin-mfa-cancel", "garmin-disconnect"]) {
     const node = $("#" + id);
     if (node) node.disabled = busy;
@@ -161,8 +162,8 @@ function renderGarminCard(data) {
 function metricExportView(enabled, status) {
   return {
     text: enabled
-      ? "Die ausgewählten Werte gehen automatisch an Intervals.icu. Schwellenwerte kommen aus deinen lokalen Zonen, sonst Garmin, sonst Wahoo, und überschreiben abweichende Werte; Intervals.icu berechnet die HF-Zonen neu. Körperwerte kommen von Garmin; abweichende Werte bei Intervals.icu bleiben geschützt."
-      : "Einmal aktivieren: Schwellenwerte aus deinen lokalen Zonen, sonst Garmin, sonst Wahoo, automatisch an Intervals.icu senden, damit relative Workouts auf Garmin und Zwift stimmen.",
+      ? "Schwellenwerte aus lokalen Zonen, sonst Garmin, sonst Wahoo, überschreiben Intervals.icu; Körperwerte von Garmin."
+      : "Schwellenwerte aus lokalen Zonen, sonst Garmin, sonst Wahoo, automatisch an Intervals.icu senden.",
     button: enabled ? "Automatischen Abgleich deaktivieren" : "Werte automatisch an Intervals.icu senden",
     status: status || "",
   };

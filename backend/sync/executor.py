@@ -737,10 +737,22 @@ class SyncJobExecutor:
 def chained_after_job(
     *hooks: Callable[[Mapping[str, Any]], None],
 ) -> Callable[[Mapping[str, Any]], None]:
-    """Return one completion hook that runs each hook in order."""
+    """Return one completion hook that runs each hook in order.
+
+    A failing hook is logged and never skips the hooks after it.
+    """
 
     def after_job(job: Mapping[str, Any]) -> None:
         for hook in hooks:
-            hook(job)
+            try:
+                hook(job)
+            except Exception as exc:  # noqa: BLE001 - the worker must survive
+                _LOGGER.error(
+                    "sync job completion hook failed",
+                    extra={
+                        "event": "sync_job_after_job_failed",
+                        "error_class": type(exc).__name__,
+                    },
+                )
 
     return after_job

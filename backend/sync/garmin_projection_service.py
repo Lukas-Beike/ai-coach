@@ -36,6 +36,7 @@ from backend.sync.garmin import (
 )
 from backend.sync.garmin_personal_status import personal_key_state
 from backend.sync.garmin_service import GarminSyncService
+from backend.sync.metric_export import STATUS_KEY as METRIC_EXPORT_STATUS_KEY
 from backend.sync.metric_export_consent import enabled_fields, fields_view
 
 # The recovery context shows the latest record; two weeks cover a missed sync.
@@ -152,7 +153,7 @@ class GarminProjectionService:
         with self._database_manager.reader() as db:
             last_sync_at = self._key_value_repository.get(db, "last_garmin_sync_at")
             metric_export_status = self._key_value_repository.get(
-                db, "last_garmin_metric_export_status"
+                db, METRIC_EXPORT_STATUS_KEY
             )
             metric_export_fields = enabled_fields(
                 lambda key: self._key_value_repository.get(db, key)

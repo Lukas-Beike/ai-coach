@@ -2429,6 +2429,7 @@ def main() -> None:
             sync_worker.stop()
         COACH_JOB_WORKER.stop()
         CANONICAL_BACKFILL.worker.stop()
+        METRIC_EXPORT_RUNNER.stop()
         server.server_close()
         DIAGNOSTIC_CAPTURE.close()
         if daily_thread is not None:

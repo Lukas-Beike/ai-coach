@@ -18,14 +18,12 @@ function loadFunctions(context, names) {
 
 test("the export card explains consent in both states", () => {
   const off = loadFunctions({}, ["metricExportView"]).metricExportView(false);
-  assert.match(off.text, /^Einmal aktivieren/);
   assert.match(off.text, /lokalen Zonen, sonst Garmin, sonst Wahoo/);
   assert.equal(off.button, "Werte automatisch an Intervals.icu senden");
 
   const on = loadFunctions({}, ["metricExportView"]).metricExportView(true);
-  assert.match(on.text, /automatisch an Intervals\.icu/);
-  assert.match(on.text, /HF-Zonen neu/);
-  assert.match(on.text, /geschützt/);
+  assert.match(on.text, /Körperwerte von Garmin/);
+  assert.match(on.text, /überschreiben Intervals\.icu/);
   assert.equal(on.button, "Automatischen Abgleich deaktivieren");
 });
 

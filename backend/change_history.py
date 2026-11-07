@@ -466,5 +466,9 @@ def public_view(row: dict[str, Any]) -> dict[str, Any]:
             "before_present": bool(diff.get("before_present")),
             "after_present": bool(diff.get("after_present")),
         },
-        "remote_sync": "local_only",
+        **(
+            {"remote_sync": "remote", "undoable": False}
+            if row["entity_type"] in NOT_UNDOABLE_ENTITY_TYPES
+            else {"remote_sync": "local_only"}
+        ),
     }

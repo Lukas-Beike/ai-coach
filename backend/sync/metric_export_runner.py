@@ -77,35 +77,43 @@ class MetricExportRunner:
             self.request()
 
     def stop(self) -> None:
+        """Cancel a pending run; an active run finishes its current write."""
         self._stop_event.set()
 
+    @staticmethod
+    def _log_failure(exc: Exception) -> None:
+        _LOGGER.warning(
+            "Automatic metric export failed",
+            extra={
+                "event": "metric_export_automatic_failed",
+                "error_class": type(exc).__name__,
+            },
+        )
+
     def _run_loop(self) -> None:
-        while True:
-            if self._stop_event.wait(self._delay_seconds):
+        try:
+            while not self._stop_event.wait(self._delay_seconds):
                 with self._lock:
-                    self._active = False
-                return
+                    self._rerun = False
+                self._run_once()
+                with self._lock:
+                    if not self._rerun:
+                        return
+        finally:
             with self._lock:
-                self._rerun = False
-            self._run_once()
-            with self._lock:
-                if self._stop_event.is_set() or not self._rerun:
-                    self._active = False
-                    return
+                self._active = False
 
     def _run_once(self) -> None:
-        service = self._service()
+        try:
+            service = self._service()
+        except Exception as exc:  # noqa: BLE001 - a background run never raises
+            self._log_failure(exc)
+            return
         try:
             with self._maintenance_gate().operation():
                 receipt = service.sync_automatic()
         except Exception as exc:  # noqa: BLE001 - a background run never raises
-            _LOGGER.warning(
-                "Automatic metric export failed",
-                extra={
-                    "event": "metric_export_automatic_failed",
-                    "error_class": type(exc).__name__,
-                },
-            )
+            self._log_failure(exc)
             message = (
                 "Automatischer Abgleich mit Intervals.icu fehlgeschlagen; "
                 "erneuter Versuch beim nächsten Sync."

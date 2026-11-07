@@ -13,7 +13,7 @@ test("@responsive Garmin metric export sits in Anbindungen and shows its receipt
     state.data.garmin.metric_export_status = "Intervals.icu: 2 Werte gesendet, 1 Konflikte, 0 fehlgeschlagen.";
     renderProviderCredentials(state.data);
   });
-  await expect(panel.getByText(/Schwellenwerte aus deinen lokalen Zonen/)).toBeVisible();
+  await expect(panel.getByText(/Schwellenwerte aus lokalen Zonen/)).toBeVisible();
   await expect(panel.getByRole("button", { name: "Werte automatisch an Intervals.icu senden" })).toBeVisible();
   await expect(panel.getByText("Intervals.icu: 2 Werte gesendet, 1 Konflikte, 0 fehlgeschlagen.")).toBeVisible();
   await expect(panel.getByRole("button", { name: "Werte an Anbieter senden" })).toHaveCount(0);
