@@ -833,6 +833,8 @@ HISTORY = HistoryAssembly(
             zone_service=ATHLETE_DATA.zones,
             feedback_service=ATHLETE_DATA.activity_feedback,
             session_corrections=ATHLETE_DATA.session_corrections,
+            # Defined further down; resolved only when a history service is built.
+            nutrition_diary=lambda: NUTRITION_ASSEMBLY.diary_service(),
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,
@@ -1265,7 +1267,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         export_thresholds=EXPORT_THRESHOLDS,
     )
 )
-NUTRITION_ASSEMBLY = NutritionAssembly(
+NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
     dependencies=NutritionAssembly.Inputs(
         persistence=NutritionPersistence(
             database_manager, DB_LOCK, observation_reader=lambda: CANONICAL_READ

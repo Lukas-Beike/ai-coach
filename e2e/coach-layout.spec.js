@@ -79,6 +79,16 @@ test("empty coach chat does not promise quick actions and keeps the composer gap
   const empty = page.locator("#messages .empty-state");
   await expect(empty).toBeVisible();
   await expect(empty).not.toContainText("Schnellaktion");
+  await expect(page.locator("#chatJumpToComposer")).toBeHidden();
+  // The one action asks the Coach to fill the profile; the request is caught before it is sent.
+  await page.evaluate(() => document.querySelector("#chatForm").addEventListener("submit", (event) => {
+    globalThis.e2eProfileRequest = document.querySelector("#messageInput").value;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, { capture: true, once: true }));
+  await empty.getByRole("button", { name: "Profil ausfüllen" }).click();
+  expect(await page.evaluate(() => globalThis.e2eProfileRequest)).toBe("Hilf mir, mein Profil und meine Ziele auszufüllen.");
+  await expect(page.locator("#messageInput")).toHaveValue("");
 
   const nav = page.locator(".bottom-nav");
   const composerGap = async () => {

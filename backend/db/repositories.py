@@ -733,7 +733,9 @@ class PlanAdjustmentRepository:
         )
 
 
-# An assistant message shows the change summary of the Coach turn it finished.
+# An assistant message shows the change summary of the Coach turn it finished
+# and whether that turn failed, with its quick-action kind, so the chat can
+# offer to send it again as it was.
 _MESSAGE_COLUMNS = (
     "id, role, content, client_turn_id, created_at, "
     "(SELECT json_group_array(json_extract(value, '$.name')) "
@@ -741,7 +743,12 @@ _MESSAGE_COLUMNS = (
     "(SELECT json_extract(receipt, '$.change_summary') FROM coach_commands "
     "WHERE messages.role='assistant' "
     "AND coach_commands.client_turn_id=messages.client_turn_id "
-    "AND json_valid(receipt)) AS coach_changes"
+    "AND json_valid(receipt)) AS coach_changes, "
+    "(SELECT CASE WHEN json_extract(receipt, '$.status')='failed' "
+    "THEN COALESCE(json_extract(receipt, '$.request_kind'), '') END FROM coach_commands "
+    "WHERE messages.role='assistant' "
+    "AND coach_commands.client_turn_id=messages.client_turn_id "
+    "AND json_valid(receipt)) AS coach_failed"
 )
 
 
@@ -752,7 +759,12 @@ def _message_view(row: Any) -> dict[str, Any]:
         if (key != "client_turn_id" or value is not None)
         and (key != "attachment_names" or value != "[]")
         and (key != "coach_changes" or value is not None)
+        and key != "coach_failed"
     }
+    if row["coach_failed"] is not None:
+        message["coach_failed"] = True
+        if row["coach_failed"]:
+            message["coach_request_kind"] = row["coach_failed"]
     if "coach_changes" in message:
         message["coach_changes"] = json.loads(message["coach_changes"])
     return message
