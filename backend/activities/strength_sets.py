@@ -1,8 +1,8 @@
 """Executed strength sets of a session: selection, summary and plan comparison.
 
 One stored set list per session is used, never merged set by set: Garmin's
-exercise sets (which carry the athlete's Connect corrections) first, then any
-Garmin list, then other providers. The summary groups the active sets of each
+exercise sets (which carry the athlete's Connect corrections) first, then the
+file set lists in a stable provider order. The summary groups the active sets of each
 exercise over the whole session (supersets included), in order of first
 appearance; the rest after a set is the duration of the rest set that follows
 it. Exercise names are provider codes (upper-case identifiers), never free text.
@@ -34,6 +34,7 @@ from backend.canonical.activity_detail import (
 )
 from backend.canonical.vocabulary import (
     ExerciseCategory,
+    StrengthSetSource,
     StrengthSetType,
 )
 from backend.db.activity_detail_store import (
@@ -82,11 +83,10 @@ def select_strength_sets(
 
 
 def strength_rank(item: StoredDetailSet) -> tuple[Any, ...]:
-    """Exercise sets before file sets, Garmin before other providers."""
+    """Exercise sets (with the athlete's corrections) before file sets."""
     detail = _detail(item)
     return (
-        detail.source.value != "garmin_exercise_sets",
-        item.provider != "garmin",
+        detail.source is not StrengthSetSource.GARMIN_EXERCISE_SETS,
         item.provider,
         item.provider_activity_id,
     )

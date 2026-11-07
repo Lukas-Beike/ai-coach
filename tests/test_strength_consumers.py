@@ -175,7 +175,7 @@ class StrengthSummaryTests(unittest.TestCase):
         )
         self.assertIsNone(strength_summary(stored(unknown), set_list=False)["leg"])
 
-    def test_exercise_sets_win_over_file_sets_and_garmin_over_others(self) -> None:
+    def test_exercise_sets_win_over_file_sets_in_a_stable_order(self) -> None:
         file_sets = stored(
             set_list(SQUAT_SESSION, source=StrengthSetSource.FIT_SET_MESSAGES)
         )
