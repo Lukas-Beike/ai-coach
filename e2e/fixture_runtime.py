@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta, timezone
 BLS_OATS_ID = "bls:C133000"
 FIXTURE_DEMO_SEED_VERSION = "8"
 FIXTURE_RATIONALE = "Synthetische Vorschau"
-FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
+FIXTURE_TRAINING_FEATURES_SEED_VERSION = "2"
 # canned keeps the canned Coach replies; offline simulates an unreachable OpenAI.
 FIXTURE_OPENAI_MODES = ("canned", "offline")
 
@@ -613,6 +613,90 @@ def _save_activity_detail(activity_id, record):
         )
 
 
+def _save_garmin_copy(activity_id, streams):
+    """Bundle a Garmin copy with full streams into an Intervals activity's session.
+
+    The canonical session analysis (#1685) reads Garmin, Wahoo and local detail
+    only, so the fixture's recorded profiles and analyses come from this copy.
+    """
+    from datetime import datetime
+
+    from backend.canonical.activity_detail import ActivityStreamSet
+    from backend.canonical.records import Provenance
+    from backend.canonical.vocabulary import (
+        ActivityDetailOrigin,
+        ProviderId,
+        RecordingOrigin,
+        SourceKind,
+        StreamChannel,
+        StreamResolution,
+    )
+    from backend.db.activity_detail_store import replace_detail_set
+
+    now = server.runtime_clock.utc_now()
+    garmin_id = f"garmin-{activity_id}"
+    with server.database_manager().unit_of_work() as db:
+        row = db.execute(
+            "SELECT activity_id, sport, environment, started_at FROM activity_records "
+            "WHERE provider = 'intervals' AND provider_activity_id = ?",
+            (activity_id,),
+        ).fetchone()
+        db.execute(
+            "INSERT OR IGNORE INTO activity_records(provider, provider_activity_id, "
+            "activity_id, state, mapper_version, source_kind, recorded_by, sport, "
+            "environment, started_at, load_model, name, fetched_at, created_at, "
+            "updated_at) VALUES ('garmin', ?, ?, 'active', 1, 'provider_reported', "
+            "'garmin', ?, ?, ?, 'unknown', ?, ?, ?, ?)",
+            (
+                garmin_id,
+                row["activity_id"],
+                row["sport"],
+                row["environment"],
+                row["started_at"],
+                "Fixture Garmin copy",
+                now,
+                now,
+                now,
+            ),
+        )
+        replace_detail_set(
+            db,
+            ActivityStreamSet(
+                provider_activity_id=garmin_id,
+                provenance=Provenance(
+                    provider=ProviderId.GARMIN,
+                    source_kind=SourceKind.PROVIDER_REPORTED,
+                    source_record_id=None,
+                    recorded_by=RecordingOrigin.GARMIN,
+                    retrieved_at=datetime.fromisoformat(now),
+                    label="Garmin Connect",
+                ),
+                origin=ActivityDetailOrigin.FETCH,
+                resolution=StreamResolution.FULL,
+                channels={
+                    StreamChannel.TIME_S: tuple(float(v) for v in streams["time"]),
+                    StreamChannel.POWER_W: tuple(float(v) for v in streams["watts"]),
+                    StreamChannel.HEART_RATE_BPM: tuple(
+                        float(v) for v in streams["heartrate"]
+                    ),
+                },
+            ),
+            mapper_version=1,
+            summary_sha256=None,
+            now=now,
+        )
+
+
+def _run_session_analysis():
+    """Store the canonical session analyses of the seeded sessions."""
+    stage = server.CANONICAL_BACKFILL.session_analysis
+    with server.database_manager().unit_of_work() as db:
+        for _ in range(100):
+            if stage.run_batch(db).done:
+                return
+    raise RuntimeError("fixture session analysis did not finish")
+
+
 def _fixture_seed_fueling_ride(today):
     """Reuse the feature seed's local fueling workout without activity history."""
     units = server.PLANNING_DATA.planned_unit().list(500)
@@ -809,6 +893,8 @@ def seed_training_features():
                 "available_streams": ["time", "watts", "heartrate"],
             },
         )
+        _save_garmin_copy(activity["id"], detailed["streams"])
+    _run_session_analysis()
     server.ATHLETE_DATA.profile().save(
         {**server.ATHLETE_DATA.profile().get(), "sleep_target_hours": 8}
     )
