@@ -53,6 +53,10 @@ from backend.canonical.domain_records import (
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.db.repositories import CompetitionRepository, KeyValueRepository
+from backend.performance.session_metrics_reads import (
+    stored_session_metrics,
+    with_session_metrics,
+)
 from backend.runtime.ports import (
     ActivityReader,
     ActivityRowReader,
@@ -254,6 +258,7 @@ class CanonicalReadSelector(
 
         ``training_load`` and ``intensity`` are the stored local load (card M6);
         stored competitions mark and link their races (``with_competitions``).
+        EF, VI, work and decoupling are the stored local session metrics (card M8).
         """
         source = self._source(db)
         summaries = activity_summaries(
@@ -261,9 +266,10 @@ class CanonicalReadSelector(
             self._zone(db),
             limit=limit,
         )
-        loaded = with_local_loads(
-            summaries,
-            stored_local_loads(db, (summary["id"] for summary in summaries)),
+        ids = [summary["id"] for summary in summaries]
+        loaded = with_session_metrics(
+            with_local_loads(summaries, stored_local_loads(db, ids)),
+            stored_session_metrics(db, ids),
         )
         days = sorted(filter(None, (summary_local_date(row) for row in loaded)))
         if not days:

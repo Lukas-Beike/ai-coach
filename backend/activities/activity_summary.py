@@ -73,6 +73,8 @@ _MEASURED: Final = (
     ("min_temp_c", "min_temp_c"),
     ("max_temp_c", "max_temp_c"),
     ("device_name", "device_name"),
+    ("energy_kj", "energy_kj"),
+    ("energy_kcal", "energy_kcal"),
 )
 # Summary key -> ActivityRecord field, in rating order.
 _RATINGS: Final = (("rpe", "rpe"), ("feel", "feel"))

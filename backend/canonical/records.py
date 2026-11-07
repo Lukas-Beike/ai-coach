@@ -316,6 +316,7 @@ TEMPERATURE_C_BOUNDS: Final = (-60.0, 70.0)
 # Garmin's training effect runs 0.0 (none) to 5.0 (overreaching).
 MAX_TRAINING_EFFECT: Final = 5.0
 MAX_WATER_ESTIMATE_ML: Final = 50_000.0
+MAX_ACTIVITY_ENERGY_KCAL: Final = 20_000.0
 _SUMMARY_VALUE_BOUNDS: Final = (
     ("intensity", 0.0, 1_000.0),
     ("rpe", 0.0, 10.0),
@@ -335,6 +336,7 @@ _SUMMARY_VALUE_BOUNDS: Final = (
     ("aerobic_training_effect", 0.0, MAX_TRAINING_EFFECT),
     ("anaerobic_training_effect", 0.0, MAX_TRAINING_EFFECT),
     ("water_estimated_ml", 0.0, MAX_WATER_ESTIMATE_ML),
+    ("energy_kcal", 0.0, MAX_ACTIVITY_ENERGY_KCAL),
 )
 _ZONE_FIELDS: Final = ("power_zone_times_s", "hr_zone_times_s", "pace_zone_times_s")
 
@@ -454,6 +456,8 @@ class ActivityRecord:
     anaerobic_training_effect: float | None = None
     # The provider's estimated sweat loss of the session.
     water_estimated_ml: float | None = None
+    # The device's energy-expenditure estimate of the session in kcal (card M8).
+    energy_kcal: float | None = None
     # Seconds per zone as (zone id, seconds) pairs, ids such as "Z1".
     power_zone_times_s: ZoneSeconds | None = None
     hr_zone_times_s: ZoneSeconds | None = None

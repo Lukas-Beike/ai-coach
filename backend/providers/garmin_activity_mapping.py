@@ -54,6 +54,8 @@ the same moment.
   A minimum above its maximum drops both of the pair with one issue.
 * ``waterEstimated`` (ml, Garmin's estimate) -> ``water_estimated_ml``;
   ``lapCount`` -> ``lap_count``.
+* ``calories`` (kcal, Garmin's whole-session estimate including the resting
+  share) -> ``energy_kcal``; zero means not estimated and becomes None (card M8).
 * ``averageBikingCadenceInRevPerMinute`` (rpm) -> ``avg_cadence``; else
   ``averageRunningCadenceInStepsPerMinute`` (steps/min) halved to one-leg rpm.
 * ``hrTimeInZone_<n>`` and ``powerTimeInZone_<n>`` (seconds, by Garmin's own
@@ -98,6 +100,7 @@ from backend.canonical.mapping import (
     coerce_number,
 )
 from backend.canonical.records import (
+    MAX_ACTIVITY_ENERGY_KCAL,
     MAX_LAP_COUNT,
     MAX_NATIVE_TYPE_LENGTH,
     MAX_TRAINING_EFFECT,
@@ -159,7 +162,8 @@ from backend.canonical.vocabulary import (
 # merged activity_ratings rows (#1724).
 # Version 17: maps eventType.typeKey race and transportation to the activity
 # purpose (#1678).
-MAPPER_VERSION: Final = 17
+# Version 18: maps calories, the device's energy estimate (card M8, #1680).
+MAPPER_VERSION: Final = 18
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -399,6 +403,9 @@ def _map_row(
         row, ("waterEstimated",), (0.0, MAX_WATER_ESTIMATE_ML), ref, issues
     )
     lap_count = _optional_number(row, ("lapCount",), (0.0, MAX_LAP_COUNT), ref, issues)
+    calories = _optional_number(
+        row, ("calories",), (0.0, MAX_ACTIVITY_ENERGY_KCAL), ref, issues
+    )
     cadence = _cadence(row, ref, issues)
     hr_zones = _zone_times(row, _HR_ZONE_PREFIX, ref, issues)
     power_zones = _zone_times(row, _POWER_ZONE_PREFIX, ref, issues)
@@ -442,6 +449,7 @@ def _map_row(
         min_temp_c=min_temp,
         max_temp_c=max_temp,
         water_estimated_ml=water,
+        energy_kcal=calories or None,
         lap_count=lap_count,
         avg_cadence=cadence,
         hr_zone_times_s=hr_zones,

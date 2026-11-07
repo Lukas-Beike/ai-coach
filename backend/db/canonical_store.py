@@ -47,9 +47,16 @@ from backend.canonical.vocabulary import (
 
 ACTIVITY_ID_PREFIX: Final = "act_"
 ATHLETE_SERIES: Final = "athlete"
-# Local per-session derived kinds, keyed by their owning session (card M6).
+# Local per-session derived kinds, keyed by their owning session (cards M6, M8).
 SESSION_SERIES_KINDS: Final = frozenset(
-    {MetricKind.SESSION_LOAD, MetricKind.INTENSITY_FACTOR}
+    {
+        MetricKind.SESSION_LOAD,
+        MetricKind.INTENSITY_FACTOR,
+        MetricKind.EFFICIENCY_FACTOR,
+        MetricKind.VARIABILITY_INDEX,
+        MetricKind.MECHANICAL_WORK,
+        MetricKind.AEROBIC_DECOUPLING,
+    }
 )
 _ATHLETE_SERIES_KINDS: Final = frozenset(
     {MetricKind.WEIGHT, MetricKind.EFTP, MetricKind.BODY_FAT}
@@ -102,6 +109,7 @@ ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "aerobic_training_effect",
     "anaerobic_training_effect",
     "water_estimated_ml",
+    "energy_kcal",
 )
 ACTIVITY_ZONE_DETAIL_FIELDS: Final = (
     "power_zone_times_s",

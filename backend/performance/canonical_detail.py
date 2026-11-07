@@ -49,6 +49,10 @@ from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.performance.session_execution import session_execution
+from backend.performance.session_metrics_reads import (
+    detail_metric_entries,
+    stored_session_metrics,
+)
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
     map_intervals_summary_zones,
@@ -205,10 +209,13 @@ class CanonicalDetailReader:
             refreshable=self._refreshable(),
             status=status,
             envelope=envelope,
-            summary_metrics=None
-            if summary is None
-            else intervals_summary_metrics(
-                summary, recorded_by=analysis_record.provenance.recorded_by
+            summary_metrics=_summary_metrics(
+                None
+                if summary is None
+                else intervals_summary_metrics(
+                    summary, recorded_by=analysis_record.provenance.recorded_by
+                ),
+                stored_session_metrics(db, [activity_id]).get(activity_id, {}),
             ),
             zone=self._zone,
         )
@@ -455,6 +462,22 @@ def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
         fetched_at=item.fetched_at,
         detail=cast(ActivityDetailSet, replace(item.detail, provenance=provenance)),
     )
+
+
+def _summary_metrics(
+    provider: Mapping[str, Mapping[str, Any]] | None,
+    stored: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Local session metrics (card M8) win; a provider value of the same key stays an alternative."""
+    metrics = {key: dict(entry) for key, entry in (provider or {}).items()}
+    for key, entry in detail_metric_entries(stored).items():
+        other = metrics.get(key)
+        if other is not None:
+            entry["alternatives"] = [
+                {"value": other.get("value"), "source": other.get("source")}
+            ]
+        metrics[key] = entry
+    return metrics
 
 
 def _stored_payload(

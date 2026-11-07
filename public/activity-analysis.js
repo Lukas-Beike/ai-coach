@@ -216,7 +216,7 @@
 
   // Before the document loads, the list row's summary values stand in under the document's metric keys.
   function rowMetrics(row) {
-    const keys = ["distance_m", "moving_duration_s", "elapsed_duration_s", "avg_speed_mps", "max_speed_mps", "avg_hr", "max_hr", "avg_power", "normalized_power", "elevation_gain_m", "intensity"];
+    const keys = ["distance_m", "moving_duration_s", "elapsed_duration_s", "avg_speed_mps", "max_speed_mps", "avg_hr", "max_hr", "avg_power", "normalized_power", "elevation_gain_m", "intensity", "efficiency_factor", "efficiency_factor_unit", "variability_index", "work_kj", "decoupling_pct", "energy_kj", "energy_kcal"];
     const metrics = {};
     for (const key of keys) if (row?.[key] != null) metrics[key] = row[key];
     // The list row names its load like planned units do (training_load); the document calls it load.
@@ -240,7 +240,12 @@
       ["Max. Leistung", measure(metrics.max_power_w, "W")],
       [`Ø ${cadence.label}`, measure(cadence.average, cadence.unit)],
       ["Anstieg", measure(metrics.elevation_gain_m, "m")],
-      ["Kalorien", measure(metrics.calories_kcal, "kcal")],
+      ["Kalorien", measure(metrics.energy_kcal ?? metrics.calories_kcal, "kcal")],
+      // Local session metrics (card M8): descriptive values, no verdict.
+      ["Arbeit", measure(metrics.work_kj ?? metrics.energy_kj, "kJ")],
+      ["Effizienzfaktor", finite(metrics.efficiency_factor) ? `${numberText(metrics.efficiency_factor, 2)}${metrics.efficiency_factor_unit ? ` ${metrics.efficiency_factor_unit}` : ""}` : null],
+      ["Variabilitätsindex", finite(metrics.variability_index) ? numberText(metrics.variability_index, 2) : null],
+      ["Decoupling", finite(metrics.decoupling_pct) ? `${numberText(metrics.decoupling_pct, 1)} %` : null],
       ["Trainingsbelastung", measure(metrics.load)],
       // Intensity arrives as a fraction or in percent; the calendar helper normalizes both.
       ["Intensität", calendarIntensityLabel(metrics.intensity)],
@@ -316,6 +321,7 @@
     const session = payload?.session || summary;
     const activity = { sport: session.sport, environment: session.environment };
     const metrics = payload ? ActivityDetails.metricValues(payload) : rowMetrics(summary);
+    if (payload?.metrics?.efficiency_factor?.unit) metrics.efficiency_factor_unit = payload.metrics.efficiency_factor.unit;
     const stats = overview(activity, metrics);
     if (stats) panel.append(stats);
     const streams = payload?.streams;

@@ -205,6 +205,11 @@ class MetricKind(StrEnum):
     # Local TSS-scale load and intensity factor of one session (card M6).
     SESSION_LOAD = "session_load"
     INTENSITY_FACTOR = "intensity_factor"
+    # Local efficiency, variability, work and decoupling of one session (card M8).
+    EFFICIENCY_FACTOR = "efficiency_factor"
+    VARIABILITY_INDEX = "variability_index"
+    MECHANICAL_WORK = "mechanical_work"
+    AEROBIC_DECOUPLING = "aerobic_decoupling"
 
     @property
     def unit(self) -> str:
@@ -275,6 +280,11 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.INDOOR_FTP: "W",
     MetricKind.SESSION_LOAD: "load",
     MetricKind.INTENSITY_FACTOR: "%",
+    # Ride W/bpm, run (m/min)/bpm; the derivation names the unit of each value.
+    MetricKind.EFFICIENCY_FACTOR: "ratio",
+    MetricKind.VARIABILITY_INDEX: "ratio",
+    MetricKind.MECHANICAL_WORK: "kJ",
+    MetricKind.AEROBIC_DECOUPLING: "%",
 }
 
 
@@ -301,6 +311,18 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
         "derived locally per session by backend.sync.local_load (card M6), never "
         "by a provider mapper"
     ),
+    **{
+        kind: (
+            "derived locally per session by backend.sync.session_metrics (card "
+            "M8), never by a provider mapper"
+        )
+        for kind in (
+            MetricKind.EFFICIENCY_FACTOR,
+            MetricKind.VARIABILITY_INDEX,
+            MetricKind.MECHANICAL_WORK,
+            MetricKind.AEROBIC_DECOUPLING,
+        )
+    },
 }
 # Kinds stored for export, backup and history that no reader uses yet. A kind
 # leaves this list when a consumer reads it; the vocabulary accountability test
