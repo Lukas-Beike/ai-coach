@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -17,6 +18,7 @@ from backend.planning.competition_service import CompetitionService
 from backend.settings import SettingsService
 
 ZONES_PATH = "/api/zones"
+_LOGGER = logging.getLogger("intervals_coach")
 
 
 class AthleteGetRoutes:
@@ -47,11 +49,15 @@ class AthleteGetRoutes:
 
     def _competitions(self) -> list[dict[str, Any]]:
         competitions = self._competition_service().list(limit=100)
-        return (
-            competitions
-            if self._race_results is None
-            else self._race_results(competitions)
-        )
+        if self._race_results is None:
+            return competitions
+        try:
+            return self._race_results(competitions)
+        except Exception as exc:  # noqa: BLE001 - results are optional; never fail the profile
+            _LOGGER.warning(
+                "competition race results unavailable: %s", type(exc).__name__
+            )
+            return competitions
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {

@@ -454,7 +454,7 @@ class HttpApiAssembly:
             race_results=lambda competitions: with_race_results(
                 competitions,
                 local_today(),
-                lambda day: activity_read_service().summaries_between(day, day),
+                activity_read_service().summaries_on_days,
             ),
         )
         self.diagnostics_get_routes = DiagnosticsGetRoutes(
