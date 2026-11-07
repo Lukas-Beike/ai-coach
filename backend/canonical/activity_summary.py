@@ -32,7 +32,9 @@ class ActivitySummary(TypedDict, total=False):
     (``session_assist``).
     Zone times are lists of
     ``{"id": "Z1", "secs": 600.0}`` items. ``rpe_conflict`` is True when the
-    session's records report different provider RPE values.
+    session's records report different provider RPE values. ``purpose`` is an
+    ``ActivityPurpose`` value, absent for ordinary training without a source;
+    ``competition_id`` names the stored competition a race is linked to.
     """
 
     id: str
@@ -91,6 +93,8 @@ class ActivitySummary(TypedDict, total=False):
     heart_rate_zone_times: list[dict[str, Any]]
     pace_zone_times: list[dict[str, Any]]
     planned_event_id: str
+    purpose: str
+    competition_id: str
 
 
 def summary_local_date(summary: Mapping[str, Any], timezone: str | None = None) -> str:

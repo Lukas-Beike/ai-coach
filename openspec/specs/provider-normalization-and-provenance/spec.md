@@ -428,3 +428,22 @@ The system SHALL let the athlete choose a preferred source (Garmin or Intervals.
 - **THEN** the Intervals.icu value is current and Garmin's stays an alternative.
 
 Evidence: `backend/performance/source_policy.py:preferences_from_profile`, `backend/performance/source_policy.py:source_order`, `backend/performance/source_policy.py:family_providers`, `backend/athlete/profile.py:normalize_profile`, `backend/performance/canonical_inputs.py:CanonicalPerformanceSource`; `tests/test_source_policy.py:PreferredSourceTests`, `tests/test_current_thresholds.py:PreferredSourceTests`, `tests/test_performance_display_sources.py:PreferredDisplayTests`, `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`, `tests/test_change_history.py:test_preferred_sources_are_audited_and_older_rows_stay_matchable`, `tests/test_performance_recovery_context.py:test_an_intervals_preference_uses_only_its_values`.
+
+### Requirement: Activity purpose
+The system SHALL classify why an activity was done as training, race, commute, warm-up or cool-down from Garmin's activity event type and stored competitions, never from Intervals.icu fields, and carry it with its source label on the session summary and the Coach activity list.
+
+#### Scenario: Garmin event types name race and commute
+- **WHEN** a Garmin activity list entry (unofficial SDK or Personal API) has `eventType.typeKey` `race` or `transportation`
+- **THEN** its record has purpose race or commute; any other event type, a missing event type or a missing key leaves the purpose unset, and a key that is not text is one mapping issue.
+
+#### Scenario: A race in any record wins
+- **WHEN** the records of one session report different purposes
+- **THEN** the session purpose is race if any record says race, else the first purpose in derived order, and `sources.purpose` names that record's provider.
+
+#### Scenario: Intervals.icu classification is not read
+- **WHEN** an Intervals.icu activity carries `sub_type`, `race` or `commute`
+- **THEN** its record has no purpose.
+
+Detailed contract: the purpose is stored in the record details (`purpose`), so no migration is needed; an unknown stored value is ignored on read. The Garmin activity mapper version 17 replays stored payloads. The Coach activity list adds `purpose_label` (Training, Wettkampf, Pendeln, Einfahren, Ausfahren). Warm-up and cool-down are reserved for the athlete's own marking, which is not yet implemented.
+
+Evidence: `backend/canonical/vocabulary.py:ActivityPurpose`, `backend/providers/garmin_activity_mapping.py:_purpose`, `backend/activities/session_purpose.py:session_purpose`, `backend/db/canonical_store.py:activity_summary_values`, `backend/coach/context.py:compact_coach_activity`; `tests/test_session_purpose.py`, `tests/test_coach_activity_summary_parity.py`.

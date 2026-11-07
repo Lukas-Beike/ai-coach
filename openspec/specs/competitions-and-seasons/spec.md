@@ -195,3 +195,22 @@ Evidence for CS9–CS12: `public/plan-views.js` renders canonical competition st
 Validation: `tests/competition-overview.test.cjs` covers missing, zero and free-text distance and invalid dates. `e2e/competitions.spec.js` covers summaries, disclosure details, ordering, archives, safe text, failed reads/retry, empty lists and absence of analysis requests or writes on mobile-small and desktop. `e2e/text-reflow.spec.js`, `e2e/training-feature-panels.spec.js`, `tests/test_server_frontend.py` and `tests/test_server_runtime.py` cover the surrounding UI and asset contracts. Existing CS1–CS8 remain unchanged.
 
 Evidence limits: Coach-edit refresh is exercised using simulated canonical saved state rather than an end-to-end real-model mutation. Real-device microphone/notification permissions and keyboard-open behavior were not verified. The full Python discovery run's five obsolete UI assertions were corrected and both affected suites passed on rerun; the full discovery run was not repeated after those test-only corrections.
+
+### Requirement: CS13 Completed races link to stored competitions
+The system SHALL link each stored competition to the completed sessions of its local date and sport when it reads activity summaries, without storing the link, so consumers see which session was the race.
+
+#### Scenario: Provider races are linked
+- **WHEN** a session with purpose race starts on a competition's local date in its sport
+- **THEN** the race nearest the competition's start carries that `competition_id`; other sessions of the day stay unlinked, and a day with a provider race never gets a hint.
+
+#### Scenario: A competition marks its best candidate as a race hint
+- **WHEN** no session of the competition's date and sport has purpose race
+- **THEN** the session that starts nearest the competition's local start time (a stored midnight counts as unknown), else the longest, else the earliest, gets purpose race with source "Lokale Wettkämpfe" and the `competition_id`; with a planned duration it must last at least half of it.
+
+#### Scenario: No link across sports or for commutes
+- **WHEN** a session has another sport, another local date, the other side of indoor (indoor, virtual) versus outdoor when both are known, or purpose commute, warm-up or cool-down, or the competition's sport is unsupported
+- **THEN** the session is not linked and keeps its own purpose.
+
+Detailed contract: a session links to at most one competition (competitions in date then id order). A limited read links over every session of its oldest day, so the hint never depends on the page size. Unlinking by athlete marking is not yet implemented (#1759).
+
+Evidence: `backend/activities/session_purpose.py:with_competitions`, `backend/sync/canonical_read_selector.py:activity_summaries`, `backend/db/repositories.py:CompetitionRepository.between`; `tests/test_session_purpose.py`.

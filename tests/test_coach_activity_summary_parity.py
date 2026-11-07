@@ -83,6 +83,8 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
                 "max_temp_c": 21.0,
                 "aerobic_training_effect": 3.2,
                 "anaerobic_training_effect": 0.8,
+                "purpose": "race",
+                "competition_id": "c-1",
             },
             select=planning_context.selected,
         )
@@ -122,10 +124,13 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
                 "pace_mps": 7.7,
                 "rpe": 6.0,
                 "feel": 3,
+                "purpose": "race",
+                "competition_id": "c-1",
+                "purpose_label": "Wettkampf",
                 "source": "Intervals.icu",
             },
         )
-        self.assertEqual(set(row), set(COACH_ACTIVITY_FIELDS))
+        self.assertEqual(set(row), {*COACH_ACTIVITY_FIELDS, "purpose_label"})
 
     def test_projection_groups_and_rolls_up_with_unchanged_labels_and_numbers(self):
         result = CoachIntervalsContextService().project(

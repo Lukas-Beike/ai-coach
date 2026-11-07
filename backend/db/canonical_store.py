@@ -32,6 +32,7 @@ from backend.canonical.records import (
 from backend.canonical.validation import MAX_ACTIVITY_DURATION_S
 from backend.canonical.vocabulary import (
     ActivityLinkKind,
+    ActivityPurpose,
     ActivityRecordState,
     ActivitySessionState,
     Assist,
@@ -75,6 +76,7 @@ _LOCAL_OFFSET_KEY: Final = "local_offset_minutes"
 _TERRAIN_KEY: Final = "terrain"
 _ASSIST_KEY: Final = "assist"
 _NATIVE_TYPE_KEY: Final = "native_type"
+_PURPOSE_KEY: Final = "purpose"
 # The stored terrain, assist and native type of ``r``, as columns named by key.
 _QUALIFIER_COLUMNS: Final = ", ".join(
     f"json_extract(r.details, '$.{key}') AS {key}"
@@ -1634,6 +1636,7 @@ def _activity_details(record: ActivityRecord) -> str:
             (_TERRAIN_KEY, _known(record.terrain, Terrain.UNKNOWN)),
             (_ASSIST_KEY, _known(record.assist, Assist.UNKNOWN)),
             (_NATIVE_TYPE_KEY, record.native_type),
+            (_PURPOSE_KEY, None if record.purpose is None else record.purpose.value),
             *(
                 (field, getattr(record, field))
                 for field in ACTIVITY_SUMMARY_DETAIL_FIELDS
@@ -1687,7 +1690,14 @@ def activity_summary_values(details: object) -> dict[str, Any]:
         values[_TRAINING_EFFECT_LABEL_KEY] = label
     if valid_offset_minutes(offset := loaded.get(_LOCAL_OFFSET_KEY)):
         values[_LOCAL_OFFSET_KEY] = offset
-    return values | _activity_qualifiers(loaded)
+    return values | _stored_purpose(loaded) | _activity_qualifiers(loaded)
+
+
+def _stored_purpose(loaded: Mapping[str, Any]) -> dict[str, Any]:
+    purpose = loaded.get(_PURPOSE_KEY)
+    if isinstance(purpose, str) and purpose in ActivityPurpose._value2member_map_:
+        return {_PURPOSE_KEY: ActivityPurpose(purpose)}
+    return {}
 
 
 def _activity_qualifiers(loaded: Mapping[str, Any]) -> dict[str, Any]:

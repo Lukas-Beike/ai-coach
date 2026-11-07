@@ -32,7 +32,7 @@ from backend.backup.restore_validation import (
 )
 from backend.db import DatabaseManager, migrations, row_factory
 from backend.db.migrations import migrate_schema
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.db.schema import CURRENT_SCHEMA_VERSION, database_schema_is_current
 from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V16
 from backend.providers.canonical_plans import current_mapper_versions
@@ -323,6 +323,7 @@ class CompletedBackfillUpgradeTests(unittest.TestCase):
             key_values=self.key_values,
             zone=lambda _db: ZONE,
             compact_only=lambda _db: False,
+            competitions=CompetitionRepository(),
         )
         with self.manager.reader() as db:
             self.assertIs(

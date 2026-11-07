@@ -21,7 +21,8 @@ stored derived observations (``backend.sync.local_load.with_local_loads``).
 ``training_effect_label`` is the provider's training-effect category,
 ``training_effect_load`` the training load on that provider's own scale, and
 ``aerobic_training_effect``/``anaerobic_training_effect`` its effect values, all
-from the same record.
+from the same record. ``purpose`` follows ``session_purpose``; the reader links
+stored competitions afterwards (``session_purpose.with_competitions``).
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from backend.activities.detail_contract import (
     rating_order,
     session_local_start,
 )
+from backend.activities.session_purpose import session_purpose
 from backend.canonical.activity_summary import (
     TSS_LIKE_LOAD_MODELS,
     ActivitySummary,
@@ -156,6 +158,10 @@ def activity_summary(
     )
     if effect is not None:
         _training_effect(summary, sources, effect)
+    purpose = session_purpose(derived)
+    if purpose is not None and purpose.purpose is not None:
+        summary["purpose"] = purpose.purpose.value
+        sources["purpose"] = _label(purpose)
     summary["source"] = _label(primary)
     summary["sources"] = sources
     summary["record_ids"] = _record_ids(measured)
