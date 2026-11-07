@@ -292,6 +292,20 @@ class SelectorCompetitionTests(CanonicalReadFixture):
             self.assertEqual(row.get("competition_id"), full[row["id"]])
         self.assertEqual(list(full.values()).count("c-run"), 1)
 
+    def test_the_reader_applies_the_planned_duration(self) -> None:
+        populate(self)
+        self.execute(
+            "INSERT INTO competitions(id, name, event_date, sport, priority, distance, "
+            "target, course_profile, notes, planned_duration_s, created_at, "
+            "updated_at) VALUES ('c-long', 'Marathon', '2026-10-09', 'run', 'A', "
+            "'42 km', '', '', '', 36000, '2026-10-01T00:00:00', "
+            "'2026-10-01T00:00:00')"
+        )
+
+        summaries = self.read(make_selector(self).activity_summaries)
+
+        self.assertNotIn("c-long", [row.get("competition_id") for row in summaries])
+
 
 if __name__ == "__main__":
     unittest.main()

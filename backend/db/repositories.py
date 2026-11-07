@@ -466,11 +466,12 @@ class CompetitionRepository:
         return [dict(row) for row in db.execute(query, params).fetchall()]
 
     def between(self, db: Any, first: str, last: str) -> tuple[dict[str, Any], ...]:
-        """Return the date, start and sport of competitions from first to last."""
+        """Return date, start, sport and planned duration of competitions in range."""
         return tuple(
             dict(row)
             for row in db.execute(
-                "SELECT id, event_date, starts_at_local, sport, environment "
+                "SELECT id, event_date, starts_at_local, sport, environment, "
+                "planned_duration_s "
                 "FROM competitions WHERE substr(event_date, 1, 10) BETWEEN ? AND ? "
                 "ORDER BY event_date, id",
                 (first, last),

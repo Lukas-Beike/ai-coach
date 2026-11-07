@@ -1690,10 +1690,14 @@ def activity_summary_values(details: object) -> dict[str, Any]:
         values[_TRAINING_EFFECT_LABEL_KEY] = label
     if valid_offset_minutes(offset := loaded.get(_LOCAL_OFFSET_KEY)):
         values[_LOCAL_OFFSET_KEY] = offset
+    return values | _stored_purpose(loaded) | _activity_qualifiers(loaded)
+
+
+def _stored_purpose(loaded: Mapping[str, Any]) -> dict[str, Any]:
     purpose = loaded.get(_PURPOSE_KEY)
     if isinstance(purpose, str) and purpose in ActivityPurpose._value2member_map_:
-        values[_PURPOSE_KEY] = ActivityPurpose(purpose)
-    return values | _activity_qualifiers(loaded)
+        return {_PURPOSE_KEY: ActivityPurpose(purpose)}
+    return {}
 
 
 def _activity_qualifiers(loaded: Mapping[str, Any]) -> dict[str, Any]:
