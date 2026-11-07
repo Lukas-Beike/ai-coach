@@ -208,6 +208,11 @@
     return unit ? `${numberText(value)} ${unit}` : numberText(value);
   };
   const duration = (value) => (finite(value) ? clock(value) : null);
+  function efficiencyText(metrics) {
+    if (!finite(metrics.efficiency_factor)) return null;
+    const value = numberText(metrics.efficiency_factor, 2);
+    return metrics.efficiency_factor_unit ? `${value} ${metrics.efficiency_factor_unit}` : value;
+  }
 
   function speedText(speed, value) {
     const converted = finite(value) ? speed.convert(value) : null;
@@ -243,7 +248,7 @@
       ["Kalorien", measure(metrics.energy_kcal ?? metrics.calories_kcal, "kcal")],
       // Local session metrics (card M8): descriptive values, no verdict.
       ["Arbeit", measure(metrics.work_kj ?? metrics.energy_kj, "kJ")],
-      ["Effizienzfaktor", finite(metrics.efficiency_factor) ? `${numberText(metrics.efficiency_factor, 2)}${metrics.efficiency_factor_unit ? ` ${metrics.efficiency_factor_unit}` : ""}` : null],
+      ["Effizienzfaktor", efficiencyText(metrics)],
       ["Variabilitätsindex", finite(metrics.variability_index) ? numberText(metrics.variability_index, 2) : null],
       ["Decoupling", finite(metrics.decoupling_pct) ? `${numberText(metrics.decoupling_pct, 1)} %` : null],
       ["Trainingsbelastung", measure(metrics.load)],

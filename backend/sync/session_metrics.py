@@ -18,6 +18,7 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, tzinfo
 from typing import Any, Final
 
@@ -126,6 +127,85 @@ def _observations(
     return result
 
 
+@dataclass(slots=True)
+class _Plan:
+    """Which sessions stay as stored and which need a recompute."""
+
+    keep: set[str] = field(default_factory=set)
+    empty: dict[str, str] = field(default_factory=dict)
+    changed: list[tuple[Mapping[str, Any], str]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _Tally:
+    """Content-free counts of one batch."""
+
+    written: int = 0
+    values: Counter[str] = field(default_factory=Counter)
+    bases: Counter[str] = field(default_factory=Counter)
+
+
+def _plan(
+    summaries: Sequence[Mapping[str, Any]],
+    sessions: Mapping[str, Sequence[ActivityRecord]],
+    stream_keys: Mapping[str, Sequence[Any]],
+    stored: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    empty: Mapping[str, str],
+) -> _Plan:
+    """Fingerprint every session before any stream is decoded."""
+    plan = _Plan()
+    for summary in summaries:
+        session_id = str(summary["id"])
+        fingerprint = metrics_fingerprint(
+            summary,
+            [key.content_sha256 for key in stream_keys.get(session_id, ())],
+            _members(sessions[session_id]),
+        )
+        rows = stored.get(session_id, {})
+        if rows and all(
+            row.get("input_fingerprint") == fingerprint for row in rows.values()
+        ):
+            plan.keep.update(row["natural_key"] for row in rows.values())
+        elif not rows and empty.get(session_id) == fingerprint:
+            plan.empty[session_id] = fingerprint
+        else:
+            plan.changed.append((summary, fingerprint))
+    return plan
+
+
+def _write_session(
+    db: Any,
+    summary: Mapping[str, Any],
+    metrics: SessionMetrics,
+    now: str,
+    tally: _Tally,
+) -> set[str]:
+    """Upsert the session's values; return their natural keys (empty: no value)."""
+    try:
+        observations = _observations(summary, metrics)
+    except TypeError, ValueError:
+        # Outside the canonical bounds: this session keeps no value.
+        observations = []
+    if not observations:
+        tally.values["none"] += 1
+    keys: set[str] = set()
+    for observation, derivation in observations:
+        keys.add(canonical_store.observation_natural_key(observation))
+        outcome = canonical_store.upsert_observation(
+            db,
+            observation,
+            mapper_version=METHOD_VERSION,
+            now=now,
+            owner=str(summary["id"]),
+            derivation=derivation,
+        )
+        tally.written += outcome is not canonical_store.WriteOutcome.UNCHANGED
+        tally.values[observation.kind.value] += 1
+        if basis := derivation.get("basis"):
+            tally.bases[f"{observation.kind.value}:{basis}"] += 1
+    return keys
+
+
 class SessionMetricsStage:
     """Backfill follow-up that keeps the stored local session metrics current."""
 
@@ -170,37 +250,17 @@ class SessionMetricsStage:
         )
         stored = stored_session_metrics(db)
         state = self._state(db)
-        empty: Mapping[str, str] = state.get("empty") or {}
-        keep: set[str] = set()
-        next_empty: dict[str, str] = {}
-        changed: list[tuple[Mapping[str, Any], str]] = []
-        for summary in summaries:
-            session_id = str(summary["id"])
-            keys = stream_keys.get(session_id, ())
-            fingerprint = metrics_fingerprint(
-                summary,
-                [key.content_sha256 for key in keys],
-                _members(sessions[session_id]),
-            )
-            rows = stored.get(session_id, {})
-            if rows and all(
-                row.get("input_fingerprint") == fingerprint for row in rows.values()
-            ):
-                keep.update(row["natural_key"] for row in rows.values())
-            elif not rows and empty.get(session_id) == fingerprint:
-                next_empty[session_id] = fingerprint
-            else:
-                changed.append((summary, fingerprint))
-        batch, pending = changed[: self._batch_size], changed[self._batch_size :]
+        plan = _plan(summaries, sessions, stream_keys, stored, state.get("empty") or {})
+        batch = plan.changed[: self._batch_size]
+        pending = plan.changed[self._batch_size :]
+        keep, next_empty = plan.keep, plan.empty
         for waiting, _ in pending:
             # Not recomputed yet: its stored rows stay until a later batch.
             keep.update(
                 row["natural_key"]
                 for row in stored.get(str(waiting["id"]), {}).values()
             )
-        written = 0
-        values: Counter[str] = Counter()
-        bases: Counter[str] = Counter()
+        tally = _Tally()
         for item, fingerprint in batch:
             session_id = str(item["id"])
             activity = (
@@ -208,29 +268,13 @@ class SessionMetricsStage:
                 if session_id in stream_keys
                 else None
             )
-            metrics = session_metrics(item, activity, fingerprint)
-            try:
-                observations = _observations(item, metrics)
-            except TypeError, ValueError:
-                # Outside the canonical bounds: this session keeps no value.
-                observations = []
-            if not observations:
+            written = _write_session(
+                db, item, session_metrics(item, activity, fingerprint), now, tally
+            )
+            if written:
+                keep.update(written)
+            else:
                 next_empty[session_id] = fingerprint
-                values["none"] += 1
-            for observation, derivation in observations:
-                keep.add(canonical_store.observation_natural_key(observation))
-                outcome = canonical_store.upsert_observation(
-                    db,
-                    observation,
-                    mapper_version=METHOD_VERSION,
-                    now=now,
-                    owner=session_id,
-                    derivation=derivation,
-                )
-                written += outcome is not canonical_store.WriteOutcome.UNCHANGED
-                values[observation.kind.value] += 1
-                if basis := derivation.get("basis"):
-                    bases[f"{observation.kind.value}:{basis}"] += 1
         retired = canonical_store.retire_derived_observations(
             db, METHOD_ID, keep=keep, now=now
         )
@@ -240,9 +284,9 @@ class SessionMetricsStage:
             "with_streams": len(stream_keys),
             "computed": len(batch),
             "pending": len(pending),
-            "values": dict(sorted(values.items())),
-            "bases": dict(sorted(bases.items())),
-            "written": written,
+            "values": dict(sorted(tally.values.items())),
+            "bases": dict(sorted(tally.bases.items())),
+            "written": tally.written,
             "retired": retired,
         }
         self._save(
