@@ -342,6 +342,31 @@ function plannedEntryDurationLabel(actual, entry) {
   return AppFormat.duration(entry.planned_duration_s);
 }
 
+// The planned name with its category when they differ, else the category.
+function plannedStrengthName(exercise) {
+  const category = AppFormat.strengthCategory(exercise.category);
+  const planned = typeof exercise.name === "string" && exercise.name ? exercise.name : null;
+  if (!planned) return category || "Übung";
+  return category && category !== planned ? `${planned} (${category})` : planned;
+}
+
+function plannedStrengthRows(strength) {
+  if (!strength?.exercises?.length) return null;
+  const list = document.createElement("ul");
+  list.className = "planned-strength";
+  strength.exercises.forEach((exercise) => {
+    const load = exercise.planned_kg == null ? "" : ` @ ${calendarMetricNumber(exercise.planned_kg)} kg`;
+    const plan = `${exercise.planned_sets}×${exercise.planned_reps}${load}`;
+    const item = document.createElement("li");
+    const name = plannedStrengthName(exercise);
+    item.textContent = exercise.status === "matched"
+      ? `${name}: ${exercise.completed_sets}/${exercise.planned_sets} Sätze erreicht · Ist ${(exercise.reps || []).map((reps) => reps ?? "?").join("/") || "–"} Wdh. · Plan ${plan}`
+      : `${name}: nicht zugeordnet · Plan ${plan}`;
+    list.append(item);
+  });
+  return list;
+}
+
 function appendPlannedCalendarComparison(details, entry, actual) {
   if (!actual || entry.is_completed_activity) return;
   const comparison = document.createElement("div");
@@ -365,6 +390,8 @@ function appendPlannedCalendarComparison(details, entry, actual) {
     ratio.textContent = `${ratioLabel} Plan/Ist: ${entry.compliance.percentage} %`;
     comparison.append(ratio);
   }
+  const strengthRows = plannedStrengthRows(entry.compliance?.strength_sets);
+  if (strengthRows) comparison.append(strengthRows);
   details.append(comparison);
 }
 
