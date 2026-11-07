@@ -341,8 +341,9 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "activity_validation",
             },
         )
-        # Canonical reads (#1416): the canonical sync instant in ISO form.
-        self.assertEqual(result["as_of"], "2026-05-04T05:00:00+00:00")
+        # The stored Intervals.icu sync names no time any more (#1728); the
+        # fixture stores no Garmin or Wahoo activity fetch.
+        self.assertIsNone(result["as_of"])
         self.assertEqual(
             set(result["thresholds"]),
             {

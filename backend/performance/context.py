@@ -32,7 +32,6 @@ PENDING_STATUS: Final = "Daten werden vorbereitet"
 # The status while stored compact-only Intervals.icu activities are missing.
 REFRESH_STATUS: Final = "Aktivitäten: Intervals.icu neu abrufen"
 # The source of a context with a canonical Intervals.icu sync.
-INTERVALS_SNAPSHOT_SOURCE: Final = "Letzter gespeicherter Intervals.icu-Snapshot"
 # The source of a context without an Intervals.icu sync, e.g. a Garmin-only setup.
 STORED_PROVIDERS_SOURCE: Final = "Gespeicherte Provider-Daten"
 
@@ -86,11 +85,8 @@ def _has_provider_values(canonical: CanonicalPerformanceInputs) -> bool:
 
 
 def _sync_status(canonical: CanonicalPerformanceInputs) -> dict[str, Any]:
-    """The source label and the canonical Intervals.icu sync time, if any."""
-    synced_at = canonical.intervals_synced_at
-    if synced_at is None:
-        return {"source": STORED_PROVIDERS_SOURCE, "as_of": None}
-    return {"source": INTERVALS_SNAPSHOT_SOURCE, "as_of": synced_at}
+    """The source label and the activity sync time of the stored provider data."""
+    return {"source": STORED_PROVIDERS_SOURCE, "as_of": canonical.activities_synced_at}
 
 
 def _refresh_status(canonical: CanonicalPerformanceInputs) -> dict[str, str]:
@@ -122,7 +118,7 @@ def _unavailable_context(
     """Projection without canonical inputs: Garmin-only recovery and load."""
     unavailable = {
         "available": False,
-        "source": performance_current_metrics.PROVIDER_INTERVALS_NAME,
+        "source": STORED_PROVIDERS_SOURCE,
         "as_of": None,
         "metrics": {},
         "activities_need_refresh": canonical.activities_need_refresh,

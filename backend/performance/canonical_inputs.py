@@ -162,20 +162,18 @@ def with_read_status(
     Before the first completed backfill the reads are empty and the inputs are
     ``PENDING_PERFORMANCE_INPUTS``; afterwards a compact-only activity gap is
     carried as ``activities_need_refresh``. With a coverage reader the inputs
-    carry the Intervals.icu sync time of the coverage (``intervals_synced_at``).
+    carry the stored Intervals.icu sync time (``intervals_synced_at``) and the
+    activity sync time of the active providers (``activities_synced_at``).
     """
     marked = _read_state(source, db, inputs)
     if marked is None or marked.pending or source.coverage is None:
         return marked
     coverage = source.coverage()
     synced = intervals_synced_at(coverage, db)
-    if synced is None:
+    activities = activities_synced_at(coverage, db)
+    if synced is None and activities is None:
         return marked
-    return _changed(
-        marked,
-        intervals_synced_at=synced,
-        activities_synced_at=activities_synced_at(coverage, db),
-    )
+    return _changed(marked, intervals_synced_at=synced, activities_synced_at=activities)
 
 
 def _changed(

@@ -86,7 +86,7 @@ def read_current_inputs(
     """
     wahoo_ftp, wahoo_weight = _wahoo_current(reader, db, as_of=as_of)
     candidates = (wahoo_ftp,) if wahoo_ftp is not None else ()
-    providers = (*candidates, *read_garmin_thresholds(reader, db))
+    providers = _provider_thresholds(reader, db, wahoo_ftp)
     local = (
         local_thresholds(reader.zone_configurations(db), as_of)
         if isinstance(reader, ZoneConfigurationSource)
@@ -116,14 +116,20 @@ def read_zone_thresholds(
 
     A reader that already holds ``CanonicalCurrentInputs`` takes them from there.
     """
-    wahoo_ftp = _wahoo_ftp(reader, db, as_of=as_of)
     return provider_zone_thresholds(
-        (
-            *((wahoo_ftp,) if wahoo_ftp is not None else ()),
-            *read_garmin_thresholds(reader, db),
-        ),
+        _provider_thresholds(reader, db, _wahoo_ftp(reader, db, as_of=as_of)),
         as_of=as_of,
         preferences=preferences,
+    )
+
+
+def _provider_thresholds(
+    reader: ObservationReader, db: Any, wahoo_ftp: Observation | None
+) -> tuple[Observation, ...]:
+    """The provider threshold candidates: the current Wahoo FTP, then Garmin's."""
+    return (
+        *((wahoo_ftp,) if wahoo_ftp is not None else ()),
+        *read_garmin_thresholds(reader, db),
     )
 
 
@@ -144,11 +150,7 @@ def read_export_thresholds(
     the source policy and the athlete's preferences. Intervals.icu values are never
     a source, so a value Intervals reported is never sent back to it (#1729).
     """
-    wahoo_ftp = _wahoo_ftp(reader, db, as_of=as_of)
-    providers = (
-        *((wahoo_ftp,) if wahoo_ftp is not None else ()),
-        *read_garmin_thresholds(reader, db),
-    )
+    providers = _provider_thresholds(reader, db, _wahoo_ftp(reader, db, as_of=as_of))
     if configurations is None and isinstance(reader, ZoneConfigurationSource):
         configurations = reader.zone_configurations(db)
     local = local_thresholds(configurations or (), as_of)

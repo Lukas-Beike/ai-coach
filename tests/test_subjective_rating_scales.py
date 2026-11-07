@@ -75,12 +75,11 @@ class CoachRuleTests(unittest.TestCase):
         self.assertEqual(
             {("1–4", "worse")}, {(_range(s), s.higher_is) for s in wellness}
         )
-        self.assertIn(
-            "Intervals.icu recovery fatigue/soreness/stress/mood 1–4", self.RULE
-        )
+        # The Intervals.icu 1–4 recovery ratings are no Coach input any more (#1728).
+        self.assertNotIn("recovery fatigue/soreness/stress/mood", self.RULE)
         self.assertEqual("worse", INTERVALS_FEEL_SCALE.higher_is)
         self.assertIn(f"activity feel {_range(INTERVALS_FEEL_SCALE)}", self.RULE)
-        self.assertIn("run from 1 = best", self.RULE)
+        self.assertIn("runs from 1 = best", self.RULE)
         self.assertIn(f"activity rpe {_range(INTERVALS_RPE_SCALE)}", self.RULE)
 
     def test_rule_names_the_local_scales_and_directions(self) -> None:

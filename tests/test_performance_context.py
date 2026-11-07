@@ -27,7 +27,7 @@ class PerformanceContextTests(unittest.TestCase):
     def test_none_and_empty_snapshots_are_unavailable(self):
         expected = {
             "available": False,
-            "source": "Intervals.icu",
+            "source": "Gespeicherte Provider-Daten",
             "as_of": None,
             "metrics": {},
             "activities_need_refresh": False,
@@ -125,12 +125,10 @@ class PerformanceContextTests(unittest.TestCase):
         )
 
         self.assertTrue(result["available"])
-        self.assertEqual(
-            result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
-        )
-        # Canonical reads (#1416): the canonical Intervals.icu sync instant, in
-        # ISO form, replaces the stored snapshot's sync text.
-        self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
+        self.assertEqual(result["source"], "Gespeicherte Provider-Daten")
+        # The stored Intervals.icu snapshot names no sync time any more (#1728);
+        # these inputs carry no activity coverage.
+        self.assertIsNone(result["as_of"])
         self.assertFalse(result["activities_need_refresh"])
         # The Intervals.icu athlete FTP is no source; Garmin reports none here.
         self.assertIsNone(result["thresholds"]["ftp_w"])
@@ -376,14 +374,13 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertNotIn("status", result)
 
     def test_sync_time_without_athlete_record_values_comes_from_the_coverage(self):
-        # Canonical reads (#1416): a sync that stores wellness but no athlete
-        # record observation still names its sync: the Intervals.icu fetch time of
-        # the canonical coverage, the one sync time reports use too.
+        # The context names the activity sync time of the canonical coverage (the
+        # one reports use too), never an Intervals.icu snapshot (#1728).
         today = date(2026, 9, 20)
         snapshot = {"recent_wellness": [{"id": today.isoformat(), "weight": 70}]}
         canonical = canonical_from_snapshot(snapshot, today)
         assert canonical is not None
-        coverage = _IntervalsCoverage(datetime(2026, 9, 20, 8, tzinfo=UTC))
+        coverage = _ProviderCoverage(datetime(2026, 9, 20, 8, tzinfo=UTC))
         source = CanonicalPerformanceSource(
             database_manager=lambda: None,
             observation_reader=lambda: None,  # type: ignore[arg-type, return-value]
@@ -399,11 +396,9 @@ class PerformanceContextTests(unittest.TestCase):
             GarminSyncStatus(), {}, today, canonical=canonical
         )
 
-        self.assertEqual(served.intervals_synced_at, "2026-09-20T08:00:00+00:00")
+        self.assertEqual(served.activities_synced_at, "2026-09-20T08:00:00+00:00")
         self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
-        self.assertEqual(
-            result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
-        )
+        self.assertEqual(result["source"], "Gespeicherte Provider-Daten")
         self.assertTrue(without["available"])
         self.assertIsNone(without["as_of"])
         self.assertEqual(without["source"], "Gespeicherte Provider-Daten")
@@ -474,8 +469,8 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class _IntervalsCoverage:
-    """Canonical coverage with one Intervals.icu fetch time and no metric windows."""
+class _ProviderCoverage:
+    """Canonical coverage with one Garmin activity fetch time, no metric windows."""
 
     def __init__(self, retrieved_at: datetime) -> None:
         self._retrieved_at = retrieved_at
@@ -483,13 +478,14 @@ class _IntervalsCoverage:
     def coverage(self, db):
         return (
             ProviderCoverage(
-                provider=ProviderId.INTERVALS,
+                provider=ProviderId.GARMIN,
                 retrieved_at=self._retrieved_at,
                 activity_count=0,
                 observation_count=1,
                 issue_counts={},
                 first_observed_on=None,
                 last_observed_on=None,
+                activities_retrieved_at=self._retrieved_at,
             ),
         )
 

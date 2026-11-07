@@ -132,7 +132,9 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         )
         # No canonical source is wired here, so there are no canonical values.
         self.assertEqual(result["current_performance"]["available"], False)
-        self.assertEqual(result["current_performance"]["source"], "Intervals.icu")
+        self.assertEqual(
+            result["current_performance"]["source"], "Gespeicherte Provider-Daten"
+        )
         self.assertEqual(result["weather"]["days"][0]["date"], "2026-09-24")
         self.assertEqual(result["calendar"][0]["source"], "local-plan")
         self.assertIn(

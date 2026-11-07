@@ -1455,7 +1455,8 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("LATEST INTERVALS.ICU SNAPSHOT", context)
         self.assertEqual(context.count('"local_planned_workouts"'), 1)
         preview = server.COACH_CONTEXT.preview_service().preview()
-        self.assertTrue(preview["snapshot_compacted"])
+        # An Intervals.icu-only snapshot carries no activity sync time (#1728).
+        self.assertFalse(preview["snapshot_compacted"])
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])
 

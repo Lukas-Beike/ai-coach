@@ -443,7 +443,13 @@ class DatedThresholds:
     ) -> None:
         self._observations = tuple(
             sorted(
-                (item for item in observations if item.kind in THRESHOLD_KINDS),
+                (
+                    item
+                    for item in observations
+                    if item.kind in THRESHOLD_KINDS
+                    # Stored Intervals.icu thresholds are never a source.
+                    and item.provenance.provider is not ProviderId.INTERVALS
+                ),
                 key=lambda item: item.observed_on,
             )
         )

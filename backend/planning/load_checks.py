@@ -99,11 +99,17 @@ class PlannedSession:
 def _has_configuration(
     configurations: Sequence[ZoneConfiguration], today: date
 ) -> bool:
-    """Whether a local (athlete-confirmed) configuration applies to a load sport."""
+    """Whether a configuration with a usable threshold applies to a load sport.
+
+    A stored Intervals.icu configuration gives limits only, so it never counts.
+    """
+    usable = [
+        item
+        for item in configurations
+        if item.provenance.provider is not ProviderId.INTERVALS
+    ]
     return any(
-        effective_zone_configuration(
-            configurations, metric, sport, indoor=indoor, day=today
-        )
+        effective_zone_configuration(usable, metric, sport, indoor=indoor, day=today)
         for sport in LOAD_SPORTS
         for metric in ZoneConfigurationMetric
         for indoor in (False, True)
@@ -116,16 +122,12 @@ def load_thresholds(
     """Thresholds with the Coach precedence: locally confirmed values, then providers.
 
     ``inputs.zone_thresholds`` are the source-policy provider winners (Garmin and
-    Wahoo values within their own age limits); local values do not age. Stored
-    Intervals.icu zone configurations are never a source. Without any threshold the
-    thresholds are unusable and named as missing.
+    Wahoo values within their own age limits); local values do not age. A stored
+    Intervals.icu zone configuration gives its limits only, never a threshold, as
+    in ``ZoneSettings``. Without any threshold the thresholds are unusable and named
+    as missing.
     """
     observed = tuple(inputs.zone_thresholds)
-    configurations = [
-        item
-        for item in configurations
-        if item.provenance.provider is not ProviderId.INTERVALS
-    ]
     if not observed and not _has_configuration(configurations, today):
         return LoadThresholds(unavailable="missing_thresholds")
 
