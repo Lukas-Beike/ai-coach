@@ -312,6 +312,7 @@ h2 {
 
 .status-card {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
@@ -324,7 +325,6 @@ h2 {
   font-size: .79rem;
   backdrop-filter: blur(18px) saturate(135%);
 }
-.status-card { flex-wrap: wrap; }
 .status-card > * { min-width: 0; overflow-wrap: anywhere; }
 .status-card[hidden] { display: none; }
 .status-card-row { display: flex; align-items: center; gap: 8px; color: var(--ink); }
@@ -333,8 +333,7 @@ h2 {
 .status-card.working .pulse { animation: pulse 1.2s ease-in-out infinite; }
 .connectivity-notice { margin: -4px 0 16px; padding: 10px 13px; border: 1px solid var(--warning-border); border-radius: 12px; background: var(--warning-surface-soft); color: var(--orange); font-size: .76rem; line-height: 1.4; }
 .connectivity-notice[hidden] { display: none; }
-.provider-attention-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: -4px 0 16px; padding: 12px 13px; border: 1px solid var(--danger-border-strong); border-radius: 12px; background: var(--danger-surface); color: var(--ink); font-size: .76rem; line-height: 1.4; }
-.provider-attention-banner { flex-wrap: wrap; }
+.provider-attention-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin: -4px 0 16px; padding: 12px 13px; border: 1px solid var(--danger-border-strong); border-radius: 12px; background: var(--danger-surface); color: var(--ink); font-size: .76rem; line-height: 1.4; }
 .provider-attention-banner[hidden] { display: none; }
 .provider-attention-banner > div { display: grid; gap: 2px; min-width: 0; }
 .provider-attention-banner strong { color: var(--danger-soft-ink); }
@@ -1282,12 +1281,6 @@ input:focus, textarea:focus:not(#messageInput), select:focus { border-color: var
 @container (max-width: 3.6rem) {
   .desktop-nav .nav-item > span { display: none; }
 }
-@media (min-width: 1100px) {
-  @container (max-width: 7.5rem) {
-    .desktop-nav .nav-item { justify-content: center; }
-    .desktop-nav .nav-item > span { display: none; }
-  }
-}
 .collapsible-section > summary, .library-sport > summary { min-height: 44px; }
 
 dialog { width: min(90vw, 420px); border: 1px solid var(--line); border-radius: 22px; padding: 24px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow); }
@@ -1326,6 +1319,11 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .desktop-nav { padding: 32px 16px; }
   .desktop-nav .nav-item { display: flex; min-height: 48px; flex-direction: row; justify-content: flex-start; gap: 12px; padding: 10px 14px; }
   .desktop-nav .nav-item > span { display: inline; font-size: .875rem; font-weight: 700; }
+  /* Large-text collapse of the wide rail; after the declarations above so it wins the cascade. */
+  @container (max-width: 7.5rem) {
+    .desktop-nav .nav-item { justify-content: center; }
+    .desktop-nav .nav-item > span { display: none; }
+  }
   #chatPanel { max-width: 1100px; }
   #chatPanel .messages,
   #chatPanel .composer,

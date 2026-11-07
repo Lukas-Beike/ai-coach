@@ -35,7 +35,9 @@ test("@responsive navigation and banners keep their text inside at 200 % text si
       if (box.left < 0 || box.right > document.documentElement.clientWidth + 1) problems.push(`${container.id || container.className} leaves the viewport`);
       for (const element of [container, ...container.querySelectorAll("*")]) {
         if (!element.getClientRects().length || element instanceof SVGElement) continue;
-        if (element.scrollWidth > element.clientWidth + 1) problems.push(`${container.id || container.className} > ${element.tagName.toLowerCase()}.${element.className} "${element.textContent.trim().slice(0, 30)}"`);
+        // Inline labels report no scroll size, so their box must also stay inside the container.
+        const inner = element.getBoundingClientRect();
+        if (element.scrollWidth > element.clientWidth + 1 || inner.left < box.left - 1 || inner.right > box.right + 1) problems.push(`${container.id || container.className} > ${element.tagName.toLowerCase()}.${element.className} "${element.textContent.trim().slice(0, 30)}"`);
       }
     }
     return problems;
