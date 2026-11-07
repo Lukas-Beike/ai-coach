@@ -32,7 +32,7 @@ class Obs:
 
 def inputs(*, present: bool = True, pace: bool = True) -> SimpleNamespace:
     """Current inputs whose source-policy provider winners are ``present`` or none."""
-    observations = (
+    observations: tuple[Obs, ...] = (
         Obs(MetricKind.FTP, Sport.RIDE, SimpleNamespace(value=250.0)),
         Obs(MetricKind.THRESHOLD_HR, Sport.RIDE, SimpleNamespace(value=165.0)),
         Obs(MetricKind.THRESHOLD_HR, Sport.RUN, SimpleNamespace(value=170.0)),
