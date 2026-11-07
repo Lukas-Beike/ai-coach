@@ -99,9 +99,11 @@ jobs:
           fi
 
           version_is_greater() {
+            local left_version="$1"
+            local right_version="$2"
             local left_major left_minor left_patch right_major right_minor right_patch
-            IFS=. read -r left_major left_minor left_patch <<< "$1"
-            IFS=. read -r right_major right_minor right_patch <<< "$2"
+            IFS=. read -r left_major left_minor left_patch <<< "$left_version"
+            IFS=. read -r right_major right_minor right_patch <<< "$right_version"
             if (( left_major != right_major )); then
               if (( left_major > right_major )); then return 0; fi
               return 1
@@ -402,9 +404,11 @@ jobs:
             --jq '[.[] | select(.isDraft == false and .isPrerelease == false) | select(.tagName | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')"
            if [[ -n "$latest_tag" ]]; then
              version_is_greater() {
+               local left_version="$1"
+               local right_version="$2"
                local left_major left_minor left_patch right_major right_minor right_patch
-               IFS=. read -r left_major left_minor left_patch <<< "$1"
-               IFS=. read -r right_major right_minor right_patch <<< "$2"
+               IFS=. read -r left_major left_minor left_patch <<< "$left_version"
+               IFS=. read -r right_major right_minor right_patch <<< "$right_version"
                if (( left_major != right_major )); then
                  if (( left_major > right_major )); then return 0; fi
                  return 1
