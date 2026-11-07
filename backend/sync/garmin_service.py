@@ -28,6 +28,15 @@ from backend.providers.garmin import (
     collect_garmin_data,
 )
 from backend.providers.garmin_fields import GARMIN_EXTENDED_DATE_ALIASES
+from backend.providers.garmin_personal import (
+    PERSONAL_KEY_REJECTED_REASON,
+    GarminPersonalClient,
+    GarminTransportClient,
+)
+from backend.providers.garmin_wellness_history import (
+    WellnessHistoryHooks,
+    collect_wellness_history,
+)
 from backend.sync.garmin import GARMIN_RECONCILIATION_DAYS
 from backend.sync.garmin_snapshot_writer import (
     ANALYSIS_SOURCES,
@@ -35,12 +44,15 @@ from backend.sync.garmin_snapshot_writer import (
     GarminSnapshotWriter,
 )
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.metric_export import STATUS_KEY as METRIC_EXPORT_STATUS_KEY
+from backend.sync.metric_export import automatic_export_message
 from backend.sync.observation import SyncOperationObserver, operation_context
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
 
 GARMIN_AUTOMATIC_SYNC_DAYS = 2
+GARMIN_NOT_CONFIGURED_MESSAGE = "Garmin ist nicht konfiguriert."
 
 GARMIN_SYNC_LOCK = threading.Lock()
 
@@ -105,6 +117,42 @@ def _garmin_sync_configured(config: Config, garmin_tokens: Any | None) -> bool:
     return bool(config.garmin_email)
 
 
+def _personal_client(
+    config: Config, key_result: Callable[[bool], None] | None = None
+) -> GarminPersonalClient | None:
+    """The official Personal API client when its key is configured."""
+    key = str(getattr(config, "garmin_personal_api_key", "") or "").strip()
+    return GarminPersonalClient(key, key_result=key_result) if key else None
+
+
+def _verify_personal_key(personal: GarminPersonalClient) -> None:
+    """Exchange the key as an AppError the provider transport passes through."""
+    try:
+        personal.verify_key()
+    except provider_http.ProviderHTTPError as error:
+        if error.status in {401, 403}:
+            raise AppError(
+                401,
+                "Der Garmin-Personal-API-Schlüssel wurde abgelehnt.",
+                reason=PERSONAL_KEY_REJECTED_REASON,
+            ) from None
+        raise AppError(
+            502,
+            "Garmin Personal API nicht erreichbar.",
+            upstream_status=error.status,
+        ) from None
+    except provider_http.ProviderInvalidResponse, OSError, ValueError:
+        # No answer about the key: unreachable, timed out or no token returned.
+        raise AppError(502, "Garmin Personal API nicht erreichbar.") from None
+
+
+def _skippable_history_error(error: BaseException) -> bool:
+    """Only a client error or an unreadable answer may skip history; others retry."""
+    return isinstance(error, (TypeError, ValueError)) or (
+        sync_job_error_class(error) == "client_error"
+    )
+
+
 def _garmin_tokenstore_present(config: Config, garmin_tokens: Any | None) -> bool:
     if garmin_tokens is not None:
         return garmin_tokens.connected()
@@ -115,7 +163,9 @@ def _persist_garmin_tokens(
     garmin_tokens: Any | None, client: Any, login_argument: str
 ) -> None:
     """Store refreshed or first-imported tokens, even when collection failed."""
-    if garmin_tokens is not None:
+    if isinstance(client, GarminTransportClient):
+        client = client.sdk
+    if garmin_tokens is not None and client is not None:
         garmin_tokens.write_back(client, login_argument)
 
 
@@ -151,10 +201,16 @@ class GarminRemoteReader:
         self._garmin_tokens = garmin_tokens
 
     def available(self) -> bool:
-        return self._client_factory.available()
+        return self._client_factory.available() or self._personal_configured()
 
     def configured(self) -> bool:
-        return self.available() and _garmin_sync_configured(
+        return self._personal_configured() or self._sdk_configured()
+
+    def _personal_configured(self) -> bool:
+        return bool(str(self._config.garmin_personal_api_key or "").strip())
+
+    def _sdk_configured(self) -> bool:
+        return self._client_factory.available() and _garmin_sync_configured(
             self._config, self._garmin_tokens
         )
 
@@ -168,6 +224,7 @@ class GarminRemoteReader:
         include_recovery: bool | None = None,
         include_daily_metrics: bool = True,
         known_activity_ids: frozenset[str] | None = None,
+        rated_activity_ids: frozenset[str] = frozenset(),
     ) -> tuple[dict[str, Any], list[tuple[date, date]]]:
         today = end_date or self._local_today()
         windows = split_date_windows(
@@ -205,6 +262,7 @@ class GarminRemoteReader:
                     ),
                     include_daily_metrics=include_daily_metrics,
                     known_activity_ids=known_activity_ids,
+                    rated_activity_ids=rated_activity_ids,
                 ),
             )
         finally:
@@ -291,9 +349,7 @@ class GarminRemoteReader:
         if source not in {"daily_stats", "weight"}:
             raise ValueError("Unsupported Garmin nutrition source")
         if not self.configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
         client, login_argument = self._authenticated_client(call_external)
         try:
@@ -310,6 +366,35 @@ class GarminRemoteReader:
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
+    def fetch_wellness_history(
+        self, start: date, end: date, *, needs_night: Callable[[str], bool]
+    ) -> dict[str, Any]:
+        """Read one wellness history window for the one-off backfill (#1730).
+
+        Paused sources and their failures share the regular sync's capability
+        state, so a rate limit pauses this walk as it pauses the hourly sync.
+        """
+        if not self.configured():
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
+        call_external = self._external_call(None)
+        client, login_argument = self._authenticated_client(call_external)
+        try:
+            return collect_wellness_history(
+                client,
+                start,
+                end,
+                external_call=call_external,
+                hooks=WellnessHistoryHooks(
+                    skippable=_skippable_history_error,
+                    needs_night=needs_night,
+                    capability_allowed=self._state_service.capability_allowed,
+                    capability_failure=self._state_service.record_capability_failure,
+                    capability_success=self._state_service.record_capability_success,
+                ),
+            )
+        finally:
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
+
     def fetch_analysis_data(
         self, area: str, start: date, end: date
     ) -> tuple[dict[str, Any], dict[str, bool]]:
@@ -318,9 +403,7 @@ class GarminRemoteReader:
         if area not in sources or start > end or (end - start).days > 89:
             raise AppError(400, "Ungültiger Analyse-Aktualisierungsbereich.")
         if not self.configured():
-            raise AppError(
-                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
-            )
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
         client, login_argument = self._authenticated_client(call_external)
         try:
@@ -339,12 +422,20 @@ class GarminRemoteReader:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
     def check_stored_login(self) -> None:
-        """Verify the stored tokens only; never fall back to a credential login.
+        """Verify the Personal API key, then the stored SDK tokens when connected.
 
-        The SDK reports every rejection as one generic failure, so a failure is
-        raised as ``reconnect_required`` without claiming the exact cause.
+        With a Personal API key, one fresh token exchange proves the key; the SDK
+        login is checked only when SDK tokens are stored. The SDK never falls back
+        to a credential login. It reports every rejection as one generic failure,
+        so an SDK failure is raised as ``reconnect_required`` without claiming the
+        exact cause.
         """
         tokens = self._garmin_tokens
+        personal = _personal_client(self._config, self._record_key_result)
+        if personal is not None:
+            self._check_personal_key(personal)
+            if tokens is None or not tokens.connected():
+                return
         if tokens is None or not tokens.connected():
             raise AppError(
                 401, "Garmin ist nicht angemeldet.", reason="reconnect_required"
@@ -372,6 +463,16 @@ class GarminRemoteReader:
             raise AppError(
                 401, GARMIN_MFA_REQUIRED_MESSAGE, reason="reconnect_required"
             )
+        self._state_service.clear_sdk_skipped()
+
+    def _check_personal_key(self, personal: GarminPersonalClient) -> None:
+        """Exchange the Personal API key once; a rejection names the key."""
+        self._external_call(None)(
+            GARMIN_ID,
+            "personal_api_token",
+            lambda: _verify_personal_key(personal),
+            None,
+        )
 
     def _external_call(self, cancel_event: threading.Event | None) -> ExternalCall:
         """Wrap SDK calls with the provider transport and cancellation checks."""
@@ -397,19 +498,36 @@ class GarminRemoteReader:
 
         return call_external
 
-    def _authenticated_client(self, call_external: ExternalCall) -> tuple[Any, str]:
-        """Create the SDK client and log in; MFA stops before any collection."""
+    def _authenticated_client(
+        self, call_external: ExternalCall
+    ) -> tuple[GarminTransportClient, str]:
+        """Route Garmin reads through the Personal API and, if connected, the SDK.
+
+        Without a Personal API key the SDK login is required and MFA stops before
+        any collection. With a key, a failed SDK login or pending MFA only drops
+        the SDK-only families; the Personal API families still sync.
+        """
+        personal = _personal_client(self._config, self._record_key_result)
         login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
-        client, mfa_status = garmin_adapter.authenticate_client(
-            self._client_factory,
-            self._config.garmin_email or None,
-            self._config.garmin_password or None,
-            login_argument,
-            external_call=call_external,
-            tokenstore_exists=_garmin_tokenstore_present(
-                self._config, self._garmin_tokens
-            ),
-        )
+        if personal is not None and not self._sdk_configured():
+            return GarminTransportClient(personal, None), login_argument
+        try:
+            sdk, mfa_status = garmin_adapter.authenticate_client(
+                self._client_factory,
+                self._config.garmin_email or None,
+                self._config.garmin_password or None,
+                login_argument,
+                external_call=call_external,
+                tokenstore_exists=_garmin_tokenstore_present(
+                    self._config, self._garmin_tokens
+                ),
+            )
+        except Exception as error:
+            # A cancelled run stops; only a failed login falls back to Personal.
+            if personal is None or getattr(error, "reason", None) == "chat_cancelled":
+                raise
+            self._log_sdk_skipped("login_failed")
+            return GarminTransportClient(personal, None), login_argument
         if mfa_status:
             self._logger.warning(
                 "Garmin login requires MFA",
@@ -418,8 +536,35 @@ class GarminRemoteReader:
                     "context": {"service": GARMIN_ID, "operation": "login"},
                 },
             )
-            raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
-        return client, login_argument
+            if personal is None:
+                raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
+            self._log_sdk_skipped("mfa_required")
+            return GarminTransportClient(personal, None), login_argument
+        self._state_service.clear_sdk_skipped()
+        return GarminTransportClient(personal, sdk), login_argument
+
+    def _record_key_result(self, accepted: bool) -> None:
+        """Keep whether Garmin accepted the Personal API key for the card."""
+        try:
+            self._state_service.record_personal_key_result(accepted)
+        except Exception as error:  # noqa: BLE001 - a status write never fails a read
+            self._logger.warning(
+                "Garmin Personal API key state not stored",
+                extra={
+                    "event": "garmin_personal_key_state_failed",
+                    "context": {"error_type": type(error).__name__},
+                },
+            )
+
+    def _log_sdk_skipped(self, reason: str) -> None:
+        self._logger.warning(
+            "Garmin SDK unavailable; reading Personal API families only",
+            extra={
+                "event": "garmin_sdk_skipped",
+                "context": {"service": GARMIN_ID, "reason": reason},
+            },
+        )
+        self._state_service.record_sdk_skipped(reason)
 
     def _warn(self, source: str, _message: str, error: BaseException) -> None:
         self._logger.warning(
@@ -801,15 +946,23 @@ class GarminMorningRemoteReader:
         self._garmin_tokens = garmin_tokens
 
     def configured(self) -> bool:
-        return self._client_factory.available() and _garmin_sync_configured(
-            self._config, self._garmin_tokens
+        return _personal_client(self._config) is not None or (
+            self._client_factory.available()
+            and _garmin_sync_configured(self._config, self._garmin_tokens)
         )
 
     def fetch(self, checkin_date: date) -> tuple[Any, Any]:
-        client = self._client_factory.create(
-            self._config.garmin_email or None,
-            self._config.garmin_password or None,
-            return_on_mfa=True,
+        # Sleep and Body Battery are Personal API families; the SDK (and its
+        # login) is used only without a Personal API key.
+        personal = _personal_client(self._config)
+        client: Any = (
+            GarminTransportClient(personal, None)
+            if personal is not None
+            else self._client_factory.create(
+                self._config.garmin_email or None,
+                self._config.garmin_password or None,
+                return_on_mfa=True,
+            )
         )
         profile_timezone = timezone_name(self._profile_service.get().get("timezone"))
         fallback_zone = self._athlete_clock.now().tzinfo or UTC
@@ -887,6 +1040,7 @@ class GarminSyncSource:
         include_recovery: bool | None = None,
         include_daily_metrics: bool = True,
         known_activity_ids: frozenset[str] | None = None,
+        rated_activity_ids: frozenset[str] = frozenset(),
     ) -> tuple[dict[str, Any], list[tuple[date, date]] | None, str | None, str]:
         if self.fixture_enabled():
             payload = self._fixture_loader.load(days)
@@ -899,6 +1053,7 @@ class GarminSyncSource:
             include_recovery=include_recovery,
             include_daily_metrics=include_daily_metrics,
             known_activity_ids=known_activity_ids,
+            rated_activity_ids=rated_activity_ids,
         )
         return payload, windows, None, windows[0][0].isoformat()
 
@@ -977,7 +1132,7 @@ class GarminSyncLifecycleState:
         self._set("sync_operation_finished_at", self._utc_now())
 
     def record_metric_export_status(self, message: str) -> None:
-        self._set("last_garmin_metric_export_status", f"{self._utc_now()}: {message}")
+        self._set(METRIC_EXPORT_STATUS_KEY, f"{self._utc_now()}: {message}")
 
     def log_configuration_skip(self, reason: str) -> None:
         self._logger.warning(
@@ -1179,6 +1334,7 @@ class GarminSyncService:
                 if daily_metrics
                 else self._payload_service.known_activity_ids(days)
             ),
+            rated_activity_ids=self._payload_service.rated_activity_ids(days),
         )
         self._raise_if_cancelled(cancel_event)
         payload = (
@@ -1210,16 +1366,13 @@ class GarminSyncService:
                 operation_id,
                 "metric-export",
                 90,
-                "Garmin-Messwerte werden mit Intervals.icu abgeglichen…",
+                "Werte werden mit Intervals.icu abgeglichen…",
             )
             try:
                 receipt = self._metric_export()
                 if receipt is not None:
                     result["metric_export"] = receipt
-                    export_message = (
-                        f"Intervals.icu: {receipt['exported']} Messwerte gesendet, "
-                        f"{receipt['conflicts']} Konflikte, {receipt['failed']} fehlgeschlagen."
-                    )
+                    export_message = automatic_export_message(receipt)
                     self._lifecycle_state.record_metric_export_status(export_message)
                     message += f" {export_message}"
             except Exception as error:  # noqa: BLE001 - import remains successful; never expose provider errors

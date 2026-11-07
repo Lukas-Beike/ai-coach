@@ -12,6 +12,7 @@ from backend.http_api.athlete_assembly import (
     AthleteRepositories,
     AthleteRuntime,
 )
+from backend.performance.source_policy import PREFERENCE_PROFILE_FIELDS
 from backend.planning.assembly import (
     PlanningDataAssembly,
     PlanningMutations,
@@ -19,7 +20,6 @@ from backend.planning.assembly import (
     PlanningRuntime,
 )
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.weather.cache import invalidate_for_location_change
 
 
 class AthleteDataAssemblyTests(unittest.TestCase):
@@ -51,9 +51,13 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                     normalize_profile=Mock(name="normalize_profile"),
                     normalize_competition=Mock(name="normalize_competition"),
                     uuid_factory=Mock(name="uuid_factory"),
+                    load_inputs_changed=lambda: load_input_changes.append(True),
+                    thresholds_changed=lambda: threshold_changes.append(True),
                 ),
             )
         )
+        load_input_changes: list[bool] = []
+        threshold_changes: list[bool] = []
 
         feedback = assembly.activity_feedback()
         checkin = assembly.checkin()
@@ -65,7 +69,27 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         self.assertIs(checkin._manager, manager)
         self.assertIs(checkin._today, today)
         self.assertIs(profile._manager, manager)
-        self.assertIs(profile._on_location_changed, invalidate_for_location_change)
+        # The profile hook keeps the location invalidation and requests a local
+        # load pass (card M6) only when a preferred threshold source or the time zone
+        # changes.
+        with patch(
+            "backend.http_api.athlete_assembly.invalidate_for_location_change"
+        ) as invalidate:
+            profile._on_location_changed({"city": "a"}, {"city": "b"}, db=None)
+            invalidate.assert_called_once_with({"city": "a"}, {"city": "b"}, db=None)
+            self.assertEqual(load_input_changes, [])
+            field = next(iter(PREFERENCE_PROFILE_FIELDS.values()))
+            profile._on_location_changed({}, {field: "garmin"}, db=None)
+            self.assertEqual(load_input_changes, [True])
+            # A new time zone re-dates the stored loads (#1726).
+            profile._on_location_changed(
+                {"timezone": "Europe/Berlin"}, {"timezone": "UTC"}, db=None
+            )
+            self.assertEqual(load_input_changes, [True, True])
+            self.assertEqual(threshold_changes, [])
+        # A local zone change requests a load pass and a threshold export (#1729).
+        assembly.zones()._on_change()
+        self.assertEqual((load_input_changes[-1], threshold_changes), (True, [True]))
         self.assertIs(duplicate._database_manager, manager)
         self.assertIs(duplicate._event_buffer, event_buffer)
         self.assertFalse(hasattr(assembly, "activity_read"))

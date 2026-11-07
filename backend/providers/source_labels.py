@@ -139,9 +139,6 @@ def _intervals_fine(observation: Observation, view: SourceView) -> str | None:
         and observation.sport is None
     ):
         return _INTERVALS_GENERAL_THRESHOLD
-    if view is SourceView.BODY_HISTORY and kind is MetricKind.FTP:
-        # Body history keys its eFTP-derived series by this provider label.
-        return INTERVALS_LABEL
     return None
 
 

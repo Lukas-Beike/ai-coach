@@ -64,6 +64,22 @@ class Environment(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ActivityPurpose(StrEnum):
+    """Why an activity was done, where a source says so.
+
+    RACE and COMMUTE come from the provider's event type (Garmin
+    ``eventType.typeKey``) or, for RACE, from a stored competition on the same
+    local date and sport. WARMUP and COOLDOWN are reserved for the athlete's own
+    marking. An activity without any of these is ordinary training.
+    """
+
+    TRAINING = "training"
+    RACE = "race"
+    COMMUTE = "commute"
+    WARMUP = "warmup"
+    COOLDOWN = "cooldown"
+
+
 class Terrain(StrEnum):
     """The surface an activity was done on, where the provider type names it.
 
@@ -120,6 +136,12 @@ class MetricKind(StrEnum):
     HRV_WEEKLY_AVERAGE = "hrv_weekly_average"
     SLEEP_DURATION = "sleep_duration"
     SLEEP_SCORE = "sleep_score"
+    # Night values of the Garmin sleep record (mapper 18): mean and lowest SpO2,
+    # mean respiration rate and mean heart rate while asleep.
+    SPO2 = "spo2"
+    SPO2_LOWEST = "spo2_lowest"
+    RESPIRATION_RATE = "respiration_rate"
+    SLEEPING_HR = "sleeping_hr"
     VO2MAX = "vo2max"
     THRESHOLD_PACE = "threshold_pace"
     BODY_BATTERY = "body_battery"
@@ -180,6 +202,14 @@ class MetricKind(StrEnum):
     # setting's ``ftp``; a setting without ``ftp`` (absent or null) also stores its
     # ``indoor_ftp`` as FTP, as the current metrics read it.
     INDOOR_FTP = "indoor_ftp"
+    # Local TSS-scale load and intensity factor of one session (card M6).
+    SESSION_LOAD = "session_load"
+    INTENSITY_FACTOR = "intensity_factor"
+    # Local efficiency, variability, work and decoupling of one session (card M8).
+    EFFICIENCY_FACTOR = "efficiency_factor"
+    VARIABILITY_INDEX = "variability_index"
+    MECHANICAL_WORK = "mechanical_work"
+    AEROBIC_DECOUPLING = "aerobic_decoupling"
 
     @property
     def unit(self) -> str:
@@ -198,6 +228,10 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.HRV_WEEKLY_AVERAGE: "ms",
     MetricKind.SLEEP_DURATION: "s",
     MetricKind.SLEEP_SCORE: "score",
+    MetricKind.SPO2: "%",
+    MetricKind.SPO2_LOWEST: "%",
+    MetricKind.RESPIRATION_RATE: "brpm",
+    MetricKind.SLEEPING_HR: "bpm",
     MetricKind.VO2MAX: "ml/kg/min",
     MetricKind.THRESHOLD_PACE: "m/s",
     MetricKind.BODY_BATTERY: "score",
@@ -244,6 +278,13 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.HEIGHT: "cm",
     MetricKind.ZONE2_PACE: "m/s",
     MetricKind.INDOOR_FTP: "W",
+    MetricKind.SESSION_LOAD: "load",
+    MetricKind.INTENSITY_FACTOR: "%",
+    # Ride W/bpm, run (m/min)/bpm; the derivation names the unit of each value.
+    MetricKind.EFFICIENCY_FACTOR: "ratio",
+    MetricKind.VARIABILITY_INDEX: "ratio",
+    MetricKind.MECHANICAL_WORK: "kJ",
+    MetricKind.AEROBIC_DECOUPLING: "%",
 }
 
 
@@ -262,6 +303,26 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
         "no longer produced: running threshold power is FTP with sport RUN since "
         "Garmin health mapper 17; retained so rows stored earlier stay readable"
     ),
+    MetricKind.SESSION_LOAD: (
+        "derived locally per session by backend.sync.local_load (card M6), never "
+        "by a provider mapper"
+    ),
+    MetricKind.INTENSITY_FACTOR: (
+        "derived locally per session by backend.sync.local_load (card M6), never "
+        "by a provider mapper"
+    ),
+    **{
+        kind: (
+            "derived locally per session by backend.sync.session_metrics (card "
+            "M8), never by a provider mapper"
+        )
+        for kind in (
+            MetricKind.EFFICIENCY_FACTOR,
+            MetricKind.VARIABILITY_INDEX,
+            MetricKind.MECHANICAL_WORK,
+            MetricKind.AEROBIC_DECOUPLING,
+        )
+    },
 }
 # Kinds stored for export, backup and history that no reader uses yet. A kind
 # leaves this list when a consumer reads it; the vocabulary accountability test

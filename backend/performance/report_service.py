@@ -16,17 +16,17 @@ from backend.activities.activity_summary import (
     summary_local_date,
 )
 from backend.activities.detail_analysis_reads import analysis_summaries
+from backend.activities.session_purpose import summary_is_not_training, summary_is_race
 from backend.canonical.stored_sports import resolve_workout_sport
-from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.canonical.vocabulary import ProviderId
 from backend.db import activity_detail_store
 from backend.errors import AppError
-from backend.performance import wellness_days
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
     activity_summaries_and_fingerprints,
     activity_summaries_for,
+    activity_summaries_with_load_days,
     activity_summaries_with_sync_time,
-    inputs_for_snapshot,
 )
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.critical_power import WINDOW_DAYS as CP_WINDOW_DAYS
@@ -168,7 +168,9 @@ class TrainingProfileSelectionService:
     def curve_records(self) -> list[dict[str, Any]]:
         """Ride and run sessions of the longest window with their session curves.
 
-        E-bike sessions (``summary_is_electric``) are left out.
+        E-bike sessions (``summary_is_electric``) and commutes, warm-ups and
+        cool-downs (``summary_is_not_training``) are left out; races carry
+        ``effort_context`` "race".
         Sessions without full-resolution streams stay in the list with empty
         profiles, so the coverage counts them as unknown.
         """
@@ -189,6 +191,8 @@ class TrainingProfileSelectionService:
                 # Motor assistance inflates speed and power: e-bike rides stay
                 # out of the best values, CP/CS fits and curve trends.
                 and not summary_is_electric(summary)
+                # A commute, warm-up or cool-down is never a maximal effort.
+                and not summary_is_not_training(summary)
                 and start.isoformat()
                 <= summary_local_date(summary)
                 <= today.isoformat()
@@ -319,6 +323,12 @@ class TrainingProfileSelectionService:
             if (row.get("power_profile") or {}).get("status") == "ok"
             or (row.get("running_profile") or {}).get("status") == "ok"
         ]
+        rides = [row for row in eligible if row.get("sport") == "ride"]
+        ride_usable = [
+            row
+            for row in rides
+            if (row.get("power_profile") or {}).get("status") == "ok"
+        ]
         result: dict[str, Any] = {
             "date_start": start.isoformat(),
             "date_end": today.isoformat(),
@@ -328,6 +338,9 @@ class TrainingProfileSelectionService:
                 "cached_records": len(eligible),
                 "usable_records": len(usable),
                 "unknown_records": len(eligible) - len(usable),
+                # Rides only: the power bests cannot come from runs.
+                "power_records": len(rides),
+                "power_unknown_records": len(rides) - len(ride_usable),
                 "eligible_activities": [row["activity_id"] for row in eligible],
             },
             "input_fingerprint": _records_fingerprint(eligible),
@@ -503,7 +516,10 @@ class TrainingReportReadService:
             or sport is None
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
-        summaries, observed_at = activity_summaries_with_sync_time(self._canonical)
+        # One read: the fitness load days belong to the same revision as the summaries.
+        summaries, observed_at, load_days = activity_summaries_with_load_days(
+            self._canonical
+        )
         period = [
             row
             for row in summaries
@@ -511,9 +527,6 @@ class TrainingReportReadService:
             <= summary_local_date(row, timezone)
             <= today.isoformat()
         ]
-        with self._canonical.database_manager().read_snapshot() as db:
-            inputs = inputs_for_snapshot(self._canonical, db, as_of=today)
-        history = () if inputs is None else inputs.history_wellness_days or ()
         return weekly_progress(
             start=start,
             weeks=days // 7,
@@ -523,8 +536,7 @@ class TrainingReportReadService:
             activity_summaries=summaries,
             session_feedback=feedback_by_session(period, self._session_feedback),
             plan=self._read_plan(),
-            ctl_by_day=wellness_days.series(history, MetricKind.CTL),
-            eftp_by_day=None if inputs is None else inputs.eftp_by_day,
+            local_load_days=load_days,
             # Session curves cover the longest profile window only; read them
             # only when the window needs the mean-max comparison.
             curve_records=self._curve_records()
@@ -595,7 +607,12 @@ class TrainingReportReadService:
             or sport is None
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
-        summaries, observed_at = activity_summaries_with_sync_time(self._canonical)
+        # Only all-sport reports carry the local fitness, which needs the load days.
+        summaries, observed_at, load_days = (
+            activity_summaries_with_load_days(self._canonical)
+            if sport == "all"
+            else (*activity_summaries_with_sync_time(self._canonical), {})
+        )
         # The smoothed load of an all-sport report needs the weeks before it.
         history = history_start(start, today) if sport == "all" else start
         period = [
@@ -620,6 +637,7 @@ class TrainingReportReadService:
             computed_at=None
             if self._now is None
             else self._now().isoformat(timespec="seconds"),
+            local_load_days=load_days,
         )
 
 
@@ -741,7 +759,7 @@ def _curve_record(
     profile = None
     if curve is not None:
         profile = curve.power if fields["sport"] == "ride" else curve.running
-    return {
+    record = {
         **fields,
         "terrain": summary.get("terrain"),
         "activity_id": stored_activity_key(summary),
@@ -755,6 +773,9 @@ def _curve_record(
         "avg_temp_c": summary.get("avg_temp_c"),
         "fingerprint": None if curve is None else curve.fingerprint,
     }
+    if summary_is_race(summary):
+        record["effort_context"] = "race"
+    return record
 
 
 def _records_fingerprint(records: list[dict[str, Any]]) -> str:
@@ -766,6 +787,7 @@ def _records_fingerprint(records: list[dict[str, Any]]) -> str:
             row.get("sport"),
             row.get("environment"),
             row.get("fingerprint"),
+            row.get("effort_context"),
         ]
         for row in records
     )

@@ -550,7 +550,6 @@
  "test_performance_daily_health.CanonicalDailyHealthParityTests": 0.002,
  "test_performance_daily_health.GarminDailyHealthTests": 0.011,
  "test_performance_display_sources.DisplaySourcesTests": 0.0,
- "test_performance_eftp.EftpAggregationTests": 0.003,
  "test_performance_freshness.GarminMetricFreshnessTests": 0.001,
  "test_performance_freshness.GarminSourceFreshnessTests": 0.0,
  "test_performance_freshness.MeasurementAgeTests": 0.0,

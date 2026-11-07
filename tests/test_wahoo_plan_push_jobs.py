@@ -40,7 +40,7 @@ class JobValidationTests(unittest.TestCase):
         )
 
     def test_other_providers_and_unknown_targets_are_rejected(self) -> None:
-        for provider in ("garmin", "weather", "calendar", "unknown", ""):
+        for provider in ("weather", "calendar", "unknown", ""):
             with (
                 self.subTest(provider=provider),
                 self.assertRaises(JobValidationError),

@@ -246,8 +246,12 @@ class LocalZoneEditTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
             self.refresh(db)
+        self.zone_changes: list[bool] = []
         self.service = ZoneConfigurationService(
-            self.manager, CanonicalTableReader(), lambda: NOW
+            self.manager,
+            CanonicalTableReader(),
+            lambda: NOW,
+            on_change=lambda: self.zone_changes.append(True),
         )
         unused: Any = None
         self.undo = HistoryUndoService(
@@ -317,6 +321,30 @@ class LocalZoneEditTests(unittest.TestCase):
                 for row in self.service.read()["configurations"]
             )
         )
+
+    def test_committed_save_and_removal_notify_the_change_hook(self) -> None:
+        calls: list[bool] = []
+        service = ZoneConfigurationService(
+            self.manager,
+            CanonicalTableReader(),
+            lambda: NOW,
+            on_change=lambda: calls.append(True),
+        )
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        self.assertEqual(calls, [True])
+        with self.assertRaises(AppError):
+            service.remove({"key": key})
+        self.assertEqual(calls, [True])
+        service.remove({"key": key, "confirmed": True})
+        self.assertEqual(calls, [True, True])
+
+    def test_undo_of_a_zone_change_requests_a_local_load_pass(self) -> None:
+        change = self.service.save(LOCAL_POWER)["change"]
+        self.assertEqual(self.zone_changes, [True])
+        self.undo.apply(
+            {"change_id": change["id"], "expected_current_hash": change["after_hash"]}
+        )
+        self.assertEqual(self.zone_changes, [True, True])
 
     def test_removal_needs_confirmation_and_can_be_undone(self) -> None:
         key = self.service.save(LOCAL_POWER)["configuration"]["key"]

@@ -55,6 +55,7 @@ document.addEventListener("click", (event) => {
   if (section) section.open = true;
 });
 $("#systemIntervalsSyncButton").addEventListener("click", syncNow);
+$("#intervalsIngestToggle").addEventListener("click", (event) => void toggleIntervalsIngest(event.currentTarget));
 $("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync(providerIds().intervals));
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 bindExternalCalendar(syncExternalCalendar);

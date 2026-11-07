@@ -133,7 +133,8 @@ function changedSyncAreas(nextVersions) {
   // A version that a load was already requested for is not requested again.
   const previous = { ...state.data?.state_versions, ...state.requestedStateVersions };
   const areaMap = {
-    activities: ["plan", "performance"],
+    // Race results of past competitions come with the profile read.
+    activities: ["plan", "performance", "profile"],
     performance: ["performance", "plan"],
     ...(providerIds().garmin ? { [providerIds().garmin]: ["performance", "plan"] } : {}),
     chat: ["chat"],
@@ -339,12 +340,39 @@ function providerRequiresManualAttention(entry) {
 }
 
 
+const GARMIN_KEY_RENEWAL = "in Garmin Connect Web erneuern und unter Zugangsdaten speichern";
+
+function garminKeyDaysLeft(days) {
+  if (days === 0) return "heute";
+  return `in ${days} ${days === 1 ? "Tag" : "Tagen"}`;
+}
+
+// Pure: the Personal API key and SDK login hint for the Garmin card. A rejected
+// or expired key is urgent and also raises the attention banner.
+function garminKeyHint(garmin) {
+  const key = garmin?.personal_api || {};
+  if (!key.configured) return { text: "", urgent: false };
+  const parts = [];
+  const urgent = ["rejected", "expired"].includes(key.state);
+  if (key.state === "rejected") parts.push(`Personal-API-Schlüssel abgelehnt – ${GARMIN_KEY_RENEWAL}`);
+  else if (key.state === "expired") parts.push(`Personal-API-Schlüssel abgelaufen – ${GARMIN_KEY_RENEWAL}`);
+  else if (key.state === "expiring") {
+    parts.push(`Personal-API-Schlüssel läuft ${garminKeyDaysLeft(Number(key.days_left))} ab – ${GARMIN_KEY_RENEWAL}`);
+  } else if (key.state === "expiry_missing") parts.push("Ablaufdatum des Personal-API-Schlüssels fehlt");
+  if (garmin.sdk_skipped) parts.push("Garmin-Login für Zusatzwerte erneuern");
+  return { text: parts.join(" · "), urgent };
+}
+
 function renderProviderAttention(data) {
   const banner = $("#providerAttentionBanner");
   const detail = $("#providerAttentionDetail");
   if (!banner || !detail) return;
   const providers = (Array.isArray(data.provider_freshness) ? data.provider_freshness : [])
     .filter(providerRequiresManualAttention);
+  const garminId = providerIds().garmin;
+  if (garminKeyHint(data.garmin).urgent && !providers.some((entry) => entry.provider === garminId)) {
+    providers.push({ provider: garminId, label: providerShortLabel(garminId), state: "error" });
+  }
   banner.hidden = !providers.length;
   if (!providers.length) {
     detail.textContent = "";

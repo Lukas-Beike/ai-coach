@@ -195,13 +195,6 @@ class IntervalsSourceLabelTests(unittest.TestCase):
             "Intervals.icu",
         )
 
-    def test_body_history_ftp_is_labelled_as_the_provider(self) -> None:
-        observation = _observation(MetricKind.FTP, record_id=ATHLETE_RECORD_ID)
-        self.assertEqual(
-            observation_source_label(observation, SourceView.BODY_HISTORY),
-            "Intervals.icu",
-        )
-
     def test_current_metric_ftp_uses_the_base_label(self) -> None:
         observation = _observation(MetricKind.FTP, record_id=ATHLETE_RECORD_ID)
         self.assertEqual(

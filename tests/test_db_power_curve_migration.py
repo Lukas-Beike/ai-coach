@@ -6,7 +6,7 @@ the empty ``power_curve_points`` and ``power_curve_fetches`` tables and keeps th
 record; every other row stays exactly as it was. A failure rolls back to the
 unchanged release, a restart changes nothing, an older backup restores through
 validation, and an installation whose backfill completed before the upgrade
-shows the same chart points afterwards. Temporary databases and synthetic rows
+stores the same curve afterwards. Temporary databases and synthetic rows
 only.
 """
 
@@ -17,14 +17,14 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from unittest import mock
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
-from test_power_curve_canonical import ENVELOPE, chart, legacy_chart
+from test_power_curve_canonical import ENVELOPE
 
 from backend.backup.restore_validation import (
     DatabaseRestoreValidationConfig,
@@ -32,12 +32,12 @@ from backend.backup.restore_validation import (
 )
 from backend.db import DatabaseManager, migrations, row_factory
 from backend.db.migrations import migrate_schema
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.db.schema import CURRENT_SCHEMA_VERSION, database_schema_is_current
 from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V16
-from backend.performance.canonical_inputs import read_performance_inputs
 from backend.providers.canonical_plans import current_mapper_versions
 from backend.providers.intervals_power_curve_mapping import map_intervals_power_curve
+from backend.runtime.ports import PowerCurveReader
 from backend.sync.canonical_backfill import (
     COUNTER_NAMES,
     STATE_KEY,
@@ -277,7 +277,7 @@ class PowerCurveMigrationTests(unittest.TestCase):
 
 
 class CompletedBackfillUpgradeTests(unittest.TestCase):
-    """An installation whose backfill completed under schema 16 keeps its chart."""
+    """An installation whose backfill completed under schema 16 keeps its curve."""
 
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory()
@@ -313,7 +313,7 @@ class CompletedBackfillUpgradeTests(unittest.TestCase):
             "first_completed_at": OLDER_SYNC,
         }
 
-    def test_the_chart_shows_the_snapshot_curve_after_the_backfill(self) -> None:
+    def test_the_tables_hold_the_snapshot_curve_after_the_backfill(self) -> None:
         with self.manager.unit_of_work() as db:
             migrate_schema(db)
             self.key_values.set(db, STATE_KEY, json.dumps(self.completed_v16_state()))
@@ -323,6 +323,7 @@ class CompletedBackfillUpgradeTests(unittest.TestCase):
             key_values=self.key_values,
             zone=lambda _db: ZONE,
             compact_only=lambda _db: False,
+            competitions=CompetitionRepository(),
         )
         with self.manager.reader() as db:
             self.assertIs(
@@ -340,18 +341,13 @@ class CompletedBackfillUpgradeTests(unittest.TestCase):
                     break
         with self.manager.reader() as db:
             self.assertIs(read_state(self.key_values, db, zone=ZONE), ReadState.TABLES)
-            inputs = read_performance_inputs(
-                selector,
-                db,
-                activity_reader=selector,
-                as_of=TODAY,
-                include_power_curve=True,
-            )
+            reader = selector.reader_for(db)
+            assert isinstance(reader, PowerCurveReader)
+            curve = reader.power_curve(db)
             self.assertEqual(
                 raw_curve_rows(db)[0]["mapped_version"],
                 current_mapper_versions()[POWER_CURVE_VERSION_KEY],
             )
-        assert inputs is not None
         mapped = map_intervals_power_curve(
             ENVELOPE,
             source_record_id="power_curve",
@@ -359,12 +355,8 @@ class CompletedBackfillUpgradeTests(unittest.TestCase):
             zone=ZONE,
         )
         assert mapped.fetch is not None and mapped.points is not None
-        self.assertEqual(inputs.power_curve.points, mapped.points)
-        self.assertEqual(inputs.power_curve.fetches, (mapped.fetch,))
-        start = TODAY - timedelta(days=89)
-        self.assertEqual(
-            chart(inputs.power_curve), legacy_chart(NEWEST_SNAPSHOT, start, TODAY)
-        )
+        self.assertEqual(curve.points, mapped.points)
+        self.assertEqual(curve.fetches, (mapped.fetch,))
 
 
 if __name__ == "__main__":

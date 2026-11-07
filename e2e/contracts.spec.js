@@ -139,7 +139,6 @@ test("light mode keeps performance source badges readable", { tag: "@responsive"
     state.data.performance = { available: true, metrics: {
       weight_kg: { value: 70, unit: "kg", source: "Manuell" },
       cycling_ftp_watts: { value: 250, unit: "W", source: "Garmin Connect" },
-      cycling_eftp_watts: { value: 245, unit: "W", source: "Intervals.icu" },
     } };
     renderPerformance(state.data.performance);
   });
@@ -696,12 +695,12 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
       tsb: i === 40 || i === 89 ? null : -10 + Math.cos(i / 5) * 10,
     }));
     const metrics = Object.fromEntries([
-      ["cycling_ftp_watts", 250], ["cycling_eftp_watts", 260], ["run_threshold_pace_seconds_per_km", 300],
+      ["cycling_ftp_watts", 250], ["run_threshold_pace_seconds_per_km", 300],
       ["cycling_vo2max_ml_kg_min", 52], ["running_vo2max_ml_kg_min", 54],
     ].map(([key, value]) => [key, ["Intervals.icu", "Garmin Connect"].map((source, index) => ({
       source, source_provider: index ? "garmin" : "intervals", points: points.map((point, i) => ({ date: point.date, value: i >= 36 && i <= 42 ? null : value + index + i / 20 })),
     }))]));
-    const preferred_providers = Object.fromEntries(Object.keys(metrics).map((key) => [key, key === "cycling_eftp_watts" ? "intervals" : "garmin"]));
+    const preferred_providers = Object.fromEntries(Object.keys(metrics).map((key) => [key, "garmin"]));
     return { start: points[0].date, end: points.at(-1).date, load: { points }, metrics, preferred_providers };
   })();
   const projection = fixture.get("/api/performance");
@@ -721,10 +720,10 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(running).toContainText("Schwellenpace: 5:05 min/km");
   await expect(running).toContainText("VO₂max: 59,4 ml/kg/min");
   await expect(cycling).toContainText("FTP: 255,5 W");
-  await expect(cycling).toContainText("eFTP: 264,4 W");
+  await expect(cycling).not.toContainText("eFTP");
   await expect(cycling).toContainText("VO₂max: 57,4 ml/kg/min");
   await expect(running.locator("path[data-series]")).toHaveCount(2);
-  await expect(cycling.locator("path[data-series]")).toHaveCount(3);
+  await expect(cycling.locator("path[data-series]")).toHaveCount(2);
   await expect(running).not.toContainText("%");
   await expect(cycling).not.toContainText("%");
   await expect(cycling.locator(".analysis-coverage")).toHaveCount(0);
@@ -747,6 +746,6 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   await expect(charts.locator("svg")).toHaveCount(0);
   await expect(charts.locator(".empty").filter({ hasText: "Noch keine datierten Werte im Zeitraum vorhanden." })).toHaveCount(0);
   await expect(charts.locator('[data-analysis-section="development-Lauf"]').locator("..").locator("p.empty", { hasText: "Keine Daten" })).toHaveText("Keine Daten: Schwellenpace, VO₂max · Schätzung, Lauf-Belastbarkeit");
-  await expect(charts.locator('[data-analysis-section="development-Rad"]').locator("..").locator("p.empty", { hasText: "Keine Daten" })).toHaveText("Keine Daten: Leistungsschwelle · FTP / eFTP, VO₂max · Schätzung");
+  await expect(charts.locator('[data-analysis-section="development-Rad"]').locator("..").locator("p.empty", { hasText: "Keine Daten" })).toHaveText("Keine Daten: Leistungsschwelle · FTP, VO₂max · Schätzung");
   await expect(charts.locator("#performancePredictions")).toHaveText(predictionsText);
 });

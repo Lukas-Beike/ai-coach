@@ -194,5 +194,18 @@ class EffortSelectionTests(unittest.TestCase):
         self.assertEqual(20, _fit(records)["data_age_days"])
 
 
+class EffortContextTests(unittest.TestCase):
+    def test_race_efforts_are_flagged_and_others_are_not(self):
+        rides = _model_rides()
+        rides[0]["effort_context"] = "race"
+
+        efforts = _fit(rides)["efforts"]
+
+        self.assertEqual(
+            [("short", "race"), ("mid", None), ("long", None)],
+            [(e["activity_id"], e.get("effort_context")) for e in efforts],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

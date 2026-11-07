@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from datetime import date, timedelta
 
 from backend.canonical.vocabulary import MetricKind
@@ -28,23 +28,16 @@ def garmin_history_average(
 
 def intervals_performance_average(
     days_view: tuple[WellnessDay, ...],
-    run_eftp_by_day: Mapping[date, float] | None,
     key: str,
     days: int,
     end_date: date,
 ) -> float | None:
     """Average supported Intervals metrics over an inclusive calendar window."""
     cutoff = end_date - timedelta(days=days - 1)
-    candidates: Iterable[tuple[date, float | None]]
-    if key == "run_threshold_watts":
-        candidates = (run_eftp_by_day or {}).items()
-    else:
-        kind = {"weight_kg": MetricKind.WEIGHT, "readiness": MetricKind.READINESS}.get(
-            key
-        )
-        if kind is None:
-            return None
-        candidates = ((item.day, item.value(kind)) for item in days_view)
+    kind = {"weight_kg": MetricKind.WEIGHT, "readiness": MetricKind.READINESS}.get(key)
+    if kind is None:
+        return None
+    candidates = ((item.day, item.value(kind)) for item in days_view)
     values = [
         float(bounded)
         for day, value in candidates

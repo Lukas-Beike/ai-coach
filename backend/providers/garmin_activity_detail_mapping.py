@@ -2,9 +2,16 @@
 
 The input is the dict returned by ``backend.providers.garmin.collect_garmin_activity_detail``:
 ``details`` (get_activity_details), ``splits`` (get_activity_splits), ``hr_zones``
-and ``power_zones`` (get_activity_hr/power_in_timezones). A part that is absent
-yields no set and no issue; a part that is present but malformed yields one
-value-free issue and no set for that part.
+and ``power_zones`` (get_activity_hr/power_in_timezones), and ``fit`` (the
+original FIT file from the Personal API). A part that is absent yields no set
+and no issue; a part that is present but malformed yields one value-free issue
+and no set for that part.
+
+A decodable FIT file wins over the JSON parts of the same kind: its record
+streams (full resolution) replace the downsampled ``details`` charts and its
+device laps replace ``splits``. The FIT sets are mapped by
+``fit_activity_detail_mapping`` under the Garmin provenance; ``details`` and
+``splits`` remain the fallback for a kind the file does not yield.
 
 The mapper is pure: it performs no I/O, logs nothing and never raises on
 malformed provider input. Issues name the activity, the provider field and a
@@ -65,11 +72,13 @@ from backend.canonical.vocabulary import (
     ZoneBoundarySource,
     ZoneMetric,
 )
+from backend.providers.fit_activity_detail_mapping import map_fit_activity_detail
 from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 
 # Version 1: first mapping of Garmin activity detail sets (streams, laps, zones).
 # Version 2: maximum speed per lap.
-MAPPER_VERSION: Final = 2
+# Version 3: FIT record streams and device laps win over charts and splits.
+MAPPER_VERSION: Final = 3
 
 # Same limit as the Intervals mapper; kept local so providers do not import each other.
 MAX_GARMIN_ACTIVITY_ID_LENGTH: Final = 200
@@ -139,10 +148,15 @@ def map_garmin_activity_detail(
     )
     issues: list[MappingIssue] = []
     records: list[ActivityDetailSet] = []
-    stream_set = _stream_set(activity_id, provenance, collected.get("details"), issues)
+    fit_sets = _fit_sets(activity_id, provenance, collected.get("fit"), issues)
+    stream_set = fit_sets.get(ActivityStreamSet) or _stream_set(
+        activity_id, provenance, collected.get("details"), issues
+    )
     if stream_set is not None:
         records.append(stream_set)
-    lap_set = _lap_set(activity_id, provenance, collected.get("splits"), issues)
+    lap_set = fit_sets.get(ActivityLapSet) or _lap_set(
+        activity_id, provenance, collected.get("splits"), issues
+    )
     if lap_set is not None:
         records.append(lap_set)
     for key, metric in _ZONE_KEYS:
@@ -152,6 +166,22 @@ def map_garmin_activity_detail(
         if distribution is not None:
             records.append(distribution)
     return MappingResult(records=tuple(records), issues=tuple(issues))
+
+
+def _fit_sets(
+    ref: str,
+    provenance: Provenance,
+    data: object,
+    issues: list[MappingIssue],
+) -> dict[type, ActivityDetailSet]:
+    """Map the FIT part into its stream and lap sets, keyed by set type."""
+    if data is None:
+        return {}
+    mapped = map_fit_activity_detail(
+        data, provider_activity_id=ref, provenance=provenance
+    )
+    issues.extend(mapped.issues)
+    return {type(record): record for record in mapped.records}
 
 
 def _activity_id(value: object) -> tuple[str | None, MappingIssue | None]:

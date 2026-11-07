@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.performance.fitness_fatigue import SOURCE_LABEL
 from backend.performance.source_policy import (
     FAMILY_LOOKBACK_DAYS,
     METHOD_FAMILY_KINDS,
@@ -37,11 +38,13 @@ _DAILY_FIELDS: tuple[tuple[str, MetricKind], ...] = (
     ("readiness", MetricKind.READINESS),
     ("resting_hr", MetricKind.RESTING_HR),
 )
-_LOAD_FIELDS: tuple[tuple[str, MetricKind], ...] = (
-    ("ctl", MetricKind.CTL),
-    ("atl", MetricKind.ATL),
-    ("tsb", MetricKind.FORM),
+# Local fitness (M7) result keys by planning field; never Intervals.icu CTL/ATL.
+_LOAD_FIELDS: tuple[tuple[str, str], ...] = (
+    ("ctl", "fitness"),
+    ("atl", "fatigue"),
+    ("tsb", "form"),
 )
+LOCAL_LOAD_SOURCE: Final = SOURCE_LABEL
 
 
 def _planning_context_date(value: Any) -> str:
@@ -109,17 +112,6 @@ def _canonical_value(kind: MetricKind, observation: Observation) -> float | int:
     return int(value) if float(value).is_integer() else value
 
 
-def first_intervals_by_day(
-    observations: Iterable[Observation],
-) -> dict[date, Observation]:
-    """Return the first Intervals.icu observation of each day."""
-    first: dict[date, Observation] = {}
-    for observation in observations:
-        if observation.provenance.provider is ProviderId.INTERVALS:
-            first.setdefault(observation.observed_on, observation)
-    return first
-
-
 def canonical_planning_recovery(
     reader: ObservationReader,
     db: Any,
@@ -133,9 +125,10 @@ def canonical_planning_recovery(
     ``reader`` must already be the source chosen for the unit of work. Each value
     is the observation the daily source rule selects for its day: Garmin's method
     family for sleep, HRV and resting HR (Intervals.icu only as its relay, or
-    without any Garmin value), Intervals.icu before Garmin for readiness. CTL, ATL
-    and form (TSB) come from Intervals.icu only. Every value carries the source
-    label of the provider that supplied it; a relay value is labelled as Garmin's.
+    without any Garmin value), Intervals.icu before Garmin for readiness. Every
+    value carries the source label of the provider that supplied it; a relay value
+    is labelled as Garmin's. CTL, ATL and form are added by
+    ``planning_recovery_view`` from the local curve.
     The method family is decided over ``FAMILY_LOOKBACK_DAYS`` ending on ``end``
     (or from ``start``, if earlier), the window the current recovery values use.
     """
@@ -159,12 +152,23 @@ def canonical_planning_recovery(
             relay=ProviderId.GARMIN in family_providers(observations, kind, preferences)
             and intervals_relays_garmin(observations, kind),
         )
-    for field, kind in _LOAD_FIELDS:
-        loaded = first_intervals_by_day(
-            reader.observations(db, kind, start=start, end=end)
-        )
-        _add_observations(recovery_by_date, field, kind, loaded)
     return recovery_by_date
+
+
+def _add_local_load(
+    recovery_by_date: dict[str, dict[str, Any]],
+    local_fitness_days: Sequence[Mapping[str, Any]],
+) -> None:
+    """Add the valued local fitness, fatigue and form (M7) of each day."""
+    for day in local_fitness_days:
+        for field, key in _LOAD_FIELDS:
+            if day[key] is not None:
+                _add_planning_recovery_value(
+                    recovery_by_date.setdefault(day["date"], {}),
+                    field,
+                    day[key],
+                    LOCAL_LOAD_SOURCE,
+                )
 
 
 def _add_observations(
@@ -201,14 +205,18 @@ def planning_recovery_view(
     morning_battery_history: Any,
     morning_body_battery: Any,
     preferences: SourcePreferences = NO_PREFERENCES,
+    local_fitness_days: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, dict[str, Any]]:
-    """Combine canonical recovery with the body battery, which has no metric kind.
+    """Combine canonical recovery with the body battery and the local fitness.
 
-    Body battery comes from the morning history and the current morning reading.
+    Body battery comes from the morning history and the current morning reading;
+    CTL, ATL and form from the days of the local curve (card M7,
+    ``read_local_fitness``); open and warm-up days have none.
     """
     recovery_by_date = canonical_planning_recovery(
         reader, db, start=start, end=end, preferences=preferences
     )
+    _add_local_load(recovery_by_date, local_fitness_days)
     _add_morning_battery_recovery(
         recovery_by_date, morning_battery_history, morning_body_battery
     )

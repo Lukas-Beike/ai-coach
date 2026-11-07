@@ -52,6 +52,11 @@ class PublicPerformanceStateTests(unittest.TestCase):
             (smoothed["status"], smoothed["reason"], len(smoothed["days"])),
             ("insufficient_data", "no_sessions", 84),
         )
+        fitness = result["performance"]["history"].pop("local_fitness_fatigue")
+        self.assertEqual(
+            (fitness["status"], fitness["reason"], len(fitness["days"])),
+            ("insufficient_data", "no_load", 84),
+        )
         self.assertEqual(
             result,
             {

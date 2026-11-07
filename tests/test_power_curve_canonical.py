@@ -1,9 +1,9 @@
 """The Intervals.icu power curve through the canonical tables (schema v17).
 
 The stored ``cycling_power_profile`` envelope is mapped to one canonical power
-curve fetch and its points at ingest and by the backfill; the analysis chart
-reads them through the canonical ports and shows the same envelope the snapshot
-read showed. Temporary SQLite files, synthetic values, no provider access.
+curve fetch and its points at ingest and by the backfill; the stored rows hold
+the same envelope the snapshot held. No performance view reads the curve
+(#1727). Temporary SQLite files, synthetic values, no provider access.
 """
 
 from __future__ import annotations
@@ -13,12 +13,11 @@ import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from backend.athlete.local_date import LocalDate
 from backend.canonical.domain_records import (
     EMPTY_POWER_CURVE,
     PowerCurve,
@@ -28,15 +27,9 @@ from backend.canonical.domain_records import (
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, SourceKind
 from backend.db import DatabaseManager, canonical_domain_store, row_factory
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.db.schema import initialize_schema
-from backend.performance.canonical_inputs import (
-    EMPTY_PERFORMANCE_INPUTS,
-    CanonicalPerformanceInputs,
-    read_performance_inputs,
-)
-from backend.performance.chart_history import analysis_history
-from backend.performance.freshness import GarminSyncStatus
+from backend.performance.canonical_inputs import read_performance_inputs
 from backend.providers.canonical_plans import (
     POWER_CURVE_RECORD_ID,
     POWER_CURVE_RECORD_KIND,
@@ -61,7 +54,6 @@ ZONE = ZoneInfo("Europe/Berlin")
 TODAY = date(2026, 10, 20)
 NOW = "2026-10-20T06:00:00+00:00"
 FETCHED = datetime(2026, 10, 20, 6, 0, tzinfo=UTC)
-CHART_START = TODAY - timedelta(days=89)
 
 
 def point(duration: int, watts: Any, day: str, activity: str = "") -> dict[str, Any]:
@@ -75,7 +67,7 @@ def point(duration: int, watts: Any, day: str, activity: str = "") -> dict[str, 
     }
 
 
-# The envelope IntervalsReader stores: one best effort before the chart window.
+# The envelope IntervalsReader stores, with five best efforts.
 ENVELOPE: dict[str, Any] = {
     "status": "ok",
     "start": "2026-07-01",
@@ -102,30 +94,35 @@ def snapshot(curve: Any = ENVELOPE, **extra: Any) -> dict[str, Any]:
     return payload
 
 
-def legacy_chart(stored: dict[str, Any] | None, start: date, today: date) -> Any:
-    """The chart's former read of the snapshot's power curve, kept for parity."""
+def snapshot_envelope(stored: dict[str, Any] | None) -> dict[str, Any]:
+    """The power curve envelope a snapshot holds, with its points listed."""
     profile = (stored or {}).get("cycling_power_profile") or {}
-    rows = profile.get("points")
-    kept = []
-    for row in rows if isinstance(rows, list) else []:
-        if not isinstance(row, dict):
-            continue
-        try:
-            day = LocalDate.parse(row.get("date")).to_date()
-        except ValueError:
-            continue
-        if start <= day <= today:
-            kept.append(row)
-    return {**profile, "points": kept}
+    return {**profile, "points": list(profile.get("points") or [])}
 
 
-def chart(curve: PowerCurve) -> Any:
-    inputs = CanonicalPerformanceInputs(
-        wellness_day=None, ctl=None, atl=None, power_curve=curve
-    )
-    return analysis_history(GarminSyncStatus(), TODAY, canonical=inputs)[
-        "cycling_power_profile"
+def stored_envelope(curve: PowerCurve) -> dict[str, Any]:
+    """The stored canonical power curve in the snapshot's envelope shape."""
+    envelope: dict[str, Any] = {}
+    if curve.fetches:
+        fetch = curve.fetches[0]
+        envelope["status"] = fetch.fetch_status
+        if fetch.window_start is not None and fetch.window_end is not None:
+            envelope["start"] = fetch.window_start.isoformat()
+            envelope["end"] = fetch.window_end.isoformat()
+        if fetch.provenance.retrieved_at is not None:
+            envelope["synced_at"] = fetch.provenance.retrieved_at.isoformat()
+    envelope["points"] = [
+        {
+            "duration_seconds": stored.duration_s,
+            "watts": stored.watts,
+            "date": stored.observed_on.isoformat(),
+            "activity_id": stored.provider_activity_id or "",
+            "source": stored.provenance.label,
+            "status": "ok",
+        }
+        for stored in curve.points
     ]
+    return envelope
 
 
 def provenance(source_record_id: str | None = POWER_CURVE_RECORD_ID) -> Provenance:
@@ -298,28 +295,27 @@ class IngestFixture(unittest.TestCase):
 
 
 class PowerCurveIngestTests(IngestFixture):
-    def test_the_chart_shows_the_snapshot_curve_after_ingest(self) -> None:
+    def test_the_stored_rows_hold_the_snapshot_curve_after_ingest(self) -> None:
         self.ingest(snapshot())
         raw = self.db.execute(
             "SELECT payload FROM provider_records WHERE record_kind = ?",
             (POWER_CURVE_RECORD_KIND,),
         ).fetchone()
         self.assertEqual(json.loads(raw["payload"]), ENVELOPE)
-        shown = chart(stored_curve(self.db))
-        self.assertEqual(shown, legacy_chart(snapshot(), CHART_START, TODAY))
+        shown = stored_envelope(stored_curve(self.db))
+        self.assertEqual(shown, snapshot_envelope(snapshot()))
         self.assertEqual(
-            [p["duration_seconds"] for p in shown["points"]], [5, 60, 1200, 3600]
+            [p["duration_seconds"] for p in shown["points"]], [5, 60, 300, 1200, 3600]
         )
-        self.assertIsInstance(shown["points"][0]["watts"], int)
         self.assertEqual(len(stored_curve(self.db).fetches), 1)
 
-    def test_a_failed_fetch_keeps_the_points_and_shows_the_failure(self) -> None:
+    def test_a_failed_fetch_keeps_the_points_and_stores_the_failure(self) -> None:
         self.ingest(snapshot())
         failed = snapshot({**ENVELOPE, "status": "failed"})
         self.ingest(failed, partial=True)
-        shown = chart(stored_curve(self.db))
+        shown = stored_envelope(stored_curve(self.db))
         self.assertEqual(shown["status"], "failed")
-        self.assertEqual(shown, legacy_chart(failed, CHART_START, TODAY))
+        self.assertEqual(shown, snapshot_envelope(failed))
 
     def test_a_failure_without_a_curve_keeps_the_points_and_records_it(self) -> None:
         self.ingest(snapshot())
@@ -327,14 +323,12 @@ class PowerCurveIngestTests(IngestFixture):
         self.ingest(snapshot({"status": "failed"}), partial=True)
         self.assertEqual(stored_points(self.db), before)
         self.assertEqual(active_point_count(self.db), 5)
-        shown = chart(stored_curve(self.db))
+        shown = stored_envelope(stored_curve(self.db))
         self.assertEqual(shown["status"], "failed")
         self.assertNotIn("start", shown)
-        self.assertEqual(
-            shown["points"], legacy_chart(snapshot(), CHART_START, TODAY)["points"]
-        )
+        self.assertEqual(shown["points"], ENVELOPE["points"])
 
-    def test_a_status_without_points_is_shown(self) -> None:
+    def test_a_status_without_points_is_stored(self) -> None:
         for envelope in (
             {"status": "failed"},
             {
@@ -350,9 +344,9 @@ class PowerCurveIngestTests(IngestFixture):
                 stored = snapshot(envelope)
                 self.ingest(stored)
                 self.assertEqual(stored_points(self.db), ())
-                shown = chart(stored_curve(self.db))
+                shown = stored_envelope(stored_curve(self.db))
                 self.assertEqual(shown["status"], envelope["status"])
-                self.assertEqual(shown, legacy_chart(stored, CHART_START, TODAY))
+                self.assertEqual(shown, snapshot_envelope(stored))
 
     def test_a_sync_without_a_curve_keeps_it_and_a_new_curve_replaces_it(
         self,
@@ -367,21 +361,12 @@ class PowerCurveIngestTests(IngestFixture):
             [(p.duration_s, p.watts) for p in stored_points(self.db)], [(5, 920.0)]
         )
         self.assertEqual(
-            chart(stored_curve(self.db)),
-            legacy_chart(snapshot(smaller), CHART_START, TODAY),
+            stored_envelope(stored_curve(self.db)), snapshot_envelope(snapshot(smaller))
         )
         self.assertEqual(active_point_count(self.db), 1)
 
-    def test_no_stored_curve_shows_no_points(self) -> None:
-        self.assertEqual(
-            chart(EMPTY_POWER_CURVE), legacy_chart(None, CHART_START, TODAY)
-        )
-        self.assertEqual(
-            analysis_history(
-                GarminSyncStatus(), TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
-            )["cycling_power_profile"],
-            {"points": []},
-        )
+    def test_no_ingested_curve_stores_nothing(self) -> None:
+        self.assertEqual(stored_curve(self.db), EMPTY_POWER_CURVE)
 
     def test_reprojection_of_the_raw_record_emits_the_same_rows(self) -> None:
         self.ingest(snapshot())
@@ -415,6 +400,7 @@ class PowerCurveReadStateTests(IngestFixture):
             key_values=key_values or KeyValueRepository(lambda: NOW),
             zone=lambda _db: ZONE,
             compact_only=lambda _db: False,
+            competitions=CompetitionRepository(),
         )
 
     def test_nothing_is_read_before_the_first_completed_backfill(self) -> None:
@@ -424,35 +410,16 @@ class PowerCurveReadStateTests(IngestFixture):
         self.assertEqual(pending.power_curve(self.db), EMPTY_POWER_CURVE)
         selector = self.selector()
         self.assertIs(selector.reader_for(self.db), PENDING_READER)
-        inputs = read_performance_inputs(
-            selector,
-            self.db,
-            activity_reader=selector,
-            as_of=TODAY,
-            include_power_curve=True,
-        )
-        assert inputs is not None
-        self.assertEqual(inputs.power_curve, EMPTY_POWER_CURVE)
-        self.assertEqual(chart(inputs.power_curve), {"points": []})
 
-    def test_the_curve_is_read_only_when_asked_and_without_other_inputs(
-        self,
-    ) -> None:
+    def test_a_stored_curve_alone_gives_no_performance_inputs(self) -> None:
+        # #1727: no performance view reads the stored curve any more.
         self.ingest(snapshot())
-        reader = CanonicalTableReader()
-        self.assertIsNone(read_performance_inputs(reader, self.db, as_of=TODAY))
-        inputs = read_performance_inputs(
-            reader, self.db, as_of=TODAY, include_power_curve=True
-        )
-        assert inputs is not None
-        self.assertEqual(inputs.power_curve, stored_curve(self.db))
-        self.assertEqual(
-            chart(inputs.power_curve), legacy_chart(snapshot(), CHART_START, TODAY)
+        self.assertFalse(stored_curve(self.db).is_empty)
+        self.assertIsNone(
+            read_performance_inputs(CanonicalTableReader(), self.db, as_of=TODAY)
         )
 
-    def backfilled(
-        self, *snapshots: dict[str, Any]
-    ) -> tuple[int, CanonicalPerformanceInputs | None]:
+    def backfilled(self, *snapshots: dict[str, Any]) -> tuple[int, PowerCurve]:
         manager = DatabaseManager(
             self.root / "backfill.db", sqlite3, row_factory=row_factory
         )
@@ -479,21 +446,14 @@ class PowerCurveReadStateTests(IngestFixture):
                 "SELECT COUNT(*) AS n FROM provider_records WHERE record_kind = ?",
                 (POWER_CURVE_RECORD_KIND,),
             ).fetchone()
-            return int(raw["n"]), read_performance_inputs(
-                selector,
-                db,
-                activity_reader=selector,
-                as_of=TODAY,
-                include_power_curve=True,
-            )
+            reader = selector.reader_for(db)
+            assert isinstance(reader, PowerCurveReader)
+            return int(raw["n"]), reader.power_curve(db)
 
     def test_the_backfill_projects_a_stored_snapshot_and_reads_follow(self) -> None:
-        raw, inputs = self.backfilled(snapshot())
-        assert inputs is not None
+        raw, curve = self.backfilled(snapshot())
         self.assertEqual(raw, 1)
-        self.assertEqual(
-            chart(inputs.power_curve), legacy_chart(snapshot(), CHART_START, TODAY)
-        )
+        self.assertEqual(stored_envelope(curve), snapshot_envelope(snapshot()))
 
     def test_the_backfill_never_takes_an_older_snapshots_curve(self) -> None:
         for newest, raw_records in (
@@ -503,10 +463,9 @@ class PowerCurveReadStateTests(IngestFixture):
         ):
             with self.subTest(newest=newest.get("cycling_power_profile")):
                 self.setUp()
-                raw, inputs = self.backfilled(snapshot(), newest)
-                assert inputs is not None
+                raw, curve = self.backfilled(snapshot(), newest)
                 self.assertEqual(raw, raw_records)
-                self.assertEqual(inputs.power_curve, EMPTY_POWER_CURVE)
+                self.assertEqual(curve, EMPTY_POWER_CURVE)
 
     def test_only_the_newest_snapshot_plans_its_curve(self) -> None:
         text = json.dumps(snapshot())

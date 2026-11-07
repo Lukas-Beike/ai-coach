@@ -19,6 +19,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
 from backend.runtime.clock import utc_now as system_utc_now
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
@@ -32,7 +33,20 @@ JOB_TYPES = frozenset(
         "competition_push",
         "nutrition_sync",
         "historical_backfill",
+        "wellness_backfill",
     }
+)
+# Backfill chains and the sync-state cursor stream each one walks back.
+WELLNESS_BACKFILL = "wellness_backfill"
+WELLNESS_HISTORY_CURSOR = "wellness_history"
+BACKFILL_CURSOR_STREAMS: dict[str, str] = {
+    "historical_backfill": "historical",
+    WELLNESS_BACKFILL: WELLNESS_HISTORY_CURSOR,
+}
+BACKFILL_JOB_TYPES = frozenset(BACKFILL_CURSOR_STREAMS)
+# Built from the fixed type names above, never from request data.
+_BACKFILL_TYPES_SQL = "({})".format(
+    ", ".join(f"'{job_type}'" for job_type in sorted(BACKFILL_JOB_TYPES))
 )
 JOB_STATUSES = frozenset({"queued", "running", "completed", "partial", "failed"})
 ALLOWED_JOB_TRANSITIONS: dict[str, frozenset[str]] = {
@@ -166,7 +180,7 @@ _SETTLED_ITEMS = "status NOT IN ('completed', 'skipped')"
 # queues. A "backfill" continuation carries the next chunk's end_date cursor, so it
 # is never folded into another job: that would drop the cursor and stop the chain.
 _COALESCED_REQUESTERS = frozenset({"scheduler", "startup"})
-_COALESCED_TYPES = frozenset({"refresh", "historical_backfill"})
+_COALESCED_TYPES = frozenset({"refresh", *BACKFILL_JOB_TYPES})
 
 
 def read_job(db: Any, job_id: str) -> tuple[Any | None, builtins.list[Any]]:
@@ -254,11 +268,13 @@ def normalize_sync_job_request(
     provider_value = envelope["provider"]
     type_value = envelope["type"]
     values = envelope["payload"]
-    if type_value == "historical_backfill" and not registry.supports_job(
+    if type_value in BACKFILL_JOB_TYPES and not registry.supports_job(
         provider_value, type_value
     ):
         raise JobValidationError(
             "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
+            if type_value == "historical_backfill"
+            else "Der Wellness-Backfill ist nur für Garmin zulässig."
         )
     if type_value == "activity_details":
         normalized_payload = _normalize_activity_details_job(
@@ -285,7 +301,7 @@ def normalize_sync_job_request(
             all_sync_days,
             registry,
             enforce_period_limit,
-            historical=type_value == "historical_backfill",
+            historical=type_value in BACKFILL_JOB_TYPES,
         )
     return {
         "provider": provider_value,
@@ -456,12 +472,18 @@ def _normalize_competition_push_job(
     return normalized
 
 
-def _normalize_plan_push_entry(entry: Any) -> dict[str, str]:
+def _normalize_plan_push_entry(entry: Any, *, removable: bool) -> dict[str, Any]:
     workout_id = (
         str(entry.get("library_workout_id") or "") if isinstance(entry, dict) else ""
     )
     if not isinstance(entry, dict) or not re.fullmatch(r"[0-9a-f-]{36}", workout_id):
         raise JobValidationError("Jede Plan-Push-Einheit benötigt eine lokale UUID.")
+    if "remove" in entry:
+        # Only Garmin removes a pushed workout; elsewhere the flag would be
+        # dropped and the entry silently pushed instead.
+        if not removable or entry["remove"] is not True:
+            raise JobValidationError("remove ist nur für Garmin mit true zulässig.")
+        return {"library_workout_id": workout_id, "remove": True}
     payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
     if not SHA256_PATTERN.fullmatch(payload_hash):
         raise JobValidationError(
@@ -475,7 +497,7 @@ def _normalize_plan_push_job(
 ) -> dict[str, Any]:
     if not registry.supports_job(provider, "plan_push"):
         raise JobValidationError(
-            "Plan-Push-Jobs sind nur für Intervals.icu und Wahoo zulässig."
+            "Plan-Push-Jobs sind nur für Intervals.icu, Wahoo und Garmin zulässig."
         )
     if set(values) - {"entries", "reason", "repair"}:
         raise JobValidationError("Ein Plan-Push-Job enthält nicht unterstützte Felder.")
@@ -484,7 +506,10 @@ def _normalize_plan_push_job(
         raise JobValidationError(
             "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten."
         )
-    normalized_entries = [_normalize_plan_push_entry(entry) for entry in entries]
+    removable = provider == ProviderId.GARMIN.value
+    normalized_entries = [
+        _normalize_plan_push_entry(entry, removable=removable) for entry in entries
+    ]
     if "repair" in values and type(values["repair"]) is not bool:
         raise JobValidationError("repair muss ein Boolean sein.")
     normalized: dict[str, Any] = {
@@ -529,6 +554,10 @@ def _normalize_refresh_job(
     if "automatic" in values:
         normalized_payload["automatic"] = _normalize_refresh_flag(
             values["automatic"], "automatic"
+        )
+    if "one_off" in values:
+        normalized_payload["one_off"] = _normalize_refresh_flag(
+            values["one_off"], "one_off"
         )
     if "end_date" in values:
         normalized_payload["end_date"] = _normalize_refresh_end_date(values["end_date"])
@@ -646,15 +675,19 @@ class SyncJobStore:
             return has_active_job(db, provider, job_type)
 
     def has_backfill_continuation(
-        self, provider: str, end_date: str, created_since: str
+        self,
+        provider: str,
+        end_date: str,
+        created_since: str,
+        job_type: str = "historical_backfill",
     ) -> bool:
         """Report whether a backfill chain already continued to ``end_date``."""
         with self._database_manager.reader() as db:
             row = db.execute(
-                "SELECT 1 FROM sync_jobs WHERE provider=? AND type='historical_backfill' "
+                "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? "
                 "AND requested_by='backfill' AND json_extract(payload, '$.end_date')=? "
                 "AND created_at>=? LIMIT 1",
-                (provider, end_date, created_since),
+                (provider, job_type, end_date, created_since),
             ).fetchone()
             return row is not None
 
@@ -804,8 +837,8 @@ class SyncJobStore:
             candidate = db.execute(
                 "SELECT id FROM sync_jobs WHERE status='queued' "
                 "AND (available_at IS NULL OR available_at<=?) "
-                + ("AND type<>'historical_backfill' " if hold_backfill else "")
-                + "ORDER BY type='historical_backfill', created_at, id LIMIT 1",
+                + (f"AND type NOT IN {_BACKFILL_TYPES_SQL} " if hold_backfill else "")
+                + f"ORDER BY type IN {_BACKFILL_TYPES_SQL}, created_at, id LIMIT 1",
                 (now,),
             ).fetchone()
             if not candidate:

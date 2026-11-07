@@ -310,6 +310,31 @@ class AnalysisSessionsRefreshTests(unittest.TestCase):
         storage.merge_base.assert_not_called()
         storage.save.assert_not_called()
 
+    def test_ingest_off_skips_without_a_provider_read(self):
+        provider = Mock()
+        service = AnalysisSessionsRefreshService(
+            config=SimpleNamespace(
+                intervals_api_key="configured",
+                intervals_athlete_id="athlete",
+            ),
+            database_manager=Mock(),
+            provider_client=provider,
+            event_publisher=Mock(),
+            observer=SimpleNamespace(observe=lambda *_: nullcontext(SimpleNamespace())),
+            resync_gate=SimpleNamespace(operation=nullcontext),
+            zone_provider=lambda: UTC,
+            utc_now=lambda: "2026-10-20T12:00:00+00:00",
+            all_sync_days=365,
+            earliest_date=date(2020, 1, 1),
+            snapshot_storage=Mock(),
+            ingest_enabled=lambda: False,
+        )
+
+        self.assertEqual(
+            service.refresh(), {"status": "skipped", "reason": "intervals_ingest_off"}
+        )
+        provider.get.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

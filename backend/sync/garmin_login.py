@@ -35,6 +35,7 @@ from backend.provider_credentials import (
     GARMIN_TOKENSTORE_DISCONNECTED,
     GARMIN_TOKENSTORE_STATE_KEY,
 )
+from backend.sync.garmin_personal_status import SDK_SKIPPED_KEY
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -205,6 +206,8 @@ class GarminTokenStore:
         with self._database_lock(), self._database_manager().unit_of_work() as db:
             self._key_values.set(db, GARMIN_TOKENS_KEY, blob)
             self._key_values.delete(db, GARMIN_TOKENSTORE_STATE_KEY)
+            # A fresh login replaces the one a sync skipped; drop its card hint.
+            self._key_values.delete(db, SDK_SKIPPED_KEY)
         self._registry.replace_tokens(blob)
 
     def write_back(self, client: Any, login_argument: str) -> None:

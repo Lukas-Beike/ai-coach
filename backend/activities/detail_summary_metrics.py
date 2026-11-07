@@ -15,6 +15,7 @@ from backend.canonical.rating_scales import (
     INTERVALS_FEEL_SCALE,
     INTERVALS_RPE_SCALE,
     RatingScale,
+    rating_fields,
 )
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin
 from backend.providers.intervals_activity_keys import (
@@ -82,17 +83,5 @@ def intervals_summary_metrics(
         }
         scale = _RATING_SCALES.get(key)
         if scale is not None:
-            metrics[key].update(_rating(scale, value))
+            metrics[key].update(rating_fields(scale, value))
     return metrics
-
-
-def _rating(scale: RatingScale, value: float) -> dict[str, Any]:
-    """The scale, label and normalized value of one rating on ``scale``."""
-    rating: dict[str, Any] = {"scale": scale.describe()}
-    if not scale.minimum <= value <= scale.maximum:
-        return rating
-    text = scale.label(value)
-    if text is not None:
-        rating["rating_label"] = text
-    rating["normalized_0_1"] = round(scale.normalized(value), 3)
-    return rating

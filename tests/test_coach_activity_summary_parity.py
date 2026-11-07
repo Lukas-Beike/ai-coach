@@ -49,7 +49,10 @@ RIDE_SUMMARY = {
     "pace_mps": 7.7,
     "intensity": 71.0,
     "training_load": 82.0,
-    "load_model": "intervals_training_load",
+    "load_branch": "power",
+    "load_threshold_after_session": True,
+    # Shape only: a strength session's calibration basis (M6 v2).
+    "load_calibration": {"tss_per_au": 0.33, "pairs": 20, "session_rpe_au": 270.0},
     "rpe": 6.0,
     "feel": 3,
     "planned_event_id": "evt-1",
@@ -64,14 +67,30 @@ RUN_SUMMARY = {
     "moving_duration_s": 1800,
     "distance_m": 5000.0,
     "training_load": 30.0,
-    "load_model": "intervals_training_load",
+    "load_branch": "heart_rate",
 }
 
 
 class CoachActivitySummaryParityTests(unittest.TestCase):
     def test_coach_activity_carries_the_summary_values_without_private_fields(self):
         row = compact_coach_activity(
-            {**RIDE_SUMMARY, "terrain": "gravel", "assist": "electric"},
+            {
+                **RIDE_SUMMARY,
+                "terrain": "gravel",
+                "assist": "electric",
+                "elevation_loss_m": 405.0,
+                "min_temp_c": 12.0,
+                "max_temp_c": 21.0,
+                "aerobic_training_effect": 3.2,
+                "anaerobic_training_effect": 0.8,
+                "purpose": "race",
+                "competition_id": "c-1",
+                "efficiency_factor": 1.48,
+                "efficiency_factor_unit": "W/bpm",
+                "variability_index": 1.04,
+                "decoupling_pct": 3.1,
+                "work_kj": 1020.0,
+            },
             select=planning_context.selected,
         )
         self.assertEqual(
@@ -87,22 +106,41 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
                 "moving_duration_s": 5400,
                 "distance_m": 42000.0,
                 "elevation_gain_m": 410.0,
+                "elevation_loss_m": 405.0,
+                "min_temp_c": 12.0,
+                "max_temp_c": 21.0,
                 "training_load": 82.0,
-                "load_model": "intervals_training_load",
+                "load_branch": "power",
+                "load_threshold_after_session": True,
+                "load_calibration": {
+                    "tss_per_au": 0.33,
+                    "pairs": 20,
+                    "session_rpe_au": 270.0,
+                },
+                "aerobic_training_effect": 3.2,
+                "anaerobic_training_effect": 0.8,
                 "intensity": 71.0,
                 "avg_hr": 138.0,
                 "max_hr": 171.0,
                 "avg_power": 190.0,
                 "normalized_power": 205.0,
+                "efficiency_factor": 1.48,
+                "efficiency_factor_unit": "W/bpm",
+                "variability_index": 1.04,
+                "decoupling_pct": 3.1,
+                "work_kj": 1020.0,
                 "avg_speed_mps": 7.8,
                 "weighted_avg_speed_mps": 7.9,
                 "pace_mps": 7.7,
                 "rpe": 6.0,
                 "feel": 3,
+                "purpose": "race",
+                "competition_id": "c-1",
+                "purpose_label": "Wettkampf",
                 "source": "Intervals.icu",
             },
         )
-        self.assertEqual(set(row), set(COACH_ACTIVITY_FIELDS))
+        self.assertEqual(set(row), {*COACH_ACTIVITY_FIELDS, "purpose_label"})
 
     def test_projection_groups_and_rolls_up_with_unchanged_labels_and_numbers(self):
         result = CoachIntervalsContextService().project(
@@ -200,9 +238,6 @@ class CoachRawRowParityTests(unittest.TestCase):
                 "moving_duration_s": 3600.0,
                 "distance_m": 36000.0,
                 "elevation_gain_m": 120.0,
-                "training_load": 75.0,
-                "load_model": "intervals_training_load",
-                "intensity": 82.5,
                 "avg_hr": 150.0,
                 "max_hr": 172.0,
                 "avg_power": 215.0,

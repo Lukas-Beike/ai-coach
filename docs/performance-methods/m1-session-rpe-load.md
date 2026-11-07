@@ -75,15 +75,17 @@ endurance athlete.
   2 Leicht, 3 Moderat, 4 Etwas schwer, 5 Schwer, 7 Sehr schwer, 10 Maximal).
 - The rating time is stored since schema v18 whenever the athlete sets or
   changes the RPE, and the result shows the minutes after the session end.
-  Earlier ratings and the Intervals.icu fallback stay "timing unknown" and are
+  Earlier ratings and the provider fallback stay "timing unknown" and are
   not given protocol fidelity retroactively.
 - Duration comes from provider records, not a stopwatch of the rated session:
   the canonical elapsed duration. A session with only a moving time gets no
   value (`no_elapsed_duration`).
-- Intervals `icu_rpe` is a second rating source. Local `session_rpe` is the
-  input (decision D3 on #1406); `icu_rpe` is used only as a labelled fallback
-  when no local rating exists, never averaged with it. Disagreeing provider
-  ratings of one session give no value unless a local rating exists.
+- Provider RPE is a second rating source. Local `session_rpe` is the input
+  (decision D3 on #1406); without it the watch rating from Garmin Connect
+  (`directWorkoutRpe` / 10, #1724) is the labelled fallback, then the
+  Intervals.icu `icu_rpe` copy, never averaged with the local value. Garmin and
+  its Intervals.icu copy are not compared; copies of one provider that disagree
+  give no value unless a local rating exists.
 
 ## Minimum data and stop rules
 
@@ -104,7 +106,7 @@ endurance athlete.
 | Collection time | about 30 min after session end | source | R1 protocol; R2 after cool-down. Not enforced; unknown times stay marked. |
 | Duration unit | minutes | source | R1 uses minutes for 30/60/90-min bouts. |
 | Duration includes warm-up and cool-down | yes | product assumption | R1 text read does not say; R2 rated sessions including warm-up and cool-down. Decided to match the rated whole session. |
-| Fallback rating source | Intervals `icu_rpe` only without local rating | product assumption | Decision D3 on #1406; keeps provider value labelled and separate. |
+| Fallback rating source | Garmin `directWorkoutRpe` / 10, then Intervals `icu_rpe`, only without local rating | product assumption | Decision D3 on #1406, precedence local -> Garmin from #1724 (Intervals.icu ingest becomes dormant, #1728); keeps provider value labelled and separate. |
 | Existing ATL reconstruction decay (not M1) | exp(-1/7) per day | product assumption | `backend/performance/load.py:121`; fitness-fatigue form from R17, the 7-day constant is not individually validated. Applies to imported load, never to AU. |
 | Existing scenario model constants (not M1) | 42 and 7 days | product assumption | `backend/planning/season_preparation.py:260` and `:478-479`; R17 model form, parameters not validated for this athlete. |
 | Duplicate session matching | start within 30 min, duration within max(120 s, 10 %), distance within max(500 m, 10 %) | product assumption | Existing canonical session bundling in `bundle_sessions`; not a scientific rule. |
@@ -115,7 +117,7 @@ endurance athlete.
 - "This week: 1,240 AU from 4 rated sessions; 1 session has no rating."
 - "Your session-RPE load this week is higher than last week" (descriptive
   comparison of the athlete's own sums with coverage).
-- "This value uses the Intervals.icu rating because no local rating exists."
+- "This value uses the Garmin Connect rating because no local rating exists."
 
 ## Forbidden statements
 

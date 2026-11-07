@@ -79,6 +79,7 @@ from backend.performance.report_service import (
     TrainingSeasonReadService,
 )
 from backend.planning.block_review import block_review, last_completed_test
+from backend.planning.race_results import with_race_results
 from backend.planning.season_preparation import load_scenarios, season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -289,6 +290,8 @@ class HttpDomainRouteServices:
     provider_credentials: Any | None = None
     garmin_login: Callable[[], Any] | None = None
     connection_checks: Callable[[], Any] | None = None
+    intervals_ingest: Callable[[], Any] | None = None
+    resume_provider_schedule: Callable[[str], None] | None = None
 
 
 def _present(route: Any) -> tuple[Any, ...]:
@@ -450,6 +453,11 @@ class HttpApiAssembly:
             coach_context_preview_service,
             settings,
             athlete.zones,
+            race_results=lambda competitions: with_race_results(
+                competitions,
+                local_today(),
+                activity_read_service().summaries_on_days,
+            ),
         )
         self.diagnostics_get_routes = DiagnosticsGetRoutes(
             session_auth_service,
@@ -608,7 +616,11 @@ class HttpApiAssembly:
             session_auth_service,
             StateEventTransport(state_event_buffer),
         )
-        self.settings_put_routes = SettingsPutRoutes(settings)
+        self.settings_put_routes = SettingsPutRoutes(
+            settings,
+            intervals_ingest=dependencies.domains.intervals_ingest,
+            resume_provider_schedule=dependencies.domains.resume_provider_schedule,
+        )
         provider_credentials = dependencies.domains.provider_credentials
         self.credentials_put_routes = (
             CredentialsPutRoutes(provider_credentials) if provider_credentials else None

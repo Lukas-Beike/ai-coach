@@ -1,57 +1,42 @@
-"""Characterization of load rollups, ATL reconstruction and training focus.
+"""Characterization of load rollups, the load context and training focus.
 
 These tests pin the current behaviour of the load context, the activity
-rollups, the reconstructed ATL series, the training-focus projection and the
+rollups, the training-focus projection and the
 Wahoo/Garmin canonical row selection. They are the parity reference for a later
 refactor, so deliberate quirks are pinned as they are and marked "Quirk:".
 """
 
 import math
 import unittest
+from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any
 
 from performance_day_support import (
-    current_days,
     garmin_activity_summaries,
     garmin_sync_status,
 )
 
-from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.load import activity_rollup
-from backend.performance.load import actual_atl_series as _actual_atl_series
 from backend.performance.load_context import (
     performance_load_context as _performance_load_context,
 )
 from backend.performance.training_focus import training_focus
-from backend.performance.wellness_days import series
 
 TODAY = date(2026, 5, 4)
 RETENTION = math.exp(-1.0 / 7.0)
 DECAY = 1.0 - RETENTION
 
 
-def actual_atl_series(
-    rows: list[Any], activities: list[Any], end_date: date
-) -> dict[date, float]:
-    return _actual_atl_series(
-        series(
-            current_days([row for row in rows if isinstance(row, dict)]), MetricKind.ATL
-        ),
-        activities,
-        end_date,
-    )
-
-
 def performance_load_context(
-    activities: list[Any], rows: list[Any], _latest: dict[str, Any], today: date
+    activities: list[Any], today: date, **inputs: Any
 ) -> dict[str, Any]:
     return _performance_load_context(
         activities,
-        current_days([row for row in rows if isinstance(row, dict)]),
         today,
-        canonical=EMPTY_PERFORMANCE_INPUTS,
+        canonical=replace(EMPTY_PERFORMANCE_INPUTS, **inputs),
+        timezone="UTC",
     )
 
 
@@ -242,243 +227,74 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         self.assertEqual(result["sessions"], 1)
 
 
-class CharacterizationAtlSeriesTests(unittest.TestCase):
-    def test_first_day_load_is_backed_out_and_has_no_effect_on_the_series(
-        self,
-    ) -> None:
-        # The first wellness ATL is reproduced exactly: its own day load is backed
-        # out before the recurrence starts, so the series matches one without it.
-        wellness = [_wellness("2026-05-03", 10), _wellness("2026-05-04", 20)]
-        with_load = actual_atl_series(
-            wellness,
-            [_activity("2026-05-03", training_load=70)],
-            TODAY,
-        )
-        without_load = actual_atl_series(wellness, [], TODAY)
-        self.assertEqual(with_load, without_load)
-        self.assertEqual(with_load[date(2026, 5, 3)], 10.0)
-
-    def test_only_the_first_wellness_atl_anchors_the_series(self) -> None:
-        # Quirk: later wellness ATL values are not read; only their presence
-        # matters, and the value is reconstructed from the first row's ATL.
-        series = actual_atl_series(
-            [_wellness("2026-05-01", 10), _wellness("2026-05-02", 999)], [], TODAY
-        )
-        self.assertEqual(
-            series,
-            {date(2026, 5, 1): 10.0, date(2026, 5, 2): round(10 * RETENTION, 2)},
-        )
-
-    def test_activity_load_on_a_day_without_wellness_row_is_applied(self) -> None:
-        # Loads on days without a wellness row decay the running ATL and add their
-        # load, so the next wellness day reflects the completed activity.
-        wellness = [_wellness("2026-05-01", 10), _wellness("2026-05-04", 10)]
-        with_gap_load = actual_atl_series(
-            wellness, [_activity("2026-05-02", training_load=100)], TODAY
-        )
-        self.assertEqual(
-            with_gap_load,
-            {
-                date(2026, 5, 1): 10.0,
-                date(2026, 5, 4): round(
-                    (10 * RETENTION + 100 * DECAY) * RETENTION**2, 2
-                ),
-            },
-        )
-        self.assertNotEqual(with_gap_load, actual_atl_series(wellness, [], TODAY))
-
-    def test_activity_load_before_first_wellness_row_is_ignored(self) -> None:
-        series = actual_atl_series(
-            [_wellness("2026-05-04", 10)],
-            [_activity("2026-04-30", training_load=70)],
-            TODAY,
-        )
-        self.assertEqual(series, {date(2026, 5, 4): 10.0})
-
-    def test_activity_load_after_anchor_is_ignored_but_future_wellness_is_kept(
-        self,
-    ) -> None:
-        # Quirk: the series itself contains wellness rows after the anchor date;
-        # only the context layer filters them out (see the context tests).
-        series = actual_atl_series(
-            [_wellness("2026-05-04", 10), _wellness("2026-05-06", 10)],
-            [_activity("2026-05-05", training_load=999)],
-            TODAY,
-        )
-        self.assertEqual(
-            series,
-            {date(2026, 5, 4): 10.0, date(2026, 5, 6): round(10 * RETENTION**2, 2)},
-        )
-
-    def test_duplicate_wellness_dates_make_one_observed_day(self) -> None:
-        series = actual_atl_series(
-            [_wellness("2026-05-04", 10), _wellness("2026-05-04", 10)],
-            [_activity("2026-05-04", training_load=70)],
-            TODAY,
-        )
-        self.assertEqual(series, {date(2026, 5, 4): 10.0})
-
-    def test_decimal_comma_activity_load_is_accepted_by_atl(self) -> None:
-        series = actual_atl_series(
-            [_wellness("2026-05-03", 10), _wellness("2026-05-04", 10)],
-            [_activity("2026-05-04", training_load="42,5")],
-            TODAY,
-        )
-        self.assertEqual(
-            series[date(2026, 5, 4)], round(10 * RETENTION + 42.5 * DECAY, 2)
-        )
-
-    def test_non_numeric_loads_and_malformed_activities_contribute_nothing(
-        self,
-    ) -> None:
-        series = actual_atl_series(
-            [_wellness("2026-05-03", 10), _wellness("2026-05-04", 10)],
-            [
-                "junk",
-                _activity("2026-05-04", training_load="n/a"),
-                {"started_at_local": None, "training_load": 50},
-            ],
-            TODAY,
-        )
-        self.assertEqual(series[date(2026, 5, 4)], round(10 * RETENTION, 2))
-
-    def test_invalid_ids_do_not_create_canonical_days(
-        self,
-    ) -> None:
-        # Quirk: an invalid id is not replaced by the date field, so that row drops.
-        series = actual_atl_series(
-            [
-                {"id": "2026-05-03T07:00:00", "atl": 10},
-                {"id": "bad", "date": "2026-05-04", "atl": 10},
-                {"date": "2026-05-05", "atl": 20},
-            ],
-            [],
-            TODAY,
-        )
-        self.assertEqual(series, {})
-
-    def test_atl_alias_is_mapped_before_reconstruction(self) -> None:
-        self.assertEqual(
-            actual_atl_series([{"id": "2026-05-04", "atlLoad": 10}], [], TODAY),
-            {TODAY: 10.0},
-        )
-        self.assertEqual(
-            actual_atl_series(
-                [{"id": "2026-05-04", "atl": 10, "atlLoad": 99}], [], TODAY
-            ),
-            {date(2026, 5, 4): 10.0},
-        )
-
-
 class CharacterizationLoadContextTests(unittest.TestCase):
     def test_result_contract_keys_are_stable(self) -> None:
-        result = performance_load_context([], [], {}, TODAY)
+        result = performance_load_context([], TODAY)
         self.assertEqual(
             set(result),
             {
                 "load",
+                "intervals_history",
                 "last_7",
                 "previous_7",
                 "last_30",
                 "previous_30",
-                "actual_atl_current",
-                "actual_atl_date",
-                "actual_atl_average",
             },
         )
 
-    def test_missing_latest_wellness_yields_null_load_block(self) -> None:
+    def test_without_local_load_the_load_block_is_empty_and_local(self) -> None:
+        load = performance_load_context([], TODAY)["load"]
         self.assertEqual(
-            performance_load_context([], [], {}, TODAY)["load"],
+            {key: load[key] for key in ("id", "ctl", "atl", "tsb", "source")},
             {
                 "id": None,
                 "ctl": None,
                 "atl": None,
                 "tsb": None,
-                "ramp_rate": None,
-                "ramp_rate_source": None,
+                "source": "Lokal berechnet (M7)",
             },
         )
+        self.assertEqual(
+            (load["status"], load["reason"]), ("insufficient_data", "no_load")
+        )
+        self.assertNotIn("ramp_rate", load)
 
-    def test_load_block_does_not_read_snapshot_aliases_without_canonical_inputs(
+    def test_load_block_is_the_latest_local_day_with_its_averages(self) -> None:
+        days = {
+            (TODAY - timedelta(days=offset)).isoformat(): 60.0
+            for offset in range(1, 120)
+        }
+        load = performance_load_context([], TODAY, local_load_days=days)["load"]
+        self.assertEqual(load["method_id"], "local-fitness-fatigue")
+        self.assertEqual(load["status"], "estimate")
+        # Today is open without a session and the sync time is unknown: the
+        # latest valued day is today itself (complete_before = today).
+        self.assertIsNotNone(load["ctl"])
+        self.assertAlmostEqual(load["tsb"], round(load["ctl"] - load["atl"], 1), 1)
+        self.assertIsNotNone(load["averages_7d"]["ctl"])
+
+    def test_intervals_values_stay_a_labelled_history_and_never_the_load(
         self,
     ) -> None:
-        # Quirk: ctl and atl come from the latest Intervals row (with aliases) and
-        # raw values are passed through. Form and ramp rate no longer come from the
-        # row (#1412): without canonical inputs they are unknown.
         result = performance_load_context(
             [],
-            [],
-            {
-                "id": TODAY.isoformat(),
-                "ctLoad": "55",
-                "atlLoad": 65,
-                "rampRate": "1,5",
-            },
             TODAY,
-        )
-        self.assertEqual(
-            result["load"],
-            {
-                "id": None,
-                "ctl": None,
-                "atl": None,
-                "tsb": None,
-                "ramp_rate": None,
-                "ramp_rate_source": None,
-            },
-        )
-
-    def test_load_block_skips_empty_strings_but_keeps_zero(self) -> None:
-        result = performance_load_context(
-            [], [], {"ctl": "", "ctLoad": 55, "atl": 0}, TODAY
+            wellness_day=TODAY,
+            ctl=50.0,
+            atl=60.0,
+            form_by_day={TODAY: -10.0},
         )
         self.assertIsNone(result["load"]["ctl"])
-        self.assertIsNone(result["load"]["atl"])
-
-    def test_carrier_form_fields_are_not_read_without_canonical_inputs(self) -> None:
-        # Intended difference (#1412): the row's tsb/form/freshness and a derived
-        # CTL minus ATL are gone; form is read from canonical observations only.
-        for row in (
-            {"ctl": 50, "atl": 60, "tsb": ""},
-            {"ctl": 50, "atl": 60, "freshness": 4},
-            {"ctl": 50, "atl": 60, "tsb": 3, "form": 2},
-        ):
-            with self.subTest(row=row):
-                self.assertIsNone(
-                    performance_load_context([], [], row, TODAY)["load"]["tsb"]
-                )
-
-    def test_actual_atl_current_falls_back_to_a_stale_row_while_average_is_empty(
-        self,
-    ) -> None:
-        # Quirk: the current value is the last row on or before today, however old,
-        # while the average needs a row inside the last seven days.
-        result = performance_load_context([], [_wellness("2026-04-20", 30)], {}, TODAY)
-        self.assertEqual(result["actual_atl_current"], 30.0)
-        self.assertEqual(result["actual_atl_date"], date(2026, 4, 20))
-        self.assertIsNone(result["actual_atl_average"])
-
-    def test_actual_atl_average_uses_only_the_seven_day_window(self) -> None:
-        # Quirk: the series decays from the first row (100 on 2026-04-27), so the
-        # later ATL values 10 and 20 do not change the result. Only the rows dated
-        # 2026-05-01 and 2026-05-04 fall in the window: (100 * R**4 + 100 * R**7) / 2
-        # with R = exp(-1/7).
-        rows = [
-            _wellness("2026-04-27", 100),
-            _wellness("2026-05-01", 10),
-            _wellness("2026-05-04", 20),
-        ]
-        result = performance_load_context([], rows, {}, TODAY)
-        self.assertEqual(result["actual_atl_average"], 46.63)
-
-    def test_future_wellness_is_excluded_from_current_and_average(self) -> None:
-        rows = [_wellness("2026-05-04", 20), _wellness("2026-05-05", 999)]
-        result = performance_load_context([], rows, {}, TODAY)
-        self.assertEqual(result["actual_atl_current"], 20.0)
-        self.assertEqual(result["actual_atl_date"], TODAY)
-        self.assertEqual(result["actual_atl_average"], 20.0)
-        self.assertIn(date(2026, 5, 5), actual_atl_series(rows, [], TODAY))
+        self.assertEqual(
+            result["intervals_history"],
+            {
+                "as_of": TODAY.isoformat(),
+                "ctl": 50.0,
+                "atl": 60.0,
+                "tsb": -10.0,
+                "source": "Intervals.icu (gespeichert, nicht lokal)",
+            },
+        )
 
     def test_context_rollups_count_garmin_and_wahoo_copies_twice(self) -> None:
         # Quirk: the production caller passes raw recent_activities, so the load
@@ -491,7 +307,7 @@ class CharacterizationLoadContextTests(unittest.TestCase):
             ),
             _ride("g", source="garmin", training_load=40),
         ]
-        result = performance_load_context(activities, [], {}, TODAY)
+        result = performance_load_context(activities, TODAY)
         self.assertEqual(result["last_7"]["sessions"], 2)
         self.assertEqual(result["last_7"]["training_load"], 80.0)
         self.assertEqual(result["last_7"]["duration_hours"], 2.0)

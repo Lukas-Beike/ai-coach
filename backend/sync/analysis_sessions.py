@@ -22,6 +22,7 @@ from backend.sync.canonical_ingest import (
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals_compaction import compact_snapshot
+from backend.sync.intervals_ingest import ingest_off_result
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.snapshot_storage import SnapshotStorage
 
@@ -48,7 +49,9 @@ class AnalysisSessionsRefreshService:
         earliest_date: date,
         snapshot_storage: SnapshotStorage,
         lock: Any = _REFRESH_LOCK,
+        ingest_enabled: Callable[[], bool] = lambda: True,
     ) -> None:
+        self._ingest_enabled = ingest_enabled
         self._config = config
         self._database_manager = database_manager
         self._provider_client = provider_client
@@ -74,6 +77,8 @@ class AnalysisSessionsRefreshService:
     def _refresh_inner(self) -> dict[str, Any]:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
+        if not self._ingest_enabled():
+            return ingest_off_result()
         if not self._lock.acquire(blocking=False):
             return {"status": "already_running"}
         try:

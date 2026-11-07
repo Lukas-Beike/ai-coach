@@ -6,6 +6,7 @@ from typing import Any
 from backend.activities.activity_summary import stored_activity_key
 from backend.activities.identity import activity_kind
 from backend.activities.matching import match_planned_workouts, record_date
+from backend.activities.session_purpose import summary_is_not_training
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.calendar.canonical import canonical_planned_workouts
 
@@ -82,6 +83,8 @@ def _unique_local_match(
         or sum(
             record_date(item.get("started_at_local")) == day
             and activity_kind(item) == kind
+            # A commute, warm-up or cool-down never completes a planned unit.
+            and not summary_is_not_training(item)
             for item in activities
         )
         != 1

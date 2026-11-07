@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -17,6 +18,7 @@ from backend.planning.competition_service import CompetitionService
 from backend.settings import SettingsService
 
 ZONES_PATH = "/api/zones"
+_LOGGER = logging.getLogger("intervals_coach")
 
 
 class AthleteGetRoutes:
@@ -32,7 +34,10 @@ class AthleteGetRoutes:
         coach_context_preview_service: Callable[[], CoachContextPreviewService],
         settings_service: SettingsService,
         zone_service: Callable[[], Any] | None = None,
+        race_results: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
+        | None = None,
     ) -> None:
+        self._race_results = race_results
         self._session_auth_service = session_auth_service
         self._public_performance_state_service = public_performance_state_service
         self._profile_service = profile_service
@@ -41,6 +46,18 @@ class AthleteGetRoutes:
         self._coach_context_preview_service = coach_context_preview_service
         self._settings_service = settings_service
         self._zone_service = zone_service
+
+    def _competitions(self) -> list[dict[str, Any]]:
+        competitions = self._competition_service().list(limit=100)
+        if self._race_results is None:
+            return competitions
+        try:
+            return self._race_results(competitions)
+        except Exception as exc:  # noqa: BLE001 - results are optional; never fail the profile
+            _LOGGER.warning(
+                "competition race results unavailable: %s", type(exc).__name__
+            )
+            return competitions
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {
@@ -61,7 +78,7 @@ class AthleteGetRoutes:
         elif path == "/api/profile":
             payload = {
                 "profile": self._profile_service().get(),
-                "competitions": self._competition_service().list(limit=100),
+                "competitions": self._competitions(),
                 "weekly_fallback": weekly_plan.fallback_windows(),
             }
         elif path == "/api/feedback":

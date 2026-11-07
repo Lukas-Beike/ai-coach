@@ -159,11 +159,15 @@ The client SHALL present product and label candidates for review and explicit lo
 
 #### Scenario: Favorite products
 - **WHEN** the athlete marks a saved product as a favorite
-- **THEN** the product list shows it before other products, and saving or editing the product keeps the mark.
+- **THEN** the product list shows it before other products, open, while unmarked products stay together in one collapsed group, and saving or editing the product keeps the mark.
 
 #### Scenario: Add a product to a logged meal
 - **WHEN** the athlete adds a saved product and quantity to a logged meal
 - **THEN** the meal becomes a composite of its earlier values and the product's nutrients frozen at that time, with at most 20 components.
+
+#### Scenario: Product without a chosen meal
+- **WHEN** the athlete adds a saved product and quantity without choosing a meal
+- **THEN** a new local snack entry for the selected day records the product.
 
 #### Scenario: Safe ingredient details
 - **WHEN** the diary displays a composite meal

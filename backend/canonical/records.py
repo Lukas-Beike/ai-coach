@@ -36,6 +36,7 @@ from backend.canonical.validation import (
     validate_metric_value,
 )
 from backend.canonical.vocabulary import (
+    ActivityPurpose,
     Assist,
     DeviceType,
     Environment,
@@ -310,17 +311,32 @@ MAX_ZONE_COUNT: Final = 20
 MAX_TRAINING_EFFECT_LABEL_LENGTH: Final = 50
 MAX_NATIVE_TYPE_LENGTH: Final = 64
 MAX_ZONE_ID_LENGTH: Final = 20
+MAX_LAP_COUNT: Final = 10_000.0
+TEMPERATURE_C_BOUNDS: Final = (-60.0, 70.0)
+# Garmin's training effect runs 0.0 (none) to 5.0 (overreaching).
+MAX_TRAINING_EFFECT: Final = 5.0
+MAX_WATER_ESTIMATE_ML: Final = 50_000.0
+MAX_ACTIVITY_ENERGY_KCAL: Final = 20_000.0
 _SUMMARY_VALUE_BOUNDS: Final = (
     ("intensity", 0.0, 1_000.0),
     ("rpe", 0.0, 10.0),
     ("feel", 0.0, 10.0),
     ("avg_speed_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
     ("weighted_avg_speed_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
+    ("grade_adjusted_speed_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
     ("pace_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
     ("ftp_w", 0.0, MAX_ACTIVITY_POWER_W),
     ("eftp_w", 0.0, MAX_ACTIVITY_POWER_W),
     ("vo2max", 0.0, 100.0),
-    ("avg_temp_c", -60.0, 70.0),
+    ("avg_temp_c", *TEMPERATURE_C_BOUNDS),
+    ("min_temp_c", *TEMPERATURE_C_BOUNDS),
+    ("max_temp_c", *TEMPERATURE_C_BOUNDS),
+    ("elevation_loss_m", 0.0, MAX_ACTIVITY_ELEVATION_M),
+    ("lap_count", 0.0, MAX_LAP_COUNT),
+    ("aerobic_training_effect", 0.0, MAX_TRAINING_EFFECT),
+    ("anaerobic_training_effect", 0.0, MAX_TRAINING_EFFECT),
+    ("water_estimated_ml", 0.0, MAX_WATER_ESTIMATE_ML),
+    ("energy_kcal", 0.0, MAX_ACTIVITY_ENERGY_KCAL),
 )
 _ZONE_FIELDS: Final = ("power_zone_times_s", "hr_zone_times_s", "pace_zone_times_s")
 
@@ -424,11 +440,24 @@ class ActivityRecord:
     feel: float | None = None
     avg_speed_mps: float | None = None
     weighted_avg_speed_mps: float | None = None
+    # Average speed adjusted for gradient, as the provider computes it.
+    grade_adjusted_speed_mps: float | None = None
     pace_mps: float | None = None
     ftp_w: float | None = None
     eftp_w: float | None = None
     vo2max: float | None = None
     avg_temp_c: float | None = None
+    min_temp_c: float | None = None
+    max_temp_c: float | None = None
+    elevation_loss_m: float | None = None
+    lap_count: float | None = None
+    # The provider's own training-effect estimates (Garmin 0.0-5.0) of the session.
+    aerobic_training_effect: float | None = None
+    anaerobic_training_effect: float | None = None
+    # The provider's estimated sweat loss of the session.
+    water_estimated_ml: float | None = None
+    # The device's energy-expenditure estimate of the session in kcal (card M8).
+    energy_kcal: float | None = None
     # Seconds per zone as (zone id, seconds) pairs, ids such as "Z1".
     power_zone_times_s: ZoneSeconds | None = None
     hr_zone_times_s: ZoneSeconds | None = None
@@ -450,6 +479,8 @@ class ActivityRecord:
     terrain: Terrain = Terrain.UNKNOWN
     assist: Assist = Assist.UNKNOWN
     native_type: str | None = None
+    # Why the activity was done, when the provider's event type says so.
+    purpose: ActivityPurpose | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -461,6 +492,8 @@ class ActivityRecord:
         optional_text(
             self.native_type, "native_type", max_length=MAX_NATIVE_TYPE_LENGTH
         )
+        if self.purpose is not None:
+            require_instance(self.purpose, ActivityPurpose, "purpose")
         require_aware_datetime(self.started_at, "started_at")
         object.__setattr__(
             self,

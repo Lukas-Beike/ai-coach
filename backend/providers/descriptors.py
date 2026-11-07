@@ -305,8 +305,11 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         job_types=_ALL_INTERVALS_JOB_TYPES,
         # Refresh payload fields; backend/sync/jobs.py enforces them via the
         # registry's refresh_fields. ``automatic`` marks a scheduled refresh,
-        # which reads the short window after the day's full-period read.
-        refresh_fields=frozenset({"days", "reason", "end_date", "automatic"}),
+        # which reads the short window after the day's full-period read;
+        # ``one_off`` is the manual read while the ingest switch is off.
+        refresh_fields=frozenset(
+            {"days", "reason", "end_date", "automatic", "one_off"}
+        ),
         # Default sync window reported by ProviderRegistry.sync_period_defaults to
         # http_api public and bootstrap state. The sync services still take their
         # window from the separate server.py SYNC_PERIOD_DEFAULTS literal, so the
@@ -376,7 +379,19 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         # providers that do not declare it. activity_details is the on-demand,
         # read-only Garmin detail fetch for one activity (see
         # backend/sync/garmin_activity_details.py); it is never scheduled.
-        job_types=frozenset({"refresh", "historical_backfill", "activity_details"}),
+        # plan_push is the explicit strength-workout push to the watch
+        # (backend/sync/garmin_strength_push.py); it is never scheduled either.
+        # wellness_backfill is the one-off, insert-only wellness history walk
+        # (backend/sync/garmin_wellness_history.py), queued once at startup.
+        job_types=frozenset(
+            {
+                "refresh",
+                "historical_backfill",
+                "wellness_backfill",
+                "activity_details",
+                "plan_push",
+            }
+        ),
         # Refresh payload fields; backend/sync/jobs.py enforces them via the registry.
         refresh_fields=frozenset({"days", "reason", "end_date"}),
         default_sync_days=_GARMIN_DEFAULT_SYNC_DAYS,

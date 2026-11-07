@@ -975,6 +975,7 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .planned-focus-field { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; }
 .planned-focus-field select { min-height: 36px; padding: 4px 8px; }
 .planned-focus-status { color: var(--muted); font-size: .72rem; }
+.planned-sync-button { justify-self: start; margin: 8px 12px 0; min-height: 44px; }
 .planned-description { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
 .planned-week-totals { margin: 0; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--subtle); font-size: .7rem; line-height: 1.5; }
 @media (max-width: 480px) {
@@ -1114,13 +1115,15 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .connection-card small { color: var(--subtle); font-size: .64rem; }
 .connection-card .secondary-button { width: 100%; min-height: 44px; margin-top: auto; display: grid; place-items: center; text-align: center; }
 .connection-actions { display: grid; gap: 8px; margin-top: auto; }
-.connection-actions[hidden], .connection-card .secondary-button[hidden] { display: none; }
+.connection-actions[hidden], .connection-card .sync-period[hidden], .connection-card .secondary-button[hidden] { display: none; }
 .connection-actions [data-check-button] { grid-column: 1 / -1; }
 .connection-card .sync-period { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--subtle); font-size: .67rem; font-weight: 500; }
 .connection-card .sync-period input { width: 76px; padding: 7px 8px; text-align: center; font-size: .76rem; }
 .connection-resync-status { display: block; line-height: 1.4; }
 .provider-setup-hint { margin: 0; color: var(--subtle); font-size: .64rem; line-height: 1.4; }
 .provider-setup-hint[hidden] { display: none; }
+.provider-key-hint[hidden] { display: none; }
+.provider-key-hint.error { color: var(--form-error-ink); }
 .provider-setup-hint a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent-bright); font-weight: 700; }
 .provider-setup-hint code { font: .95em ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 .provider-credentials { display: grid; gap: 10px; margin-top: 12px; }
@@ -1546,6 +1549,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-product-head { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
 .nutrition-product-head h3 { margin: 0; min-width: 0; }
 .nutrition-favorite { flex: none; min-width: 44px; min-height: 44px; margin: -8px -8px 0 0; padding: 0; border: 0; background: none; color: var(--accent); font-size: 1.4rem; line-height: 1; cursor: pointer; }
+.nutrition-product-others > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--ink); }
+.nutrition-product-others > .nutrition-list { margin: 0 0 18px; }
 .nutrition-low-confidence { box-shadow: 0 0 0 1px var(--nutrition-warning-border); }
 #nutritionBarcodeVideo { display: block; width: 100%; max-height: 40vh; object-fit: cover; border-radius: 12px; background: var(--black); }
 :root .activity-detail-dialog {

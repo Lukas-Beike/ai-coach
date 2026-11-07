@@ -18,6 +18,7 @@ from backend.errors import CORRUPT_PLANNING_ERROR, AppError
 from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
 from backend.planning.conflicts import calendar_item_window
+from backend.planning.push_state import attach_push_state, garmin_baselines
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.planning.session_focus import carry_focus
 
@@ -336,7 +337,9 @@ class PlannedUnitService:
         *,
         future_only: bool = False,
         since: date | None = None,
+        push_state: bool = False,
     ) -> list[dict[str, Any]]:
+        """Return planned units; ``push_state`` adds the calendar sync-button state."""
         with self._database_manager.reader() as db:
             rows = planned_unit_rows(
                 db,
@@ -346,11 +349,15 @@ class PlannedUnitService:
                 today=self._today(),
                 since=since,
             )
-        return [
-            payload
+            baselines = garmin_baselines(db) if push_state else {}
+        pairs = [
+            (row, payload)
             for row in rows
             if (payload := planned_unit_payload(row, include_archived)) is not None
         ]
+        if push_state:
+            attach_push_state(pairs, baselines)
+        return [payload for _row, payload in pairs]
 
     def list_for_coach(self, limit: int = 250) -> dict[str, Any]:
         """Return the future local planned units in the Coach calendar shape."""

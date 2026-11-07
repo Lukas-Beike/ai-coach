@@ -1,4 +1,8 @@
-"""Form, ramp rate and cycling eFTP are read from canonical observations only.
+"""Intervals.icu form is read from canonical observations only; eFTP is not read.
+
+Since #1726 the Intervals.icu CTL, ATL and form are only a labelled history
+(``intervals_load_history``); the current load is the local curve (M7) and no
+ramp rate is derived.
 
 The observations come from the real Intervals.icu mappers, applied to synthetic
 snapshots; the snapshot handed to the performance context is stripped of its
@@ -108,7 +112,7 @@ class FormTests(unittest.TestCase):
             ("derived", _row(_day(), ctl=52.1, atl=60.43), -8.33),
         ):
             with self.subTest(name):
-                load = _context(_snapshot([row]))["current_load"]
+                load = _context(_snapshot([row]))["intervals_load_history"]
                 self.assertEqual(load["tsb"], expected)
 
     def test_a_derived_form_keeps_its_value_and_kind_with_its_method_metadata(
@@ -124,88 +128,37 @@ class FormTests(unittest.TestCase):
         self.assertEqual(form.method, FORM_METHOD)
         self.assertEqual(form.method_version, FORM_METHOD_VERSION)
         self.assertIsNotNone(form.input_fingerprint)
-        self.assertEqual(_context(snapshot)["current_load"]["tsb"], form.value.value)
+        self.assertEqual(
+            _context(snapshot)["intervals_load_history"]["tsb"], form.value.value
+        )
 
     def test_the_carrier_form_is_never_read(self) -> None:
         mapped = _snapshot([_row(_day(), ctl=50, atl=60)])
         carrier = _snapshot([_row(_day(), ctl=50, atl=60, tsb=99, form=98)])
-        self.assertEqual(_context(mapped, carrier)["current_load"]["tsb"], -10.0)
+        self.assertEqual(
+            _context(mapped, carrier)["intervals_load_history"]["tsb"], -10.0
+        )
 
     def test_an_invalid_reported_form_is_unknown_not_derived(self) -> None:
         # Known deviation: the mapper rejects the invalid value and stores no form
         # for the day, where the snapshot reader derived CTL minus ATL.
         load = _context(_snapshot([_row(_day(), ctl=50, atl=60, tsb="fresh")]))
-        self.assertIsNone(load["current_load"]["tsb"])
+        self.assertIsNone(load["intervals_load_history"]["tsb"])
 
     def test_snapshot_only_latest_day_does_not_displace_observed_form(self) -> None:
         snapshot = _snapshot([_row(_day(1), ctl=50, atl=60), _row(_day())])
-        load = _context(snapshot, copy.deepcopy(snapshot))["current_load"]
+        load = _context(snapshot, copy.deepcopy(snapshot))["intervals_load_history"]
         self.assertEqual(load["tsb"], -10.0)
 
-    def test_the_seven_day_comparison_averages_the_canonical_form_days(self) -> None:
-        rows = [
-            _row(_day(8), ctl=60, atl=40),  # outside the window
-            _row(_day(6), tsb=-10),
-            _row(_day(3), tsb=2),
-            _row(_day(0), ctl=60, atl=62),
-        ]
-        comparison = _context(_snapshot(rows))["comparisons"]["form_tsb"]
-        self.assertEqual(comparison["current"], -2.0)
-        self.assertEqual(comparison["average"], -3.33)
-
-
-class RampRateTests(unittest.TestCase):
-    def test_ramp_rate_is_the_ctl_change_over_exactly_seven_days(self) -> None:
+    def test_intervals_form_never_feeds_the_current_load_or_comparison(
+        self,
+    ) -> None:
         rows = [_row(_day(7), ctl=54.1, atl=50), _row(_day(), ctl=58.4, atl=60)]
-        snapshot = _snapshot(rows)
-        self.assertEqual(_inputs(snapshot).ramp_rate, 4.3)
-        load = _context(snapshot)["current_load"]
-        self.assertEqual(load["ramp_rate"], 4.3)
-        self.assertEqual(load["ramp_rate_source"], RAMP_LABEL)
-
-    def test_ramp_rate_may_be_negative_and_is_rounded_to_two_decimals(self) -> None:
-        rows = [_row(_day(7), ctl=60.333), _row(_day(), ctl=58.1)]
-        self.assertEqual(_inputs(_snapshot(rows)).ramp_rate, -2.23)
-
-    def test_a_missing_day_gives_no_ramp_rate_and_no_neighbour_is_used(self) -> None:
-        rows = [
-            _row(_day(8), ctl=50),
-            _row(_day(6), ctl=52),
-            _row(_day(), ctl=58),
-        ]
-        load = _context(_snapshot(rows))["current_load"]
-        self.assertIsNone(load["ramp_rate"])
-        self.assertIsNone(load["ramp_rate_source"])
-
-    def test_eight_days_apart_is_not_a_ramp_rate(self) -> None:
-        rows = [_row(_day(8), ctl=50), _row(_day(), ctl=58)]
-        self.assertIsNone(_inputs(_snapshot(rows)).ramp_rate)
-
-    def test_a_latest_day_without_ctl_gives_no_ramp_rate(self) -> None:
-        snapshot = _snapshot(
-            [_row(_day(7), ctl=50), _row(_day(1), ctl=55), _row(_day())]
-        )
-        self.assertIsNone(_inputs(snapshot, copy.deepcopy(snapshot)).ramp_rate)
-
-    def test_no_wellness_day_gives_no_ramp_rate(self) -> None:
-        # The only wellness row has an unusable id, so there is no wellness day.
-        self.assertIsNone(
-            read_performance_inputs(
-                FilteringReader(()),
-                None,
-                as_of=DAY,
-            )
-        )
-
-    def test_the_carrier_ramp_rate_is_never_read(self) -> None:
-        rows = [_row(_day(7), ctl=54.1), _row(_day(), ctl=58.4, rampRate=9.9)]
-        mapped = _snapshot(rows)
-        load = _context(mapped, copy.deepcopy(mapped))["current_load"]
-        self.assertEqual(load["ramp_rate"], 4.3)
-        lone = _snapshot([_row(_day(), ctl=58.4, rampRate=9.9)])
-        self.assertIsNone(
-            _context(lone, copy.deepcopy(lone))["current_load"]["ramp_rate"]
-        )
+        context = _context(_snapshot(rows))
+        self.assertIsNone(context["current_load"]["tsb"])
+        self.assertIsNone(context["comparisons"]["form_tsb"])
+        self.assertNotIn("ramp_rate", context["current_load"])
+        self.assertEqual(context["intervals_load_history"]["ctl"], 58.4)
 
 
 def _ride(eftp: float | None = None, **fields: Any) -> dict[str, Any]:
@@ -216,6 +169,8 @@ def _ride(eftp: float | None = None, **fields: Any) -> dict[str, Any]:
 
 
 class EftpTests(unittest.TestCase):
+    """Stored Intervals.icu eFTP observations feed no view (#1727)."""
+
     ACTIVITY: ClassVar[dict[str, Any]] = {
         "id": "ride-1",
         "type": "Ride",
@@ -223,102 +178,44 @@ class EftpTests(unittest.TestCase):
         "icu_eftp": 270,
     }
 
-    def _eftp(self, snapshot: dict[str, Any]) -> Any:
-        return _context(snapshot)["metrics"]["cycling_eftp_watts"]["value"]
-
-    def test_current_eftp_follows_athlete_then_wellness_then_latest_ride(self) -> None:
-        wellness = [_row(_day(), ctl=50, atl=60, sportInfo=[_ride(265)])]
-        for name, settings, rows, expected in (
-            ("athlete", [_ride(262)], wellness, 262),
-            ("wellness", [_ride()], wellness, 265),
-            ("latest ride", [_ride()], [_row(_day(), ctl=50, atl=60)], 270),
-        ):
-            with self.subTest(name):
-                snapshot = _snapshot(
-                    rows, settings=settings, activities=[self.ACTIVITY]
-                )
-                self.assertEqual(self._eftp(snapshot), expected)
-                self.assertEqual(
-                    _context(snapshot)["metrics"]["cycling_eftp_watts"]["source"],
-                    INTERVALS,
-                )
-        none = _snapshot([_row(_day(), ctl=50, atl=60)], settings=[_ride()])
-        self.assertIsNone(self._eftp(none))
-
-    def test_the_snapshot_carriers_are_never_read(self) -> None:
-        snapshot = _snapshot(
-            [_row(_day(), ctl=50, atl=60, sportInfo=[_ride(265)])],
-            settings=[_ride(262)],
+    def _snapshot(self) -> dict[str, Any]:
+        return _snapshot(
+            [
+                _row(_day(1), ctl=48, atl=50, weight=70, sportInfo=[_ride(255)]),
+                _row(_day(), ctl=50, atl=60, weight=70, sportInfo=[_ride(265)]),
+            ],
+            settings=[_ride(262, lthr=168), {"types": ["Run"], "eftp": 310}],
             activities=[self.ACTIVITY],
         )
-        mapped_only = _snapshot([_row(_day(), ctl=50, atl=60)], settings=[_ride()])
-        carrier = _snapshot(
-            [_row(_day(), ctl=50, atl=60, sportInfo=[_ride(111)])],
-            settings=[_ride(222)],
-        )
-        # The observations decide, not the carrier rows or sport settings.
-        carried = _context(mapped_only, carrier)
-        self.assertIsNone(carried["metrics"]["cycling_eftp_watts"]["value"])
-        stripped = _context(snapshot)
-        full = _context(snapshot, copy.deepcopy(snapshot))
-        # Other metrics (thresholds, VO2max) still read the carrier sport settings.
-        self.assertEqual(stripped["current_load"], full["current_load"])
-        self.assertEqual(
-            stripped["metrics"]["cycling_eftp_watts"],
-            full["metrics"]["cycling_eftp_watts"],
-        )
-        self.assertEqual(stripped["metrics"]["cycling_eftp_watts"]["value"], 262)
-        for key in ("form_tsb", "cycling_eftp_30d"):
-            self.assertEqual(stripped["comparisons"][key], full["comparisons"][key])
 
-    def test_a_stale_newest_day_falls_back_to_the_ride_while_history_keeps_days(
-        self,
-    ) -> None:
-        rows = [
-            _row(_day(3), ctl=48, atl=50, sportInfo=[_ride(255)]),
-            _row(_day(), ctl=50, atl=60),
+    def test_eftp_observations_are_still_stored(self) -> None:
+        eftps = [
+            item
+            for item in _observations(self._snapshot())
+            if item.kind is MetricKind.EFTP
         ]
-        snapshot = _snapshot(rows, settings=[_ride()], activities=[self.ACTIVITY])
-        inputs = _inputs(snapshot)
-        self.assertEqual(inputs.eftp_by_day, {DAY - timedelta(days=3): 255.0})
-        context = _context(snapshot)
-        self.assertEqual(context["metrics"]["cycling_eftp_watts"]["value"], 270)
-        # 30-day comparison: wellness day (255) and the ride's day (270).
-        self.assertEqual(context["comparisons"]["cycling_eftp_30d"]["average"], 262.5)
+        self.assertTrue(eftps)
 
-    def test_run_and_virtual_ride_eftp_are_classified_by_sport(self) -> None:
-        rows = [
-            _row(
-                _day(),
-                ctl=50,
-                atl=60,
-                sportInfo=[
-                    {"types": ["Run"], "eftp": 999},
-                    {"types": ["VirtualRide"], "eftp": 258},
-                    {"types": ["Ride"], "eftp": 240},
-                ],
-            )
-        ]
-        snapshot = _snapshot(
-            rows,
-            settings=[{"types": ["Run"], "eftp": 310}, _ride()],
+    def test_canonical_eftp_feeds_no_metric_or_comparison(self) -> None:
+        context = _context(self._snapshot())
+        self.assertTrue(context["available"])
+        self.assertNotIn("cycling_eftp_watts", context["metrics"])
+        self.assertNotIn("cycling_eftp_30d", context["comparisons"])
+        self.assertFalse(
+            any("eftp" in key for key in (*context["metrics"], *context["comparisons"]))
         )
-        self.assertEqual(self._eftp(snapshot), 258)
-        self.assertEqual(_inputs(snapshot).eftp_by_day, {DAY: 258.0})
 
-    def test_the_series_bounds_drop_implausible_wellness_values(self) -> None:
-        rows = [
-            _row(_day(2), ctl=40, sportInfo=[_ride(19)]),
-            _row(_day(1), ctl=41, sportInfo=[_ride(2001)]),
-            _row(_day(), ctl=42, sportInfo=[_ride(250)]),
-        ]
-        context = _context(_snapshot(rows))
-        self.assertEqual(context["comparisons"]["cycling_eftp_30d"]["average"], 250)
+    def test_the_canonical_inputs_carry_no_eftp(self) -> None:
+        inputs = _inputs(self._snapshot())
+        for name in ("eftp_by_day", "run_eftp_by_day", "power_curve"):
+            self.assertFalse(hasattr(inputs, name), name)
+        assert inputs.current is not None
+        for name in ("athlete_eftp", "wellness_eftp"):
+            self.assertFalse(hasattr(inputs.current, name), name)
 
-    def test_the_athlete_record_eftp_needs_no_wellness_day(self) -> None:
+    def test_the_athlete_record_thresholds_need_no_wellness_day(self) -> None:
         # An athlete-only snapshot: no wellness row, so no wellness day. The latest
-        # sync's athlete eFTP and thresholds still reach the current metrics; only
-        # the wellness-day eFTP stays absent in this branch.
+        # sync's athlete thresholds still reach the current metrics; its eFTP not.
         snapshot = _snapshot([], settings=[_ride(262, lthr=168)])
         inputs = read_performance_inputs(
             FilteringReader(_observations(snapshot)),
@@ -328,10 +225,6 @@ class EftpTests(unittest.TestCase):
         )
         assert inputs is not None and inputs.current is not None
         self.assertIsNone(inputs.wellness_day)
-        athlete_eftp = inputs.current.athlete_eftp
-        assert athlete_eftp is not None
-        self.assertEqual(athlete_eftp.value.value, 262)
-        self.assertIsNone(inputs.current.wellness_eftp)
         self.assertEqual(
             [item.value.value for item in inputs.current.bike_threshold_hr], [168]
         )
@@ -341,55 +234,30 @@ class EftpTests(unittest.TestCase):
             garmin_payload_performance_metrics({}, DAY),
             canonical=inputs.current,
         )
-        self.assertEqual(metrics["cycling_eftp_watts"]["value"], 262)
-        self.assertEqual(metrics["cycling_eftp_watts"]["source"], INTERVALS)
-
-    def test_an_athlete_without_eftp_keeps_thresholds_without_a_wellness_day(
-        self,
-    ) -> None:
-        snapshot = _snapshot([], settings=[_ride(lthr=168)])
-        inputs = read_performance_inputs(
-            FilteringReader(_observations(snapshot)),
-            None,
-            activity_reader=NoActivityRows(),
-            as_of=DAY,
-        )
-        assert inputs is not None
-        self.assertIsNone(inputs.current.athlete_eftp)
-        self.assertEqual(len(inputs.current.bike_threshold_hr), 1)
+        self.assertNotIn("cycling_eftp_watts", metrics)
 
     def test_without_canonical_inputs_no_eftp_remains(self) -> None:
         # Canonical reads (#1416): the context takes no snapshot at all.
         context = current_performance_context(
             GarminSyncStatus.from_state({}), {}, DAY, canonical=EMPTY_PERFORMANCE_INPUTS
         )
-        # Canonical reads (#1415): the snapshot's ride activity is no longer read
-        # either (was 270 for both values). Without canonical values the context
-        # is unavailable (#1416).
+        # Without canonical values the context is unavailable (#1416).
         self.assertFalse(context["available"])
         self.assertEqual(context["metrics"], {})
         self.assertNotIn("comparisons", context)
         self.assertNotIn("current_load", context)
 
-    def test_chart_and_body_history_read_the_canonical_series(self) -> None:
-        rows = [
-            _row(_day(1), weight=70, sportInfo=[_ride(250)]),
-            _row(_day(), weight=70, sportInfo=[_ride(260)]),
-        ]
-        snapshot = _snapshot(rows)
+    def test_chart_and_body_history_have_no_eftp_series(self) -> None:
         history = analysis_history(
             GarminSyncStatus.from_state({}),
             DAY,
-            canonical=_inputs(snapshot),
+            canonical=_inputs(self._snapshot()),
         )
-        points = history["metrics"]["cycling_eftp_watts"][0]["points"]
-        self.assertEqual([point["value"] for point in points[-2:]], [250.0, 260.0])
-        weekly = next(
-            item
-            for item in history["body"]["windows"]["12w"]["metrics"]["cycling_w_per_kg"]
-            if item["source"] == INTERVALS
-        )
-        self.assertEqual(weekly["points"][-1]["ftp_watts"], 260.0)
+        self.assertNotIn("cycling_eftp_watts", history["metrics"])
+        self.assertNotIn("cycling_power_profile", history)
+        for window in history["body"]["windows"].values():
+            sources = [item["source"] for item in window["metrics"]["cycling_w_per_kg"]]
+            self.assertNotIn(INTERVALS, sources)
 
 
 if __name__ == "__main__":

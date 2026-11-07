@@ -6,6 +6,7 @@ import unittest
 from datetime import UTC, datetime
 
 from backend.activities.detail_store import summary_fingerprint
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_detail import (
     ActivityLap,
     ActivityLapSet,
@@ -211,6 +212,29 @@ class CanonicalDetailReaderTests(unittest.TestCase):
             ],
             doc["detail_data"]["providers"],
         )
+
+    def test_garmin_only_session_gets_zone_times_from_its_stream(self) -> None:
+        # #1724: the Personal API serves no zone times; LTHR 160 with default limits.
+        self.add_session("act_3")
+        self.add_record(GARMIN, "g-only-99", "act_3")
+        self.store_streams(GARMIN, "g-only-99", {HR: heart_rate()})
+        reader = CanonicalDetailReader(
+            CanonicalTableReader().session_activities,
+            refreshable=frozenset,
+            zone_settings=lambda _db, _record: ZoneSettings(lthr=160.0),
+        )
+
+        doc = reader.read(self.db, "act_3")
+        assert doc is not None
+        zones = doc["zones"]["heart_rate"]
+
+        # 100..149 bpm repeating: per 50 s, 9 s up to 108.8, 24 s up to 132.8,
+        # 17 s up to 150.4; 54 full cycles, the last sample counts nothing.
+        self.assertEqual(
+            [486.0, 1296.0, 918.0, 0.0, 0.0, 0.0, 0.0],
+            [bucket["seconds"] for bucket in zones["buckets"]],
+        )
+        self.assertEqual("derived", zones["source"]["kind"])
 
     def test_deleted_and_unknown_sessions_read_as_none(self) -> None:
         self.add_session("act_4", "deleted")

@@ -287,13 +287,14 @@ class AnalysisHistoryTests(unittest.TestCase):
             series["run_threshold_pace_seconds_per_km"][0]["points"][-2]["value"], None
         )
 
-    def test_eftp_uses_only_intervals_estimates_and_never_plain_ftp(self):
+    def test_history_has_no_intervals_power_curve(self):
+        # #1727: neither the Intervals.icu eFTP (wellness day or activity) nor its
+        # power curve is read by the analysis history.
         snapshot = {
             "recent_wellness": [
-                {"id": "2026-09-30", "sport_info": [{"types": ["Ride"], "ftp": 900}]},
                 {
                     "id": "2026-10-01",
-                    "sport_info": [{"types": ["Ride"], "mmp_model": {"ftp": 270}}],
+                    "sportInfo": [{"types": ["Ride"], "mmp_model": {"ftp": 270}}],
                 },
             ],
             "recent_activities": [
@@ -303,47 +304,25 @@ class AnalysisHistoryTests(unittest.TestCase):
                     "type": "Ride",
                     "icu_eftp": 250,
                 },
-                {
-                    "id": "e2",
-                    "start_date_local": "2026-10-02T10:00:00",
-                    "type": "Ride",
-                    "icu_eftp": 260,
-                },
-                {
-                    "id": "e3",
-                    "start_date_local": "2026-10-02T12:00:00",
-                    "type": "VirtualRide",
-                    "icu_eftp": 265,
-                },
-                {
-                    "id": "e4",
-                    "start_date_local": "2026-10-02T13:00:00",
-                    "type": "Run",
-                    "icu_eftp": 999,
-                },
             ],
+            "cycling_power_profile": {
+                "status": "ok",
+                "start": "2026-07-01",
+                "end": "2026-10-02",
+                "points": [
+                    {
+                        "duration_seconds": 60,
+                        "watts": 450,
+                        "date": "2026-10-01",
+                        "activity_id": "e1",
+                        "status": "ok",
+                    }
+                ],
+            },
         }
-        garmin = {
-            "performance_history": [
-                {"date": "2026-10-01", "metrics": {"cycling_eftp_watts": 999}}
-            ]
-        }
-        # The wellness-day eFTP is a canonical observation (the mapper never stores
-        # the plain ftp as eFTP); the snapshot's sport_info is not read (#1412).
-        result = analysis_history(
-            snapshot,
-            garmin,
-            date(2026, 10, 2),
-            eftp_by_day={date(2026, 10, 1): 270.0},
-        )["metrics"]
-        points = result["cycling_eftp_watts"][0]["points"]
-        self.assertEqual(result["cycling_eftp_watts"][0]["source"], "Intervals.icu")
-        self.assertIsNone(points[-3]["value"])
-        self.assertEqual(points[-2]["value"], 270)
-        self.assertEqual(points[-1]["value"], 265)
-        self.assertTrue(
-            all(p["value"] is None for p in result["cycling_ftp_watts"][0]["points"])
-        )
+        result = analysis_history(snapshot, {}, date(2026, 10, 2))
+        self.assertNotIn("cycling_power_profile", result)
+        self.assertNotIn("cycling_eftp_watts", result["metrics"])
 
     def test_invalid_values_are_missing_and_empty_history_is_safe(self):
         snapshot = {

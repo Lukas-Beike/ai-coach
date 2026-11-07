@@ -154,6 +154,9 @@ def _secret_variants(value: Any) -> set[str]:
     return {item for item in variants if len(item) >= 4}
 
 
+_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+
+
 def config_secret_values(config: Any) -> tuple[str, ...]:
     """Return the secret-bearing values of one configuration for redaction."""
     return tuple(
@@ -163,6 +166,7 @@ def config_secret_values(config: Any) -> tuple[str, ...]:
             "intervals_api_key",
             "garmin_email",
             "garmin_password",
+            "garmin_personal_api_key",
             "garmin_tokenstore",
             "garmin_fixture_path",
             "app_password",
@@ -454,6 +458,8 @@ class Redactor:
             redacted = re.sub(
                 r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted
             )
+            # Bearer JWTs (Garmin Personal API tokens) outside an Authorization header.
+            redacted = _JWT_RE.sub("[REDACTED_TOKEN]", redacted)
             # Preserved configurations and logs may still contain legacy keys.
             redacted = re.sub(
                 r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_GEMINI_KEY]", redacted
@@ -497,6 +503,7 @@ def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
         "intervals_api_key",
         "garmin_email",
         "garmin_password",
+        "garmin_personal_api_key",
         "app_password",
         "wahoo_client_secret",
         "yazio_email",
@@ -544,11 +551,7 @@ def _clean_diagnostic_text(
         safe = safe.replace(secret, _REDACTED)
     safe = _DIAGNOSTIC_AUTH_RE.sub("[REDACTED_AUTHORIZATION]", safe)
     safe = _redact_labeled_secrets(safe)
-    safe = re.sub(
-        r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
-        "[REDACTED_TOKEN]",
-        safe,
-    )
+    safe = _JWT_RE.sub("[REDACTED_TOKEN]", safe)
     safe = _DIAGNOSTIC_PRIVATE_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", safe)
     return _DIAGNOSTIC_DATA_URL_RE.sub("[OMITTED_BINARY]", safe)
 

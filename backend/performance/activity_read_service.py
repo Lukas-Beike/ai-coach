@@ -1,5 +1,6 @@
 """Completed-activity analysis combining activity reads and performance context."""
 
+import functools
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from typing import Any
@@ -10,9 +11,12 @@ from backend.activities.activity_summary import ActivitySummary
 from backend.activities.detail_contract import measured_order
 from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.read_service import ActivityReadService, ActivitySummarySource
+from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.profile import timezone_name
+from backend.canonical.local_time import local_date
 from backend.canonical.records import ActivityRecord
 from backend.errors import AppError
+from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_detail import (
     CanonicalDetailReader,
     RefreshableProviders,
@@ -23,9 +27,11 @@ from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
     read_performance_inputs,
+    resolve_reader,
     with_read_status,
 )
 from backend.performance.context import current_performance_context
+from backend.performance.current_thresholds import ZoneConfigurationSource
 from backend.performance.detail_envelope import (
     DetailEnvelopeReader,
     feedback_session_load,
@@ -60,6 +66,13 @@ class ActivityAnalysisReadService(ActivityReadService):
         self._session_records = session_records
         self._refreshable = refreshable
 
+    def _zone_settings_reader(
+        self, profile: Mapping[str, Any]
+    ) -> Callable[[Any, ActivityRecord], ZoneSettings]:
+        return _session_zone_settings(
+            self._canonical, ZoneInfo(timezone_name(profile.get("timezone")))
+        )
+
     def _performance_inputs(
         self, as_of: date, activity_id: str | None = None
     ) -> tuple[
@@ -82,6 +95,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                     db,
                     activity_reader=reader,
                     as_of=as_of,
+                    include_local_load=True,
                     preferences=source.preferences_in(db),
                 ),
             )
@@ -104,6 +118,19 @@ class ActivityAnalysisReadService(ActivityReadService):
             return None
         with source.database_manager().read_snapshot() as db:
             return list(reader.activity_summaries(db, start=start, end=end))
+
+    def summaries_on_days(
+        self, days: Sequence[date]
+    ) -> dict[date, list[ActivitySummary]]:
+        """Canonical activity summaries of each local day, read in one snapshot."""
+        reader = self._canonical.activity_summary_reader()
+        if reader is None:
+            return {}
+        with self._canonical.database_manager().read_snapshot() as db:
+            return {
+                day: list(reader.activity_summaries(db, start=day, end=day))
+                for day in days
+            }
 
     def session_rpe_load(self, activity_id: Any, today: date) -> dict[str, Any] | None:
         """The session-RPE load the detail document serves for one activity."""
@@ -151,6 +178,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 return None
             return summary_reader.intervals_summary_row(db, provider_activity_id)
 
+        @functools.cache
         def requested_summary() -> ActivitySummary | None:
             return _find_summary(load_inputs(normalized_id), normalized_id)
 
@@ -181,6 +209,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 summary=requested_summary,
             ),
             zone=ZoneInfo(timezone_name(profile.get("timezone"))),
+            zone_settings=self._zone_settings_reader(profile),
         )
         with self._database_manager.read_snapshot() as db:
             document = reader.read(db, normalized_id)
@@ -191,7 +220,55 @@ class ActivityAnalysisReadService(ActivityReadService):
                     reason="activity_details_not_found",
                 )
             records = self._session_records(db, document["session"]["activity_id"])
+        _add_purpose(document["session"], requested_summary())
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
+
+
+def _add_purpose(session: dict[str, Any], summary: ActivitySummary | None) -> None:
+    """Copy the session's purpose and competition link from its summary."""
+    if summary is None:
+        return
+    if "purpose" in summary:
+        session["purpose"] = summary["purpose"]
+    if "competition_id" in summary:
+        session["competition_id"] = summary["competition_id"]
+    source = summary.get("sources", {}).get("purpose")
+    if source:
+        session["purpose_source"] = source
+
+
+def _session_zone_settings(
+    source: CanonicalPerformanceSource, zone: ZoneInfo
+) -> Callable[[Any, ActivityRecord], ZoneSettings]:
+    """The zones in effect for a session's sport, environment and local day.
+
+    Local configurations first, then provider configurations, then the plan-zone
+    thresholds of that day with the default limits, as planned units use them.
+    """
+
+    def read(db: Any, record: ActivityRecord) -> ZoneSettings:
+        day = local_date(record.started_at, zone)
+        reader = resolve_reader(source.observation_reader(), db)
+        thresholds = read_zone_thresholds(
+            reader, db, as_of=day, preferences=source.preferences_in(db)
+        )
+        configurations = (
+            reader.zone_configurations(db)
+            if isinstance(reader, ZoneConfigurationSource)
+            else ()
+        )
+        # The zones of planning's resolve_thresholds, without importing planning.
+        return ZoneSettings.from_configurations(
+            configurations,
+            record.sport,
+            record.environment,
+            day,
+            fallback=ZoneSettings.from_thresholds(
+                thresholds, record.sport, record.environment
+            ),
+        )
+
+    return read
 
 
 def _find_summary(

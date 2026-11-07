@@ -21,6 +21,7 @@ from backend.sync.canonical_coverage_store import (
 )
 from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.intervals_ingest import ingest_off_result
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.snapshot_storage import SnapshotStorage
@@ -50,7 +51,9 @@ class PerformanceRefreshService:
         *,
         zone_provider: Callable[[], tzinfo | None],
         snapshot_storage: SnapshotStorage | None = None,
+        ingest_enabled: Callable[[], bool] = lambda: True,
     ):
+        self._ingest_enabled = ingest_enabled
         self._zone_provider = zone_provider
         self._snapshot_storage = snapshot_storage or SnapshotStorage(
             sync_state_repository
@@ -83,6 +86,8 @@ class PerformanceRefreshService:
     def _refresh_inner(self, *, include_power_profile: bool = True) -> dict[str, Any]:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
+        if not self._ingest_enabled():
+            return ingest_off_result()
         if not self._lock.acquire(blocking=False):
             return {"status": "already_running"}
 

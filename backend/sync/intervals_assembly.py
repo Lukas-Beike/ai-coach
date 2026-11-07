@@ -30,6 +30,7 @@ from backend.sync.intervals import (
     IntervalsSyncStatus,
     IntervalsSyncWorkflow,
 )
+from backend.sync.intervals_ingest import IntervalsIngestSwitch
 from backend.sync.performance import (
     PerformanceRefreshFollowupService,
     PerformanceRefreshService,
@@ -143,6 +144,10 @@ class IntervalsSyncAssembly:
         self._performance_wait_seconds = waits.performance_wait_seconds
         self._poll_seconds = waits.poll_seconds
 
+    def ingest_switch(self) -> IntervalsIngestSwitch:
+        """Create the athlete's switch for reading Intervals.icu data."""
+        return IntervalsIngestSwitch(self._database_manager(), self._key_values)
+
     def activity_detail_service(self) -> ActivityDetailRefreshService:
         config = self._config()
         return ActivityDetailRefreshService(
@@ -154,6 +159,7 @@ class IntervalsSyncAssembly:
             store=ActivityDetailStore(self._database_manager()),
             utc_now=self._utc_now,
             configured=bool(config.intervals_api_key),
+            ingest_enabled=self.ingest_switch().enabled,
             references=ActivityReferences(self._database_manager()),
             canonical=CanonicalDetailWriter(),
             local_date=lambda: self._athlete_clock().now().date().isoformat(),
@@ -190,6 +196,7 @@ class IntervalsSyncAssembly:
             self._intervals_resync_gate,
             zone_provider=lambda: self._athlete_clock().now().tzinfo,
             snapshot_storage=self.snapshot_storage(),
+            ingest_enabled=self.ingest_switch().enabled,
         )
 
     def analysis_sessions_service(self) -> AnalysisSessionsRefreshService:
@@ -210,6 +217,7 @@ class IntervalsSyncAssembly:
             earliest_date=self._sync_earliest_date,
             snapshot_storage=self.snapshot_storage(),
             lock=self._intervals_sync_lock,
+            ingest_enabled=self.ingest_switch().enabled,
         )
 
     def snapshot_reader(self) -> IntervalsSnapshotReader:
@@ -296,4 +304,5 @@ class IntervalsSyncAssembly:
                 self._intervals_resync_gate,
                 wait_seconds=self._performance_wait_seconds,
             ),
+            ingest_enabled=self.ingest_switch().enabled,
         )

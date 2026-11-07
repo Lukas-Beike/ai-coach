@@ -16,8 +16,6 @@ from typing import Any, Final, cast
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.sync_time import activities_synced_at, intervals_synced_at
 from backend.canonical.domain_records import (
-    EMPTY_POWER_CURVE,
-    PowerCurve,
     ZoneConfiguration,
 )
 from backend.canonical.records import Observation
@@ -54,9 +52,9 @@ from backend.runtime.ports import (
     ActivityRowAndSummaryReader,
     ActivitySummaryReader,
     CanonicalReadStatus,
+    LocalLoadDayReader,
     ObservationReader,
     ObservationSourceSelector,
-    PowerCurveReader,
     ProviderCoverageReader,
     SleepPeriodReader,
 )
@@ -79,13 +77,9 @@ class CanonicalPerformanceInputs:
     they were not read. ``body`` holds the Garmin weight and body fat of the body
     history window.
 
-    ``form_by_day``, ``eftp_by_day`` and ``run_eftp_by_day`` are the
-    Intervals.icu wellness-day form and sport-scoped eFTP series.
-    ``ramp_rate`` is the latest wellness day's CTL minus the CTL of exactly seven
-    days earlier, rounded to two decimals, or None when either day is missing.
-    ``power_curve`` holds the stored power curve fetches and best power per
-    duration; it is empty when none is stored or it was not read (only the
-    analysis view asks for it).
+    ``form_by_day`` is the Intervals.icu wellness-day form series.
+    ``local_load_days`` is the stored local session load (card M6) per local ISO
+    day of the whole history, None when the reader does not store it.
 
     ``intervals_synced_at`` is the newest Intervals.icu fetch time of the
     canonical provider coverage (ISO text), None without an Intervals.icu sync; it
@@ -111,11 +105,8 @@ class CanonicalPerformanceInputs:
     garmin: GarminCanonicalMetrics | None = None
     daily_health: Mapping[str, Mapping[str, Any]] | None = None
     form_by_day: Mapping[date, float] | None = None
-    eftp_by_day: Mapping[date, float] | None = None
-    run_eftp_by_day: Mapping[date, float] | None = None
-    ramp_rate: float | None = None
+    local_load_days: Mapping[str, float] | None = None
     body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
-    power_curve: PowerCurve = EMPTY_POWER_CURVE
     pending: bool = False
     backfill_failed: bool = False
     activities_need_refresh: bool = False
@@ -170,8 +161,6 @@ class CanonicalPerformanceSource:
 ACTIVITY_HISTORY_DAYS: Final = 365
 # Daily totals of the days before ``as_of`` that the 7-day averages read.
 DAILY_HEALTH_DAYS: Final = 7
-# The ramp rate compares the CTL of the latest wellness day with this many days before.
-RAMP_RATE_DAYS: Final = 7
 
 
 def with_read_status(
@@ -234,12 +223,34 @@ def activity_summaries_with_sync_time(
     The sync time is the canonical coverage fetch time of the Intervals.icu
     activities, None when none is stored. The read never waits for the writer.
     """
+    summaries, synced_at, _loads = _read_summaries(source, load_days=False)
+    return summaries, synced_at
+
+
+def activity_summaries_with_load_days(
+    source: CanonicalPerformanceSource,
+) -> tuple[tuple[ActivitySummary, ...], str | None, Mapping[str, float]]:
+    """Read the summaries, their sync time and the local load per day in one read.
+
+    The load days are empty when the reader does not store the local load.
+    """
+    return _read_summaries(source, load_days=True)
+
+
+def _read_summaries(
+    source: CanonicalPerformanceSource, *, load_days: bool
+) -> tuple[tuple[ActivitySummary, ...], str | None, Mapping[str, float]]:
     reader = source.activity_summary_reader()
     if reader is None:
         raise RuntimeError("activity reads need the canonical activity summary reader")
     with source.database_manager().reader() as db:
         coverage = None if source.coverage is None else source.coverage()
-        return reader.activity_summaries(db), activities_synced_at(coverage, db)
+        loads = (
+            reader.local_load_days(db)
+            if load_days and isinstance(reader, LocalLoadDayReader)
+            else {}
+        )
+        return reader.activity_summaries(db), activities_synced_at(coverage, db), loads
 
 
 def activity_summaries_and_fingerprints(
@@ -275,12 +286,11 @@ def inputs_for_snapshot(
     db: Any,
     *,
     as_of: date,
-    include_power_curve: bool = False,
 ) -> CanonicalPerformanceInputs | None:
     """Read canonical load inputs inside the caller's snapshot transaction.
 
-    ``include_power_curve`` also reads the stored power curve, which only the
-    analysis view shows.
+    The whole-history local load per day is always read: every snapshot
+    consumer shows the local fitness (card M7).
     """
     if source is None:
         return None
@@ -292,7 +302,7 @@ def inputs_for_snapshot(
             db,
             activity_reader=source.activity_summary_reader(),
             as_of=as_of,
-            include_power_curve=include_power_curve,
+            include_local_load=True,
             preferences=source.preferences_in(db),
         ),
     )
@@ -382,12 +392,6 @@ class ReadOnceObservationReader:
             return ()
         return self._reader.zone_configurations(db)
 
-    def power_curve(self, db: Any) -> PowerCurve:
-        """Forward the power curve read; none for a source without it."""
-        if not isinstance(self._reader, PowerCurveReader):
-            return EMPTY_POWER_CURVE
-        return self._reader.power_curve(db)
-
     def observations(
         self,
         db: Any,
@@ -440,9 +444,7 @@ class _CarriedRows:
     body: CanonicalBodyInputs
     recovery: CanonicalRecoveryInputs
     form_by_day: Mapping[date, float]
-    eftp_by_day: Mapping[date, float]
-    run_eftp_by_day: Mapping[date, float]
-    power_curve: PowerCurve
+    local_load_days: Mapping[str, float] | None
 
     def inputs(
         self,
@@ -451,7 +453,6 @@ class _CarriedRows:
         ctl: float | None,
         atl: float | None,
         current: CanonicalCurrentInputs,
-        ramp_rate: float | None = None,
         preferences: SourcePreferences = NO_PREFERENCES,
     ) -> CanonicalPerformanceInputs:
         return CanonicalPerformanceInputs(
@@ -467,10 +468,7 @@ class _CarriedRows:
             daily_health=self.daily_health,
             body=self.body,
             form_by_day=self.form_by_day,
-            eftp_by_day=self.eftp_by_day,
-            run_eftp_by_day=self.run_eftp_by_day,
-            ramp_rate=ramp_rate,
-            power_curve=self.power_curve,
+            local_load_days=self.local_load_days,
             preferences=preferences,
         )
 
@@ -481,7 +479,7 @@ def read_performance_inputs(
     *,
     activity_reader: ActivitySummaryReader | None = None,
     as_of: date,
-    include_power_curve: bool = False,
+    include_local_load: bool = False,
     preferences: SourcePreferences = NO_PREFERENCES,
 ) -> CanonicalPerformanceInputs | None:
     """Read canonical activity summaries and wellness days in one selected unit.
@@ -490,9 +488,9 @@ def read_performance_inputs(
     selection over these inputs and carried with them.
 
     No snapshot section is read. None means no activity reader, no observed
-    wellness day and no stored power curve. ``as_of`` is the athlete-local day.
-    ``include_power_curve`` also reads the stored power curve; otherwise it
-    stays empty.
+    wellness day. ``as_of`` is the athlete-local day. ``include_local_load``
+    also reads the whole-history local load per day (``local_load_days``);
+    otherwise it stays None.
     """
     reader = resolve_reader(reader, db)
     if not isinstance(reader, ReadOnceObservationReader):
@@ -504,8 +502,7 @@ def read_performance_inputs(
         if activity_reader is None
         else activity_reader.activity_summaries(db, start=_activity_start(days, as_of))
     )
-    power_curve = reader.power_curve(db) if include_power_curve else EMPTY_POWER_CURVE
-    if activities is None and not days and power_curve.is_empty:
+    if activities is None and not days:
         return None
     latest_view = wellness_days.latest(days)
     latest_day = None if latest_view is None else latest_view.day
@@ -526,15 +523,9 @@ def read_performance_inputs(
             preferences=preferences,
         ),
         form_by_day=wellness_days.series(history, MetricKind.FORM),
-        eftp_by_day=wellness_days.wellness_day_values(
-            reader.observations(db, MetricKind.EFTP, sport=Sport.RIDE),
-            sport=Sport.RIDE,
-        ),
-        run_eftp_by_day=wellness_days.wellness_day_values(
-            reader.observations(db, MetricKind.EFTP, sport=Sport.RUN),
-            sport=Sport.RUN,
-        ),
-        power_curve=power_curve,
+        local_load_days=activity_reader.local_load_days(db)
+        if include_local_load and isinstance(activity_reader, LocalLoadDayReader)
+        else None,
     )
     if latest_day is None:
         return carried.inputs(
@@ -561,18 +552,8 @@ def read_performance_inputs(
             as_of=as_of,
             preferences=preferences,
         ),
-        ramp_rate=_ramp_rate(wellness_days.series(days, MetricKind.CTL), latest_day),
         preferences=preferences,
     )
-
-
-def _ramp_rate(ctl_by_day: Mapping[date, float], day: date) -> float | None:
-    """Return the CTL change over ``RAMP_RATE_DAYS`` days; exact days only."""
-    current = ctl_by_day.get(day)
-    earlier = ctl_by_day.get(day - timedelta(days=RAMP_RATE_DAYS))
-    if current is None or earlier is None:
-        return None
-    return round(current - earlier, 2)
 
 
 def _activity_start(days: tuple[WellnessDay, ...], as_of: date) -> date:

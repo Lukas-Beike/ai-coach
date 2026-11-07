@@ -19,6 +19,7 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.jobs import BACKFILL_CURSOR_STREAMS
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_runtime import ProviderSchedulePolicy
 from backend.sync.queue import SyncJobQueueService
@@ -238,23 +239,38 @@ class StartupSyncScheduler:
                 policy.refresh_payload("startup", "startup"),
                 requested_by="startup",
             )
-        if self._registry.supports_job(provider_id, _HISTORICAL_BACKFILL):
-            self._enqueue_historical_backfill(provider_id)
+        # Each backfill chain walks its own cursor to the floor once; a restart
+        # resumes below the cursor (the wellness walk is the one-off #1730).
+        for job_type in BACKFILL_CURSOR_STREAMS:
+            if self._registry.supports_job(provider_id, job_type):
+                self._enqueue_historical_backfill(provider_id, job_type)
 
-    def _enqueue_historical_backfill(self, provider: str) -> None:
-        if self._queue.active(provider, _HISTORICAL_BACKFILL):
+    def resume_provider(self, provider_id: str) -> None:
+        """Queue one provider's startup refresh and backfill again, e.g. when
+        the athlete turns its ingest back on."""
+        policy = self._policies.get(provider_id)
+        if policy is not None:
+            self._schedule_provider(provider_id, policy)
+
+    def _enqueue_historical_backfill(
+        self, provider: str, job_type: str = _HISTORICAL_BACKFILL
+    ) -> None:
+        if self._queue.active(provider, job_type):
             return
-        payload = self._historical_backfill_payload(provider)
+        payload = self._historical_backfill_payload(provider, job_type)
         if payload is not None:
             self._queue.enqueue(
                 provider,
-                _HISTORICAL_BACKFILL,
+                job_type,
                 payload,
                 requested_by="startup",
             )
 
-    def _historical_backfill_payload(self, provider: str) -> dict[str, Any] | None:
-        cursor = self._sync_state.cursor(provider, "historical").get("cursor")
+    def _historical_backfill_payload(
+        self, provider: str, job_type: str = _HISTORICAL_BACKFILL
+    ) -> dict[str, Any] | None:
+        stream = BACKFILL_CURSOR_STREAMS[job_type]
+        cursor = self._sync_state.cursor(provider, stream).get("cursor")
         if cursor and str(cursor) <= self._config.sync_earliest_date.isoformat():
             return None
         try:
@@ -267,7 +283,7 @@ class StartupSyncScheduler:
             resume_end = None
         payload: dict[str, Any] = {
             "days": self._config.sync_chunk_days,
-            "reason": "startup historical backfill",
+            "reason": f"startup {job_type.replace('_', ' ')}",
         }
         if resume_end is not None:
             payload["end_date"] = resume_end.isoformat()

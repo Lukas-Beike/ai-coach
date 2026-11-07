@@ -107,8 +107,21 @@ The system SHALL fill the activity duration by one rule for every provider: movi
 
 Evidence: `backend/canonical/records.py:activity_duration_s`, `backend/activities/canonical_sessions.py:_garmin_measurement_gaps`; `tests/test_canonical_records.py:ActivityDurationRuleTests`, `tests/test_intervals_activity_mapping.py:test_strength_duration_is_the_whole_session`, `tests/test_garmin_activity_mapping.py:test_moving_duration_comes_from_moving_duration_only`, `tests/test_canonical_sessions.py:test_a_wahoo_record_is_not_matched_by_the_intervals_elapsed_time`.
 
+### Requirement: Garmin activity summary values
+The system SHALL map the Garmin activity list's zone times, training-effect values, altitude extremes, elevation loss, temperature range, estimated sweat loss, lap count and average cadence onto the canonical activity record, so Garmin-only sessions carry them with the Garmin Connect source label.
+
+#### Scenario: Garmin run with zone times and extremes
+- **WHEN** a Garmin activity row carries `hrTimeInZone_1..5`, `aerobicTrainingEffect`, `minElevation`/`maxElevation`, `minTemperature`/`maxTemperature` and `averageRunningCadenceInStepsPerMinute`
+- **THEN** since Garmin activity mapper 14 the record carries heart-rate zones `Z1..Z5` by Garmin's own zones, the effect values on Garmin's 0.0-5.0 scale beside the effect label, both extremes, and the cadence halved to one-leg rpm; stored rows gain them by reprojection without a refetch.
+
+#### Scenario: Inconsistent Garmin extremes
+- **WHEN** a Garmin minimum altitude or temperature lies above its maximum, or one zone time is invalid
+- **THEN** that pair or zone distribution is dropped with one mapping issue, and the rest of the record is kept.
+
+Evidence: `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/activities/activity_summary.py:activity_summary`, `backend/activities/detail_contract.py:activity_detail_contract`; `tests/test_garmin_activity_mapping.py:ZoneEffectAndExtremeTests`, `tests/test_activity_summary.py:test_effect_values_and_garmin_extremes_reach_the_summary`, `tests/test_activity_detail_contract.py:test_garmin_summary_values_are_labelled_metrics`.
+
 ### Requirement: Health and body unit normalization
-The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.
+The system SHALL normalize Garmin sleep duration/score, night SpO2/respiration/sleeping HR, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.
 
 #### Scenario: Declared weight unit
 - **WHEN** a valid Garmin weigh-in explicitly declares pounds or grams
@@ -126,13 +139,17 @@ The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly
 - **WHEN** a payload has only a weekly HRV average and no last-night value
 - **THEN** the canonical last-night observation stays absent rather than borrowing the weekly statistic, and the weekly average is stored as its own weekly HRV observation.
 
+#### Scenario: Garmin night SpO2, respiration and sleeping heart rate
+- **WHEN** a Garmin sleep element carries `averageSpO2Value`, `lowestSpO2Value`, `averageRespirationValue` or `avgHeartRate`, at top level or in its `dailySleepDTO` (the SDK element and the wrapped flat Personal API `dailySleep` alike)
+- **THEN** each becomes a device-measured SPO2 (mean), SPO2_LOWEST (minimum), RESPIRATION_RATE (mean) or SLEEPING_HR (mean) observation with the `overnight` window on the night's date; a 0 value is "not measured" and yields nothing without an issue, and Garmin's whole-day pulse-ox and respiration summaries are not mapped to these kinds.
+
 #### Scenario: Stored Garmin health records after the weekly HRV mapping
 - **WHEN** the Garmin health mapper version changes to add the weekly HRV kind
 - **THEN** stored Garmin health records are reprojected through the existing canonical backfill without a provider refetch, schema change or remote write.
 
 Detailed contract: Zero SHALL remain valid for sleep score, steps, floors, and active energy where implemented, while absent or invalid measurements remain unknown.
 
-Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_wake_up_reading_wins_regardless_of_list_order`, `tests/test_garmin_health_mapping.py:test_manual_weigh_in_is_provider_reported_and_recorded_by_manual`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
+Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_wake_up_reading_wins_regardless_of_list_order`, `tests/test_garmin_health_mapping.py:test_manual_weigh_in_is_provider_reported_and_recorded_by_manual`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:SleepNightValueTests`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
 
 ### Requirement: Current thresholds and dated special metrics
 The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed conversion to canonical m/s, display conversion to seconds/km, date-bearing historical FTP, running race-prediction seconds, and endurance-score wrapper normalization. An undated current Garmin FTP, running threshold, zone maximum, or prediction may use the fetch's local day only in its implemented current-value path. Undated current FTP SHALL never invent historical FTP.
@@ -360,15 +377,23 @@ The system SHALL give activity consumers one provider-neutral summary per live c
 - **WHEN** Intervals.icu and Garmin Connect both report a session that canonical linking bundled
 - **THEN** consumers receive one summary with the local session id, the canonical sport and environment, and each value's source label.
 
+#### Scenario: Recording relayed through Garmin Connect
+- **WHEN** a Garmin Connect activity names a Wahoo or Zwift manufacturer
+- **THEN** its origin is that manufacturer (any other manufacturer stays a Garmin recording), so the Wahoo recording, not the Garmin copy, wins the measured values; Wahoo rides that are not indoor or virtual, including such relayed copies, carry the bike computer device type, and Garmin's own recordings name none.
+
 #### Scenario: Load on different scales
 - **WHEN** a session has only a Garmin training load
-- **THEN** the summary has no `training_load`, still counts its duration and distance, and loads of TSS-like models (Intervals.icu training load, TSS) keep their `load_model`.
+- **THEN** the summary has no provider TSS-like load, still counts its duration and distance, and loads of TSS-like models (Intervals.icu training load, TSS) are kept as `provider_training_load` with their `provider_load_model`.
+
+#### Scenario: Served load is local
+- **WHEN** a reader serves a session's summary
+- **THEN** `training_load` and `intensity` are the stored local load and power IF (M6) labelled `derived`, never a provider value.
 
 #### Scenario: Stored keys of a session
 - **WHEN** a consumer looks up feedback, workout profiles or analyses of a summary
 - **THEN** it uses the session's Intervals.icu activity id when it holds one, else the local session id, as the reference resolver does.
 
-Detailed contract: summary keys follow `activity_detail.v1` (`started_at_local`, `moving_duration_s`, `elapsed_duration_s`, `distance_m`, `elevation_gain_m`, `avg_hr`, `max_hr`, `avg_power`, `normalized_power`, `avg_speed_mps`, `pace_mps`, `intensity`, `rpe`, `feel`, `ftp_w`, `eftp_w`, `vo2max`, `training_load`, `load_model`, zone times as `{id, secs}` lists, `planned_event_id`, `recorded_by`, `source`, `sources`, `record_ids`). The Intervals.icu (v6) and Garmin (v7) mappers store the summary values in the record details, so the existing backfill re-maps stored rows; no schema change.
+Detailed contract: summary keys follow `activity_detail.v1` (`started_at_local`, `moving_duration_s`, `elapsed_duration_s`, `distance_m`, `elevation_gain_m`, `avg_hr`, `max_hr`, `avg_power`, `normalized_power`, `avg_speed_mps`, `pace_mps`, `grade_adjusted_speed_mps`, `rpe`, `feel`, `ftp_w`, `eftp_w`, `vo2max`, `provider_training_load`, `provider_load_model`, `provider_intensity`, the served `training_load`, `intensity`, `load_method`, `load_method_version`, `load_branch` and `load_threshold_after_session`, zone times as `{id, secs}` lists, `planned_event_id`, `recorded_by`, `source`, `sources`, `record_ids`). The Intervals.icu (v6) and Garmin (v7) mappers store the summary values in the record details, so the existing backfill re-maps stored rows; no schema change.
 
 Evidence: `backend/activities/activity_summary.py`, `backend/sync/canonical_table_reader.py:CanonicalTableReader.activity_sessions`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector.activity_summaries`; `tests/test_activity_summary.py`, `tests/test_canonical_table_reader.py:ActivitySessionReadTests`, `tests/test_intervals_activity_mapping.py:SummaryValueTests`, `tests/test_garmin_activity_mapping.py:SummaryValueTests`, `tests/test_provider_coupling_guard.py`.
 
@@ -407,3 +432,30 @@ The system SHALL let the athlete choose a preferred source (Garmin or Intervals.
 - **THEN** the Intervals.icu value is current and Garmin's stays an alternative.
 
 Evidence: `backend/performance/source_policy.py:preferences_from_profile`, `backend/performance/source_policy.py:source_order`, `backend/performance/source_policy.py:family_providers`, `backend/athlete/profile.py:normalize_profile`, `backend/performance/canonical_inputs.py:CanonicalPerformanceSource`; `tests/test_source_policy.py:PreferredSourceTests`, `tests/test_current_thresholds.py:PreferredSourceTests`, `tests/test_performance_display_sources.py:PreferredDisplayTests`, `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`, `tests/test_change_history.py:test_preferred_sources_are_audited_and_older_rows_stay_matchable`, `tests/test_performance_recovery_context.py:test_an_intervals_preference_uses_only_its_values`.
+
+### Requirement: Activity purpose
+The system SHALL classify why an activity was done as training, race, commute, warm-up or cool-down from Garmin's activity event type and stored competitions, never from Intervals.icu fields, and carry it with its source label on the session summary and the Coach activity list.
+
+#### Scenario: Garmin event types name race and commute
+- **WHEN** a Garmin activity list entry (unofficial SDK or Personal API) has `eventType.typeKey` `race` or `transportation`
+- **THEN** its record has purpose race or commute; any other event type, a missing event type or a missing key leaves the purpose unset, and a key that is not text is one mapping issue.
+
+#### Scenario: A race in any record wins
+- **WHEN** the records of one session report different purposes
+- **THEN** the session purpose is race if any record says race, else the first purpose in derived order, and `sources.purpose` names that record's provider.
+
+#### Scenario: Intervals.icu classification is not read
+- **WHEN** an Intervals.icu activity carries `sub_type`, `race` or `commute`
+- **THEN** its record has no purpose.
+
+#### Scenario: Commutes, warm-ups and cool-downs are never maximal efforts or plan completions
+- **WHEN** a session has purpose commute, warm-up or cool-down
+- **THEN** it stays out of the power and speed best values, mean-max curves, CP/CS fits and session comparisons, never completes a planned workout (a workout the provider paired with it stays open instead of matching another session by date), and a commute still counts in weekly volume, named again as `commute_sessions` and `commute_duration_s`.
+
+#### Scenario: Races are flagged for analysis
+- **WHEN** a session has purpose race
+- **THEN** its curve record and CP/CS efforts carry `effort_context` "race", the activity detail session carries `purpose`, `competition_id` and `purpose_source`, and the session-analysis playbook judges pacing, fade and finish instead of interval execution.
+
+Detailed contract: the purpose is stored in the record details (`purpose`), so no migration is needed; an unknown stored value is ignored on read. The Garmin activity mapper version 17 replays stored payloads. The Coach activity list adds `purpose_label` (Training, Wettkampf, Pendeln, Einfahren, Ausfahren). Warm-up and cool-down are reserved for the athlete's own marking, which is not yet implemented.
+
+Evidence: `backend/canonical/vocabulary.py:ActivityPurpose`, `backend/providers/garmin_activity_mapping.py:_purpose`, `backend/activities/session_purpose.py:session_purpose`, `backend/db/canonical_store.py:activity_summary_values`, `backend/coach/context.py:compact_coach_activity`, `backend/performance/report_service.py:curve_records`, `backend/performance/critical_power.py:_select_efforts`, `backend/activities/matching.py:match_planned_workouts`, `backend/performance/progress_report.py:_bucket`, `backend/performance/activity_read_service.py:_add_purpose`, `backend/coach/playbooks.py`; `tests/test_session_purpose.py`, `tests/test_coach_activity_summary_parity.py`, `tests/test_activity_purpose_consumers.py`, `tests/test_mean_max_curve.py:test_commutes_stay_out_and_races_are_flagged`, `tests/test_critical_power.py:EffortContextTests`, `tests/test_activity_matching.py:test_commutes_and_warmups_never_complete_a_planned_workout`.

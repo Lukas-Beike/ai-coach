@@ -11,6 +11,7 @@ from backend.errors import AppError
 _INVALID_HISTORY_ID = "Ungültige Änderungshistorie-ID."
 _MISSING_HISTORY = "Änderung nicht gefunden."
 _ALREADY_UNDONE = "Eine Undo-Aktion kann nicht erneut zurückgenommen werden."
+_NOT_UNDOABLE = "Ein Export an einen Anbieter lässt sich nicht zurücknehmen."
 _STALE_HISTORY = (
     "Die lokale Änderung wurde inzwischen weiter geändert; Undo wurde abgebrochen."
 )
@@ -158,6 +159,8 @@ class HistoryUndoService:
         history = dict(row)
         if history["action"] not in {"create", "update", "delete"}:
             raise AppError(409, _ALREADY_UNDONE)
+        if history["entity_type"] in change_history.NOT_UNDOABLE_ENTITY_TYPES:
+            raise AppError(400, _NOT_UNDOABLE)
         return normalized_id, history
 
     @staticmethod

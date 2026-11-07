@@ -7,11 +7,22 @@ and takes it from the best-ranked record that has it: measured values in
 ``derived_order`` (provider rank). ``sources`` names the source label of every
 value, so consumers never read provider rows or provider field names.
 
-``training_load`` is filled only from TSS-like load models, so loads of different
-scales are never added up; ``load_model`` names the model it came from.
-``training_effect_label`` is the provider's training-effect category and
-``training_effect_load`` the training load on that provider's own scale, from the
-same record.
+The athlete's provider ratings ``rpe`` and ``feel`` follow ``rating_order``:
+Garmin Connect, where the athlete rates on the watch, before the Intervals.icu
+copy. ``rpe_conflict`` marks only copies of one provider that disagree; the local
+session RPE of the feedback stays authoritative over both (M1).
+
+A provider's own load and intensity are never the session's load: the first
+TSS-like provider load is kept as ``provider_training_load`` (its model in
+``provider_load_model``) and the provider intensity as ``provider_intensity``,
+for cross-checking only. ``training_load`` and ``intensity`` are the local
+TSS-scale load and intensity factor (card M6) that the reader sets from the
+stored derived observations (``backend.sync.local_load.with_local_loads``).
+``training_effect_label`` is the provider's training-effect category,
+``training_effect_load`` the training load on that provider's own scale, and
+``aerobic_training_effect``/``anaerobic_training_effect`` its effect values, all
+from the same record. ``purpose`` follows ``session_purpose``; the reader links
+stored competitions afterwards (``session_purpose.with_competitions``).
 """
 
 from __future__ import annotations
@@ -23,8 +34,10 @@ from typing import Any, Final
 from backend.activities.detail_contract import (
     derived_order,
     measured_order,
+    rating_order,
     session_local_start,
 )
+from backend.activities.session_purpose import session_purpose
 from backend.canonical.activity_summary import (
     TSS_LIKE_LOAD_MODELS,
     ActivitySummary,
@@ -49,6 +62,7 @@ _MEASURED: Final = (
     ("elapsed_duration_s", "elapsed_duration_s"),
     ("distance_m", "distance_m"),
     ("elevation_gain_m", "elevation_gain_m"),
+    ("elevation_loss_m", "elevation_loss_m"),
     ("avg_hr", "avg_hr"),
     ("max_hr", "max_hr"),
     ("avg_power", "avg_power"),
@@ -56,18 +70,22 @@ _MEASURED: Final = (
     ("avg_speed_mps", "avg_speed_mps"),
     ("max_speed_mps", "max_speed_mps"),
     ("avg_temp_c", "avg_temp_c"),
-    ("rpe", "rpe"),
-    ("feel", "feel"),
+    ("min_temp_c", "min_temp_c"),
+    ("max_temp_c", "max_temp_c"),
     ("device_name", "device_name"),
+    ("energy_kj", "energy_kj"),
+    ("energy_kcal", "energy_kcal"),
 )
+# Summary key -> ActivityRecord field, in rating order.
+_RATINGS: Final = (("rpe", "rpe"), ("feel", "feel"))
 # Summary key -> ActivityRecord field, in derived order.
 _DERIVED: Final = (
     ("normalized_power", "normalized_power"),
     ("weighted_avg_speed_mps", "weighted_avg_speed_mps"),
     ("pace_mps", "pace_mps"),
-    ("intensity", "intensity"),
+    ("provider_intensity", "intensity"),
+    ("grade_adjusted_speed_mps", "grade_adjusted_speed_mps"),
     ("ftp_w", "ftp_w"),
-    ("eftp_w", "eftp_w"),
     ("vo2max", "vo2max"),
     ("power_zone_times", "power_zone_times_s"),
     ("heart_rate_zone_times", "hr_zone_times_s"),
@@ -109,8 +127,10 @@ def activity_summary(
         summary["assist"] = assist.value
     if offset is not None:
         summary["local_offset_minutes"] = offset
-    sources = _values(summary, measured, _MEASURED) | _values(
-        summary, derived, _DERIVED
+    sources = (
+        _values(summary, measured, _MEASURED)
+        | _values(summary, derived, _DERIVED)
+        | _values(summary, rating_order(records), _RATINGS)
     )
     load = next(
         (
@@ -120,26 +140,51 @@ def activity_summary(
         ),
         None,
     )
-    if len({record.rpe for record in records if record.rpe is not None}) > 1:
+    if _rpe_conflict(rating_order(records)):
         summary["rpe_conflict"] = True
     if load is not None:
-        summary["training_load"] = load.load
-        summary["load_model"] = load.load_model.value
-        sources["training_load"] = _label(load)
-    effect = _first(derived, "training_effect_label")
+        summary["provider_training_load"] = load.load
+        summary["provider_load_model"] = load.load_model.value
+        sources["provider_training_load"] = _label(load)
+    effect = next(
+        (record for record in derived if record.training_effect_label is not None),
+        None,
+    ) or next(
+        (
+            record
+            for record in derived
+            if record.aerobic_training_effect is not None
+            or record.anaerobic_training_effect is not None
+        ),
+        None,
+    )
     if effect is not None:
-        record, label = effect
-        summary["training_effect_label"] = label
-        sources["training_effect_label"] = _label(record)
-        if (
-            record.load is not None
-            and record.load_model is LoadModel.GARMIN_TRAINING_LOAD
-        ):
-            summary["training_effect_load"] = record.load
+        _training_effect(summary, sources, effect)
+    purpose = session_purpose(derived)
+    if purpose is not None and purpose.purpose is not None:
+        summary["purpose"] = purpose.purpose.value
+        sources["purpose"] = _label(purpose)
     summary["source"] = _label(primary)
     summary["sources"] = sources
     summary["record_ids"] = _record_ids(measured)
     return summary  # type: ignore[return-value]
+
+
+def _training_effect(
+    summary: dict[str, Any], sources: dict[str, str], record: ActivityRecord
+) -> None:
+    """Set the training-effect label, values and load of one record."""
+    for key in (
+        "training_effect_label",
+        "aerobic_training_effect",
+        "anaerobic_training_effect",
+    ):
+        value = getattr(record, key)
+        if value is not None:
+            summary[key] = value
+            sources[key] = _label(record)
+    if record.load is not None and record.load_model is LoadModel.GARMIN_TRAINING_LOAD:
+        summary["training_effect_load"] = record.load
 
 
 def _values(
@@ -157,6 +202,15 @@ def _values(
         summary[key] = _zones(value) if key in _ZONE_KEYS else value
         sources[key] = _label(record)
     return sources
+
+
+def _rpe_conflict(rated: Sequence[ActivityRecord]) -> bool:
+    """Whether copies of the provider whose RPE the summary uses disagree."""
+    with_rpe = [record for record in rated if record.rpe is not None]
+    if not with_rpe:
+        return False
+    provider = with_rpe[0].provenance.provider
+    return len({r.rpe for r in with_rpe if r.provenance.provider is provider}) > 1
 
 
 def _record_ids(measured: Sequence[ActivityRecord]) -> dict[str, str]:

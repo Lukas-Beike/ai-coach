@@ -1087,7 +1087,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "sport_setting",
             "sport_info_setting",
-            "intervals_eftp_value",
             "intervals_max_hr_metric",
             "threshold_pace_seconds",
             "zone2_pace_seconds",
@@ -1137,13 +1136,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "backend.performance.daily_health",
         ("garmin_daily_health_metrics",),
-    ),
-    (
-        "backend.performance.eftp",
-        (
-            "_activity_eftp_value",
-            "eftp_30_day_average",
-        ),
     ),
     (
         "backend.performance.wellness",

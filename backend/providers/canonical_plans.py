@@ -29,6 +29,7 @@ from backend.canonical.domain_records import (
     ZoneConfiguration,
 )
 from backend.canonical.garmin_payload import ITEM_SECTIONS as GARMIN_ITEM_SECTIONS
+from backend.canonical.garmin_payload import dedicated_activity_rows
 from backend.canonical.local_time import (
     local_date,
     parse_provider_datetime,
@@ -585,7 +586,7 @@ def garmin_ingest_plan(
                 zone=zone,
                 retrieved_at=activities_at,
                 training_loads=training_loads,
-                payload_loads=payload.get(GARMIN_TRAINING_LOAD_SECTION),
+                payload_loads=dedicated_activity_rows(payload),
             ),
             mapper_version=GARMIN_ACTIVITY_VERSION,
             zone=zone,

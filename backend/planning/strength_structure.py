@@ -13,6 +13,7 @@ from typing import Any, Final
 
 from backend.athlete.measurements import number
 from backend.errors import AppError
+from backend.providers import garmin_strength_workout as garmin_catalogue
 
 MAX_EXERCISES: Final = 12
 MAX_SETS: Final = 10
@@ -23,7 +24,10 @@ MAX_REST_S: Final = 600
 MAX_RPE: Final = 10
 MAX_RIR: Final = 10
 LOAD_KEYS: Final = ("kg", "pct_1rm", "rpe", "rir")
-EXERCISE_KEYS: Final = ("name", "sets", "reps", *LOAD_KEYS, "rest_s")
+# ``garmin_exercise`` names a Garmin catalogue exercise; ``garmin_pair`` is its
+# category/exercise pair, always derived from the catalogue on write.
+GARMIN_KEYS: Final = ("garmin_exercise", "garmin_pair")
+EXERCISE_KEYS: Final = ("name", "sets", "reps", *LOAD_KEYS, "rest_s", *GARMIN_KEYS)
 # Heavy from 80 % 1RM, RPE 8 or 2 reps in reserve; moderate from 65 %, RPE 6, RIR 4.
 HEAVY_PCT: Final = 80
 MODERATE_PCT: Final = 65
@@ -70,7 +74,53 @@ def _exercise(item: Any) -> dict[str, Any]:
             result[key] = _bounded(item[key], key, low, high, whole=whole)
     if sum(key in result for key in ("pct_1rm", "rpe", "rir")) > 1:
         raise _invalid("Pro Übung nur eine relative Last: %1RM, RPE oder RIR.")
+    _garmin_exercise(item, result)
     return result
+
+
+def _garmin_exercise(item: Mapping[str, Any], result: dict[str, Any]) -> None:
+    """Store an explicit Garmin catalogue exercise with its resolved pair.
+
+    Without an explicit name nothing is stored; the export resolves the exercise
+    name or an alias itself. The pair is always derived from the catalogue,
+    never taken from the request. Any name the catalogue does not know is
+    rejected with suggestions, also one a later catalogue version renamed.
+    """
+    requested = " ".join(str(item.get("garmin_exercise") or "").split())[:80]
+    if not requested:
+        return
+    if not garmin_catalogue.catalogue_available():
+        # Without the catalogue the name is kept and checked again on export.
+        result["garmin_exercise"] = requested
+        return
+    found = garmin_catalogue.catalogue_exercise(requested)
+    if found is None:
+        hint = garmin_catalogue.suggestions(requested)
+        raise _invalid(
+            f"Unbekannte Garmin-Übung: {requested}."
+            + (f" Vorschläge: {', '.join(hint)}." if hint else "")
+        )
+    result["garmin_exercise"] = found.name
+    result["garmin_pair"] = {"category": found.category, "exercise": found.exercise}
+
+
+def without_unknown_garmin(value: Any) -> Any:
+    """Drop a stored Garmin mapping the current catalogue no longer knows.
+
+    For stored structures only (for example a remote reconcile), so a catalogue
+    update loses that one mapping instead of the whole structure; new input
+    still goes through the strict check of ``normalize_structure``.
+    """
+    if not isinstance(value, list) or not garmin_catalogue.catalogue_available():
+        return value
+    return [
+        {key: item[key] for key in item if key not in GARMIN_KEYS}
+        if isinstance(item, Mapping)
+        and item.get("garmin_exercise")
+        and garmin_catalogue.catalogue_exercise(item["garmin_exercise"]) is None
+        else item
+        for item in value
+    ]
 
 
 def normalize_structure(value: Any) -> list[dict[str, Any]] | None:

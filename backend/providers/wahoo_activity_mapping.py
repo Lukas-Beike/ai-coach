@@ -32,7 +32,10 @@ Field rules:
   ``LoadModel.TSS`` so it is never mixed with another provider's load. Without a
   positive value the load stays unknown.
 
-Calories, speed and the workout file location stay out of the canonical record.
+* energy estimate: the summary's ``calories_accum`` (kcal) -> ``energy_kcal``;
+  zero means not estimated and becomes None (card M8).
+
+Speed and the workout file location stay out of the canonical record.
 The stored raw record drops the summary ``file`` object, which carries a
 download URL; see ``raw_workout_for_storage``.
 """
@@ -50,7 +53,12 @@ from backend.canonical.mapping import (
     MappingResult,
     coerce_number,
 )
-from backend.canonical.records import ActivityRecord, Provenance, activity_duration_s
+from backend.canonical.records import (
+    MAX_ACTIVITY_ENERGY_KCAL,
+    ActivityRecord,
+    Provenance,
+    activity_duration_s,
+)
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
     MAX_ACTIVITY_CADENCE_RPM,
@@ -63,6 +71,7 @@ from backend.canonical.validation import (
 )
 from backend.canonical.vocabulary import (
     Assist,
+    DeviceType,
     Environment,
     LoadModel,
     ProviderId,
@@ -78,7 +87,10 @@ from backend.canonical.vocabulary import (
 # Version 6: maps terrain, motor assistance and the native type id; track,
 # mountain and road biking and lap swimming name no environment, like the same
 # Garmin types (#1670).
-MAPPER_VERSION: Final = 6
+# Version 7: maps calories_accum, the device's energy estimate (card M8, #1680).
+# Version 8: a ride that is not indoor or virtual carries the bike computer device
+# type (#1686).
+MAPPER_VERSION: Final = 8
 WAHOO_LABEL: Final = "Wahoo"
 MAX_NAME_LENGTH: Final = 200
 MAX_WORKOUT_ID: Final = 2**63 - 1
@@ -95,6 +107,7 @@ _CADENCE_KEYS: Final = ("cadence_avg",)
 _NORMALIZED_POWER_KEYS: Final = ("power_bike_np_last",)
 _WORK_JOULES_KEYS: Final = ("work_accum",)
 _TSS_KEYS: Final = ("power_bike_tss_last",)
+_CALORIE_KEYS: Final = ("calories_accum",)
 _SUMMARY_FILE_KEY: Final = "file"
 _JOULES_PER_KJ: Final = 1000.0
 
@@ -348,11 +361,30 @@ def _map_row(
             reader.number(_CADENCE_KEYS, 0.0, MAX_ACTIVITY_CADENCE_RPM)
         ),
         energy_kj=_positive(None if joules is None else joules / _JOULES_PER_KJ),
+        energy_kcal=_positive(
+            reader.number(_CALORIE_KEYS, 0.0, MAX_ACTIVITY_ENERGY_KCAL)
+        ),
         local_offset_minutes=zone_offset_minutes(row.get("time_zone"), started_at),
         terrain=terrain,
         assist=assist,
         native_type=None if type_id is None else str(type_id),
+        device_type=wahoo_device_type(sport, environment),
     )
+
+
+def wahoo_device_type(sport: Sport, environment: Environment) -> DeviceType | None:
+    """Return the device type of a Wahoo recording, where it is certain.
+
+    A Wahoo ride that is not indoor or virtual is an ELEMNT bike computer
+    recording; road, mountain and track rides name no environment, so an unknown
+    environment counts. Indoor or app rides and other sports name no device type.
+    """
+    if sport is Sport.RIDE and environment in (
+        Environment.OUTDOOR,
+        Environment.UNKNOWN,
+    ):
+        return DeviceType.BIKE_COMPUTER
+    return None
 
 
 def map_wahoo_activities(

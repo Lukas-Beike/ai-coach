@@ -33,8 +33,11 @@ from tests.test_feedback_session_identity import (
 class SessionCorrectionFixture(FeedbackSessionFixture):
     def setUp(self) -> None:
         super().setUp()
+        self.load_input_changes: list[bool] = []
         self.corrections = SessionCorrectionService(
-            self.manager, lambda: "2026-09-21T08:00:00+00:00"
+            self.manager,
+            lambda: "2026-09-21T08:00:00+00:00",
+            on_change=lambda: self.load_input_changes.append(True),
         )
         self.intervals = self.sessions["intervals"]
         self.garmin = self.sessions["garmin"]
@@ -112,6 +115,12 @@ class SessionCorrectionTests(SessionCorrectionFixture):
         )
         self.undo(result["change"])
         self.assertEqual(self._rows()[survivor], before)
+
+    def test_correction_and_its_undo_request_a_local_load_pass(self) -> None:
+        result = self.corrections.split(self.intervals, self.garmin)
+        self.assertEqual(self.load_input_changes, [True])
+        self.undo(result["change"])
+        self.assertEqual(self.load_input_changes, [True, True])
 
     def test_split_keeps_both_copies_apart_through_later_syncs(self) -> None:
         self.service.save(INTERVALS_ID, {"notes": "Heavy legs", "session_rpe": 6})

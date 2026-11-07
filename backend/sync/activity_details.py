@@ -50,6 +50,7 @@ from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,
 )
+from backend.sync.intervals_ingest import INGEST_OFF_REASON
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -112,7 +113,9 @@ class ActivityDetailRefreshService:
         references: ActivityReferenceResolver | None = None,
         canonical: CanonicalDetailWriter,
         local_date: Callable[[], str] | None = None,
+        ingest_enabled: Callable[[], bool] = lambda: True,
     ) -> None:
+        self._ingest_enabled = ingest_enabled
         self._api_client = api_client
         self._database_manager = database_manager
         self._row_reader = row_reader
@@ -161,6 +164,12 @@ class ActivityDetailRefreshService:
         if not self._configured:
             raise AppError(
                 503, "Intervals.icu ist nicht konfiguriert.", reason="not_configured"
+            )
+        if not self._ingest_enabled():
+            raise AppError(
+                409,
+                "Das Einlesen von Intervals.icu ist ausgeschaltet.",
+                reason=INGEST_OFF_REASON,
             )
         path = f"/activity/{quote(activity_id, safe='')}"
         detail = self._api_client.get(path, dict(ACTIVITY_DETAIL_PARAMS))
@@ -265,7 +274,7 @@ class ActivityDetailRefreshService:
         limit, outage or authentication failure ends the run, so it is not
         retried per activity and the next refresh tries again.
         """
-        if not self._configured:
+        if not self._configured or not self._ingest_enabled():
             return {"fetched": 0, "failed": 0}
         with self._database_manager.unit_of_work() as db:
             rows = self._row_reader.intervals_activity_payloads(db)

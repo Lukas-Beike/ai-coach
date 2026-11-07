@@ -1,7 +1,7 @@
 """Weekly per-sport progress projection and its Coach tool contract."""
 
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import Mock
 
 import server
@@ -107,6 +107,30 @@ class WeeklyProgressTests(unittest.TestCase):
         self.assertEqual("incomplete_current_week", weeks["2026-09-28"]["status"])
         self.assertEqual("no_records_unknown", weeks["2026-09-21"]["status"])
         self.assertNotIn("sports", weeks["2026-09-21"])
+
+    def test_fitness_is_the_local_curve_not_intervals_ctl(self):
+        loads = {
+            (self.TODAY - timedelta(days=i)).isoformat(): 70.0 for i in range(1, 200)
+        }
+
+        class _LoadRows(_Rows):
+            def local_load_days(self, _db):
+                return loads
+
+        service = self._service()
+        service._canonical = CanonicalPerformanceSource(
+            database_manager=_FakeDatabaseManager,
+            observation_reader=_EmptyReader,
+            activity_summaries=lambda: _LoadRows(()),
+        )
+        ctl = service.progress({"days": 28}, "UTC")["ctl"]
+        self.assertEqual(
+            (ctl["status"], ctl["source"], ctl["method_id"]),
+            ("ok", "Lokal berechnet (M7)", "local-fitness-fatigue"),
+        )
+        self.assertGreater(ctl["last"]["value"], 0)
+        # Without stored local load there is no fitness, whatever Intervals holds.
+        self.assertEqual(self._progress()["ctl"]["status"], "insufficient_data")
 
     def test_sport_filter_limits_buckets(self):
         rows = [

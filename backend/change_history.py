@@ -26,7 +26,12 @@ ENTITY_TYPES = {
     "zone_configuration",
     "activity_feedback",
     "activity_session",
+    "metric_export",
 }
+# A metric export to a provider; its entity id is "<provider>:<remote record>".
+# The write is remote, so it is shown but never undone.
+METRIC_EXPORT_ENTITY = "metric_export"
+NOT_UNDOABLE_ENTITY_TYPES = frozenset({METRIC_EXPORT_ENTITY})
 ACTIONS = {"create", "update", "delete", "undo"}
 # Fields a caller needs to undo a recorded change later.
 UNDO_REFERENCE_FIELDS = ("id", "entity_type", "action", "after_hash")
@@ -170,6 +175,18 @@ ZONE_CONFIGURATION_FIELDS = (
     "percent_limits",
 )
 
+# The exported fields, keyed like the export consent (metric_export_consent).
+METRIC_EXPORT_FIELDS = (
+    "weight",
+    "body_fat",
+    "resting_hr",
+    "threshold_pace",
+    "threshold_hr",
+    "max_hr",
+    "ftp",
+    "run_ftp",
+)
+
 
 def audit_projection_fields(entity_type: str) -> set[str]:
     fields_by_entity = {
@@ -181,6 +198,7 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "zone_configuration": set(ZONE_CONFIGURATION_FIELDS),
         "activity_feedback": set(ACTIVITY_FEEDBACK_FIELDS),
         "activity_session": set(ACTIVITY_SESSION_FIELDS),
+        METRIC_EXPORT_ENTITY: set(METRIC_EXPORT_FIELDS),
     }
     try:
         return fields_by_entity[entity_type]
@@ -448,5 +466,9 @@ def public_view(row: dict[str, Any]) -> dict[str, Any]:
             "before_present": bool(diff.get("before_present")),
             "after_present": bool(diff.get("after_present")),
         },
-        "remote_sync": "local_only",
+        **(
+            {"remote_sync": "remote", "undoable": False}
+            if row["entity_type"] in NOT_UNDOABLE_ENTITY_TYPES
+            else {"remote_sync": "local_only"}
+        ),
     }

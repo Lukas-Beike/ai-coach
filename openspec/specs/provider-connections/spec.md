@@ -115,25 +115,25 @@ The system SHALL keep external credentials and callback values out of public sta
 Evidence: `backend/providers/http.py:request_json`, `backend/providers/wahoo_fit_download.py:download_wahoo_fit`, `backend/http_api/wahoo.py:WahooGetRoutes`; `tests/test_provider_redirects.py:test_json_transport_rejects_same_and_cross_origin_redirects`, `tests/test_wahoo_http.py:test_callback_code_and_state_never_reach_logs`, `tests/test_wahoo_fit_download.py:test_request_is_a_plain_get_with_only_accept_and_user_agent`.
 
 ### Requirement: Explicit metric export and stored automatic consent
-The system SHALL offer supported metric export only to a capable target, with a preview, named target, explicit confirmation, and unchanged source/target evidence at execution. Automatic Garmin-to-Intervals export SHALL require separately stored named consent per exported field, preserve independent target edits across restarts, remain idempotent, and leave HR zones unchanged. Export failure SHALL preserve successful local Garmin import.
+The system SHALL offer metric export only to a capable target, with a preview, named target, explicit confirmation and unchanged evidence at execution. Thresholds SHALL be the resolved local, else Garmin, else Wahoo values, never the target's own. Automatic export SHALL need stored per-field consent and stay idempotent. Every write SHALL be in the change history without undo; export failure SHALL keep the local import.
 
 #### Scenario: Confirmed manual metric selection
 - **WHEN** selected source observations and live remote values still match a confirmed preview
-- **THEN** only selected supported fields are written, previous-value/source receipts are recorded, and HR zones recalculate only when explicitly requested for supported threshold fields.
+- **THEN** only selected supported fields are written, previous-value/source receipts and a change-history entry are recorded, and HR zones recalculate only when explicitly requested for supported threshold fields.
 
 #### Scenario: Automatic export after consent
-- **WHEN** a successful eligible current Garmin sync completes and stored Garmin-to-Intervals consent is enabled
-- **THEN** only the consented fields transfer; unchanged target baselines permit eligible new values to transfer; a target edited independently is preserved and reported as conflict, without blocking unrelated fields.
+- **WHEN** a successful eligible current Garmin sync completes, a local zone configuration is saved, removed or undone, or a Wahoo sync succeeds, and stored consent is enabled
+- **THEN** only the consented fields transfer; a different Intervals.icu sport setting is overwritten by the resolved threshold, heart-rate thresholds are written with `recalcHrZones=true`; a wellness target edited independently is preserved and reported as conflict, without blocking unrelated fields.
 
 #### Scenario: Unconfirmed or failed export
 - **WHEN** the request lacks named consent/confirmation, preview values changed, or a remote write fails
-- **THEN** unauthorized or stale selection sends nothing, failures receive safe per-field results, and the imported local Garmin data is retained.
+- **THEN** unauthorized or stale selection sends nothing, failures receive safe per-field results, and the imported local data is retained.
 
 #### Scenario: Per-field consent
-- **WHEN** the athlete enables the automatic export for the first time, or changes one field's consent with a confirmed request naming Garmin and Intervals.icu
-- **THEN** a new consent covers every field except cycling FTP, a consent stored before per-field consent keeps all fields until a field is changed, the response lists each changed field as a receipt, and revoking the last field ends the automatic export.
+- **WHEN** the athlete enables the automatic export for the first time, or changes one field's consent with a confirmed request naming Intervals.icu
+- **THEN** a new consent covers threshold heart rate, maximum heart rate and running threshold pace; cycling FTP, running FTP and the wellness fields are opt-in; a consent stored before per-field consent keeps the fields of that time (all but running FTP) until a field is changed; the response lists each changed field as a receipt, and revoking the last field ends the automatic export.
 
-Evidence: `backend/sync/metric_export.py:MetricExportService.export`, `backend/sync/metric_export.py:MetricExportService.configure_automatic`, `backend/sync/metric_export.py:MetricExportService.sync_garmin`, `backend/sync/metric_export_consent.py:enabled_fields`, `backend/sync/garmin_service.py:GarminSyncService._execute`; `tests/test_metric_export.py:test_automatic_export_requires_persisted_named_consent`, `tests/test_metric_export.py:test_legacy_consent_keeps_all_fields_until_saved_per_field`, `tests/test_metric_export.py:test_new_consent_starts_without_ftp`, `tests/test_metric_export.py:test_new_garmin_value_after_restart_preserves_a_manual_target_change`, `tests/test_sync_garmin_service.py:test_export_failure_preserves_import_and_does_not_expose_error`, `tests/metric-export.test.cjs`.
+Evidence: `backend/sync/metric_export.py:MetricExportService.export`, `backend/sync/metric_export.py:MetricExportService.configure_automatic`, `backend/sync/metric_export.py:MetricExportService.sync_automatic`, `backend/sync/metric_export_consent.py:enabled_fields`, `backend/performance/canonical_current.py:read_export_thresholds`, `backend/sync/metric_export_runner.py:MetricExportRunner`, `backend/sync/garmin_service.py:GarminSyncService._execute`; `tests/test_metric_export.py:test_automatic_export_requires_persisted_named_consent`, `tests/test_metric_export.py:test_legacy_consent_keeps_all_fields_until_saved_per_field`, `tests/test_metric_export.py:test_new_consent_starts_with_heart_rate_and_pace_thresholds_only`, `tests/test_metric_export.py:test_a_target_side_threshold_change_is_overwritten_after_restart`, `tests/test_metric_export.py:test_heart_rate_thresholds_recalculate_target_zones`, `tests/test_metric_export.py:test_writes_are_in_the_change_history_without_undo`, `tests/test_current_thresholds.py:test_local_then_garmin_then_wahoo_and_never_intervals`, `tests/test_metric_export_runner.py`, `tests/test_sync_garmin_service.py:test_export_failure_preserves_import_and_does_not_expose_error`, `tests/metric-export.test.cjs`.
 
 ### Requirement: Explicit Wahoo library-plan export
 The system SHALL export local library workouts to Wahoo only through an explicit Wahoo `plan_push` request with expected payload hashes. It SHALL serialize supported workouts before remote writes, retain Wahoo links separately from Intervals slots, verify readback, and reuse the existing remote plan or matching coach external identity on repeat export. It SHALL refuse Wahoo calendar scheduling and repair operations.
@@ -150,7 +150,11 @@ The system SHALL export local library workouts to Wahoo only through an explicit
 - **WHEN** a workout uses another sport, zones, ramps, unsupported pace units, or a relative target without its required athlete reference
 - **THEN** Wahoo mapping rejects that entry; supported biking/running time or distance steps can use absolute power/HR/pace and relative FTP/max-HR/threshold-HR/threshold-speed targets with the needed header reference.
 
-Evidence: `backend/sync/wahoo_plan_push.py:WahooPlanPushService`, `backend/sync/wahoo_workout_export.py:WahooWorkoutExport`, `backend/providers/wahoo_plan_mapping.py:wahoo_plan`; `tests/test_wahoo_plan_push.py:test_second_push_updates_the_same_plan_without_duplicating`, `tests/test_wahoo_plan_push.py:test_changed_workout_is_a_conflict_and_nothing_is_written`, `tests/test_wahoo_plan_push_jobs.py:test_coach_and_replanning_never_reference_the_wahoo_export`, `tests/test_wahoo_plan_mapping.py:test_zone_targets_are_rejected_instead_of_guessed`.
+#### Scenario: Header references from resolved thresholds
+- **WHEN** a library workout with relative steps is serialized for Wahoo
+- **THEN** its header references are the plan sport's export thresholds (local zones, else Garmin, else Wahoo, never Intervals.icu; threshold speed from the run threshold pace), read at serialization time.
+
+Evidence: `backend/sync/wahoo_plan_push.py:WahooPlanPushService`, `backend/sync/wahoo_workout_export.py:WahooWorkoutExport`, `backend/sync/wahoo_workout_export.py:plan_references`, `backend/providers/wahoo_plan_mapping.py:wahoo_plan`; `tests/test_wahoo_plan_mapping.py:ExportReferenceTests`, `tests/test_wahoo_plan_mapping.py:AssemblyReferenceTests`, `tests/test_wahoo_plan_push.py:test_second_push_updates_the_same_plan_without_duplicating`, `tests/test_wahoo_plan_push.py:test_changed_workout_is_a_conflict_and_nothing_is_written`, `tests/test_wahoo_plan_push_jobs.py:test_coach_and_replanning_never_reference_the_wahoo_export`, `tests/test_wahoo_plan_mapping.py:test_zone_targets_are_rejected_instead_of_guessed`.
 
 ### Requirement: Optional Yazio configuration
 The system SHALL treat Yazio as an optional read-only food source configured by server-side environment values, with account email, password and application client identifiers overridable from the PWA provider settings. Stored values SHALL take precedence, clearing them SHALL restore the environment value, and Yazio SHALL be configured only when all four values exist. Status SHALL report only presence and source, never a value.

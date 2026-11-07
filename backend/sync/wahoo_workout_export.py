@@ -12,11 +12,13 @@ opens the transport.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from typing import Any
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
+from backend.canonical.records import Observation
+from backend.canonical.vocabulary import MetricKind, Sport
 from backend.errors import AppError
 from backend.planning.sport import planned_sport_environment
 from backend.providers.wahoo_client import WahooClient
@@ -46,7 +48,7 @@ class WahooWorkoutExport:
         client_factory: Callable[[], WahooClient],
         *,
         now: Callable[[], datetime],
-        references: Callable[[], WahooPlanReferences | None] | None = None,
+        references: Callable[[Sport], WahooPlanReferences | None] | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._now = now
@@ -65,7 +67,7 @@ class WahooWorkoutExport:
             raise WahooPlanMappingError(
                 "Die Einheit enthält keine gültigen Trainingsschritte für Wahoo."
             ) from exc
-        references = self._references() if self._references else None
+        references = self._references(sport) if self._references else None
         plan = wahoo_plan(
             name=str(workout.get("name") or "Coach-Einheit"),
             description=description,
@@ -157,3 +159,29 @@ def _saved_entry(plan: Any) -> dict[str, Any]:
         )
     entry["id"] = str(identifier)
     return entry
+
+
+def plan_references(
+    thresholds: Mapping[tuple[MetricKind, Sport], Observation], sport: Sport
+) -> WahooPlanReferences:
+    """Return the plan header references of ``sport`` from resolved thresholds.
+
+    ``thresholds`` are the export thresholds (local zones, then Garmin, then
+    Wahoo; never Intervals.icu). Values are read for the plan's own sport; the
+    threshold speed is the run threshold pace in m/s.
+    """
+
+    def value(kind: MetricKind) -> float | None:
+        observation = thresholds.get((kind, sport))
+        return None if observation is None else float(observation.value.value)
+
+    def whole(kind: MetricKind) -> int | None:
+        number = value(kind)
+        return None if number is None else round(number)
+
+    return WahooPlanReferences(
+        ftp=whole(MetricKind.FTP),
+        max_hr=whole(MetricKind.MAX_HR),
+        threshold_hr=whole(MetricKind.THRESHOLD_HR),
+        threshold_speed=value(MetricKind.THRESHOLD_PACE),
+    )

@@ -112,12 +112,10 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         )
         garmin = {"weight": merged}
         projection = body_history(
-            None,
             GarminSyncStatus.from_state(garmin),
             today,
             canonical=garmin_body_from_payload(garmin, today),
             wellness_days=(),
-            activities=(),
             garmin_ftp={},
         )
         metrics = projection["windows"]["14d"]["metrics"]

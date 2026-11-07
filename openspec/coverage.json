@@ -2383,13 +2383,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/performance/eftp.py",
-      "capabilities": [
-        "performance-and-readiness"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/performance/freshness.py",
       "capabilities": [
         "performance-and-readiness"

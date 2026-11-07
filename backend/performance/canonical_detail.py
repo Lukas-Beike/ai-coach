@@ -29,6 +29,8 @@ from backend.activities.detail_merge import (
 )
 from backend.activities.detail_store import summary_fingerprint
 from backend.activities.detail_summary_metrics import intervals_summary_metrics
+from backend.activities.stream_zones import with_stream_zones
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_detail import (
     ActivityDetailSet,
     ActivityStreamSet,
@@ -47,6 +49,10 @@ from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.performance.session_execution import session_execution
+from backend.performance.session_metrics_reads import (
+    detail_metric_entries,
+    stored_session_metrics,
+)
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
     map_intervals_summary_zones,
@@ -117,6 +123,10 @@ def read_reference(db: Any, any_id: str) -> str | None:
     return None
 
 
+# The zone settings in effect for one session's primary record, or None.
+type ZoneSettingsReader = Callable[[Any, ActivityRecord], ZoneSettings | None]
+
+
 class CanonicalDetailReader:
     """Serve the ``activity_detail.v1`` document of a canonical session."""
 
@@ -130,6 +140,7 @@ class CanonicalDetailReader:
         failures: FailureReader | None = None,
         envelope: EnvelopeReader | None = None,
         zone: tzinfo = UTC,
+        zone_settings: ZoneSettingsReader | None = None,
     ) -> None:
         self._session_records = session_records
         self._zone = zone
@@ -139,6 +150,8 @@ class CanonicalDetailReader:
         self._fingerprints = fingerprints
         self._failures = failures
         self._envelope = envelope
+        # Without it no zone distribution is derived from the streams.
+        self._zone_settings = zone_settings
 
     def read(self, db: Any, any_id: str) -> dict[str, Any] | None:
         """Return the document, or None when the session has no readable records.
@@ -170,6 +183,11 @@ class CanonicalDetailReader:
                 candidates, activity_id, analysis_record, summary
             )
         merged = merge_details(candidates)
+        zone_settings = self._zone_settings
+        if zone_settings is not None:
+            merged = with_stream_zones(
+                merged, lambda: zone_settings(db, analysis_record)
+            )
         status = self._status(db, sets, intervals_id, summary)
         stale = any(state.stale for state in status.values())
         analysis = (
@@ -191,10 +209,13 @@ class CanonicalDetailReader:
             refreshable=self._refreshable(),
             status=status,
             envelope=envelope,
-            summary_metrics=None
-            if summary is None
-            else intervals_summary_metrics(
-                summary, recorded_by=analysis_record.provenance.recorded_by
+            summary_metrics=_summary_metrics(
+                None
+                if summary is None
+                else intervals_summary_metrics(
+                    summary, recorded_by=analysis_record.provenance.recorded_by
+                ),
+                stored_session_metrics(db, [activity_id]).get(activity_id, {}),
             ),
             zone=self._zone,
         )
@@ -428,9 +449,19 @@ def _with_live_zones(
 
 
 def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
-    """Attach the record's provenance label; stored sets do not keep labels."""
+    """Attach the record's label and origin; stored sets do not keep labels.
+
+    The origin follows the current record, so a set stored before a mapper
+    re-named the origin (a Wahoo ride relayed through Garmin Connect, #1686)
+    ranks like its record without a re-fetch.
+    """
     provenance = cast(
-        Provenance, replace(item.detail.provenance, label=record.provenance.label)
+        Provenance,
+        replace(
+            item.detail.provenance,
+            label=record.provenance.label,
+            recorded_by=record.provenance.recorded_by,
+        ),
     )
     return StoredDetailSet(
         provider=item.provider,
@@ -441,6 +472,22 @@ def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
         fetched_at=item.fetched_at,
         detail=cast(ActivityDetailSet, replace(item.detail, provenance=provenance)),
     )
+
+
+def _summary_metrics(
+    provider: Mapping[str, Mapping[str, Any]] | None,
+    stored: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Local session metrics (card M8) win; a provider value of the same key stays an alternative."""
+    metrics = {key: dict(entry) for key, entry in (provider or {}).items()}
+    for key, entry in detail_metric_entries(stored).items():
+        other = metrics.get(key)
+        if other is not None:
+            entry["alternatives"] = [
+                {"value": other.get("value"), "source": other.get("source")}
+            ]
+        metrics[key] = entry
+    return metrics
 
 
 def _stored_payload(

@@ -39,9 +39,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from datetime import date, tzinfo
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
+from backend.activities.session_purpose import with_competitions
+from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.domain_records import (
     EMPTY_POWER_CURVE,
@@ -50,7 +52,11 @@ from backend.canonical.domain_records import (
 )
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import CompetitionRepository, KeyValueRepository
+from backend.performance.session_metrics_reads import (
+    stored_session_metrics,
+    with_session_metrics,
+)
 from backend.runtime.ports import (
     ActivityReader,
     ActivityRowReader,
@@ -71,6 +77,11 @@ from backend.sync.canonical_coverage_store import (
     CANONICAL_COVERAGE_PROVIDERS,
     LIVE_COVERAGE_PROVIDERS,
     CanonicalCoverageStore,
+)
+from backend.sync.local_load import (
+    daily_local_loads,
+    stored_local_loads,
+    with_local_loads,
 )
 
 REASON_COMPLETE: Final = "backfill_complete"
@@ -178,8 +189,10 @@ class CanonicalReadSelector(
         key_values: KeyValueRepository,
         zone: Callable[[Any], tzinfo],
         compact_only: Callable[[Any], bool],
+        competitions: CompetitionRepository,
     ) -> None:
         self._zone = zone
+        self._competitions = competitions
         self._compact_only = compact_only
         self._table = table
         self._reprojecting_table = reprojecting_table
@@ -209,7 +222,9 @@ class CanonicalReadSelector(
         limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
         """Return raw activity rows from the same source as ``activities``."""
-        return self._source(db).intervals_activity_payloads(db, start=start, end=end, limit=limit)
+        return self._source(db).intervals_activity_payloads(
+            db, start=start, end=end, limit=limit
+        )
 
     def summary_fingerprints(
         self, db: Any, keys: Iterable[ProviderActivityKey]
@@ -239,12 +254,62 @@ class CanonicalReadSelector(
         end: date | None = None,
         limit: int | None = None,
     ) -> tuple[ActivitySummary, ...]:
-        """Return one neutral summary per session, newest first."""
-        return activity_summaries(
-            self._source(db).activity_sessions(db, start=start, end=end, newest=limit),
+        """Return one neutral summary per session, newest first.
+
+        ``training_load`` and ``intensity`` are the stored local load (card M6);
+        stored competitions mark and link their races (``with_competitions``).
+        EF, VI, work and decoupling are the stored local session metrics (card M8).
+        """
+        source = self._source(db)
+        summaries = activity_summaries(
+            source.activity_sessions(db, start=start, end=end, newest=limit),
             self._zone(db),
             limit=limit,
         )
+        ids = [summary["id"] for summary in summaries]
+        loaded = with_session_metrics(
+            with_local_loads(summaries, stored_local_loads(db, ids)),
+            stored_session_metrics(db, ids),
+        )
+        days = sorted(filter(None, (summary_local_date(row) for row in loaded)))
+        if not days:
+            return cast(tuple[ActivitySummary, ...], loaded)
+        competitions = self._competitions.between(db, days[0], days[-1])
+        if not competitions:
+            return cast(tuple[ActivitySummary, ...], loaded)
+        # A limit can cut the oldest day: link over all its sessions, so the
+        # race hint never depends on the page size.
+        whole_day: tuple[ActivitySummary, ...] = ()
+        if limit is not None:
+            oldest = date.fromisoformat(days[0])
+            whole_day = activity_summaries(
+                source.activity_sessions(db, start=oldest, end=oldest),
+                self._zone(db),
+            )
+        page = {str(row["id"]) for row in loaded}
+        linked = {
+            str(row["id"]): row
+            for row in with_competitions(
+                [
+                    *loaded,
+                    *(dict(row) for row in whole_day if str(row["id"]) not in page),
+                ],
+                competitions,
+            )
+        }
+        return cast(
+            tuple[ActivitySummary, ...],
+            tuple(linked[str(row["id"])] for row in loaded),
+        )
+
+    def local_load_days(self, db: Any) -> dict[str, float]:
+        """Return the stored local session load (card M6) summed per local day.
+
+        Empty before the first completed backfill, as every other read.
+        """
+        if self._read_state(db) is ReadState.PENDING:
+            return {}
+        return daily_local_loads(db)
 
     def observations(
         self,

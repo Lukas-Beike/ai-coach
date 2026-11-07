@@ -31,6 +31,7 @@ from backend.sync.garmin_service import (
     shared_garmin_sync_lock,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.garmin_wellness_history import GarminWellnessHistoryService
 from backend.sync.gates import RESYNC_RUNNING_REASON
 from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncOperationStateWriter
@@ -174,6 +175,25 @@ class GarminAssembly:
             ),
         )
 
+    def strength_push_service(self) -> Any:
+        """Compose the explicit strength-workout push; it opens no connection yet."""
+        from backend.sync.garmin_strength_push import (
+            GarminSdkWriteSession,
+            GarminStrengthPushService,
+        )
+
+        return GarminStrengthPushService(
+            configured=lambda: bool(self.sync_service().configured()),
+            database_manager=self._database_manager,
+            sdk_session=GarminSdkWriteSession(
+                self.remote_reader(), self.fixture_loader(), self._garmin_tokens
+            ),
+            today=lambda: self._athlete_clock.now().date(),
+            now=self._datetime_now,
+            redactor=self._redactor.redact_text,
+            gate=self._resync_gate,
+        )
+
     def body_export(self, profile: Any) -> Any:
         from backend.sync.garmin_profile_body_export import GarminProfileBodyExport
 
@@ -285,6 +305,23 @@ class GarminAssembly:
                 lambda: self._athlete_clock.now().tzinfo,
             ),
             payload_service=self.payload_service(),
+            coordination=self._sync_coordination(),
+            utc_now=self._utc_now,
+            configured=lambda: fixture_loader.path() is None and reader.configured(),
+        )
+
+    def wellness_history_service(self) -> GarminWellnessHistoryService:
+        """Compose the one-off, insert-only Garmin wellness history backfill."""
+        fixture_loader = self.fixture_loader()
+        reader = self.remote_reader()
+        return GarminWellnessHistoryService(
+            reader=reader,
+            database_manager=self._database_manager(),
+            snapshot_writer=GarminSnapshotWriter(
+                self._key_values,
+                lambda: self._athlete_clock.now().tzinfo,
+            ),
+            sync_state_repository=self._sync_state_repository(),
             coordination=self._sync_coordination(),
             utc_now=self._utc_now,
             configured=lambda: fixture_loader.path() is None and reader.configured(),

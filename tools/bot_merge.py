@@ -7,6 +7,12 @@ import sys
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+OPENSPEC_BRANCH = "chore/openspec-update"
+# Must match the allowlist in .github/workflows/openspec-update.yml.
+OPENSPEC_FILES = re.compile(
+    r"\.agents/skills/(\.openspec-target|openspec-[a-z0-9-]+/SKILL\.md)"
+)
+
 
 def eligible(pr, repository):
     if (
@@ -24,7 +30,7 @@ def eligible(pr, repository):
     if author != "ai-coach-release-bot[bot]":
         return False
     patterns = {
-        "develop": r"chore/release-version-\d+\.\d+\.\d+",
+        "develop": r"chore/release-version-\d+\.\d+\.\d+|" + OPENSPEC_BRANCH,
         "main": r"chore/release-promotion-\d+\.\d+\.\d+",
     }
     return bool(
@@ -74,6 +80,24 @@ def release_test_passed(pr, repository, token):
     return False
 
 
+def only_generated_skills(number, repository, token):
+    page = 1
+    while True:
+        files = request(
+            f"repos/{repository}/pulls/{int(number)}/files?per_page=100&page={page}",
+            token,
+        )
+        if not files:
+            return page > 1
+        if not all(
+            item.get("status") in ("added", "modified")
+            and OPENSPEC_FILES.fullmatch(item.get("filename", ""))
+            for item in files
+        ):
+            return False
+        page += 1
+
+
 def open_pull_numbers(repository, token):
     page = 1
     numbers = []
@@ -93,6 +117,10 @@ def merge_if_eligible(number, repository, token):
         return
     if pr["user"]["login"] == "ai-coach-release-bot[bot]" and not release_test_passed(
         pr, repository, token
+    ):
+        return
+    if pr["head"]["ref"] == OPENSPEC_BRANCH and not only_generated_skills(
+        number, repository, token
     ):
         return
     result = request(

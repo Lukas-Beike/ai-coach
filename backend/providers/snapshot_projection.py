@@ -19,6 +19,7 @@ from collections.abc import Collection, Iterable, Mapping
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
 
+from backend.canonical.garmin_payload import dedicated_activity_rows
 from backend.canonical.local_time import local_date, parse_provider_datetime
 from backend.canonical.mapping import MappingIssue, MappingResult
 from backend.canonical.records import ActivityRecord, Observation
@@ -99,7 +100,7 @@ def project_garmin_snapshot(
     activities = map_garmin_activities(
         merge_training_load_rows(
             payload.get(_GARMIN_ACTIVITIES_KEY),
-            payload.get(_GARMIN_TRAINING_LOAD_KEY),
+            dedicated_activity_rows(dict(payload)),
         ),
         zone=zone,
         retrieved_at=retrieved_at,

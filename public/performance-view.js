@@ -73,6 +73,15 @@ function renderUnavailableGarmin(garmin, status, detail, button, fullButton) {
   return true;
 }
 
+function renderGarminKeyHint(garmin) {
+  const node = $("#garminKeyHint");
+  if (!node) return;
+  const hint = garminKeyHint(garmin);
+  node.textContent = hint.text;
+  node.hidden = !hint.text;
+  node.classList.toggle("error", hint.urgent);
+}
+
 function renderGarmin(garmin) {
   const status = $("#garminStatus");
   const detail = $("#garminDetail");
@@ -80,6 +89,7 @@ function renderGarmin(garmin) {
   const fullButton = $("#garminFullResyncButton");
   const fullStatus = $("#garminFullResyncStatus");
   if (!status || !detail || !button) return;
+  renderGarminKeyHint(garmin);
   const fullResync = state.data?.provider_resync?.garmin || {};
   const fullRunning = Boolean(fullResync.running || state.localSync.garminFull);
   button.disabled = Boolean(state.data?.garmin_sync?.running || fullRunning);
@@ -290,7 +300,6 @@ function renderCurrentPerformance(metrics, history, status = []) {
     ["Radfahren", [
       ["cycling_ftp_watts", "FTP"],
       ["cycling_w_per_kg", "Leistung pro Gewicht"],
-      ["cycling_eftp_watts", "eFTP \u00b7 Sch\u00e4tzung"],
       ["bike_threshold_hr_bpm", "Schwellen-Herzfrequenz"],
       ["cycling_vo2max_ml_kg_min", "VO\u2082max \u00b7 Sch\u00e4tzung"],
     ]],

@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 
+from backend.activities.session_purpose import summary_is_not_training
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
@@ -34,6 +35,14 @@ from backend.sync.garmin import GarminPayloadService
 _LIST_OMITTED_KEYS: Final = frozenset(
     {"sources", "power_zone_times", "heart_rate_zone_times", "pace_zone_times"}
 )
+
+
+def _not_compared() -> dict[str, Any]:
+    """Curve records leave commutes, warm-ups and cool-downs out; say why."""
+    return {
+        "status": "not_covered",
+        "reason": "Pendeln, Einfahren und Ausfahren werden nicht verglichen.",
+    }
 
 
 class CoachActivityReadToolService:
@@ -254,6 +263,8 @@ class CoachActivityReadToolService:
                 "status": "not_covered",
                 "reason": "E-Bike-Einheiten werden nicht verglichen (Motorunterstützung).",
             }
+        elif summary_is_not_training(own):
+            checks["comparable_sessions"] = _not_compared()
         elif records is None:
             checks["comparable_sessions"] = {
                 "status": "not_covered",
@@ -340,6 +351,8 @@ class CoachActivityReadToolService:
             }
         if own is None or records is None:
             return _unavailable()
+        if summary_is_not_training(own):
+            return _not_compared()
         return session_comparison(records, stored_activity_key(own))
 
     @staticmethod

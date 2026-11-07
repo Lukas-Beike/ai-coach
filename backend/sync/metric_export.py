@@ -1,17 +1,23 @@
 """Manual and automatic export of canonical body and threshold metrics.
 
-The preview lists, per target field, the newest local value that another
-provider supplied, next to the target's current value read live. Execute reads
-the target again and writes only what a confirmed request names: the target
-provider and every metric with the exact day, value and current target value of
-the preview. A value the target itself reported is
-never sent back to it; only values another provider reported are offered, so
-AI estimates are never exported. Each written field is recorded in
-``remote_links`` so the same value is not offered again.
+The preview lists, per target field, the value to send next to the target's
+current value read live. Execute reads the target again and writes only what a
+confirmed request names: the target provider and every metric with the exact day,
+value and current target value of the preview. Each written field is recorded in
+``remote_links`` so the same value is not offered again, and each written record
+in the change history (no undo: the write is remote).
 
-Successful current Garmin synchronization also exports Garmin measurements with
-unchanged heart-rate zones and durable comparison baselines protecting later
-target-side edits.
+Thresholds (FTP, threshold and maximum heart rate, threshold pace) are the current
+resolved values of ``thresholds``: the local zone configuration, else Garmin, else
+Wahoo (#1729). Body metrics are the newest value another provider reported. A
+value the target itself reported is never sent back to it, and AI estimates are
+never exported.
+
+The automatic export (``sync_automatic``) sends only the consented fields. For
+thresholds the resolved value wins: a different target value is overwritten, and
+heart-rate thresholds are written with the target's zone recalculation. Body
+metrics come from Garmin measurements only, and durable comparison baselines
+protect existing and later target-side edits.
 """
 
 from __future__ import annotations
@@ -23,17 +29,20 @@ import math
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any, Final, TypeGuard
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
+    MetricKind,
     ProviderId,
     RemoteEntityKind,
     RemoteLinkState,
     SourceKind,
+    Sport,
 )
+from backend.change_history import METRIC_EXPORT_ENTITY, record_change
 from backend.db.canonical_store import observation_natural_key
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
@@ -44,6 +53,7 @@ from backend.runtime.ports import ObservationReader
 from backend.sync.metric_export_consent import (
     DEFAULT_FIELDS,
     EXPORT_FIELDS,
+    consent_key,
     enabled_fields,
     fields_view,
     store_fields,
@@ -56,6 +66,13 @@ from backend.sync.metric_export_port import (
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 _LOGGER = logging.getLogger(__name__)
+
+# The current resolved thresholds per (metric, sport), read inside a unit of work.
+type ThresholdSource = Callable[[Any], Mapping[tuple[MetricKind, Sport], Observation]]
+
+STATUS_KEY: Final = "last_garmin_metric_export_status"
+# Heart-rate settings make the target recalculate its heart-rate zones.
+_HR_ZONE_KINDS: Final = frozenset({MetricKind.THRESHOLD_HR, MetricKind.MAX_HR})
 
 DEFAULT_METRIC_EXPORT_TARGET: Final = ProviderId.INTERVALS
 # Older values are stale for a current setting and are not offered.
@@ -132,6 +149,18 @@ def _item_key(field: MetricExportField) -> str:
     return f"{field.kind.value}|{field.sport.value if field.sport else ''}"
 
 
+def _consent(candidate: _Candidate) -> str:
+    return consent_key(candidate.field.kind, candidate.field.sport)
+
+
+def automatic_export_message(receipt: Mapping[str, int]) -> str:
+    """Return the athlete-facing status line of one automatic export."""
+    return (
+        f"Intervals.icu: {receipt['exported']} Werte gesendet, "
+        f"{receipt['conflicts']} Konflikte, {receipt['failed']} fehlgeschlagen."
+    )
+
+
 class MetricExportService:
     """Own confirmed exports and automatic Garmin measurement synchronization."""
 
@@ -141,6 +170,7 @@ class MetricExportService:
         observation_reader: Callable[[], ObservationReader],
         ports: Mapping[ProviderId, Callable[[], MetricExportPort]],
         *,
+        thresholds: ThresholdSource,
         database_lock: AbstractContextManager[Any],
         today: Callable[[], date],
         utc_now: Callable[[], datetime],
@@ -150,6 +180,7 @@ class MetricExportService:
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._observation_reader = observation_reader
+        self._thresholds = thresholds
         self._ports = dict(ports)
         self._today = today
         self._utc_now = utc_now
@@ -200,7 +231,7 @@ class MetricExportService:
                 port, group, recalc_hr_zones=recalc and group[0].field.zone_recalc
             )
             if failure is None:
-                self._record(target, port, group)
+                self._record(target, port, group, history="manual")
             items.extend(self._group_items(group, failure, label))
         exported = sum(1 for item in items if item["status"] == EXPORTED)
         return {
@@ -231,7 +262,7 @@ class MetricExportService:
         ):
             raise AppError(
                 400,
-                "Der automatische Garmin-Abgleich mit Intervals.icu muss ausdrücklich bestätigt werden.",
+                "Der automatische Abgleich mit Intervals.icu muss ausdrücklich bestätigt werden.",
                 reason="confirmation_required",
             )
         requested = self._requested_fields(payload)
@@ -276,7 +307,7 @@ class MetricExportService:
         ):
             raise AppError(
                 400,
-                "Die Auswahl der Garmin-Werte ist ungültig.",
+                "Die Auswahl der Werte ist ungültig.",
                 reason="invalid_metric_export",
             )
         return key, enabled
@@ -295,18 +326,20 @@ class MetricExportService:
         ):
             raise AppError(
                 400,
-                "Die Auswahl der Garmin-Werte ist ungültig.",
+                "Die Auswahl der Werte ist ungültig.",
                 reason="invalid_metric_export",
             )
         return frozenset(raw)
 
-    def sync_garmin(self) -> dict[str, Any] | None:
-        """Apply Garmin measurements, preserving later changes at Intervals.icu.
+    def sync_automatic(self) -> dict[str, Any] | None:
+        """Send the consented fields' new values to Intervals.icu.
 
-        This internal sync entry point never accepts HTTP/Coach payloads. Only the
-        consented fields (``metric_export_consent``) are sent. The first transfer
-        protects unknown existing target values; later transfers compare the live
-        target against the last accepted value, including across restarts.
+        This internal entry point never accepts HTTP/Coach payloads; a Garmin sync,
+        a local zone change and a Wahoo sync start it. Thresholds send the
+        resolved value over a different target value. Body metrics send Garmin
+        measurements only: the first transfer protects unknown existing target
+        values, later transfers compare the live target against the last accepted
+        value, including across restarts.
         """
         with self._export_lock:
             with self._database_manager().reader() as db:
@@ -315,24 +348,9 @@ class MetricExportService:
                 return None
             target = ProviderId.INTERVALS
             port = self._port(target)
-            candidates = [
-                candidate
-                for candidate in self._candidates(
-                    target, port, source_provider=ProviderId.GARMIN
-                )
-                if candidate.field.kind.value in consented
-            ]
-            groups: dict[str, list[_Candidate]] = {}
-            conflicts = 0
-            for candidate in candidates:
-                if candidate.status == UNCHANGED:
-                    self._record(target, port, [candidate])
-                elif candidate.status == ALREADY_EXPORTED or self._automatic_conflict(
-                    target, candidate
-                ):
-                    conflicts += 1
-                elif candidate.status == READY:
-                    groups.setdefault(candidate.record, []).append(candidate)
+            groups, conflicts = self._automatic_groups(
+                target, port, self._candidates(target, port, consented=consented)
+            )
             items: list[dict[str, Any]] = []
             for group in groups.values():
                 # Re-read immediately before writing, just like the manual preview.
@@ -345,24 +363,93 @@ class MetricExportService:
                         self._group_items(group, "target_unavailable", "Intervals.icu")
                     )
                     continue
-                stable = [
-                    item
-                    for item in group
-                    if _same_remote(current.get(item.field.field), item.remote)
-                ]
-                conflicts += len(group) - len(stable)
-                if not stable:
-                    continue
-                failure = self._write(port, stable, recalc_hr_zones=False)
-                if failure is None:
-                    self._record(target, port, stable)
-                items.extend(self._group_items(stable, failure, "Intervals.icu"))
+                stable, changed = self._still_writable(target, port, group, current)
+                conflicts += changed
+                if stable:
+                    items.extend(self._automatic_write(target, port, stable))
             exported = sum(item["status"] == EXPORTED for item in items)
             return {
                 "exported": exported,
                 "failed": len(items) - exported,
                 "conflicts": conflicts,
             }
+
+    def _automatic_groups(
+        self,
+        target: ProviderId,
+        port: MetricExportPort,
+        candidates: Sequence[_Candidate],
+    ) -> tuple[dict[str, list[_Candidate]], int]:
+        """Group the values to write per remote record; count wellness conflicts.
+
+        An unchanged value only records its baseline. Thresholds are always
+        written; a wellness value waits while its target changed independently.
+        """
+        groups: dict[str, list[_Candidate]] = {}
+        conflicts = 0
+        for candidate in candidates:
+            if candidate.status == UNCHANGED:
+                self._record(target, port, [candidate])
+            elif not candidate.field.dated:
+                groups.setdefault(candidate.record, []).append(candidate)
+            elif candidate.status == ALREADY_EXPORTED or self._automatic_conflict(
+                target, candidate
+            ):
+                conflicts += 1
+            elif candidate.status == READY:
+                groups.setdefault(candidate.record, []).append(candidate)
+        return groups, conflicts
+
+    def _still_writable(
+        self,
+        target: ProviderId,
+        port: MetricExportPort,
+        group: Sequence[_Candidate],
+        current: Mapping[str, float],
+    ) -> tuple[list[_Candidate], int]:
+        """Return the group's values to write after the re-read, and new conflicts.
+
+        A threshold carries the re-read value as its previous value; one that
+        already matches records its baseline instead. A wellness value whose
+        target changed since the first read is a conflict.
+        """
+        stable: list[_Candidate] = []
+        conflicts = 0
+        for item in group:
+            live = current.get(item.field.field)
+            if item.field.dated:
+                if _same_remote(live, item.remote):
+                    stable.append(item)
+                else:
+                    conflicts += 1
+                continue
+            fresh = replace(item, remote=live)
+            if live is not None and _same_value(
+                live, port.normalize_value(item.field, item.value)
+            ):
+                self._record(target, port, [fresh])
+            else:
+                stable.append(fresh)
+        return stable, conflicts
+
+    def _automatic_write(
+        self, target: ProviderId, port: MetricExportPort, stable: Sequence[_Candidate]
+    ) -> list[dict[str, Any]]:
+        """Write one record; heart-rate thresholds recalculate the target zones."""
+        recalc = port.supports_hr_zone_recalc and any(
+            item.field.kind in _HR_ZONE_KINDS for item in stable
+        )
+        failure = self._write(port, stable, recalc_hr_zones=recalc)
+        if failure is None:
+            self._record(target, port, stable, history="automatic")
+        return self._group_items(stable, failure, "Intervals.icu")
+
+    def record_status(self, message: str) -> None:
+        """Store the athlete-facing status line of the last automatic export."""
+        with self._database_lock, self._database_manager().unit_of_work() as db:
+            self._key_values.set(
+                db, STATUS_KEY, f"{self._utc_now().isoformat()}: {message}"
+            )
 
     @staticmethod
     def _baseline_key(target: ProviderId, candidate: _Candidate) -> str:
@@ -509,23 +596,30 @@ class MetricExportService:
         target: ProviderId,
         port: MetricExportPort,
         *,
-        source_provider: ProviderId | None = None,
+        consented: frozenset[str] | None = None,
     ) -> list[_Candidate]:
+        """Return the body-metric and threshold candidates with their live status.
+
+        ``consented`` (automatic runs) keeps only those fields, so only their
+        records are read, and offers Garmin measurements only for body metrics.
+        """
+        automatic = consented is not None
         kinds = self._registry.get(target.value).metric_exports
         start = self._today() - timedelta(days=_LOOKBACK_DAYS)
         reader = self._observation_reader()
         offered: list[tuple[str, MetricExportField, Observation, bool]] = []
         with self._database_manager().reader() as db:
+            sources: dict[str, tuple[MetricExportField, Observation]] = {}
             for kind in sorted(kinds, key=lambda item: item.value):
-                sources = self._sources(
+                sources |= self._sources(
                     (
                         item
                         for item in reader.observations(
                             db, kind, start=start, end=self._today()
                         )
-                        if source_provider is None
+                        if not automatic
                         or (
-                            item.provenance.provider is source_provider
+                            item.provenance.provider is ProviderId.GARMIN
                             and item.provenance.source_kind
                             in {
                                 SourceKind.PROVIDER_REPORTED,
@@ -536,15 +630,21 @@ class MetricExportService:
                     target,
                     port,
                 )
-                for key, (field, source) in sorted(sources.items()):
-                    offered.append(
-                        (
-                            key,
-                            field,
-                            source,
-                            self._exported(db, target, port, field, source),
-                        )
+            sources |= self._threshold_sources(db, kinds, target, port)
+            for key, (field, source) in sorted(sources.items()):
+                if (
+                    consented is not None
+                    and consent_key(field.kind, field.sport) not in consented
+                ):
+                    continue
+                offered.append(
+                    (
+                        key,
+                        field,
+                        source,
+                        self._exported(db, target, port, field, source),
                     )
+                )
         # Target values are read live after the database read: cached target
         # observations can be older than the target's current state.
         records: dict[str, Mapping[str, float]] = {}
@@ -565,13 +665,34 @@ class MetricExportService:
             candidates.append(_Candidate(key, field, record, source, remote, status))
         return candidates
 
+    def _threshold_sources(
+        self,
+        db: Any,
+        kinds: frozenset[MetricKind],
+        target: ProviderId,
+        port: MetricExportPort,
+    ) -> dict[str, tuple[MetricExportField, Observation]]:
+        """Return the resolved threshold per target setting; the target's own never."""
+        sources: dict[str, tuple[MetricExportField, Observation]] = {}
+        for (kind, sport), observation in self._thresholds(db).items():
+            if (
+                kind not in kinds
+                or observation.provenance.provider is target
+                or observation.provenance.source_kind is SourceKind.AI_ESTIMATE
+            ):
+                continue
+            field = port.field_for(kind, sport)
+            if field is not None and not field.dated:
+                sources[_item_key(field)] = (field, observation)
+        return sources
+
     @staticmethod
     def _sources(
         observations: Iterable[Observation],
         target: ProviderId,
         port: MetricExportPort,
     ) -> dict[str, tuple[MetricExportField, Observation]]:
-        """Return the newest exportable value per target field."""
+        """Return the newest exportable body metric per target field."""
         sources: dict[str, tuple[MetricExportField, Observation]] = {}
         for observation in observations:
             provider = observation.provenance.provider
@@ -580,7 +701,8 @@ class MetricExportService:
             if provider is None or provider is target:
                 continue
             field = port.field_for(observation.kind, observation.sport)
-            if field is None:
+            # Thresholds come from the resolver (``_threshold_sources``).
+            if field is None or not field.dated:
                 continue
             key = _item_key(field)
             current = sources.get(key)
@@ -685,10 +807,29 @@ class MetricExportService:
         return None
 
     def _record(
-        self, target: ProviderId, port: MetricExportPort, group: Sequence[_Candidate]
+        self,
+        target: ProviderId,
+        port: MetricExportPort,
+        group: Sequence[_Candidate],
+        *,
+        history: str | None = None,
     ) -> None:
+        """Persist the accepted values; ``history`` names a write's change source."""
         synced_at = self._utc_now().isoformat()
         with self._database_lock, self._database_manager().unit_of_work() as db:
+            if history is not None:
+                record_change(
+                    db,
+                    METRIC_EXPORT_ENTITY,
+                    f"{target.value}:{group[0].record}",
+                    "update",
+                    {_consent(item): item.remote for item in group},
+                    {
+                        _consent(item): port.normalize_value(item.field, item.value)
+                        for item in group
+                    },
+                    source=history,
+                )
             for candidate in group:
                 sent_value = port.normalize_value(candidate.field, candidate.value)
                 self._key_values.set(

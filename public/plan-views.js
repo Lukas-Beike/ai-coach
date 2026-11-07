@@ -9,7 +9,19 @@
     ].filter(Boolean);
   }
 
-globalThis.AppPlanViews = Object.freeze({ create });
+globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets });
+
+// Providers this planned unit still needs an explicit push to, in push order:
+// Intervals.icu last, because its sync rewrites the unit and so its payload
+// hash, which every other job of the same click still carries. Past, done,
+// in-flight and unconfigured targets get none.
+function plannedPushTargets(entry, dateKey, todayKey, { configured = {}, completed = false, intervals } = {}) {
+  const pending = entry?.push_pending;
+  if (!entry?.local_id || !entry.payload_hash || entry.is_completed_activity || completed) return [];
+  if (!pending || typeof pending !== "object" || !dateKey || dateKey < todayKey) return [];
+  const targets = Object.keys(pending).filter((provider) => pending[provider] === true && configured[provider] === true);
+  return [...targets.filter((provider) => provider !== intervals).sort((a, b) => a.localeCompare(b)), ...targets.filter((provider) => provider === intervals)];
+}
 
 const CALENDAR_MARKERS = [
   { key: "no_training", name: "NO_TRAINING", label: "Kein Training" },
@@ -220,6 +232,24 @@ function competitionDistance(value) {
   if (!Number.isFinite(numeric)) return String(value);
   if (numeric < 0) return "Distanz unbekannt";
   return numeric === 0 ? "0 km" : AppFormat.distance(numeric);
+}
+
+function competitionResult(result) {
+  if (!result || typeof result !== "object") return null;
+  const speed = Number(result.avg_speed_mps);
+  const power = Number(result.avg_power);
+  const hasSpeed = Number.isFinite(speed) && speed > 0;
+  let effort = null;
+  if (result.sport === "ride") {
+    if (Number.isFinite(power) && power > 0) effort = `${Math.round(power)} W`;
+    else if (hasSpeed) effort = `${AppFormat.number(speed * 3.6)} km/h`;
+  } else if (hasSpeed) {
+    effort = result.sport === "swim" ? `${AppFormat.clock(100 / speed)} /100 m` : `${AppFormat.clock(1000 / speed)} /km`;
+  }
+  const time = result.duration_s == null ? null : AppFormat.clock(result.duration_s);
+  const value = [time, AppFormat.distance(result.distance_m), effort].filter(Boolean).join(" · ");
+  if (!value) return null;
+  return result.source ? `${value} (${result.source})` : value;
 }
 
 function competitionFact(labelText, value) {
@@ -752,6 +782,48 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return form;
   }
 
+  // One explicit sync per pending provider; each job carries the unit's current
+  // payload hash, so a unit edited meanwhile is refused instead of pushed.
+  function plannedSyncButton(entry, dateKey, todayKey, actual) {
+    const ids = providerIds();
+    const configured = { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured) };
+    const targets = plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual), intervals: ids.intervals });
+    if (!targets.length) return null;
+    // A re-render during a running push must not offer a second click.
+    state.plannedSyncInFlight ||= new Set();
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button planned-sync-button";
+    button.textContent = "Synchronisieren";
+    button.setAttribute("aria-label", `${entry.name || "Einheit"} synchronisieren`);
+    button.disabled = state.plannedSyncInFlight.has(entry.local_id);
+    button.addEventListener("click", async (event) => {
+      // The button sits in the card summary; a click must not toggle the card.
+      event.preventDefault();
+      event.stopPropagation();
+      if (state.plannedSyncInFlight.has(entry.local_id)) return;
+      state.plannedSyncInFlight.add(entry.local_id);
+      button.disabled = true;
+      button.classList.add("busy");
+      const failures = [];
+      for (const provider of targets) {
+        try {
+          const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }] } }) });
+          const done = await globalThis.waitForSyncJob(job.id);
+          if (done.status !== "completed") failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
+        } catch (error) {
+          failures.push(error.message);
+        }
+      }
+      state.plannedSyncInFlight.delete(entry.local_id);
+      globalThis.toast?.(failures.length ? failures.join(" · ") : "Synchronisiert", failures.length > 0);
+      button.disabled = false;
+      button.classList.remove("busy");
+      await globalThis.load?.();
+    });
+    return button;
+  }
+
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {
     const actual = calendarActualActivity(entry);
     const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -783,6 +855,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
     if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
+    const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
+    if (syncButton) cardSummary.append(syncButton);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
     appendActualCalendarDetails(details, actual);
@@ -1084,6 +1158,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const details = document.createElement("div");
     details.className = "competition-card-facts";
     const optional = [
+      ["Ergebnis", competitionResult(competition.result)],
       ["Startzeit", competition.starts_at_local ? formatLocalCompetitionTime(competition.starts_at_local) : null],
       ["Ziel", competition.target],
       ["Erwartete Dauer", competition.planned_duration_s == null ? null : AppFormat.duration(competition.planned_duration_s)],

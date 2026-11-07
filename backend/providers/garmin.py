@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from typing import Any
 
+from backend.canonical.garmin_payload import ACTIVITY_RATINGS_SECTION
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import (
     GARMIN_DATE_ALIASES,
@@ -53,6 +54,8 @@ class GarminCollectionOptions:
     # unless the run reads an activity outside ``known_activity_ids``.
     include_daily_metrics: bool = True
     known_activity_ids: frozenset[str] | None = None
+    # Activities whose watch rating is already stored (``activity_ratings``).
+    rated_activity_ids: frozenset[str] = frozenset()
 
 
 # Metrics that change at most daily or after an activity: they are read once per
@@ -999,25 +1002,27 @@ def _collect_current_metrics(
     metrics = (
         (
             "daily_training_status",
-            lambda: client.get_daily_training_status(today.isoformat()),
+            "get_daily_training_status",
+            lambda fetch: fetch(today.isoformat()),
             {"date": today.isoformat()},
         ),
         (
             "training_load_balance",
-            lambda: client.get_training_four_week_load_balance(today.isoformat()),
+            "get_training_four_week_load_balance",
+            lambda fetch: fetch(today.isoformat()),
             {"date": today.isoformat()},
         ),
         (
             "readiness",
-            lambda: client.get_training_readiness(today.isoformat()),
+            "get_training_readiness",
+            lambda fetch: fetch(today.isoformat()),
             {"date": today.isoformat()},
         ),
-        ("race_predictions", client.get_race_predictions, None),
+        ("race_predictions", "get_race_predictions", lambda fetch: fetch(), None),
         (
             "max_metrics",
-            lambda: client.get_max_metrics_range(
-                max_metrics_start.isoformat(), today.isoformat()
-            ),
+            "get_max_metrics_range",
+            lambda fetch: fetch(max_metrics_start.isoformat(), today.isoformat()),
             {
                 "window_start": max_metrics_start.isoformat(),
                 "window_end": today.isoformat(),
@@ -1025,19 +1030,15 @@ def _collect_current_metrics(
             },
         ),
     )
-    for key, metric_fetch, details in metrics:
+    for key, method_name, invoke, details in metrics:
         if not include_daily and key in GARMIN_DAILY_METRIC_SOURCES:
             continue
-        if key == "daily_training_status" and not callable(
-            getattr(client, "get_daily_training_status", None)
-        ):
-            continue
-        if key == "training_load_balance" and not callable(
-            getattr(client, "get_training_four_week_load_balance", None)
-        ):
+        # A method the transport does not serve (SDK not connected) is skipped.
+        fetch = getattr(client, method_name, None)
+        if not callable(fetch):
             continue
         _collect_optional_metric(
-            payload, key, metric_fetch, details, external_call, redact, warn
+            payload, key, partial(invoke, fetch), details, external_call, redact, warn
         )
     if include_daily:
         _collect_threshold_metrics(client, payload, external_call, redact, warn)
@@ -1347,27 +1348,48 @@ def collect_garmin_activity_detail(
     skipped: list[str] = []
     # (capability key, payload key, fetch). The capability key also names the
     # external call, matching ``_fetch_range``.
-    parts: tuple[tuple[str, str, Callable[[], Any]], ...] = (
+    parts: tuple[tuple[str, str, str, Callable[[Any], Any]], ...] = (
         (
             "activity_details",
             "details",
-            lambda: client.get_activity_details(
+            "get_activity_details",
+            lambda method: method(
                 activity_id, maxchart=ACTIVITY_DETAIL_MAX_CHART_POINTS
             ),
         ),
-        ("activity_splits", "splits", lambda: client.get_activity_splits(activity_id)),
+        (
+            "activity_splits",
+            "splits",
+            "get_activity_splits",
+            lambda method: method(activity_id),
+        ),
         (
             "activity_hr_zones",
             "hr_zones",
-            lambda: client.get_activity_hr_in_timezones(activity_id),
+            "get_activity_hr_in_timezones",
+            lambda method: method(activity_id),
         ),
         (
             "activity_power_zones",
             "power_zones",
-            lambda: client.get_activity_power_in_timezones(activity_id),
+            "get_activity_power_in_timezones",
+            lambda method: method(activity_id),
+        ),
+        # Personal API only: device laps and full record streams from the file.
+        (
+            "activity_fit",
+            "fit",
+            "download_activity_fit",
+            lambda method: method(activity_id),
         ),
     )
-    for capability, key, fetch in parts:
+    for capability, key, method_name, invoke in parts:
+        method = getattr(client, method_name, None)
+        if not callable(method):
+            # The Personal API serves no splits or zone times and the SDK no FIT
+            # file; a part no transport serves is absent, not incomplete.
+            continue
+        fetch = partial(invoke, method)
         if capability_allowed is not None and not capability_allowed(capability):
             skipped.append(capability)
             continue
@@ -1424,6 +1446,94 @@ def _validate_current_metrics(
             _add_error(
                 payload, key, ValueError(f"Invalid Garmin {key} response"), redact, warn
             )
+
+
+# The athlete's own ratings live only in the single-activity read (summaryDTO).
+ACTIVITY_RATING_KEYS = ("directWorkoutRpe", "directWorkoutFeel", "minHR")
+# Activities of the last three days are read again, so a rating corrected after
+# the save is picked up. Older ones of the last two weeks are read once, when no
+# rating row is stored yet; history is not read (its Intervals.icu copy stays).
+ACTIVITY_RATING_RECHECK_DAYS = 3
+ACTIVITY_RATING_NEW_DAYS = 14
+MAX_ACTIVITY_RATING_READS = 30
+
+
+def _collect_activity_ratings(
+    client: Any,
+    payload: dict[str, Any],
+    today: date,
+    rated_activity_ids: frozenset[str],
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None,
+) -> None:
+    """Read the ratings of unrated and recent activities into ``activity_ratings``.
+
+    At most ``MAX_ACTIVITY_RATING_READS`` reads, newest first; the rest follow on
+    later syncs. The first failed read (a rate limit, an outage) stops the reads
+    of this run and is only logged: the ratings supplement the activities, so the
+    sync stays complete and the stored ratings stay.
+    """
+    fetch = getattr(client, "get_activity", None)
+    if not callable(fetch):
+        return
+    ratings: list[dict[str, Any]] = []
+    for started, activity_id in _rating_candidates(payload, today, rated_activity_ids):
+        try:
+            value = external_call(
+                GARMIN_ID,
+                ACTIVITY_RATINGS_SECTION,
+                partial(fetch, activity_id),
+                {"activity_id": activity_id},
+            )
+        except Exception as exc:  # noqa: BLE001 - the activities stay complete.
+            if warn:
+                warn(ACTIVITY_RATINGS_SECTION, redact(str(exc))[:500], exc)
+            break
+        row = _rating_row(value, activity_id, started)
+        if row is not None:
+            ratings.append(row)
+    if ratings:
+        payload[ACTIVITY_RATINGS_SECTION] = ratings
+
+
+def _rating_candidates(
+    payload: dict[str, Any], today: date, rated_activity_ids: frozenset[str]
+) -> list[tuple[str, str]]:
+    """(start, id) of the activities whose rating is read, newest first, capped."""
+    recheck_from = (today - timedelta(days=ACTIVITY_RATING_RECHECK_DAYS)).isoformat()
+    new_from = (today - timedelta(days=ACTIVITY_RATING_NEW_DAYS)).isoformat()
+    candidates = sorted(
+        (
+            (str(row.get("startTimeLocal") or ""), str(row["activityId"]))
+            for row in payload.get("activities") or []
+            if isinstance(row, dict)
+            and row.get("activityId") is not None
+            and row.get("manualActivity") is not True
+        ),
+        reverse=True,
+    )
+    return [
+        (started, activity_id)
+        for started, activity_id in candidates
+        if started[:10] >= recheck_from
+        or (started[:10] >= new_from and activity_id not in rated_activity_ids)
+    ][:MAX_ACTIVITY_RATING_READS]
+
+
+def _rating_row(value: Any, activity_id: str, started: str) -> dict[str, Any] | None:
+    """The stored rating row of one single-activity read, or None without a summary.
+
+    Every key is present, so a rating cleared on the watch clears the stored one.
+    """
+    summary = value.get("summaryDTO") if isinstance(value, dict) else None
+    if not isinstance(summary, dict):
+        return None
+    return {
+        "activityId": activity_id,
+        "startTimeLocal": started,
+        **{key: summary.get(key) for key in ACTIVITY_RATING_KEYS},
+    }
 
 
 def collect_garmin_data(
@@ -1484,6 +1594,20 @@ def collect_garmin_data(
             warn,
             source="training_status",
             method="get_training_status",
+        )
+    if (
+        collection_options.include_recovery
+        or collection_options.include_current_metrics
+    ):
+        # Historical chunks read no ratings: history keeps its Intervals.icu copy.
+        _collect_activity_ratings(
+            client,
+            payload,
+            today,
+            collection_options.rated_activity_ids,
+            external_call,
+            redact,
+            warn,
         )
     read_daily = collection_options.include_daily_metrics or _reads_new_activity(
         payload, collection_options.known_activity_ids

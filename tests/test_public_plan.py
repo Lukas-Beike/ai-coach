@@ -122,7 +122,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         ):
             state = service.read(local_only=True)
 
-        services["planned"].list.assert_called_once_with(500)
+        services["planned"].list.assert_called_once_with(500, push_state=True)
         services["feedback"].attach_to_activities.assert_called_once_with(
             snapshot["recent_activities"][:1000]
         )

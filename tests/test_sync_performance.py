@@ -222,6 +222,29 @@ class PerformanceRefreshServiceTests(unittest.TestCase):
         self.assertFalse(self.lock.locked())
         self.provider.fetch_performance_snapshot.assert_not_called()
 
+    def test_ingest_off_skips_without_a_provider_read(self):
+        service = PerformanceRefreshService(
+            self.config,
+            self.database_manager,
+            self.sync_state,
+            self.key_values,
+            self.provider,
+            self.events,
+            lambda text: text,
+            self.logger,
+            self.observer,
+            self.provider_resync_gate,
+            self.lock,
+            zone_provider=lambda: UTC,
+            ingest_enabled=lambda: False,
+        )
+
+        self.assertEqual(
+            service.refresh(), {"status": "skipped", "reason": "intervals_ingest_off"}
+        )
+        self.provider.fetch_performance_snapshot.assert_not_called()
+        self.assertIsNone(self.get_value("performance_refresh_running"))
+
     def test_busy_returns_already_running_without_changing_markers(self):
         self.lock.acquire()
         try:

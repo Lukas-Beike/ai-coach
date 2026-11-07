@@ -601,10 +601,19 @@ function renderIntervalsSyncControls(data, configured) {
   const syncButton = $("#systemIntervalsSyncButton");
   if (syncButton) {
     syncButton.disabled = syncRunning || !intervalsConfigured;
-    syncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : "Synchronisieren";
+    syncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : intervalsSyncCaption();
   }
+  const ingestEnabled = intervalsIngestEnabled();
+  const ingestToggle = $("#intervalsIngestToggle");
+  if (ingestToggle) {
+    ingestToggle.hidden = !intervalsConfigured;
+    ingestToggle.textContent = ingestEnabled ? "Einlesen ausschalten" : "Einlesen einschalten";
+  }
+  const period = $("#intervalsSyncDays")?.closest("label");
+  if (period) period.hidden = !ingestEnabled;
   const fullButton = $("#systemIntervalsFullResyncButton");
   if (fullButton) {
+    fullButton.hidden = !ingestEnabled;
     fullButton.disabled = !intervalsConfigured || fullRunning || Boolean(data.sync?.running || state.localSync.intervals);
     fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
   }

@@ -1053,6 +1053,7 @@ const COACH_RECEIPT_LABELS = {
   sync_competitions: "Wettkampfsynchronisierung beauftragt",
   resolve_training_sync_conflict: "Synchronisierungsentscheidung gespeichert",
   start_intervals_plan_sync: "Intervals-Synchronisierung beauftragt",
+  push_strength_to_garmin: "Garmin-Krafteinheiten beauftragt",
   delete_duplicate_intervals_activity: "Garmin-Duplikat gelöscht",
 };
 const SYNC_JOB_RECEIPT_LABELS = {
@@ -1311,7 +1312,8 @@ function coachActionDescription(proposal) {
       : "Diese Mahlzeitvorlage wird lokal gespeichert. Sie wird erst nach deiner Bestätigung angelegt.";
   }
   if (proposal.action_type === "remote_coach_write") {
-    return "Diese Änderung wird an Intervals.icu gesendet. Sie wird erst ausgeführt, wenn du sie hier freigibst.";
+    const target = proposal.target_system === providerIds().garmin ? "deine Garmin-Uhr" : "Intervals.icu";
+    return `Diese Änderung wird an ${target} gesendet. Sie wird erst ausgeführt, wenn du sie hier freigibst.`;
   }
   return "Diese Garmin-Aufzeichnung ist nahezu identisch mit der Wahoo-Einheit. Nur das Garmin-Duplikat aus Intervals.icu löschen?";
 }

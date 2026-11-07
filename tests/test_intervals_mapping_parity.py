@@ -22,7 +22,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import mapped_recovery_inputs
-from performance_day_support import current_days, latest_day, snapshot_metrics
+from performance_day_support import latest_day, snapshot_metrics
 
 from backend.activities.activity_summary import activity_summaries
 from backend.activities.identity import activity_kind
@@ -281,10 +281,11 @@ class ActivityParityTests(unittest.TestCase):
             rollup["duration_hours"],
             round(sum(record.duration_s or 0.0 for record in records) / 3600, 1),
         )
-        self.assertEqual(
-            rollup["training_load"],
-            round(sum(record.load or 0.0 for record in records), 1),
-        )
+        # The Intervals.icu load stays on the records but is never summed: the
+        # rollup sums only the stored local load (card M6), absent here.
+        self.assertTrue(any(record.load for record in records))
+        self.assertEqual(rollup["training_load"], 0.0)
+        self.assertEqual(rollup["load_missing_sessions"], len(records))
 
     def test_sport_family_matches_legacy_activity_kind(self) -> None:
         for rows in (self.raw, self.compact):
@@ -429,14 +430,15 @@ class WellnessParityTests(unittest.TestCase):
                 day = date.fromisoformat(row["id"])
                 ctl = expect_value(result, MetricKind.CTL, day=row["id"])
                 atl = expect_value(result, MetricKind.ATL, day=row["id"])
+                # The stored values are the labelled history since #1726.
                 load = performance_load_context(
                     self.snapshot["recent_activities"],
-                    current_days([row]),
                     TODAY,
                     canonical=CanonicalPerformanceInputs(
                         wellness_day=day, ctl=ctl, atl=atl
                     ),
-                )["load"]
+                    timezone="UTC",
+                )["intervals_history"] or {"ctl": None, "atl": None}
                 self.assertEqual(
                     expect_value(result, MetricKind.CTL, day=row["id"]), load["ctl"]
                 )
@@ -607,10 +609,10 @@ class ThresholdParityTests(unittest.TestCase):
         )
 
     def test_eftp_is_a_ride_observation_and_not_read_from_the_snapshot(self) -> None:
-        # The snapshot reader of cycling_eftp_watts was removed (#1412): the value
-        # is read from this observation.
+        # The mapper still stores the ride eFTP, but since #1727 no current metric
+        # reads it.
         result = map_thresholds(self.athlete)
-        self.assertEqual(self.legacy["cycling_eftp_watts"]["value"], 258)
+        self.assertNotIn("cycling_eftp_watts", self.legacy)
         self.assertEqual(first_value(result, MetricKind.EFTP, sport=Sport.RIDE), 258)
 
     def test_any_type_entry_classifies_a_sport_setting(self) -> None:

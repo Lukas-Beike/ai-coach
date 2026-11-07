@@ -22,9 +22,11 @@ from backend.performance.canonical_recovery import (
     RECOVERY_KINDS,
     CanonicalRecoveryInputs,
 )
+from backend.performance.local_tss import DatedThresholds, LocalLoad, session_loads
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.providers.sleep_period_mapping import map_sleep_periods
+from backend.sync.local_load import with_local_loads
 
 RETRIEVED = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
 UNITS = {
@@ -246,7 +248,7 @@ def recovery_only_inputs(
     full = read_performance_inputs(
         FilteringReader(tuple(mapped.records)),
         None,
-        activity_reader=SnapshotActivityRows(snapshot),
+        activity_reader=SnapshotActivityRows(snapshot, mapped.records),
         as_of=RETRIEVED.date(),
     )
     if full is None:
@@ -255,8 +257,6 @@ def recovery_only_inputs(
         inputs,
         wellness_day=full.wellness_day,
         form_by_day=full.form_by_day,
-        eftp_by_day=full.eftp_by_day,
-        ramp_rate=full.ramp_rate,
         current=full.current,
         activities=full.activities,
         # The stored wellness days mark the provider data as present (#1416).
@@ -266,14 +266,55 @@ def recovery_only_inputs(
     )
 
 
-class SnapshotActivityRows:
-    """Serves the activity rows of a stored Intervals.icu snapshot."""
+def with_local_load_of(
+    summaries: Iterable[Mapping[str, Any]], observations: Iterable[Observation]
+) -> tuple[dict[str, Any], ...]:
+    """The summaries as the reader serves them after a local load pass (card M6).
 
-    def __init__(self, snapshot: Mapping[str, Any]) -> None:
+    The local load is computed from ``observations`` (the mapped thresholds and
+    resting HR) the way the stage stores it, then set on the summaries.
+    """
+    listed = tuple(summaries)
+    observed = tuple(observations)
+    thresholds = DatedThresholds(
+        observed,
+        resting_hr=[item for item in observed if item.kind is MetricKind.RESTING_HR],
+    )
+    stored: dict[str, dict[str, Any]] = {}
+    for session_id, load in session_loads(listed, thresholds).items():
+        if not isinstance(load, LocalLoad):
+            continue
+        rows = {
+            MetricKind.SESSION_LOAD.value: {
+                "value": load.load,
+                "derivation": dict(load.details),
+                "method_version": 1,
+            }
+        }
+        if load.intensity_pct is not None:
+            rows[MetricKind.INTENSITY_FACTOR.value] = {
+                "value": load.intensity_pct,
+                "derivation": dict(load.details),
+                "method_version": 1,
+            }
+        stored[session_id] = rows
+    return with_local_loads(listed, stored)
+
+
+class SnapshotActivityRows:
+    """Serves the activity rows of a stored Intervals.icu snapshot.
+
+    With ``observations`` the summaries carry the local load a pass would store.
+    """
+
+    def __init__(
+        self, snapshot: Mapping[str, Any], observations: Iterable[Observation] = ()
+    ) -> None:
         self._rows = tuple(snapshot.get("recent_activities") or ())
+        self._observations = tuple(observations)
 
     def activity_summaries(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
-        return summaries_of_rows(self._rows)
+        return with_local_load_of(summaries_of_rows(self._rows), self._observations)
 
 
 class NoActivityRows:

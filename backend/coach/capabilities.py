@@ -57,6 +57,7 @@ OWNER_TOOLS = {
         "start_provider_refresh",
         "refresh_current_performance",
         "start_intervals_plan_sync",
+        "push_strength_to_garmin",
         "sync_competitions",
         "resolve_training_sync_conflict",
         "sync_nutrition",
@@ -74,6 +75,7 @@ OWNER_TOOLS = {
 REMOTE_WRITE_TOOLS = frozenset(
     {
         "start_intervals_plan_sync",
+        "push_strength_to_garmin",
         "sync_competitions",
         "delete_duplicate_intervals_activity",
         "sync_nutrition",

@@ -1109,7 +1109,8 @@ class ServerCoachTests(ServerTestCase):
 
         self.assertIn('"Leistungsfähigkeit und Entwicklung"', context)
         self.assertIn("identify meaningful new evidence", context)
-        self.assertIn("Mention VO2max, FTP, eFTP", context)
+        self.assertIn("Mention VO2max, FTP, threshold values", context)
+        self.assertNotIn("eFTP", context)
         self.assertIn(
             "If there is no new indication for a metric, omit it entirely", context
         )

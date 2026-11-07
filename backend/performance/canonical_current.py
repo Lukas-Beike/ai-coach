@@ -14,12 +14,6 @@ value rather than a canonical pick. The athlete-wide threshold heart rate has no
 sport and comes from the single athlete ``lthr`` field, so this sync stores at most
 one such row and it is taken directly.
 
-Cycling eFTP: the ride eFTP of the latest sync's athlete record is read like the
-athlete weight, and the ride eFTP of the latest wellness day like the wellness weight.
-The sync instant is the latest of the threshold, VO2max, weight and athlete-record
-observations, so an athlete record that stores only an eFTP still defines it. The
-wellness-day eFTP needs a wellness day.
-
 Weight is read for the latest wellness day, from the newest stored row of that
 day, and for the athlete record of the sync. Garmin weight stays on the Garmin
 path. Only athlete-record observations define the sync instant, so a later write
@@ -41,16 +35,20 @@ not current. Its row stays stored and readable, so history keeps it.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
+from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.current_thresholds import (
+    ThresholdKey,
     ZoneConfigurationSource,
     local_thresholds,
     provider_zone_thresholds,
+    resolve_current_thresholds,
 )
 from backend.performance.garmin_canonical import read_garmin_thresholds
 from backend.performance.source_policy import (
@@ -61,7 +59,7 @@ from backend.performance.source_policy import (
 from backend.runtime.ports import ObservationReader
 
 _SYNC_KINDS: Final = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX, MetricKind.WEIGHT)
-# Athlete record settings kept as ``athlete_record``; eFTP has its own fields.
+# Athlete record settings kept as ``athlete_record``.
 _ATHLETE_RECORD_KINDS: Final = (
     MetricKind.VO2MAX,
     MetricKind.FTP,
@@ -72,7 +70,9 @@ _ATHLETE_RECORD_KINDS: Final = (
     MetricKind.HEIGHT,
     MetricKind.W_PRIME,
 )
-# Kinds whose athlete-record rows define the sync instant, each read once.
+# Kinds whose athlete-record rows define the sync instant, each read once. eFTP
+# rows still define it, so a record holding only an eFTP keeps the instant
+# current; their values feed no metric.
 _INSTANT_KINDS: Final = tuple(
     dict.fromkeys((*_SYNC_KINDS, MetricKind.EFTP, *_ATHLETE_RECORD_KINDS))
 )
@@ -110,8 +110,6 @@ class CanonicalCurrentInputs:
     athlete_weight: Observation | None
     wahoo_ftp: Observation | None = None
     wahoo_weight: Observation | None = None
-    athlete_eftp: Observation | None = None
-    wellness_eftp: Observation | None = None
     athlete_record: tuple[Observation, ...] = ()
     synced_at: datetime | None = None
     # The source-policy provider winners per sport (FTP, threshold and maximum
@@ -162,7 +160,7 @@ def read_current_inputs(
     """Read the latest sync's athlete settings and weights, and the Wahoo fallbacks.
 
     ``latest_wellness_day`` is the latest wellness day. Without it no wellness-row
-    weight or eFTP is selected. ``as_of`` is the athlete-local day the Wahoo values
+    weight is selected. ``as_of`` is the athlete-local day the Wahoo values
     must be current on. Without anything stored every field is empty.
     """
     intervals = _intervals_current(reader, db) or _NO_SYNC
@@ -184,8 +182,6 @@ def read_current_inputs(
         athlete_weight=intervals.athlete_weight,
         wahoo_ftp=wahoo_ftp,
         wahoo_weight=wahoo_weight,
-        athlete_eftp=intervals.athlete_eftp,
-        wellness_eftp=_wellness_eftp(reader, db, latest_wellness_day),
         athlete_record=intervals.athlete_record,
         synced_at=intervals.synced_at,
         zone_thresholds=provider_zone_thresholds(
@@ -233,7 +229,6 @@ class _SyncValues:
     cycling_vo2max: tuple[Observation, ...] = ()
     running_vo2max: tuple[Observation, ...] = ()
     athlete_weight: Observation | None = None
-    athlete_eftp: Observation | None = None
     athlete_record: tuple[Observation, ...] = ()
     synced_at: datetime | None = None
     zone_thresholds: tuple[Observation, ...] = ()
@@ -261,9 +256,6 @@ def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None
     weights = _sync_observations(
         reader, db, MetricKind.WEIGHT, synced, start=start, end=end
     )
-    eftps = _sync_observations(
-        reader, db, MetricKind.EFTP, synced, start=start, end=end
-    )
     athlete_record = tuple(
         observation
         for kind in _ATHLETE_RECORD_KINDS
@@ -289,7 +281,6 @@ def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None
         cycling_vo2max=_sport_candidates(vo2max, Sport.RIDE),
         running_vo2max=_sport_candidates(vo2max, Sport.RUN),
         athlete_weight=_athlete_weight(weights),
-        athlete_eftp=_athlete_eftp(eftps),
         athlete_record=athlete_record,
         synced_at=synced,
         zone_thresholds=zone_thresholds,
@@ -319,36 +310,39 @@ def read_zone_thresholds(
     )
 
 
-def _athlete_eftp(observations: tuple[Observation, ...]) -> Observation | None:
-    """Return the ride eFTP of this sync's athlete record, if stored."""
-    return next(
-        (
-            observation
-            for observation in observations
-            if observation.sport is Sport.RIDE and _is_athlete_record(observation)
-        ),
-        None,
-    )
+def read_export_thresholds(
+    reader: ObservationReader,
+    db: Any,
+    *,
+    as_of: date,
+    preferences: SourcePreferences = NO_PREFERENCES,
+    configurations: Iterable[ZoneConfiguration] | None = None,
+) -> dict[ThresholdKey, Observation]:
+    """Return the thresholds an outbound export sends, current on ``as_of``.
 
+    ``configurations`` are the stored zone configurations; without them the
+    reader's are used (none when it serves no configurations).
 
-def _wellness_eftp(
-    reader: ObservationReader, db: Any, day: date | None
-) -> Observation | None:
-    """Return the ride eFTP observation of the Intervals wellness day ``day``."""
-    if day is None:
-        return None
-    record_id = day.isoformat()
-    return next(
-        (
-            observation
-            for observation in reader.observations(
-                db, MetricKind.EFTP, start=day, end=day, sport=Sport.RIDE
-            )
-            if observation.provenance.provider is ProviderId.INTERVALS
-            and observation.provenance.source_record_id == record_id
-        ),
-        None,
+    The local zone configuration in effect wins, then Garmin, then Wahoo, under
+    the source policy and the athlete's preferences. Intervals.icu values are left
+    out, so a value Intervals reported is never sent back to it (#1729).
+    """
+    wahoo_ftp = _wahoo_ftp(reader, db, as_of=as_of)
+    providers = (
+        *((wahoo_ftp,) if wahoo_ftp is not None else ()),
+        *read_garmin_thresholds(reader, db),
     )
+    if configurations is None and isinstance(reader, ZoneConfigurationSource):
+        configurations = reader.zone_configurations(db)
+    local = local_thresholds(configurations or (), as_of)
+    return {
+        key: winner
+        for key, result in resolve_current_thresholds(
+            providers, local, as_of=as_of, preferences=preferences
+        ).items()
+        if (winner := result.winner.observation) is not None
+        and winner.provenance.provider is not ProviderId.INTERVALS
+    }
 
 
 def _wahoo_current(

@@ -32,7 +32,9 @@ class ActivitySummary(TypedDict, total=False):
     (``session_assist``).
     Zone times are lists of
     ``{"id": "Z1", "secs": 600.0}`` items. ``rpe_conflict`` is True when the
-    session's records report different provider RPE values.
+    session's records report different provider RPE values. ``purpose`` is an
+    ``ActivityPurpose`` value, absent for ordinary training without a source;
+    ``competition_id`` names the stored competition a race is linked to.
     """
 
     id: str
@@ -54,6 +56,7 @@ class ActivitySummary(TypedDict, total=False):
     elapsed_duration_s: float
     distance_m: float
     elevation_gain_m: float
+    elevation_loss_m: float
     avg_hr: float
     max_hr: float
     avg_power: float
@@ -61,6 +64,16 @@ class ActivitySummary(TypedDict, total=False):
     avg_speed_mps: float
     max_speed_mps: float
     avg_temp_c: float
+    min_temp_c: float
+    max_temp_c: float
+    energy_kj: float
+    energy_kcal: float
+    # Local session metrics (card M8), stored as derived observations.
+    efficiency_factor: float
+    efficiency_factor_unit: str
+    variability_index: float
+    work_kj: float
+    decoupling_pct: float
     rpe: float
     rpe_conflict: bool
     feel: float
@@ -68,17 +81,28 @@ class ActivitySummary(TypedDict, total=False):
     weighted_avg_speed_mps: float
     pace_mps: float
     intensity: float
+    provider_intensity: float
+    grade_adjusted_speed_mps: float
     ftp_w: float
-    eftp_w: float
     vo2max: float
     training_load: float
-    load_model: str
+    load_method: str
+    load_method_version: int
+    load_branch: str
+    load_threshold_after_session: bool
+    load_calibration: dict[str, Any]
+    provider_training_load: float
+    provider_load_model: str
     training_effect_label: str
     training_effect_load: float
+    aerobic_training_effect: float
+    anaerobic_training_effect: float
     power_zone_times: list[dict[str, Any]]
     heart_rate_zone_times: list[dict[str, Any]]
     pace_zone_times: list[dict[str, Any]]
     planned_event_id: str
+    purpose: str
+    competition_id: str
 
 
 def summary_local_date(summary: Mapping[str, Any], timezone: str | None = None) -> str:

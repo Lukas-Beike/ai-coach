@@ -63,6 +63,7 @@ SNAPSHOT: Final[Mapping[str, frozenset[str]]] = {
         }
     ),
     "Assist": frozenset({"none", "electric", "unknown"}),
+    "ActivityPurpose": frozenset({"training", "race", "commute", "warmup", "cooldown"}),
     "LoadModel": frozenset(
         {
             "intervals_training_load",

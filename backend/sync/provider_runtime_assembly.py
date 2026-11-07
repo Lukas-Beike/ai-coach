@@ -155,6 +155,7 @@ def intervals_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBindi
             competition_service=intervals.competition_sync_service(),
             gate=gate,
             all_sync_days=all_sync_days,
+            ingest_enabled=intervals.ingest_enabled,
         )
 
     def synchronous_refresh() -> IntervalsSynchronousRefresh:
@@ -181,7 +182,12 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
     def job_owner() -> ProviderJobOwner:
         historical_sync = build_historical_owner(deps.historical, deps.state)
         return GarminJobAdapter(
-            jobs=build_garmin_owner(historical_sync, garmin, all_sync_days)
+            jobs=build_garmin_owner(historical_sync, garmin, all_sync_days),
+            plan_push=(
+                garmin.strength_push_service()
+                if garmin.strength_push_service is not None
+                else None
+            ),
         )
 
     def schedule() -> GarminSchedulePolicy:

@@ -40,13 +40,40 @@ the same moment.
 * ``averageSpeed`` (m/s), ``elevationGain`` (m), ``normPower`` (W) and
   ``vO2MaxValue`` -> ``avg_speed_mps``, ``elevation_gain_m``,
   ``normalized_power`` and ``vo2max``.
+* ``avgGradeAdjustedSpeed`` (m/s) -> ``grade_adjusted_speed_mps``, the pace
+  input of the local session load (card M6).
 * ``activityName`` (text, stripped and truncated to 200 characters).
 * ``trainingEffectLabel`` (text, stripped, upper-cased and truncated to 50
   characters) -> ``training_effect_label``.
+* ``aerobicTrainingEffect`` (legacy ``trainingEffect``) and
+  ``anaerobicTrainingEffect`` (Garmin's 0.0-5.0 scale) ->
+  ``aerobic_training_effect`` and ``anaerobic_training_effect``.
+* ``maxElevation`` and ``minElevation`` (metres) -> ``elevation_high_m`` and
+  ``elevation_low_m``; ``elevationLoss`` (m) -> ``elevation_loss_m``.
+* ``minTemperature`` and ``maxTemperature`` (°C) -> ``min_temp_c``, ``max_temp_c``.
+  A minimum above its maximum drops both of the pair with one issue.
+* ``waterEstimated`` (ml, Garmin's estimate) -> ``water_estimated_ml``;
+  ``lapCount`` -> ``lap_count``.
+* ``calories`` (kcal, Garmin's whole-session estimate including the resting
+  share) -> ``energy_kcal``; zero means not estimated and becomes None (card M8).
+* ``averageBikingCadenceInRevPerMinute`` (rpm) -> ``avg_cadence``; else
+  ``averageRunningCadenceInStepsPerMinute`` (steps/min) halved to one-leg rpm.
+* ``hrTimeInZone_<n>`` and ``powerTimeInZone_<n>`` (seconds, by Garmin's own
+  zones) -> ``hr_zone_times_s`` and ``power_zone_times_s`` as zones ``Z<n>``.
+  One invalid zone drops that distribution with one issue.
+* ``eventType.typeKey`` ``race`` -> ``purpose`` RACE and ``transportation`` ->
+  COMMUTE; every other event type (``uncategorized``, ``training`` ...) leaves
+  ``purpose`` unset, as does a missing key. A key that is not text is one issue.
 
-A dedicated ``training_load_activities`` row of the same ``activityId`` supplies
-``activityTrainingLoad`` and ``trainingEffectLabel`` before the activity is stored
-(``merge_training_load_rows``), so a re-projection of the stored row reads them too.
+* ``directWorkoutRpe`` (10..100) / 10 -> ``rpe`` (1..10); ``directWorkoutFeel``
+  (0 very weak .. 100 very strong) -> ``feel`` on the 1 (strong) .. 5 (weak)
+  scale, as Intervals.icu imports it; ``minHR`` (bpm) -> ``min_hr``.
+
+Dedicated rows of the same ``activityId`` supply values before the activity is
+mapped (``merge_training_load_rows``): a ``training_load_activities`` row
+``activityTrainingLoad``, ``trainingEffectLabel`` and the training-effect values,
+an ``activity_ratings`` row (from the single-activity ``summaryDTO``) the RPE,
+feel and minimum heart rate; a re-projection of the stored row reads them too.
 
 Sport and environment. A known ``typeKey`` uses ``GARMIN_ACTIVITY_TYPES``. An
 environment that the key leaves UNKNOWN may be named by the activity name.
@@ -73,8 +100,14 @@ from backend.canonical.mapping import (
     coerce_number,
 )
 from backend.canonical.records import (
+    MAX_ACTIVITY_ENERGY_KCAL,
+    MAX_LAP_COUNT,
     MAX_NATIVE_TYPE_LENGTH,
+    MAX_TRAINING_EFFECT,
     MAX_TRAINING_EFFECT_LABEL_LENGTH,
+    MAX_WATER_ESTIMATE_ML,
+    MAX_ZONE_COUNT,
+    TEMPERATURE_C_BOUNDS,
     ActivityRecord,
     Provenance,
     activity_duration_s,
@@ -82,6 +115,8 @@ from backend.canonical.records import (
 from backend.canonical.sports import classify_environment_text, classify_sport_text
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
+    MAX_ACTIVITY_ALTITUDE_M,
+    MAX_ACTIVITY_CADENCE_RPM,
     MAX_ACTIVITY_DISTANCE_M,
     MAX_ACTIVITY_DURATION_S,
     MAX_ACTIVITY_ELEVATION_M,
@@ -89,9 +124,11 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_POWER_W,
     MAX_ACTIVITY_SPEED_MPS,
     MAX_ACTIVITY_STEPS,
+    MIN_ACTIVITY_ALTITUDE_M,
     require_aware_datetime,
 )
 from backend.canonical.vocabulary import (
+    ActivityPurpose,
     Assist,
     Environment,
     LoadModel,
@@ -101,6 +138,7 @@ from backend.canonical.vocabulary import (
     Sport,
     Terrain,
 )
+from backend.providers.wahoo_activity_mapping import wahoo_device_type
 
 # Version 5: maps the maximum speed, maximum power and step count.
 # Version 4: a row with manualActivity exactly True is recorded as MANUAL origin.
@@ -116,7 +154,20 @@ from backend.canonical.vocabulary import (
 # Version 13: maps terrain, motor assistance and the native type key, and knows
 # the cyclocross, BMX, track cycling, e-MTB, skate and backcountry skiing,
 # indoor and treadmill walking, Pilates, HIIT and indoor cardio keys (#1670).
-MAPPER_VERSION: Final = 13
+# Version 14: maps HR and power zone times, aerobic and anaerobic training
+# effect, altitude extremes, elevation loss, temperature range, estimated sweat
+# loss, lap count and average cadence (#1724).
+# Version 15: maps avgGradeAdjustedSpeed, the pace input of the local session
+# load (card M6, #1725).
+# Version 16: maps the athlete's RPE and feel and the minimum heart rate from the
+# merged activity_ratings rows (#1724).
+# Version 17: maps eventType.typeKey race and transportation to the activity
+# purpose (#1678).
+# Version 18: maps calories, the device's energy estimate (card M8, #1680).
+# Version 19: a Wahoo or Zwift manufacturer names the recording origin, so such a
+# recording relayed through Garmin Connect is not a Garmin recording, and a
+# relayed Wahoo ride that is not indoor or virtual carries the bike computer device type (#1686).
+MAPPER_VERSION: Final = 19
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -130,13 +181,45 @@ _MAX_SPEED_KEYS: Final = ("maxSpeed",)
 _MAX_POWER_KEYS: Final = ("maxPower",)
 _STEPS_KEYS: Final = ("steps",)
 _AVERAGE_SPEED_KEYS: Final = ("averageSpeed",)
+_GRADE_ADJUSTED_SPEED_KEYS: Final = ("avgGradeAdjustedSpeed",)
 _ELEVATION_GAIN_KEYS: Final = ("elevationGain",)
 _NORMALIZED_POWER_KEYS: Final = ("normPower",)
 _VO2MAX_KEYS: Final = ("vO2MaxValue",)
 _TRAINING_EFFECT_LABEL_KEY: Final = "trainingEffectLabel"
+_EVENT_TYPE_KEY: Final = "eventType"
+# Garmin event types that name a purpose; every other type is plain training.
+_EVENT_PURPOSES: Final = {
+    "race": ActivityPurpose.RACE,
+    "transportation": ActivityPurpose.COMMUTE,
+}
 _TRAINING_LOAD_KEY: Final = "activityTrainingLoad"
-# The dedicated training-load rows override these activity fields.
-_TRAINING_LOAD_FIELDS: Final = (_TRAINING_LOAD_KEY, _TRAINING_EFFECT_LABEL_KEY)
+_AEROBIC_EFFECT_KEYS: Final = ("aerobicTrainingEffect", "trainingEffect")
+_ANAEROBIC_EFFECT_KEYS: Final = ("anaerobicTrainingEffect",)
+# The dedicated training-load rows override these activity fields, each named
+# by its aliases.
+_RPE_KEY: Final = "directWorkoutRpe"
+_FEEL_KEY: Final = "directWorkoutFeel"
+_MIN_HR_KEYS: Final = ("minHR",)
+_TRAINING_LOAD_FIELDS: Final = (
+    (_TRAINING_LOAD_KEY,),
+    (_TRAINING_EFFECT_LABEL_KEY,),
+    _AEROBIC_EFFECT_KEYS,
+    _ANAEROBIC_EFFECT_KEYS,
+    # The activity_ratings rows (single-activity summaryDTO).
+    (_RPE_KEY,),
+    (_FEEL_KEY,),
+    _MIN_HR_KEYS,
+)
+# Garmin rates RPE 10..100 and feel 0 (very weak) .. 100 (very strong).
+_RPE_BOUNDS: Final = (10.0, 100.0)
+_FEEL_BOUNDS: Final = (0.0, 100.0)
+_TRAINING_EFFECT_BOUNDS: Final = (0.0, MAX_TRAINING_EFFECT)
+_ALTITUDE_BOUNDS: Final = (MIN_ACTIVITY_ALTITUDE_M, MAX_ACTIVITY_ALTITUDE_M)
+_BIKE_CADENCE_KEYS: Final = ("averageBikingCadenceInRevPerMinute",)
+_RUN_CADENCE_KEYS: Final = ("averageRunningCadenceInStepsPerMinute",)
+# Garmin reports zone times as numbered keys, zone 1 first.
+_HR_ZONE_PREFIX: Final = "hrTimeInZone_"
+_POWER_ZONE_PREFIX: Final = "powerTimeInZone_"
 
 # Exact Garmin activityType.typeKey values. The environment is set only where the
 # key names it;
@@ -279,6 +362,9 @@ def _map_row(
     training_effect_label = _training_effect_label(row, ref, issues)
     avg_hr = _optional_number(row, ("averageHR",), HEART_RATE_BOUNDS, ref, issues)
     max_hr = _optional_number(row, _MAX_HR_KEYS, HEART_RATE_BOUNDS, ref, issues)
+    min_hr = _optional_number(row, _MIN_HR_KEYS, HEART_RATE_BOUNDS, ref, issues)
+    raw_rpe = _optional_number(row, (_RPE_KEY,), _RPE_BOUNDS, ref, issues)
+    raw_feel = _optional_number(row, (_FEEL_KEY,), _FEEL_BOUNDS, ref, issues)
     max_speed = _optional_number(
         row, _MAX_SPEED_KEYS, (0.0, MAX_ACTIVITY_SPEED_MPS), ref, issues
     )
@@ -292,6 +378,9 @@ def _map_row(
     avg_speed = _optional_number(
         row, _AVERAGE_SPEED_KEYS, (0.0, MAX_ACTIVITY_SPEED_MPS), ref, issues
     )
+    grade_adjusted_speed = _optional_number(
+        row, _GRADE_ADJUSTED_SPEED_KEYS, (0.0, MAX_ACTIVITY_SPEED_MPS), ref, issues
+    )
     elevation_gain = _optional_number(
         row, _ELEVATION_GAIN_KEYS, (0.0, MAX_ACTIVITY_ELEVATION_M), ref, issues
     )
@@ -299,11 +388,37 @@ def _map_row(
         row, _NORMALIZED_POWER_KEYS, (0.0, MAX_ACTIVITY_POWER_W), ref, issues
     )
     vo2max = _optional_number(row, _VO2MAX_KEYS, (0.0, 100.0), ref, issues)
+    aerobic_effect = _optional_number(
+        row, _AEROBIC_EFFECT_KEYS, _TRAINING_EFFECT_BOUNDS, ref, issues
+    )
+    anaerobic_effect = _optional_number(
+        row, _ANAEROBIC_EFFECT_KEYS, _TRAINING_EFFECT_BOUNDS, ref, issues
+    )
+    elevation_low, elevation_high = _ordered_pair(
+        row, ("minElevation", "maxElevation"), _ALTITUDE_BOUNDS, ref, issues
+    )
+    min_temp, max_temp = _ordered_pair(
+        row, ("minTemperature", "maxTemperature"), TEMPERATURE_C_BOUNDS, ref, issues
+    )
+    elevation_loss = _optional_number(
+        row, ("elevationLoss",), (0.0, MAX_ACTIVITY_ELEVATION_M), ref, issues
+    )
+    water = _optional_number(
+        row, ("waterEstimated",), (0.0, MAX_WATER_ESTIMATE_ML), ref, issues
+    )
+    lap_count = _optional_number(row, ("lapCount",), (0.0, MAX_LAP_COUNT), ref, issues)
+    calories = _optional_number(
+        row, ("calories",), (0.0, MAX_ACTIVITY_ENERGY_KCAL), ref, issues
+    )
+    cadence = _cadence(row, ref, issues)
+    hr_zones = _zone_times(row, _HR_ZONE_PREFIX, ref, issues)
+    power_zones = _zone_times(row, _POWER_ZONE_PREFIX, ref, issues)
     if activity_id is None or started_at is None:
         return None
+    recorded_by = _recorded_by(row)
     return ActivityRecord(
         activity_id=activity_id,
-        provenance=_provenance(activity_id, retrieved_at, _recorded_by(row)),
+        provenance=_provenance(activity_id, retrieved_at, recorded_by),
         sport=sport,
         environment=environment,
         started_at=started_at,
@@ -319,19 +434,51 @@ def _map_row(
         avg_power=avg_power,
         name=name,
         max_hr=max_hr,
+        min_hr=min_hr,
+        rpe=None if raw_rpe is None else raw_rpe / 10,
+        feel=None if raw_feel is None else garmin_feel(raw_feel),
         max_speed_mps=max_speed,
         max_power_w=max_power,
         steps=steps,
         avg_speed_mps=avg_speed,
+        grade_adjusted_speed_mps=grade_adjusted_speed,
         elevation_gain_m=elevation_gain,
         normalized_power=normalized_power,
         vo2max=vo2max,
         training_effect_label=training_effect_label,
+        aerobic_training_effect=aerobic_effect,
+        anaerobic_training_effect=anaerobic_effect,
+        elevation_high_m=elevation_high,
+        elevation_low_m=elevation_low,
+        elevation_loss_m=elevation_loss,
+        min_temp_c=min_temp,
+        max_temp_c=max_temp,
+        water_estimated_ml=water,
+        energy_kcal=calories or None,
+        lap_count=lap_count,
+        avg_cadence=cadence,
+        hr_zone_times_s=hr_zones,
+        power_zone_times_s=power_zones,
         local_offset_minutes=_local_offset(row, started_at),
         terrain=terrain,
         assist=assist,
         native_type=type_key[:MAX_NATIVE_TYPE_LENGTH] if type_key else None,
+        purpose=_purpose(row, ref, issues),
+        device_type=(
+            wahoo_device_type(sport, environment)
+            if recorded_by is RecordingOrigin.WAHOO
+            else None
+        ),
     )
+
+
+def garmin_feel(value: float) -> float:
+    """Garmin feel 0..100 (higher = stronger) on the 1..5 feel scale, 1 = strong.
+
+    This is the conversion Intervals.icu applies when it imports the rating
+    (100 -> 1), so both copies of one session carry the same value.
+    """
+    return 5.0 - value / 25.0
 
 
 def merge_training_load_rows(activities: object, training_loads: object) -> object:
@@ -343,12 +490,14 @@ def merge_training_load_rows(activities: object, training_loads: object) -> obje
     """
     if not isinstance(activities, list) or not isinstance(training_loads, list):
         return activities
-    by_id = {
-        str(identity): row
-        for row in training_loads
-        if isinstance(row, dict)
-        and not _is_absent(identity := row.get("activityId") or row.get("id"))
-    }
+    # Rows of one id combine in order: a later row's value replaces an earlier one.
+    by_id: dict[str, dict[str, object]] = {}
+    for row in training_loads:
+        if isinstance(row, dict) and not _is_absent(
+            identity := row.get("activityId") or row.get("id")
+        ):
+            # An explicit null clears an earlier value: a rating removed on the watch.
+            by_id.setdefault(str(identity), {}).update(row)
     if not by_id:
         return activities
     merged: list[object] = []
@@ -361,17 +510,39 @@ def merge_training_load_rows(activities: object, training_loads: object) -> obje
         if not isinstance(activity, dict) or load_row is None:
             merged.append(activity)
             continue
-        merged.append(
-            {
-                **activity,
-                **{
-                    key: load_row[key]
-                    for key in _TRAINING_LOAD_FIELDS
-                    if load_row.get(key) is not None
-                },
-            }
-        )
+        merged.append(_with_load_fields(activity, load_row))
     return merged
+
+
+def _with_load_fields(
+    activity: dict[str, object], load_row: dict[str, object]
+) -> dict[str, object]:
+    """Replace each field the load row carries, dropping the activity's aliases."""
+    result = dict(activity)
+    for aliases in _TRAINING_LOAD_FIELDS:
+        carried = {
+            key: load_row[key] for key in aliases if load_row.get(key) is not None
+        }
+        if carried:
+            for key in aliases:
+                result.pop(key, None)
+            result.update(carried)
+    return result
+
+
+def _purpose(
+    row: dict[str, object], ref: str | None, issues: list[MappingIssue]
+) -> ActivityPurpose | None:
+    event = row.get(_EVENT_TYPE_KEY)
+    if event is None:
+        return None
+    key = event.get("typeKey") if isinstance(event, dict) else event
+    if key is None:
+        return None
+    if not isinstance(key, str):
+        issues.append(MappingIssue(ref, _EVENT_TYPE_KEY, IssueReason.INVALID_TYPE))
+        return None
+    return _EVENT_PURPOSES.get(key.strip().casefold())
 
 
 def _training_effect_label(
@@ -538,10 +709,72 @@ def _optional_number(
     return number
 
 
+def _ordered_pair(
+    row: dict[str, object],
+    keys: tuple[str, str],
+    bounds: tuple[float, float],
+    ref: str | None,
+    issues: list[MappingIssue],
+) -> tuple[float | None, float | None]:
+    """Return a (minimum, maximum) pair; a minimum above its maximum drops both."""
+    low_key, high_key = keys
+    low = _optional_number(row, (low_key,), bounds, ref, issues)
+    high = _optional_number(row, (high_key,), bounds, ref, issues)
+    if low is not None and high is not None and low > high:
+        issues.append(MappingIssue(ref, low_key, IssueReason.OUT_OF_RANGE))
+        return None, None
+    return low, high
+
+
+def _cadence(
+    row: dict[str, object], ref: str | None, issues: list[MappingIssue]
+) -> float | None:
+    """Bike rpm as reported; run steps per minute halved to one-leg rpm."""
+    bike = _optional_number(
+        row, _BIKE_CADENCE_KEYS, (0.0, MAX_ACTIVITY_CADENCE_RPM), ref, issues
+    )
+    if bike:
+        return bike
+    steps = _optional_number(
+        row, _RUN_CADENCE_KEYS, (0.0, 2 * MAX_ACTIVITY_CADENCE_RPM), ref, issues
+    )
+    return bike if steps is None else steps / 2
+
+
+def _zone_times(
+    row: dict[str, object], prefix: str, ref: str | None, issues: list[MappingIssue]
+) -> tuple[tuple[str, float], ...] | None:
+    """Return ``<prefix><n>`` seconds as ``Z<n>`` zones; one bad zone drops all."""
+    zones: list[tuple[str, float]] = []
+    for number in range(1, MAX_ZONE_COUNT + 1):
+        key = f"{prefix}{number}"
+        if _is_absent(row.get(key)):
+            continue
+        seconds = _optional_number(
+            row, (key,), (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
+        )
+        if seconds is None:
+            return None
+        zones.append((f"Z{number}", seconds))
+    return tuple(zones) or None
+
+
 def _recorded_by(row: dict[str, object]) -> RecordingOrigin:
-    """Only an explicit boolean True marks a manual entry; anything else is GARMIN."""
+    """Name who recorded the activity.
+
+    Only an explicit boolean True marks a manual entry. Otherwise the list row's
+    ``manufacturer`` (SDK and Personal API) names a relayed recording: a Wahoo
+    or Zwift value is that origin. Anything else, including Connect IQ or
+    third-party values, stays a Garmin recording as before.
+    """
     if row.get("manualActivity") is True:
         return RecordingOrigin.MANUAL
+    manufacturer = row.get("manufacturer")
+    text = manufacturer.strip().upper() if isinstance(manufacturer, str) else ""
+    if text.startswith("WAHOO"):
+        return RecordingOrigin.WAHOO
+    if text.startswith("ZWIFT"):
+        return RecordingOrigin.ZWIFT
     return RecordingOrigin.GARMIN
 
 

@@ -104,6 +104,9 @@ class _PayloadService:
     def known_activity_ids(self, days: int) -> frozenset[str]:
         return self._known_activity_ids
 
+    def rated_activity_ids(self, days: int) -> frozenset[str]:
+        return frozenset()
+
     def prepare_fixture(self, payload: dict) -> dict:
         self.prepared = ("fixture", payload)
         return payload
@@ -154,6 +157,7 @@ class _RemoteReader:
         include_recovery=None,
         include_daily_metrics=True,
         known_activity_ids=None,
+        rated_activity_ids=frozenset(),
     ):
         self.arguments = (days, end_date, cancel_event, include_recovery)
         self.daily_metrics = (include_daily_metrics, known_activity_ids)
@@ -235,7 +239,7 @@ class GarminSyncServiceTests(unittest.TestCase):
         export.assert_called_once_with()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["metric_export"]["exported"], 2)
-        self.assertIn("2 Messwerte gesendet", self.writer.calls[-1][4])
+        self.assertIn("2 Werte gesendet", self.writer.calls[-1][4])
         self.assertIn("1 Konflikte", self.writer.calls[-1][4])
         self.assertFalse(self.lock.locked())
 

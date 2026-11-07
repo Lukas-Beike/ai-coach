@@ -147,14 +147,6 @@ def _first(candidates: tuple[Observation, ...]) -> Observation | None:
     return next(iter(candidates), None)
 
 
-def _canonical_eftp_value(canonical: CanonicalCurrentInputs) -> float | None:
-    """Return the athlete-record ride eFTP, else the latest wellness day's."""
-    for observation in (canonical.athlete_eftp, canonical.wellness_eftp):
-        if observation is not None:
-            return observation.value.value
-    return None
-
-
 def _activity_max_hr(activity: Any) -> tuple[float, ProviderId] | None:
     """Return a summary's plausible max HR and the provider that reported it."""
     sources = activity.get("sources") if isinstance(activity, dict) else None
@@ -252,19 +244,6 @@ def _height_in_cm(value: Any) -> float | int | None:
     if number is not None and 1.2 <= float(number) <= 2.5:
         return round(float(number) * 100, 1)
     return number
-
-
-def _latest_ride_eftp(activities: list[Any]) -> Any:
-    """Return the eFTP of the newest ride summary, or None."""
-    rides = (
-        activity
-        for activity in activities
-        if isinstance(activity, dict) and activity.get("sport") == Sport.RIDE.value
-    )
-    latest = max(
-        rides, key=lambda item: str(item.get("started_at_local") or ""), default={}
-    )
-    return latest.get("eftp_w")
 
 
 def _first_performance_source(
@@ -578,8 +557,6 @@ def current_performance_metrics(
     current on ``as_of`` (None applies no age limit). Weight and body fat are
     resolved by recency with Garmin's latest ``garmin_body`` measurements.
     """
-    latest_ride_eftp = _latest_ride_eftp(activities)
-    current_ride_eftp = _canonical_eftp_value(canonical)
     thresholds = resolve_current_thresholds(
         (*canonical.threshold_candidates, *garmin_thresholds),
         canonical.local_thresholds,
@@ -603,9 +580,6 @@ def current_performance_metrics(
             as_of,
         ),
         **_performance_threshold_metrics(garmin_metrics, canonical, thresholds),
-        "cycling_eftp_watts": _intervals_metric(
-            current_ride_eftp or latest_ride_eftp, "W"
-        ),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
         "max_hr_bpm": max_hr,

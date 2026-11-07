@@ -11,6 +11,7 @@ from typing import Any
 from backend.activities.duplicates import deduplicate_api_records
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.garmin_payload import (
+    ACTIVITY_RATINGS_SECTION,
     MERGE_SECTIONS,
     REPLACE_SECTIONS,
     SECTIONS,
@@ -24,6 +25,7 @@ from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
+from backend.provider_credentials import GARMIN_PERSONAL_KEY_REJECTED_KEY
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
 from backend.providers.garmin_gear_fields import garmin_gear_id
@@ -31,6 +33,7 @@ from backend.sync.canonical_ingest import DeletionWindow, fetch_deletion_window
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_payload_metrics import garmin_source_observed_at
 from backend.sync.garmin_performance_history import append_garmin_performance_history
+from backend.sync.garmin_personal_status import SDK_SKIPPED_KEY, sdk_skipped_view
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.state import SyncStateRepository
@@ -316,6 +319,19 @@ class GarminPayloadService:
         return frozenset(
             str(row["activityId"])
             for row in rows
+            if isinstance(row, dict) and row.get("activityId") is not None
+        )
+
+    def rated_activity_ids(self, days: int) -> frozenset[str]:
+        """Return the Garmin activity IDs of the last ``days`` days with a stored rating."""
+        start = (self._local_today() - timedelta(days=max(1, days))).isoformat()
+        with self._database_manager.reader() as db:
+            rows = garmin_store.read_sections(
+                db, (ACTIVITY_RATINGS_SECTION,), start=start
+            ).get(ACTIVITY_RATINGS_SECTION)
+        return frozenset(
+            str(row["activityId"])
+            for row in rows or []
             if isinstance(row, dict) and row.get("activityId") is not None
         )
 
@@ -695,6 +711,37 @@ class GarminSyncStateService:
     def record_capability_success(self, source: str) -> None:
         if self.capability_state(source):
             self._set(f"garmin_capability_{source}", "")
+
+    def record_sdk_skipped(self, reason: str) -> None:
+        """Keep the last SDK login skip so the card can ask for a new login."""
+        self._set(
+            SDK_SKIPPED_KEY,
+            json.dumps(
+                {"reason": reason, "at": self._utc_now()}, separators=(",", ":")
+            ),
+        )
+
+    def record_personal_key_result(self, accepted: bool) -> None:
+        """Mark a rejected Personal API key until an exchange succeeds again."""
+        if accepted:
+            if self._get(GARMIN_PERSONAL_KEY_REJECTED_KEY):
+                self._set(GARMIN_PERSONAL_KEY_REJECTED_KEY, "")
+        else:
+            self._set(GARMIN_PERSONAL_KEY_REJECTED_KEY, self._utc_now())
+
+    def personal_key_rejected(self) -> bool:
+        return bool(self._get(GARMIN_PERSONAL_KEY_REJECTED_KEY))
+
+    def clear_sdk_skipped(self) -> None:
+        if self._get(SDK_SKIPPED_KEY):
+            self._set(SDK_SKIPPED_KEY, "")
+
+    def sdk_skipped(self) -> dict[str, str] | None:
+        try:
+            value = json.loads(self._get(SDK_SKIPPED_KEY) or "null")
+        except TypeError, ValueError:
+            value = None
+        return sdk_skipped_view(value)
 
     def error_entries(self) -> list[dict[str, Any]]:
         try:

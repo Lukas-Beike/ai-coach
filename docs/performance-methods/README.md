@@ -12,8 +12,15 @@ a card by its `Card` ID.
 | [M3](m3-sleep-duration-timing.md) | Sleep duration, goal shortfall and timing | descriptive statistic |
 | [M4](m4-critical-power-speed.md) | Critical Power and Critical Speed | model estimate |
 | [M5](m5-smoothed-session-load.md) | Short- and long-term session-RPE load | model estimate |
+| [M6](m6-local-tss-load.md) | Local TSS-scale session load and intensity | model estimate |
+| [M7](m7-local-fitness-fatigue.md) | Local fitness, fatigue and form | model estimate |
+| [M8](m8-local-session-metrics.md) | Local efficiency factor, variability index, work and decoupling | descriptive statistic |
 
-M5 covers the smoothed load curves (#1432). Passive CP/CS, TRIMP, further
+M5 covers the smoothed load curves (#1432). M6 (#1725) replaces provider TSS
+with a local load; Banister TRIMP appears only as its heart-rate branch. M7
+(#1726) smooths the M6 load into local fitness, fatigue and form in place of
+the Intervals.icu CTL, ATL and form.
+Passive CP/CS, other TRIMP uses, further
 threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based
 recommendations stay deferred without a card.
 
@@ -130,6 +137,20 @@ accessible text, not a declared absence.
 | R15 | Shanghai science commission grant | none declared | no | full text |
 | R16 | no statement | none declared | no | full text |
 | R17 | Engineering research council of Canada | no statement | no | full text (third-party copy) |
+| R18 | not applicable (book) | not checked | yes: authors linked to WKO/TrainingPeaks metrics | metadata only |
+| R19 | not applicable (book chapter) | no statement | unknown | metadata only |
+| R20 | no statement | no statement | unknown | abstract |
+| R21 | no statement | no statement | unknown | abstract |
+| R22 | no statement | no statement | unknown | abstract |
+| R23 | no statement | no statement | unknown | abstract |
+| R24 | no statement | no statement | unknown | abstract |
+| R25 | no statement (author manuscript) | no statement | no | full-text methods |
+| R26 | no statement | no statement | unknown | abstract |
+| R27 | no statement | no statement | unknown | abstract |
+| R28 | no statement | none declared | no | abstract |
+| R29 | none (Europe PMC) | no statement | no | abstract |
+| R30 | no statement | no statement | unknown | abstract |
+| R31 | no statement | no statement | unknown | abstract |
 | L1 | no statement | one author: funding from lighting and circadian-health companies, company co-founder | yes, indirect (lighting) | full text |
 
 | ID | Source | Access | Use and limits |
@@ -151,7 +172,63 @@ accessible text, not a declared absence.
 | R15 | Ding et al. 2026, "Acute:chronic workload ratio and load management for team sports: a multilevel meta-analysis", Front Public Health 14:1896651, PMID 42662491, DOI `10.3389/fpubh.2026.1896651` | abstract | 16 studies, 797 athletes, g 0.35, I² 95.8 %, search to October 2024. No standalone prediction; team sport, not an endurance athlete. |
 | R16 | Smyth & Muniz-Pumares 2020, "Calculation of Critical Speed from Raw Training Data in Recreational Marathon Runners", Med Sci Sports Exerc 52(12):2637-2645, PMID 32472926, DOI `10.1249/MSS.0000000000002412` | full-text methods | Passive CS from logged runs (best 400-5000 m efforts, linear distance-time fit). No lab validation; maximality unverified; D′ imprecise. Abstract and full text disagree on the runner count. |
 | R17 | Morton, Fitz-Clarke & Banister 1990, "Modeling human performance in running", J Appl Physiol 69(3):1171-1177, PMID 2246166, DOI `10.1152/jappl.1990.69.3.1171` | abstract | Fitness-fatigue model with two exponentially decaying responses. No validation of our 42-/7-day parameters. |
+| R18 | Allen, Coggan & McGregor 2019, *Training and Racing with a Power Meter*, 3rd ed., VeloPress, ISBN 978-1-937715-93-9 | metadata only (book not read) | Origin of NP, IF and TSS. Formula `TSS = s × NP × IF / (FTP × 3600) × 100` confirmed only in vendor text (V1); NP definition (30-s rolling mean, 4th power) not verified from the book. Not peer-reviewed; author interest. |
+| R19 | Banister 1991, "Modeling elite athletic performance", in MacDougall, Wenger & Green (eds), *Physiological Testing of the High-Performance Athlete*, 2nd ed., Human Kinetics, pp. 403-424 or 403-425 (sources disagree), ISBN 0-87322-300-4 | metadata only | Average-HR TRIMP with HR reserve. Male weighting 0.64·e^(1.92·HRr) as cited elsewhere, not verified from the chapter; R25 prints 0.84 instead of the usual 0.86 for the female constant. |
+| R20 | Sanders et al. 2017, "Methods of Monitoring Training Load and Their Relationships to Changes in Fitness and Performance in Competitive Road Cyclists", IJSPP 12(5):668-675, PMID 28095061, DOI `10.1123/ijspp.2016-0454` | abstract | 15 well-trained cyclists, 10 weeks. TSS vs change in power at 2 and 4 mmol/L: r = .75 and .79 (wide CIs); iTRIMP similar; luTRIMP strongest for the time trial. Group dose-response only, no agreement between methods. |
+| R21 | van Erp et al. 2019, "The Influence of Exercise Intensity on the Association Between Kilojoules Spent and Various Training Loads in Professional Cycling", IJSPP 14(10):1395-1400, PMID 30958053, DOI `10.1123/ijspp.2018-0877` | abstract | 21 professionals, 11,716 sessions. Intensity changes the kJ-TSS relation but not kJ-sRPE or kJ-luTRIMP; TSS is not interchangeable with HR load. |
+| R22 | Vermeire et al. 2021, "The Influence of Different Training Load Quantification Methods on the Fitness-Fatigue Model", IJSPP 16(9):1261-1269, PMID 33691278, DOI `10.1123/ijspp.2020-0662` | abstract | 9 participants, 8 weeks. Similar model error for Banister, Lucia and Edwards TRIMP, TSS and sRPE, but the load series evolve differently; "cannot be used interchangeably". |
+| R23 | Vermeire et al. 2023, "Training Load and Acute Performance Decrements Following Different Training Sessions", IJSPP 18(3):284-292, PMID 36716743, DOI `10.1123/ijspp.2022-0157` | abstract | 11 recreational cyclists, 4 sessions. TSS and iTRIMP over-express intensity; only sRPE matched the acute performance drop. |
+| R24 | Kesisoglou, Nicolò & Passfield 2021, "Cycling Performance and Training Load: Effects of Intensity and Duration", IJSPP 16(4):535-543, PMID 33059328, DOI `10.1123/ijspp.2020-0072` | abstract | 14 cyclists. Load metrics including TSS differed across bouts while the acute performance drop did not. |
+| R25 | Kesisoglou et al. 2021, "Continuous Versus Intermittent Running: Acute Performance Decrement and Training Load", IJSPP 16(12):1794-1803, PMID 34021094, DOI `10.1123/ijspp.2020-0844` | full-text methods (author manuscript) | 11 runners (10 men). rTSS with threshold pace assumed at 88 % of 10-min speed; rTSS and the TRIMPs moved opposite to the performance drop. Evidence against, not a validation. |
+| R26 | Wallace et al. 2014, "Establishing the criterion validity and reliability of common methods for quantifying training load", J Strength Cond Res 28(8):2330-2337, PMID 24662229, DOI `10.1519/JSC.0000000000000416` | abstract | 10 recreational athletes vs VO2. Test-retest CV: Banister TRIMP 15.6 %, Lucia TRIMP 10.7 %, sRPE 28.1 %. No TSS. |
+| R27 | Klitzke Borszcz et al. 2019, "Is the Functional Threshold Power Interchangeable With the Maximal Lactate Steady State in Trained Cyclists?", IJSPP 14(8):1029-1035, PMID 30676826, DOI `10.1123/ijspp.2018-0572` | abstract | 15 cyclists. FTP vs MLSS bias 1.4 % ± 9.2 % (95 % limits of agreement). |
+| R28 | Klitzke Borszcz et al. 2020, "Reliability of the Functional Threshold Power in Competitive Cyclists", Int J Sports Med 41(3):175-181, PMID 31952081, DOI `10.1055/a-1018-1965` | abstract | 25 cyclists; 20-min test CV 2.9 %, ICC 0.97. |
+| R29 | Wong et al. 2022 (online 2023-02-20), "Functional threshold power is not a valid marker of the maximal metabolic steady state", J Sports Sci 40(23):2578-2584, PMID 36803419, DOI `10.1080/02640414.2023.2176045` | abstract | 13 cyclists; time to failure at FTP 33.7 ± 7.6 min. IF = 1 is not the heavy/severe boundary. |
+| R30 | McGregor, Weese & Ratz 2009, "Performance modeling in an Olympic 1500-m finalist: a practical approach", J Strength Cond Res 23(9):2515-2523, PMID 19910822, DOI `10.1519/JSC.0b013e3181bf88be` | abstract | One elite runner, pace-based TSS. Use case, not a validation; no formula in the abstract. |
+| R31 | Bossi et al. 2026, "Quantifying and Comparing Training Load Metrics in Cycling: A Methodology Review", Int J Sport Nutr Exerc Metab 36(5):588-598, PMID 42315095, DOI `10.1123/ijsnem.2026-0028` | abstract | Teaching review of how TSS, Edwards TRIMP and sRPE are computed and compared; no pooled agreement. |
+| R32 | Coyle & González-Alonso 2001, "Cardiovascular drift during prolonged exercise: new perspectives", Exerc Sport Sci Rev 29(2):88-92, PMID 11337829, DOI `10.1097/00003677-200104000-00009` | abstract | Review. Stroke volume falls progressively after 10-20 min, mainly because HR rises. Mechanism for the warm-up exclusion, not a validated cut-off. |
+| R33 | Hamilton et al. 1991, "Fluid replacement and glucose infusion during exercise prevent cardiovascular drift", J Appl Physiol 71(3):871-877, PMID 1757323, DOI `10.1152/jappl.1991.71.3.871` | abstract | 10 trained cyclists, 2 h at 70 % VO2max, 22 °C. HR +10 % from 20 to 120 min without fluid (2.9 % mass loss), +5 % with full replacement. Hydration confounds decoupling. |
+| R34 | Wingo, Ganio & Cureton 2012, "Cardiovascular drift during heat stress: implications for exercise prescription", Exerc Sport Sci Rev 40(2):88-94, PMID 22410803, DOI `10.1097/JES.0b013e31824c43af` | abstract | Review. Drift starts about 10 min into moderate exercise; in heat the higher HR reflects a higher relative intensity. |
+| R35 | Wingo, Stone & Ng 2020, "Cardiovascular Drift and Maximal Oxygen Uptake during Running and Cycling in the Heat", Med Sci Sports Exerc 52(9):1924-1932, PMID 32102057, DOI `10.1249/MSS.0000000000002324` | abstract | 7 men, 60 % VO2max at 35 °C: HR +19 % running, +17 % cycling between 15 and 45 min. Heat alone exceeds any decoupling band. |
+| R36 | Maunder et al. 2021, "The Importance of 'Durability' in the Physiological Profiling of Endurance Athletes", Sports Med 51(8):1619-1628, PMID 33886100, DOI `10.1007/s40279-021-01459-0` | abstract | Narrative review; defines durability. Concept only, no decoupling formula or threshold. |
+| R37 | Smyth et al. 2022, "Decoupling of Internal and External Workload During a Marathon", Sports Med 52(9):2283-2295, PMID 35511416, DOI `10.1007/s40279-022-01680-5` | abstract | 82,303 recreational marathon runners; a different ratio ((%HRmax)/(speed/CS), 35-40 km vs 5-10 km). Lower decoupling went with better performance. Observational; its bands do not transfer to Pa:HR. |
+| R38 | Barsumyan et al. 2026, "The relationship between cadence decline, cardiovascular drift and aerobic decoupling as a marker of fatigue in well trained cyclists", BMC Sports Sci Med Rehabil 18(1):179, PMID 41923151, DOI `10.1186/s13102-026-01678-w` | full-text methods | 17 trained men, 60 min at 75 % FTP indoors with fan and fluid; Pw:HR 0-30 vs 31-60 min: 2.00 ± 2.38 %. No threshold. Convenience sample. |
+| R39 | Barsumyan et al. 2025, "Quantifying training response in cycling based on cardiovascular drift using machine learning", Front Artif Intell 8:1623384, PMID 40687435, DOI `10.3389/frai.2025.1623384` | abstract | 20 athletes over 5 months; drift and Pw:HR decoupling strongly correlated. Not a reliability study; classifier not externally validated. |
+| R40 | Cartón-Llorente, García-Pinillos & Jaén-Carrillo 2026, "Power-Based Running Durability in Trained Runners", Eur J Sport Sci 26(11):e70275, PMID 42897874, DOI `10.1002/ejsc.70275` | abstract | 12 trail runners, footpod power; adjusted for speed, running power did not drift. Background for runs with power. |
+| R41 | Ettema & Lorås 2009, "Efficiency in cycling: a review", Eur J Appl Physiol 106(1):1-14, PMID 19229554, DOI `10.1007/s00421-009-1008-7` | abstract | Energy expenditure is linear in work rate; gross efficiency depends on work rate. A fixed kJ-to-kcal factor is an approximation. |
+| R42 | Moseley & Jeukendrup 2001, "The reliability of cycling efficiency", Med Sci Sports Exerc 33(4):621-627, PMID 11283439, DOI `10.1097/00005768-200104000-00017` | abstract | 17 men: gross efficiency 19.8 ± 0.6 %, test-retest CV 4.2 %. Lab value, not a field constant. |
+| R43 | Hopker et al. 2009, "The effects of training on gross efficiency in cycling: a review", Int J Sports Med 30(12):845-850, PMID 19941249, DOI `10.1055/s-0029-1237712` | abstract | Training can raise gross efficiency, so work-to-energy varies within an athlete. |
 | L1 | Phillips & Steven 2026, "Perspective: sleep regularity—where do we go from here?", Sleep 49(8), PMID 42023690, DOI `10.1093/sleep/zsag114` | full text | Perspective without new data, formula, threshold or wearable/athlete content. Background only; not decision evidence. |
+
+### Vendor documentation (not peer-reviewed)
+
+| ID | Source | Access | Use and limits |
+| --- | --- | --- | --- |
+| V1 | TrainingPeaks articles: Friel 2009, https://www.trainingpeaks.com/learn/articles/estimating-training-stress-score-tss/ ; McGregor 2008 (updated 2026-04-13), https://www.trainingpeaks.com/learn/articles/running-training-stress-score-rtss-explained/ | full text (web) | TSS formula as text. The rTSS formula appears only as an image, so `hours × IF² × 100` for pace is unverified. |
+| V2 | Intervals.icu forum, developer posts 2020-03-21 and 2020-03-26, https://forum.intervals.icu/t/hrss-normalized-trimp-training-load/569 | full text (web) | HRSS = normalised TRIMP, "100 = 1h max effort"; no formula, constants or peer-reviewed source. |
+
+| V3 | Friel, TrainingPeaks, "Efficiency Factor and Decoupling" (2011-12-07, updated 2026-07-18), https://www.trainingpeaks.com/blog/efficiency-factor-and-decoupling/ | full text (web) | EF ride = NP / avg HR, run = normalized graded speed / avg HR; decoupling = (EF1 − EF2)/EF1 on a steady effort; "5 % or less" as a preference, no citations. |
+| V4 | Friel, TrainingPeaks, "Aerobic Endurance and Decoupling" (2008-10-10, updated 2026-06-03), https://www.trainingpeaks.com/learn/articles/aerobic-endurance-and-decoupling/ | full text (web) | Bands < 5 %, 5-10 %, > 10 %, with "There's no hard research-based rule here"; heat and dehydration named as causes. |
+| V5 | TrainingPeaks Help, "Aerobic Decoupling and Efficiency Factor" (204071724) and "Variability Index (VI)" (204071734) | search snippet only | VI = NP / AP; steady ride 1.00-1.02, MTB or cyclocross 1.13-1.50; decoupling under 20 min "not as valid". Not verified from the page. |
+
+M8 search on 2026-11-07 (PubMed E-utilities, Crossref, vendor pages):
+`aerobic decoupling`, `cardiovascular drift[ti] AND (2023:2026[dp])`,
+`cardiac drift heat cycling`, `durability[ti] AND endurance AND (2024:2026[dp])`,
+`efficiency factor[ti] AND heart rate`, `variability index AND normalized power`,
+`gross efficiency cycling review`, author searches for R32-R43. Crossref
+`filter=updates:<doi>` and PubMed `CommentsCorrections` found no correction or
+retraction for R32-R43. No peer-reviewed validity or reliability study of EF or
+VI and no peer-reviewed decoupling threshold was found.
+
+M6 search on 2026-11-06 (PubMed E-utilities, Europe PMC, publisher and vendor
+pages): `"training stress score"[tiab] AND 2020:2026[dp]`,
+`"normalized power"[tiab] AND (cycling OR cyclists) AND 2018:2026[dp]`,
+`functional threshold power validity cyclists`, `hrTSS[tiab]`, `rTSS[tiab]`,
+`"running power" AND (training load OR stress score)`, internal vs external
+load in endurance athletes 2023-2026, and systematic reviews of training load
+2023-2026. Crossref `filter=updates:<doi>` and PubMed `CommentsCorrections`
+found no correction or retraction for R20-R31. No 2023-2026 systematic review
+on internal vs external load agreement in endurance athletes was found.
 
 ### Newer work found, not yet decision evidence
 

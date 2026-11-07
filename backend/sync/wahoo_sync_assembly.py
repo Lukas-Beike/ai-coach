@@ -5,17 +5,21 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from typing import Any
 
+from backend.canonical.records import Observation
+from backend.canonical.vocabulary import Sport
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.performance.current_thresholds import ThresholdKey
 from backend.providers.wahoo_client import WahooClient
 from backend.providers.wahoo_fit_download import download_wahoo_fit
+from backend.providers.wahoo_plan_mapping import WahooPlanReferences
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
@@ -28,7 +32,7 @@ from backend.sync.wahoo_sync import (
     WahooSyncService,
     WahooSyncStorage,
 )
-from backend.sync.wahoo_workout_export import WahooWorkoutExport
+from backend.sync.wahoo_workout_export import WahooWorkoutExport, plan_references
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,8 @@ class WahooSyncInputs:
     logger: logging.Logger
     redactor: Callable[[str], str]
     resync_gate: ProviderResyncGate
+    # ``db -> export thresholds`` (local zones, Garmin, Wahoo) for plan references.
+    export_thresholds: Callable[[Any], Mapping[ThresholdKey, Observation]]
 
 
 class WahooSyncAssembly:
@@ -109,8 +115,23 @@ class WahooSyncAssembly:
             return self._details
 
     def workout_export(self) -> WahooWorkoutExport:
-        """Create the library export target; the client resolves per remote call."""
-        return WahooWorkoutExport(self.client, now=self._inputs.now)
+        """Create the library export target; the client resolves per remote call.
+
+        One export serves one push run, so the thresholds are read once per run
+        and plan sport, not once per workout.
+        """
+        cache: dict[Sport, WahooPlanReferences] = {}
+
+        def references(sport: Sport) -> WahooPlanReferences:
+            if sport not in cache:
+                with self._inputs.database_manager().reader() as db:
+                    thresholds = self._inputs.export_thresholds(db)
+                cache[sport] = plan_references(thresholds, sport)
+            return cache[sport]
+
+        return WahooWorkoutExport(
+            self.client, now=self._inputs.now, references=references
+        )
 
     def plan_push_service(self) -> WahooPlanPushService:
         """Share one plan-push service so its run lock serializes every caller."""

@@ -39,6 +39,7 @@ class IntervalsJobDependencies:
     operation_observer: Callable[[], SyncOperationObserver]
     resync_gate: ProviderResyncGate
     activity_detail_service: Callable[[], Any] | None = None
+    ingest_enabled: Callable[[], bool] = lambda: True
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,8 @@ class GarminJobDependencies:
     morning_body_battery_service: Callable[[], Any]
     fixture_loader: Callable[[], Any]
     activity_detail_service: Callable[[], Any] | None = None
+    strength_push_service: Callable[[], Any] | None = None
+    wellness_history_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,9 @@ def build_garmin_owner(
         activity_detail_service=garmin.activity_detail_service()
         if garmin.activity_detail_service
         else None,
+        wellness_history_service=garmin.wellness_history_service()
+        if garmin.wellness_history_service
+        else None,
     )
 
 
@@ -137,6 +143,7 @@ class SyncJobExecutionAssembly:
         *,
         dependencies: SyncJobExecutionAssembly.Inputs,
         provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
+        after_job: Callable[[Mapping[str, Any]], None] = lambda _job: None,
     ) -> None:
         self._historical = dependencies.historical
         self._state = dependencies.state
@@ -144,6 +151,7 @@ class SyncJobExecutionAssembly:
         self._garmin = dependencies.garmin
         self._calendar_weather = dependencies.calendar_weather
         self._provider_runtime = provider_runtime
+        self._after_job = after_job
 
     def executor(self) -> sync_executor.SyncJobExecutor:
         """Create one dispatcher with shared historical sync policy."""
@@ -167,6 +175,7 @@ class SyncJobExecutionAssembly:
             historical_sync=historical_sync,
             outcome_service=self._state.outcome_service(),
             all_sync_days=self._historical.all_sync_days,
+            after_job=self._after_job,
         )
 
     def _runtime_executor(
@@ -178,4 +187,5 @@ class SyncJobExecutionAssembly:
             outcome_service=self._state.outcome_service(),
             all_sync_days=self._historical.all_sync_days,
             registry=runtime.static,
+            after_job=self._after_job,
         )

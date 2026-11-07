@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from backend.canonical.records import Observation
 from backend.canonical.sports import legacy_activity_family
@@ -207,6 +207,16 @@ def read_garmin_thresholds(
     )
 
 
+# Night values of the sleep record; the sleep section also carries their mean
+# over the read window as the athlete's own recent range.
+_NIGHT_FIELDS: Final = (
+    ("avg_spo2_pct", MetricKind.SPO2),
+    ("lowest_spo2_pct", MetricKind.SPO2_LOWEST),
+    ("avg_respiration_brpm", MetricKind.RESPIRATION_RATE),
+    ("avg_sleeping_hr_bpm", MetricKind.SLEEPING_HR),
+)
+_NIGHT_MEANS: Final = "night_means"
+
 # Coach recovery section -> ((field, kind), ...) and its status domain, if any.
 _RECOVERY_RECORDS: Mapping[
     str, tuple[tuple[tuple[str, MetricKind], ...], tuple[str, CategoricalDomain] | None]
@@ -215,6 +225,7 @@ _RECOVERY_RECORDS: Mapping[
         (
             ("sleep_seconds", MetricKind.SLEEP_DURATION),
             ("sleep_score", MetricKind.SLEEP_SCORE),
+            *_NIGHT_FIELDS,
         ),
         None,
     ),
@@ -241,7 +252,8 @@ def read_garmin_recovery(
     A section's record is the latest day with any of its kinds or its status; it
     holds that day's values, each the day's latest observation. A section without
     any is an empty mapping. Status codes are read only from a source that stores
-    them.
+    them. The sleep record adds ``night_means``: each night value's mean over the
+    nights since ``start`` and their count.
     """
     reader = _resolved(reader, db)
     records: dict[str, dict[str, Any]] = {}
@@ -254,7 +266,22 @@ def read_garmin_recovery(
             continue
         day = max(values)
         records[section] = {"date": day.isoformat(), **values[day]}
+        if section == "sleep" and (means := _night_means(values)):
+            records[section][_NIGHT_MEANS] = means
     return records
+
+
+def _night_means(values: Mapping[date, Mapping[str, Any]]) -> dict[str, Any]:
+    """Each night value's mean and night count over ``values``; empty without any."""
+    means: dict[str, Any] = {}
+    for name, _kind in _NIGHT_FIELDS:
+        numbers = [day[name] for day in values.values() if name in day]
+        if numbers:
+            means[name] = {
+                "mean": round(sum(numbers) / len(numbers), 1),
+                "nights": len(numbers),
+            }
+    return means
 
 
 def _recovery_kind_values(

@@ -31,6 +31,7 @@ from backend.sync.full_resync import (
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.gates import ProviderResyncGate, resync_gate
 from backend.sync.intervals import IntervalsSyncService
+from backend.sync.intervals_ingest import INGEST_OFF_REASON
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_runtime import FullResyncHandler, ProviderRuntimeRegistry
 from backend.sync.wahoo_sync import WahooSyncService
@@ -81,8 +82,10 @@ class IntervalsFullResync:
         competition_service: CompetitionSyncService,
         gate: ProviderResyncGate,
         all_sync_days: int,
+        ingest_enabled: Callable[[], bool] = lambda: True,
     ) -> None:
         self._config = config
+        self._ingest_enabled = ingest_enabled
         self._intervals_service = intervals_service
         self._competition_service = competition_service
         self._gate = gate
@@ -95,10 +98,18 @@ class IntervalsFullResync:
         return AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
 
     def run(self, operation_id: str, observer: SyncOperationObserver) -> dict[str, Any]:
+        if not self._ingest_enabled():
+            raise AppError(
+                409,
+                "Das Einlesen von Intervals.icu ist ausgeschaltet.",
+                reason=INGEST_OFF_REASON,
+            )
+        # Checked once above, so a toggle meanwhile cannot turn it into a no-op.
         result = self._intervals_service.sync(
             FULL_RESYNC_LABEL,
             activity_days=self._all_sync_days,
             operation_id=operation_id,
+            one_off=True,
         )
         with (
             observer.observe(

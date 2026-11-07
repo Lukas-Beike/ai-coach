@@ -102,12 +102,24 @@ class DefaultFreshnessSourceTests(unittest.TestCase):
                 source = sources[area]
                 inputs = _inputs(
                     config=make_config(intervals_api_key="configured"),
-                    values={at_key: "stored-at", error_key: "stored-error"},
+                    values={
+                        at_key: "stored-at",
+                        error_key: "stored-error",
+                        "intervals_ingest_enabled": "1",
+                    },
                 )
                 self.assertEqual(source.fallback_at(inputs), "stored-at")
                 self.assertEqual(source.fallback_error(inputs), "stored-error")
                 self.assertTrue(source.configured(inputs))
                 self.assertFalse(source.configured(_inputs()))
+
+    def test_intervals_ingest_areas_do_not_age_while_the_ingest_is_off(self) -> None:
+        sources = DEFAULT_FRESHNESS_SOURCES[INTERVALS_ID]
+        inputs = _inputs(config=make_config(intervals_api_key="configured"))
+
+        self.assertFalse(sources["activities"].configured(inputs))
+        self.assertFalse(sources["performance"].configured(inputs))
+        self.assertTrue(sources["competitions"].configured(inputs))
 
     def test_garmin_is_configured_by_any_single_credential_source(self) -> None:
         source = DEFAULT_FRESHNESS_SOURCES[GARMIN_ID]["data"]

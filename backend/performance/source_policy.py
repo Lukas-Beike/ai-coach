@@ -45,7 +45,7 @@ than ``WAHOO_CURRENT_MAX_AGE_DAYS`` days before it is not current. Such values s
 in the observations, so history keeps them.
 
 Values that this module does not see, and must stay with the caller: profile and
-manual values, per-sport settings from the wellness row, Intervals eFTP, the
+manual values, per-sport settings from the wellness row, the
 generic top-level FTP and threshold-HR fallbacks, and activity-derived fallbacks
 such as the maximum recorded heart rate.
 
@@ -223,8 +223,6 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
             # load_context: Intervals only, latest row.
             SourceRule(MetricKind.CTL, (_INTERVALS,), latest_intervals_row=True),
             SourceRule(MetricKind.ATL, (_INTERVALS,), latest_intervals_row=True),
-            # Intervals' estimated FTP: a separate, labelled value, never the FTP.
-            SourceRule(MetricKind.EFTP, (_INTERVALS,)),
         )
     }
 )

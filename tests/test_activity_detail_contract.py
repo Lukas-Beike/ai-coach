@@ -496,6 +496,45 @@ class MetricTests(unittest.TestCase):
         self.assertEqual("W", normalized["unit"])
         self.assertEqual("derived", normalized["source"]["kind"])
 
+    def test_garmin_summary_values_are_labelled_metrics(self) -> None:
+        # #1724: Garmin's own estimates are derived; its extremes are measured.
+        doc = build(
+            [
+                record(
+                    GARMIN,
+                    "g-run-1",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    label="Garmin Connect",
+                    aerobic_training_effect=3.7,
+                    water_estimated_ml=826.0,
+                    elevation_loss_m=28.0,
+                    min_temp_c=15.0,
+                    max_temp_c=24.0,
+                    lap_count=13.0,
+                )
+            ]
+        )
+
+        metrics = doc["metrics"]
+        self.assertEqual(
+            "derived", metrics["aerobic_training_effect"]["source"]["kind"]
+        )
+        self.assertEqual(
+            ("ml", 826.0),
+            (
+                metrics["water_estimated_ml"]["unit"],
+                metrics["water_estimated_ml"]["value"],
+            ),
+        )
+        for key, unit in (
+            ("elevation_loss_m", "m"),
+            ("min_temp_c", "°C"),
+            ("max_temp_c", "°C"),
+            ("lap_count", "count"),
+        ):
+            self.assertEqual(unit, metrics[key]["unit"], key)
+            self.assertEqual("measured", metrics[key]["source"]["kind"], key)
+
     def test_load_is_omitted_without_a_value(self) -> None:
         self.assertNotIn("load", build([record(INTERVALS, "i-ride-99")])["metrics"])
 
@@ -917,6 +956,41 @@ class SummaryMetricTests(unittest.TestCase):
         self.assertEqual(120.0, doc["metrics"]["avg_hr"]["value"])
         self.assertEqual(8.5, doc["metrics"]["avg_speed_mps"]["value"])
         json.dumps(doc, allow_nan=False)
+
+    def test_covered_intervals_extremes_stay_as_alternatives(self) -> None:
+        extra = intervals_summary_metrics(
+            {"min_temp": 8.0, "total_elevation_loss": 400.0},
+            recorded_by=RecordingOrigin.GARMIN,
+        )
+
+        doc = build(
+            [
+                record(
+                    GARMIN,
+                    "g-run-1",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    label="Garmin Connect",
+                    min_temp_c=9.0,
+                    elevation_loss_m=390.0,
+                )
+            ],
+            summary_metrics=extra,
+        )
+
+        for key, own, other in (
+            ("min_temp_c", 9.0, 8.0),
+            ("elevation_loss_m", 390.0, 400.0),
+        ):
+            metric = doc["metrics"][key]
+            self.assertEqual(own, metric["value"], key)
+            self.assertEqual(
+                [(other, "intervals")],
+                [
+                    (alt["value"], alt["source"]["provider"])
+                    for alt in metric["alternatives"]
+                ],
+                key,
+            )
 
 
 if __name__ == "__main__":

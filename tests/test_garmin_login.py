@@ -195,6 +195,17 @@ class GarminLoginTests(unittest.TestCase):
         self.assertNotIn(PASSWORD, stored_values)
         self.assertNotIn(PASSWORD, self.registry.values())
 
+    def test_login_success_clears_the_skipped_sdk_hint(self):
+        self.key_values.set(
+            self.connection,
+            "garmin_sdk_skipped",
+            '{"reason":"login_failed","at":"2026-11-06T08:00:00+00:00"}',
+        )
+        self.connection.commit()
+        self.next_client = FakeClient()
+        self.service.login(self._login_body())
+        self.assertIsNone(self._stored("garmin_sdk_skipped"))
+
     def test_mfa_wrong_code_keeps_slot_then_correct_code_connects(self):
         self.next_client = FakeClient(needs_mfa=True, mfa_codes=("123456",))
         result = self.service.login(self._login_body())

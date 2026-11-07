@@ -15,6 +15,7 @@ from backend.activities.activity_summary import (
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
+from backend.performance.fitness_fatigue import local_fitness_fatigue
 from backend.performance.session_rpe_load import session_rpe_load
 from backend.performance.smoothed_load import complete_before, smoothed_session_load
 
@@ -121,6 +122,39 @@ def zone_distribution(summaries: Sequence[Mapping[str, Any]]) -> list[dict[str, 
     return reports
 
 
+def _load_curves(
+    sport: str,
+    history: Sequence[ActivitySummary],
+    current: Sequence[ActivitySummary],
+    feedback: Mapping[str, Mapping[str, Any]],
+    load_days: Mapping[str, float],
+    *,
+    start: date,
+    end: date,
+    today: date,
+    open_from: date,
+    timezone: str,
+    computed_at: str | None,
+) -> dict[str, Any]:
+    """The smoothed sRPE load (M5) and local fitness (M7) of all-sport reports."""
+    if sport != "all":
+        return {"smoothed_session_load": None, "local_fitness_fatigue": None}
+    window: dict[str, Any] = {
+        "start": start,
+        "end": end,
+        "today": today,
+        "complete_before": open_from,
+        "timezone": timezone,
+        "computed_at": computed_at,
+    }
+    return {
+        "smoothed_session_load": smoothed_session_load(history, feedback, **window),
+        "local_fitness_fatigue": local_fitness_fatigue(
+            load_days, current, feedback, **window
+        ),
+    }
+
+
 def training_report(
     *,
     start: date,
@@ -135,12 +169,14 @@ def training_report(
     observed_at: str | None = None,
     session_feedback: Mapping[str, Mapping[str, Any]] | None = None,
     computed_at: str | None = None,
+    local_load_days: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Build the report from the activity summaries, one per canonical session.
 
     ``sport`` is ``"all"`` or a canonical sport. ``observed_at`` is the sync time
     of the summaries (canonical coverage). ``session_feedback`` maps a summary's
     stored key to its session's effective feedback for the session-RPE load.
+    ``local_load_days`` is the stored local load per day of the whole history.
     """
     end = start + timedelta(days=days - 1)
     effective_end = min(today, end)
@@ -210,15 +246,16 @@ def training_report(
             timezone=timezone,
             computed_at=computed_at,
         ),
-        "smoothed_session_load": None
-        if sport != "all"
-        else smoothed_session_load(
+        **_load_curves(
+            sport,
             activity_summaries,
+            current,
             session_feedback or {},
+            local_load_days or {},
             start=start,
             end=effective_end,
             today=today,
-            complete_before=complete_before(today, observed_at, timezone),
+            open_from=complete_before(today, observed_at, timezone),
             timezone=timezone,
             computed_at=computed_at,
         ),

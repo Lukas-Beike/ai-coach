@@ -36,6 +36,11 @@ class _Database:
                 "planned_units",
                 "activity_records",
                 "activity_sessions",
+                "observations",
+                "provider_records",
+                "sleep_periods",
+                "zone_configurations",
+                "power_curve_points",
             )
         ):
             return SimpleNamespace(fetchall=list, fetchone=lambda: {"count": 0})
@@ -188,6 +193,9 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "canonical_backfill",
                 "canonical_read",
                 "canonical_session_conflicts",
+                "canonical_provider_composition",
+                "local_load",
+                "session_metrics",
                 "logs",
                 "debug_capture",
                 "note",
@@ -267,10 +275,17 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     "planned_units",
                     "activity_records",
                     "activity_sessions",
+                    "observations",
+                    "provider_records",
+                    "sleep_periods",
+                    "zone_configurations",
+                    "power_curve_points",
                 )
             )
         ]
-        self.assertEqual(len(self.db.queries), 15)
+        # The provider composition adds five reads (sessions, observations and
+        # three domain tables) to the same snapshot.
+        self.assertEqual(len(self.db.queries), 20)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
@@ -285,7 +300,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         )
         # Two extra reads: the Garmin configured signal checks the token blob and
         # the disconnect marker inside the same snapshot (see transactions above).
-        self.assertEqual(self.key_values.get.call_count, 10)
+        # One more reads the local load state (card M6).
+        self.assertEqual(self.key_values.get.call_count, 12)
 
     def test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:

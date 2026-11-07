@@ -26,7 +26,12 @@ def validated_coach_action_preview_input(
     if action_type not in COACH_ACTION_TYPES:
         raise AppError(400, "Unbekannter Coach-Aktionstyp.")
     target_system = str(values.get("target_system") or "").strip()
-    if target_system not in {"local", ProviderId.INTERVALS, "local+intervals"}:
+    if target_system not in {
+        "local",
+        ProviderId.INTERVALS,
+        ProviderId.GARMIN,
+        "local+intervals",
+    }:
         raise AppError(400, "Die Aktionsvorschau benötigt ein gültiges Zielsystem.")
     object_ids = values.get("object_ids")
     diff = values.get("diff")
@@ -39,15 +44,7 @@ def validated_coach_action_preview_input(
         raise AppError(
             400, "Die Aktionsvorschau benötigt Objekt-IDs, Diff und Payload."
         )
-    expected_target = (
-        ProviderId.INTERVALS.value
-        if action_type
-        in {
-            "delete_duplicate_intervals_activity",
-            "remote_coach_write",
-        }
-        else "local"
-    )
+    expected_target = _expected_target(action_type, payload)
     if action_type == "local_coach_write":
         if target_system != "local" or not diff:
             raise AppError(
@@ -64,13 +61,30 @@ def validated_coach_action_preview_input(
     return action_type, target_system, object_ids, diff, payload
 
 
+def _expected_target(action_type: str, payload: dict[str, Any]) -> str:
+    if action_type == "remote_coach_write":
+        return remote_write_target(payload.get("tool"))
+    if action_type == "delete_duplicate_intervals_activity":
+        return ProviderId.INTERVALS.value
+    return "local"
+
+
+def remote_write_target(tool: Any) -> str:
+    """The provider one remote Coach write tool writes to."""
+    if tool == "push_strength_to_garmin":
+        return ProviderId.GARMIN.value
+    return ProviderId.INTERVALS.value
+
+
 def _validate_remote_coach_write(payload: dict[str, Any]) -> None:
     tool = payload.get("tool")
     arguments = payload.get("arguments")
     intent = payload.get("intent")
     request = intent.get("request") if isinstance(intent, dict) else None
     scope = intent.get("authorization_scope") if isinstance(intent, dict) else None
-    scope_ok = isinstance(scope, list) and "intervals_sync" in scope
+    target = remote_write_target(tool)
+    sync_scope = "garmin_sync" if target == ProviderId.GARMIN else "intervals_sync"
+    scope_ok = isinstance(scope, list) and sync_scope in scope
     source_ids = (
         request.get("source_message_ids") if isinstance(request, dict) else None
     )
@@ -85,15 +99,13 @@ def _validate_remote_coach_write(payload: dict[str, Any]) -> None:
         or not isinstance(arguments, dict)
         or not isinstance(intent, dict)
         or intent.get("operation") != tool
-        or intent.get("target_system") != ProviderId.INTERVALS
+        or intent.get("target_system") != target
         or not isinstance(request, dict)
         or request.get("remote_write") is not True
         or not source_ids_ok
         or not scope_ok
     ):
-        raise AppError(
-            400, "Die Coach-Aktion ist keine gültige Intervals.icu-Änderung."
-        )
+        raise AppError(400, "Die Coach-Aktion ist keine gültige Remote-Änderung.")
 
 
 def _validate_local_coach_write(payload: dict[str, Any]) -> None:
@@ -144,6 +156,7 @@ def _validate_local_coach_write(payload: dict[str, Any]) -> None:
 
 REMOTE_WRITE_LABELS = {
     "start_intervals_plan_sync": "Trainingseinheiten mit Intervals.icu synchronisieren",
+    "push_strength_to_garmin": "Krafteinheiten an die Garmin-Uhr senden",
     "sync_competitions": "Bestätigte Wettkämpfe mit Intervals.icu synchronisieren",
     "delete_duplicate_intervals_activity": "Garmin-Duplikat mit Intervals.icu löschen",
     "sync_nutrition": "Ernährungsdaten mit Intervals.icu synchronisieren",
@@ -167,7 +180,7 @@ def remote_coach_write_diff(
         return _plan_sync_write_diff(
             {"name": name}, arguments, intent, approval_details or []
         )
-    if tool == "sync_competitions" and approval_details:
+    if tool in {"sync_competitions", "push_strength_to_garmin"} and approval_details:
         return approval_details
     return _remote_write_summary(tool, name, arguments, approval_manifest)
 

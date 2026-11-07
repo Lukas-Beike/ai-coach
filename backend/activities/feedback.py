@@ -12,7 +12,7 @@ feedback.
 from __future__ import annotations
 
 import builtins
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any, Final
 
 from backend import change_history
@@ -211,6 +211,16 @@ def _effective_view(group: builtins.list[dict[str, Any]]) -> dict[str, Any]:
     return view
 
 
+def _session_rpes(value: dict[str, Any] | None) -> builtins.list[Any]:
+    """The rated rows' session RPEs of an audit value, in a stable order."""
+    rows = (value or {}).get("rows") or []
+    return sorted(
+        (str(row.get("activity_id")), row["session_rpe"])
+        for row in rows
+        if isinstance(row, dict) and row.get("session_rpe") is not None
+    )
+
+
 class ActivityFeedbackService:
     """Coordinate local activity-feedback use cases and their transactions."""
 
@@ -220,9 +230,12 @@ class ActivityFeedbackService:
         feedback_repository: Any,
         *,
         references: ActivityReferenceResolver | None = None,
+        on_change: Callable[[], None] = lambda: None,
     ):
         self._database_manager = database_manager
         self._feedback_repository = feedback_repository
+        # Requests a local load pass: a session RPE feeds strength loads (M6).
+        self._on_change = on_change
         self._references = NoActivityReferences() if references is None else references
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -322,6 +335,10 @@ class ActivityFeedbackService:
                 feedback["activity_id"] = existing["activity_id"]
             own_row = feedback["activity_id"] == key
             _keep_omitted_fields(feedback, value, existing)
+            if existing.get("session_rpe") != feedback.get("session_rpe"):
+                # A session RPE feeds strength loads (M6); the requested pass
+                # waits for this writer, so it reads the committed rating.
+                self._on_change()
             if _is_cleared(feedback):
                 for row in group or [{"activity_id": key}]:
                     self._feedback_repository.delete(db, row["activity_id"])
@@ -380,7 +397,13 @@ class ActivityFeedbackService:
         current: dict[str, Any] | None,
         target: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
-        """Replace the group's stored rows with the recorded ones, ids and times kept."""
+        """Replace the group's stored rows with the recorded ones, ids and times kept.
+
+        A restored or removed session RPE requests a local load pass; the undo
+        commits after this returns and the pass waits for the writer.
+        """
+        if _session_rpes(current) != _session_rpes(target):
+            self._on_change()
         for row in (current or {}).get("rows") or []:
             self._feedback_repository.delete(db, str(row["activity_id"]))
         rows = (target or {}).get("rows")

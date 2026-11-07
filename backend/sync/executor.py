@@ -26,8 +26,12 @@ from backend.sync.garmin_service import (
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals import IntervalsSyncService
+from backend.sync.intervals_ingest import INGEST_OFF_REASON
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import (
+    BACKFILL_CURSOR_STREAMS,
+    BACKFILL_JOB_TYPES,
+    WELLNESS_BACKFILL,
     JobValidationError,
     decode_job_payload,
     normalize_sync_job_request,
@@ -88,7 +92,7 @@ class HistoricalSyncJobOwner:
         resolved only when the payload does not carry its own value, so the
         state read happens exactly when it did before the provider was injected.
         """
-        if job_type != "historical_backfill":
+        if job_type not in BACKFILL_JOB_TYPES:
             days = int(payload.get("days") or sync_days())
             end_date = payload.get("end_date")
             return days, date.fromisoformat(
@@ -115,14 +119,16 @@ class HistoricalSyncJobOwner:
     ) -> dict[str, Any] | None:
         """End a backfill whose window lies wholly below the floor without a fetch."""
         if (
-            job_type != "historical_backfill"
+            job_type not in BACKFILL_JOB_TYPES
             or historical_end is None
             or historical_end >= self._sync_earliest_date
         ):
             return None
         # The cursor at the floor keeps a restart from resuming the walk.
         self._sync_state_repository.update_cursor(
-            provider, "historical", self._sync_earliest_date.isoformat()
+            provider,
+            BACKFILL_CURSOR_STREAMS[job_type],
+            self._sync_earliest_date.isoformat(),
         )
         return {"status": "ok", "window_records": 0, "historical_next_end": None}
 
@@ -133,6 +139,7 @@ class HistoricalSyncJobOwner:
         result: dict[str, Any],
         historical_end: date | None,
         days: int,
+        job_type: str = "historical_backfill",
     ) -> None:
         """Declare the next chunk, or end the chain at the floor or after empty history."""
         if historical_end is None:
@@ -149,7 +156,9 @@ class HistoricalSyncJobOwner:
             # The cursor at the floor keeps a restart from resuming the walk.
             result["historical_next_end"] = None
             self._sync_state_repository.update_cursor(
-                provider, "historical", self._sync_earliest_date.isoformat()
+                provider,
+                BACKFILL_CURSOR_STREAMS[job_type],
+                self._sync_earliest_date.isoformat(),
             )
         result["historical_empty_chunks"] = empty_chunks
 
@@ -158,8 +167,9 @@ class HistoricalSyncJobOwner:
     ) -> None:
         # A partial chunk stops the chain: providers advance their historical
         # cursor only for complete windows, so continuing would skip the gap.
+        job_type = str(job.get("type") or "")
         if not (
-            job.get("type") == "historical_backfill"
+            job_type in BACKFILL_JOB_TYPES
             and isinstance(result, dict)
             and result.get("historical_next_end")
             and fallback_status == "completed"
@@ -169,7 +179,7 @@ class HistoricalSyncJobOwner:
         # A chunk that ran again (a retry or a restart) may already have queued
         # its continuation; queuing again would start a second chain.
         if self._queue_service.backfill_continued(
-            job["provider"], next_end, str(job.get("created_at") or "")
+            job["provider"], next_end, str(job.get("created_at") or ""), job_type
         ):
             return
         payload: dict[str, Any] = {
@@ -181,7 +191,7 @@ class HistoricalSyncJobOwner:
             payload["empty_chunks"] = result["historical_empty_chunks"]
         self._queue_service.enqueue(
             job["provider"],
-            "historical_backfill",
+            job_type,
             payload,
             requested_by="backfill",
             available_at=(self._local_now() + BACKFILL_CONTINUATION_DELAY).isoformat(),
@@ -262,7 +272,13 @@ class IntervalsSyncJobOwner:
             sync_kwargs["end_date"] = historical_end
         elif payload.get("automatic") is True:
             sync_kwargs["automatic"] = True
+        if payload.get("one_off") is True:
+            sync_kwargs["one_off"] = True
         result = self._intervals_sync_service.sync(**sync_kwargs)
+        ingest_off = result.get("reason") == INGEST_OFF_REASON
+        if ingest_off and str(job.get("type") or "") == "historical_backfill":
+            # The backfill cursor stays put until the ingest is on again.
+            return result
         if str(job.get("type") or "") == "historical_backfill":
             self._historical_sync.add_next_end(
                 INTERVALS_ID, payload, result, historical_end, days
@@ -271,16 +287,26 @@ class IntervalsSyncJobOwner:
             return result
         if result.get("status") == "already_running":
             return result
-        if self._activity_detail_service is not None:
-            try:
-                result["detail_prefetch"] = self._activity_detail_service.prefetch_new(
-                    self._intervals_resync_gate.operation
-                )
-            except Exception:  # noqa: BLE001 - prefetch is best effort; the window is synced
-                result["detail_prefetch"] = {"status": "error"}
+        if not ingest_off:
+            self._prefetch_details(result)
+        return self._reconcile_competitions(result, reason, job["id"])
+
+    def _prefetch_details(self, result: dict[str, Any]) -> None:
+        if self._activity_detail_service is None:
+            return
+        try:
+            result["detail_prefetch"] = self._activity_detail_service.prefetch_new(
+                self._intervals_resync_gate.operation
+            )
+        except Exception:  # noqa: BLE001 - prefetch is best effort; the window is synced
+            result["detail_prefetch"] = {"status": "error"}
+
+    def _reconcile_competitions(
+        self, result: dict[str, Any], reason: str, operation_id: str
+    ) -> dict[str, Any]:
         try:
             result["competitions"] = self._sync_competitions(
-                reason, push_local=False, operation_id=job["id"]
+                reason, push_local=False, operation_id=operation_id
             )
         except Exception:  # noqa: BLE001 - competition failure remains a partial refresh
             # The job stays partial so the competitions section can be retried;
@@ -324,8 +350,10 @@ class GarminSyncJobOwner:
         garmin_fixture_loader: GarminFixtureLoader,
         all_sync_days: int,
         activity_detail_service: Any = None,
+        wellness_history_service: GarminWellnessBackfill | None = None,
     ) -> None:
         self._historical_sync = historical_sync
+        self._wellness_history_service = wellness_history_service
         self._garmin_sync_service = garmin_sync_service
         self._morning_body_battery_service = morning_body_battery_service
         self._garmin_fixture_loader = garmin_fixture_loader
@@ -341,6 +369,8 @@ class GarminSyncJobOwner:
             if self._activity_detail_service is None:
                 raise AppError(503, "Aktivitätsdetails sind nicht verfügbar.")
             return self._activity_detail_service.refresh(payload["activity_id"])
+        if job_type == WELLNESS_BACKFILL:
+            return self._wellness_backfill(payload)
         days, historical_end = self._historical_sync.window(
             payload, job_type, lambda: self._sync_days(job_type)
         )
@@ -370,11 +400,41 @@ class GarminSyncJobOwner:
             )
         return result
 
+    def _wellness_backfill(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run one insert-only wellness history chunk (no activities, no deletion)."""
+        if self._wellness_history_service is None:
+            raise AppError(503, "Der Wellness-Backfill ist nicht verfügbar.")
+        if not self._wellness_history_service.available():
+            # Fixture mode: no remote read, no cursor move, no continuation.
+            return {"status": "ok", "reason": "not_configured", "window_records": 0}
+        days, end = self._historical_sync.window(
+            payload, WELLNESS_BACKFILL, lambda: GARMIN_AUTOMATIC_SYNC_DAYS
+        )
+        floor_result = self._historical_sync.below_floor(
+            GARMIN_ID, WELLNESS_BACKFILL, end
+        )
+        if floor_result is not None:
+            return floor_result
+        assert end is not None  # window() always ends a backfill chunk
+        result = self._wellness_history_service.backfill(days, end)
+        self._historical_sync.add_next_end(
+            GARMIN_ID, payload, result, end, days, WELLNESS_BACKFILL
+        )
+        return result
+
     def _sync_days(self, job_type: str) -> int:
         """Return the default window: backfills use the automatic refresh span."""
         if job_type == "historical_backfill":
             return GARMIN_AUTOMATIC_SYNC_DAYS
         return self._historical_sync.sync_period(GARMIN_ID)
+
+
+class GarminWellnessBackfill(Protocol):
+    """Backfills one window of Garmin wellness history."""
+
+    def available(self) -> bool: ...
+
+    def backfill(self, days: int, end: date) -> dict[str, Any]: ...
 
 
 class CalendarWeatherSyncJobOwner:
@@ -473,11 +533,23 @@ class IntervalsJobAdapter:
         }
 
 
-class GarminJobAdapter:
-    """Refuse plan pushes, then run the Garmin sync owner."""
+class GarminStrengthPushOwner(Protocol):
+    """Pushes the selected strength planned units to Garmin."""
 
-    def __init__(self, *, jobs: GarminSyncJobOwner) -> None:
+    def sync(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class GarminJobAdapter:
+    """Run the explicit strength-workout push or the Garmin sync owner."""
+
+    def __init__(
+        self,
+        *,
+        jobs: GarminSyncJobOwner,
+        plan_push: GarminStrengthPushOwner | None = None,
+    ) -> None:
         self._jobs = jobs
+        self._plan_push = plan_push
 
     def execute(
         self,
@@ -487,6 +559,11 @@ class GarminJobAdapter:
         *,
         job_type: str,
     ) -> dict[str, Any]:
+        if job_type == "plan_push" and self._plan_push is not None:
+            selected_payload = {"entries": payload.get("entries")}
+            if payload.get("repair"):
+                selected_payload["repair"] = True
+            return self._plan_push.sync(selected_payload)
         _reject_plan_push(job_type)
         return self._jobs.execute(job, payload, reason)
 
@@ -603,8 +680,11 @@ class SyncJobExecutor:
         all_sync_days: int,
         job_owners: Mapping[str, ProviderJobOwner],
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+        after_job: Callable[[Mapping[str, Any]], None] = lambda _job: None,
     ) -> None:
         self._job_owners = job_owners
+        # Runs with each completed job: refreshes derived local values (card M6).
+        self._after_job = after_job
         self._historical_sync = historical_sync
         self._outcome_service = outcome_service
         self._all_sync_days = all_sync_days
@@ -637,6 +717,21 @@ class SyncJobExecutor:
                         "sync job could not be marked failed",
                         extra={"event": "sync_job_last_resort_failed"},
                     )
+        else:
+            self._run_after_job(job)
+
+    def _run_after_job(self, job: Mapping[str, Any]) -> None:
+        """Run the completion hook; its failure never changes the job outcome."""
+        try:
+            self._after_job(job)
+        except Exception as exc:  # noqa: BLE001 - the worker must survive
+            _LOGGER.error(
+                "sync job completion hook failed",
+                extra={
+                    "event": "sync_job_after_job_failed",
+                    "error_class": type(exc).__name__,
+                },
+            )
 
     def execute(self, job: dict[str, Any]) -> dict[str, Any]:
         """Normalize and dispatch a persisted provider-job envelope."""
@@ -654,3 +749,27 @@ class SyncJobExecutor:
         except JobValidationError as exc:
             raise AppError(400, str(exc), reason="invalid_job_request") from exc
         return dispatch_provider_job(self._job_owners, job, envelope)
+
+
+def chained_after_job(
+    *hooks: Callable[[Mapping[str, Any]], None],
+) -> Callable[[Mapping[str, Any]], None]:
+    """Return one completion hook that runs each hook in order.
+
+    A failing hook is logged and never skips the hooks after it.
+    """
+
+    def after_job(job: Mapping[str, Any]) -> None:
+        for hook in hooks:
+            try:
+                hook(job)
+            except Exception as exc:  # noqa: BLE001 - the worker must survive
+                _LOGGER.error(
+                    "sync job completion hook failed",
+                    extra={
+                        "event": "sync_job_after_job_failed",
+                        "error_class": type(exc).__name__,
+                    },
+                )
+
+    return after_job

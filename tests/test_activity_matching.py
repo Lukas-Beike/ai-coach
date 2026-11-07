@@ -27,6 +27,50 @@ class ActivityMatchingTests(unittest.TestCase):
         self.assertFalse(is_planned_workout_event({"planned_duration_s": "nan"}))
         self.assertFalse(is_planned_workout_event("not-a-record"))
 
+    def test_commutes_and_warmups_never_complete_a_planned_workout(self):
+        planned = [
+            {
+                "id": "event-1",
+                "category": "WORKOUT",
+                "type": "Ride",
+                "date": "2026-09-20",
+            }
+        ]
+        for purpose in ("commute", "warmup", "cooldown"):
+            with self.subTest(purpose=purpose):
+                activity = {
+                    "id": "a-1",
+                    "sport": "ride",
+                    "started_at_local": "2026-09-20T08:00:00",
+                    "purpose": purpose,
+                }
+                self.assertEqual(match_planned_workouts(planned, [activity]), {})
+        race = {
+            "id": "a-2",
+            "sport": "ride",
+            "started_at_local": "2026-09-20T08:00:00",
+            "purpose": "race",
+        }
+        self.assertEqual(match_planned_workouts(planned, [race]), {0: race})
+        paired = {
+            "id": "a-3",
+            "sport": "ride",
+            "started_at_local": "2026-09-20T08:00:00",
+            "purpose": "commute",
+            "planned_event_id": "event-1",
+        }
+        evening = {
+            "id": "a-4",
+            "sport": "ride",
+            "started_at_local": "2026-09-20T19:00:00",
+        }
+        self.assertEqual(match_planned_workouts(planned, [paired, evening]), {})
+        paired_training = {**evening, "planned_event_id": "event-1"}
+        self.assertEqual(
+            match_planned_workouts(planned, [paired, paired_training]),
+            {0: paired_training},
+        )
+
     def test_workout_rows_keep_original_indices_and_ignore_malformed_rows(self):
         planned = [
             "not-a-record",

@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.errors import AppError
+from backend.sync.intervals_ingest import INGEST_OFF_REASON
 
 _SOURCE_NAMES = {
     "load": ("Intervals.icu-Belastungsdaten", "Garmin-Belastungswerte"),
@@ -36,10 +37,19 @@ class AnalysisRefreshService:
         names = _SOURCE_NAMES[area]
         outcomes = self._run_refreshes(area, days, names)
         refreshed, incomplete, pending, missing = _classify_outcomes(names, outcomes)
+        # A source the athlete switched off is neither refreshed nor missing.
+        dormant = [
+            name
+            for name, result in outcomes.items()
+            if result.get("reason") == INGEST_OFF_REASON
+        ]
+        missing = [name for name in missing if name not in dormant]
         intervals = outcomes[names[0]]
         return {
             "area": area,
-            "status": _overall_status(len(names), refreshed, incomplete, pending),
+            "status": _overall_status(
+                len(names) - len(dormant), refreshed, incomplete, pending
+            ),
             "refreshed_sources": refreshed,
             "incomplete_sources": incomplete,
             "pending_sources": pending,

@@ -6,9 +6,8 @@ from typing import Any, Final
 
 from backend.activities.activity_summary import summary_duration_s
 from backend.athlete.local_date import LocalDate
-from backend.canonical.domain_records import PowerCurve
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance import activity_validation, body, eftp
+from backend.performance import activity_validation, body
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.display_sources import preferred_providers
 from backend.performance.freshness import GarminSyncStatus
@@ -19,7 +18,6 @@ INTERVALS_SOURCE = "Intervals.icu"
 
 METRIC_KEYS = (
     "cycling_ftp_watts",
-    "cycling_eftp_watts",
     "run_threshold_pace_seconds_per_km",
     "cycling_vo2max_ml_kg_min",
     "running_vo2max_ml_kg_min",
@@ -35,40 +33,6 @@ def _day(value: Any) -> date | None:
         return LocalDate.parse(value).to_date()
     except ValueError:
         return None
-
-
-# Every stored power curve point is a measured best effort.
-_POWER_POINT_STATUS: Final = "ok"
-
-
-def _power_curve(curve: PowerCurve, start: date, today: date) -> dict[str, Any]:
-    """The canonical power curve in the stored fetch envelope shape.
-
-    The status, window and fetch time are those of the latest fetch, also when
-    it delivered no points; only best efforts of the chart's days are listed.
-    """
-    envelope: dict[str, Any] = {}
-    if curve.fetches:
-        fetch = curve.fetches[0]
-        envelope["status"] = fetch.fetch_status
-        if fetch.window_start is not None and fetch.window_end is not None:
-            envelope["start"] = fetch.window_start.isoformat()
-            envelope["end"] = fetch.window_end.isoformat()
-        if fetch.provenance.retrieved_at is not None:
-            envelope["synced_at"] = fetch.provenance.retrieved_at.isoformat()
-    envelope["points"] = [
-        {
-            "duration_seconds": point.duration_s,
-            "watts": _number(point.watts),
-            "date": point.observed_on.isoformat(),
-            "activity_id": point.provider_activity_id or "",
-            "source": point.provenance.label,
-            "status": _POWER_POINT_STATUS,
-        }
-        for point in curve.points
-        if start <= point.observed_on <= today
-    ]
-    return envelope
 
 
 def _load_history(
@@ -132,30 +96,16 @@ def _garmin_values(
 
 def _metric_series(
     key: str,
-    activities: Sequence[Mapping[str, Any]],
-    eftp_by_day: Mapping[date, float] | None,
     dates: list[str],
     start: date,
     today: date,
     canonical: GarminCanonicalMetrics,
 ) -> list[dict[str, Any]]:
-    if key == "cycling_eftp_watts":
-        source = INTERVALS_SOURCE
-        provider = ProviderId.INTERVALS
-        observations = eftp.eftp_daily_values(
-            eftp_by_day,
-            activities,
-            start,
-            today,
-        )
-    else:
-        source = GARMIN_LABEL
-        provider = ProviderId.GARMIN
-        observations = _garmin_values(key, start, today, canonical)
+    observations = _garmin_values(key, start, today, canonical)
     return [
         {
-            "source": source,
-            "source_provider": provider.value,
+            "source": GARMIN_LABEL,
+            "source_provider": ProviderId.GARMIN.value,
             "points": [{"date": day, "value": observations.get(day)} for day in dates],
         }
     ]
@@ -169,23 +119,20 @@ def analysis_history(
 ) -> dict[str, Any]:
     """Use dated provider history, never backfill today's settings into the past.
 
-    ``canonical`` supplies the activity summaries, wellness days, Garmin history,
-    the power curve and the Intervals.icu sync time read through the canonical
-    ports; ``garmin`` is the Garmin sync status.
+    ``canonical`` supplies the activity summaries, wellness days and Garmin
+    history read through the canonical ports; ``garmin`` is the Garmin sync
+    status.
     """
     start = today - timedelta(days=89)
     dates = [(start + timedelta(days=i)).isoformat() for i in range(90)]
     load_end = today
     load_start = load_end - timedelta(days=89)
     load_dates = [(load_start + timedelta(days=i)).isoformat() for i in range(90)]
-    eftp_by_day = canonical.eftp_by_day
     activities = list(canonical.activities or ())
     garmin_canonical = canonical.garmin or GarminCanonicalMetrics()
     load = _load_history(load_dates, garmin_canonical)
     series = {
-        key: _metric_series(
-            key, activities, eftp_by_day, dates, start, today, garmin_canonical
-        )
+        key: _metric_series(key, dates, start, today, garmin_canonical)
         for key in METRIC_KEYS
     }
     return {
@@ -209,19 +156,15 @@ def analysis_history(
         # PublicPerformanceStateService exposes this as performance.history.body;
         # the UI can render it in the separate Body tab without another request.
         "body": body.body_history(
-            canonical.intervals_synced_at,
             garmin,
             today,
             canonical=canonical.body,
             wellness_days=canonical.history_wellness_days or (),
-            activities=activities,
             garmin_ftp=garmin_canonical.performance_history.get(
                 "cycling_ftp_watts", {}
             ),
-            eftp_by_day=eftp_by_day,
             preferences=canonical.preferences,
         ),
-        "cycling_power_profile": _power_curve(canonical.power_curve, start, today),
         "provider_metrics": _canonical_provider_metrics(
             garmin, start, today, garmin_canonical
         ),

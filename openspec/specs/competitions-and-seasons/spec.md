@@ -126,10 +126,10 @@ The system SHALL report preparation from eligible recorded sessions and known an
 Evidence: `backend/planning/season_preparation.py:season_preparation`, `backend/planning/season_preparation.py:_evidence_window`, `backend/planning/season_preparation.py:_target_context`, `backend/planning/season_preparation.py:_specificity_evidence`; `tests/test_season_preparation.py:test_preparation_is_observed_and_does_not_follow_calendar_phase`, `tests/test_season_preparation.py:test_race_context_requires_confirmed_units_and_reports_known_dimensions`, `tests/test_season_preparation.py:test_no_history_unknown_distance_and_target_remain_nullable`, `tests/test_season_preparation.py:test_past_competition_window_is_anchored_at_event_date`, `tests/test_season_preparation.py:test_future_competition_evidence_covers_the_weeks_up_to_today`.
 
 ### Requirement: CS8 Read-only load scenarios with labeled estimates
-The system SHALL provide deterministic current/alternative load curves from the dated canonical CTL/ATL basis and known completed/planned load, expose model assumptions and input identity, and leave local/remote workouts unchanged.
+The system SHALL provide deterministic current/alternative load curves from yesterday's local fitness and fatigue (card M7, never Intervals.icu CTL/ATL) and known completed/planned load, expose model assumptions and input identity, and leave local/remote workouts unchanged.
 
 #### Scenario: Valid current and alternative scenarios
-- **WHEN** yesterday's CTL/ATL and all required loads are known with valid scale/taper/end parameters
+- **WHEN** yesterday's local fitness and fatigue and all required loads are known with valid scale/taper/end parameters
 - **THEN** the system returns reproducible curves and an input hash, labels the local 42-day/7-day model assumptions, keeps today's completed load fixed and avoids double-counting completed planned sessions.
 
 #### Scenario: Estimated planned load
@@ -140,7 +140,7 @@ The system SHALL provide deterministic current/alternative load curves from the 
 - **WHEN** CTL/ATL or a required load is unknown, or parameters are invalid
 - **THEN** the response reports insufficient-data with missing units, or rejects invalid parameters; it does not fabricate provider settings, race-time predictions or an applied replan.
 
-Evidence: `backend/planning/season_preparation.py:load_scenarios`, `backend/planning/season_preparation.py:_scenario_values`, `backend/planning/season_preparation.py:_planned_loads`, `backend/planning/season_preparation.py:_estimated_load`; `tests/test_season_preparation.py:test_scenarios_are_deterministic_nonmutating_and_taper_changes_load`, `tests/test_season_preparation.py:test_missing_basis_or_planned_load_is_not_zero_filled`, `tests/test_season_preparation.py:test_completed_today_load_is_fixed_and_not_double_counted_or_scaled`, `tests/test_season_preparation.py:test_planned_load_is_estimated_from_duration_and_intensity`, `tests/test_season_preparation.py:test_recorded_planned_load_wins_over_estimate`, `tests/test_season_preparation.py:test_load_scale_accepts_german_decimal_comma`.
+Evidence: `backend/planning/season_preparation.py:load_scenarios`, `backend/performance/season_inputs.py:read_season_load_inputs`, `tests/test_season_canonical_reads.py:test_scenarios_read_the_load_basis_only_from_the_tables`, `backend/planning/season_preparation.py:_scenario_values`, `backend/planning/season_preparation.py:_planned_loads`, `backend/planning/season_preparation.py:_estimated_load`; `tests/test_season_preparation.py:test_scenarios_are_deterministic_nonmutating_and_taper_changes_load`, `tests/test_season_preparation.py:test_missing_basis_or_planned_load_is_not_zero_filled`, `tests/test_season_preparation.py:test_completed_today_load_is_fixed_and_not_double_counted_or_scaled`, `tests/test_season_preparation.py:test_planned_load_is_estimated_from_duration_and_intensity`, `tests/test_season_preparation.py:test_recorded_planned_load_wins_over_estimate`, `tests/test_season_preparation.py:test_load_scale_accepts_german_decimal_comma`.
 
 ### Requirement: CS9 Competition-focused overview
 The system SHALL present the planning segment as `Wettkämpfe`, with individually expandable, initially collapsed upcoming events ordered by date, priority and name. Each summary SHALL show saved name, date, sport, distance, personal A/B/C priority and athlete-local relative date without requiring training history.
@@ -195,3 +195,26 @@ Evidence for CS9–CS12: `public/plan-views.js` renders canonical competition st
 Validation: `tests/competition-overview.test.cjs` covers missing, zero and free-text distance and invalid dates. `e2e/competitions.spec.js` covers summaries, disclosure details, ordering, archives, safe text, failed reads/retry, empty lists and absence of analysis requests or writes on mobile-small and desktop. `e2e/text-reflow.spec.js`, `e2e/training-feature-panels.spec.js`, `tests/test_server_frontend.py` and `tests/test_server_runtime.py` cover the surrounding UI and asset contracts. Existing CS1–CS8 remain unchanged.
 
 Evidence limits: Coach-edit refresh is exercised using simulated canonical saved state rather than an end-to-end real-model mutation. Real-device microphone/notification permissions and keyboard-open behavior were not verified. The full Python discovery run's five obsolete UI assertions were corrected and both affected suites passed on rerun; the full discovery run was not repeated after those test-only corrections.
+
+### Requirement: CS13 Completed races link to stored competitions
+The system SHALL link each stored competition to the completed sessions of its local date and sport when it reads activity summaries, without storing the link, so consumers see which session was the race.
+
+#### Scenario: Provider races are linked
+- **WHEN** a session with purpose race starts on a competition's local date in its sport
+- **THEN** the race nearest the competition's start carries that `competition_id`; other sessions of the day stay unlinked, and a day with a provider race never gets a hint.
+
+#### Scenario: A competition marks its best candidate as a race hint
+- **WHEN** no session of the competition's date and sport has purpose race
+- **THEN** the session that starts nearest the competition's local start time (a stored midnight counts as unknown), else the longest, else the earliest, gets purpose race with source "Lokale Wettkämpfe" and the `competition_id`; with a planned duration it must last at least half of it.
+
+#### Scenario: No link across sports or for commutes
+- **WHEN** a session has another sport, another local date, the other side of indoor (indoor, virtual) versus outdoor when both are known, or purpose commute, warm-up or cool-down, or the competition's sport is unsupported
+- **THEN** the session is not linked and keeps its own purpose.
+
+#### Scenario: A past competition shows its race result
+- **WHEN** the athlete opens the competition overview and a past competition has a linked session
+- **THEN** its expanded details show "Ergebnis" with the session's elapsed time (else moving time), distance, average pace (rides: average power, else speed) and the link's source label, read on `GET /api/profile` in one read snapshot without any write; a competition without a linked session shows no result, today's competition shows only a provider race (never the date hint), and a failed result read keeps the profile response.
+
+Detailed contract: a session links to at most one competition (competitions in date then id order). A limited read links over every session of its oldest day, so the hint never depends on the page size. Unlinking by athlete marking is not yet implemented (#1759).
+
+Evidence: `backend/activities/session_purpose.py:with_competitions`, `backend/sync/canonical_read_selector.py:activity_summaries`, `backend/db/repositories.py:CompetitionRepository.between`, `backend/planning/race_results.py:with_race_results`, `backend/performance/activity_read_service.py:summaries_on_days`, `backend/http_api/athlete_get.py`, `public/plan-views.js:competitionResult`; `tests/test_session_purpose.py`, `tests/test_race_results.py`, `tests/competition-overview.test.cjs`.

@@ -22,6 +22,7 @@ from backend.providers.connection_checks import (
     ProviderProbe,
     simple_probe,
 )
+from backend.providers.garmin_personal import PERSONAL_KEY_REJECTED_REASON
 
 OPENAI_MODELS_PATH = "/models"
 # Fixed public coordinates: the check never sends the athlete's location.
@@ -111,14 +112,21 @@ def build_probes(
             raise AppError(502, "Berechtigung fehlt.", reason=SCOPE_MISSING_REASON)
         wahoo_user()
 
+    def personal_key() -> str:
+        return str(getattr(config(), "garmin_personal_api_key", "") or "").strip()
+
+    def garmin_identity(connected: bool) -> str:
+        return _identity(connected, garmin_fingerprint(), personal_key())
+
     def garmin_check() -> str:
         # The login may rotate the stored token; report the identity that now holds.
         garmin_login()
-        return _identity(True, garmin_fingerprint())
+        return garmin_identity(garmin_connected())
 
     def garmin_snapshot() -> tuple[bool, str]:
+        # The Personal API key alone is a checkable Garmin connection.
         connected = garmin_connected()
-        return connected, _identity(connected, garmin_fingerprint())
+        return connected or bool(personal_key()), garmin_identity(connected)
 
     def wahoo_snapshot() -> tuple[bool, str]:
         current = config()
@@ -156,6 +164,12 @@ def build_probes(
             snapshot=garmin_snapshot,
             check=garmin_check,
             auth_hint="Anmeldung fehlgeschlagen – später erneut prüfen oder neu anmelden",
+            reason_hints={
+                PERSONAL_KEY_REJECTED_REASON: (
+                    "Personal-API-Schlüssel abgelehnt – in Garmin Connect Web "
+                    "erneuern und unter Zugangsdaten speichern"
+                )
+            },
         ),
         "wahoo": ProviderProbe(
             snapshot=wahoo_snapshot,

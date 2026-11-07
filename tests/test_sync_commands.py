@@ -75,6 +75,28 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
             cancel_event=cancel_event,
         )
 
+    def test_synchronous_refresh_reports_a_dormant_ingest_as_skipped(self):
+        self.intervals.sync.return_value = {
+            "status": "skipped",
+            "reason": "intervals_ingest_off",
+        }
+
+        result = self.service.start(
+            "intervals", {"days": "30", "_wait_for_completion": True}
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "ok": True,
+                "status": "skipped",
+                "reason": "intervals_ingest_off",
+                "provider": "intervals",
+                "synchronous_refresh": True,
+            },
+        )
+        self.intervals.sync.assert_called_once()
+
     def test_retries_when_existing_sync_did_not_cover_requested_window(self):
         cancel_event = threading.Event()
         self.intervals.sync.side_effect = [

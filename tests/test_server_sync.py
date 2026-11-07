@@ -2525,15 +2525,18 @@ class ServerSyncTests(ServerTestCase):
                     "start_date_local": today + "T07:00:00",
                     "moving_time": 7200,
                     "icu_training_load": 110,
+                    "icu_weighted_avg_watts": 270,
                 }
             ],
         }
         performance = _current_performance_context(snapshot)
         self.assertEqual(performance["thresholds"]["ftp_w"], 300)
-        self.assertEqual(performance["current_load"]["tsb"], -6)
+        self.assertEqual(performance["intervals_load_history"]["tsb"], -6)
         self.assertEqual(performance["recovery"]["sleep_hours"], 7.5)
+        # The local load (card M6), not Intervals.icu's 110: NP 270 W at the
+        # Intervals.icu FTP 300 W for 2 h is IF 0.9, 2 × 0.81 × 100 = 162 TSS.
         self.assertEqual(
-            performance["rolling_training"]["last_7_days"]["training_load"], 110.0
+            performance["rolling_training"]["last_7_days"]["training_load"], 162.0
         )
         self.assertNotIn("ai_estimates", performance)
 
@@ -2546,9 +2549,9 @@ class ServerSyncTests(ServerTestCase):
             "recent_activities": [],
         }
         performance = _current_performance_context(snapshot)
-        self.assertEqual(performance["current_load"]["tsb"], -12)
+        self.assertEqual(performance["intervals_load_history"]["tsb"], -12)
 
-    def test_current_eftp_prefers_current_intervals_model_over_latest_activity_estimate(
+    def test_intervals_eftp_is_not_read_from_settings_wellness_or_activities(
         self,
     ):
         today = _local_datetime.now().astimezone().date().isoformat()
@@ -2574,22 +2577,17 @@ class ServerSyncTests(ServerTestCase):
         performance = _current_performance_context(snapshot)
         metrics = performance["metrics"]
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
-        self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
-        self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
-        # One value per day: the same-day wellness eFTP wins over the activity.
-        self.assertEqual(performance["comparisons"]["cycling_eftp_30d"]["average"], 274)
-        eftp_reference = next(
-            item
-            for item in performance["activity_validation"]["provider_references"]
-            if item["metric"] == "cycling_eftp_watts"
+        # Intervals.icu eFTP is no longer read by any view (#1727).
+        self.assertNotIn("cycling_eftp_watts", metrics)
+        self.assertNotIn("cycling_eftp_30d", performance.get("comparisons") or {})
+        validation = performance["activity_validation"]
+        self.assertNotIn(
+            "cycling_eftp_watts",
+            [item["metric"] for item in validation["provider_references"]],
         )
-        self.assertEqual(eftp_reference["historical_comparison"]["average"], 274)
-        self.assertEqual(
-            performance["activity_validation"]["direct_activity_estimates"][
-                "activity_configured_ftp_watts"
-            ],
-            300,
-        )
+        estimates = validation["direct_activity_estimates"]
+        self.assertNotIn("activity_eftp_watts", estimates)
+        self.assertEqual(estimates["activity_configured_ftp_watts"], 300)
 
     def test_garmin_near_duplicate_is_skipped_in_favour_of_intervals_activity(self):
         garmin = {

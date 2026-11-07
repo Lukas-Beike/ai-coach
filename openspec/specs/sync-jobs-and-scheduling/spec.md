@@ -17,7 +17,7 @@ The system SHALL validate provider and job type together using the configured re
 - **WHEN** a request assigns historical backfill to Wahoo or supplies an unsupported field or non-boolean force flag
 - **THEN** validation rejects it before creating a job.
 
-Detailed contract: Intervals supports refresh, performance refresh, activity details, plan push, competition push, nutrition sync, and historical backfill; Garmin supports refresh, activity details, and historical backfill; Wahoo supports refresh and plan push; weather and calendar support refresh. Nutrition approval semantics belong to the nutrition capability.
+Detailed contract: Intervals supports refresh, performance refresh, activity details, plan push, competition push, nutrition sync, and historical backfill; Garmin supports refresh, activity details, plan push, historical backfill, and wellness backfill; Wahoo supports refresh and plan push; weather and calendar support refresh. Nutrition approval semantics belong to the nutrition capability.
 
 Evidence: `backend/sync/jobs.py:normalize_sync_job_request`, `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`, `tests/test_sync_jobs.py:test_boolean_fields_require_actual_booleans`.
 
@@ -77,6 +77,25 @@ Detailed contract: Garmin's slowly changing metric sources SHALL be reread when 
 
 Evidence: `backend/sync/intervals.py:IntervalsSyncService`, `backend/sync/garmin.py:GarminPayloadService.automatic_sync_window`, `backend/providers/garmin.py:GarminCollectionOptions`, `backend/sync/wahoo_sync.py:sync_window_days`; `tests/test_sync_intervals_flow.py:test_automatic_refresh_reads_full_period_once_per_day`, `tests/test_sync_garmin_service.py:test_current_refresh_reads_daily_metrics_only_when_due`, `tests/test_wahoo_sync.py:test_all_sentinel_and_zero_mean_the_descriptor_maximum`.
 
+### Requirement: Dormant Intervals.icu ingest
+The system SHALL read Intervals.icu activities, wellness, athlete record, performance refresh, analysis sessions and activity details only while the athlete's ingest switch is on; a missing switch means off. While off, a scheduled or Coach refresh SHALL only reconcile competitions, a historical chunk SHALL keep its cursor, and a full resync SHALL be refused. Output writes and their read-backs SHALL stay unchanged. Stored Intervals.icu records SHALL be kept.
+
+#### Scenario: Daily run while off
+- **WHEN** the switch is off and the daily Intervals.icu refresh runs
+- **THEN** no activities, wellness, athlete, events, power curve or detail endpoint is read, no detail prefetch or performance follow-up runs, and only the competition reconciliation runs.
+
+#### Scenario: Manual one-off read
+- **WHEN** the switch is off and the athlete presses "Einmal abrufen"
+- **THEN** one refresh job with `one_off: true` reads the last 42 days as an ordinary sync, the stored sync period is unchanged, and the switch stays off.
+
+#### Scenario: Duplicate delete while off
+- **WHEN** the switch is off
+- **THEN** the duplicate inspector reports no Intervals.icu duplicate, so neither the Coach nor a proposal can delete one remotely; stored Intervals.icu copies stay linked to their sessions.
+
+Detailed contract: The switch is the kv key `intervals_ingest_enabled` (`PUT /api/settings/intervals-ingest` with `{"enabled": bool}`), shown as "Einlesen einschalten/ausschalten" in the Intervals.icu card and exposed as `sync_settings.intervals_ingest_enabled`. No schema change. Turning it on restores the scheduled ingest.
+
+Evidence: `backend/sync/intervals_ingest.py:IntervalsIngestSwitch`, `backend/sync/intervals.py:IntervalsSyncService.sync`, `backend/sync/executor.py:IntervalsSyncJobOwner.execute_sync`, `backend/activities/duplicate_inspection.py:DuplicateInspector.latest`; `tests/test_intervals_ingest_switch.py`, `tests/test_sync_executor.py:test_ingest_off_refresh_only_reconciles_competitions`, `tests/test_http_sync_commands.py:test_one_off_intervals_read_keeps_the_stored_period`.
+
 ### Requirement: Bounded resumable historical backfill
 The system SHALL walk Intervals and Garmin history in inclusive chunks of at most 90 days down to the configured history floor. A restart SHALL resume before the persisted historical cursor. Complete chunks may schedule their next chunk after 15 seconds; partial chunks SHALL stop continuation. Two consecutive completely empty chunks SHALL end the walk and persist the floor.
 
@@ -88,9 +107,13 @@ The system SHALL walk Intervals and Garmin history in inclusive chunks of at mos
 - **WHEN** a chunk is partial, reaches the floor, or is the second consecutive complete empty chunk
 - **THEN** no next chunk is queued; incomplete history is not silently skipped.
 
-Detailed contract: Historical work SHALL yield to non-backfill jobs and active foreground Coach work, and repeated completion SHALL not fork a second continuation chain.
+#### Scenario: Garmin wellness history
+- **WHEN** Garmin is configured and its `wellness_history` cursor has not reached the floor
+- **THEN** startup queues one `wellness_backfill` chain that walks the same chunks and reads only sleep (one full night element per night, with SpO2, respiration and sleeping heart rate), HRV, daily summaries with their resting heart rate, and weigh-ins, through the Personal API or the SDK; it adds only days not stored yet, replaces a stored night only when it has no night values, merges weigh-ins with the stored readings winning, and never prunes or deletes. A client error or an unreadable answer skips only that night or source; a paused source, rate limit or other provider error fails the chunk for a retry and keeps the cursor.
 
-Evidence: `backend/sync/executor.py:HistoricalSyncJobOwner`, `backend/sync/windows.py:split_date_windows`, `backend/sync/jobs.py:SyncJobStore.claim`; `tests/test_startup_sync_scheduler.py:test_cursor_date_and_earliest_boundary_contract`, `tests/test_sync_jobs.py:test_claim_holds_backfill_while_foreground_work_runs`, `tests/test_sync_jobs.py:test_backfill_continuation_keeps_its_cursor_while_a_chunk_runs`.
+Detailed contract: Historical work SHALL yield to non-backfill jobs and active foreground Coach work, and repeated completion SHALL not fork a second continuation chain. Each backfill chain keeps its own cursor (`historical` for activities, `wellness_history` for the Garmin wellness walk).
+
+Evidence: `backend/sync/executor.py:HistoricalSyncJobOwner`, `backend/sync/garmin_wellness_history.py:GarminWellnessHistoryService`, `backend/providers/garmin_wellness_history.py:collect_wellness_history`; `tests/test_garmin_wellness_history.py`, `backend/sync/windows.py:split_date_windows`, `backend/sync/jobs.py:SyncJobStore.claim`; `tests/test_startup_sync_scheduler.py:test_cursor_date_and_earliest_boundary_contract`, `tests/test_sync_jobs.py:test_claim_holds_backfill_while_foreground_work_runs`, `tests/test_sync_jobs.py:test_backfill_continuation_keeps_its_cursor_while_a_chunk_runs`.
 
 ### Requirement: Worker retries and restart recovery
 The system SHALL conditionally claim due queued jobs and increment attempts once, enforce declared job-state transitions, preserve completed items across retry, and classify complete, partial, failed, and skipped item outcomes. Retryable failures SHALL use bounded backoff and at most three attempts. Restart recovery SHALL requeue interrupted running work and clear a stale performance-running marker. Explicit resolution SHALL accept only `action=retry` for failed or partial jobs.

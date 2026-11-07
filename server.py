@@ -349,6 +349,7 @@ from backend.sync.execution_assembly import (
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
 )
+from backend.sync.executor import chained_after_job
 from backend.sync.external_calendar_assembly import (
     ExternalCalendarAssembly,
     ExternalCalendarSyncOwners,
@@ -395,8 +396,13 @@ from backend.sync.library_assembly import (
     WorkoutLibraryState,
     WorkoutLibrarySyncAssembly,
 )
+from backend.sync.local_load import refresh_after_job
 from backend.sync.metric_export import MetricExportService
-from backend.sync.metric_export_assembly import build_metric_export_service
+from backend.sync.metric_export_assembly import (
+    build_metric_export_service,
+    export_thresholds_reader,
+)
+from backend.sync.metric_export_runner import MetricExportRunner
 from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.planned_calendar_assembly import (
     PlannedCalendarLocalState,
@@ -479,7 +485,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.43"
+APP_VERSION = "1.13.44"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -685,6 +691,8 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
 
 PROFILE_MUTATION_COORDINATOR = threading.RLock()
 
+# Declared ahead of its first lambda reference; assigned after METRIC_EXPORT below.
+METRIC_EXPORT_RUNNER: MetricExportRunner
 ATHLETE_DATA = AthleteDataAssembly(
     dependencies=AthleteDataAssembly.Inputs(
         database_manager=database_manager,
@@ -706,6 +714,8 @@ ATHLETE_DATA = AthleteDataAssembly(
             normalize_competition=planning_competitions.normalize_competition,
             uuid_factory=uuid.uuid4,
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
+            load_inputs_changed=lambda: start_canonical_backfill(),
+            thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
         ),
     )
 )
@@ -790,6 +800,7 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
             source_preferences=lambda db: preferences_from_profile(
                 ATHLETE_DATA.profile().get_from_db(db)
             ),
+            timezone=lambda: str(ATHLETE_DATA.profile().get().get("timezone") or "UTC"),
         ),
         runtime=PlanningRuntime(
             sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
@@ -1062,8 +1073,8 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
             lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
             morning_body_battery_service=morning_body_battery_service,
             metric_export=lambda: (
-                METRIC_EXPORT.sync_garmin()
-                if CONFIG.intervals_api_key and CONFIG.intervals_athlete_id
+                METRIC_EXPORT.sync_automatic()
+                if _intervals_export_configured()
                 else None
             ),
         ),
@@ -1222,6 +1233,15 @@ WAHOO_CONNECTION = WahooConnectionAssembly(
         utc_now=runtime_clock.utc_now,
     )
 )
+# The thresholds every outbound export sends (Intervals.icu metrics, Wahoo plan
+# headers): local zones, then Garmin, then Wahoo, current on the athlete's today.
+EXPORT_THRESHOLDS = export_thresholds_reader(
+    lambda: CANONICAL_READ,
+    source_preferences=lambda db: preferences_from_profile(
+        ATHLETE_DATA.profile().get_from_db(db)
+    ),
+    today=lambda: ATHLETE_CLOCK.now().date(),
+)
 WAHOO_SYNC = WahooSyncAssembly(
     WahooSyncInputs(
         config=lambda: CONFIG,
@@ -1238,6 +1258,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         logger=LOGGER,
         redactor=REDACTOR.redact_text,
         resync_gate=WAHOO_RESYNC_GATE,
+        export_thresholds=EXPORT_THRESHOLDS,
     )
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(
@@ -1615,12 +1636,15 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
         operation_observer=PROVIDER_SYNC.operation_observer,
         resync_gate=INTERVALS_RESYNC_GATE,
+        ingest_enabled=lambda: INTERVALS_SYNC.ingest_switch().enabled(),
     ),
     garmin=GarminJobDependencies(
         sync_service=GARMIN_ASSEMBLY.sync_service,
         morning_body_battery_service=morning_body_battery_service,
         fixture_loader=GARMIN_ASSEMBLY.fixture_loader,
         activity_detail_service=GARMIN_ASSEMBLY.activity_detail_service,
+        strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
+        wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
@@ -1631,6 +1655,10 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     dependencies=SYNC_JOB_DEPENDENCIES,
     provider_runtime=provider_runtime,
+    after_job=chained_after_job(
+        refresh_after_job(lambda: start_canonical_backfill()),
+        lambda job: METRIC_EXPORT_RUNNER.after_job(job),
+    ),
 )
 
 
@@ -2087,9 +2115,22 @@ METRIC_EXPORT: MetricExportService = build_metric_export_service(
     lambda: CANONICAL_READ,
     database_lock=DB_LOCK,
     intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+    thresholds=EXPORT_THRESHOLDS,
     today=lambda: ATHLETE_CLOCK.now().date(),
     utc_now=lambda: datetime.now(UTC),
 )
+
+
+def _intervals_export_configured() -> bool:
+    return bool(CONFIG.intervals_api_key and CONFIG.intervals_athlete_id)
+
+
+METRIC_EXPORT_RUNNER = MetricExportRunner(
+    lambda: METRIC_EXPORT,
+    enabled=_intervals_export_configured,
+    maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+)
+
 
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
@@ -2097,6 +2138,13 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     clock=runtime_clock.utc_now,
+    source_preferences=lambda db: preferences_from_profile(
+        ATHLETE_DATA.profile().get_from_db(db)
+    ),
+    # Strength sessions read their session RPE (card M6 v2).
+    session_feedback=lambda keys: ATHLETE_DATA.activity_feedback().for_activity_ids(
+        keys, sessions_only=True
+    ),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
@@ -2302,6 +2350,10 @@ HTTP_API = HttpApiAssembly(
             provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
             garmin_login=lambda: GARMIN_LOGIN,
             connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
+            intervals_ingest=INTERVALS_SYNC.ingest_switch,
+            resume_provider_schedule=lambda provider: (
+                SYNC_SCHEDULERS.startup_scheduler().resume_provider(provider)
+            ),
         ),
     ),
 )
@@ -2395,6 +2447,7 @@ def main() -> None:
             sync_worker.stop()
         COACH_JOB_WORKER.stop()
         CANONICAL_BACKFILL.worker.stop()
+        METRIC_EXPORT_RUNNER.stop()
         server.server_close()
         DIAGNOSTIC_CAPTURE.close()
         if daily_thread is not None:

@@ -291,7 +291,19 @@ function bootstrapPayload(bootstrap, liveAreasOnly) {
   ["messages", "messages_next_cursor", "library", "library_next_cursor", "plans", "planned", "training_calendar", "planning_view", "planning_compliance", "weather", "parallel_cycling", "daily_planning_context", "planning", "performance", providerIds().garmin, "checkins", "local_feedback", "activity_feedback"].filter(Boolean).forEach((key) => {
     if (existing[key] !== undefined) payload[key] = existing[key];
   });
+  if (Array.isArray(bootstrap.competitions)) payload.competitions = withLoadedRaceResults(bootstrap.competitions, existing.competitions);
   return payload;
+}
+
+// The bootstrap carries raw competitions; keep the race results the last profile
+// read added to the same event on the same date until the next profile read.
+function withLoadedRaceResults(competitions, loaded) {
+  if (!Array.isArray(loaded)) return competitions;
+  const results = new Map(loaded.filter((item) => item?.result).map((item) => [String(item.id), item]));
+  return competitions.map((item) => {
+    const previous = results.get(String(item?.id));
+    return previous && !item.result && previous.event_date === item.event_date ? { ...item, result: previous.result } : item;
+  });
 }
 
 function renderLoadedState(payload, liveAreasOnly, options) {

@@ -44,9 +44,10 @@ separate licensing and runtime constraints; see
 ## OpenSpec generated skills
 
 The six `openspec-*` skills are unmodified output of
-[`@fission-ai/openspec` 1.14.3](https://www.npmjs.com/package/@fission-ai/openspec/v/1.14.3),
+[`@fission-ai/openspec`](https://www.npmjs.com/package/@fission-ai/openspec),
 generated with `init --tools agents --profile core --language en --no-animation`.
-The exact version and package integrity are pinned in `package-lock.json`.
+Each skill's `generatedBy` metadata records the generator version; the installed
+version and package integrity are pinned in `package-lock.json`.
 Upstream: [Fission-AI/OpenSpec](https://github.com/Fission-AI/OpenSpec),
 MIT, copyright (c) 2024 OpenSpec Contributors. The complete
 [MIT notice](licenses/OpenSpec-MIT.txt) is retained with these generated files.

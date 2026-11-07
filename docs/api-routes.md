@@ -88,14 +88,14 @@ provider-keyed.
 | POST | `/api/wahoo/connect`, `/api/wahoo/disconnect` | Start the Wahoo OAuth connection or disconnect Wahoo | CSRF |
 | POST | `/api/metric-export/preview` | Preview metric values for export without writing | CSRF |
 | POST | `/api/metric-export/execute` | Intervals.icu write: send the confirmed metric selection | CSRF |
-| POST | `/api/metric-export/automatic` | Intervals.icu write: switch the automatic Garmin metric export; needs `confirmed: true` and the `intervals` target | CSRF |
+| POST | `/api/metric-export/automatic` | Intervals.icu write: switch the automatic metric export (consent per field); needs `confirmed: true`, `source: "garmin"` and the `intervals` target | CSRF |
 | POST | `/api/transcribe` | Transcribe short-lived voice input | CSRF |
 
 ## PUT routes
 
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
-| PUT | `/api/settings/model`, `/api/settings/service-tier`, `/api/settings/thinking-level`, `/api/settings/calendar-display`, `/api/settings/activity-detail-floor` | Update settings | CSRF |
+| PUT | `/api/settings/model`, `/api/settings/service-tier`, `/api/settings/thinking-level`, `/api/settings/calendar-display`, `/api/settings/activity-detail-floor`, `/api/settings/intervals-ingest` | Update settings | CSRF |
 | PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile | CSRF |
 | PUT | `/api/zones` | Save one local zone configuration; returns a receipt with an undo reference | CSRF |
 | PUT | `/api/zones/remove` | Remove one local zone configuration; needs `confirmed: true` | CSRF |
@@ -111,8 +111,10 @@ return a secret: the response is the credential status only.
 
 - `PUT /api/settings/credentials` takes a JSON object whose keys are credential
   fields (`openai_api_key`, `openai_base_url`, `intervals_api_key`,
-  `intervals_athlete_id`, `wahoo_client_id`, `wahoo_client_secret`,
-  `garmin_email`). `garmin_email` has no UI field; it pairs with the
+  `intervals_athlete_id`, `garmin_personal_api_key`,
+  `garmin_personal_api_key_expires` (ISO date; changing the key without it
+  clears the stored date), `wahoo_client_id`,
+  `wahoo_client_secret`, `garmin_email`). `garmin_email` has no UI field; it pairs with the
   environment `GARMIN_PASSWORD` fallback and is reported as configured only,
   never echoed back. A string
   stores the value; `null` or a blank string clears the value stored in the app,

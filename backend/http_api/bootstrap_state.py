@@ -11,6 +11,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
+from backend.sync.intervals_ingest import INGEST_ENABLED_KEY, ingest_enabled_value
 from backend.sync.intervals_state import latest_library_timestamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import connection_status
@@ -77,7 +78,7 @@ class PublicBootstrapService:
         # connection instead of racing.
         with deps.database_manager().read_snapshot() as db:
             sync_metadata = deps.sync_state_repository().sync_metadata(db)
-            local_planned = deps.planned_unit_service().list(250)
+            local_planned = deps.planned_unit_service().list(250, push_state=True)
             competitions = deps.competition_service().list(limit=100)
             relevant_external = deps.external_calendar_reader().list_events(
                 250, training_relevant_only=True
@@ -226,10 +227,15 @@ class PublicBootstrapService:
                     "state": deps.workout_library_sync_state_service().summary(),
                 },
                 "sync_settings": {
-                    f"{provider_id}_days": deps.sync_state_repository().sync_period(
-                        provider_id, deps.sync_period_defaults, deps.all_sync_days
-                    )
-                    for provider_id in registry.sync_period_defaults()
+                    **{
+                        f"{provider_id}_days": deps.sync_state_repository().sync_period(
+                            provider_id, deps.sync_period_defaults, deps.all_sync_days
+                        )
+                        for provider_id in registry.sync_period_defaults()
+                    },
+                    INGEST_ENABLED_KEY: ingest_enabled_value(
+                        deps.key_values.get_in_transaction(db, INGEST_ENABLED_KEY)
+                    ),
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {

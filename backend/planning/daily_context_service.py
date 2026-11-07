@@ -9,6 +9,7 @@ from typing import Any
 from backend.db import garmin_store
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import read_daily_health_by_date
+from backend.performance.load_context import read_local_fitness
 from backend.performance.planning_recovery import planning_recovery_view
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.context import build_daily_planning_context
@@ -37,6 +38,8 @@ class DailyPlanningContextService:
         calendar_window_days: int,
         observation_reader: Callable[[], ObservationReader],
         source_preferences: Callable[[Any], SourcePreferences] | None = None,
+        *,
+        timezone: Callable[[], str] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
@@ -48,6 +51,7 @@ class DailyPlanningContextService:
         self._calendar_window_days = calendar_window_days
         self._observation_reader = observation_reader
         self._source_preferences = source_preferences
+        self._timezone = timezone
 
     def _recovery_by_date(
         self,
@@ -58,11 +62,12 @@ class DailyPlanningContextService:
     ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
         """Recovery and daily-health views of the window ending on the local date.
 
-        Sleep, HRV, resting HR, readiness, CTL, ATL, form, steps, floors and
-        energy come from canonical observations. The reader is resolved once,
+        Sleep, HRV, resting HR, readiness, steps, floors and energy come from
+        canonical observations; CTL, ATL and form from the local curve (M7). The reader is resolved once,
         inside the caller's transaction.
         """
-        reader = resolve_reader(self._observation_reader(), db)
+        selector = self._observation_reader()
+        reader = resolve_reader(selector, db)
         start = today - timedelta(days=RECOVERY_WINDOW_DAYS)
         recovery = planning_recovery_view(
             reader,
@@ -76,6 +81,15 @@ class DailyPlanningContextService:
                 if self._source_preferences is None
                 else self._source_preferences(db)
             ),
+            # The sync day is taken in the athlete's zone, as on the load tab.
+            local_fitness_days=read_local_fitness(
+                selector,
+                db,
+                start=start,
+                end=today,
+                today=today,
+                timezone="UTC" if self._timezone is None else self._timezone(),
+            )["days"],
         )
         return recovery, read_daily_health_by_date(reader, db, start=start, end=today)
 

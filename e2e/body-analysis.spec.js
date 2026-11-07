@@ -5,7 +5,7 @@ function bodyHistory() {
   const start = "2026-07-15";
   const dates = Array.from({ length: 84 }, (_, index) => new Date(Date.parse(`${start}T12:00:00Z`) + index * 86400000).toISOString().slice(0, 10));
   const make = (source, metric, transform) => ({ source, source_provider: source.startsWith("Garmin") ? "garmin" : "intervals", unit: metric === "weight_kg" ? "kg" : metric === "body_fat_pct" ? "%" : "W/kg",
-    ...(metric === "cycling_w_per_kg" ? { power_method: source === "Garmin Connect" ? "FTP" : "eFTP" } : {}),
+    ...(metric === "cycling_w_per_kg" ? { power_method: "FTP" } : {}),
     points: dates.map((date, index) => {
       const missingWeek = index >= 35 && index <= 41;
       const value = missingWeek || (metric === "body_fat_pct" && source === "Intervals.icu Wellness") ? null : transform(index);
@@ -22,7 +22,7 @@ function bodyHistory() {
   const metrics = {
     weight_kg: [make("Intervals.icu Wellness", "weight_kg", (index) => 70 + index / 100), make("Garmin Connect", "weight_kg", (index) => 71 + index / 100)],
     body_fat_pct: [make("Intervals.icu Wellness", "body_fat_pct", () => 18), make("Garmin Connect", "body_fat_pct", (index) => 19 + index / 100)],
-    cycling_w_per_kg: [make("Garmin Connect", "cycling_w_per_kg", (index) => (280 + index) / 70), make("Intervals.icu", "cycling_w_per_kg", (index) => (270 + index) / 71)],
+    cycling_w_per_kg: [make("Garmin Connect", "cycling_w_per_kg", (index) => (280 + index) / 70)],
   };
   const end = dates.at(-1);
   return { start, end, load: { points: [] }, metrics: {}, body: { version: 1, default_window: "12w", preferred_providers: { weight_kg: "garmin", body_fat_pct: "garmin", cycling_w_per_kg: "garmin" }, windows: {

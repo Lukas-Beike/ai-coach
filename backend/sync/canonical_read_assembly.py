@@ -14,7 +14,7 @@ from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from backend.athlete.profile import timezone_name
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.sync.canonical_backfill import completed_observation_versions
 from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -38,6 +38,7 @@ def build_canonical_read(
         key_values=key_values,
         zone=_athlete_zone(profile),
         compact_only=compact_only,
+        competitions=CompetitionRepository(),
     )
 
 

@@ -30,8 +30,14 @@ from backend.canonical.activity_detail import (
     ZoneDistribution,
 )
 from backend.canonical.local_time import wall_time
+from backend.canonical.rating_scales import ACTIVITY_RATING_SCALES, rating_fields
 from backend.canonical.records import ActivityRecord, Provenance
-from backend.canonical.vocabulary import ProviderId, StreamChannel, ZoneMetric
+from backend.canonical.vocabulary import (
+    ProviderId,
+    SourceKind,
+    StreamChannel,
+    ZoneMetric,
+)
 from backend.db.activity_detail_store import StoredDetailSet
 from backend.providers.intervals_activity_detail_projection import (
     COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
@@ -57,6 +63,7 @@ _MEASURED_METRICS: Final[tuple[tuple[str, str], ...]] = (
     ("elapsed_duration_s", "s"),
     ("distance_m", "m"),
     ("elevation_gain_m", "m"),
+    ("elevation_loss_m", "m"),
     ("elevation_high_m", "m"),
     ("elevation_low_m", "m"),
     ("avg_hr", "bpm"),
@@ -66,12 +73,24 @@ _MEASURED_METRICS: Final[tuple[tuple[str, str], ...]] = (
     ("max_power_w", "W"),
     ("avg_cadence", "rpm"),
     ("max_speed_mps", "m/s"),
+    ("min_temp_c", "°C"),
+    ("max_temp_c", "°C"),
     ("steps", "count"),
+    ("lap_count", "count"),
     ("energy_kj", "kJ"),
+    ("energy_kcal", "kcal"),
 )
 _DERIVED_METRICS: Final[tuple[tuple[str, str | None], ...]] = (
     ("normalized_power", "W"),
     ("load", None),
+    ("aerobic_training_effect", None),
+    ("anaerobic_training_effect", None),
+    ("water_estimated_ml", "ml"),
+)
+# Record values the Intervals.icu summary scalars also report (#1724); the
+# scalar is kept as an alternative instead of being dropped.
+_SUMMARY_ALTERNATIVE_KEYS: Final = frozenset(
+    {"min_temp_c", "max_temp_c", "elevation_loss_m"}
 )
 # Measured averages that fall back to the merged stream mean when no record has them.
 _GAP_FILL: Final[Mapping[str, tuple[StreamChannel, str]]] = {
@@ -99,6 +118,32 @@ def measured_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
     newest retrieval, then the provider activity id.
     """
     return sorted(records, key=lambda record: (_own_rank(record), *_tie_break(record)))
+
+
+# The provider where the athlete rates a session first; Intervals.icu copies it.
+_RATING_RANK: Final[Mapping[ProviderId, int]] = {
+    ProviderId.GARMIN: 0,
+    ProviderId.INTERVALS: 1,
+}
+_RATING_KEYS: Final = ("rpe", "feel")
+
+
+def rating_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
+    """Order records for the athlete's provider ratings: Garmin, Intervals.icu, rest.
+
+    The athlete rates on the watch; Intervals.icu imports that rating. Within one
+    provider the derived order (newest retrieval, id) decides.
+    """
+
+    def rank(record: ActivityRecord) -> int:
+        provider = record.provenance.provider
+        return (
+            len(_RATING_RANK)
+            if provider is None
+            else _RATING_RANK.get(provider, len(_RATING_RANK))
+        )
+
+    return sorted(derived_order(records), key=rank)
 
 
 def derived_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
@@ -133,7 +178,12 @@ def activity_detail_contract(
     measured = measured_order(records)
     metrics = _metrics(measured, derived_order(records), merged)
     for key, entry in (summary_metrics or {}).items():
-        metrics.setdefault(key, dict(entry))
+        if key not in metrics:
+            metrics[key] = dict(entry)
+        elif key in _SUMMARY_ALTERNATIVE_KEYS:
+            metrics[key].setdefault("alternatives", []).append(
+                {"value": entry.get("value"), "source": entry.get("source")}
+            )
     document = {
         "contract": ACTIVITY_DETAIL_CONTRACT,
         "session": _session(session_id, measured, zone),
@@ -213,6 +263,17 @@ def _metrics(
         )
         if entry is not None:
             metrics[key] = entry
+    rated = rating_order(measured)
+    for key in _RATING_KEYS:
+        entry = _record_metric(rated, key, None, "athlete_entered")
+        if entry is None:
+            continue
+        record = next(record for record in rated if getattr(record, key) is not None)
+        provider = record.provenance.provider
+        scale = ACTIVITY_RATING_SCALES.get(provider, {}).get(key) if provider else None
+        if scale is not None:
+            entry.update(rating_fields(scale, entry["value"]))
+        metrics[key] = entry
     return metrics
 
 
@@ -331,7 +392,12 @@ def _zones(zones: Mapping[ZoneMetric, SetChoice]) -> dict[str, Any]:
         zone = _zone_set(choice.chosen)
         result[metric.value] = {
             "boundary_source": zone.boundary_source.value,
-            "source": _candidate_source(choice.chosen),
+            "source": _source(
+                zone.provenance,
+                "derived"
+                if zone.provenance.source_kind is SourceKind.DERIVED
+                else "measured",
+            ),
             "buckets": [
                 {
                     "index": bucket.index,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.canonical.activity_summary import ActivitySummary
@@ -34,7 +34,9 @@ from backend.sync.garmin import (
     GarminPayloadService,
     GarminSyncStateService,
 )
+from backend.sync.garmin_personal_status import personal_key_state
 from backend.sync.garmin_service import GarminSyncService
+from backend.sync.metric_export import STATUS_KEY as METRIC_EXPORT_STATUS_KEY
 from backend.sync.metric_export_consent import enabled_fields, fields_view
 
 # The recovery context shows the latest record; two weeks cover a missed sync.
@@ -109,6 +111,25 @@ class GarminProjectionService:
             summaries = sources.activity_summaries().activity_summaries(db, start=start)
         return state, summaries
 
+    def _personal_api_state(
+        self, today: date, tokens_connected: bool
+    ) -> dict[str, Any]:
+        """Personal API key and SDK-skip state; absent without a key (bounded bootstrap)."""
+        if not self._config.garmin_personal_api_key:
+            return {}
+        state: dict[str, Any] = {
+            "personal_api": personal_key_state(
+                self._config,
+                today,
+                rejected=self._garmin_sync_state_service.personal_key_rejected(),
+            )
+        }
+        if tokens_connected or self._config.garmin_email:
+            skipped = self._garmin_sync_state_service.sdk_skipped()
+            if skipped:
+                state["sdk_skipped"] = skipped
+        return state
+
     def public_state(
         self,
         status: GarminSyncStatus | None = None,
@@ -132,7 +153,7 @@ class GarminProjectionService:
         with self._database_manager.reader() as db:
             last_sync_at = self._key_value_repository.get(db, "last_garmin_sync_at")
             metric_export_status = self._key_value_repository.get(
-                db, "last_garmin_metric_export_status"
+                db, METRIC_EXPORT_STATUS_KEY
             )
             metric_export_fields = enabled_fields(
                 lambda key: self._key_value_repository.get(db, key)
@@ -147,6 +168,7 @@ class GarminProjectionService:
             "configured": bool(
                 self._config.garmin_fixture_path
                 or self._config.garmin_email
+                or self._config.garmin_personal_api_key
                 or tokens_connected
             ),
             "source": status.source
@@ -158,8 +180,14 @@ class GarminProjectionService:
                 else {}
             ),
             "metric_export_enabled": bool(metric_export_fields),
-            "metric_export_fields": fields_view(metric_export_fields),
+            # The field checkboxes show only while the export is enabled.
+            **(
+                {"metric_export_fields": fields_view(metric_export_fields)}
+                if metric_export_fields
+                else {}
+            ),
             "last_error": parsed_error,
+            **self._personal_api_state(today, tokens_connected),
             "pagination": dict(status.pagination),
             "source_freshness": performance_freshness.garmin_source_freshness(
                 status, today
