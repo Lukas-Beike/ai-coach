@@ -66,6 +66,7 @@ CHECKED_THRESHOLDS: Final[tuple[tuple[ThresholdKey, str], ...]] = (
     ((MetricKind.THRESHOLD_PACE, Sport.RUN), "Schwellenpace"),
 )
 INDOOR_LABEL: Final = "Indoor-FTP"
+RIDE_FTP: Final[ThresholdKey] = (MetricKind.FTP, Sport.RIDE)
 _METRIC: Final = {
     MetricKind.FTP: ZoneConfigurationMetric.POWER,
     MetricKind.THRESHOLD_HR: ZoneConfigurationMetric.HEART_RATE,
@@ -126,6 +127,57 @@ def _stale(threshold: DatedThreshold, today: date) -> bool:
     )
 
 
+def _threshold_item(
+    key: ThresholdKey,
+    label: str,
+    current: DatedThreshold | None,
+    expired: DatedThreshold | None,
+    *,
+    today: date,
+    sdk_failed: bool,
+) -> dict[str, Any] | None:
+    """The item of one checked threshold, or None when it needs no hint."""
+    kind, sport = key
+    if current is None:
+        return (
+            None
+            if expired is None
+            else _item(kind, sport, label, expired, REASON_EXPIRED, today)
+        )
+    if _stale(current, today):
+        return _item(kind, sport, label, current, REASON_STALE, today)
+    if sdk_failed and current.provider is ProviderId.GARMIN:
+        return _item(kind, sport, label, current, REASON_SDK_FAILED, today)
+    return None
+
+
+def _indoor_item(
+    outdoor: DatedThreshold | None, indoor_local: DatedThreshold | None, today: date
+) -> dict[str, Any] | None:
+    """The indoor FTP item: missing (naming the outdoor FTP used) or stale."""
+    if indoor_local is not None:
+        if not _stale(indoor_local, today):
+            return None
+        item = _item(
+            MetricKind.FTP, Sport.RIDE, INDOOR_LABEL, indoor_local, REASON_STALE, today
+        )
+        return {**item, "metric": MetricKind.INDOOR_FTP.value}
+    return {
+        "metric": MetricKind.INDOOR_FTP.value,
+        "sport": Sport.RIDE.value,
+        "label": INDOOR_LABEL,
+        "value": None if outdoor is None else outdoor.value,
+        "value_text": None
+        if outdoor is None
+        else value_text(MetricKind.FTP, outdoor.value),
+        "source": None,
+        "source_label": None,
+        "dated_on": None,
+        "age_days": None,
+        "reason": REASON_INDOOR_MISSING,
+    }
+
+
 def assess_thresholds(
     active: Mapping[ThresholdKey, DatedThreshold],
     last_provider: Mapping[ThresholdKey, DatedThreshold],
@@ -144,59 +196,36 @@ def assess_thresholds(
     indoor FTP in effect. ``local_undated`` names thresholds whose local value
     is in effect without a date; they are not judged.
     """
-    items: list[dict[str, Any]] = []
-    garmin_involved = False
-    for (kind, sport), label in CHECKED_THRESHOLDS:
-        current = active.get((kind, sport))
-        if current is None and (kind, sport) in local_undated:
-            continue
-        if current is None:
-            expired = last_provider.get((kind, sport))
-            if expired is not None:
-                garmin_involved |= expired.provider is ProviderId.GARMIN
-                items.append(_item(kind, sport, label, expired, REASON_EXPIRED, today))
-            continue
-        from_garmin = current.provider is ProviderId.GARMIN
-        garmin_involved |= from_garmin
-        if _stale(current, today):
-            items.append(_item(kind, sport, label, current, REASON_STALE, today))
-        elif from_garmin and sdk_failure:
-            items.append(_item(kind, sport, label, current, REASON_SDK_FAILED, today))
-    if indoor_rides:
-        if indoor_local is None:
-            outdoor = active.get((MetricKind.FTP, Sport.RIDE))
-            items.append(
-                {
-                    "metric": MetricKind.INDOOR_FTP.value,
-                    "sport": Sport.RIDE.value,
-                    "label": INDOOR_LABEL,
-                    "value": None if outdoor is None else outdoor.value,
-                    "value_text": None
-                    if outdoor is None
-                    else value_text(MetricKind.FTP, outdoor.value),
-                    "source": None,
-                    "source_label": None,
-                    "dated_on": None,
-                    "age_days": None,
-                    "reason": REASON_INDOOR_MISSING,
-                }
+    checked = [
+        (key, label, active.get(key), last_provider.get(key))
+        for key, label in CHECKED_THRESHOLDS
+        if key not in local_undated or key in active
+    ]
+    items = [
+        item
+        for key, label, current, expired in checked
+        if (
+            item := _threshold_item(
+                key,
+                label,
+                current,
+                expired,
+                today=today,
+                sdk_failed=bool(sdk_failure),
             )
-        elif _stale(indoor_local, today):
-            items.append(
-                {
-                    **_item(
-                        MetricKind.FTP,
-                        Sport.RIDE,
-                        INDOOR_LABEL,
-                        indoor_local,
-                        REASON_STALE,
-                        today,
-                    ),
-                    "metric": MetricKind.INDOOR_FTP.value,
-                }
-            )
+        )
+    ]
+    if indoor_rides and (
+        indoor := _indoor_item(active.get(RIDE_FTP), indoor_local, today)
+    ):
+        items.append(indoor)
     if not items:
         return None
+    garmin_involved = any(
+        value.provider is ProviderId.GARMIN
+        for _, _, current, expired in checked
+        if (value := current or expired) is not None
+    )
     return {
         "stale_after_days": STALE_AFTER_DAYS,
         "sdk_failure": dict(sdk_failure) if sdk_failure and garmin_involved else None,
@@ -237,6 +266,32 @@ def _newest_by_key(
         if held is None or observation.observed_on > held.observed_on:
             newest[key] = observation
     return newest
+
+
+def _active_thresholds(
+    winners: Mapping[ThresholdKey, Observation],
+    local: list[ZoneConfiguration],
+    saved_on: Mapping[str, date],
+    today: date,
+) -> tuple[dict[ThresholdKey, DatedThreshold], frozenset[ThresholdKey]]:
+    """The dated value in effect per threshold, and the undated local ones."""
+    active: dict[ThresholdKey, DatedThreshold] = {}
+    undated: set[ThresholdKey] = set()
+    for key, _ in CHECKED_THRESHOLDS:
+        winner = winners.get(key)
+        if winner is None:
+            continue
+        if winner.provenance.provider is not None:
+            active[key] = _provider_dated(winner)
+            continue
+        kind, sport = key
+        chosen = effective_zone_configuration(local, _METRIC[kind], sport, day=today)
+        dated = None if chosen is None else _local_dated(chosen, saved_on)
+        if dated is None:
+            undated.add(key)
+        else:
+            active[key] = dated
+    return active, frozenset(undated)
 
 
 class ThresholdStalenessService:
@@ -295,23 +350,7 @@ class ThresholdStalenessService:
             start = today - timedelta(days=STALE_AFTER_DAYS)
             summaries = reader.activity_summaries(db, start=start)
         local = [item for item in configurations if item.provenance.provider is None]
-        active: dict[ThresholdKey, DatedThreshold] = {}
-        local_undated: set[ThresholdKey] = set()
-        for (kind, sport), _ in CHECKED_THRESHOLDS:
-            winner = winners.get((kind, sport))
-            if winner is None:
-                continue
-            if winner.provenance.provider is None:
-                chosen = effective_zone_configuration(
-                    local, _METRIC[kind], sport, day=today
-                )
-                dated = None if chosen is None else _local_dated(chosen, saved_on)
-                if dated is not None:
-                    active[(kind, sport)] = dated
-                else:
-                    local_undated.add((kind, sport))
-            else:
-                active[(kind, sport)] = _provider_dated(winner)
+        active, local_undated = _active_thresholds(winners, local, saved_on, today)
         last_provider = {
             key: _provider_dated(observation)
             for key, observation in _newest_by_key(providers).items()
@@ -336,5 +375,5 @@ class ThresholdStalenessService:
                 for summary in summaries
             ),
             indoor_local=indoor_local,
-            local_undated=frozenset(local_undated),
+            local_undated=local_undated,
         )

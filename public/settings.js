@@ -367,7 +367,8 @@ function zoneWarningLine(item) {
       ? `${item.label} fehlt – Indoor-Fahrten nutzen FTP Rad ${item.value_text}`
       : `${item.label} fehlt`;
   }
-  const age = item.age_days == null ? "" : ` · ${item.age_days} ${item.age_days === 1 ? "Tag" : "Tage"} alt`;
+  const unit = item.age_days === 1 ? "Tag" : "Tage";
+  const age = item.age_days == null ? "" : ` · ${item.age_days} ${unit} alt`;
   const suffix = { expired: " – nicht mehr verwendet", sdk_failed: " – wird nicht aktualisiert" }[item.reason] || "";
   return `${item.label} ${item.value_text} · ${item.source_label}${age}${suffix}`;
 }
@@ -388,13 +389,9 @@ function renderZoneWarnings(warnings) {
   }
   const title = document.createElement("strong");
   title.textContent = zoneWarningTitle(warnings);
-  const list = document.createElement("ul");
-  list.replaceChildren(...items.map((item) => {
-    const line = document.createElement("li");
-    line.textContent = zoneWarningLine(item);
-    return line;
-  }));
-  node.replaceChildren(title, list);
+  // Phrasing content only: <output> holds one line per threshold.
+  const lines = items.flatMap((item) => [document.createElement("br"), document.createTextNode(`• ${zoneWarningLine(item)}`)]);
+  node.replaceChildren(title, ...lines);
   const section = $("#zoneSettings");
   if (section) section.open = true;
 }
