@@ -12,7 +12,7 @@ from canonical_detail_support import (
 )
 
 from backend.canonical.vocabulary import ActivityDetailOrigin, RecordingOrigin
-from backend.db.activity_detail_store import detail_origins
+from backend.db.activity_detail_store import detail_origins, save_analysis
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,
@@ -185,6 +185,32 @@ class CanonicalDetailWriterTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(
             (3, '{"canonical":true}'), (row["analysis_version"], row["payload"])
+        )
+
+    def test_legacy_targets_reach_a_canonical_row_without_a_snapshot(self):
+        targets = {"steps": [], "basis": {"ftp": 250}}
+        with self.manager.unit_of_work() as db:
+            activity_id = db.execute(
+                "SELECT activity_id FROM activity_records WHERE provider_activity_id = ?",
+                ("9001",),
+            ).fetchone()["activity_id"]
+            save_analysis(
+                db,
+                activity_id,
+                analysis_version=3,
+                input_sha256="1" * 64,
+                payload={"target_snapshot": None, "x": 1},
+                now=NOW,
+            )
+        self.legacy(legacy_record(target_snapshot=targets))
+        with self.manager.reader() as db:
+            row = db.execute(
+                "SELECT analysis_version, input_sha256, payload "
+                "FROM activity_detail_analysis"
+            ).fetchone()
+        self.assertEqual(
+            (3, "1" * 64, {"target_snapshot": targets, "x": 1}),
+            (row["analysis_version"], row["input_sha256"], json.loads(row["payload"])),
         )
 
     def test_refetch_without_laps_removes_the_stale_lap_set(self):

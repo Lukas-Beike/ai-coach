@@ -86,8 +86,9 @@ def build_canonical_backfill(
         followups=(
             local_load,
             session_metrics,
-            session_analysis,
             detail_backfill,
+            # After the legacy detail copy, so its target snapshots carry over.
+            session_analysis,
             detail_retirement,
         ),
     )

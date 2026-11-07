@@ -36,6 +36,8 @@ from backend.performance.session_analysis_reads import (
     calendar_profiles,
 )
 from backend.providers.garmin_health_mapping import MAPPER_VERSION
+from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.session_analysis_stage import (
     SessionAnalysisStage,
@@ -415,6 +417,26 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertEqual(("running", 1), (first["status"], first["counts"]["pending"]))
         self.assertEqual("complete", self._run(stage)["status"])
         self.assertEqual(0, self._run(stage)["counts"]["computed"])
+
+
+class StageOrderTests(unittest.TestCase):
+    def test_analysis_runs_after_the_legacy_detail_copy(self) -> None:
+        # The legacy copy writes the target snapshots the stage carries over.
+        assembly = build_canonical_backfill(
+            database=lambda: None,
+            key_values=KeyValueRepository(lambda: NOW),
+            zone_provider=lambda: ZONE,
+            maintenance_gate=MaintenanceGate(),
+            clock=lambda: NOW,
+        )
+        order = [stage.stage for stage in assembly.worker._followups]
+        self.assertLess(
+            order.index(assembly.detail_backfill.stage), order.index("session_analysis")
+        )
+        self.assertLess(
+            order.index("session_analysis"),
+            order.index(assembly.detail_retirement.stage),
+        )
 
 
 if __name__ == "__main__":
