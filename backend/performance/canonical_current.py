@@ -35,10 +35,12 @@ not current. Its row stays stored and readable, so history keeps it.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
+from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.current_thresholds import (
@@ -314,8 +316,12 @@ def read_export_thresholds(
     *,
     as_of: date,
     preferences: SourcePreferences = NO_PREFERENCES,
+    configurations: Iterable[ZoneConfiguration] | None = None,
 ) -> dict[ThresholdKey, Observation]:
     """Return the thresholds an outbound export sends, current on ``as_of``.
+
+    ``configurations`` are the stored zone configurations; without them the
+    reader's are used (none when it serves no configurations).
 
     The local zone configuration in effect wins, then Garmin, then Wahoo, under
     the source policy and the athlete's preferences. Intervals.icu values are left
@@ -326,11 +332,9 @@ def read_export_thresholds(
         *((wahoo_ftp,) if wahoo_ftp is not None else ()),
         *read_garmin_thresholds(reader, db),
     )
-    local = (
-        local_thresholds(reader.zone_configurations(db), as_of)
-        if isinstance(reader, ZoneConfigurationSource)
-        else ()
-    )
+    if configurations is None and isinstance(reader, ZoneConfigurationSource):
+        configurations = reader.zone_configurations(db)
+    local = local_thresholds(configurations or (), as_of)
     return {
         key: winner
         for key, result in resolve_current_thresholds(

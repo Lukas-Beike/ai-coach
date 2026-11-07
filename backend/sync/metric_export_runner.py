@@ -20,6 +20,8 @@ from backend.canonical.vocabulary import ProviderId
 from backend.sync.metric_export import automatic_export_message
 
 _LOGGER = logging.getLogger("intervals_coach")
+# Wahoo jobs that read the athlete's FTP; a workout upload changes no threshold.
+_WAHOO_READ_JOBS: Final = frozenset({"refresh", "performance_refresh"})
 DEFAULT_DELAY_SECONDS: Final = 5.0
 
 
@@ -74,8 +76,11 @@ class MetricExportRunner:
             ).start()
 
     def after_job(self, job: Mapping[str, Any]) -> None:
-        """A sync-job hook: a successful Wahoo job can change the resolved FTP."""
-        if job.get("provider") == ProviderId.WAHOO.value:
+        """A sync-job hook: a successful Wahoo sync can change the resolved FTP."""
+        if (
+            job.get("provider") == ProviderId.WAHOO.value
+            and job.get("type") in _WAHOO_READ_JOBS
+        ):
             self.request()
 
     def stop(self) -> None:

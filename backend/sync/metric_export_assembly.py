@@ -12,6 +12,7 @@ from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.source_policy import SourcePreferences
 from backend.providers.intervals_client import IntervalsClient
 from backend.runtime.ports import ObservationReader
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.intervals_metric_export import IntervalsMetricExport
 from backend.sync.metric_export import MetricExportService
 
@@ -29,6 +30,8 @@ def build_metric_export_service(
     """Return the service; a provider client is opened only by a confirmed write.
 
     Thresholds are the resolved local, Garmin and Wahoo values current today.
+    Local zones are read from the tables directly, like the zone editor, so a
+    zone saved before the first canonical backfill completes is still sent.
     """
 
     def thresholds(db: Any) -> Any:
@@ -37,6 +40,7 @@ def build_metric_export_service(
             db,
             as_of=today(),
             preferences=source_preferences(db),
+            configurations=CanonicalTableReader().zone_configurations(db),
         )
 
     return MetricExportService(

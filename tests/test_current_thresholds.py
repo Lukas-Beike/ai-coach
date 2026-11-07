@@ -423,6 +423,13 @@ class ExportThresholdTests(unittest.TestCase):
         self.assertEqual(self._ride_ftp((intervals, wahoo)), (ProviderId.WAHOO, 250.0))
         self.assertIsNone(self._ride_ftp((intervals,)))
 
+    def test_given_configurations_count_for_a_reader_without_them(self) -> None:
+        # A pending canonical reader serves no zones; the tables' zones still count.
+        exported = read_export_thresholds(
+            StubReader(()), None, as_of=AS_OF, configurations=[_local_power(300.0)]
+        )
+        self.assertEqual(exported[(MetricKind.FTP, Sport.RIDE)].value.value, 300.0)
+
     def test_heart_rate_and_pace_come_from_garmin_not_intervals(self) -> None:
         exported = self._export(
             (

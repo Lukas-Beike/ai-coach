@@ -116,13 +116,14 @@ class MetricExportRunnerTests(unittest.TestCase):
         runner.request()
         self.assertEqual((self.threads, service.runs), ([], 0))
 
-    def test_only_a_wahoo_job_requests_a_run(self) -> None:
+    def test_only_a_wahoo_sync_requests_a_run(self) -> None:
         runner = self._runner(_Service())
         with patch.object(runner, "request") as request:
-            runner.after_job({"provider": "garmin"})
-            runner.after_job({"provider": "intervals"})
+            runner.after_job({"provider": "garmin", "type": "refresh"})
+            runner.after_job({"provider": "intervals", "type": "refresh"})
+            runner.after_job({"provider": "wahoo", "type": "plan_push"})
             request.assert_not_called()
-            runner.after_job({"provider": "wahoo"})
+            runner.after_job({"provider": "wahoo", "type": "refresh"})
             request.assert_called_once_with()
 
     def test_chained_hooks_each_see_the_job_in_order(self) -> None:
