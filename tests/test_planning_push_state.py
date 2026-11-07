@@ -171,19 +171,35 @@ class PushStateTests(unittest.TestCase):
             "strength_structure": [{"name": "Kabelrudern  eng", "sets": 4, "reps": 8}],
         }
         with self.manager.unit_of_work() as db:
+            wrong = {
+                **confirmed,
+                "strength_structure": [
+                    {
+                        **confirmed["strength_structure"][0],
+                        "garmin_exercise": "Seated Cable Row",
+                        "garmin_pair": {
+                            "category": "ROW",
+                            "exercise": "SEATED_CABLE_ROW",
+                        },
+                    }
+                ],
+            }
             for local_id, payload, tombstone in (
                 ("c1", confirmed, 0),
-                # A deleted unit's confirmation does not count.
-                ("c2", {**confirmed, "date": "2026-11-02"}, 1),
+                # A deleted or archived unit's confirmation does not count.
+                ("c2", {**wrong, "local_deleted": True}, 0),
+                ("c3", {**wrong, "archived": True}, 0),
+                ("c4", wrong, 1),
             ):
                 db.execute(
                     "INSERT INTO planned_units(id, local_id, payload, tombstone, "
                     "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (local_id, local_id, json.dumps(payload), tombstone, "t", "t"),
+                    (local_id, local_id, json.dumps(payload), tombstone, "t", local_id),
                 )
         with self.manager.reader() as db:
             remembered = remembered_exercises(db)
         self.assertEqual(["kabelruderneng"], list(remembered))
+        self.assertEqual("V-grip Cable Row", remembered["kabelruderneng"].name)
         rows = [{"local_id": "l1", "payload": json.dumps(later), "sync_state": "local"}]
         pairs = [(row, json.loads(row["payload"])) for row in rows]
         attach_push_state(pairs, {}, remembered)

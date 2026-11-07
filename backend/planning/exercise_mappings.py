@@ -5,7 +5,7 @@ A structure exercise that names its Garmin catalogue exercise explicitly
 editor) stores the resolved pair. That confirmation also applies to the same
 exercise name in other units, so it is asked once. Nothing extra is stored: the
 mappings are read from the local planned units and library templates, newest
-first; deleted units do not count. Read-only.
+wins; deleted or archived ones do not count. Read-only.
 """
 
 from __future__ import annotations
@@ -20,11 +20,17 @@ from backend.providers.garmin_strength_workout import (
     stored_pair,
 )
 
+# Deleted and archived units and templates do not count, as in the other
+# planning readers.
+_ACTIVE = (
+    "COALESCE(json_extract(payload, '$.local_deleted'), 0) = 0 "
+    "AND COALESCE(json_extract(payload, '$.archived'), 0) = 0"
+)
 _ROWS_SQL = (
     "SELECT payload, updated_at FROM planned_units "
-    "WHERE tombstone=0 AND payload LIKE '%garmin_exercise%' "
+    f"WHERE tombstone=0 AND {_ACTIVE} AND payload LIKE '%garmin_exercise%' "
     "UNION ALL SELECT payload, updated_at FROM workout_library "
-    "WHERE payload LIKE '%garmin_exercise%' "
+    f"WHERE {_ACTIVE} AND payload LIKE '%garmin_exercise%' "
     "ORDER BY updated_at"
 )
 
