@@ -13,6 +13,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -82,17 +83,24 @@ class EffectiveZoneTests(unittest.TestCase):
             for environment in Environment:
                 with self.subTest(sport=sport, environment=environment):
                     legacy = legacy_sport_settings(settings, sport, environment)
+                    # An Intervals.icu configuration gives its limits only; its
+                    # thresholds are never a source.
                     self.assertEqual(
                         ZoneSettings.from_configurations(
                             configurations, sport, environment
                         ),
-                        legacy,
+                        replace(legacy, ftp=None, lthr=None, max_hr=None),
+                    )
+                    # The Intervals.icu indoor FTP is never read: an indoor workout
+                    # uses the sport FTP.
+                    outdoor = legacy_sport_settings(
+                        settings, sport, Environment.UNKNOWN
                     )
                     self.assertEqual(
                         canonical_zone_settings(
                             ATHLETE["sportSettings"], sport, environment
                         ),
-                        legacy,
+                        replace(legacy, ftp=outdoor.ftp),
                     )
 
     def test_a_local_configuration_wins_on_its_valid_days(self) -> None:
@@ -104,12 +112,13 @@ class EffectiveZoneTests(unittest.TestCase):
         after = ZoneSettings.from_configurations(
             configurations, Sport.RIDE, Environment.INDOOR, date(2026, 11, 1)
         )
-        self.assertEqual((before.ftp, before.power_limits[0]), (250, 55))
+        self.assertEqual((before.ftp, before.power_limits[0]), (None, 55))
         self.assertEqual(
             (after.ftp, after.power_limits), (280, (50, 70, 85, 100, 115, 140))
         )
-        # Heart-rate zones still come from the provider.
-        self.assertEqual(after.lthr, 168)
+        # Heart-rate limits still come from the provider, its threshold does not.
+        self.assertIsNone(after.lthr)
+        self.assertTrue(after.hr_limits)
 
     def test_absolute_local_limits_become_percent_of_the_threshold(self) -> None:
         local = local_configuration(
@@ -150,7 +159,9 @@ class EffectiveZoneTests(unittest.TestCase):
             return row["workout_profile"]["segments"][0]["zone"]
 
         local = local_configuration(LOCAL_POWER)
-        self.assertEqual(zone(provider_configurations()), 5)
+        # An Intervals.icu configuration gives no threshold, so only the local one
+        # colors the step.
+        self.assertIsNone(zone(provider_configurations()))
         self.assertEqual(zone((*provider_configurations(), local)), 4)
 
     def test_a_missing_power_list_keeps_the_canonical_ride_ftp(self) -> None:

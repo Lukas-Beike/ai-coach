@@ -361,15 +361,15 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         ) as project:
             service.execute("get_activity_details", {"activity_id": "synthetic-1"})
         canonical = project.call_args.kwargs["canonical"]
-        self.assertEqual(canonical.wellness_day, date(2026, 9, 22))
         self.assertIsNotNone(canonical.recovery)
         selector.reader_for.assert_called_once()
         served_kinds = {
             call.args[1]
             for call in selector.reader_for.return_value.observations.call_args_list
         }
-        self.assertIn(MetricKind.CTL, served_kinds)
-        self.assertIn(MetricKind.ATL, served_kinds)
+        # Intervals.icu CTL and ATL are never read.
+        self.assertNotIn(MetricKind.CTL, served_kinds)
+        self.assertNotIn(MetricKind.ATL, served_kinds)
 
     def test_detail_without_wellness_rows_still_passes_the_canonical_inputs(self):
         selector, service = _canonical_activity_tool(self, _activity_snapshot([]))
@@ -379,7 +379,6 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         ) as project:
             service.execute("get_activity_details", {"activity_id": "synthetic-1"})
         canonical = project.call_args.kwargs["canonical"]
-        self.assertIsNone(canonical.wellness_day)
         self.assertEqual(len(canonical.activities or ()), 1)
         # The wellness observations are read to find the days, once per call.
         selector.reader_for.assert_called_once()

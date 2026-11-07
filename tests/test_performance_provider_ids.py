@@ -131,17 +131,16 @@ class ProviderIdPayloadTests(unittest.TestCase):
             _empty_garmin_metrics(cycling_ftp_watts=260),
         )
 
-        # The Intervals ride setting precedes Garmin's FTP (#1668).
-        self.assertEqual(result["cycling_ftp_watts"]["source"], "Intervals.icu")
-        self.assertEqual(result["cycling_ftp_watts"]["source_provider"], "intervals")
-        self.assertEqual(
-            result["cycling_ftp_watts"]["alternatives"][0]["source_provider"], "garmin"
-        )
+        # Garmin's FTP is the value; the Intervals ride setting is no source.
+        self.assertEqual(result["cycling_ftp_watts"]["source"], "Garmin Connect")
+        self.assertEqual(result["cycling_ftp_watts"]["source_provider"], "garmin")
+        self.assertNotIn("alternatives", result["cycling_ftp_watts"])
         self.assertNotIn("cycling_eftp_watts", result)
         self.assertIsNone(result["run_threshold_watts"]["value"])
         self.assertIsNone(result["run_threshold_watts"]["source_provider"])
-        self.assertEqual(result["weight_kg"]["source"], "Intervals.icu")
-        self.assertEqual(result["weight_kg"]["source_provider"], "intervals")
+        # The profile weight is the only weight; the Intervals athlete weight is not.
+        self.assertEqual(result["weight_kg"]["source"], "Manuell")
+        self.assertIsNone(result["weight_kg"]["source_provider"])
         self.assertEqual(result["height_cm"]["source_provider"], None)
 
     def test_manual_profile_weight_has_no_provider_id(self):

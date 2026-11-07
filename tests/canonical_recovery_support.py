@@ -91,13 +91,9 @@ class RecordingReader:
         return tuple(self._by_kind.get(kind, []))
 
 
-_LATEST_ROW: Any = object()
-
-
 def recovery_inputs(
     observations: Iterable[Observation] = (),
     *,
-    latest_wellness_day: date | None = None,
     sleep_periods: tuple[SleepPeriod, ...] | None = None,
 ) -> CanonicalRecoveryInputs:
     """Group synthetic recovery observations into canonical recovery inputs."""
@@ -106,7 +102,6 @@ def recovery_inputs(
         by_kind.setdefault(observation.kind, []).append(observation)
     return CanonicalRecoveryInputs(
         observations={kind: tuple(by_kind.get(kind, ())) for kind in RECOVERY_KINDS},
-        latest_wellness_day=latest_wellness_day,
         sleep_periods=sleep_periods,
     )
 
@@ -144,8 +139,6 @@ def mapped_sleep_periods(
 def mapped_recovery_inputs(
     garmin: Mapping[str, Any] | None = None,
     wellness: list[dict[str, Any]] | None = None,
-    *,
-    latest_wellness_day: Any = _LATEST_ROW,
 ) -> CanonicalRecoveryInputs:
     """Map raw Garmin sections and wellness rows with the real provider mappers.
 
@@ -166,25 +159,10 @@ def mapped_recovery_inputs(
         observations.extend(
             map_intervals_wellness(rows, retrieved_at=RETRIEVED).records
         )
-    if latest_wellness_day is _LATEST_ROW:
-        latest_wellness_day = max(
-            (day for day in map(_row_day, rows) if day is not None), default=None
-        )
     return recovery_inputs(
         observations,
-        latest_wellness_day=latest_wellness_day,
         sleep_periods=mapped_sleep_periods(garmin, rows),
     )
-
-
-def _row_day(row: Mapping[str, Any]) -> date | None:
-    text = row.get("id")
-    if not isinstance(text, str) or len(text) != 10:
-        return None
-    try:
-        return date.fromisoformat(text)
-    except ValueError:
-        return None
 
 
 def mapped_personal_recovery(
@@ -230,9 +208,6 @@ def recovery_only_inputs(
     from backend.providers.snapshot_projection import project_intervals_snapshot
 
     inputs = CanonicalPerformanceInputs(
-        wellness_day=None,
-        ctl=None,
-        atl=None,
         recovery=mapped_recovery_inputs(garmin, wellness),
         garmin=None if garmin is None else garmin_metrics_from_payload(dict(garmin)),
         # Daily totals come only from observations (#1415).
@@ -255,8 +230,6 @@ def recovery_only_inputs(
         return inputs
     return replace(
         inputs,
-        wellness_day=full.wellness_day,
-        form_by_day=full.form_by_day,
         current=full.current,
         activities=full.activities,
         # The stored wellness days mark the provider data as present (#1416).

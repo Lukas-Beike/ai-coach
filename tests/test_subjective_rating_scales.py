@@ -16,7 +16,6 @@ from backend.canonical.rating_scales import (
 from backend.canonical.vocabulary import MetricKind, RecordingOrigin
 from backend.coach.context import COACH_ACTIVITY_FIELDS
 from backend.coach.prompt import COACH_PROMPT
-from backend.performance.context import SUBJECTIVE_RATINGS
 from backend.performance.session_rpe_load import session_load
 from backend.planning.context import CHECKIN_FIELDS
 
@@ -44,7 +43,7 @@ class RatingScaleTests(unittest.TestCase):
     def test_every_intervals_wellness_rating_runs_one_to_four_higher_worse(
         self,
     ) -> None:
-        for kind in (kind for _key, kind in SUBJECTIVE_RATINGS):
+        for kind in INTERVALS_WELLNESS_SCALES:
             scale = INTERVALS_WELLNESS_SCALES[kind]
             self.assertEqual(
                 (1, 4, "worse"), (scale.minimum, scale.maximum, scale.higher_is)
@@ -72,14 +71,13 @@ class CoachRuleTests(unittest.TestCase):
     RULE = COACH_PROMPT[COACH_PROMPT.index("8h. ") :].splitlines()[0]
 
     def test_rule_names_the_intervals_scales_with_best_at_one(self) -> None:
-        wellness = [
-            INTERVALS_WELLNESS_SCALES[kind] for _key, kind in SUBJECTIVE_RATINGS
-        ]
+        wellness = list(INTERVALS_WELLNESS_SCALES.values())
         self.assertEqual(
             {("1–4", "worse")}, {(_range(s), s.higher_is) for s in wellness}
         )
-        keys = "/".join(key for key, _kind in SUBJECTIVE_RATINGS)
-        self.assertIn(f"Intervals.icu recovery {keys} 1–4", self.RULE)
+        self.assertIn(
+            "Intervals.icu recovery fatigue/soreness/stress/mood 1–4", self.RULE
+        )
         self.assertEqual("worse", INTERVALS_FEEL_SCALE.higher_is)
         self.assertIn(f"activity feel {_range(INTERVALS_FEEL_SCALE)}", self.RULE)
         self.assertIn("run from 1 = best", self.RULE)

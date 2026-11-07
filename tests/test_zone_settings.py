@@ -71,38 +71,23 @@ class ZoneSettingsTests(unittest.TestCase):
         self.assertEqual(5, settings.power_zone(130))
         self.assertEqual(5, settings.absolute_zone("W", 260))
 
-    def test_indoor_workouts_use_the_indoor_ftp(self):
+    def test_a_provider_indoor_ftp_is_never_read(self):
         setting = {
             "types": ["Ride", "VirtualRide"],
             "ftp": 250,
             "indoor_ftp": 200,
             "power_zones": [55, 75, 90, 105, 120, 150, 999],
         }
-        for environment, ftp in (
-            (Environment.OUTDOOR, 250),
-            (Environment.UNKNOWN, 250),
-            (Environment.INDOOR, 200),
-            (Environment.VIRTUAL, 200),
-        ):
-            settings = canonical_zone_settings([setting], Sport.RIDE, environment)
-            self.assertEqual(ftp, settings.ftp, environment)
-        # Without a power zone list the indoor FTP comes from its own canonical
-        # kind (INDOOR_FTP), as the snapshot reader took indoor_ftp.
         without_zones = {"types": ["Ride"], "ftp": 250, "indoor_ftp": 200}
-        for environment, ftp in (
-            (Environment.OUTDOOR, 250),
-            (Environment.INDOOR, 200),
-            (Environment.VIRTUAL, 200),
+        for environment in (
+            Environment.OUTDOOR,
+            Environment.UNKNOWN,
+            Environment.INDOOR,
+            Environment.VIRTUAL,
         ):
-            self.assertEqual(
-                ftp,
-                canonical_zone_settings([without_zones], Sport.RIDE, environment).ftp,
-                environment,
-            )
-        no_indoor = canonical_zone_settings(
-            [{"types": ["Ride"], "ftp": 250}], Sport.RIDE, Environment.INDOOR
-        )
-        self.assertEqual(250, no_indoor.ftp)
+            for source in (setting, without_zones):
+                settings = canonical_zone_settings([source], Sport.RIDE, environment)
+                self.assertEqual(250, settings.ftp, environment)
 
     def test_heart_rate_zones_need_a_threshold(self):
         settings = canonical_zone_settings(

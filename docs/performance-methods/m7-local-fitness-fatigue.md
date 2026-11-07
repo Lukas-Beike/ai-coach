@@ -6,7 +6,7 @@
 - **Status:** implemented (`backend/performance/fitness_fatigue.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-06
-- **Review:** released 2026-11-06 (athlete)
+- **Review:** released 2026-11-07 (athlete)
 
 ## Target construct
 
@@ -23,7 +23,7 @@ Athlete decisions (2026-11-06, #1726):
 - Local fitness, fatigue and form from the M6 load, not M5 only.
 - Computed on read from the stored per-session load, never stored.
 - Never initialised, corrected or mixed with Intervals.icu CTL, ATL or form;
-  the stored Intervals series stay labelled history.
+  the stored Intervals series are not shown (athlete decision 2026-11-07).
 - A session without a local load adds nothing and marks its day incomplete.
 
 ## Formula and units
@@ -75,7 +75,7 @@ of M5, and the common CTL/ATL convention, not individually fitted.
   fitness, fatigue and form comparisons, the progress report and block review
   (`ctl` first and last of the window), the daily planning context and the
   load scenarios (yesterday's values as the start state) read the same curve
-  (#1726). The stored Intervals.icu values stay a labelled history.
+  (#1726). The stored Intervals.icu values are not shown.
 
 ## Measurement error and uncertainty
 

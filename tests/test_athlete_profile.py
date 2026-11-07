@@ -13,14 +13,21 @@ from backend.errors import AppError
 class AthleteProfileTests(unittest.TestCase):
     def test_preferred_sources_accept_known_providers_only(self):
         result = normalize_profile(
-            {"preferred_source_body": "intervals", "preferred_source_hrv": "wahoo"}
+            {"preferred_source_body": "garmin", "preferred_source_hrv": "wahoo"}
         )
-        self.assertEqual(result["preferred_source_body"], "intervals")
+        self.assertEqual(result["preferred_source_body"], "garmin")
         self.assertEqual(result["preferred_source_hrv"], "")
         with self.assertRaises(AppError):
             normalize_profile(
                 {"preferred_source_sleep": "oura"}, validate_timezone=True
             )
+
+    def test_a_stored_intervals_preference_reads_as_the_default(self):
+        profile = {"preferred_source_body": "intervals"}
+        self.assertEqual(normalize_profile(profile)["preferred_source_body"], "")
+        self.assertEqual(profile, {"preferred_source_body": "intervals"})
+        with self.assertRaises(AppError):
+            normalize_profile(profile, validate_timezone=True)
 
     def test_defaults_preserve_profile_contract_and_import_time_timezone_fallback(self):
         self.assertEqual(

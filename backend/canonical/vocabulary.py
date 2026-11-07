@@ -358,6 +358,24 @@ EXPORT_ONLY_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
         "Garmin daily drained total, stored for export and history; no reader "
         "showed it before the canonical model"
     ),
+    **dict.fromkeys(
+        (
+            MetricKind.CTL,
+            MetricKind.ATL,
+            MetricKind.FORM,
+            MetricKind.EFTP,
+            MetricKind.SUBJECTIVE_FATIGUE,
+            MetricKind.SUBJECTIVE_SORENESS,
+            MetricKind.SUBJECTIVE_STRESS,
+            MetricKind.SUBJECTIVE_MOOD,
+            MetricKind.W_PRIME,
+            MetricKind.HEIGHT,
+            MetricKind.ZONE2_PACE,
+            MetricKind.INDOOR_FTP,
+        ),
+        "Intervals.icu is output-only: stored from its sync, no current value, "
+        "load or rating reads it (athlete decision 2026-11-07)",
+    ),
 }
 
 

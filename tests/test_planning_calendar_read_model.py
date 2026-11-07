@@ -482,8 +482,9 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
         }
         # 150 bpm of a 170 bpm LTHR (88 %) is zone 3 and needs the run settings.
         self.assertEqual(3, zones["Strides"])
-        # 190 W is 95 % of the 200 W indoor FTP but 76 % of the 250 W outdoor FTP.
-        self.assertEqual(4, zones["Trainer"])
+        # The Intervals.icu indoor FTP is not read: indoor and outdoor rides both
+        # use the 250 W ride FTP (190 W is 76 % of it).
+        self.assertEqual(3, zones["Trainer"])
         self.assertEqual(3, zones["Road"])
 
 

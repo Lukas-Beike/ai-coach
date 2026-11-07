@@ -2,45 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from datetime import date, timedelta
 from typing import Any
 
 from backend.canonical.decimal_text import provider_number as _as_number
-from backend.canonical.vocabulary import MetricKind
-from backend.performance.recovery import rounded_average
-from backend.performance.wellness_days import WellnessDay
-
-
-def wellness_window_values(
-    days_view: tuple[WellnessDay, ...],
-    kind: MetricKind,
-    days: int,
-    end_date: date,
-    divisor: float = 1.0,
-) -> list[tuple[date, float]]:
-    """Dated numbers of the inclusive, anchored window behind the wellness average."""
-    cutoff = end_date - timedelta(days=days - 1)
-    values: list[tuple[date, float]] = []
-    for item in days_view:
-        if item.day < cutoff or item.day > end_date:
-            continue
-        value = item.value(kind)
-        if value is not None:
-            values.append((item.day, float(value) / divisor))
-    return values
-
-
-def wellness_average(
-    days_view: tuple[WellnessDay, ...],
-    kind: MetricKind,
-    days: int,
-    end_date: date,
-    divisor: float = 1.0,
-) -> float | None:
-    """Average a wellness field over the inclusive, anchored date window."""
-    values = wellness_window_values(days_view, kind, days, end_date, divisor)
-    return rounded_average([value for _, value in values])
 
 
 def comparison_value(
@@ -85,14 +49,3 @@ def comparison_value(
         "color": color,
         "label": label or f"{days}-Tage-Durchschnitt",
     }
-
-
-def wellness_form_average(
-    form_by_day: Mapping[date, float] | None, days: int, end_date: date
-) -> float | None:
-    """Average the form observations of the inclusive window ending on ``end_date``."""
-    cutoff = end_date - timedelta(days=days - 1)
-    values = [
-        value for day, value in (form_by_day or {}).items() if cutoff <= day <= end_date
-    ]
-    return round(sum(values) / len(values), 2) if values else None

@@ -209,7 +209,9 @@ class BodyHistoryTests(unittest.TestCase):
         }
         self.assertEqual(garmin_weight_daily_records(snapshot), [("2026-10-01", 69.99)])
 
-    def test_a_preferred_body_source_supplies_the_w_per_kg_weight(self):
+    def test_a_stored_intervals_body_preference_is_ignored_for_the_w_per_kg_weight(
+        self,
+    ):
         snapshot = {
             "synced_at": "intervals-sync",
             "recent_wellness": [{"id": "2026-10-04", "weight": 72}],
@@ -242,7 +244,7 @@ class BodyHistoryTests(unittest.TestCase):
         )["points"]
 
         self.assertAlmostEqual(default[-1]["value"], 288 / 70, places=3)
-        self.assertAlmostEqual(preferred[-1]["value"], 288 / 72, places=3)
+        self.assertAlmostEqual(preferred[-1]["value"], 288 / 70, places=3)
 
     def test_weekly_quotient_median_counts_dates_and_chart_history_integration(self):
         from backend.performance.chart_history import analysis_history
@@ -260,9 +262,6 @@ class BodyHistoryTests(unittest.TestCase):
             ]
         }
         canonical = CanonicalPerformanceInputs(
-            wellness_day=None,
-            ctl=None,
-            atl=None,
             garmin=garmin_metrics_from_payload(garmin),
             history_wellness_days=days_from_rows(snapshot["recent_wellness"]),
         )

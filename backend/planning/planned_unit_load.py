@@ -17,6 +17,7 @@ from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
     Environment,
     MetricKind,
+    ProviderId,
     Sport,
     ZoneConfigurationMetric,
 )
@@ -82,14 +83,20 @@ def resolve_thresholds(
         if pace is not None and pace.provenance.provider is None
         else None
     )
-    provider = pace.threshold if pace is not None and local is None else None
+    provider = (
+        pace.threshold
+        if pace is not None
+        and local is None
+        and pace.provenance.provider is not ProviderId.INTERVALS
+        else None
+    )
     return AthleteThresholds(
         zones=ZoneSettings.from_configurations(
             zone_configurations,
             sport,
             environment,
             day,
-            fallback=ZoneSettings.from_thresholds(sport_thresholds, sport, environment),
+            fallback=ZoneSettings.from_thresholds(sport_thresholds, sport),
         ),
         threshold_speed_mps=local
         or sport_threshold_speed(sport_thresholds, sport)

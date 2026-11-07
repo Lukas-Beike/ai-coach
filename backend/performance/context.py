@@ -6,7 +6,6 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 from backend.canonical.activity_summary import summary_local_date
-from backend.canonical.vocabulary import MetricKind
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import comparisons as performance_comparisons
 from backend.performance import current_metrics as performance_current_metrics
@@ -26,16 +25,6 @@ from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.training_focus import training_focus
-from backend.performance.wellness_days import WellnessDay, latest
-
-# Recovery keys of the Intervals.icu wellness ratings; their scales live in
-# backend.canonical.rating_scales.
-SUBJECTIVE_RATINGS = (
-    ("fatigue", MetricKind.SUBJECTIVE_FATIGUE),
-    ("soreness", MetricKind.SUBJECTIVE_SORENESS),
-    ("stress", MetricKind.SUBJECTIVE_STRESS),
-    ("mood", MetricKind.SUBJECTIVE_MOOD),
-)
 
 # The reason an unavailable context gives while the canonical source serves nothing yet.
 REASON_CANONICAL_PENDING: Final = "canonical_pending"
@@ -74,17 +63,6 @@ def _recent(activities: list[Any], cutoff: date) -> list[Any]:
 def _activities(canonical: CanonicalPerformanceInputs) -> list[Any]:
     """Return the canonical activity summaries; none when none were read."""
     return list(canonical.activities or ())
-
-
-def _day_id(day: WellnessDay | None) -> str | None:
-    return None if day is None else day.day.isoformat()
-
-
-def _subjective_ratings(day: WellnessDay | None) -> dict[str, float | None]:
-    return {
-        key: None if day is None else day.value(kind)
-        for key, kind in SUBJECTIVE_RATINGS
-    }
 
 
 def _garmin_canonical(canonical: CanonicalPerformanceInputs) -> GarminCanonicalMetrics:
@@ -194,8 +172,6 @@ def current_performance_context(
         return _unavailable_context(garmin, profile, today, canonical)
 
     activities = _activities(canonical)
-    days = canonical.wellness_days or ()
-    latest_wellness = latest(days)
 
     recovery = performance_recovery_context.performance_recovery_context(
         canonical.recovery, today
@@ -219,7 +195,6 @@ def current_performance_context(
         ),
         canonical=current,
         activities=activities,
-        latest_wellness=latest_wellness,
         garmin_thresholds=_garmin_canonical(canonical).thresholds,
         garmin_body=_garmin_canonical(canonical).body,
         as_of=today,
@@ -254,7 +229,6 @@ def current_performance_context(
         metrics,
         recovery,
         load_context,
-        days,
         today,
         # The weight trend uses the body history's per-day Garmin weights.
         garmin_history={
@@ -284,28 +258,20 @@ def current_performance_context(
         **_refresh_status(canonical),
         "metrics": metrics,
         "thresholds": {
-            **performance_current_metrics.coach_thresholds(metrics, current),
+            **performance_current_metrics.coach_thresholds(metrics),
             "weight": metrics["weight_kg"]["value"],
         },
         "current_load": load,
-        # Stored Intervals.icu values, labelled; never part of current_load.
-        **(
-            {"intervals_load_history": history}
-            if (history := load_context["intervals_history"])
-            else {}
-        ),
         "recovery": {
             "id": recovery["sleep_date"]
             or recovery["resting_hr_date"]
-            or recovery["hrv_date"]
-            or _day_id(latest_wellness),
+            or recovery["hrv_date"],
             "resting_hr_bpm": resting_hr,
             "resting_hr_bpm_source": resting_hr_source,
             "hrv_ms": hrv,
             "hrv_ms_source": hrv_source,
             "sleep_score": sleep_score,
             "sleep_score_source": sleep_score_source,
-            **_subjective_ratings(latest_wellness),
             "readiness": readiness_current,
             "readiness_source": readiness_source,
             "sleep_hours": sleep_hours,

@@ -4,10 +4,10 @@ The current FTP, threshold heart rate, threshold pace and maximum heart rate of
 each sport are resolved once, by ``source_policy.resolve_candidates``, from:
 
 * the athlete's locally confirmed zone configuration in effect on the day,
-* the Intervals.icu sport setting of the latest sync, else the athlete-wide
-  threshold or maximum heart rate of the same sync,
 * the latest Garmin value (``garmin_canonical.garmin_thresholds``),
 * the current Wahoo cycling FTP.
+
+Intervals.icu values are never a source (athlete decision 2026-11-07).
 
 The Coach context and the current metrics read the resolved values with their
 alternatives and conflict flags. Plans read ``provider_zone_thresholds``, the
@@ -20,7 +20,6 @@ This module must not import ``server.py`` or providers.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import replace
 from datetime import date
 from typing import Any, Final, Protocol, runtime_checkable
 
@@ -29,12 +28,10 @@ from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import MetricValue, Observation
 from backend.canonical.vocabulary import (
     MetricKind,
-    ProviderId,
     Sport,
     ZoneConfigurationMetric,
 )
 from backend.performance.source_policy import (
-    INTERVALS_THRESHOLD_MAX_AGE_DAYS,
     LOCAL_FIRST_KINDS,
     NO_PREFERENCES,
     Candidate,
@@ -54,8 +51,6 @@ THRESHOLD_KEYS: Final[tuple[ThresholdKey, ...]] = (
     (MetricKind.MAX_HR, Sport.RIDE),
     (MetricKind.MAX_HR, Sport.RUN),
 )
-# Intervals athlete-wide values that stand in for a missing sport setting.
-_ATHLETE_WIDE: Final = frozenset({MetricKind.THRESHOLD_HR, MetricKind.MAX_HR})
 
 
 @runtime_checkable
@@ -107,18 +102,8 @@ def _provider_candidates(
 ) -> list[Candidate]:
     """Each provider's observations of ``kind`` for ``sport``, best first.
 
-    The caller gives one current observation per provider and sport. Intervals
-    athlete-wide heart-rate values follow its sport settings.
+    The caller gives one current observation per provider and sport.
     """
-    own = [item for item in observations if item.kind is kind and item.sport is sport]
-    wide = [
-        item
-        for item in observations
-        if kind in _ATHLETE_WIDE
-        and item.kind is kind
-        and item.sport is None
-        and item.provenance.provider is ProviderId.INTERVALS
-    ]
     return [
         Candidate(
             item.provenance.provider,
@@ -126,7 +111,8 @@ def _provider_candidates(
             item.observed_on,
             item,
         )
-        for item in (*own, *wide)
+        for item in observations
+        if item.kind is kind and item.sport is sport
     ]
 
 
@@ -140,7 +126,7 @@ def resolve_current_thresholds(
     """Resolve each threshold key; keys without a current value are absent.
 
     Besides ``THRESHOLD_KEYS``, any other sport a provider gives a threshold for
-    (such as an Intervals swim setting) is resolved under the same rule.
+    is resolved under the same rule.
     """
     observations = tuple(provider_observations)
     local_values = tuple(local)
@@ -172,28 +158,14 @@ def provider_zone_thresholds(
     as_of: date | None,
     preferences: SourcePreferences = NO_PREFERENCES,
 ) -> tuple[Observation, ...]:
-    """Return the provider winners per threshold key, plus the Intervals indoor FTP.
+    """Return the provider winners per threshold key.
 
-    Plans put their local configurations ahead of these. The indoor FTP comes
-    only from a current Intervals sync.
+    Plans put their local configurations ahead of these.
     """
-    observations = tuple(provider_observations)
-    winners = tuple(
-        # An athlete-wide Intervals value applies to the sport it stands in for.
-        replace(winner, sport=sport) if winner.sport is not sport else winner
-        for (_, sport), result in resolve_current_thresholds(
-            observations, as_of=as_of, preferences=preferences
-        ).items()
+    return tuple(
+        winner
+        for result in resolve_current_thresholds(
+            tuple(provider_observations), as_of=as_of, preferences=preferences
+        ).values()
         if (winner := result.winner.observation) is not None
     )
-    indoor = tuple(
-        item
-        for item in observations
-        if item.kind is MetricKind.INDOOR_FTP
-        and item.provenance.provider is ProviderId.INTERVALS
-        and (
-            as_of is None
-            or (as_of - item.observed_on).days <= INTERVALS_THRESHOLD_MAX_AGE_DAYS
-        )
-    )
-    return (*winners, *indoor)

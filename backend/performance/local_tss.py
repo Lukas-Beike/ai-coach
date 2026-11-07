@@ -82,7 +82,7 @@ CALIBRATION_RPE_SCALES: Final = frozenset(
 CALIBRATION_WINDOW_DAYS: Final = 365
 CALIBRATION_MIN_PAIRS: Final = 20
 _POWER_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
-_RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.INTERVALS, ProviderId.WAHOO)
+_RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.WAHOO)
 THRESHOLD_KINDS: Final = (
     MetricKind.FTP,
     MetricKind.THRESHOLD_PACE,

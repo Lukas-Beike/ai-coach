@@ -32,9 +32,6 @@ class ExportedSourceConstantTests(unittest.TestCase):
 
     def test_current_metrics_source_constants_are_unchanged(self):
         self.assertEqual("Intervals.icu", current_metrics.PROVIDER_INTERVALS_NAME)
-        self.assertEqual(
-            "Intervals.icu Wellness", current_metrics.PROVIDER_INTERVALS_WELLNESS_NAME
-        )
         self.assertEqual("Garmin Connect", current_metrics.GARMIN_PERFORMANCE_SOURCE)
 
     def test_garmin_performance_note_source_is_unchanged(self):

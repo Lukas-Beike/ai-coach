@@ -1,7 +1,6 @@
 """One source-precedence resolver for thresholds, shared by Coach and plan (#1668)."""
 
 import unittest
-from dataclasses import replace
 from datetime import date, timedelta
 
 from canonical_domain_support import provenance, zone_configuration
@@ -100,10 +99,10 @@ def _local_power(threshold: float):
 
 
 class PolicyOrderTests(unittest.TestCase):
-    def test_ride_ftp_is_local_then_intervals_then_garmin_then_wahoo(self) -> None:
+    def test_ride_ftp_is_local_then_garmin_then_wahoo(self) -> None:
         self.assertEqual(
             source_order(MetricKind.FTP, Sport.RIDE),
-            (None, INTERVALS, GARMIN, ProviderId.WAHOO),
+            (None, GARMIN, ProviderId.WAHOO),
         )
 
     def test_heart_rate_pace_and_run_power_are_local_then_garmin(self) -> None:
@@ -114,30 +113,31 @@ class PolicyOrderTests(unittest.TestCase):
             (MetricKind.FTP, Sport.RUN),
         ):
             with self.subTest(kind=kind, sport=sport):
-                self.assertEqual(
-                    source_order(kind, sport)[:3], (None, GARMIN, INTERVALS)
-                )
+                self.assertEqual(source_order(kind, sport), (None, GARMIN))
 
 
 class ResolverTests(unittest.TestCase):
     def test_ftp_conflict_keeps_both_values_visible(self) -> None:
         resolved = resolve_candidates(
             MetricKind.FTP,
-            [Candidate(GARMIN, 280.0, AS_OF), Candidate(INTERVALS, 265.0, AS_OF)],
+            [
+                Candidate(ProviderId.WAHOO, 265.0, AS_OF),
+                Candidate(GARMIN, 280.0, AS_OF),
+            ],
             as_of=AS_OF,
             sport=Sport.RIDE,
         )
         assert resolved is not None
         self.assertEqual(
-            (resolved.winner.source, resolved.winner.value), (INTERVALS, 265.0)
+            (resolved.winner.source, resolved.winner.value), (GARMIN, 280.0)
         )
         self.assertEqual(
             [(item.source, item.value) for item in resolved.alternatives],
-            [(GARMIN, 280.0)],
+            [(ProviderId.WAHOO, 265.0)],
         )
         self.assertTrue(resolved.conflict)
 
-    def test_values_within_tolerance_are_no_conflict(self) -> None:
+    def test_an_intervals_candidate_is_never_current(self) -> None:
         resolved = resolve_candidates(
             MetricKind.FTP,
             [Candidate(GARMIN, 270.0, AS_OF), Candidate(INTERVALS, 265.0, AS_OF)],
@@ -145,37 +145,43 @@ class ResolverTests(unittest.TestCase):
             sport=Sport.RIDE,
         )
         assert resolved is not None
+        self.assertEqual(resolved.winner.source, GARMIN)
+        self.assertEqual(resolved.alternatives, ())
         self.assertFalse(resolved.conflict)
+        self.assertIsNone(
+            resolve_candidates(
+                MetricKind.FTP,
+                [Candidate(INTERVALS, 265.0, AS_OF)],
+                as_of=AS_OF,
+                sport=Sport.RIDE,
+            )
+        )
 
     def test_old_garmin_threshold_is_not_current(self) -> None:
         old = AS_OF - timedelta(days=181)
-        resolved = resolve_candidates(
+        self.assertIsNone(
+            resolve_candidates(
+                MetricKind.THRESHOLD_HR,
+                [Candidate(GARMIN, 170.0, old), Candidate(INTERVALS, 165.0, AS_OF)],
+                as_of=AS_OF,
+                sport=Sport.RUN,
+            )
+        )
+        fresh = resolve_candidates(
             MetricKind.THRESHOLD_HR,
-            [Candidate(GARMIN, 170.0, old), Candidate(INTERVALS, 165.0, AS_OF)],
+            [Candidate(GARMIN, 170.0, AS_OF - timedelta(days=180))],
             as_of=AS_OF,
             sport=Sport.RUN,
         )
-        assert resolved is not None
-        self.assertEqual(resolved.winner.source, INTERVALS)
-        self.assertEqual(resolved.alternatives, ())
-
-    def test_stale_intervals_sync_yields_to_garmin(self) -> None:
-        stale = AS_OF - timedelta(days=31)
-        resolved = resolve_candidates(
-            MetricKind.FTP,
-            [Candidate(INTERVALS, 265.0, stale), Candidate(GARMIN, 280.0, AS_OF)],
-            as_of=AS_OF,
-            sport=Sport.RIDE,
-        )
-        assert resolved is not None
-        self.assertEqual(resolved.winner.source, GARMIN)
+        assert fresh is not None
+        self.assertEqual(fresh.winner.source, GARMIN)
 
     def test_local_value_wins_and_does_not_age(self) -> None:
         resolved = resolve_candidates(
             MetricKind.FTP,
             [
                 Candidate(None, 300.0, AS_OF - timedelta(days=400)),
-                Candidate(INTERVALS, 265.0, AS_OF),
+                Candidate(GARMIN, 265.0, AS_OF),
             ],
             as_of=AS_OF,
             sport=Sport.RIDE,
@@ -189,7 +195,7 @@ class PreferredSourceTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.observations = (
-            _obs(MetricKind.FTP, 265.0, INTERVALS, Sport.RIDE),
+            _obs(MetricKind.FTP, 265.0, ProviderId.WAHOO, Sport.RIDE),
             _obs(MetricKind.FTP, 280.0, GARMIN, Sport.RIDE),
         )
         self.garmin_first = preferences_from_profile(
@@ -204,7 +210,9 @@ class PreferredSourceTests(unittest.TestCase):
         self.assertEqual(
             (resolved.winner.source, resolved.winner.value), (GARMIN, 280.0)
         )
-        self.assertEqual([item.source for item in resolved.alternatives], [INTERVALS])
+        self.assertEqual(
+            [item.source for item in resolved.alternatives], [ProviderId.WAHOO]
+        )
         self.assertTrue(resolved.conflict)
 
     def test_plans_read_the_same_preferred_threshold(self):
@@ -221,7 +229,7 @@ class PreferredSourceTests(unittest.TestCase):
             [
                 Candidate(GARMIN, 280.0, AS_OF),
                 Candidate(None, 270.0, AS_OF),
-                Candidate(INTERVALS, 265.0, AS_OF),
+                Candidate(ProviderId.WAHOO, 265.0, AS_OF),
             ],
             as_of=AS_OF,
             sport=Sport.RIDE,
@@ -230,7 +238,7 @@ class PreferredSourceTests(unittest.TestCase):
         assert resolved is not None
         self.assertIsNone(resolved.winner.source)
         self.assertEqual(
-            [item.source for item in resolved.alternatives], [GARMIN, INTERVALS]
+            [item.source for item in resolved.alternatives], [GARMIN, ProviderId.WAHOO]
         )
 
 
@@ -268,19 +276,17 @@ class CoachAndPlanParityTests(unittest.TestCase):
             ),
             as_of=AS_OF,
         )
-        return coach_thresholds(metrics, inputs), metrics
+        return coach_thresholds(metrics), metrics
 
     def test_coach_and_plan_use_the_resolved_thresholds(self) -> None:
         inputs = self._inputs(self._observations())
         coach, metrics = self._coach(inputs)
         plan = load_thresholds(inputs, AS_OF)
 
-        self.assertEqual(coach["ftp_w"], 265)
-        self.assertEqual(coach["ftp_source"], "Intervals.icu")
-        self.assertEqual(
-            coach["ftp_alternatives"], [{"source": "Garmin Connect", "value": 280}]
-        )
-        self.assertTrue(coach["ftp_conflict"])
+        self.assertEqual(coach["ftp_w"], 280)
+        self.assertEqual(coach["ftp_source"], "Garmin Connect")
+        self.assertNotIn("ftp_alternatives", coach)
+        self.assertNotIn("w_prime_j", coach)
         self.assertEqual(plan.for_sport(Sport.RIDE).zones.ftp, coach["ftp_w"])
         self.assertEqual(coach["run_lthr"], 172)
         self.assertEqual(plan.for_sport(Sport.RUN).zones.lthr, coach["run_lthr"])
@@ -301,21 +307,16 @@ class CoachAndPlanParityTests(unittest.TestCase):
         self.assertEqual(
             {(item.kind, item.sport, item.provenance.provider) for item in winners},
             {
-                (MetricKind.FTP, Sport.RIDE, INTERVALS),
+                (MetricKind.FTP, Sport.RIDE, GARMIN),
                 (MetricKind.THRESHOLD_HR, Sport.RUN, GARMIN),
             },
         )
 
-    def test_intervals_athlete_wide_lthr_fills_a_sport(self) -> None:
+    def test_intervals_athlete_wide_lthr_fills_no_sport(self) -> None:
         wide = _obs(MetricKind.THRESHOLD_HR, 168.0, INTERVALS, None)
         resolved = resolve_current_thresholds((wide,), as_of=AS_OF)
-        self.assertEqual(
-            resolved[(MetricKind.THRESHOLD_HR, Sport.RIDE)].winner.value, 168.0
-        )
-        self.assertEqual(
-            {item.sport for item in provider_zone_thresholds((wide,), as_of=AS_OF)},
-            {Sport.RIDE, Sport.RUN},
-        )
+        self.assertNotIn((MetricKind.THRESHOLD_HR, Sport.RIDE), resolved)
+        self.assertEqual(provider_zone_thresholds((wide,), as_of=AS_OF), ())
 
 
 class ReviewGuardTests(unittest.TestCase):
@@ -344,29 +345,47 @@ class ReviewGuardTests(unittest.TestCase):
         self.assertEqual(read_garmin_thresholds(StubReader((slow,)), None), ())
 
     def test_plan_pace_prefers_the_winner_over_a_provider_configuration(self) -> None:
-        provider_pace = zone_configuration(
-            metric=ZoneConfigurationMetric.PACE,
-            sport=Sport.RUN,
-            threshold=4.0,
-            maximum=None,
-            resting=None,
-            limits=(2.0, 3.0, 4.0, 6.0),
+        pace = {
+            "metric": ZoneConfigurationMetric.PACE,
+            "sport": Sport.RUN,
+            "threshold": 4.0,
+            "maximum": None,
+            "resting": None,
+            "limits": (2.0, 3.0, 4.0, 6.0),
+        }
+        garmin_pace = zone_configuration(
+            **pace, provenance=provenance("zones", provider=GARMIN)
         )
+        intervals_pace = zone_configuration(**pace)
         winner = _obs(MetricKind.THRESHOLD_PACE, 4.2, GARMIN, Sport.RUN)
         thresholds = resolve_thresholds(
-            (winner,), (provider_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
+            (winner,), (garmin_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
         )
         self.assertEqual(thresholds.threshold_speed_mps, 4.2)
         thresholds = resolve_thresholds(
-            (), (provider_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
+            (), (garmin_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
         )
         self.assertEqual(thresholds.threshold_speed_mps, 4.0)
+        # An Intervals.icu configuration gives its limits, never a pace.
+        thresholds = resolve_thresholds(
+            (), (intervals_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
+        )
+        self.assertIsNone(thresholds.threshold_speed_mps)
 
-    def test_a_fresh_sync_without_values_is_missing_not_stale(self) -> None:
+    def test_no_values_make_the_thresholds_missing(self) -> None:
         inputs = read_current_inputs(StubReader(()), None, as_of=AS_OF)
-        fresh = replace(inputs, synced_at=SYNCED_AT)
         self.assertEqual(
-            load_thresholds(fresh, AS_OF).unavailable, "missing_thresholds"
+            load_thresholds(inputs, AS_OF).unavailable, "missing_thresholds"
+        )
+
+    def test_intervals_values_alone_make_the_thresholds_missing(self) -> None:
+        intervals = (
+            _obs(MetricKind.FTP, 265.0, INTERVALS, Sport.RIDE),
+            _obs(MetricKind.THRESHOLD_HR, 165.0, INTERVALS, Sport.RUN),
+        )
+        inputs = read_current_inputs(StubReader(intervals), None, as_of=AS_OF)
+        self.assertEqual(
+            load_thresholds(inputs, AS_OF).unavailable, "missing_thresholds"
         )
 
 
