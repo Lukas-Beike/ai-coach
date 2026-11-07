@@ -3217,6 +3217,36 @@ class ServerPlanningTests(ServerTestCase):
             server.PLANNING_DATA.workout_library().list(include_archived=True)
         )
 
+    def test_structured_competition_push_is_a_queued_job(self):
+        competition_intent = {
+            "intent": "remote_sync",
+            "operation": "sync_competitions",
+            "target_system": "intervals",
+            "artifact_id": None,
+            "ambiguities": [],
+            "authorization_scope": ["local_competitions"],
+        }
+        with patch.object(
+            sync_queue.SyncJobQueueService,
+            "enqueue",
+            side_effect=[{"id": "job-competition"}],
+        ) as enqueue:
+            with server.database_manager().reader() as db:
+                approval_manifest = competition_push_manifest(db)
+            competition = server.COACH_TOOL_DISPATCH.service().execute(
+                "sync_competitions",
+                {"_approval_manifest": approval_manifest},
+                intent=competition_intent,
+                conversation_id="conversation-jobs",
+                client_turn_id="turn-competition",
+                session_csrf_hash="",
+                sync_job_ids=[],
+            )
+        self.assertEqual(competition["sync_job_id"], "job-competition")
+        self.assertEqual(
+            enqueue.call_args_list[0].args[:2], ("intervals", "competition_push")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -377,6 +377,14 @@ class WahooGarminRideTests(unittest.TestCase):
         )
         self.assertFalse(any(session.duplicates for session in sessions))
 
+    def test_intervals_zero_moving_time_falls_back_to_elapsed_time(self) -> None:
+        # A zero moving_time falls back to the 3600 s elapsed_time, which matches
+        # the Wahoo ride.
+        sessions = _bundle(
+            _map_intervals([_wahoo(), _garmin_copy(moving_time=0, elapsed_time=3600)])
+        )
+        self.assertTrue(any(session.duplicates for session in sessions))
+
 
 class FixtureParityTests(unittest.TestCase):
     """Parity on the shared provider fixtures."""
@@ -390,6 +398,46 @@ class FixtureParityTests(unittest.TestCase):
         sessions = _bundle(_map_intervals(self.intervals_rows))
         self.assertEqual(len(self.intervals_rows), len(sessions))
         self.assertTrue(all(not session.duplicates for session in sessions))
+
+    def test_garmin_fixture_duplicates_match_the_pairwise_rule(self) -> None:
+        sessions = _bundle(
+            _map_garmin(self.garmin_rows), _map_intervals(self.intervals_rows)
+        )
+        self.assertEqual({"910001"}, _joined_ids(sessions, ProviderId.GARMIN))
+
+    def test_dst_fixture_runs_match_only_their_wall_clock_neighbour(self) -> None:
+        # i-act-002 (01:59 CET) and i-act-003 (03:01 CEST) are 2 minutes apart on
+        # the instant and 62 minutes apart on the wall clock.
+        before, after = (
+            row
+            for row in self.intervals_rows
+            if row["id"] in ("i-act-002", "i-act-003")
+        )
+        garmin_run = {
+            "activityId": 920001,
+            "activityType": {"typeKey": "running"},
+            "startTimeLocal": "2026-03-29 03:01:00",
+            "duration": 2300.0,
+            "distance": 7200.0,
+        }
+        self.assertFalse(_canonical_garmin_duplicate(garmin_run, before))
+        self.assertTrue(_canonical_garmin_duplicate(garmin_run, after))
+
+    def test_fixture_ride_recorded_twice_bundles_under_the_wahoo_recording(self) -> None:
+        ride = next(row for row in self.intervals_rows if row["id"] == "i-act-001")
+        wahoo = dict(ride, id="w-1", device_name="Wahoo ELEMNT")
+        copy = dict(
+            ride,
+            id="g-1",
+            device_name="Garmin Edge 1040",
+            external_id="garmin-1",
+            moving_time=5410,
+            distance=88600.0,
+        )
+        sessions = _bundle(_map_intervals([wahoo, copy]))
+        self.assertEqual(1, len(sessions))
+        self.assertEqual("w-1", sessions[0].primary.activity_id)
+        self.assertEqual(["g-1"], [d.activity_id for d in sessions[0].duplicates])
 
 
 

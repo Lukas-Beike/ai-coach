@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
 from garmin_support import read_garmin, save_garmin
+from support import store_canonical_snapshot
 
 from backend.activities.feedback import ActivityFeedbackService
 from backend.performance import morning_battery as performance_morning_battery
@@ -322,3 +323,51 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(history[0]["steps"][0]["error"]["status"], 404)
         self.assertEqual(history[0]["steps"][0]["tool"], "save_activity_feedback")
         self.assertNotIn("Synthetic note", json.dumps(history))
+
+    def test_feedback_answer_after_plain_text_morning_question_is_saved_once(self):
+        store_canonical_snapshot(
+            server,
+            {
+                "synced_at": runtime_clock.utc_now(),
+                "recent_activities": [
+                    {
+                        "id": "synthetic-ride",
+                        "name": "Synthetic recovery ride",
+                        "type": "Ride",
+                        "start_date_local": "2026-09-06T10:00:00",
+                    }
+                ],
+            },
+        )
+        self.turn(
+            "Morgen-Check-in",
+            [
+                {
+                    "output_text": "Wie haben sich deine Beine bei der gestrigen Fahrt angefühlt?"
+                }
+            ],
+        )
+        result, _ = self.turn(
+            "Beine fühlten sich gut an, die geringe Leistung war aber zäh und langweilig.",
+            [
+                lambda _: self.call(
+                    "save_activity_feedback",
+                    {
+                        "payload": {
+                            "activity_id": "synthetic-ride",
+                            "notes": "Beine gut; geringe Leistung fühlte sich zäh und langweilig an.",
+                        }
+                    },
+                    ["activity_feedback"],
+                ),
+                {"output_text": "Deine Rückmeldung zur Fahrt ist gespeichert."},
+            ],
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(server.ATHLETE_DATA.activity_feedback().list()), 1)
+        # The Coach names the provider id; the feedback is stored under the session.
+        self.assertTrue(
+            server.ATHLETE_DATA.activity_feedback()
+            .list()[0]["activity_id"]
+            .startswith("act_")
+        )

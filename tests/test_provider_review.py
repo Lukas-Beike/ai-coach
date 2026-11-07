@@ -5,18 +5,21 @@ import threading
 import unittest
 from dataclasses import replace
 from datetime import date
+from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
 from canonical_recovery_support import recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
+from support import store_canonical_snapshot
 
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.http_api.auth import RATE_LIMITER
 from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
 from backend.performance.freshness import GarminSyncStatus
+from backend.providers import garmin as garmin_provider
 from backend.providers.garmin import (
     GarminCollectionOptions,
     collect_garmin_data,
@@ -24,7 +27,7 @@ from backend.providers.garmin import (
 )
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import garmin as garmin_sync
-from backend.sync import garmin_payload_metrics
+from backend.sync import garmin_payload_metrics, garmin_service
 from backend.sync import garmin_performance_history as performance_history
 from backend.sync.worker import SyncJobWorker
 
@@ -400,6 +403,205 @@ class ProviderReviewTests(unittest.TestCase):
             rate_limit.assert_called_with(RATE_LIMITER, "login:127.0.0.1", 5, 900)
             DATABASE_MANAGER_CACHE.reset()
             self.assertEqual(server.key_value_service().get("marker"), "fresh")
+
+    def test_garmin_partial_metrics_and_backfill_keep_last_good_sources_and_cursors(
+        self,
+    ):
+        sources = (
+            "sleep",
+            "hrv",
+            "body_battery",
+            "activities",
+            "daily_stats",
+            "resting_hr",
+            "training_load_activities",
+            "training_load_balance",
+            "daily_training_status",
+            "heart_rate_zones",
+            "readiness",
+            "race_predictions",
+            "max_metrics",
+            "cycling_ftp",
+            "running_threshold",
+            "weight",
+        )
+        previous = {
+            source: (
+                {"calendarDate": "2026-09-01", "synthetic_metric": 51}
+                if source in ("training_load_balance", "daily_training_status")
+                else [
+                    {
+                        "calendarDate": "2026-09-01",
+                        "synthetic_metric": 51,
+                        **(
+                            {
+                                "activityId": 1,
+                                "startTimeLocal": "2026-09-01 10:00:00",
+                            }
+                            if source == "activities"
+                            else {}
+                        ),
+                    }
+                ]
+            )
+            for source in sources
+        }
+        previous["source_freshness"] = {
+            source: {
+                "fetched_at": "2026-09-01T00:00:00+00:00",
+                "observed_at": "2026-09-01",
+                "freshness": "current",
+            }
+            for source in sources
+        }
+        client = Mock()
+        client.login.return_value = (False, None)
+        for source in sources:
+            for historical in (False, True):
+                with self.subTest(source=source, historical=historical):
+                    save_garmin(previous)
+                    server.SYNC_PERSISTENCE.state_repository().update_cursor(
+                        "garmin", "data", "2026-09-01", "synthetic"
+                    )
+                    server.SYNC_PERSISTENCE.state_repository().update_cursor(
+                        "garmin", "historical", "2026-08-01", "synthetic"
+                    )
+                    payload = {
+                        "synced_at": "2026-09-05T00:00:00+00:00",
+                        "start": "2026-08-01",
+                        "end": "2026-09-05",
+                        "errors": [{"source": source, "message": "synthetic outage"}],
+                        "provider_sync": {
+                            "pagination": {
+                                "activities": {"complete": source != "activities"}
+                            }
+                        },
+                    }
+                    with (
+                        patch.object(
+                            garmin_provider.GarminClientFactory,
+                            "available",
+                            return_value=True,
+                        ),
+                        patch.object(
+                            garmin_provider.GarminClientFactory,
+                            "create",
+                            return_value=client,
+                        ),
+                        patch.object(
+                            garmin_service, "collect_garmin_data", return_value=payload
+                        ),
+                    ):
+                        result = server.GARMIN_ASSEMBLY.sync_service().sync(
+                            days=2,
+                            end_date=date(2026, 8, 30) if historical else None,
+                        )
+                    saved = read_garmin()
+                    self.assertEqual(saved[source], previous[source])
+                    self.assertEqual(
+                        saved["source_freshness"][source]["fetched_at"],
+                        previous["source_freshness"][source]["fetched_at"],
+                    )
+                    self.assertEqual(
+                        saved["source_freshness"][source]["freshness"], "stale"
+                    )
+                    self.assertEqual(result["status"], "partial")
+                    self.assertEqual(
+                        server.SYNC_PERSISTENCE.state_repository().cursor(
+                            "garmin", "data"
+                        )["cursor"],
+                        "2026-09-01",
+                    )
+                    self.assertEqual(
+                        server.SYNC_PERSISTENCE.state_repository().cursor(
+                            "garmin", "historical"
+                        )["cursor"],
+                        "2026-08-01",
+                    )
+
+    def test_garmin_raw_duplicate_records_survive_fixture_and_sdk_sync(self):
+        original = {
+            "activityId": 123,
+            "activityName": "Synthetic ride",
+            "startTimeLocal": "2026-09-04 10:00:00",
+            "activityType": {"typeKey": "cycling"},
+            "duration": 3600,
+            "distance": 30000,
+            "garmin_specific": {"sample": "preserved"},
+        }
+        intervals = {
+            "id": "canonical",
+            "start_date_local": "2026-09-04T10:00:00",
+            "type": "Ride",
+            "moving_time": 3600,
+            "distance": 30000,
+        }
+        store_canonical_snapshot(
+            server, {"synced_at": "synthetic", "recent_activities": [intervals]}
+        )
+        for fixture in (False, True):
+            with self.subTest(fixture=fixture):
+                payload = {
+                    "synced_at": "2026-09-05T00:00:00+00:00",
+                    "start": "2026-09-04",
+                    "end": _local_datetime.now().astimezone().date().isoformat(),
+                    "activities": [dict(original)],
+                    "errors": [],
+                    "provider_sync": {"pagination": {"activities": {"complete": True}}},
+                }
+                client = Mock()
+                client.login.return_value = (False, None)
+                with (
+                    patch.object(
+                        garmin_provider.GarminClientFactory,
+                        "available",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        garmin_provider.GarminClientFactory,
+                        "create",
+                        return_value=client,
+                    ),
+                    patch.object(
+                        garmin_sync.GarminFixtureLoader,
+                        "path",
+                        return_value=Path("synthetic.json") if fixture else None,
+                    ),
+                    patch.object(
+                        garmin_sync.GarminFixtureLoader, "load", return_value=payload
+                    ),
+                    patch.object(
+                        garmin_service, "collect_garmin_data", return_value=payload
+                    ),
+                ):
+                    result = server.GARMIN_ASSEMBLY.sync_service().sync(days=2)
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(
+                    read_garmin()["activities"],
+                    [original],
+                )
+                self.assertEqual(
+                    server.GARMIN_ASSEMBLY.projection_service().public_state()[
+                        "activities"
+                    ],
+                    0,
+                )
+                # Canonical reads (#1416): the sync stores no activity matches;
+                # equipment pairs canonical activity records at read time.
+                self.assertNotIn("activity_matches", read_garmin())
+                self.assertEqual(
+                    server.SYNC_PERSISTENCE.state_repository().cursor("garmin", "data")[
+                        "cursor"
+                    ],
+                    payload["end"],
+                )
+                context = server.COACH_CONTEXT.training_context_service().build()
+                self.assertNotIn("garmin_specific", context)
+                # The tables merge the Garmin copy into the Intervals.icu
+                # session, so the Coach sees the activity once.
+                self.assertEqual(
+                    context.count('"started_at_local":"2026-09-04T10:00:00"'), 1
+                )
 
 
 class GarminRangeContractTests(unittest.TestCase):

@@ -2234,6 +2234,211 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 45
         )
 
+    def test_invalid_arguments_and_missing_objects_do_not_partially_write(self):
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout()], plan_name="Synthetic validation plan"
+        )[0]
+        server.PLANNING_DATA.workout_library().create_template(
+            {
+                "name": "Synthetic template",
+                "description": "- 30m 60% Easy",
+                "duration_minutes": 30,
+            }
+        )
+        template_id = server.PLANNING_DATA.workout_library().list()[0]["id"]
+        plan_id = server.PLANNING_DATA.training_plan().list()[0]["id"]
+        period = {"start": "2026-09-09", "end": "2026-09-09"}
+        cases = [
+            (
+                "update_profile",
+                {"changes": [{"field": "name", "expected_value": "", "value": None}]},
+                ["local_profile"],
+                {},
+            ),
+            (
+                "manage_training_templates",
+                {
+                    "templates": [
+                        {
+                            "action": "create",
+                            "name": "Must roll back",
+                            "description": "Easy",
+                        },
+                        {"action": "invalid"},
+                    ]
+                },
+                ["local_template"],
+                {},
+            ),
+            ("save_checkin", {"payload": {"soreness": 11}}, ["local_checkin"], {}),
+            (
+                "save_checkin",
+                {
+                    "payload": {
+                        "illness": "Synthetic cold",
+                        "clear_fields": ["illness"],
+                    }
+                },
+                ["local_checkin"],
+                {},
+            ),
+            (
+                "save_activity_feedback",
+                {"payload": {"activity_id": "missing", "notes": "Synthetic"}},
+                ["activity_feedback"],
+                {},
+            ),
+            (
+                "delete_activity_feedback",
+                {"activity_id": ""},
+                ["activity_feedback"],
+                {},
+            ),
+            (
+                "save_competition",
+                {
+                    "payload": {
+                        "name": "Synthetic",
+                        "event_date": "2026-99-99",
+                        "sport": "Run",
+                    }
+                },
+                ["local_competitions"],
+                {},
+            ),
+            (
+                "delete_competition",
+                {"competition_id": "missing"},
+                ["competition:missing"],
+                {},
+            ),
+            (
+                "stage_training_plan",
+                {
+                    "payload": {
+                        "plan_name": "Invalid draft",
+                        "goal": "Synthetic",
+                        "workouts": [],
+                    }
+                },
+                ["local_plan"],
+                {"period": period},
+            ),
+            (
+                "commit_training_plan",
+                {"artifact_id": "missing"},
+                ["artifact:missing"],
+                {"period": period},
+            ),
+            (
+                "replace_training_plan",
+                {
+                    "payload": {
+                        "plan_name": "Invalid replacement",
+                        "goal": "Synthetic",
+                        "workouts": [self.workout()],
+                    },
+                    "expected_revision": -1,
+                },
+                ["local_plan"],
+                {"period": period},
+            ),
+            (
+                "apply_training_patch",
+                {"workouts": [self.workout()], "expected_revision": -1},
+                ["local_plan"],
+                {"period": period},
+            ),
+            (
+                "apply_workout_library_plan",
+                {
+                    "entries": [
+                        {"library_workout_id": template_id, "date": "2026-99-99"}
+                    ]
+                },
+                ["library_workout:" + template_id],
+                {"period": period},
+            ),
+            (
+                "update_training_plan",
+                {"payload": {"plan_id": plan_id, "start_date": "invalid"}},
+                ["training_plan:" + plan_id],
+                {},
+            ),
+            ("undo_training_change", {"change_id": "missing"}, ["change:missing"], {}),
+            (
+                "resolve_training_sync_conflict",
+                {"local_id": unit["id"], "strategy": "keep_local"},
+                ["planned_unit:" + unit["id"]],
+                {},
+            ),
+            (
+                "apply_adaptive_replan",
+                {"adjustment_id": "missing"},
+                ["adaptive_replan:missing"],
+                {},
+            ),
+            (
+                "start_provider_refresh",
+                {"days": 4000},
+                ["garmin_refresh"],
+                {"target": "garmin"},
+            ),
+            (
+                "refresh_current_performance",
+                {},
+                ["weather_refresh"],
+                {"target": "weather"},
+            ),
+            (
+                "start_intervals_plan_sync",
+                {
+                    "entries": [
+                        {
+                            "library_workout_id": unit["id"],
+                            "expected_payload_hash": "invalid",
+                        }
+                    ]
+                },
+                ["intervals_sync", "planned_unit:" + unit["id"]],
+                {"target": "intervals", "remote_write": True, "sync_scope": "selected"},
+            ),
+            (
+                "sync_competitions",
+                {},
+                ["intervals_sync"],
+                {"target": "intervals", "remote_write": True},
+            ),
+        ]
+        for name, args, scope, kwargs in cases:
+            with self.subTest(tool=name):
+                before = self.athlete_state()
+                previous_auto_approval = self.auto_approve_remote_proposals
+                if kwargs.get("remote_write"):
+                    self.auto_approve_remote_proposals = False
+                result, _ = self.turn(
+                    message_for(name),
+                    [
+                        lambda _, n=name, a=args, s=scope, k=kwargs: self.call(
+                            n, a, s, **k
+                        ),
+                        {"output_text": "Nicht ausgeführt."},
+                    ],
+                )
+                self.auto_approve_remote_proposals = previous_auto_approval
+                if kwargs.get("remote_write"):
+                    self.assertEqual(
+                        result["command_receipts"][0]["result"]["status"],
+                        "approval_required",
+                    )
+                    after = self.athlete_state()
+                    before.pop("coach_action_proposals")
+                    after.pop("coach_action_proposals")
+                    self.assertEqual(after, before)
+                else:
+                    self.assertEqual(result["status"], "failed")
+                    self.assertEqual(self.athlete_state(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

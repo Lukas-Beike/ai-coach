@@ -2674,6 +2674,31 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(self.state(), before)
 
+    def test_current_refresh_runs_before_next_model_response_without_trigger_gate(self):
+        with patch(
+            "backend.sync.wahoo_sync.WahooSyncService.sync",
+            return_value={"status": "ok"},
+        ) as sync:
+            result, model = self.turn(
+                "Sind die Zahlen wirklich von heute? Bitte damit bewerten.",
+                [
+                    lambda _: self.call(
+                        "start_provider_refresh",
+                        {"days": 7},
+                        ["wahoo_refresh"],
+                        target="wahoo",
+                    ),
+                    lambda _: (
+                        {"output_text": "Aktuelle Daten bewertet."}
+                        if sync.called
+                        else self.fail("refresh must finish first")
+                    ),
+                ],
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(model.call_count, 2)
+        sync.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

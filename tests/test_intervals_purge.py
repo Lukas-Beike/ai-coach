@@ -35,11 +35,10 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import intervals_purge
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
-from backend.sync.intervals import IntervalsSyncService
 from backend.sync.intervals_ingest import (
-    IntervalsIngestSwitch,
-    ingest_off_result,
+    purge_done,
     purge_marker_exists,
+    purge_state,
 )
 from backend.sync.intervals_purge import (
     BACKUP_LABEL,
@@ -901,75 +900,41 @@ class IntervalsPurgeSafetyTests(unittest.TestCase):
 
         again.assert_not_called()
         self.assertEqual(dump(restored), before)
-        # The restored copy keeps its ingest off: the file counts as the marker.
-        switch = IntervalsIngestSwitch(
-            restored,
-            key_values(),
-            purge_marker=lambda: purge_marker_exists(restored.path.parent),
-        )
-        self.assertTrue(switch.purged())
-        with self.assertRaises(AppError):
-            switch.save({"enabled": True})
+        # The restored copy has no database marker: the file counts as the marker.
+        with restored.reader() as db:
+            self.assertFalse(purge_done(purge_state(key_values(), db)))
+        self.assertTrue(purge_marker_exists(restored.path.parent))
         with restored.reader() as db:
             self.assertEqual(
                 summarize_intervals_purge(key_values(), db, marker_exists=True),
                 {"status": "done_restored", "version": 1},
             )
 
-    def test_purged_ingest_cannot_be_turned_on_or_read_once(self) -> None:
+
+
+    def test_a_completed_purge_leaves_the_ingest_switch_off_and_records_its_state(
+        self,
+    ) -> None:
         manager = open_current(self)
-        switch = IntervalsIngestSwitch(manager, key_values())
-        self.assertFalse(switch.purged())
-        self.assertEqual(switch.save({"enabled": True})["enabled"], True)
-        switch.save({"enabled": False})
+        with manager.unit_of_work() as db:
+            key_values().set(db, "intervals_ingest_enabled", "1")
 
         purge(manager)
 
-        self.assertTrue(switch.purged())
-        with self.assertRaises(AppError) as refused:
-            switch.save({"enabled": True})
-        self.assertEqual(
-            (refused.exception.status, refused.exception.reason),
-            (409, "intervals_ingest_purged"),
-        )
-        self.assertEqual(switch.save({"enabled": False})["enabled"], False)
-        runtime = mock.Mock()
-        service = IntervalsSyncService(
-            cast(Any, mock.Mock(intervals_api_key="key")),
-            cast(Any, mock.Mock()),
-            cast(Any, mock.Mock()),
-            cast(Any, mock.Mock()),
-            cast(Any, mock.Mock()),
-            cast(Any, runtime),
-            ingest=switch,
-        )
-        self.assertEqual(service.sync(one_off=True), ingest_off_result())
-        runtime.operation.assert_not_called()
+        self.assertEqual(kv(manager, "intervals_ingest_enabled"), "0")
+        with manager.reader() as db:
+            self.assertTrue(purge_done(purge_state(key_values(), db)))
 
-    def test_the_marker_file_alone_refuses_ingest_and_one_off_reads(self) -> None:
+    def test_the_marker_file_alone_keeps_the_purge_from_running(self) -> None:
         manager = open_current(self)
         (manager.path.parent / intervals_purge.MARKER_FILE).write_text("x")
-        switch = IntervalsIngestSwitch(
-            manager,
-            key_values(),
-            purge_marker=lambda: purge_marker_exists(manager.path.parent),
-        )
+        before = dump(manager)
+        backup = mock.Mock()
 
-        with self.assertRaises(AppError) as refused:
-            switch.save({"enabled": True})
-        self.assertEqual(refused.exception.status, 409)
-        runtime = mock.Mock()
-        service = IntervalsSyncService(
-            cast(Any, mock.Mock(intervals_api_key="key")),
-            cast(Any, mock.Mock()),
-            cast(Any, mock.Mock()),
-            cast(Any, mock.Mock()),
-            cast(Any, mock.Mock()),
-            cast(Any, runtime),
-            ingest=switch,
-        )
-        self.assertEqual(service.sync(one_off=True), ingest_off_result())
-        runtime.operation.assert_not_called()
+        self.runner(manager, backup, threading.Lock()).run()
+
+        backup.assert_not_called()
+        self.assertEqual(dump(manager), before)
 
     def test_a_newer_family_item_stays_where_it_is(self) -> None:
         moves = intervals_purge._plan(

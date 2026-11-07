@@ -8,7 +8,7 @@ import threading
 import unittest
 import uuid
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as _local_datetime
 from io import BytesIO
 from pathlib import Path
@@ -1675,6 +1675,63 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(
             [call.args[0] for call in sync_entry.call_args_list],
             [first["id"], second["id"]],
+        )
+
+    def test_garmin_sync_persists_fatal_error_status(self):
+        config = replace(
+            server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json"
+        )
+        with patch.object(server, "CONFIG", config), self.assertRaises(server.AppError):
+            server.GARMIN_ASSEMBLY.sync_service().sync()
+        state = server.GARMIN_ASSEMBLY.projection_service().public_state()
+        self.assertTrue(state["last_error"])
+
+    def test_daily_sync_markers_are_separate_per_provider(self):
+        local_day = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
+        markers = server.SYNC_PERSISTENCE.daily_markers()
+        markers.mark("wahoo", local_day)
+        self.assertFalse(markers.is_due("wahoo", local_day))
+        self.assertTrue(markers.is_due("wahoo", local_day + timedelta(hours=1)))
+        self.assertTrue(markers.is_due("garmin", local_day))
+        self.assertTrue(markers.is_due("calendar", local_day))
+        with patch.object(server.ATHLETE_CLOCK, "now", return_value=local_day):
+            server.SYNC_JOB_QUEUE.service().enqueue(
+                "calendar", "refresh", {}, requested_by="scheduler"
+            )
+        self.assertFalse(markers.is_due("calendar", local_day))
+        self.assertTrue(markers.is_due("calendar", local_day + timedelta(hours=1)))
+
+    def test_daily_sync_marker_module_is_dependency_light(self):
+        from backend.sync.daily import (
+            daily_sync_is_due,
+            mark_daily_sync,
+            mark_daily_sync_attempt,
+        )
+
+        values = {}
+        current = datetime(2026, 3, 30, 0, 30, tzinfo=UTC)
+
+        self.assertTrue(daily_sync_is_due("wahoo", current, get_value=values.get))
+        mark_daily_sync("wahoo", current, set_value=values.__setitem__)
+        self.assertEqual(values["sync_wahoo_last_success_at"], current.isoformat())
+        self.assertFalse(daily_sync_is_due("wahoo", current, get_value=values.get))
+        self.assertTrue(
+            daily_sync_is_due(
+                "wahoo", current + timedelta(hours=1), get_value=values.get
+            )
+        )
+        mark_daily_sync_attempt(
+            "wahoo", current + timedelta(hours=2), set_value=values.__setitem__
+        )
+        self.assertFalse(
+            daily_sync_is_due(
+                "wahoo", current + timedelta(hours=2), get_value=values.get
+            )
+        )
+        self.assertTrue(
+            daily_sync_is_due(
+                "wahoo", current + timedelta(hours=3), get_value=values.get
+            )
         )
 
 

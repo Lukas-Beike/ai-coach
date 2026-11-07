@@ -24,6 +24,7 @@ from backend.history.undo_service import HistoryUndoService
 from tests.test_feedback_session_identity import (
     GARMIN_ID,
     INTERVALS_ID,
+    SYNCED,
     ZONE,
     FeedbackSessionFixture,
     intervals_row,
@@ -183,6 +184,52 @@ class SessionCorrectionTests(SessionCorrectionFixture):
         self.assertEqual(raised.exception.status, 404)
         self.assertIsNone(self.corrections.bundle("act_missing"))
 
+    def test_merge_refuses_two_copies_from_one_source(self) -> None:
+        with self.manager.unit_of_work() as db:
+            intervals_fixture.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": SYNCED,
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row("i2", start_date_local="2026-09-10T18:00:00")
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+            other = canonical_store.activity_local_ids(db, "intervals", ["i2"])["i2"]
+
+        with self.assertRaises(AppError) as raised:
+            self.corrections.merge(self.intervals, other)
+
+        self.assertEqual(raised.exception.status, 409)
+        bundle = self.corrections.bundle(self.intervals)
+        assert bundle is not None
+        self.assertEqual(bundle["merge_candidates"], [])
+
+    def test_merge_refuses_a_session_of_another_day(self) -> None:
+        with self.manager.unit_of_work() as db:
+            intervals_fixture.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": SYNCED,
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row("i3", start_date_local="2026-09-11T07:00:00")
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+            other = canonical_store.activity_local_ids(db, "intervals", ["i3"])["i3"]
+        self.corrections.split(self.intervals, self.garmin)
+
+        with self.assertRaises(AppError) as raised:
+            self.corrections.merge(self.garmin, other)
+
+        self.assertEqual(raised.exception.status, 409)
+
 
 class SessionDeleteTests(SessionCorrectionFixture):
     def _live(self) -> list[str]:
@@ -210,6 +257,34 @@ class SessionDeleteTests(SessionCorrectionFixture):
         self.assertEqual(self._rows(), before)
         self.assertEqual(len(set(self._live())), 1)
 
+    def test_no_copy_comes_back_after_provider_deletes_or_edits(self) -> None:
+        self.corrections.delete(self.intervals)
+        with self.manager.unit_of_work() as db:
+            intervals_fixture.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": "2026-09-22T08:00:00+00:00",
+                    "raw_provider_data": {
+                        "activities": [intervals_row(INTERVALS_ID, distance=20100.0)]
+                    },
+                },
+                zone=ZONE,
+            )
+            canonical_store.mark_activity_deleted(
+                db,
+                "intervals",
+                record_kind="activity",
+                provider_activity_id=INTERVALS_ID,
+                now="2026-09-23T08:00:00+00:00",
+            )
+            record = canonical_store.provider_activity_record_rows(
+                db, "intervals", [INTERVALS_ID]
+            )
+
+        self.assertEqual(self._live(), [])
+        self.assertEqual(record, [])
+        self.assertTrue(all(row["state"] == "deleted" for row in self._rows().values()))
+
 
 class AthleteDeleteFollowUpTests(SessionCorrectionFixture):
     def test_undo_is_refused_once_the_provider_deleted_the_primary(self) -> None:
@@ -233,6 +308,78 @@ class AthleteDeleteFollowUpTests(SessionCorrectionFixture):
             self.undo(result["change"])
 
         self.assertEqual(raised.exception.status, 409)
+
+    def test_an_exact_copy_of_a_deleted_activity_stays_deleted(self) -> None:
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                "intervals",
+                record_kind="activity",
+                provider_activity_id=INTERVALS_ID,
+                now=SYNCED,
+            )
+        self.corrections.delete(self.garmin)
+        with self.manager.unit_of_work() as db:
+            intervals_fixture.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": "2026-09-22T08:00:00+00:00",
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row(
+                                "i7",
+                                source="GARMIN_CONNECT",
+                                device_name="Garmin Edge 840",
+                                external_id=GARMIN_ID,
+                                start_date_local="2026-09-10T09:30:00",
+                            )
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+            live = canonical_store.active_session_activity_rows(db)
+
+        self.assertEqual(live, [])
+
+    def test_undoing_the_delete_brings_a_later_exact_copy_back(self) -> None:
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                "intervals",
+                record_kind="activity",
+                provider_activity_id=INTERVALS_ID,
+                now=SYNCED,
+            )
+        result = self.corrections.delete(self.garmin)
+        with self.manager.unit_of_work() as db:
+            intervals_fixture.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": "2026-09-22T08:00:00+00:00",
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row(
+                                "i7",
+                                source="GARMIN_CONNECT",
+                                device_name="Garmin Edge 840",
+                                external_id=GARMIN_ID,
+                                start_date_local="2026-09-10T09:30:00",
+                            )
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+
+        self.undo(result["change"])
+
+        with self.manager.reader() as db:
+            live = canonical_store.active_session_activity_rows(db)
+        self.assertEqual(
+            sorted(row["provider_activity_id"] for _, row in live), ["910", "i7"]
+        )
+        self.assertEqual(len({session for session, _ in live}), 1)
 
 
 

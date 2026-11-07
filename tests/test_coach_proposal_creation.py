@@ -13,6 +13,7 @@ from unittest.mock import Mock
 from uuid import UUID
 
 from backend.coach.proposal_creation import CoachProposalCreationService
+from backend.coach.proposal_models import COACH_ACTION_TTL_SECONDS, coach_action_hash
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -674,6 +675,56 @@ class CoachProposalCreationTests(unittest.TestCase):
 
         with self.assertRaises(sqlite3.IntegrityError):
             self._service().create(self._undo(), "session")
+
+        self.assertEqual(self._rows(), [])
+
+    def test_undo_creation_persists_session_ttl_hash_and_safe_view(self) -> None:
+        payload = self._undo()["payload"]
+        result = self._service().create(self._undo(), "session-csrf-hash")
+
+        self.assertEqual(COACH_ACTION_TTL_SECONDS, 600)
+        self.assertEqual(result["status"], "preview")
+        self.assertEqual(
+            result["proposed_action"],
+            {
+                "id": "abc12345-6789-4abc-8def-0123456789ab",
+                "action_type": "undo_change",
+                "target_system": "local",
+                "object_ids": ["change-1"],
+                "diff": [{"type": "restore", "label": "Änderung"}],
+                "payload_hash": coach_action_hash(payload),
+                "expires_at": 100 + COACH_ACTION_TTL_SECONDS,
+                "status": "preview",
+            },
+        )
+        self.assertNotIn("payload", result["proposed_action"])
+        row = self._rows()[0]
+        self.assertEqual(row["session_csrf_hash"], "session-csrf-hash")
+        expected_hash = hashlib.sha256(
+            json.dumps(
+                payload,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(row["payload_hash"], expected_hash)
+        self.assertEqual(row["payload"], '{"change_id":"change-1","secret":"private"}')
+        self.assertEqual(row["diff"], '[{"type":"restore","label":"Änderung"}]')
+        self.assertEqual(row["created_at"], "2026-09-23T10:11:12+00:00")
+        self.assertNotIn("private", repr(result))
+
+    def test_invalid_inputs_reject_before_inspection_or_insert(self) -> None:
+        invalid_values = [
+            None,
+            {},
+            {**self._undo(), "diff": []},
+            {**self._undo(), "target_system": "intervals"},
+        ]
+        for values in invalid_values:
+            with self.subTest(values=values), self.assertRaises(AppError):
+                self._service().create(values, "session")
 
         self.assertEqual(self._rows(), [])
 

@@ -285,6 +285,19 @@ class IntervalsIngestTests(IngestFixture):
         self.assertNotIn("X-Amz-Signature", text)
         self.assertIn("i-1", text)
 
+    def test_snapshot_without_a_sync_time_writes_nothing(self) -> None:
+        counters = intervals_fixture.ingest_intervals_snapshot(
+            self.db,
+            {"raw_provider_data": {"activities": [intervals_row("i-1")]}},
+            zone=ZONE,
+            activity_days=3,
+            all_sync_days=3,
+            earliest_date=EARLIEST,
+        )
+        self.assertEqual(counters, ingest.CanonicalIngestCounters())
+        self.assertEqual(self.count("provider_records"), 0)
+        self.assertEqual(self.count("activity_records"), 0)
+
 
 class GarminIngestTests(IngestFixture):
     def test_payload_without_a_sync_time_writes_nothing(self) -> None:

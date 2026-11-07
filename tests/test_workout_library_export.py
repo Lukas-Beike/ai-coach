@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+import remote_reconcilers
 from remote_link_fixtures import create_remote_links_table
 
 from backend.canonical.vocabulary import (
@@ -382,6 +383,45 @@ class LibraryReadsResolveThroughRemoteLinksTests(_LibraryDatabase):
         self.assertTrue(by_id["lib-legacy"]["has_remote_id"])
         self.assertFalse(by_id["lib-unlinked-id"]["has_remote_id"])
         self.assertEqual(by_id["lib-unlinked-id"]["category"], "new")
+
+    def test_missing_remote_marking_resolves_the_external_id_through_the_link(
+        self,
+    ) -> None:
+        self.add_entry("lib-seen", state="synced", external_id="slot-seen", link=True)
+        self.add_entry("lib-gone", state="synced", external_id="slot-gone", link=True)
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE remote_links SET remote_external_id='link-seen' "
+                "WHERE local_id='lib-seen'"
+            )
+            db.execute(
+                "UPDATE workout_library SET sync_dirty=0 WHERE sync_state='synced'"
+            )
+        reconciler = remote_reconcilers.WorkoutLibraryRemoteReconciler(
+            self.database_manager, lambda: NOW, lambda: OTHER_ID
+        )
+
+        reconciler.reconcile([], remove_missing=False)
+        with self.database_manager.unit_of_work() as db:
+            reconciler._mark_missing_remote_library_workouts(db, {"link-seen"}, NOW)
+
+        self.assertEqual(self.row("lib-seen")["sync_state"], "synced")
+        self.assertEqual(self.row("lib-gone")["sync_state"], "remote_missing")
+
+    def test_missing_remote_marking_covers_a_link_without_a_slot(self) -> None:
+        self.add_entry(
+            "lib-linked-only", state="synced", external_id="slot-x", link=True
+        )
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE workout_library SET external_id=NULL, sync_dirty=0 "
+                "WHERE local_id='lib-linked-only'"
+            )
+            remote_reconcilers.WorkoutLibraryRemoteReconciler(
+                self.database_manager, lambda: NOW, lambda: OTHER_ID
+            )._mark_missing_remote_library_workouts(db, set(), NOW)
+
+        self.assertEqual(self.row("lib-linked-only")["sync_state"], "remote_missing")
 
 
 

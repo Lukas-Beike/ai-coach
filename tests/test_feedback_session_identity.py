@@ -358,6 +358,35 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         (shown,) = self.service.for_activity_ids([INTERVALS_ID])
         self.assertEqual(shown["notes"], "Saved on the Garmin copy")
 
+    def test_an_ambiguous_id_stands_alone(self) -> None:
+        with self.manager.unit_of_work() as db:
+            intervals_fixture.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": SYNCED,
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row(INTERVALS_ID, icu_rpe=7),
+                            intervals_row(
+                                GARMIN_ID, start_date_local="2026-09-12T07:00:00"
+                            ),
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+        self.service.save(GARMIN_ID, {"notes": "Which one?"})
+        self.service.save(INTERVALS_ID, {"notes": "The Intervals ride"})
+
+        self.assertEqual(
+            sorted(item["notes"] for item in self.service.list()),
+            ["The Intervals ride", "Which one?"],
+        )
+        (ambiguous,) = [
+            row for row in stored_rows(self) if row["activity_id"] == GARMIN_ID
+        ]
+        self.assertIsNone(ambiguous["session_id"])
+
 
 class ReportFeedbackTests(FeedbackSessionFixture):
     """Block review and training report read feedback through the session lookup."""

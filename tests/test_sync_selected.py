@@ -366,6 +366,39 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_planned_normal_and_repair_paths(self) -> None:
+        normal = self._add("planned", {"date": "2026-10-01"})
+        repair = self._add("planned", {"date": "2026-10-02"})
+        self.calendar_sync.sync_entry.return_value = {"id": "event-normal"}
+        batch = MagicMock()
+        batch.verify.return_value = {}
+        self.repair_sync.create_batch.return_value = batch
+        self.repair_sync.repair_entry.return_value = None
+        gate = CountingResyncGate()
+
+        normal_result = self._service(provider_resync_gate=gate).sync(
+            {"entries": [normal]}
+        )
+        repair_result = self._service(provider_resync_gate=gate).sync(
+            {"entries": [repair], "repair": True}
+        )
+
+        self.assertEqual(normal_result["status"], "ok")
+        self.assertTrue(normal_result["results"][0]["calendar_synced"])
+        self.calendar_sync.sync_entry.assert_called_once_with(
+            normal["library_workout_id"]
+        )
+        self.repair_sync.create_batch.assert_called_once()
+        self.repair_sync.repair_entry.assert_called_once_with(
+            repair["library_workout_id"], repair["expected_payload_hash"], batch=batch
+        )
+        self.assertEqual(repair_result["status"], "ok")
+        self.assertTrue(repair_result["results"][0]["calendar_synced"])
+        self.assertEqual(self.lock.acquire_calls, [])
+        self.assertEqual(self.lock.release_calls, 0)
+        self.assertEqual(gate.operation_entries, 0)
+        self.assertEqual(gate.operation_exits, 0)
+
 
 
 if __name__ == "__main__":

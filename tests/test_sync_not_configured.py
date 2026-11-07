@@ -146,6 +146,7 @@ class NotConfiguredClassificationTests(unittest.TestCase):
         self.assertEqual(public_error_contract(error), (503, "not_configured"))
 
 
+
 class NotConfiguredReasonContractTests(unittest.TestCase):
     def test_every_provider_not_configured_app_error_declares_reason(self):
         sites: list[str] = []
