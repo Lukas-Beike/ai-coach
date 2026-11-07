@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from backend.db import DatabaseManager, garmin_store, row_factory
+from backend.db import DatabaseManager, canonical_store, garmin_store, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.performance import morning_battery
-from backend.performance.morning_battery_service import MorningBatteryStore
+from backend.performance.morning_battery_service import METHOD_ID, MorningBatteryStore
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
@@ -83,8 +83,8 @@ class MorningBatteryCanonicalTests(unittest.TestCase):
             CHECKIN, sleep, records, attempted_at=ATTEMPTED_AT
         )
         self.store.persist(CHECKIN, None, record, records, sleep)
-        with self.manager.reader() as db:
-            stored = garmin_store.read_state(db)["morning_body_battery"]
+        stored = self.store.current()
+        assert stored is not None
         return stored
 
     def test_canonical_record_equals_the_payload_record(self) -> None:
@@ -104,6 +104,45 @@ class MorningBatteryCanonicalTests(unittest.TestCase):
         self.assertEqual(stored["status"], "ready")
         self.assertEqual(stored["before_sleep"]["value"], 38)
         self.assertEqual(stored["morning"]["value"], 82)
+
+    def test_values_are_derived_observations_not_view_entries(self) -> None:
+        # #1686: the Garmin state view keeps only the refresh bookkeeping.
+        records = levels(
+            (SLEEP_START - timedelta(minutes=10), 38),
+            (SLEEP_END + timedelta(minutes=20), 82),
+        )
+        self.persist(sleep_payload(), records)
+        with self.manager.reader() as db:
+            view = garmin_store.read_state(db)["morning_body_battery"]
+            rows = canonical_store.derived_observation_rows(db, METHOD_ID)
+        for key in ("before_sleep", "morning", "sleep_start_at", "sleep_end_at"):
+            self.assertNotIn(key, view)
+        self.assertEqual(
+            {(row["metric"], row["value"]) for row in rows},
+            {("body_battery_before_sleep", 38.0), ("morning_body_battery", 82.0)},
+        )
+
+    def test_a_later_refresh_retires_the_nights_earlier_values(self) -> None:
+        self.persist(
+            sleep_payload(),
+            levels(
+                (SLEEP_START - timedelta(minutes=10), 38),
+                (SLEEP_END + timedelta(minutes=20), 82),
+            ),
+        )
+        stored = self.persist(
+            sleep_payload(),
+            levels(
+                (SLEEP_START - timedelta(minutes=5), 36),
+                (SLEEP_END + timedelta(minutes=10), 84),
+            ),
+        )
+        with self.manager.reader() as db:
+            rows = canonical_store.derived_observation_rows(db, METHOD_ID)
+        self.assertEqual(
+            (36, 84), (stored["before_sleep"]["value"], stored["morning"]["value"])
+        )
+        self.assertEqual(2, len(rows))
 
     def test_without_a_night_the_record_is_not_available(self) -> None:
         stored = self.persist({}, levels((SLEEP_END, 80)))

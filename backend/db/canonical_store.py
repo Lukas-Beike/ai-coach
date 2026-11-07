@@ -1116,14 +1116,16 @@ def derived_observation_rows(
 ) -> list[dict[str, Any]]:
     """Return the active local derived observations of ``method``.
 
-    Each row has its natural key, metric, value, sport, observed day, owner
-    (the canonical session id) and the parsed ``derivation`` details. Local
+    Each row has its natural key, metric, value, sport, observed day and instant,
+    owner (the canonical session id, or the night of a morning value) and the
+    parsed ``derivation`` details. Local
     derived rows carry no provider, so provider reads never return them.
     ``owners`` limits the rows to those owner ids; None returns every row.
     """
     sql = (
-        "SELECT natural_key, metric, value, sport, observed_on, owner_record_id, "
-        "details FROM observations WHERE provider IS NULL AND method = ? "
+        "SELECT natural_key, metric, value, sport, observed_on, observed_at, "
+        "owner_record_id, details FROM observations WHERE provider IS NULL "
+        "AND method = ? "
         "AND source_kind = ? AND state = ?"
     )
     params: tuple[object, ...] = (
@@ -1174,6 +1176,28 @@ def retire_derived_observations(
             "UPDATE observations SET state = ?, updated_at = ? "
             f"WHERE natural_key IN ({', '.join('?' * len(batch))})",
             (ProjectionState.RETIRED.value, now, *batch),
+        )
+    return len(stale)
+
+
+def retire_owner_derived_observations(
+    db: Any, method: str, owner: str, *, keep: Collection[str], now: str
+) -> int:
+    """Retire one owner's active local derived rows of ``method`` not in ``keep``."""
+    stale = [
+        row["natural_key"]
+        for row in _fetch_all(
+            db,
+            "SELECT natural_key FROM observations WHERE provider IS NULL "
+            "AND method = ? AND source_kind = ? AND state = ? AND owner_record_id = ?",
+            (method, SourceKind.DERIVED.value, ProjectionState.ACTIVE.value, owner),
+        )
+        if row["natural_key"] not in keep
+    ]
+    for key in stale:
+        db.execute(
+            "UPDATE observations SET state = ?, updated_at = ? WHERE natural_key = ?",
+            (ProjectionState.RETIRED.value, now, key),
         )
     return len(stale)
 

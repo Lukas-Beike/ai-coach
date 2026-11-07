@@ -213,9 +213,9 @@ _SUMMARY_FINGERPRINT = (
     "mapping: summary_fingerprint hashes the stored provider activity summary, "
     "excluding the later-added zone-time keys, to detect stale details"
 )
-_MORNING_VIEW = (
-    "awaiting-kind: reads the morning Body Battery from the Garmin state view; "
-    "#1686 item 5 moves it to a derived observation"
+_MORNING_OWNER = (
+    "owner: the morning refresh fetches through garmin_morning and keeps only its "
+    "refresh bookkeeping in the Garmin state view; values are derived observations"
 )
 # repository-relative path -> (reason, field-name modules it may still import).
 # A new module in an allowlisted file fails the guard as well.
@@ -225,7 +225,7 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
         ("intervals_performance_fields",),
     ),
     "backend/performance/morning_battery_service.py": (
-        _MORNING_VIEW,
+        _MORNING_OWNER,
         ("garmin_morning",),
     ),
 }
@@ -251,9 +251,8 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_LEGACY_READ, "backend/athlete/equipment.py"): _SYNC_STATUS,
     (RULE_LEGACY_READ, "backend/nutrition/sync_status.py"): _SYNC_STATUS,
     (RULE_LEGACY_READ, "backend/performance/morning_battery_service.py"): (
-        _MORNING_VIEW
+        _MORNING_OWNER
     ),
-    (RULE_LEGACY_READ, "backend/planning/daily_context_service.py"): _MORNING_VIEW,
     **{
         (RULE_SOURCE_LABEL, path): _LEGACY_LABEL
         for path in (

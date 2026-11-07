@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from collections.abc import Callable, Hashable, Iterator, Mapping
@@ -10,8 +11,14 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 
-from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.db import garmin_store
+from backend.canonical.records import MetricValue, Observation, Provenance
+from backend.canonical.vocabulary import (
+    MetricKind,
+    ProviderId,
+    RecordingOrigin,
+    SourceKind,
+)
+from backend.db import canonical_store, garmin_store
 from backend.performance import morning_battery
 from backend.providers.garmin_morning import latest_garmin_record, morning_sleep_element
 from backend.runtime.ports import ObservationReader, SleepPeriodReader
@@ -24,6 +31,17 @@ MORNING_LOCK_POLL_SECONDS = 1
 MORNING_BATTERY_HISTORY_KEY = "morning_body_battery_history"
 MORNING_SOURCES = frozenset({"body_battery", "sleep"})
 _GARMIN_ERROR_KEY = "last_garmin_error"
+# The morning record's values are stored as local derived observations
+# (#1686); the Garmin state view keeps only the refresh bookkeeping.
+METHOD_ID = "morning_body_battery"
+METHOD_VERSION = 1
+_DERIVED_LABEL = "Garmin Connect (abgeleitet)"
+_VALUE_KINDS = {
+    "before_sleep": MetricKind.BODY_BATTERY_BEFORE_SLEEP,
+    "morning": MetricKind.MORNING_BODY_BATTERY,
+}
+_SLEEP_KEYS = ("sleep_start_at", "sleep_end_at")
+_VALUE_KEYS = (*_VALUE_KINDS, *_SLEEP_KEYS)
 
 
 class GarminSnapshotSink(Protocol):
@@ -68,8 +86,38 @@ class MorningBatteryStore:
 
     def current(self) -> dict[str, Any] | None:
         with self._manager.reader() as db:
-            value = garmin_store.read_state(db).get("morning_body_battery")
-        return value if isinstance(value, dict) else None
+            return self.current_in(db)
+
+    @staticmethod
+    def current_in(db: Any) -> dict[str, Any] | None:
+        """The morning record: the view's bookkeeping with the derived values.
+
+        A record stored before the values became observations keeps its inline
+        values until the next refresh of its night.
+        """
+        view = garmin_store.read_state(db).get("morning_body_battery")
+        if not isinstance(view, dict):
+            return None
+        night = str(view.get("sleep_date") or "")
+        rows = canonical_store.derived_observation_rows(
+            db, METHOD_ID, owners=[_night_owner(night)]
+        )
+        if not rows:
+            # A night without values; a record stored before #1686 keeps its own.
+            return {**dict.fromkeys(_VALUE_KINDS), **view}
+        record = {key: value for key, value in view.items() if key not in _VALUE_KEYS}
+        for name, kind in _VALUE_KINDS.items():
+            row = next((item for item in rows if item["metric"] == kind.value), None)
+            record[name] = (
+                None
+                if row is None
+                else {"observed_at": row["observed_at"], "value": round(row["value"])}
+            )
+            if row is not None:
+                for key in _SLEEP_KEYS:
+                    if row["derivation"].get(key):
+                        record[key] = row["derivation"][key]
+        return record
 
     def persist(
         self,
@@ -107,11 +155,15 @@ class MorningBatteryStore:
                     ),
                     attempts=attempts,
                 )
+            view = record
+            if self._canonical is not None and not record.get("error"):
+                _store_values(db, checkin_date, record, now=fetched_at)
+                view = {k: v for k, v in record.items() if k not in _VALUE_KEYS}
             self._garmin_snapshots.write_refresh(
                 db,
                 fetched_at=fetched_at,
                 sections=sections,
-                view={"morning_body_battery": record},
+                view={"morning_body_battery": view},
                 windows={},
                 allowed=MORNING_SOURCES,
             )
@@ -174,6 +226,62 @@ class MorningBatteryStore:
                 else ""
             )
             self._key_values.set(db, _GARMIN_ERROR_KEY, value)
+
+
+def _night_owner(sleep_date: str) -> str:
+    return f"night:{sleep_date}"
+
+
+def _store_values(
+    db: Any, checkin_date: date, record: Mapping[str, Any], *, now: str
+) -> None:
+    """Store the night's before-sleep and morning levels as derived observations.
+
+    Each observation is dated on the night (``sleep_date``) at its sample time and
+    owned by the night, so a refresh that picks another sample, or none, retires
+    the night's earlier rows.
+    """
+    owner = _night_owner(checkin_date.isoformat())
+    derivation = {key: record[key] for key in _SLEEP_KEYS if record.get(key)}
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {key: record.get(key) for key in _VALUE_KEYS}, sort_keys=True
+        ).encode("utf-8")
+    ).hexdigest()
+    keep: set[str] = set()
+    for name, kind in _VALUE_KINDS.items():
+        sample = record.get(name)
+        if not isinstance(sample, Mapping):
+            continue
+        observation = Observation(
+            kind=kind,
+            value=MetricValue(float(sample["value"]), kind.unit),
+            observed_on=checkin_date,
+            observed_at=datetime.fromisoformat(str(sample["observed_at"])),
+            provenance=Provenance(
+                provider=None,
+                source_kind=SourceKind.DERIVED,
+                source_record_id=owner,
+                recorded_by=RecordingOrigin.GARMIN,
+                retrieved_at=None,
+                label=_DERIVED_LABEL,
+            ),
+            method=METHOD_ID,
+            method_version=METHOD_VERSION,
+            input_fingerprint=fingerprint,
+        )
+        keep.add(canonical_store.observation_natural_key(observation))
+        canonical_store.upsert_observation(
+            db,
+            observation,
+            mapper_version=METHOD_VERSION,
+            now=now,
+            owner=owner,
+            derivation=derivation,
+        )
+    canonical_store.retire_owner_derived_observations(
+        db, METHOD_ID, owner, keep=keep, now=now
+    )
 
 
 class MorningBatteryRemoteSource(Protocol):
@@ -428,12 +536,13 @@ class MorningBodyBatteryService:
             retry_seconds=self._retry_policy.retry_seconds,
         )
 
-    def current(self, snapshot: dict[str, Any] | None = None) -> dict[str, Any] | None:
-        """Return the persisted morning record from an explicit or current snapshot."""
-        if snapshot is None:
-            return self.store.current()
-        value = snapshot.get("morning_body_battery")
-        return value if isinstance(value, dict) else None
+    def current(self) -> dict[str, Any] | None:
+        """Return the persisted morning record (bookkeeping and derived values)."""
+        return self.store.current()
+
+    def current_in(self, db: Any) -> dict[str, Any] | None:
+        """The persisted morning record, read inside the caller's transaction."""
+        return self.store.current_in(db)
 
 
 class MorningBodyBatteryServiceCache:
