@@ -379,10 +379,10 @@ class ServerPerformanceTests(ServerTestCase):
             _garmin_metrics(read_garmin()),
             canonical=recovery_only_inputs(snapshot=snapshot).current,
         )
-        # The Intervals ride setting precedes Garmin's FTP (#1668).
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 250)
-        self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Intervals.icu")
-        self.assertEqual(metrics["cycling_ftp_watts"]["alternatives"][0]["value"], 302)
+        # Garmin's FTP is the value; the Intervals.icu setting is no source.
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
+        self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")
+        self.assertNotIn("alternatives", metrics["cycling_ftp_watts"])
         # Intervals.icu eFTP is no longer read (#1727).
         self.assertNotIn("cycling_eftp_watts", metrics)
         self.assertEqual(metrics["run_threshold_watts"]["value"], 328)
@@ -482,8 +482,8 @@ class ServerPerformanceTests(ServerTestCase):
         comparisons = performance["comparisons"]
         self.assertIsNone(comparisons["cycling_ftp_watts_30d"])
         self.assertIsNone(comparisons["bike_threshold_hr_bpm_30d"])
-        self.assertEqual(comparisons["readiness_30d"]["delta"], 5)
-        self.assertEqual(comparisons["readiness_30d"]["color"], "good")
+        # Intervals.icu readiness is no source, so there is no readiness trend.
+        self.assertIsNone(comparisons["readiness_30d"])
         # The canonical Garmin history keeps today's prediction too (1500, 1600).
         self.assertEqual(comparisons["run_5k_seconds_30d"]["delta"], -50)
         self.assertEqual(comparisons["run_5k_seconds_30d"]["color"], "good")
@@ -493,7 +493,13 @@ class ServerPerformanceTests(ServerTestCase):
         snapshot = intervals_compaction.compact_snapshot(
             {"sportSettings": [{"types": ["Ride"], "ftp": 300}]},
             [],
-            [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 290}]}],
+            [
+                {
+                    "id": today,
+                    "restingHR": 50,
+                    "sportInfo": [{"types": ["Ride"], "eFTP": 290}],
+                }
+            ],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
             synced_at=runtime_clock.utc_now(),
@@ -501,7 +507,8 @@ class ServerPerformanceTests(ServerTestCase):
 
         performance = _current_performance_context(snapshot)
 
-        self.assertEqual(performance["metrics"]["cycling_ftp_watts"]["value"], 300)
+        # Neither the Intervals.icu FTP nor its eFTP is a current value or history.
+        self.assertIsNone(performance["metrics"]["cycling_ftp_watts"]["value"])
         self.assertIsNone(performance["comparisons"]["cycling_ftp_watts_30d"])
 
     def test_morning_body_battery_uses_timestamped_levels_not_daily_charge(self):
@@ -686,21 +693,10 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(validation["activity"]["sport"], "Laufen")
         self.assertEqual(validation["activity"]["pace_seconds_per_km"], 312)
         self.assertEqual(validation["activity"]["average_heart_rate_bpm"], 166)
-        self.assertEqual(
-            validation["provider_references"][0]["metric"], "running_vo2max_ml_kg_min"
+        # The Intervals.icu sport settings give no provider reference value.
+        self.assertTrue(
+            all(item["value"] is None for item in validation["provider_references"])
         )
-        zone2_reference = next(
-            item
-            for item in validation["provider_references"]
-            if item["metric"] == "run_zone2_pace_seconds_per_km"
-        )
-        self.assertEqual(zone2_reference["value"], 333)
-        threshold_reference = next(
-            item
-            for item in validation["provider_references"]
-            if item["metric"] == "run_threshold_pace_seconds_per_km"
-        )
-        self.assertEqual(threshold_reference["value"], 250)
         self.assertIn("direct_support", validation["validation_outcome_enum"])
 
     def test_activity_validation_exposes_cycling_power_as_percent_of_ftp(self):
@@ -730,16 +726,12 @@ class ServerPerformanceTests(ServerTestCase):
         validation = _current_performance_context(snapshot)["activity_validation"]
 
         self.assertEqual(validation["activity"]["sport"], "Radfahren")
-        self.assertEqual(validation["activity"]["intensity"], 90)
-        self.assertEqual(
-            validation["activity"]["power_as_percent_of_current_ftp"], 90.0
-        )
-        self.assertEqual(
-            [item["metric"] for item in validation["provider_references"]],
-            [
-                "cycling_vo2max_ml_kg_min",
-                "cycling_ftp_watts",
-            ],
+        # Without a Garmin, Wahoo or local FTP there is no local intensity and no
+        # power ratio; the Intervals.icu FTP is no source.
+        self.assertNotIn("intensity", validation["activity"])
+        self.assertNotIn("power_as_percent_of_current_ftp", validation["activity"])
+        self.assertTrue(
+            all(item["value"] is None for item in validation["provider_references"])
         )
         self.assertEqual(
             validation["direct_activity_estimates"]["activity_configured_ftp_watts"],
@@ -857,6 +849,7 @@ class ServerPerformanceTests(ServerTestCase):
                 "id": (today - timedelta(days=offset)).isoformat(),
                 "atl": 60.0,
                 "ctl": 55.0,
+                "weight": 70,
             }
             for offset in range(7)
         ]
@@ -898,20 +891,32 @@ class ServerPerformanceTests(ServerTestCase):
                 ],
             },
             [],
-            [{"id": today, "ctLoad": 68, "atlLoad": 74, "form": -6, "readiness": 82}],
+            [
+                {
+                    "id": today,
+                    "ctLoad": 68,
+                    "atlLoad": 74,
+                    "form": -6,
+                    "readiness": 82,
+                    "weight": 72,
+                }
+            ],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
             synced_at=runtime_clock.utc_now(),
         )
         performance = _mapped_performance_context(snapshot)
         metrics = performance["metrics"]
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 285)
-        self.assertEqual(metrics["run_threshold_watts"]["value"], 315)
-        self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 286)
-        self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 174)
-        self.assertEqual(metrics["cycling_vo2max_ml_kg_min"]["value"], 62)
-        history = performance["intervals_load_history"]
-        self.assertEqual((history["ctl"], history["tsb"]), (68, -6))
+        # Intervals.icu sport settings are no source, whatever their aliases.
+        for key in (
+            "cycling_ftp_watts",
+            "run_threshold_watts",
+            "run_threshold_pace_seconds_per_km",
+            "run_threshold_hr_bpm",
+            "cycling_vo2max_ml_kg_min",
+        ):
+            self.assertIsNone(metrics[key]["value"], key)
+        self.assertNotIn("intervals_load_history", performance)
 
     def test_mmp_model_is_neither_ftp_nor_a_current_eftp(self):
         today = _local_datetime.now().astimezone().date().isoformat()
@@ -927,14 +932,14 @@ class ServerPerformanceTests(ServerTestCase):
                 ],
             },
             [],
-            [{"id": today}],
+            [{"id": today, "restingHR": 50}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
             synced_at=runtime_clock.utc_now(),
         )
 
         metrics = _current_performance_context(snapshot)["metrics"]
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
+        self.assertIsNone(metrics["cycling_ftp_watts"]["value"])
         # Intervals.icu eFTP is no longer read (#1727).
         self.assertNotIn("cycling_eftp_watts", metrics)
 
@@ -954,7 +959,7 @@ class ServerPerformanceTests(ServerTestCase):
             {
                 "synced_at": "now",
                 "athlete": {},
-                "recent_wellness": [{"id": today, "ctl": 40}],
+                "recent_wellness": [{"id": today, "restingHR": 50}],
                 "recent_activities": [],
             }
         )
@@ -965,11 +970,12 @@ class ServerPerformanceTests(ServerTestCase):
             {
                 "synced_at": "now",
                 "athlete": {"height": 1.83},
-                "recent_wellness": [{"id": today, "ctl": 40}],
+                "recent_wellness": [{"id": today, "restingHR": 50}],
                 "recent_activities": [],
             }
         )["metrics"]["height_cm"]
-        self.assertEqual(metric["value"], 183)
+        # The Intervals.icu athlete height is no source; the profile's stands.
+        self.assertEqual(metric["value"], 181)
 
     def test_performance_refresh_only_requests_provider_data(self):
         calls = []

@@ -1,19 +1,16 @@
-"""Intervals.icu form is read from canonical observations only; eFTP is not read.
+"""Intervals.icu load, form and eFTP are not read.
 
-Since #1726 the Intervals.icu CTL, ATL and form are only a labelled history
-(``intervals_load_history``); the current load is the local curve (M7) and no
-ramp rate is derived.
+Since the Intervals.icu output-only decision (2026-11-07) the stored CTL, ATL and
+form are no history of the performance context either; the current load is the
+local curve (M7) and no ramp rate is derived. The mapper still stores the
+observations, so the mapper tests keep their metadata checks.
 
 The observations come from the real Intervals.icu mappers, applied to synthetic
-snapshots; the snapshot handed to the performance context is stripped of its
-wellness rows and sport settings to prove that no carrier row is read (#1412). The
-expected values are those the snapshot readers produced for the same data. All
-storage is mocked and every provider payload is synthetic.
+snapshots. All storage is mocked and every provider payload is synthetic.
 """
 
 from __future__ import annotations
 
-import copy
 import unittest
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
@@ -28,6 +25,7 @@ from performance_day_support import snapshot_metrics
 
 from backend.canonical.records import FORM_METHOD, FORM_METHOD_VERSION, Observation
 from backend.canonical.vocabulary import MetricKind, SourceKind
+from backend.performance.canonical_current import NO_CURRENT_INPUTS
 from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
@@ -100,21 +98,11 @@ def _context(
 
 
 def _row(day: str, **fields: Any) -> dict[str, Any]:
-    return {"id": day, **fields}
+    # The stored weight makes each row a body-history day, so the inputs exist.
+    return {"id": day, "weight": 70, **fields}
 
 
 class FormTests(unittest.TestCase):
-    def test_reported_and_derived_form_match_the_snapshot_readers(self) -> None:
-        for name, row, expected in (
-            ("reported", _row(_day(), ctl=50, atl=60, tsb=3), 3),
-            ("form alias", _row(_day(), ctl=50, atl=60, form="-2,5"), -2.5),
-            ("zero is a value", _row(_day(), ctl=50, atl=60, freshness=0), 0),
-            ("derived", _row(_day(), ctl=52.1, atl=60.43), -8.33),
-        ):
-            with self.subTest(name):
-                load = _context(_snapshot([row]))["intervals_load_history"]
-                self.assertEqual(load["tsb"], expected)
-
     def test_a_derived_form_keeps_its_value_and_kind_with_its_method_metadata(
         self,
     ) -> None:
@@ -128,27 +116,25 @@ class FormTests(unittest.TestCase):
         self.assertEqual(form.method, FORM_METHOD)
         self.assertEqual(form.method_version, FORM_METHOD_VERSION)
         self.assertIsNotNone(form.input_fingerprint)
-        self.assertEqual(
-            _context(snapshot)["intervals_load_history"]["tsb"], form.value.value
-        )
+        self.assertEqual(form.value.value, -8.33)
 
-    def test_the_carrier_form_is_never_read(self) -> None:
-        mapped = _snapshot([_row(_day(), ctl=50, atl=60)])
-        carrier = _snapshot([_row(_day(), ctl=50, atl=60, tsb=99, form=98)])
-        self.assertEqual(
-            _context(mapped, carrier)["intervals_load_history"]["tsb"], -10.0
-        )
+    def test_reported_and_carrier_form_feed_no_context_value(self) -> None:
+        for name, row in (
+            ("reported", _row(_day(), ctl=50, atl=60, tsb=3)),
+            ("form alias", _row(_day(), ctl=50, atl=60, form="-2,5")),
+            ("derived", _row(_day(), ctl=52.1, atl=60.43)),
+            ("invalid", _row(_day(), ctl=50, atl=60, tsb="fresh")),
+        ):
+            with self.subTest(name):
+                context = _context(_snapshot([row]))
+                self.assertNotIn("intervals_load_history", context)
+                self.assertIsNone(context["current_load"]["tsb"])
+                self.assertIsNone(context["current_load"]["ctl"])
 
-    def test_an_invalid_reported_form_is_unknown_not_derived(self) -> None:
-        # Known deviation: the mapper rejects the invalid value and stores no form
-        # for the day, where the snapshot reader derived CTL minus ATL.
-        load = _context(_snapshot([_row(_day(), ctl=50, atl=60, tsb="fresh")]))
-        self.assertIsNone(load["intervals_load_history"]["tsb"])
-
-    def test_snapshot_only_latest_day_does_not_displace_observed_form(self) -> None:
-        snapshot = _snapshot([_row(_day(1), ctl=50, atl=60), _row(_day())])
-        load = _context(snapshot, copy.deepcopy(snapshot))["intervals_load_history"]
-        self.assertEqual(load["tsb"], -10.0)
+    def test_the_inputs_hold_no_load_or_form(self) -> None:
+        inputs = _inputs(_snapshot([_row(_day(), ctl=50, atl=60, tsb=3)]))
+        for name in ("wellness_day", "ctl", "atl", "form_by_day", "wellness_days"):
+            self.assertFalse(hasattr(inputs, name), name)
 
     def test_intervals_form_never_feeds_the_current_load_or_comparison(
         self,
@@ -158,7 +144,7 @@ class FormTests(unittest.TestCase):
         self.assertIsNone(context["current_load"]["tsb"])
         self.assertIsNone(context["comparisons"]["form_tsb"])
         self.assertNotIn("ramp_rate", context["current_load"])
-        self.assertEqual(context["intervals_load_history"]["ctl"], 58.4)
+        self.assertNotIn("intervals_load_history", context)
 
 
 def _ride(eftp: float | None = None, **fields: Any) -> dict[str, Any]:
@@ -209,13 +195,12 @@ class EftpTests(unittest.TestCase):
         inputs = _inputs(self._snapshot())
         for name in ("eftp_by_day", "run_eftp_by_day", "power_curve"):
             self.assertFalse(hasattr(inputs, name), name)
-        assert inputs.current is not None
         for name in ("athlete_eftp", "wellness_eftp"):
             self.assertFalse(hasattr(inputs.current, name), name)
 
-    def test_the_athlete_record_thresholds_need_no_wellness_day(self) -> None:
-        # An athlete-only snapshot: no wellness row, so no wellness day. The latest
-        # sync's athlete thresholds still reach the current metrics; its eFTP not.
+    def test_the_athlete_record_thresholds_are_no_current_inputs(self) -> None:
+        # An athlete-only snapshot: the latest sync's athlete thresholds and its
+        # eFTP reach no current metric.
         snapshot = _snapshot([], settings=[_ride(262, lthr=168)])
         inputs = read_performance_inputs(
             FilteringReader(_observations(snapshot)),
@@ -223,11 +208,8 @@ class EftpTests(unittest.TestCase):
             activity_reader=NoActivityRows(),
             as_of=DAY,
         )
-        assert inputs is not None and inputs.current is not None
-        self.assertIsNone(inputs.wellness_day)
-        self.assertEqual(
-            [item.value.value for item in inputs.current.bike_threshold_hr], [168]
-        )
+        assert inputs is not None
+        self.assertEqual(inputs.current, NO_CURRENT_INPUTS)
         metrics = snapshot_metrics(
             snapshot,
             {},
@@ -235,6 +217,7 @@ class EftpTests(unittest.TestCase):
             canonical=inputs.current,
         )
         self.assertNotIn("cycling_eftp_watts", metrics)
+        self.assertIsNone(metrics["bike_threshold_hr_bpm"]["value"])
 
     def test_without_canonical_inputs_no_eftp_remains(self) -> None:
         # Canonical reads (#1416): the context takes no snapshot at all.

@@ -892,7 +892,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(data["distance"], "21097")
         self.assertEqual(data["target"], "Sub 2:00")
 
-    def test_max_heart_rate_uses_intervals_fallback_for_both_sports(self):
+    def test_max_heart_rate_has_no_intervals_fallback(self):
         snapshot = {
             "athlete": {
                 "sport_settings": [
@@ -908,10 +908,8 @@ class ServerSyncTests(ServerTestCase):
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),
         )
-        self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
-        self.assertEqual(metrics["cycling_max_hr_bpm"]["source"], "Intervals.icu")
-        self.assertEqual(metrics["running_max_hr_bpm"]["value"], 193)
-        self.assertEqual(metrics["running_max_hr_bpm"]["source"], "Intervals.icu")
+        self.assertIsNone(metrics["cycling_max_hr_bpm"]["value"])
+        self.assertIsNone(metrics["running_max_hr_bpm"]["value"])
 
     def test_garmin_daily_health_is_averaged_over_the_last_seven_days(self):
         today = server.ATHLETE_CLOCK.now().date()
@@ -1457,7 +1455,8 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("LATEST INTERVALS.ICU SNAPSHOT", context)
         self.assertEqual(context.count('"local_planned_workouts"'), 1)
         preview = server.COACH_CONTEXT.preview_service().preview()
-        self.assertTrue(preview["snapshot_compacted"])
+        # An Intervals.icu-only snapshot carries no activity sync time (#1728).
+        self.assertFalse(preview["snapshot_compacted"])
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])
 
@@ -2502,10 +2501,9 @@ class ServerSyncTests(ServerTestCase):
             server.PLANNING_DATA.competition().list()[0]["name"], "Swim Race"
         )
 
-    def test_current_performance_is_derived_from_intervals_snapshot(self):
+    def test_intervals_snapshot_gives_no_threshold_recovery_or_load(self):
         today = _local_datetime.now().astimezone().date().isoformat()
         snapshot = {
-            # Intervals.icu thresholds count only from a sync at most 30 days old.
             "synced_at": f"{today}T00:00:00+00:00",
             "athlete": {"icu_ftp": 300, "lthr": 171},
             "recent_wellness": [
@@ -2530,17 +2528,19 @@ class ServerSyncTests(ServerTestCase):
             ],
         }
         performance = _current_performance_context(snapshot)
-        self.assertEqual(performance["thresholds"]["ftp_w"], 300)
-        self.assertEqual(performance["intervals_load_history"]["tsb"], -6)
-        self.assertEqual(performance["recovery"]["sleep_hours"], 7.5)
-        # The local load (card M6), not Intervals.icu's 110: NP 270 W at the
-        # Intervals.icu FTP 300 W for 2 h is IF 0.9, 2 × 0.81 × 100 = 162 TSS.
-        self.assertEqual(
-            performance["rolling_training"]["last_7_days"]["training_load"], 162.0
-        )
+        # Intervals.icu is output-only: its FTP, load history and wellness rows
+        # give no current value (athlete decision 2026-11-07).
+        self.assertIsNone(performance["thresholds"]["ftp_w"])
+        self.assertNotIn("intervals_load_history", performance)
+        self.assertIsNone(performance["recovery"]["sleep_hours"])
+        # The local load (card M6) has no FTP for the session, and Intervals.icu's
+        # 110 is no load: the session is counted as left out.
+        last_7 = performance["rolling_training"]["last_7_days"]
+        self.assertEqual(last_7["training_load"], 0.0)
+        self.assertEqual(last_7["load_missing_sessions"], last_7["sessions"])
         self.assertNotIn("ai_estimates", performance)
 
-    def test_form_is_derived_from_ctl_and_atl_when_intervals_omits_tsb(self):
+    def test_stored_intervals_ctl_and_atl_give_no_load_or_form(self):
         today = _local_datetime.now().astimezone().date().isoformat()
         snapshot = {
             "synced_at": "now",
@@ -2549,7 +2549,9 @@ class ServerSyncTests(ServerTestCase):
             "recent_activities": [],
         }
         performance = _current_performance_context(snapshot)
-        self.assertEqual(performance["intervals_load_history"]["tsb"], -12)
+        self.assertNotIn("intervals_load_history", performance)
+        # Rows holding only CTL and ATL are no provider value at all.
+        self.assertFalse(performance["available"])
 
     def test_intervals_eftp_is_not_read_from_settings_wellness_or_activities(
         self,
@@ -2576,7 +2578,7 @@ class ServerSyncTests(ServerTestCase):
 
         performance = _current_performance_context(snapshot)
         metrics = performance["metrics"]
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
+        self.assertIsNone(metrics["cycling_ftp_watts"]["value"])
         # Intervals.icu eFTP is no longer read by any view (#1727).
         self.assertNotIn("cycling_eftp_watts", metrics)
         self.assertNotIn("cycling_eftp_30d", performance.get("comparisons") or {})

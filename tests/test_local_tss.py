@@ -325,6 +325,36 @@ class DatedThresholdTests(unittest.TestCase):
         self.assertEqual((april.value, april.after_session), (240.0, False))
         self.assertEqual((june.value, june.observed_on), (260.0, date(2026, 5, 1)))
 
+    def test_intervals_thresholds_are_ignored_for_every_session_day(self) -> None:
+        thresholds = DatedThresholds(
+            [
+                _observation(
+                    MetricKind.FTP,
+                    300.0,
+                    date(2026, 5, 1),
+                    provider=ProviderId.INTERVALS,
+                ),
+                _observation(MetricKind.FTP, 240.0, date(2026, 3, 1)),
+                _observation(
+                    MetricKind.THRESHOLD_HR,
+                    170.0,
+                    date(2026, 5, 1),
+                    provider=ProviderId.INTERVALS,
+                ),
+            ]
+        )
+        june = _found(
+            thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2026, 6, 1))
+        )
+        early = _found(
+            thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2025, 1, 1))
+        )
+        self.assertEqual((june.value, june.source), (240.0, "garmin"))
+        self.assertEqual((early.value, early.after_session), (240.0, True))
+        self.assertIsNone(
+            thresholds.threshold(MetricKind.THRESHOLD_HR, Sport.RIDE, date(2026, 6, 1))
+        )
+
     def test_session_before_any_threshold_takes_the_earliest_later_one(self) -> None:
         thresholds = DatedThresholds(
             [

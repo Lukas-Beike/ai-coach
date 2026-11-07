@@ -2,7 +2,7 @@ import copy
 import unittest
 from datetime import date
 
-from performance_day_support import current_days, garmin_metrics_from_payload
+from performance_day_support import garmin_metrics_from_payload
 
 from backend.performance.comparisons import (
     performance_comparisons,
@@ -46,29 +46,14 @@ class PerformanceTrendAverageTests(unittest.TestCase):
             290.0,
         )
 
-    def test_intervals_source_uses_wellness_trend_and_window(self):
-        snapshot = {
-            "recent_wellness": [
-                {"id": "2026-09-01", "readiness": 70},
-                {"id": "2026-09-07", "readiness": 80},
-                {"id": "2026-08-31", "readiness": 99},
-            ]
-        }
+    def test_a_non_garmin_source_has_no_trend_average(self):
         metrics = {"readiness": {"source": "Intervals.icu Wellness"}}
+        history = {"readiness": {TODAY: 80.0}}
 
-        self.assertEqual(
-            performance_trend_average(
-                metrics,
-                "readiness",
-                7,
-                TODAY,
-                wellness_days=current_days(snapshot["recent_wellness"]),
-                garmin_history={},
-            ),
-            75.0,
-        )
         self.assertIsNone(
-            performance_trend_average(metrics, "readiness", 7, TODAY, garmin_history={})
+            performance_trend_average(
+                metrics, "readiness", 7, TODAY, garmin_history=history
+            )
         )
 
 
@@ -83,7 +68,6 @@ class PerformanceComparisonsTests(unittest.TestCase):
                 ("bike_threshold_hr_bpm", 165),
                 ("run_threshold_watts", 300),
                 ("run_threshold_pace_seconds_per_km", 280),
-                ("run_zone2_pace_seconds_per_km", 370),
                 ("run_threshold_hr_bpm", 170),
                 ("cycling_vo2max_ml_kg_min", 55),
                 ("running_vo2max_ml_kg_min", 54),
@@ -117,7 +101,6 @@ class PerformanceComparisonsTests(unittest.TestCase):
                 "value": 270,
                 "source": GARMIN_SOURCE,
             },
-            "run_zone2_pace_seconds_per_km": {"value": 360, "source": GARMIN_SOURCE},
             "run_threshold_hr_bpm": {"value": 175, "source": GARMIN_SOURCE},
             "cycling_vo2max_ml_kg_min": {"value": 60, "source": GARMIN_SOURCE},
             "running_vo2max_ml_kg_min": {"value": 58, "source": GARMIN_SOURCE},
@@ -126,30 +109,6 @@ class PerformanceComparisonsTests(unittest.TestCase):
             "run_half_marathon_seconds": {"value": 5_800, "source": GARMIN_SOURCE},
             "run_marathon_seconds": {"value": 12_000, "source": GARMIN_SOURCE},
         }
-        wellness_rows = [
-            {
-                "id": "2026-09-01",
-                "sleepSecs": 25_200,
-                "readiness": 70,
-                "restingHR": 60,
-                "hrv": 50,
-                "ctl": 65,
-                "atl": 75,
-                "tsb": -7,
-                "sportInfo": [{"types": ["Ride"], "eftp_w": 290}],
-            },
-            {
-                "id": "2026-09-07",
-                "sleepSecs": 25_200,
-                "readiness": 70,
-                "restingHR": 60,
-                "hrv": 50,
-                "ctl": 65,
-                "atl": 75,
-                "tsb": -8,
-                "sportInfo": [{"types": ["Ride"], "eftp_w": 290}],
-            },
-        ]
         recovery = {
             "sleep_hours": 8,
             "sleep_average": 7,
@@ -173,12 +132,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
             "previous_7": {"training_load": 90, "duration_hours": 8},
             "previous_30": {"training_load": 400, "duration_hours": 30},
         }
-        return (
-            metrics,
-            recovery,
-            load_context,
-            current_days(wellness_rows),
-        )
+        return (metrics, recovery, load_context)
 
     def test_comparisons_preserve_keys_units_labels_and_direction_flags(self):
         values = self._inputs()
@@ -204,26 +158,23 @@ class PerformanceComparisonsTests(unittest.TestCase):
         self.assertEqual(result["readiness_30d"]["days"], 30)
         self.assertEqual(values, before)
 
-    def test_eftp_and_form_comparisons_read_the_canonical_days_only(self):
-        metrics, recovery, load_context, days = self._inputs()
-        # A stored eFTP metric and the rows' sportInfo eFTP 290 are not read and
-        # yield no eFTP comparison since #1727.
+    def test_eftp_is_not_compared_and_form_compares_the_local_values(self):
+        metrics, recovery, load_context = self._inputs()
         metrics = {
             **metrics,
             "cycling_eftp_watts": {"value": 309, "source": "Intervals.icu"},
         }
         result = performance_comparisons(
-            metrics, recovery, load_context, days, TODAY, garmin_history=self._history()
+            metrics, recovery, load_context, TODAY, garmin_history=self._history()
         )
         self.assertNotIn("cycling_eftp_30d", result)
         self.assertFalse(any("eftp" in key for key in result))
-        # The rows carry Intervals.icu tsb -7/-8; the form compares the local values.
         self.assertEqual(
             (result["form_tsb"]["current"], result["form_tsb"]["average"]), (-5, -8)
         )
 
     def test_fitness_form_and_fatigue_compare_the_local_values(self):
-        # The rows carry Intervals.icu tsb -7/-8; only the local averages count.
+        # Only the local values and their averages count.
         result = performance_comparisons(
             *self._inputs(), TODAY, garmin_history=self._history()
         )

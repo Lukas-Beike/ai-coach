@@ -9,8 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as _local_datetime
 from unittest.mock import patch
 
-from garmin_support import read_garmin
-from performance_day_support import canonical_from_snapshot
+from canonical_recovery_support import recovery_only_inputs
 from server_test_support import ServerTestCase, server
 from support import (
     IntervalsRequestRecorder,
@@ -3420,34 +3419,29 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_current_performance_includes_health_and_training_comparisons(self):
         today = _local_datetime.now().astimezone().date()
-        wellness = [
-            {
-                "id": (today - timedelta(days=offset)).isoformat(),
-                "sleepSecs": 25200,
-                "readiness": 70,
-                "restingHR": 60,
-                "hrv": 50,
-                "ctl": 50,
-                "atl": 60,
-                "tsb": -10,
-            }
-            for offset in range(7)
-        ]
-        wellness[0]["sleepSecs"] = 28800
-        wellness[0]["readiness"] = 80
-        wellness[0]["restingHR"] = 55
-        wellness[0]["hrv"] = 60
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_wellness": wellness,
-            "recent_activities": [],
+        days = [(today - timedelta(days=offset)).isoformat() for offset in range(7)]
+        garmin = {
+            "sleep": [
+                {
+                    "calendarDate": day,
+                    "sleepTimeSeconds": 28800 if index == 0 else 25200,
+                }
+                for index, day in enumerate(days)
+            ],
+            "resting_hr": [
+                {"calendarDate": day, "restingHeartRate": 55 if index == 0 else 60}
+                for index, day in enumerate(days)
+            ],
+            "hrv": [
+                {"calendarDate": day, "lastNightAvg": 60 if index == 0 else 50}
+                for index, day in enumerate(days)
+            ],
         }
         comparisons = current_performance_context(
-            GarminSyncStatus.from_state(read_garmin()),
+            GarminSyncStatus.from_state(garmin),
             server.ATHLETE_DATA.profile().get(),
             today,
-            canonical=canonical_from_snapshot(snapshot, today),
+            canonical=recovery_only_inputs(garmin),
         )["comparisons"]
         self.assertEqual(comparisons["sleep_hours"]["days"], 7)
         self.assertEqual(comparisons["sleep_hours"]["color"], "good")

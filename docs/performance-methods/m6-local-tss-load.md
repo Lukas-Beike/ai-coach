@@ -6,7 +6,7 @@
 - **Status:** implemented (`backend/performance/local_tss.py`, `backend/sync/local_load.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-06
-- **Review:** released 2026-11-06 (athlete)
+- **Review:** released 2026-11-07 (athlete)
 
 ## Target construct
 
@@ -169,7 +169,9 @@ hour, or a mix of branches on one scale.
   current thresholds (`backend/performance/current_thresholds.py`):
   1. the locally confirmed zone configuration in effect that day;
   2. otherwise each provider's latest value observed on or before that day,
-     within the policy's age limits counted from that day.
+     within the policy's age limits counted from that day: Garmin, then Wahoo
+     for FTP. Intervals.icu values are not a source (athlete decision
+     2026-11-07).
 - Resting HR comes from the recovery family on the session day or up to 7
   days earlier, else the earliest later value, flagged.
 - Each value covers one session; no history window is needed.

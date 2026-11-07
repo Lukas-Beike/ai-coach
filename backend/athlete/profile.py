@@ -24,7 +24,7 @@ PREFERRED_SOURCE_FIELDS = (
     "preferred_source_resting_hr",
     "preferred_source_sleep",
 )
-PREFERRED_SOURCES = ("", ProviderId.GARMIN.value, ProviderId.INTERVALS.value)
+PREFERRED_SOURCES = ("", ProviderId.GARMIN.value)
 
 DEFAULT_PROFILE = {
     "name": "",

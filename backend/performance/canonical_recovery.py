@@ -6,10 +6,7 @@ these observations only; neither reads raw provider views for them.
 
 All recovery kinds are read once per unit of work, from all providers, from
 ``RECOVERY_HISTORY_DAYS - 1`` days before ``as_of`` without an end bound, because
-Garmin records may be newer than the latest wellness row. The latest wellness day
-pins the Intervals values of ``select_current`` to the newest wellness row, as
-the legacy readers did; it is None when there is no usable wellness day, and
-Garmin values are still selected then.
+Garmin records may be newer than the latest wellness row.
 
 Sleep periods for the sleep timing variability are read when the serving source
 stores them (``SleepPeriodReader``), one day before the window so a period dated
@@ -32,8 +29,6 @@ from backend.performance.source_policy import (
     FAMILY_LOOKBACK_DAYS,
     NO_PREFERENCES,
     SourcePreferences,
-    family_providers,
-    intervals_relays_garmin,
     select_current,
     within_current_bounds,
 )
@@ -55,13 +50,12 @@ RECOVERY_KINDS: Final = (
 
 @dataclass(frozen=True, slots=True)
 class CanonicalRecoveryInputs:
-    """Recovery observations of all providers by kind, and the latest wellness day.
+    """Recovery observations of all providers by kind.
 
     ``sleep_periods`` is None when the serving source stores no sleep periods.
     """
 
     observations: Mapping[MetricKind, tuple[Observation, ...]]
-    latest_wellness_day: date | None
     sleep_periods: tuple[SleepPeriod, ...] | None = None
     preferences: SourcePreferences = NO_PREFERENCES
 
@@ -74,15 +68,8 @@ class CanonicalRecoveryInputs:
         return select_current(
             self.of(kind),
             kind,
-            latest_wellness_day=self.latest_wellness_day,
             preferences=self.preferences,
         )
-
-    def relays(self, kind: MetricKind) -> bool:
-        """Return True when Intervals values of ``kind`` count as Garmin's relay."""
-        return ProviderId.GARMIN in family_providers(
-            self.of(kind), kind, self.preferences
-        ) and intervals_relays_garmin(self.of(kind), kind)
 
     def daily(
         self, kind: MetricKind, provider: ProviderId, *, bounded: bool = False
@@ -116,7 +103,6 @@ def read_recovery_inputs(
     db: Any,
     *,
     as_of: date,
-    latest_wellness_day: date | None,
     preferences: SourcePreferences = NO_PREFERENCES,
 ) -> CanonicalRecoveryInputs:
     """Read every recovery kind once; ``reader`` must already be resolved."""
@@ -126,7 +112,6 @@ def read_recovery_inputs(
             kind: tuple(reader.observations(db, kind, start=start))
             for kind in RECOVERY_KINDS
         },
-        latest_wellness_day=latest_wellness_day,
         preferences=preferences,
         sleep_periods=(
             reader.sleep_periods(db, start=start - timedelta(days=1))

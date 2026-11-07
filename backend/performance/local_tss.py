@@ -82,7 +82,7 @@ CALIBRATION_RPE_SCALES: Final = frozenset(
 CALIBRATION_WINDOW_DAYS: Final = 365
 CALIBRATION_MIN_PAIRS: Final = 20
 _POWER_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
-_RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.INTERVALS, ProviderId.WAHOO)
+_RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.WAHOO)
 THRESHOLD_KINDS: Final = (
     MetricKind.FTP,
     MetricKind.THRESHOLD_PACE,
@@ -443,7 +443,13 @@ class DatedThresholds:
     ) -> None:
         self._observations = tuple(
             sorted(
-                (item for item in observations if item.kind in THRESHOLD_KINDS),
+                (
+                    item
+                    for item in observations
+                    if item.kind in THRESHOLD_KINDS
+                    # Stored Intervals.icu thresholds are never a source.
+                    and item.provenance.provider is not ProviderId.INTERVALS
+                ),
                 key=lambda item: item.observed_on,
             )
         )

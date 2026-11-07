@@ -27,7 +27,7 @@ class PerformanceContextTests(unittest.TestCase):
     def test_none_and_empty_snapshots_are_unavailable(self):
         expected = {
             "available": False,
-            "source": "Intervals.icu",
+            "source": "Gespeicherte Provider-Daten",
             "as_of": None,
             "metrics": {},
             "activities_need_refresh": False,
@@ -125,18 +125,17 @@ class PerformanceContextTests(unittest.TestCase):
         )
 
         self.assertTrue(result["available"])
-        self.assertEqual(
-            result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
-        )
-        # Canonical reads (#1416): the canonical Intervals.icu sync instant, in
-        # ISO form, replaces the stored snapshot's sync text.
-        self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
+        self.assertEqual(result["source"], "Gespeicherte Provider-Daten")
+        # The stored Intervals.icu snapshot names no sync time any more (#1728);
+        # these inputs carry no activity coverage.
+        self.assertIsNone(result["as_of"])
         self.assertFalse(result["activities_need_refresh"])
-        self.assertEqual(result["thresholds"]["ftp_w"], 300)
-        # The mapped Intervals.icu form is only the labelled history (#1726);
-        # the current load is the local curve, which has no stored load here,
-        # and no ramp rate is derived.
-        self.assertEqual(result["intervals_load_history"]["tsb"], -6)
+        # The Intervals.icu athlete FTP is no source; Garmin reports none here.
+        self.assertIsNone(result["thresholds"]["ftp_w"])
+        self.assertNotIn("w_prime_j", result["thresholds"])
+        # The mapped Intervals.icu form is not shown; the current load is the
+        # local curve, which has no stored load here, and no ramp rate is derived.
+        self.assertNotIn("intervals_load_history", result)
         self.assertIsNone(result["current_load"]["tsb"])
         self.assertNotIn("ramp_rate", result["current_load"])
         # Provider loads are never summed (card M6): without a stored local load
@@ -237,7 +236,7 @@ class PerformanceContextTests(unittest.TestCase):
             "athlete": "invalid",
             "recent_wellness": [
                 None,
-                {"id": "2026-09-20", "readiness": "bad", "ctl": 40},
+                {"id": "2026-09-20", "readiness": "bad", "ctl": 40, "weight": 70},
             ],
             "recent_activities": [None, "bad", {"type": "Unknown"}],
         }
@@ -263,9 +262,7 @@ class PerformanceContextTests(unittest.TestCase):
             )
             for day in range(20)
         ]
-        canonical = CanonicalPerformanceInputs(
-            wellness_day=None, ctl=None, atl=None, recovery=recovery_inputs(nights)
-        )
+        canonical = CanonicalPerformanceInputs(recovery=recovery_inputs(nights))
 
         result = current_performance_context(
             GarminSyncStatus.from_state({}), {}, today, canonical=canonical
@@ -367,9 +364,7 @@ class PerformanceContextTests(unittest.TestCase):
 
     def test_inputs_without_provider_values_are_unavailable(self):
         today = date(2026, 9, 20)
-        nothing = CanonicalPerformanceInputs(
-            wellness_day=None, ctl=None, atl=None, activities=(), wellness_days=()
-        )
+        nothing = CanonicalPerformanceInputs(activities=())
 
         result = current_performance_context(
             GarminSyncStatus.from_state({}), {}, today, canonical=nothing
@@ -379,15 +374,13 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertNotIn("status", result)
 
     def test_sync_time_without_athlete_record_values_comes_from_the_coverage(self):
-        # Canonical reads (#1416): a sync that stores wellness but no athlete
-        # record observation still names its sync: the Intervals.icu fetch time of
-        # the canonical coverage, the one sync time reports use too.
+        # The context names the activity sync time of the canonical coverage (the
+        # one reports use too), never an Intervals.icu snapshot (#1728).
         today = date(2026, 9, 20)
-        snapshot = {"recent_wellness": [{"id": today.isoformat(), "ctl": 40}]}
+        snapshot = {"recent_wellness": [{"id": today.isoformat(), "weight": 70}]}
         canonical = canonical_from_snapshot(snapshot, today)
         assert canonical is not None
-        self.assertIsNone(canonical.current.synced_at)
-        coverage = _IntervalsCoverage(datetime(2026, 9, 20, 8, tzinfo=UTC))
+        coverage = _ProviderCoverage(datetime(2026, 9, 20, 8, tzinfo=UTC))
         source = CanonicalPerformanceSource(
             database_manager=lambda: None,
             observation_reader=lambda: None,  # type: ignore[arg-type, return-value]
@@ -403,11 +396,9 @@ class PerformanceContextTests(unittest.TestCase):
             GarminSyncStatus(), {}, today, canonical=canonical
         )
 
-        self.assertEqual(served.intervals_synced_at, "2026-09-20T08:00:00+00:00")
+        self.assertEqual(served.activities_synced_at, "2026-09-20T08:00:00+00:00")
         self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
-        self.assertEqual(
-            result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
-        )
+        self.assertEqual(result["source"], "Gespeicherte Provider-Daten")
         self.assertTrue(without["available"])
         self.assertIsNone(without["as_of"])
         self.assertEqual(without["source"], "Gespeicherte Provider-Daten")
@@ -468,9 +459,9 @@ class PerformanceContextTests(unittest.TestCase):
         )
         self.assertNotIn("hrv", result["recovery"])
         self.assertNotIn("hrv", result["comparisons"])
-        self.assertEqual(result["thresholds"]["ftp_w"], 300)
-        self.assertEqual(result["thresholds"]["w_prime_j"], 20)
-        self.assertEqual(result["intervals_load_history"]["ctl"], 50)
+        self.assertIsNone(result["thresholds"]["ftp_w"])
+        self.assertNotIn("w_prime_j", result["thresholds"])
+        self.assertNotIn("intervals_load_history", result)
         self.assertEqual(result["current_load"]["source"], "Lokal berechnet (M7)")
 
 
@@ -478,8 +469,8 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class _IntervalsCoverage:
-    """Canonical coverage with one Intervals.icu fetch time and no metric windows."""
+class _ProviderCoverage:
+    """Canonical coverage with one Garmin activity fetch time, no metric windows."""
 
     def __init__(self, retrieved_at: datetime) -> None:
         self._retrieved_at = retrieved_at
@@ -487,13 +478,14 @@ class _IntervalsCoverage:
     def coverage(self, db):
         return (
             ProviderCoverage(
-                provider=ProviderId.INTERVALS,
+                provider=ProviderId.GARMIN,
                 retrieved_at=self._retrieved_at,
                 activity_count=0,
                 observation_count=1,
                 issue_counts={},
                 first_observed_on=None,
                 last_observed_on=None,
+                activities_retrieved_at=self._retrieved_at,
             ),
         )
 

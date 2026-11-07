@@ -1,16 +1,15 @@
 """Plan zones read canonical thresholds, not the snapshot sport settings (#1416).
 
-Over the shared populated fixture the canonical zone configurations plus the
-latest sync's sport-scoped FTP, threshold HR and maximum HR give the zone
-settings the stored snapshot's ``sport_settings`` gave, for every sport and
-environment. Before the first backfill the tables serve no thresholds. All
-storage is temporary and providers are mocked.
+Over the shared populated fixture the canonical zone configurations give the zone
+limits the stored snapshot's ``sport_settings`` gave, and the source-policy
+winners (Garmin; Intervals.icu is never a source) give the thresholds, for every
+sport and environment. Before the first backfill the tables serve no thresholds.
+All storage is temporary and providers are mocked.
 """
 
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
 from datetime import date
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
@@ -21,7 +20,7 @@ from zone_settings_reference import (
 )
 
 from backend.activities.zone_settings import ZoneSettings
-from backend.canonical.vocabulary import Environment, MetricKind, Sport
+from backend.canonical.vocabulary import Environment, MetricKind, ProviderId, Sport
 from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
@@ -33,9 +32,9 @@ from backend.planning.calendar_read_model import project_planning_calendar
 SPORTS = (Sport.RIDE, Sport.RUN, Sport.SWIM)
 # Sport settings whose canonical form must choose the snapshot rule's zones.
 SETTING_VARIANTS = (
-    # Indoor FTP without a power zone list: the INDOOR_FTP kind carries it.
+    # Indoor FTP without a power zone list (ignored).
     [{"types": ["Ride", "VirtualRide"], "ftp": 250, "indoor_ftp": 200}],
-    # Indoor FTP with a power zone list: the INDOOR configuration carries it.
+    # Indoor FTP with a power zone list (ignored).
     [
         {
             "types": ["Ride", "VirtualRide"],
@@ -57,9 +56,19 @@ class SettingVariantParityTests(unittest.TestCase):
                     with self.subTest(
                         settings=settings, sport=sport, environment=environment
                     ):
+                        # The Intervals.icu indoor FTP is never read, so the
+                        # snapshot rule is compared without it.
+                        without_indoor = [
+                            {
+                                key: value
+                                for key, value in item.items()
+                                if key != "indoor_ftp"
+                            }
+                            for item in settings
+                        ]
                         self.assertEqual(
                             canonical_zone_settings(settings, sport, environment),
-                            legacy_sport_settings(settings, sport, environment),
+                            legacy_sport_settings(without_indoor, sport, environment),
                         )
 
 
@@ -82,32 +91,39 @@ class PlanZoneParityTests(CanonicalReadFixture):
         self.assertEqual(direct, thresholds)
         return thresholds
 
-    def test_canonical_thresholds_give_the_snapshot_zone_settings(self) -> None:
+    def test_canonical_thresholds_are_garmins_and_the_limits_follow_the_snapshot(
+        self,
+    ) -> None:
         populate(self)
         thresholds = self._thresholds()
         configurations = self.read(self.table.zone_configurations)
         settings = self.intervals["athlete"]["sport_settings"]
         self.assertTrue(thresholds)
+        self.assertEqual(
+            {item.provenance.provider for item in thresholds}, {ProviderId.GARMIN}
+        )
         for sport in SPORTS:
             for environment in Environment:
                 legacy = legacy_zone_settings(
                     settings, configurations, sport, environment
                 )
                 with self.subTest(sport=sport, environment=environment):
-                    self.assertEqual(
-                        ZoneSettings.from_configurations(
-                            configurations,
-                            sport,
-                            environment,
-                            fallback=ZoneSettings.from_thresholds(
-                                thresholds, sport, environment
-                            ),
-                        ),
-                        # Garmin's auto-detected LTHR precedes the Intervals setting.
-                        replace(legacy, lthr=GARMIN_LTHR.get(sport, legacy.lthr)),
+                    chosen = ZoneSettings.from_configurations(
+                        configurations,
+                        sport,
+                        environment,
+                        fallback=ZoneSettings.from_thresholds(thresholds, sport),
                     )
+                    # The zone limits stay the stored configurations'; the
+                    # Intervals.icu thresholds are replaced by Garmin's.
+                    self.assertEqual(chosen.power_limits, legacy.power_limits)
+                    self.assertEqual(chosen.hr_limits, legacy.hr_limits)
+                    self.assertEqual(chosen.pace_limits, legacy.pace_limits)
+                    self.assertEqual(chosen.lthr, GARMIN_LTHR.get(sport, legacy.lthr))
         ride = ZoneSettings.from_thresholds(thresholds, Sport.RIDE)
-        self.assertEqual((ride.ftp, ride.lthr, ride.max_hr), (260, 160, 190))
+        run = ZoneSettings.from_thresholds(thresholds, Sport.RUN)
+        self.assertEqual((ride.ftp, ride.lthr, ride.max_hr), (260, 160, None))
+        self.assertEqual((run.ftp, run.lthr, run.max_hr), (290, 168, None))
 
     def test_the_calendar_colors_plan_steps_from_canonical_thresholds(self) -> None:
         populate(self)
@@ -138,7 +154,7 @@ class PlanZoneParityTests(CanonicalReadFixture):
         self.assertEqual(zone(self._thresholds()), 5)
         self.assertIsNone(zone(()))
 
-    def test_only_sport_scoped_athlete_settings_are_thresholds(self) -> None:
+    def test_only_sport_scoped_garmin_values_are_thresholds(self) -> None:
         populate(self)
         thresholds = self._thresholds()
         self.assertTrue(all(item.sport is not None for item in thresholds))
@@ -147,7 +163,6 @@ class PlanZoneParityTests(CanonicalReadFixture):
             {
                 MetricKind.FTP,
                 MetricKind.THRESHOLD_HR,
-                MetricKind.MAX_HR,
                 MetricKind.THRESHOLD_PACE,
             },
         )

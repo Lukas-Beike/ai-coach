@@ -359,7 +359,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
                 MetricKind.RESTING_HR, 47.0, TODAY.isoformat(), ProviderId.INTERVALS
             )
         )
-        canonical = recovery_inputs(observations, latest_wellness_day=TODAY)
+        canonical = recovery_inputs(observations)
 
         served = personal_recovery({}, TODAY, canonical=canonical)
 
@@ -372,9 +372,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
         )
         reader = RecordingReader({MetricKind.HRV_RMSSD: [observation]})
 
-        inputs = read_recovery_inputs(
-            reader, None, as_of=TODAY, latest_wellness_day=None
-        )
+        inputs = read_recovery_inputs(reader, None, as_of=TODAY)
         # A source without stored sleep periods leaves the regularity on raw rows.
         self.assertIsNone(inputs.sleep_periods)
         served = personal_recovery({}, TODAY, canonical=inputs)
@@ -508,9 +506,7 @@ class M3SleepInputs(unittest.TestCase):
             MetricKind.SLEEP_DURATION, 28_800.0, TODAY.isoformat(), ProviderId.GARMIN
         )
         reader = RecordingReader({MetricKind.SLEEP_DURATION: [observation]})
-        inputs = read_recovery_inputs(
-            reader, None, as_of=TODAY, latest_wellness_day=None
-        )
+        inputs = read_recovery_inputs(reader, None, as_of=TODAY)
         # Since #1411 sleep duration is a canonical input of the baselines.
         self.assertIn(MetricKind.SLEEP_DURATION, [call[0] for call in reader.calls])
         served = personal_recovery({}, TODAY, canonical=inputs)

@@ -1,74 +1,8 @@
 import copy
 import unittest
-from datetime import date
 
-from performance_day_support import current_days
-
-from backend.canonical.vocabulary import MetricKind
-from backend.performance.wellness import (
-    comparison_value,
-    wellness_average,
-    wellness_form_average,
-)
+from backend.performance.wellness import comparison_value
 from backend.sync.garmin_performance_history import readiness_score_value
-
-
-class WellnessAverageTests(unittest.TestCase):
-    def test_window_is_inclusive_and_anchored(self):
-        rows = [
-            {"id": "2026-09-08", "sleepSecs": 25200},
-            {"id": "2026-09-09", "sleepSecs": 28800},
-            {"id": "2026-09-10", "sleepSecs": 32400},
-            {"id": "2026-09-11", "sleepSecs": 36000},
-            {"id": "2026-09-12", "sleepSecs": 100000},
-        ]
-        self.assertEqual(
-            wellness_average(
-                current_days(rows),
-                MetricKind.SLEEP_DURATION,
-                3,
-                date(2026, 9, 10),
-                3600,
-            ),
-            8.0,
-        )
-
-    def test_invalid_dates_and_numbers_are_ignored(self):
-        rows = [
-            {"id": "not-a-date", "ctl": 10},
-            {"id": "2026-09-09", "ctl": "2,5"},
-            {"id": "2026-09-10", "ctl": 4},
-        ]
-        anchor = date(2026, 9, 10)
-        self.assertEqual(
-            wellness_average(current_days(rows), MetricKind.CTL, 2, anchor, 2), 1.62
-        )
-
-    def test_invalid_id_does_not_create_a_day(self):
-        rows = [{"id": 0, "date": "2026-09-10", "ctl": 4}]
-        self.assertIsNone(
-            wellness_average(current_days(rows), MetricKind.CTL, 1, date(2026, 9, 10))
-        )
-
-
-class WellnessFormTests(unittest.TestCase):
-    def test_form_average_uses_the_inclusive_window_of_canonical_days(self):
-        form_by_day = {
-            date(2026, 9, 7): 40.0,  # before the window
-            date(2026, 9, 8): -10.0,
-            date(2026, 9, 9): 2.0,
-            date(2026, 9, 10): -4.0,
-            date(2026, 9, 11): 99.0,  # after the end date
-        }
-        self.assertEqual(wellness_form_average(form_by_day, 3, date(2026, 9, 10)), -4)
-        self.assertEqual(wellness_form_average(form_by_day, 1, date(2026, 9, 10)), -4)
-
-    def test_form_average_is_unknown_without_days_in_the_window(self):
-        self.assertIsNone(wellness_form_average({}, 7, date(2026, 9, 10)))
-        self.assertIsNone(wellness_form_average(None, 7, date(2026, 9, 10)))
-        self.assertIsNone(
-            wellness_form_average({date(2026, 8, 1): 3.0}, 7, date(2026, 9, 10))
-        )
 
 
 class ReadinessTests(unittest.TestCase):

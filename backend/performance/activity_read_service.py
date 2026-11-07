@@ -263,9 +263,7 @@ def _session_zone_settings(
             record.sport,
             record.environment,
             day,
-            fallback=ZoneSettings.from_thresholds(
-                thresholds, record.sport, record.environment
-            ),
+            fallback=ZoneSettings.from_thresholds(thresholds, record.sport),
         )
 
     return read
