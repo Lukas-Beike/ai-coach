@@ -5,7 +5,7 @@ import unittest
 from backend.coach.dialogue import INSTRUCTIONS
 from backend.coach.prompt import COACH_PROMPT
 
-EXPECTED_SHA256 = "c1f9349a05929c26f80d38aa22bca5232bddbf503bbee0db7cc7d53ba15897d0"
+EXPECTED_SHA256 = "809f4990f0ee64639ef59a930096e1d5a4ceeb9f3eaeb98546062590fab52131"
 
 
 class CoachPromptTests(unittest.TestCase):

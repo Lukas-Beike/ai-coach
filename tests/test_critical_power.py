@@ -104,6 +104,23 @@ class ReferenceCaseTests(unittest.TestCase):
         )
         self.assertIn("keine FTP", result["scope"])
 
+    def test_cycling_fits_report_an_unchecked_power_source(self):
+        # Card M4 v3: Garmin and Wahoo mark no estimated power, so every ride
+        # fit says its power source is unchecked; running fits carry no field.
+        result = critical_power_speed(_model_rides(), TODAY, input_fingerprint="fp")
+        sources = {
+            (fit["sport"], fit["environment"]): fit.get("power_source")
+            for fit in result["fits"]
+        }
+        self.assertEqual(
+            {
+                ("ride", "outdoor"): "unchecked",
+                ("ride", "indoor"): "unchecked",
+                ("run", "outdoor"): None,
+            },
+            sources,
+        )
+
 
 class StopRuleTests(unittest.TestCase):
     def assertWithheld(self, fit, reason):

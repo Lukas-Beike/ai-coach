@@ -1,8 +1,8 @@
 # M8 — Local efficiency factor, variability index, work and decoupling
 
 - **Card:** M8
-- **Card version:** 1
-- **Method ID:** local-session-metrics v1 (#1680)
+- **Card version:** 2
+- **Method ID:** local-session-metrics v2 (#1680, #1770)
 - **Status:** implemented (`backend/performance/session_metrics.py`, `backend/sync/session_metrics.py`)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-11-07
@@ -30,6 +30,7 @@ and is not part of this method.
 Athlete decisions (2026-11-07, #1680):
 
 - Run EF uses speed, not running power, so it matches the Pa:HR decoupling.
+- Pa:HR uses grade-adjusted speed, as run EF does (v2, 2026-11-07, #1770).
 - Work covers rides and runs with power; run work is labelled as Garmin's
   running-power model.
 - Values exist only where full-resolution streams are stored; a follow-up
@@ -56,10 +57,18 @@ Athlete decisions (2026-11-07, #1680):
    skipped.
 5. **Aerobic decoupling:** the drift of `aerobic_analysis`
    (`backend/performance/session_analysis.py`, method
-   `time-weighted-session-analysis-v1`):
+   `time-weighted-session-analysis-v2`):
    `decoupling = (EF₁ − EF₂) / EF₁ × 100` in %, with `EF_h` the time-weighted
    mean output over the mean HR of half `h`. Output is power for rides and
-   smoothed speed for road runs.
+   grade-adjusted speed for road runs.
+   - Grade-adjusted speed per sample: `v × C(g) / C(0)` with the Minetti
+     et al. (2002) cost of running `C(g)` at the sample's grade `g`, clamped
+     to ±45 %. The grade is the stored grade stream, else the altitude change
+     over the next 200 m of distance. This is the same adjustment as
+     `pace-at-heart-rate-v2`.
+   - Treadmill and virtual runs are flat: their speed is not adjusted. An
+     outdoor run without a grade or altitude and distance stream gets no
+     decoupling.
    - The first 10 minutes are excluded; the rest is split at its midpoint.
    - A positive value means less output per heartbeat in the second half.
 
@@ -97,6 +106,7 @@ Athlete decisions (2026-11-07, #1680):
   ratio in marathon runners.
 - **Confounders:** hydration R33, heat R34 and R35.
 - **Running power:** R40.
+- **Grade-adjusted speed in Pa:HR:** R44 (Minetti 2002).
 - **Work versus energy:** R41-R43.
 
 ## Population and reference measurement
@@ -107,6 +117,7 @@ Athlete decisions (2026-11-07, #1680):
 - R38: 17 trained men, 60 min at 75 % FTP indoors with fan and fluid.
 - R39: 20 cyclists over 5 months.
 - R40: 12 trail runners with a footpod.
+- R44: 10 elite mountain runners on a treadmill, slopes −45 to +45 %.
 - R42: 17 men on an ergometer.
 
 No study covers wrist-device running power, Garmin grade-adjusted speed or
@@ -144,7 +155,9 @@ uncontrolled outdoor sessions.
 - Most evidence comes from cyclists in the laboratory.
 - Outdoor sessions have no temperature, wind or hydration control.
 - Run EF from speed depends on terrain; average speed on hills is not
-  comparable, grade-adjusted speed only partly corrects it.
+  comparable, grade-adjusted speed only partly corrects it. Pa:HR adjusts
+  each sample with Minetti 2002, run EF uses Garmin's own grade-adjusted
+  average; both are models of level-ground cost.
 - Garmin running power is a model; run work is model output, not a measured
   force.
 - Runs and rides are on different scales and are never compared.
@@ -166,7 +179,8 @@ uncontrolled outdoor sessions.
   cover at least 85 % of the moving (else elapsed) duration and a positive
   sum.
 - Decoupling, from `aerobic_analysis`:
-  - ride with power, or road run (trail runs excluded) with speed;
+  - ride with power, or road run (trail runs excluded) with speed; an
+    outdoor run also needs a grade, or altitude and distance;
   - a recording of at least 30 minutes;
   - at least 85 % paired output and HR time in each half;
   - an output coefficient of variation of at most 15 % in each half;
@@ -193,6 +207,9 @@ uncontrolled outdoor sessions.
 | Output variation | CV at most 15 % per half | product assumption | `aerobic_analysis`; keeps the comparison steady; not a published value. |
 | Half match | mean outputs within 10 % | product assumption | `aerobic_analysis`; not a published value. |
 | HR range | 30-240 bpm | product assumption | `aerobic_analysis`; sensor plausibility. |
+| Run decoupling output | Minetti 2002 grade-adjusted speed per sample | source | R44 cost model; athlete decision 2026-11-07 (#1770): same basis as run EF; Minetti 2002 is a laboratory cost model, not Garmin's GAP, so EF and Pa:HR adjust grade with different models. |
+| Grade span from altitude | 200 m of distance | product assumption | Same as `backend/performance/pace_at_hr.py:GRADE_SPAN_M`; smooths GPS altitude noise. |
+| Grade clamp | ±45 % | product assumption | Validity range of the Minetti 2002 polynomial. |
 | Trail runs | no decoupling | product assumption | Pace on trails is not comparable; `aerobic_analysis` since #1670. |
 | Batch | 100 sessions per transaction | product assumption | Keeps the writer lock short; no physiological meaning. |
 

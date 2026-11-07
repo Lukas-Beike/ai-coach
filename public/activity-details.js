@@ -121,7 +121,10 @@
     const value = Number(load.value).toLocaleString("de-DE", { maximumFractionDigits: 1 });
     const rpe = Number(load.rpe).toLocaleString("de-DE");
     const minutes = Number(load.duration_min).toLocaleString("de-DE", { maximumFractionDigits: 1 });
-    return `Session-RPE-Last: ${value} AU · RPE ${rpe} (${load.rpe_source_label}) × ${minutes} min`;
+    const text = `Session-RPE-Last: ${value} AU · RPE ${rpe} (${load.rpe_source_label}) × ${minutes} min`;
+    if (load.duration_flag !== "deviating_duration") return text;
+    const moving = Number(load.moving_duration_min).toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    return `${text} · lange Unterbrechung, ${moving} min in Bewegung`;
   }
 
   function renderFeedback(feedback, session, api, activityId, content, sessionLoad) {

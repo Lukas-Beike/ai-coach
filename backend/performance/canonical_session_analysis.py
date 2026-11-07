@@ -29,7 +29,8 @@ from backend.performance.session_execution import session_execution
 # Stored ``activity_detail_analysis.analysis_version`` of canonical analyses.
 ANALYSIS_VERSION: Final = 3
 # Bump when the computation below changes, so the stage recomputes every row.
-METHOD_VERSION: Final = 2
+# v3: grade-adjusted Pa:HR of outdoor runs (#1770).
+METHOD_VERSION: Final = 3
 
 
 def analysis_records(records: Iterable[ActivityRecord]) -> tuple[ActivityRecord, ...]:
@@ -93,7 +94,13 @@ def session_analysis(
         "aerobic": aerobic_analysis(
             activity,
             source_label=adapted.label_for(
-                "watts", "heartrate", "velocity_smooth", "moving"
+                "watts",
+                "heartrate",
+                "velocity_smooth",
+                "moving",
+                "grade_smooth",
+                "altitude",
+                "distance",
             ),
         ),
         "power_profile": {

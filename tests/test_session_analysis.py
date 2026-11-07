@@ -18,7 +18,56 @@ def ride(times=None):
     }
 
 
+def run(environment="outdoor", grade=True):
+    """Flat first half at 3.0 m/s, then 2.8 m/s up a 2 % grade, HR constant."""
+    times = list(range(3601))
+    streams = {
+        "time": times,
+        "velocity_smooth": [3.0 if time < 2100 else 2.8 for time in times],
+        "heartrate": [150] * len(times),
+    }
+    if grade:
+        streams["grade_smooth"] = [0.0 if time < 2100 else 2.0 for time in times]
+    return {"sport": "run", "environment": environment, "streams": streams}
+
+
 class SessionAnalysisTests(unittest.TestCase):
+    def test_outdoor_run_decoupling_uses_grade_adjusted_speed(self):
+        # Card M8 v2 worked example: Minetti cost at 2 % is 3.6 * 3.1175 / 2.8 J/kg/m,
+        # so 2.8 m/s uphill is 3.1175 m/s on level ground. Raw speed would give
+        # (3.0 - 2.8) / 3.0 = +6.67 %; grade-adjusted (3.0 - 3.1175) / 3.0 = -3.92 %.
+        result = aerobic_analysis(run())
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("grade_adjusted_speed", result["sensor"])
+        self.assertAlmostEqual(-3.92, result["drift_percent"], places=2)
+        self.assertAlmostEqual(3.1175, result["halves"][1]["mean_output"], places=4)
+
+    def test_altitude_and_distance_give_the_grade_without_a_grade_stream(self):
+        activity = run(grade=False)
+        times = activity["streams"]["time"]
+        distance, altitude, here, height = [], [], 0.0, 100.0
+        for time in times:
+            speed, slope = (3.0, 0.0) if time < 2100 else (2.8, 0.02)
+            distance.append(here)
+            altitude.append(height)
+            here += speed
+            height += speed * slope
+        activity["streams"].update(distance=distance, altitude=altitude)
+        result = aerobic_analysis(activity)
+        self.assertEqual("grade_adjusted_speed", result["sensor"])
+        self.assertLess(result["drift_percent"], 0)
+
+    def test_outdoor_run_without_grade_or_altitude_has_no_decoupling(self):
+        result = aerobic_analysis(run(grade=False))
+        self.assertEqual("insufficient_data", result["status"])
+        self.assertIn("Steigung oder Höhe fehlt", result["reason"])
+
+    def test_treadmill_run_keeps_raw_speed(self):
+        result = aerobic_analysis(run("indoor", grade=False))
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("velocity_smooth", result["sensor"])
+        self.assertAlmostEqual(6.67, result["drift_percent"], places=2)
+
     def test_pulse_rise_at_constant_output_has_known_drift(self):
         result = aerobic_analysis(ride())
         self.assertEqual("ok", result["status"])

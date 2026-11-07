@@ -1,12 +1,12 @@
 # M1 — Session-RPE load
 
 - **Card:** M1
-- **Card version:** 1
-- **Method ID:** session-rpe-load-v1 (#1427)
+- **Card version:** 2
+- **Method ID:** session-rpe-load-v2 (#1427, #1770)
 - **Status:** implemented (`backend/performance/session_rpe_load.py`)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-10-24
-- **Review:** released 2026-10-24 (athlete)
+- **Review:** released 2026-11-07 (athlete)
 
 ## Target construct
 
@@ -20,8 +20,9 @@ load, an HR score or a tissue-specific strain.
 
 - `duration_min`: elapsed duration of the rated session in minutes, including
   its warm-up, cool-down and recovery parts. Moving time is not a silent
-  substitute; a session that has only moving time, or an unclear long
-  interruption, gets no value or is marked as a deviating duration.
+  substitute; a session that has only moving time gets no value. A session
+  with a long interruption keeps its elapsed value and is marked as a
+  deviating duration (`deviating_duration`, see the stop rules).
 - `session_RPE`: local feedback `session_rpe`, 0 to 10, step 0.5.
 - Aggregation: compute each session in full precision, sum sessions per local
   day, ISO week and sport, round only for display.
@@ -94,6 +95,13 @@ endurance athlete.
 - Non-positive duration, NaN, Infinity or an ambiguous session assignment are
   excluded with a reason.
 - Duplicate imports of one session count once (canonical session).
+- Long interruption (v2, #1770): when `elapsed − moving` exceeds 15 minutes
+  or 20 % of the elapsed duration, the value stays elapsed minutes × RPE and
+  is marked `deviating_duration` with the moving minutes beside it. Strength
+  and yoga sessions are never marked, because rests between sets belong to
+  the session. A session without a moving duration is not checked. M5 and the
+  strength branch of M6 keep the value unchanged. Day, week and sport sums
+  count the marked sessions (`deviating_duration_sessions`).
 - Day and week sums show the known partial sum and the count of rated and
   unrated sessions. A day without records is a rest day only with evidence.
 
@@ -109,6 +117,8 @@ endurance athlete.
 | Fallback rating source | Garmin `directWorkoutRpe` / 10, then Intervals `icu_rpe`, only without local rating | product assumption | Decision D3 on #1406, precedence local -> Garmin from #1724 (Intervals.icu ingest becomes dormant, #1728); keeps provider value labelled and separate. |
 | Existing ATL reconstruction decay (not M1) | exp(-1/7) per day | product assumption | `backend/performance/load.py:121`; fitness-fatigue form from R17, the 7-day constant is not individually validated. Applies to imported load, never to AU. |
 | Existing scenario model constants (not M1) | 42 and 7 days | product assumption | `backend/planning/season_preparation.py:260` and `:478-479`; R17 model form, parameters not validated for this athlete. |
+| Long interruption mark | elapsed − moving > 15 min or > 20 % of elapsed | product assumption | Science review 2026-11-07 (#1770), athlete decision; not a published value. A café stop on a long ride is marked, short traffic stops are not. |
+| Sports exempt from the mark | strength, yoga | product assumption | Athlete decision 2026-11-07 (#1770): rests between sets are part of the rated session. |
 | Duplicate session matching | start within 30 min, duration within max(120 s, 10 %), distance within max(500 m, 10 %) | product assumption | Existing canonical session bundling in `bundle_sessions`; not a scientific rule. |
 
 ## Allowed statements
@@ -118,6 +128,7 @@ endurance athlete.
 - "Your session-RPE load this week is higher than last week" (descriptive
   comparison of the athlete's own sums with coverage).
 - "This value uses the Garmin Connect rating because no local rating exists."
+- "390 AU from RPE 3 and 130 minutes; 25 minutes of it without movement."
 
 ## Forbidden statements
 

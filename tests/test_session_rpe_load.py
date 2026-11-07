@@ -162,6 +162,62 @@ class SessionLoadTests(unittest.TestCase):
         self.assertEqual(entry["value"], round(47 / 3 * 5.5, 1))
 
 
+class LongInterruptionTests(unittest.TestCase):
+    """Card M1 v2: elapsed - moving above 15 min or 20 % marks the session."""
+
+    def test_a_cafe_stop_keeps_the_value_and_marks_the_session(self) -> None:
+        # Worked example: 130 min elapsed, 105 min moving, RPE 3. 25 min > 15 min,
+        # so the value stays 130 x 3 = 390 AU and is marked with 105 moving min.
+        entry, value = session_load(
+            summary("a", 130, moving_duration_s=105 * 60), {"session_rpe": 3}
+        )
+        self.assertEqual(value, 390)
+        self.assertEqual(entry["duration_flag"], "deviating_duration")
+        self.assertEqual(entry["moving_duration_min"], 105)
+
+    def test_either_limit_marks_the_session(self) -> None:
+        # 50 min elapsed, 39 min moving: 11 min < 15 min but 22 % > 20 %.
+        share, _ = session_load(
+            summary("a", 50, moving_duration_s=39 * 60), {"session_rpe": 4}
+        )
+        # 180 min elapsed, 164 min moving: 16 min > 15 min, only 8.9 %.
+        minutes, _ = session_load(
+            summary("b", 180, moving_duration_s=164 * 60), {"session_rpe": 4}
+        )
+        self.assertEqual(share["duration_flag"], "deviating_duration")
+        self.assertEqual(minutes["duration_flag"], "deviating_duration")
+
+    def test_short_stops_are_not_marked(self) -> None:
+        # 60 min elapsed, 48 min moving: exactly 12 min = 20 %, not above it.
+        entry, _ = session_load(
+            summary("a", 60, moving_duration_s=48 * 60), {"session_rpe": 4}
+        )
+        self.assertIsNone(entry["duration_flag"])
+        self.assertIsNone(entry["moving_duration_min"])
+
+    def test_strength_yoga_and_missing_moving_time_are_never_marked(self) -> None:
+        cases: tuple[dict[str, Any], ...] = (
+            {"sport": "strength", "moving_duration_s": 20 * 60},
+            {"sport": "yoga", "moving_duration_s": 10 * 60},
+            {},
+        )
+        for fields in cases:
+            with self.subTest(fields=fields):
+                entry, value = session_load(
+                    summary("a", 60, **fields), {"session_rpe": 5}
+                )
+                self.assertEqual(value, 300)
+                self.assertIsNone(entry["duration_flag"])
+
+    def test_sums_count_marked_sessions(self) -> None:
+        result = report(
+            [summary("a", 130, moving_duration_s=105 * 60), summary("b")],
+            {"a": {"session_rpe": 3}, "b": {"session_rpe": 3}},
+        )
+        self.assertEqual(result["totals"]["value"], 570.0)
+        self.assertEqual(result["totals"]["deviating_duration_sessions"], 1)
+
+
 class PeriodSumTests(unittest.TestCase):
     def test_known_partial_sum_keeps_its_session_coverage(self) -> None:
         result = report(
@@ -175,12 +231,13 @@ class PeriodSumTests(unittest.TestCase):
                 "rated_sessions": 2,
                 "total_sessions": 3,
                 "rpe_sources": {"athlete_feedback": 2, "provider": 0},
+                "deviating_duration_sessions": 0,
             },
         )
         self.assertEqual(result["status"], "descriptive")
         self.assertEqual(
             (result["metric_id"], result["method_id"], result["method_version"]),
-            ("session_rpe_load", "session-rpe-load", 1),
+            ("session_rpe_load", "session-rpe-load", 2),
         )
         self.assertEqual(result["unit"], "AU")
         self.assertTrue(result["evidence_card"].endswith("m1-session-rpe-load.md"))

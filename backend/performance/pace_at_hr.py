@@ -21,8 +21,9 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 from backend.canonical.activity_summary import summary_is_indoor
+from backend.performance.grade_adjustment import grade_adjusted, grade_stream
 from backend.performance.power_profile import METHOD_ID, METHOD_VERSION
-from backend.performance.session_analysis import _number, _samples
+from backend.performance.session_analysis import _samples
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 
 # v2: treadmill and virtual runs are flat and never grade-adjusted.
@@ -35,55 +36,12 @@ FLAT_GRADE_PCT: Final = 3.0
 MIN_FLAT_SHARE: Final = 0.8
 MIN_BAND_S: Final = 600
 MAX_SPEED_CV: Final = 0.15
-GRADE_SPAN_M: Final = 200.0
 MIN_SESSIONS: Final = 2
-# Minetti et al. (2002): metabolic cost of running (J/kg/m) at fractional grade.
-_MINETTI: Final = (155.4, -30.4, -43.3, 46.3, 19.5, 3.6)
-_LEVEL_COST: Final = _MINETTI[-1]
 SCOPE = (
     "Pace in a fixed heart-rate band on steady, flat-ish outdoor or indoor runs "
     "after a 10-minute warm-up; grade-adjusted where a slope is known. Heat, "
     "fatigue, hydration and caffeine move heart rate; no fitness claim."
 )
-
-
-def grade_adjusted(speed: float, grade_pct: float) -> float:
-    """Speed on level ground with the same metabolic cost."""
-    grade = max(-0.45, min(0.45, grade_pct / 100))
-    cost = 0.0
-    for coefficient in _MINETTI:
-        cost = cost * grade + coefficient
-    return speed * cost / _LEVEL_COST if cost > 0 else speed
-
-
-def _derived_grades(streams: Mapping[str, Any], count: int) -> list[float | None]:
-    """Slope in % per sample from altitude over the next ``GRADE_SPAN_M`` metres."""
-    altitude = [_number(value) for value in streams.get("altitude") or []]
-    distance = [_number(value) for value in streams.get("distance") or []]
-    grades: list[float | None] = [None] * count
-    if len(altitude) != count or len(distance) != count:
-        return grades
-    end = 0
-    for index, here in enumerate(distance):
-        end = max(end, index)
-        while end + 1 < count and (distance[end] or 0) - (here or 0) < GRADE_SPAN_M:
-            end += 1
-        ahead = distance[end]
-        if None in (here, ahead, altitude[index], altitude[end]):
-            continue
-        run = ahead - here  # type: ignore[operator]
-        if run >= GRADE_SPAN_M:
-            grades[index] = 100 * (altitude[end] - altitude[index]) / run  # type: ignore[operator]
-    return grades
-
-
-def _grade_stream(streams: Mapping[str, Any]) -> list[float | None] | None:
-    times = streams.get("time") or []
-    given = streams.get("grade_smooth") or []
-    if len(given) == len(times) and any(_number(value) is not None for value in given):
-        return [_number(value) for value in given]
-    derived = _derived_grades(streams, len(times))
-    return derived if any(value is not None for value in derived) else None
 
 
 def _ineligible(activity: Mapping[str, Any]) -> str | None:
@@ -153,7 +111,7 @@ def pace_at_heart_rate(
     # Treadmill and virtual runs have no terrain; a virtual course's altitude
     # or barometric drift never grade-adjusts or filters their pace.
     indoor = summary_is_indoor(activity)
-    grades = None if indoor else _grade_stream(activity["streams"])
+    grades = None if indoor else grade_stream(activity["streams"])
     if grades is None and not indoor:
         return {
             **base,

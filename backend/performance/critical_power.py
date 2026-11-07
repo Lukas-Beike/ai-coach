@@ -42,6 +42,10 @@ SCOPE: Final = (
 )
 
 
+# Garmin and Wahoo deliver no measured-versus-estimated power signal.
+POWER_SOURCE_UNCHECKED: Final = "unchecked"
+
+
 def critical_power_speed(
     records: Sequence[dict[str, Any]], today: date, *, input_fingerprint: str
 ) -> dict[str, Any]:
@@ -90,6 +94,9 @@ def _fit(
         "environment": environment,
         "efforts": efforts,
     }
+    if sport == "ride":
+        # Card M4 v3: no provider marks estimated cycling power.
+        result["power_source"] = POWER_SOURCE_UNCHECKED
     if len(efforts) < len(EFFORT_SECONDS):
         return {
             **result,
