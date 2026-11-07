@@ -2,10 +2,9 @@
 
 The retirement runs after the detail backfill has completed. It reads each
 ``activity_detail:<sha>`` kv record in key order and deletes it only when every
-detail set, lap and zone bucket it holds is present in the canonical tables and
-its frozen target snapshot is kept in the session's analysis row; the record's
-Intervals.icu analysis values are never read again (#1685). Any other record
-stays unchanged and counts its first failing check. Before the laps are compared, lap metrics that the canonical lap set lacks
+detail set, lap, zone bucket and analysis value it holds is present in the
+canonical tables; any other record stays unchanged and counts its first failing
+check. Before the laps are compared, lap metrics that the canonical lap set lacks
 are copied from the record, so older lap sets gain values such as the maximum
 speed. Each batch commits its deletions, refills and cursor in one writer
 transaction, so a failed batch rolls back and the next run resumes from the last
@@ -42,6 +41,9 @@ from backend.db.activity_detail_store import (
 )
 from backend.db.canonical_store import activity_record_link, canonical_json
 from backend.db.repositories import KeyValueRepository
+from backend.performance.canonical_session_analysis import (
+    ANALYSIS_VERSION as CANONICAL_VERSION,
+)
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
     STREAM_KEY_CHANNELS,
@@ -52,8 +54,7 @@ from backend.sync.activity_detail_canonical import recording_origin
 from backend.sync.canonical_backfill import BackfillStatus, BatchReport
 
 STATE_KEY: Final = "activity_detail_retirement_state"
-# Version 2 (#1685): analysis values no longer block a retirement.
-RETIREMENT_VERSION: Final = 2
+RETIREMENT_VERSION: Final = 1
 DEFAULT_BATCH_SIZE: Final = 20
 MIN_BATCH_SIZE: Final = 1
 MAX_BATCH_SIZE: Final = 100
@@ -74,6 +75,7 @@ _REASONS: Final = (
     "analysis_mismatch",
 )
 _COUNTER_NAMES: Final = (RETIRED, *_REASONS, LAPS_REFILLED)
+_ANALYSIS_KEYS: Final = ("target_snapshot", "session_analysis", "calendar_profile")
 _INTERVALS: Final = ProviderId.INTERVALS.value
 
 
@@ -377,23 +379,33 @@ def _zones_equal(legacy: ZoneDistribution, canonical: ActivityDetailSet) -> bool
 def _analysis_proven(
     db: Any, activity_id: str, record: Mapping[str, Any], *, compared: bool
 ) -> bool:
-    """Whether the stored session analysis keeps the record's frozen targets.
+    """Whether the stored session analysis holds the record's analysis values.
 
-    The session analysis is recomputed canonically from Garmin, Wahoo and local
-    detail (#1685), so the Intervals.icu analysis values of a record are never
-    read again; only the athlete's target snapshot must survive. A record
-    without compared detail sets is proven only by an existing row.
+    A record without compared detail sets is proven only by an existing payload.
     """
-    try:
-        targets = normalize_legacy_detail_targets(record).get("target_snapshot")
-    except RuntimeError:
-        return False
     row = analysis_row_for_record(db, _INTERVALS, activity_id)
     if row is None:
-        return compared and targets is None
+        has_analysis = any(record.get(key) is not None for key in _ANALYSIS_KEYS)
+        return compared and not has_analysis
     payload = row["payload"]
     if not isinstance(payload, dict):
         return False
-    return targets is None or canonical_json(
-        {"t": payload.get("target_snapshot")}
-    ) == canonical_json({"t": targets})
+    canonical = row["analysis_version"] >= CANONICAL_VERSION
+    if not canonical and payload.get("summary_sha256") != record.get("summary_sha256"):
+        return False
+    try:
+        record = normalize_legacy_detail_targets(record)
+    except RuntimeError:
+        return False
+    if canonical:
+        # The canonical analysis is recomputed from Garmin, Wahoo and local
+        # detail (#1685); only the athlete's frozen targets must be kept.
+        targets = record.get("target_snapshot")
+        return targets is None or canonical_json(
+            {"t": payload.get("target_snapshot")}
+        ) == canonical_json({"t": targets})
+    return all(
+        canonical_json({key: payload.get(key)})
+        == canonical_json({key: record.get(key)})
+        for key in _ANALYSIS_KEYS
+    )

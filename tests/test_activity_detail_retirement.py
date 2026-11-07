@@ -143,7 +143,9 @@ class RetirementTestCase(unittest.TestCase):
             canonical=writer,
         ).refresh(activity_id)
         record = writer.records[activity_id]
-        # The earlier release also stored the session analysis row of the load.
+        legacy_detail_kv.save(self.manager, activity_id, record)
+        # The earlier release also stored the session analysis of the load.
+        stored = legacy_detail_kv.get(self.manager, activity_id) or {}
         with self.manager.unit_of_work() as db:
             session_id = db.execute(
                 "SELECT activity_id FROM activity_records WHERE provider = 'intervals' "
@@ -156,13 +158,14 @@ class RetirementTestCase(unittest.TestCase):
                 analysis_version=2,
                 input_sha256="0" * 64,
                 payload={
-                    "target_snapshot": None,
-                    "summary_sha256": record.get("summary_sha256"),
+                    "target_snapshot": stored.get("target_snapshot"),
+                    "session_analysis": stored.get("session_analysis"),
+                    "calendar_profile": stored.get("calendar_profile"),
+                    "summary_sha256": stored.get("summary_sha256"),
                 },
                 now=NOW,
             )
-        legacy_detail_kv.save(self.manager, activity_id, record)
-        return record
+        return stored
 
     def save_record(self, record):
         legacy_detail_kv.save(self.manager, record["activity_id"], record)

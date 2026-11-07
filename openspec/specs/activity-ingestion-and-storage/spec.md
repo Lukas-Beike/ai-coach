@@ -222,8 +222,8 @@ Evidence: `backend/activities/duplicates.py:validate_duplicate_delete`, `backend
 The canonical backfill runner SHALL run a retirement stage after the activity detail backfill. Per kv detail record it SHALL map the record with the legacy mapper, refill canonical lap metrics that are missing, compare the defined fields with the canonical rows, and delete the kv record in the same transaction only when every comparison passes. It SHALL NOT request provider data, and unverifiable records SHALL stay unchanged and be counted.
 
 #### Scenario: Verified record retired
-- **WHEN** a kv record maps to canonical sets that match on every compared field and its frozen target snapshot (if any) is kept in the session's analysis row
-- **THEN** the kv record is deleted in the batch transaction and the stage state counts it as retired; its Intervals.icu analysis values are not compared or kept (#1685, retirement version 2 reruns completed passes).
+- **WHEN** a kv record maps to canonical sets and an analysis payload that match on every compared field
+- **THEN** the kv record is deleted in the batch transaction and the stage state counts it as retired.
 
 #### Scenario: Missing lap metric refilled
 - **WHEN** a canonical Intervals.icu lap set written before schema v13 has a NULL `max_speed_mps` or another NULL lap metric that the matching kv lap carries
