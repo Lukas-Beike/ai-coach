@@ -136,6 +136,21 @@ def _interruption(summary: Mapping[str, Any], elapsed: float | None) -> float | 
     return moving if elapsed - moving > limit else None
 
 
+def _value(
+    rating: tuple[float, str, str] | str,
+    raw_elapsed: float | None,
+    elapsed: float | None,
+) -> tuple[float | None, str | None]:
+    """The unrounded AU, or the reason the session has none."""
+    if isinstance(rating, str):
+        return None, rating
+    if raw_elapsed is None:
+        return None, REASON_NO_ELAPSED_DURATION
+    if elapsed is None:
+        return None, REASON_INVALID_DURATION
+    return elapsed / 60 * rating[0], None
+
+
 def session_load(
     summary: Mapping[str, Any],
     feedback: Mapping[str, Any] | None,
@@ -146,16 +161,7 @@ def session_load(
     rpe, source, label = (None, None, None) if isinstance(rating, str) else rating
     raw_elapsed = _finite(summary.get("elapsed_duration_s"))
     elapsed = raw_elapsed if raw_elapsed is not None and raw_elapsed > 0 else None
-    value: float | None = None
-    reason: str | None = None
-    if isinstance(rating, str):
-        reason = rating
-    elif raw_elapsed is None:
-        reason = REASON_NO_ELAPSED_DURATION
-    elif elapsed is None:
-        reason = REASON_INVALID_DURATION
-    elif rpe is not None:
-        value = elapsed / 60 * rpe
+    value, reason = _value(rating, raw_elapsed, elapsed)
     rated_after_end = None
     if source == SOURCE_ATHLETE and elapsed is not None:
         rated_after_end = _minutes_after_end(
