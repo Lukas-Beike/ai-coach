@@ -208,11 +208,8 @@ class SyncPublicStateServiceTests(unittest.TestCase):
 
     def test_state_derives_running_freshness_and_jobs_from_owners(self) -> None:
         self.set_values(sync_running="0")
-        self.intervals_lock.acquire()
-        try:
-            actual = self.service.state()
-        finally:
-            self.intervals_lock.release()
+        self.service._running_probes = {"synthetic": lambda: True}
+        actual = self.service.state()
 
         self.assertTrue(actual["running"])
         self.assertEqual(actual["status"], "running")

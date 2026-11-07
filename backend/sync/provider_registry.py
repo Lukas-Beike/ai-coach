@@ -144,6 +144,18 @@ class ProviderRegistry:
         """Return the providers the Coach can refresh, in Coach rank order."""
         return self._ranked_ids(lambda descriptor: descriptor.coach_rank)
 
+    def coach_write_targets(self) -> tuple[str, ...]:
+        """Return the output-only providers a Coach request may name for a write.
+
+        They accept competition and workout writes but are never refreshed.
+        """
+        return tuple(
+            descriptor.provider_id
+            for descriptor in self._descriptors
+            if Capability.COMPETITIONS in descriptor.capabilities
+            and descriptor.coach_rank is None
+        )
+
     def resync_key_map(self) -> dict[str, tuple[str, ...]]:
         """Return full-resync state keys for providers that declare them."""
         keys: dict[str, tuple[str, ...]] = {}

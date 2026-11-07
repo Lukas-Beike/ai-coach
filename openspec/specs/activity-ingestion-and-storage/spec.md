@@ -7,7 +7,7 @@ Describe durable provider activity ingestion, identity and session bundling, det
 ## Requirements
 
 ### Requirement: Provider reads preserve complete and partial outcomes
-The system SHALL fetch Intervals activities/wellness/events through bounded date windows and pagination, Garmin through bounded provider collections with source outcomes, and Wahoo through paged workout summaries. Wahoo SHALL bound a run to 20 pages of 50 workouts and report truncation as partial. Missing optional Wahoo scopes or refused optional sources SHALL not invalidate fetched activities. Provider imports SHALL not upload workouts as a side effect of reading them.
+The system SHALL fetch Garmin through bounded provider collections with source outcomes, and Wahoo through paged workout summaries. Wahoo SHALL bound a run to 20 pages of 50 workouts and report truncation as partial. Missing optional Wahoo scopes or refused optional sources SHALL not invalidate fetched activities. Provider imports SHALL not upload workouts as a side effect of reading them.
 
 #### Scenario: Truncated Wahoo collection
 - **WHEN** workout pagination reaches its cap before establishing complete coverage
@@ -17,7 +17,7 @@ The system SHALL fetch Intervals activities/wellness/events through bounded date
 - **WHEN** workouts are readable but Wahoo refuses power zones with 403 or 404
 - **THEN** workouts are imported and the optional source is reported skipped.
 
-Evidence: `backend/sync/intervals.py:IntervalsSnapshotReader.fetch_snapshot`, `backend/providers/garmin.py:collect_garmin_data`, `backend/providers/wahoo_client.py:WahooClient`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_wahoo_sync.py:test_truncated_fetch_reports_partial`, `tests/test_wahoo_runtime_acceptance.py:test_the_owner_never_writes_to_wahoo`, `tests/test_sync_intervals_reader.py:test_incremental_merge_and_full_sync_behavior`, `tests/test_sync_intervals_reader.py:test_historical_date_windows_and_calendar_window`.
+Evidence: `backend/providers/garmin.py:collect_garmin_data`, `backend/providers/wahoo_client.py:WahooClient`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_wahoo_sync.py:test_truncated_fetch_reports_partial`, `tests/test_wahoo_runtime_acceptance.py:test_the_owner_never_writes_to_wahoo`, `tests/test_sync_intervals_reader.py:test_incremental_merge_and_full_sync_behavior`, `tests/test_sync_intervals_reader.py:test_historical_date_windows_and_calendar_window`.
 
 ### Requirement: Garmin transports per data family
 The system SHALL read Garmin through the official read-only Personal API when its key is configured, and through the unofficial SDK login when that is connected. Every family the Personal API serves with the SDK's content SHALL use the Personal API when its key is configured: activity lists, activity details, sleep, HRV, daily summaries, resting heart rate, Body Battery, weight and heart-rate zones. Families the Personal API does not serve (readiness, training status, training load, load balance, VO2 max, FTP, lactate threshold, race predictions, endurance score, running tolerance, gear, activity splits and per-activity zone times) SHALL stay on the SDK. A family the configured transports do not serve SHALL be skipped as unsupported rather than reported as a failure. The Personal API key SHALL be stored server-side like the other provider credentials and exchanged for a bearer token on demand; neither SHALL be logged, exported or returned. Both transports SHALL write the same records: activities keyed by Garmin `activityId`, sleep nights keyed by their calendar date. With the Personal API key, a Garmin activity detail fetch SHALL also download the original FIT file and decode it with the stdlib FIT decoder; its full-resolution record streams and device laps SHALL replace the downsampled charts and the splits of that activity, which remain the fallback when the file yields no set of that kind.
@@ -99,37 +99,6 @@ Detailed contract: Garmin elapsed-time fallback SHALL avoid assigning multiple s
 
 Evidence: `backend/activities/canonical_sessions.py:bundle_sessions`, `backend/activities/session_linking.py:link_activity_sessions`, `backend/activities/activity_reference.py:ActivityReferences`; `tests/test_canonical_sessions.py:test_order_is_deterministic_regardless_of_input_order`, `tests/test_canonical_sessions.py:test_garmin_record_joins_the_wahoo_session_through_a_garmin_copy`, `tests/test_canonical_sessions.py:OneToOneAssignmentTests`, `tests/test_canonical_sessions.py:ExactLinkTests`, `tests/test_session_linking.py:ExactLinkTests`, `tests/test_diagnostic_session_conflicts.py`, `tests/test_garmin_activity_detail_job.py:test_session_alias_resolves_to_the_garmin_record`.
 
-### Requirement: Durable Intervals detail cache and prefetch
-The system SHALL fetch full-resolution Intervals detail only for a valid locally known activity, verify returned identity, normalize supported streams, laps, and zones, and store canonical detail sets and the canonical analysis payload atomically, without writing a kv detail document. Automatic prefetch SHALL initially establish its floor from the ten newest activities, thereafter load new activities at or above that fixed floor, and limit each pass to 25 provider loads.
-
-#### Scenario: Failed second detail request
-- **WHEN** an activity's previous canonical detail exists and its next provider stream request fails
-- **THEN** the previous canonical sets and analysis payload remain readable and no half-written new detail replaces them.
-
-#### Scenario: Old known activity requested
-- **WHEN** the athlete requests a valid known activity before the prefetch floor
-- **THEN** explicit loading can populate its detail even though automatic prefetch leaves it alone.
-
-#### Scenario: Successful refresh writes only canonical state
-- **WHEN** an explicit or automatic Intervals.icu detail load succeeds
-- **THEN** the canonical detail sets are written (no session analysis, which the canonical stage owns, #1685), the failure note of that activity is deleted in the same transaction, and no `activity_detail:<sha>` kv row is created or updated.
-
-#### Scenario: Canonical write fails
-- **WHEN** the canonical detail write raises inside the refresh transaction
-- **THEN** no canonical set or failure-note deletion is committed.
-
-#### Scenario: Prefetch settledness
-- **WHEN** prefetch decides whether an activity still needs loading
-- **THEN** it uses only the summary fingerprints stored with canonical detail sets and analysis payloads, plus failure notes for the same fingerprint. A remaining kv detail record does not mark an activity settled.
-
-#### Scenario: Stored analysis untouched by a reload
-- **WHEN** a session already has a stored analysis row with a `target_snapshot` and its Intervals.icu detail is reloaded
-- **THEN** the row and its frozen snapshot stay unchanged; targets are frozen only by the canonical session analysis stage.
-
-Detailed contract: Summary fingerprints SHALL prevent redundant loads and invalidate stale data/failure notes after corrections. Failure notes and the prefetch floor remain small kv keys. Older activities SHALL remain available for explicit detail loading. The refresh use case SHALL require a canonical detail writer. The refresh SHALL NOT compute or write a session analysis, calendar profile or target snapshot.
-
-Evidence: `backend/sync/activity_details.py:ActivityDetailRefreshService.refresh`, `backend/sync/activity_details.py:INITIAL_PREFETCH_ACTIVITIES`, `backend/activities/detail_store.py:ActivityDetailStore`, `backend/db/activity_detail_fingerprints.py:intervals_detail_fingerprints`; `tests/test_activity_detail_refresh.py:test_first_run_loads_the_ten_newest_activities_once`, `tests/test_activity_detail_refresh.py:test_changed_summary_is_loaded_again`, `tests/test_activity_detail_refresh.py:test_failed_canonical_write_commits_nothing`. `tests/test_activity_detail_refresh.py:test_refresh_writes_canonical_rows_without_a_kv_record`, `tests/test_activity_detail_refresh.py:test_refresh_leaves_a_stored_analysis_untouched`, `tests/test_activity_detail_refresh.py:test_leftover_kv_record_does_not_settle_prefetch`, `tests/test_activity_detail_refresh.py:test_unstored_write_fails_and_keeps_the_failure_note`.
-
 ### Requirement: Garmin detail acquisition and recovery
 The system SHALL fetch Garmin detail kinds independently for locally known active nonmanual Garmin records, persist returned valid sets without erasing omitted kinds, and report partial outcomes when only some kinds arrive.
 
@@ -191,37 +160,6 @@ Detailed contract: The sync time reported with the activity list (`snapshot_sync
 
 Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService._read`; `tests/test_activity_read_service.py:test_page_filters_orders_attaches_feedback_and_uses_cursor`, `tests/test_activity_read_service.py:test_page_keeps_activities_with_failed_details_and_names_the_error`, `tests/test_activity_read_service.py:test_activity_refresh_timestamp_is_independent_of_performance_refresh`. `tests/test_activity_detail_kv_guard.py:test_production_code_does_not_touch_kv_detail_records`. Missing evidence (planned in this change): tests that `snapshot_synced_at` comes from coverage, is null without coverage and is unchanged by a duplicate deletion; `public/activity-analysis.js:load` consumes the key unchanged (no frontend change planned).
 
-### Requirement: Explicit duplicate deletion
-The system SHALL delete a remotely stored duplicate only after validating the current detected Wahoo/Garmin duplicate pair and the explicit delete confirmation. The duplicate service SHALL retain the Wahoo activity, delete the selected Garmin copy through Intervals first, then tombstone the canonical records and session in one local transaction and publish the resulting state change. It SHALL NOT read, rewrite or save the Intervals.icu snapshot.
-
-#### Scenario: Confirmed current duplicate
-- **WHEN** the submitted pair still matches the current duplicate and confirmation is valid
-- **THEN** exactly one Intervals.icu delete request names only the duplicate, and local canonical readers cease serving it after the local commit.
-
-#### Scenario: Stale or rejected delete
-- **WHEN** the submitted pair or its confirmation token has changed or the provider delete fails
-- **THEN** no provider delete (for a stale pair), no local deletion and no success event occur.
-
-#### Scenario: Snapshot untouched by a delete
-- **WHEN** a duplicate is deleted
-- **THEN** no snapshot row is written and the stored Intervals.icu snapshot `synced_at` and the coverage fetch time are unchanged.
-
-#### Scenario: Deleted copy stays deleted across the next sync
-- **WHEN** a duplicate is deleted while the stored snapshot still carries its activity sections (a row the mapper rejects, or a snapshot stored before the backfill finished) and the next incremental Intervals.icu sync runs
-- **THEN** the merge base leaves out every activity whose canonical record is tombstoned, so the merged payload does not re-add the deleted copy, its record and session stay deleted, no pair is offered again and a repeated confirmation is rejected with a conflict before any provider call. The snapshot itself is still not rewritten by the delete; only the merge base is filtered. An activity that the provider returns in a later fetch is ingested from that fetch as before, and a full-window sync still tombstones activities the provider no longer returns.
-
-#### Scenario: Merged duplicate session
-- **WHEN** the deleted copy's session is a heuristic alias of the kept session
-- **THEN** its record, provider record and session are tombstoned in the same transaction and the kept Wahoo activity stays served.
-
-#### Scenario: Deleted copy was the surviving session
-- **WHEN** the deleted copy's session was the survivor of a heuristic merge and the Wahoo session an alias of it
-- **THEN** in the same transaction the Wahoo session becomes the active survivor (the oldest live alias takes over, any other alias merges into it), the deleted session retains it for feedback, no live session stays merged into a deleted one, and the Wahoo ride's detail lookup, lists and feedback keep resolving. The same repair applies when a provider's activity disappears.
-
-Detailed contract: A stale confirmation or remote-delete error SHALL not mutate local data. This flow does not promise distributed rollback if remote deletion succeeds and a later local write fails. Merging or undoing duplicates, athlete-confirmed sessions and any other remote write are outside this flow.
-
-Evidence: `backend/activities/duplicates.py:validate_duplicate_delete`, `backend/activities/duplicate_service.py:DuplicateActivityService.delete`; `tests/test_activity_duplicate_service.py:test_stale_confirmation_has_no_side_effects`, `tests/test_activity_duplicate_service.py:test_remote_failure_does_not_mutate_snapshot_or_publish`, `tests/test_activity_duplicate_service.py:test_delete_tombstones_the_canonical_records_in_the_snapshot_transaction`, `tests/test_activity_duplicate_service.py:MergedDuplicateDeleteTests.test_confirmed_delete_tombstones_the_merged_duplicate_session`. Missing evidence (planned in this change): tests that no snapshot is read or saved and that the snapshot `synced_at` is unchanged, and restart and backup/restore tests of tombstones and merged state.
-
 ### Requirement: Verified kv detail retirement
 The canonical backfill runner SHALL run a retirement stage after the activity detail backfill. Per kv detail record it SHALL map the record with the legacy mapper, refill canonical lap metrics that are missing, compare the defined fields with the canonical rows, and delete the kv record in the same transaction only when every comparison passes. It SHALL NOT request provider data, and unverifiable records SHALL stay unchanged and be counted.
 
@@ -260,33 +198,6 @@ The canonical backfill runner SHALL run a retirement stage after the activity de
 Evidence: `backend/sync/activity_detail_retirement.py:ActivityDetailRetirement`, `backend/db/activity_detail_store.py:refill_lap_metrics`, `backend/sync/canonical_backfill_assembly.py`; `tests/test_activity_detail_retirement.py:test_proven_record_is_deleted_and_other_keys_are_kept`, `tests/test_activity_detail_retirement.py:test_missing_lap_speed_is_refilled_before_the_record_is_retired`, `tests/test_activity_detail_retirement.py:test_lap_metric_that_differs`, `tests/test_activity_detail_retirement.py:test_failed_batch_rolls_back_refills_and_deletions`, `tests/test_activity_detail_retirement.py:test_restart_resumes_from_the_cursor_and_repeats_nothing`, `tests/test_activity_detail_retirement_upgrade.py:test_released_schemas_upgrade_and_retire_proven_records` (the SQLCipher variant is skipped without SQLCipher), `tests/test_activity_detail_retirement_backup.py:test_restored_backup_serves_the_same_document`, `tests/test_activity_detail_retirement_backup.py:test_privacy_export_holds_the_retired_detail_in_the_canonical_files`. Related existing behavior: `backend/sync/activity_detail_backfill.py:ActivityDetailBackfill`, `backend/sync/canonical_backfill_worker.py`.
 
 Additional evidence: `tests/test_activity_detail_canonical.py::test_legacy_target_basis_is_normalized_without_changing_source`; `tests/test_activity_detail_retirement.py::test_legacy_target_basis_is_compared_after_normalization`; `tests/test_activity_detail_retirement.py::test_conflicting_legacy_target_basis_is_not_retired`.
-
-### Requirement: Canonical duplicate pair detection
-The system SHALL detect and inspect the newest Wahoo/Garmin duplicate ride pair from canonical active Intervals.icu activity records, keeping the Wahoo-recorded activity and offering the Garmin-recorded copy for deletion, without reading the Intervals.icu snapshot. A pair SHALL contain the newest Intervals.icu activity.
-
-#### Scenario: Current pair
-- **WHEN** an active Wahoo-recorded and an active Garmin-recorded Intervals.icu ride start within 30 minutes and their durations and distances agree within the duplicate tolerances
-- **THEN** inspection returns `canonical_id` and `duplicate_id` (the Intervals.icu activity ids), names, local start, moving time, distance and `snapshot_synced_at`, with Wahoo kept, even when no snapshot exists.
-
-#### Scenario: Newer unrelated or tombstoned activity
-- **WHEN** a newer unrelated Intervals.icu activity exists, a record of the pair is deleted, or an id is missing or equal
-- **THEN** inspection returns no pair.
-
-#### Scenario: Intervals.icu ingest off
-- **WHEN** the Intervals.icu ingest switch is off
-- **THEN** inspection returns no pair before reading any record, so no proposal, Coach delete or delete submission can reach Intervals.icu.
-
-#### Scenario: Legacy-state selector
-- **WHEN** the canonical read selector still serves the snapshot projection (before the first completed backfill)
-- **THEN** no pair is offered at all: inspection returns none, so a Coach proposal cannot be created and `inspect_activity_duplicates` reports none, and a delete submission is rejected with a conflict before any provider call. This holds even for a copy tombstoned earlier whose record a later sync revived from the unchanged snapshot, and a pair that exists only in the snapshot is never offered. Once the tables serve reads, inspection and the delete validation read only the canonical tables, so a tombstoned copy is not offered again and a repeated confirmation is rejected with a conflict. Lists and reports served from the snapshot projection may still show a deleted copy until the backfill completes.
-
-#### Scenario: Confirmation token follows the records
-- **WHEN** either record of the pair is fetched again after the proposal was created
-- **THEN** `snapshot_synced_at` (the newest canonical fetch time of the two records) differs and the submitted confirmation is rejected with a conflict before any provider call.
-
-Detailed contract: The manifest key `snapshot_synced_at` is kept for contract stability; its value is the newest canonical fetch time of the pair. Persisted session links (`merged_into`) are not consulted for detection.
-
-Evidence: `backend/activities/duplicate_inspection.py:DuplicateInspector.latest`, `backend/activities/canonical_sessions.py` (Wahoo/Garmin ride rule), `tests/test_sync_snapshot_storage.py:LegacyStateDuplicateTests`; `tests/test_activity_duplicates.py:WahooGarminDuplicateTests` (raw-row rule being ported), `tests/test_coach_tool_coverage.py:test_duplicate_inspection_returns_preview_without_deleting_provider_data`. Missing evidence (planned in this change): detection from canonical records with an absent snapshot, token change on refetch, and parity of sport and duration handling.
 
 ### Requirement: Garmin status compares against canonical Intervals rows
 The system SHALL compute the Garmin status counts `activities` and `duplicate_activities_skipped` from the canonical sessions of the recent window only: a session with a Garmin Connect record counts as an activity, or as a skipped duplicate when an Intervals.icu record shares the session; a Garmin copy beside a Wahoo record alone stays an activity.

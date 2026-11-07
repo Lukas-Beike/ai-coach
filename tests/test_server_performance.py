@@ -4,7 +4,6 @@ import unittest
 from dataclasses import replace
 from datetime import date, timedelta
 from datetime import datetime as _local_datetime
-from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
@@ -33,7 +32,6 @@ from backend.performance import planning_recovery as performance_planning_recove
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.morning_battery_service import MORNING_BATTERY_HISTORY_KEY
 from backend.providers import garmin as garmin_provider
-from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import garmin_payload_metrics
 from backend.weather import history as weather_history
@@ -71,40 +69,8 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(load["totals"]["value"], 300.0)
         self.assertIsNotNone(load["computed_at"])
 
-    def test_performance_refresh_jobs_are_deduplicated_atomically(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
-            first = server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals",
-                "performance_refresh",
-                {"reason": "first"},
-                requested_by="scheduler",
-            )
-            second = server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals",
-                "performance_refresh",
-                {"reason": "second"},
-                requested_by="coach",
-            )
-        self.assertEqual(second["id"], first["id"])
-        self.assertEqual(second["payload"], {"reason": "first"})
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            self.assertEqual(
-                db.execute(
-                    "SELECT COUNT(*) AS count FROM sync_jobs WHERE type='performance_refresh'"
-                ).fetchone()["count"],
-                1,
-            )
 
 
-    def test_performance_refresh_timestamp_and_initial_loading_state_are_rendered(self):
-        root = Path(__file__).resolve().parents[1] / "public"
-        app = "\n".join(
-            (root / name).read_text(encoding="utf-8")
-            for name in ("shared.js", "performance-view.js", "state-loader.js")
-        )
-        self.assertIn("performance_refresh", app)
-        self.assertIn("state.loadPromise", app)
 
     def test_garmin_coach_context_keeps_only_latest_recovery_records(self):
         latest = server.ATHLETE_CLOCK.now().date() - timedelta(days=1)
@@ -962,65 +928,6 @@ class ServerPerformanceTests(ServerTestCase):
 
 
 
-    def test_confirmed_duplicate_delete_removes_only_garmin_copy_and_keeps_the_snapshot(
-        self,
-    ):
-        snapshot = {
-            "synced_at": "2026-08-29T10:00:00+00:00",
-            "athlete": {},
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-            "recent_activities": [
-                {
-                    "id": "i-wahoo",
-                    "type": "Ride",
-                    "source": "Wahoo",
-                    "start_date_local": "2026-08-29T07:00:00",
-                    "moving_time": 7200,
-                    "distance": 60000,
-                },
-                {
-                    "id": "i-garmin",
-                    "type": "Ride",
-                    "source": "Garmin",
-                    "start_date_local": "2026-08-29T07:03:00",
-                    "moving_time": 7180,
-                    "distance": 59800,
-                },
-            ],
-        }
-        snapshot["raw_provider_data"] = {
-            "activities": list(snapshot["recent_activities"])
-        }
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
-        for activity in snapshot["recent_activities"]:
-            seed_intervals_activity(
-                server.database_manager(),
-                activity["id"],
-                **{key: value for key, value in activity.items() if key != "id"},
-            )
-        mark_tables_serving(server)
-        pair = server.ATHLETE_DATA.duplicate_inspector().latest()
-        with patch.object(
-            intervals_client_module.IntervalsClient,
-            "delete_activity",
-            return_value=None,
-        ) as delete:
-            result = server.ATHLETE_DATA.duplicate_activity().delete(
-                {
-                    "canonical_id": pair["canonical_id"],
-                    "duplicate_id": pair["duplicate_id"],
-                    "snapshot_synced_at": pair["snapshot_synced_at"],
-                },
-                server.PROVIDER_TRANSPORT.intervals_client(),
-            )
-        delete.assert_called_once_with("i-garmin")
-        self.assertEqual(result["kept_activity_id"], "i-wahoo")
-        # The snapshot is an ingestion artefact: a delete leaves it as it was.
-        self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"],
-            snapshot["synced_at"],
-        )
 
 
 if __name__ == "__main__":

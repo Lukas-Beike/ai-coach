@@ -119,9 +119,7 @@ class CoachProposalExecutionTests(unittest.TestCase):
         self.undo_service.apply.assert_not_called()
 
     def test_competing_execution_dispatches_only_once(self) -> None:
-        token, payload_hash = self.add_ready(
-            action_type="delete_duplicate_intervals_activity"
-        )
+        token, payload_hash = self.add_ready()
 
         def attempt() -> str:
             try:
@@ -133,12 +131,8 @@ class CoachProposalExecutionTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             outcomes = list(executor.map(lambda _: attempt(), range(2)))
         self.assertCountEqual(outcomes, ["applied", "rejected"])
-        self.duplicate_service.delete.assert_called_once_with(
-            {"change_id": "synthetic-change"},
-            self.client,
-        )
-        self.client_factory.assert_called_once_with()
-        self.undo_service.apply.assert_not_called()
+        self.undo_service.apply.assert_called_once()
+        self.client_factory.assert_not_called()
 
     def test_remote_approval_is_bound_to_the_original_turn_and_dispatches_once(
         self,

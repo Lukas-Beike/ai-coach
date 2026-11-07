@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
-from backend.coach import proposal_assembly
 from backend.coach.proposal_assembly import (
     CoachProposalAssembly,
     ProposalClock,
@@ -64,61 +63,7 @@ class CoachProposalAssemblyTests(unittest.TestCase):
         )
         return assembly, dependencies
 
-    def test_assembly_is_lazy_and_proposal_factories_use_current_database(self):
-        assembly, dependencies = self.make_assembly()
-        dependencies["manager_provider"].assert_not_called()
-        dependencies["inspector_provider"].assert_not_called()
 
-        with (
-            patch.object(proposal_assembly, "CoachProposalReadService") as read_factory,
-            patch.object(
-                proposal_assembly, "CoachProposalCreationService"
-            ) as create_factory,
-            patch.object(
-                proposal_assembly, "CoachProposalConfirmationService"
-            ) as confirm_factory,
-        ):
-            assembly.read_service()
-            assembly.creation_service()
-            assembly.confirmation_service()
-
-        self.assertIs(read_factory.call_args.args[0], dependencies["manager"])
-        self.assertIs(create_factory.call_args.args[0], dependencies["manager"])
-        self.assertIs(create_factory.call_args.args[1], dependencies["inspector"])
-        self.assertIs(
-            create_factory.call_args.kwargs["nutrition_diary_service"],
-            dependencies["nutrition_diary_provider"],
-        )
-        self.assertIs(
-            create_factory.call_args.kwargs["nutrition_meal_library_service"],
-            dependencies["nutrition_meal_library_provider"],
-        )
-        self.assertIs(confirm_factory.call_args.args[0], dependencies["manager"])
-        self.assertEqual(dependencies["manager_provider"].call_count, 3)
-
-    def test_execution_keeps_provider_and_gate_resolution_boundaries(self):
-        assembly, dependencies = self.make_assembly()
-        with patch.object(
-            proposal_assembly, "CoachProposalExecutionService"
-        ) as factory:
-            assembly.execution_service()
-
-        args = factory.call_args.args
-        self.assertIs(args[0], dependencies["manager"])
-        self.assertIs(args[1], dependencies["duplicate"])
-        self.assertIs(args[2], dependencies["history"])
-        self.assertIs(args[3], dependencies["intervals"])
-        self.assertIs(args[4], dependencies["gate"].return_value)
-        self.assertFalse(dependencies["intervals"].called)
-        dependencies["gate"].return_value = Mock(name="replacement_gate")
-        with patch.object(
-            proposal_assembly, "CoachProposalExecutionService"
-        ) as second_factory:
-            assembly.execution_service()
-        self.assertIs(
-            second_factory.call_args.args[4], dependencies["gate"].return_value
-        )
-        self.assertEqual(dependencies["manager_provider"].call_count, 2)
 
 
 if __name__ == "__main__":

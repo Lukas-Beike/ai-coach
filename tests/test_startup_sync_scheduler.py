@@ -98,7 +98,6 @@ class StartupSyncSchedulerTests(unittest.TestCase):
         garmin=None,
         sync_state=None,
         calendar_enabled=True,
-        intervals_enabled=True,
     ):
         self.profile = profile or _Profile()
         self.queue = queue or _Queue()
@@ -118,7 +117,7 @@ class StartupSyncSchedulerTests(unittest.TestCase):
         )
 
     def test_enqueues_all_provider_jobs_in_contract_order_with_exact_payloads(self):
-        sync_state = _SyncState({"intervals": "2026-08-01", "garmin": None})
+        sync_state = _SyncState({"garmin": None})
         scheduler = self.make_scheduler(sync_state=sync_state)
 
         scheduler.schedule()
@@ -127,22 +126,6 @@ class StartupSyncSchedulerTests(unittest.TestCase):
             self.queue.jobs,
             [
                 ("calendar", "refresh", {"reason": "startup"}, "startup"),
-                (
-                    "intervals",
-                    "refresh",
-                    {"days": 17, "reason": "startup", "automatic": True},
-                    "startup",
-                ),
-                (
-                    "intervals",
-                    "historical_backfill",
-                    {
-                        "days": 45,
-                        "reason": "startup historical backfill",
-                        "end_date": "2026-07-31",
-                    },
-                    "startup",
-                ),
                 ("garmin", "refresh", {"days": 9, "reason": "startup"}, "startup"),
                 (
                     "garmin",
@@ -168,20 +151,17 @@ class StartupSyncSchedulerTests(unittest.TestCase):
         self.assertEqual(
             sync_state.cursor_reads,
             [
-                ("intervals", "historical"),
                 ("garmin", "historical"),
                 ("garmin", "wellness_history"),
                 ("garmin", "rating_history"),
             ],
         )
-        self.assertEqual(sync_state.period_reads[0][0], "intervals")
 
     def test_does_not_duplicate_any_active_refresh_or_backfill(self):
         active_jobs = {
             (provider, kind)
             for provider, kinds in {
                 "calendar": ("refresh",),
-                "intervals": ("refresh", "historical_backfill"),
                 "garmin": (
                     "refresh",
                     "historical_backfill",
@@ -205,8 +185,6 @@ class StartupSyncSchedulerTests(unittest.TestCase):
             self.queue.active_checks,
             [
                 ("calendar", "refresh"),
-                ("intervals", "refresh"),
-                ("intervals", "historical_backfill"),
                 ("garmin", "refresh"),
                 ("garmin", "historical_backfill"),
                 ("garmin", "wellness_backfill"),
@@ -222,7 +200,6 @@ class StartupSyncSchedulerTests(unittest.TestCase):
             profile=_Profile(""),
             garmin=garmin,
             calendar_enabled=False,
-            intervals_enabled=False,
         )
 
         scheduler.schedule()
@@ -246,11 +223,10 @@ class StartupSyncSchedulerTests(unittest.TestCase):
         )
         for cursor, expected in cases:
             with self.subTest(cursor=cursor):
-                sync_state = _SyncState({"intervals": cursor})
+                sync_state = _SyncState({"garmin": cursor})
                 scheduler = self.make_scheduler(
                     calendar_enabled=False,
-                    intervals_enabled=True,
-                    garmin=_Garmin(False),
+                    garmin=_Garmin(True),
                     sync_state=sync_state,
                 )
                 scheduler.schedule()
@@ -263,9 +239,8 @@ class StartupSyncSchedulerTests(unittest.TestCase):
             with self.subTest(cursor=cursor):
                 scheduler = self.make_scheduler(
                     calendar_enabled=False,
-                    intervals_enabled=True,
-                    garmin=_Garmin(False),
-                    sync_state=_SyncState({"intervals": cursor}),
+                    garmin=_Garmin(True),
+                    sync_state=_SyncState({"garmin": cursor}),
                 )
                 scheduler.schedule()
                 self.assertFalse(

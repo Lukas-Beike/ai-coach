@@ -624,7 +624,6 @@ class RemoteTierTests(unittest.TestCase):
         ("Synchronisier den Plan mit Intervals", "start_intervals_plan_sync"),
         ("Sync die Wettkämpfe zu Intervals.icu", "sync_competitions"),
         ("Übertrag die Ernährung in den Intervals Kalender", "sync_nutrition"),
-        ("Lösche die Dublette bei Intervals", "delete_duplicate_intervals_activity"),
         ("Kannst du meinen Plan zu Intervals hochladen?", "start_intervals_plan_sync"),
         ("Please upload it to my calendar", "start_intervals_plan_sync"),
         ("Bitte den Konflikt reparieren", "resolve_training_sync_conflict"),
@@ -1234,15 +1233,6 @@ class GarminTierTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual("remote_not_requested", decision.reason)
 
-    def test_garmin_duplicate_wording_still_grants_the_intervals_delete(self):
-        for text in (
-            "Lösch das Garmin-Duplikat",
-            "Lösche die doppelte Garmin-Aktivität",
-        ):
-            with self.subTest(text=text):
-                self.assertTrue(
-                    _check("delete_duplicate_intervals_activity", text).allowed
-                )
 
 
 if __name__ == "__main__":

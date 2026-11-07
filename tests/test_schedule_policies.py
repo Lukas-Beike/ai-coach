@@ -14,7 +14,6 @@ from backend.providers.descriptors import (
     CALENDAR_ID,
     DEFAULT_PROVIDER_DESCRIPTORS,
     GARMIN_ID,
-    INTERVALS_ID,
     WEATHER_ID,
 )
 from backend.sync.provider_registry import ProviderRegistry
@@ -179,13 +178,10 @@ class BuildSchedulePoliciesTests(unittest.TestCase):
             calendar_enabled=True,
             garmin_automatic_sync_days=7,
         )
-        self.assertEqual(
-            set(policies), {WEATHER_ID, CALENDAR_ID, GARMIN_ID, INTERVALS_ID}
-        )
+        self.assertEqual(set(policies), {WEATHER_ID, CALENDAR_ID, GARMIN_ID})
         self.assertTrue(policies[WEATHER_ID].configured())
         self.assertTrue(policies[CALENDAR_ID].configured())
         self.assertTrue(policies[GARMIN_ID].configured())
-        self.assertFalse(policies[INTERVALS_ID].configured())
 
 
 class _ScheduleQueue:

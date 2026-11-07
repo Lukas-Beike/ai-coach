@@ -171,7 +171,7 @@ class StructuredToolPreparationTests(unittest.TestCase):
     def test_intervals_refresh_gets_wait_flag_without_inventing_a_period(
         self,
     ) -> None:
-        self.dialogue_action.classify.return_value = {"target_system": "intervals"}
+        self.dialogue_action.classify.return_value = {"target_system": "garmin"}
         arguments: dict[str, Any] = {}
         result = self.service.prepare(
             self.metadata("start_provider_refresh", arguments),
@@ -182,10 +182,10 @@ class StructuredToolPreparationTests(unittest.TestCase):
             allow_mutations=True,
         )
         self.assertEqual(arguments, {"_wait_for_completion": True})
-        self.assertEqual(result["target_system"], "intervals")
+        self.assertEqual(result["target_system"], "garmin")
 
     def test_intervals_refresh_preserves_selected_period(self) -> None:
-        self.dialogue_action.classify.return_value = {"target_system": "intervals"}
+        self.dialogue_action.classify.return_value = {"target_system": "garmin"}
         arguments = {"days": 12}
         self.service.prepare(
             self.metadata("start_provider_refresh", arguments),

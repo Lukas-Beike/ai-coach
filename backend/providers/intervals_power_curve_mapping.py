@@ -2,7 +2,7 @@
 
 The envelope is what ``IntervalsReader`` stores as ``cycling_power_profile``:
 ``status``, the fetch window ``start`` and ``end``, ``synced_at`` and the
-``points`` of the retired Intervals.icu power-curve reader.
+``points`` of ``backend.providers.intervals_power.cycling_power_points``.
 
 The fetch-level facts (status, window, ``synced_at``) map once to a
 ``PowerCurveFetch``; each point keeps its watts and the day and activity of the
@@ -27,8 +27,8 @@ from backend.canonical.domain_records import PowerCurveFetch, PowerCurvePoint
 from backend.canonical.local_time import parse_provider_datetime
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, SourceKind
+from backend.providers.intervals_power import POWER_CURVE_LABEL
 
-POWER_CURVE_LABEL: Final = "Intervals.icu gemessene Leistungskurve"
 MAPPER_VERSION: Final = 1
 _POINT_OK: Final = "ok"
 

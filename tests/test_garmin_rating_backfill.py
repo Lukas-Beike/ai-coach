@@ -550,8 +550,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_the_chain_parks_until_the_history_chains_reached_the_floor(self) -> None:
         env = self.env
-        # With the Intervals.icu ingest on, its chain must reach the floor too.
-        env.key_values.set(env.db, "intervals_ingest_enabled", "1")
+        # Only the Garmin chain counts: Intervals.icu is not read any more.
         seed(env, 1, date(2026, 11, 3), intervals={"rpe": 6.0})
         service, _reader = make_service(
             env, _Client({"1": (60, None), "2": (60, None)})
@@ -563,10 +562,6 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(state_of(env)["finished"])
         self.assertEqual("2026-11-03", cursor_of(env))
         seed(env, 2, date(2026, 10, 1), intervals={"rpe": 6.0})
-        write_cursor(env.db, "garmin", "historical", FLOOR.isoformat(), None, NOW)
-        env.db.commit()
-        self.assertFalse(service.backfill(date(2026, 11, 2))["historical_next_end"])
-        self.assertFalse(state_of(env)["finished"])
         reach_floor(env)
 
         service.backfill(date(2026, 9, 30))

@@ -40,8 +40,8 @@ from backend.providers.canonical_plans import (
     POWER_CURVE_RECORD_KIND,
     reprojection_plan,
 )
+from backend.providers.intervals_power import POWER_CURVE_LABEL
 from backend.providers.intervals_power_curve_mapping import (
-    POWER_CURVE_LABEL,
     PowerCurveMapping,
     map_intervals_power_curve,
 )

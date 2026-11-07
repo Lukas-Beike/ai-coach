@@ -260,38 +260,6 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.library_sync.sync_entry.assert_called_once_with(local_id)
 
-    def test_planned_normal_and_repair_paths(self) -> None:
-        normal = self._add("planned", {"date": "2026-10-01"})
-        repair = self._add("planned", {"date": "2026-10-02"})
-        self.calendar_sync.sync_entry.return_value = {"id": "event-normal"}
-        batch = MagicMock()
-        batch.verify.return_value = {}
-        self.repair_sync.create_batch.return_value = batch
-        self.repair_sync.repair_entry.return_value = None
-        gate = CountingResyncGate()
-
-        normal_result = self._service(provider_resync_gate=gate).sync(
-            {"entries": [normal]}
-        )
-        repair_result = self._service(provider_resync_gate=gate).sync(
-            {"entries": [repair], "repair": True}
-        )
-
-        self.assertEqual(normal_result["status"], "ok")
-        self.assertTrue(normal_result["results"][0]["calendar_synced"])
-        self.calendar_sync.sync_entry.assert_called_once_with(
-            normal["library_workout_id"]
-        )
-        self.repair_sync.create_batch.assert_called_once()
-        self.repair_sync.repair_entry.assert_called_once_with(
-            repair["library_workout_id"], repair["expected_payload_hash"], batch=batch
-        )
-        self.assertEqual(repair_result["status"], "ok")
-        self.assertTrue(repair_result["results"][0]["calendar_synced"])
-        self.assertEqual(self.lock.acquire_calls, [{"timeout": 3.0}])
-        self.assertEqual(self.lock.release_calls, 1)
-        self.assertEqual(gate.operation_entries, 0)
-        self.assertEqual(gate.operation_exits, 0)
 
     def test_hash_and_not_found_conflicts_are_aggregated(self) -> None:
         changed = self._add("library", {"name": "current"})
@@ -398,23 +366,6 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
             ],
         )
 
-    def test_repair_lock_timeout_release_and_exception_cleanup(self) -> None:
-        entry = self._add("planned", {"date": "2026-10-01"})
-        timed_out_lock = RecordingLock(acquired=False)
-        with self.assertRaises(AppError) as raised:
-            self._service(lock=timed_out_lock).sync(
-                {"entries": [entry], "repair": True}
-            )
-        self.assertEqual(raised.exception.status, 503)
-        self.assertEqual(timed_out_lock.acquire_calls, [{"timeout": 3.0}])
-        self.assertEqual(timed_out_lock.release_calls, 0)
-        self.repair_sync.create_batch.assert_not_called()
-
-        raising_lock = RecordingLock()
-        self.repair_sync.create_batch.side_effect = RuntimeError("batch failed")
-        with self.assertRaisesRegex(RuntimeError, "batch failed"):
-            self._service(lock=raising_lock).sync({"entries": [entry], "repair": True})
-        self.assertEqual(raising_lock.release_calls, 1)
 
 
 if __name__ == "__main__":

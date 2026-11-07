@@ -123,7 +123,7 @@ class ProviderReviewTests(unittest.TestCase):
         )
 
     def test_privacy_delete_discards_queued_provider_payloads(self):
-        server.SYNC_JOB_QUEUE.service().enqueue("intervals", "refresh", {"days": 7})
+        server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 7})
         server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 7})
         server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
         self.assertIsNone(server.SYNC_JOB_QUEUE.store().claim())
@@ -145,7 +145,7 @@ class ProviderReviewTests(unittest.TestCase):
         failure.assert_not_called()
 
     def test_running_job_failure_cleanup_is_drained_before_deletion(self):
-        server.SYNC_JOB_QUEUE.service().enqueue("intervals", "refresh", {"days": 7})
+        server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 7})
         entered, release, deleted = (
             threading.Event(),
             threading.Event(),

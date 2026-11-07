@@ -232,13 +232,9 @@ class BuiltinBindingTests(unittest.TestCase):
         )
 
         self.assertEqual(set(runtime.job_owners()), BUILTIN_IDS)
-        self.assertEqual(
-            set(runtime.resync_handlers()), {INTERVALS_ID, GARMIN_ID, WAHOO_ID}
-        )
-        self.assertEqual(
-            set(runtime.synchronous_refreshes()), {INTERVALS_ID, GARMIN_ID}
-        )
-        self.assertEqual(set(runtime.running_probes()), {INTERVALS_ID, WAHOO_ID})
+        self.assertEqual(set(runtime.resync_handlers()), {GARMIN_ID, WAHOO_ID})
+        self.assertEqual(set(runtime.synchronous_refreshes()), {GARMIN_ID, WAHOO_ID})
+        self.assertEqual(set(runtime.running_probes()), {WAHOO_ID})
 
     def test_builtin_schedules_follow_registry_order(self) -> None:
         runtime = build_provider_runtime(
@@ -496,10 +492,7 @@ class PlanPushAdmissionTests(unittest.TestCase):
                     competition_service=mock.Mock(),
                 ),
                 resync=ResyncProviderOwners(
-                    config=mock.Mock(return_value=mock.Mock()),
-                    intervals_sync_service=mock.Mock(),
                     garmin_sync_service=mock.Mock(),
-                    intervals_resync_gate=ProviderResyncGate("Intervals.icu"),
                     garmin_resync_gate=ProviderResyncGate("Garmin"),
                     all_sync_days=-1,
                 ),
@@ -523,7 +516,6 @@ class PlanPushAdmissionTests(unittest.TestCase):
         self.queue.enqueue.return_value = {"id": "job-1"}
         return SyncCommandEndpoint(
             self.queue,
-            mock.Mock(),
             mock.Mock(),
             full_resync,
             lambda: "operation-1",

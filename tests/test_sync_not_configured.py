@@ -18,7 +18,7 @@ from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.full_resync import FullProviderResyncService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.provider_resync_assembly import full_resync_handlers
-from backend.sync.refresh import ProviderRefreshTracker, retry_at, sync_job_error_class
+from backend.sync.refresh import ProviderRefreshTracker, retry_at
 
 try:
     from .architecture_registry import BACKEND_ROOT
@@ -124,33 +124,6 @@ def _declares_not_configured_reason(node: ast.Call) -> bool:
 
 
 class NotConfiguredClassificationTests(unittest.TestCase):
-    def test_not_configured_provider_errors_are_non_retryable(self):
-        cases = {
-            "full resync intervals": _full_resync_intervals_not_configured,
-            "full resync garmin": _full_resync_garmin_not_configured,
-            "activity details": _activity_details_not_configured,
-            "external calendar": _external_calendar_not_configured,
-            "garmin configuration": _garmin_not_configured,
-        }
-        for label, invoke in cases.items():
-            with self.subTest(label):
-                with self.assertRaises(AppError) as raised:
-                    invoke()
-                error = raised.exception
-                self.assertEqual(error.reason, "not_configured")
-                self.assertIn("konfiguriert", error.message)
-                code = ProviderRefreshTracker.error_code(error)
-                self.assertEqual(code, "invalid_configuration")
-                self.assertEqual(sync_job_error_class(error), "invalid_configuration")
-                self.assertIsNone(
-                    retry_at(
-                        [],
-                        current_error_code=code,
-                        now=NOW,
-                        base_seconds=60,
-                        max_seconds=3600,
-                    )
-                )
 
     def test_english_fallback_and_transient_failures_keep_classification(self):
         fallback = AppError(503, "Provider is not configured.")
@@ -203,7 +176,6 @@ class NotConfiguredSyncRouteTests(unittest.TestCase):
         self.endpoint = SyncCommandEndpoint(
             self.queue,
             self.state,
-            Mock(),
             full_resync,
             lambda: "operation-1",
             {"intervals": 90, "garmin": 30},
@@ -224,26 +196,12 @@ class NotConfiguredSyncRouteTests(unittest.TestCase):
         self.state.set_sync_period.assert_not_called()
         handler.send_json.assert_not_called()
 
-    def test_manual_intervals_refresh_is_rejected_before_period_or_job(self):
-        self.assert_rejected_before_mutation(
-            "/api/sync", {"days": 7}, "Intervals.icu ist nicht konfiguriert"
-        )
 
     def test_manual_garmin_refresh_is_rejected_before_period_or_job(self):
         self.assert_rejected_before_mutation(
             "/api/garmin/sync", {"days": 7}, "Garmin ist nicht konfiguriert"
         )
 
-    def test_activity_details_job_is_rejected_before_enqueue(self):
-        self.assert_rejected_before_mutation(
-            "/api/sync/jobs",
-            {
-                "provider": "intervals",
-                "type": "activity_details",
-                "payload": {"activity_id": "a1"},
-            },
-            "Intervals.icu ist nicht konfiguriert",
-        )
 
     def test_garmin_job_is_rejected_before_enqueue(self):
         self.assert_rejected_before_mutation(
@@ -252,17 +210,6 @@ class NotConfiguredSyncRouteTests(unittest.TestCase):
             "Garmin ist nicht konfiguriert",
         )
 
-    def test_configured_intervals_manual_refresh_still_enqueues(self):
-        self.config.intervals_api_key = "test-key"
-        self.queue.enqueue.return_value = {"id": "job-1"}
-        handler = Mock()
-        handler.read_json.return_value = {"days": 7}
-        self.route.handle(handler, "/api/sync")
-        self.state.set_sync_period.assert_called_once_with("intervals", 7, -1)
-        self.queue.enqueue.assert_called_once_with(
-            "intervals", "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
-        )
-        handler.send_json.assert_called_once_with(202, {"id": "job-1"})
 
 
 if __name__ == "__main__":

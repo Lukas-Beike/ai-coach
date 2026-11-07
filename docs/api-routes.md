@@ -51,7 +51,6 @@ provider-keyed.
 | GET | `/api/plan`, `/api/library`, `/api/weather` | Planning, library and weather projections | Auth |
 | GET | `/api/performance`, `/api/profile`, `/api/feedback`, `/api/context-preview` | Athlete and performance projections | Auth |
 | GET | `/api/zones` | Local and provider zone configurations | Auth |
-| GET | `/api/settings/activity-detail-floor` | Activity detail prefetch floor | Auth |
 | GET | `/api/activities`, `/api/activities/{id}` | Activity list and detail | Auth |
 | GET | `/api/sync/status`, `/api/sync/jobs/{id}` | Synchronization status and job result | Auth |
 | GET | `/api/chat/history`, `/api/chat/receipt`, `/api/chat/status` | Coach history, receipts and status | Auth |
@@ -74,8 +73,8 @@ provider-keyed.
 | POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback; activity feedback returns a `change` undo reference | CSRF |
 | POST | `/api/planned-units/{id}/focus` | Set or clear `session_focus` and `strength_intensity` of a planned unit; returns the unit | CSRF |
 | POST | `/api/sync/jobs`, `/api/sync/jobs/{id}/resolve` | Queue or resolve a sync job | CSRF |
-| POST | `/api/sync`, `/api/garmin/sync`, `/api/wahoo/sync`, `/api/intervals/full-resync`, `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Queue provider synchronization | CSRF |
-| POST | `/api/performance/refresh`, `/api/external-calendar/sync`, `/api/weather/sync`, `/api/analysis/refresh`, `/api/nutrition/refresh` | Queue or run a targeted refresh | CSRF |
+| POST | `/api/garmin/sync`, `/api/wahoo/sync`, `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Queue provider synchronization | CSRF |
+| POST | `/api/external-calendar/sync`, `/api/weather/sync`, `/api/analysis/refresh`, `/api/nutrition/refresh` | Queue or run a targeted refresh | CSRF |
 | POST | `/api/analysis/scenarios` | Project a training scenario without saving it | CSRF |
 | POST | `/api/change-history/undo/preview`, `/api/change-history/undo`, `/api/change-history/undo-turn` | Preview or apply an undo, or undo one Coach turn | CSRF |
 | POST | `/api/privacy/delete`, `/api/privacy/restore` | Delete or restore privacy data | CSRF |
@@ -95,7 +94,7 @@ provider-keyed.
 
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
-| PUT | `/api/settings/model`, `/api/settings/service-tier`, `/api/settings/thinking-level`, `/api/settings/calendar-display`, `/api/settings/activity-detail-floor`, `/api/settings/intervals-ingest` | Update settings | CSRF |
+| PUT | `/api/settings/model`, `/api/settings/service-tier`, `/api/settings/thinking-level`, `/api/settings/calendar-display` | Update settings | CSRF |
 | PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile | CSRF |
 | PUT | `/api/zones` | Save one local zone configuration; returns a receipt with an undo reference | CSRF |
 | PUT | `/api/zones/remove` | Remove one local zone configuration; needs `confirmed: true` | CSRF |

@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
+import remote_planned_unit_fixture
+
 from backend import change_history
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import PlanningStateRepository
@@ -915,7 +917,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
             "description": "- 30m Z2",
             "moving_time": 1800,
         }
-        remote = planned_units.remote_planned_unit_payload(
+        remote = remote_planned_unit_fixture.remote_planned_unit_payload(
             planning_fields_from_intervals(provider_event), today=TODAY
         )[0]
         local_id = self.make_conflict({"remote": remote})
@@ -953,7 +955,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
             planned_units.planned_unit_payload_hash(remote),
         )
         self.assertEqual(
-            planned_units.remote_planned_unit_existing_state(
+            remote_planned_unit_fixture.remote_planned_unit_existing_state(
                 {**planned[0], "sync_dirty": 0, "sync_state": "synced"},
                 planned[0]["baseline_hash"],
             )[1],

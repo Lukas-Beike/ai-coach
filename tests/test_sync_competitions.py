@@ -335,13 +335,13 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.database_manager.unit_of_work_calls = 0
 
         result = self.reconciler.reconcile(
-            plan, [], [], [identity, changed, missing], push_local=False, now=NOW
+            plan, [], [identity, changed, missing], now=NOW
         )
 
-        self.assertEqual(result["conflicts"], 3)
+        # A clean-looking remote edit of a linked row is not pulled back any more.
+        self.assertEqual(result["conflicts"], 2)
         expected = {
             "identity": "identity_only",
-            "changed": "remote_changed",
             "missing": "remote_missing",
         }
         for local_id, conflict_type in expected.items():
@@ -356,7 +356,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.insert_competition(row)
         plan = self.sync_plan([row], [])
 
-        first = self.reconciler.reconcile(plan, [], [], [row], push_local=True, now=NOW)
+        first = self.reconciler.reconcile(plan, [], [row], now=NOW)
 
         self.assertEqual(first["conflicts"], 0)
         self.assertEqual(self.stored_competition("local-push")["sync_dirty"], 1)
@@ -370,7 +370,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             )
         )
         second = self.reconciler.reconcile(
-            plan, [pushed], [], [row], push_local=True, now=NOW
+            plan, [pushed], [row], now=NOW
         )
 
         stored = self.stored_competition("local-push")
@@ -380,33 +380,6 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(stored["external_id"], pushed["external_id"])
         self.assertEqual(second["remote_events"], [pushed])
 
-    def test_synced_local_row_is_updated_from_remote(self):
-        row = self.local_competition(
-            "local-clean",
-            intervals_event_id="remote-clean",
-            external_id="external-clean",
-            sync_dirty=0,
-            sync_state="synced",
-        )
-        self.insert_competition(row)
-        remote = self.remote_event(
-            "remote-clean",
-            "external-clean",
-            name="Remote Name",
-            description="Remote details",
-        )
-        plan = self.sync_plan([row], [remote])
-
-        result = self.reconciler.reconcile(
-            plan, [], [], [row], push_local=False, now=NOW
-        )
-
-        stored = self.stored_competition("local-clean")
-        self.assertEqual(result["updated"], 1)
-        self.assertEqual(stored["name"], "Remote Name")
-        self.assertEqual(stored["description"], "Remote details")
-        self.assertEqual(stored["planned_duration_s"], 14400)
-        self.assertEqual(stored["last_synced_at"], NOW)
 
     def test_clean_row_keeps_local_indoor_environment_for_the_same_remote_type(self):
         row = self.local_competition(
@@ -422,7 +395,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         remote["type"] = "VirtualRide"
         plan = self.sync_plan([row], [remote])
 
-        self.reconciler.reconcile(plan, [], [], [row], push_local=False, now=NOW)
+        self.reconciler.reconcile(plan, [], [row], now=NOW)
 
         self.assertEqual(
             self.stored_competition("local-indoor")["environment"], "indoor"
@@ -442,31 +415,12 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         remote["type"] = "Ride"
         plan = self.sync_plan([row], [remote])
 
-        self.reconciler.reconcile(plan, [], [], [row], push_local=False, now=NOW)
+        self.reconciler.reconcile(plan, [], [row], now=NOW)
 
         self.assertEqual(
             self.stored_competition("local-outdoor")["environment"], "outdoor"
         )
 
-    def test_clean_row_adopts_remote_environment_when_the_remote_type_changes(self):
-        row = self.local_competition(
-            "local-changed",
-            intervals_event_id="remote-changed",
-            external_id="external-changed",
-            sync_dirty=0,
-            sync_state="synced",
-        )
-        row["environment"] = "indoor"
-        self.insert_competition(row)
-        remote = self.remote_event("remote-changed", "external-changed")
-        remote["type"] = "Ride"
-        plan = self.sync_plan([row], [remote])
-
-        self.reconciler.reconcile(plan, [], [], [row], push_local=False, now=NOW)
-
-        self.assertEqual(
-            self.stored_competition("local-changed")["environment"], "unknown"
-        )
 
     def test_optimistic_check_skips_competition_edited_after_capture(self):
         captured = self.local_competition(
@@ -485,92 +439,14 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             )
 
         result = self.reconciler.reconcile(
-            plan, [], [], [captured], push_local=False, now=NOW
+            plan, [], [captured], now=NOW
         )
 
         stored = self.stored_competition("local-edit")
-        self.assertEqual(result["updated"], 0)
         self.assertEqual(result["conflicts"], 0)
         self.assertEqual(stored["name"], "New local name")
         self.assertEqual(stored["sync_dirty"], 1)
 
-    def test_remote_import_respects_tombstones_limit_and_does_not_mutate_inputs(self):
-        for index in range(19):
-            self.insert_competition(
-                self.local_competition(
-                    f"existing-{index}",
-                    name=f"Existing {index}",
-                    event_date=f"2026-11-{index + 1:02d}",
-                    sync_dirty=0,
-                    sync_state="synced",
-                )
-            )
-        self.insert_tombstone("stored-tombstone", "suppressed-db", None, "stored")
-        tombstones = [
-            {
-                "id": "captured-tombstone",
-                "intervals_event_id": "suppressed-input",
-                "external_id": None,
-                "created_at": "captured",
-            }
-        ]
-        local_rows = self.reconciler.records()[1]
-        remote_events = [
-            self.remote_event("suppressed-input", "external-input"),
-            self.remote_event("suppressed-db", "external-db"),
-            self.remote_event(
-                "import-1", "external-1", name="Imported One", event_date="2026-12-01"
-            ),
-            self.remote_event(
-                "import-2", "external-2", name="Imported Two", event_date="2026-12-02"
-            ),
-        ]
-        plan = self.sync_plan(local_rows, remote_events, tombstones)
-        plan_before = copy.deepcopy(plan)
-        pushed = []
-        pushed_before = copy.deepcopy(pushed)
-        tombstones_before = copy.deepcopy(tombstones)
-        rows_before = copy.deepcopy(local_rows)
-
-        result = self.reconciler.reconcile(
-            plan,
-            pushed,
-            tombstones,
-            local_rows,
-            push_local=False,
-            now=NOW,
-        )
-
-        self.assertEqual(result["imported"], 1)
-        self.assertEqual(len(result["remote_events"]), 4)
-        self.assertEqual(plan, plan_before)
-        self.assertEqual(pushed, pushed_before)
-        self.assertEqual(tombstones, tombstones_before)
-        self.assertEqual(local_rows, rows_before)
-        with self.database_manager.manager.reader() as db:
-            self.assertEqual(
-                db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()[
-                    "count"
-                ],
-                20,
-            )
-            self.assertIsNone(
-                db.execute(
-                    "SELECT id FROM competitions WHERE intervals_event_id IN (?, ?)",
-                    ("suppressed-input", "suppressed-db"),
-                ).fetchone()
-            )
-            self.assertEqual(
-                db.execute(
-                    "SELECT id FROM competitions WHERE intervals_event_id='import-1'"
-                ).fetchone()["id"],
-                IMPORT_ID,
-            )
-            self.assertIsNone(
-                db.execute(
-                    "SELECT id FROM competitions WHERE intervals_event_id='import-2'"
-                ).fetchone()
-            )
 
     def test_sync_requires_configured_intervals_key_before_lock_or_client(self):
         lock = FakeLock()
@@ -606,21 +482,6 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         finally:
             shared_lock.release()
 
-    def test_read_only_sync_never_deletes_or_upserts_and_keeps_tombstones(self):
-        row = self.local_competition("local-read-only")
-        self.insert_competition(row)
-        self.insert_tombstone("tombstone", "remote-delete", None, "created")
-        client = FakeCompetitionClient()
-        service = self.make_sync_service(client)
-
-        result = service.sync(push_local=False)
-
-        self.assertEqual(client.delete_calls, [])
-        self.assertEqual(client.upsert_calls, [])
-        self.assertEqual(result["pushed"], 0)
-        self.assertEqual(result["deleted_remote"], 0)
-        tombstones, _ = self.reconciler.records()
-        self.assertEqual([row["id"] for row in tombstones], ["tombstone"])
 
     def test_authorized_sync_deletes_tombstones_and_upserts_outbound(self):
         row = self.local_competition("local-push")
@@ -633,7 +494,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         client = FakeCompetitionClient(pushed=[remote])
         service = self.make_sync_service(client)
 
-        result = service.sync(push_local=True)
+        result = service.sync()
 
         self.assertEqual(client.delete_calls, [[{"id": "remote-delete"}]])
         self.assertEqual(len(client.upsert_calls), 1)
@@ -658,7 +519,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         )
         service = self.make_sync_service(client)
 
-        pushed = service.sync(push_local=True)
+        pushed = service.sync()
 
         self.assertEqual(client.upsert_calls, [])
         stored = self.stored_competition("local-swim")
@@ -668,7 +529,6 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(stored["sport_detail"], "Open water")
         self.assertIsNone(stored["last_synced_at"])
         self.assertEqual(pushed["pushed"], 0)
-        self.assertEqual(pushed["updated"], 0)
         self.assertEqual(pushed["skipped"], 1)
         self.assertEqual(
             pushed["skipped_items"],
@@ -680,7 +540,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             ],
         )
 
-        service.sync(push_local=False)
+        service.sync()
 
         stored = self.stored_competition("local-swim")
         self.assertEqual(client.upsert_calls, [])
@@ -706,7 +566,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         )
         service = self.make_sync_service(client)
 
-        result = service.sync(push_local=True)
+        result = service.sync()
 
         self.assertEqual(len(client.upsert_calls), 1)
         stored = self.stored_competition("local-run")
@@ -715,7 +575,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(stored["sport"], "run")
 
         client.events = [pushed_event]
-        service.sync(push_local=False)
+        service.sync()
 
         self.assertEqual(self.stored_competition("local-run")["sport"], "run")
         self.assertEqual(result["pushed"], 1)
@@ -735,7 +595,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         service = self.make_sync_service(client)
 
         with self.assertRaises(RuntimeError) as raised:
-            service.sync(push_local=True)
+            service.sync()
 
         self.assertIs(raised.exception, error)
         self.assertEqual(self.reconciler.records()[0][0]["id"], "tombstone")
@@ -797,8 +657,6 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             {
                 "status": "ok",
                 "synced_at": NOW,
-                "imported": 0,
-                "updated": 1,
                 "pushed": 0,
                 "skipped": 0,
                 "skipped_items": [],

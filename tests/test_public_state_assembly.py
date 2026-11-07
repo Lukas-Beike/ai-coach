@@ -39,7 +39,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
             "planning_season",
             "intervals_state",
             "diagnostic_capture",
-            "intervals_sync_lock",
             "workout_library_sync_running",
             "snapshot_repository",
             "daily_context",
@@ -158,7 +157,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
         service = assembly.sync_public_state_service()
 
         self.assertIs(service._maintenance_gate, owners["gate"])
-        self.assertIs(service._intervals_sync_lock, deps["intervals_sync_lock"]())
         self.assertIs(service._database_manager, owners["manager"])
         self.assertIs(service._config, owners["config"])
 

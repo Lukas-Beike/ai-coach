@@ -65,7 +65,6 @@ class AthleteGetRoutes:
             "/api/profile",
             "/api/feedback",
             "/api/context-preview",
-            "/api/settings/activity-detail-floor",
             ZONES_PATH,
         }:
             return False
@@ -85,8 +84,6 @@ class AthleteGetRoutes:
             payload = self._public_feedback_state_service().feedback_state()
         elif path == ZONES_PATH and self._zone_service is not None:
             payload = self._zone_service().read()
-        elif path == "/api/settings/activity-detail-floor":
-            payload = {"date": self._settings_service.activity_detail_prefetch_floor()}
         else:
             payload = self._coach_context_preview_service().preview()
 

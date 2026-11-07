@@ -77,11 +77,8 @@ class SyncCommandAssemblyTests(unittest.TestCase):
         ) as factory:
             self.assertIs(assembly.provider_refresh(), result)
 
-        factory.assert_called_once_with(
-            self.queue, self.intervals, -1, synchronous_refreshes=None
-        )
+        factory.assert_called_once_with(self.queue, {})
         self.queue_service.assert_called_once_with()
-        self.intervals_sync.assert_called_once_with()
 
     def test_illness_pause_uses_current_config_and_sync_authority_dependencies(self):
         assembly = self.make_assembly()

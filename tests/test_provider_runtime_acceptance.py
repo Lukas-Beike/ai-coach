@@ -607,40 +607,6 @@ class AcmeCoachRefreshTests(AcmeOrchestrationCase):
         self.assertEqual(job_rows(self), [])
 
 
-class AcmePerformanceRefreshTests(AcmeOrchestrationCase):
-    def test_performance_refresh_single_flight_applies_to_any_provider(self) -> None:
-        """A provider declaring ``performance_refresh`` gets the same dedup."""
-        registry = ProviderRegistry(
-            (
-                *DEFAULT_PROVIDER_REGISTRY.all(),
-                acceptance_descriptor(
-                    job_types=frozenset({"refresh", "performance_refresh"})
-                ),
-            )
-        )
-        identifiers = iter(f"perf-{index}" for index in range(1, 50))
-        store = SyncJobStore(
-            self.database,
-            self.clock.iso,
-            lambda: next(identifiers),
-            registry=registry,
-        )
-        queue = SyncJobQueueService(
-            store,
-            self.publisher,
-            self.gate,
-            self.wake,
-            all_sync_days=-1,
-            daily_sync_markers=self.markers,
-            registry=registry,
-        )
-
-        first = queue.enqueue(ACME_ID, "performance_refresh", {"reason": "manual"})
-        second = queue.enqueue(ACME_ID, "performance_refresh", {"reason": "scheduled"})
-
-        self.assertEqual(second["id"], first["id"])
-
-
 class RegistryIsolationTests(AcmeOrchestrationCase):
     def test_default_registry_is_unchanged_by_the_acceptance_scenarios(self) -> None:
         self.assertEqual(DEFAULT_PROVIDER_REGISTRY.all(), DEFAULT_SNAPSHOT)

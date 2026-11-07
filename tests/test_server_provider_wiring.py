@@ -51,7 +51,7 @@ class ProductionProviderWiringTests(unittest.TestCase):
         )
 
     def test_sync_period_defaults_are_derived_from_the_registry(self) -> None:
-        self.assertEqual({"intervals": 84, "garmin": 84, "wahoo": 84}, server.SYNC_PERIOD_DEFAULTS)
+        self.assertEqual({"garmin": 84, "wahoo": 84}, server.SYNC_PERIOD_DEFAULTS)
         self.assertEqual(
             DEFAULT_PROVIDER_REGISTRY.sync_period_defaults(),
             server.SYNC_PERIOD_DEFAULTS,

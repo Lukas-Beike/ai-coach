@@ -92,7 +92,7 @@ class AuditRemediationTests(unittest.TestCase):
         ):
             server.PROVIDER_RESYNC.competition_sync_service().sync()
             self.assertEqual(server.PLANNING_DATA.competition().list(), [])
-            server.PROVIDER_RESYNC.competition_sync_service().sync(push_local=True)
+            server.PROVIDER_RESYNC.competition_sync_service().sync()
         self.assertEqual(server.PLANNING_DATA.competition().list(), [])
         client.bulk_delete_events.assert_called_once()
 
@@ -113,7 +113,7 @@ class AuditRemediationTests(unittest.TestCase):
         with patch.object(
             intervals_client_module, "IntervalsClient", return_value=client
         ):
-            server.PROVIDER_RESYNC.competition_sync_service().sync(push_local=True)
+            server.PROVIDER_RESYNC.competition_sync_service().sync()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             self.assertEqual(
                 [

@@ -89,57 +89,6 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         )
         return assembly, dependencies
 
-    def test_round_construction_is_lazy_then_uses_current_owner_outputs(self):
-        assembly, deps = self.make_assembly()
-        for name in (
-            "database_manager",
-            "tool_names",
-            "read_only_tools",
-            "clarification",
-            "training_patch",
-            "inspector",
-            "proposal_creation",
-            "tool_dispatch",
-            "job_store",
-            "dialogue_action",
-            "planning_authority",
-            "training_context",
-            "response",
-            "response_transport",
-            "limits",
-        ):
-            deps[name].assert_not_called()
-
-        service = assembly.service()
-
-        self.assertIs(service._database_manager, deps["database_manager"])
-        self.assertIs(service._database_lock, deps["lock"])
-        self.assertIs(
-            service._replay._database_manager, deps["database_manager"].return_value
-        )
-        self.assertIs(service._replay._database_lock, deps["lock"])
-        self.assertIs(
-            service._preparation._dialogue_action, deps["dialogue_action"].return_value
-        )
-        self.assertIs(
-            service._execution._duplicate_inspector, deps["inspector"].return_value
-        )
-        self.assertIs(service._execution._key_values, deps["key_values"])
-        self.assertIs(
-            service._execution._training_patch, deps["training_patch"].return_value
-        )
-        self.assertIs(
-            service._execution._tool_dispatch, deps["tool_dispatch"].return_value
-        )
-        self.assertIs(service._journal._job_store, deps["journal_jobs"])
-        self.assertIs(service._jobs, deps["round_jobs"])
-        self.assertIs(service._training_context, deps["training_context"].return_value)
-        self.assertIs(service._response, deps["response"].return_value)
-        self.assertIs(service._limits, deps["limits"].return_value)
-        self.assertEqual(deps["database_manager"].call_count, 2)
-        self.assertEqual(deps["job_store"].call_count, 2)
-        self.assertEqual(deps["read_only_tools"].call_count, 3)
-        self.assertEqual(deps["tool_names"].call_count, 1)
 
     def test_write_gate_uses_read_only_tools_logger_and_lazy_transport(self):
         assembly, deps = self.make_assembly()

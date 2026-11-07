@@ -430,7 +430,7 @@ class CoachUndoToolPersistenceTests(unittest.TestCase):
             revisions,
             profile_mutation_coordinator=threading.RLock(),
         )
-        proposals = CoachProposalCreationService(self.manager, )
+        proposals = CoachProposalCreationService(self.manager)
         self.service = CoachPlanningActionToolService(
             Mock(), Mock(), Mock(), lambda: self.undo, lambda: proposals
         )
@@ -496,7 +496,7 @@ class CoachUndoToolPersistenceTests(unittest.TestCase):
             card["id"], "csrf-hash-1"
         )
         executed = CoachProposalExecutionService(
-            self.manager, Mock(), self.undo, Mock(), MaintenanceGate()
+            self.manager, self.undo, Mock(), MaintenanceGate()
         ).execute(confirmed["action_token"], "csrf-hash-1", card["payload_hash"])
 
         self.assertEqual(executed["status"], "undone")

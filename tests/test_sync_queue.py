@@ -104,20 +104,6 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
             },
         )
 
-    def test_deduplicated_performance_job_does_not_publish_or_wake_again(self):
-        first = self.service.enqueue(
-            "intervals", "performance_refresh", {"reason": "manual"}
-        )
-        self.wake_event.clear()
-        self.publisher.publish.reset_mock()
-
-        second = self.service.enqueue(
-            "intervals", "performance_refresh", {"reason": "scheduled"}
-        )
-
-        self.assertEqual(second["id"], first["id"])
-        self.assertFalse(self.wake_event.is_set())
-        self.publisher.publish.assert_not_called()
 
     def test_enqueue_maps_request_and_store_validation_errors(self):
         invalid_request = self._app_error(lambda: self.service.enqueue("unsupported"))
@@ -148,30 +134,6 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
         self.assertFalse(self.wake_event.is_set())
         self.publisher.publish.assert_not_called()
 
-    def test_state_list_active_and_pending_performance_job(self):
-        performance = self.service.enqueue(
-            "intervals", "performance_refresh", {"reason": "manual"}
-        )
-        weather = self.service.enqueue("weather", payload={"force": True})
-
-        self.assertEqual(
-            self.service.state(performance["id"])["payload"], {"reason": "manual"}
-        )
-        self.assertEqual(
-            {job["id"] for job in self.service.list()},
-            {performance["id"], weather["id"]},
-        )
-        self.assertTrue(self.service.active("weather"))
-        self.assertFalse(self.service.active("calendar"))
-        self.assertEqual(
-            self.service.pending_performance_job_id("intervals"), performance["id"]
-        )
-        self.assertIsNone(self.service.pending_performance_job_id("garmin"))
-
-        error = self._app_error(lambda: self.service.state("missing"))
-        self.assertEqual(error.status, 404)
-        self.assertEqual(error.message, "Synchronisationsjob nicht gefunden.")
-        self.assertEqual(error.reason, "sync_job_not_found")
 
     def test_resume_wakes_only_when_interrupted_jobs_were_resumed(self):
         self.assertEqual(self.service.resume_interrupted(), 0)
@@ -190,7 +152,7 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
         self.daily_sync_markers.mark_attempt.assert_called_once_with("garmin")
 
         self.daily_sync_markers.reset_mock()
-        self.service.enqueue("intervals", "refresh", {"days": 2}, requested_by="user")
+        self.service.enqueue("garmin", "refresh", {"days": 2}, requested_by="user")
         self.service.enqueue("weather", "refresh", {}, requested_by="scheduler")
         self.daily_sync_markers.mark_attempt.assert_not_called()
 

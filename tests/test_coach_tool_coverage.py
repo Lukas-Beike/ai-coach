@@ -59,7 +59,7 @@ REQUIRED_VARIANTS = {
     },
     "save_competition": {"create", "update"},
     "update_training_plan": {"update", "archive", "delete"},
-    "start_provider_refresh": {"intervals", "garmin", "calendar", "weather"},
+    "start_provider_refresh": {"garmin", "wahoo", "calendar", "weather"},
     "start_intervals_plan_sync": {"selected", "created", "all_pending"},
     "resolve_training_sync_conflict": {
         "keep_local",
@@ -1122,6 +1122,62 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             json.loads(server.key_value_service().get("coach_pending_request"))
         )
         self.assertEqual(self.athlete_state(), before)
+
+    @covers(
+        "start_provider_refresh:garmin",
+        "start_provider_refresh:wahoo",
+        "start_provider_refresh:calendar",
+        "start_provider_refresh:weather",
+        "get_sync_job:success",
+    )
+    def test_provider_reads_and_job_status_use_correct_provider(self):
+        with (
+            patch(
+                "backend.sync.garmin_service.GarminSyncService.sync",
+                return_value={"status": "ok"},
+            ) as garmin_sync,
+            patch(
+                "backend.performance.morning_battery_service."
+                "MorningBodyBatteryService.refresh"
+            ),
+        ):
+            result = self.run_tool(
+                "start_provider_refresh",
+                {"days": 7},
+                ["garmin_refresh"],
+                target="garmin",
+            )
+            self.assertEqual(result["status"], "completed")
+            garmin_sync.assert_called_once()
+        with patch(
+            "backend.sync.wahoo_sync.WahooSyncService.sync",
+            return_value={"status": "ok"},
+        ) as wahoo_sync:
+            result = self.run_tool(
+                "start_provider_refresh", {}, ["wahoo_refresh"], target="wahoo"
+            )
+            self.assertEqual(result["status"], "completed")
+            wahoo_sync.assert_called_once()
+        for provider in ("calendar", "weather"):
+            result = self.run_tool(
+                "start_provider_refresh",
+                {},
+                [provider + "_refresh"],
+                target=provider,
+            )
+            job = self.run_tool("get_sync_job", {"job_id": result["sync_job_id"]})[
+                "job"
+            ]
+            self.assertEqual(
+                (job["provider"], job["type"], job["status"]),
+                (provider, "refresh", "queued"),
+            )
+        self.assertTrue(
+            all(
+                job["type"] not in {"plan_push", "competition_push"}
+                for job in server.SYNC_JOB_QUEUE.service().list()
+            )
+        )
 
     def test_matrix_has_observed_success_case_for_every_available_tool_and_variant(
         self,

@@ -8,6 +8,7 @@ from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import remote_reconcilers
 from garmin_support import save_garmin
 from server_test_support import ServerTestCase, server
 from support import (
@@ -818,7 +819,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         tomorrow = (
             _local_datetime.now().astimezone().date() + timedelta(days=1)
         ).isoformat()
-        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
+        remote_reconcilers.planned_reconciler(server).reconcile(
             [
                 {
                     "id": "existing",
@@ -851,7 +852,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         day = (
             _local_datetime.now().astimezone().date() + timedelta(days=2)
         ).isoformat()
-        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
+        remote_reconcilers.planned_reconciler(server).reconcile(
             [
                 {
                     "id": "later",
@@ -1085,7 +1086,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(set(result["provider_sync"]["pagination"]), {"activities"})
 
     def test_library_plan_ignores_stale_provider_calendar_until_imported(self):
-        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
+        remote_reconcilers.library_reconciler(server).reconcile(
             [
                 {
                     "id": 43,

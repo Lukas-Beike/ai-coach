@@ -29,7 +29,6 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `clarify_coach_request` | `success` | `test_clarification_and_cancellation_preserve_athlete_data` |
 | `commit_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
 | `delete_activity_feedback` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
-| `delete_duplicate_intervals_activity` | `success` | `test_delete_duplicate_intervals_activity` |
 | `delete_competition` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |
 | `get_sync_job` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
 | `get_activity_details` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
@@ -41,7 +40,6 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `confirm_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
 | `split_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
 | `merge_activity_sessions` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
-| `inspect_activity_duplicates` | `success` | `test_duplicate_inspection_returns_preview_without_deleting_provider_data` |
 | `list_change_history` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_competitions` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_planned_workouts` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
@@ -56,7 +54,6 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `calculate_food_nutrition` | `success` | `test_food_database_read_tools_calculate_without_writing` |
 | `read_coach_context` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `read_training_state` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
-| `refresh_current_performance` | `success` | `test_provider_reads_and_job_status_use_correct_provider` |
 | `replace_training_plan` | `success` | `test_replacement_changes_only_requested_period` |
 | `resolve_training_sync_conflict` | `adopt_remote`, `keep_local`, `retry_push`, `retry_read` | `test_conflict_choices_and_failed_job_retries` |
 | `save_activity_feedback` | `success` | `test_daily_feedback_and_activity_feedback_are_separate_from_profile` |
@@ -69,7 +66,7 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `delete_nutrition_template` | `success` | `test_saved_meals_run_through_authorized_coach_and_receipts` |
 | `stage_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
 | `start_intervals_plan_sync` | `all_pending`, `created`, `selected` | `test_new_plan_sync_and_later_selected_sync_use_real_ids` |
-| `start_provider_refresh` | `calendar`, `garmin`, `intervals`, `weather` | `test_provider_reads_and_job_status_use_correct_provider` |
+| `start_provider_refresh` | `calendar`, `garmin`, `wahoo`, `weather` | `test_provider_reads_and_job_status_use_correct_provider` |
 | `push_strength_to_garmin` | `push`, `remove` | `test_garmin_strength_push_is_bound_to_the_stored_units` |
 | `sync_nutrition` | `date`, `pending` | `test_nutrition_correction_preserves_fields_and_sync_is_explicitly_queued` |
 | `delete_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |

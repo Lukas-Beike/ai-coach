@@ -14,7 +14,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock
 
 from activity_row_support import (
     FixedActivityRows,
@@ -47,7 +47,6 @@ from backend.performance.activity_read_service import ActivityAnalysisReadServic
 from backend.performance.detail_envelope import DetailEnvelopeReader
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.queue import SyncJobQueueService
 
 TODAY = date(2026, 5, 4)
 STAMP = "2026-10-11T08:00:00+00:00"
@@ -400,32 +399,6 @@ class ActivityCallerResolutionTests(_Fixture):
             service.assign({"activity_id": "act_missing", "equipment_id": "bike-1"})
 
 
-    def test_activity_detail_job_is_stored_under_the_provider_id(self) -> None:
-        local = self.seed("ride-1")
-        store = MagicMock()
-        store.enqueue.return_value = ({"id": "job-1"}, True)
-        service = SyncJobQueueService(
-            store,
-            Mock(),
-            MagicMock(),
-            Mock(),
-            7,
-            Mock(),
-            references=ActivityReferences(self.manager),
-        )
-        with (
-            patch(
-                "backend.sync.queue.normalize_sync_job_request",
-                side_effect=RuntimeError("stop after resolution"),
-            ) as normalize,
-            self.assertRaises(RuntimeError),
-        ):
-            service.enqueue(
-                "intervals",
-                "activity_details",
-                {"activity_id": local},
-            )
-        self.assertEqual({"activity_id": "ride-1"}, normalize.call_args.args[2])
 
 
 

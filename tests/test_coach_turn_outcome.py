@@ -987,7 +987,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
             [
                 self.success(),
                 {
-                    "tool": "refresh_current_performance",
+                    "tool": "start_provider_refresh",
                     "result": {
                         "ok": True,
                         "status": "queued",

@@ -17,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import remote_reconcilers
 from garmin_support import save_garmin
 from server_test_support import ServerTestCase, create_test_session, server
 from support import canonical_backfill_stopped
@@ -577,7 +578,7 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials(
         self,
     ):
-        archived = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
+        archived = remote_reconcilers.library_reconciler(server).reconcile(
             [
                 {
                     "id": "remote-template-1",
