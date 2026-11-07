@@ -301,10 +301,17 @@ class ZoneConfigurationService:
         configuration = local_configuration({**(current or {}), **target})
         if canonical_domain_store.zone_configuration_key(configuration) != key:
             raise AppError(409, "Die Änderungshistorie ist beschädigt.")
-        canonical_domain_store.upsert_local_zone_configuration(
-            db, configuration, now=self._now()
+        restored = _audit_value(configuration)
+        # The restored value keeps the age of its own save, so an undo never
+        # makes an old threshold look freshly confirmed (#1768).
+        saved_at = (
+            change_history.value_recorded_at(db, ENTITY_TYPE, key, restored or {})
+            or self._now()
         )
-        return _audit_value(configuration)
+        canonical_domain_store.upsert_local_zone_configuration(
+            db, configuration, now=saved_at, renew=False
+        )
+        return restored
 
     @staticmethod
     def _receipt(

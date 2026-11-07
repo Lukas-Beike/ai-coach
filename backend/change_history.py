@@ -437,6 +437,29 @@ def record_change(
     return record
 
 
+def value_recorded_at(
+    db: Any, entity_type: str, entity_id: str, value: dict[str, Any]
+) -> str | None:
+    """When ``value`` was last written for the entity, by its change rows.
+
+    Undo rows do not count. Without such a row (pruned or older than the
+    history) the oldest kept row's time is returned, a lower bound of the age;
+    None only for an empty history.
+    """
+    value_hash = audit_hash(audit_projection(entity_type, value))
+    row = db.execute(
+        "SELECT created_at FROM change_history WHERE entity_type = ? "
+        "AND entity_id = ? AND after_hash = ? AND action != 'undo' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (entity_type, str(entity_id), value_hash),
+    ).fetchone()
+    if row is None:
+        row = db.execute(
+            "SELECT created_at FROM change_history ORDER BY created_at LIMIT 1"
+        ).fetchone()
+    return None if row is None else str(row["created_at"])
+
+
 def public_view(row: dict[str, Any]) -> dict[str, Any]:
     """Remove retained athlete values from the public history representation."""
     try:

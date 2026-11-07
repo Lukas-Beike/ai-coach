@@ -394,6 +394,27 @@ class LocalZoneEditTests(unittest.TestCase):
         )
         self.assertEqual(self.zone_changes, [True, True])
 
+    def test_undo_restores_the_save_date_of_the_restored_value(self) -> None:
+        first = self.service.save(LOCAL_POWER)
+        key = first["configuration"]["key"]
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE change_history SET created_at = ? WHERE id = ?",
+                ("2026-08-01T06:00:00+00:00", first["change"]["id"]),
+            )
+        mistake = self.service.save({**LOCAL_POWER, "threshold": 300})["change"]
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE zone_configurations SET updated_at = ? WHERE config_key = ?",
+                ("2026-11-07T06:00:00+00:00", key),
+            )
+        self.undo.apply(
+            {"change_id": mistake["id"], "expected_current_hash": mistake["after_hash"]}
+        )
+        with self.manager.reader() as db:
+            saved = canonical_domain_store.local_zone_saved_days(db)
+        self.assertEqual(saved[key], date(2026, 8, 1))
+
     def test_removal_needs_confirmation_and_can_be_undone(self) -> None:
         key = self.service.save(LOCAL_POWER)["configuration"]["key"]
         with self.assertRaises(AppError):

@@ -265,19 +265,20 @@ def replace_zone_configurations(
 
 
 def upsert_local_zone_configuration(
-    db: Any, configuration: ZoneConfiguration, *, now: str
+    db: Any, configuration: ZoneConfiguration, *, now: str, renew: bool = True
 ) -> WriteOutcome:
     """Write one zone configuration the athlete set locally, which has no provider.
 
     Saving unchanged values still dates the row, so a re-confirmed threshold
-    counts as current (``local_zone_saved_days``).
+    counts as current (``local_zone_saved_days``); ``renew=False`` (an undo)
+    keeps the stored date of unchanged values.
     """
     require_instance(configuration, ZoneConfiguration, "configuration")
     if configuration.provenance.provider is not None:
         raise ValueError("a local zone configuration has no provider")
     row = _zone_row(configuration, None)
     outcome = _upsert(db, _ZONES, row, now=now)
-    if outcome is WriteOutcome.UNCHANGED:
+    if outcome is WriteOutcome.UNCHANGED and renew:
         db.execute(
             f"UPDATE {_ZONES.name} SET updated_at = ? WHERE config_key = ?",
             (now, row["config_key"]),
