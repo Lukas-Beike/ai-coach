@@ -48,7 +48,8 @@ MIN_PLAN_WEEKS = 2
 LONG_SESSION_S = 5400
 NOTE = (
     "Count and intensity of strength sessions only, no tonnage and no load. "
-    "Leg = legs, full body or plyometrics focus."
+    "Leg = executed leg exercises of a completed session, else a legs, full body "
+    "or plyometrics focus."
 )
 Predicate = Callable[[Mapping[str, Any]], bool]
 Draft = tuple[str, list[Mapping[str, Any]], str, dict[str, Any]]

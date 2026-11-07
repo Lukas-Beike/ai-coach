@@ -31,10 +31,17 @@ from backend.planning import leg_strength
 from backend.planning.sport import planned_sport_environment
 from backend.sync.garmin import GarminPayloadService
 
-# Per-field source labels and zone-time arrays stay in get_activity_details;
-# the list keeps each session's scalar values and its primary source label.
+# Per-field source labels, zone-time arrays and executed strength sets stay in
+# get_activity_details; the list keeps each session's scalar values and its
+# primary source label.
 _LIST_OMITTED_KEYS: Final = frozenset(
-    {"sources", "power_zone_times", "heart_rate_zone_times", "pace_zone_times"}
+    {
+        "sources",
+        "power_zone_times",
+        "heart_rate_zone_times",
+        "pace_zone_times",
+        "strength_sets",
+    }
 )
 
 

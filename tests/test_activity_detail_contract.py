@@ -281,6 +281,7 @@ class DocumentShapeTests(unittest.TestCase):
                 "streams",
                 "laps",
                 "zones",
+                "strength_sets",
                 "analysis",
                 "detail_data",
             },

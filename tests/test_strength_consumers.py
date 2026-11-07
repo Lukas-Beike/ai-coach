@@ -396,9 +396,83 @@ class SessionReadTests(unittest.TestCase):
         summaries = strength_summaries(self.db, ["act_1", "act_3"])
         self.assertEqual(set(summaries), {"act_1"})
         self.assertEqual(summaries["act_1"]["source"], "garmin_exercise_sets")
+        many = strength_summaries(
+            self.db, ["act_1", *(f"act_x{i}" for i in range(1200))]
+        )
+        self.assertEqual(set(many), {"act_1"})
         merged = with_strength_summaries([{"id": "act_1"}, {"id": "act_9"}], summaries)
         self.assertIn("strength_sets", merged[0])
         self.assertNotIn("strength_sets", merged[1])
+
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Unrecognized exercises, supersets and long histories (review of PR 2)."""
+
+    def test_unrecognized_sets_decide_neither_leg_nor_a_miss(self) -> None:
+        other = ExerciseCategory.OTHER
+        rows = [(ACTIVE, other, "UNKNOWN", 5, 80.0, None)] * 6
+        summary = strength_summary(stored(set_list(rows)), set_list=False)
+        self.assertIsNone(summary["leg"])
+        self.assertEqual(summary["unrecognized_sets"], 6)
+        structure = [planned("Squat", "SQUAT", "BARBELL_BACK_SQUAT", 3, 5)]
+        self.assertIsNone(plan_comparison(structure, summary))
+        mixed = strength_summary(
+            stored(set_list([*rows, (ACTIVE, BENCH, None, 8, 60.0, None)])),
+            set_list=False,
+        )
+        comparison = plan_comparison(
+            [*structure, planned("Bench", "BENCH_PRESS", "BARBELL_BENCH_PRESS", 1, 8)],
+            mixed,
+        )
+        assert comparison is not None
+        # The squat may hide in the unrecognized sets: unknown, not missed.
+        self.assertEqual(
+            [row["status"] for row in comparison["exercises"]], ["unknown", "matched"]
+        )
+        self.assertEqual(comparison["percentage"], 100)
+
+    def test_total_body_is_leg_and_neutral_categories_decide_nothing(self) -> None:
+        total = set_list([(ACTIVE, ExerciseCategory.TOTAL_BODY, None, 10, None, None)])
+        self.assertTrue(strength_summary(stored(total), set_list=False)["leg"])
+        cardio_and_bench = set_list(
+            [
+                (ACTIVE, ExerciseCategory.CARDIO, None, None, None, 300.0),
+                (ACTIVE, BENCH, None, 8, 60.0, None),
+            ]
+        )
+        self.assertIs(
+            strength_summary(stored(cardio_and_bench), set_list=False)["leg"], False
+        )
+
+    def test_superset_sets_group_per_exercise_over_the_session(self) -> None:
+        row = ExerciseCategory.ROW
+        rows = []
+        for kg in (40.0, 80.0, 80.0):
+            rows += [
+                (ACTIVE, BENCH, "BARBELL_BENCH_PRESS", 5, kg, None),
+                (ACTIVE, row, "BENT_OVER_ROW", 8, 50.0, None),
+            ]
+        summary = strength_summary(stored(set_list(rows)), set_list=True)
+        bench, rowing = summary["exercises"]
+        self.assertEqual(
+            (bench["sets"], bench["top_kg"], bench["reps"]), (3, 80.0, [5, 5, 5])
+        )
+        self.assertEqual(rowing["sets"], 3)
+        progress = strength_progress(
+            [{"started_at_local": "2026-11-05T18:00:00", "strength_sets": summary}]
+        )
+        self.assertEqual(progress["exercises"][0]["sessions"][0]["top_kg"], 80.0)
+
+    def test_the_comparison_uses_every_set_beyond_the_display_limit(self) -> None:
+        rows = [(ACTIVE, SQUAT, f"SQUAT_{index}", 5, 60.0, None) for index in range(25)]
+        summary = strength_summary(stored(set_list(rows)), set_list=False)
+        self.assertEqual(len(summary["exercises"]), 20)
+        self.assertEqual(summary["omitted_exercises"], 5)
+        comparison = plan_comparison(
+            [planned("Squat", "SQUAT", "BARBELL_BACK_SQUAT", 25, 5)], summary
+        )
+        assert comparison is not None
+        self.assertEqual(comparison["percentage"], 100)
 
 
 class CoachStrengthPlanTests(unittest.TestCase):

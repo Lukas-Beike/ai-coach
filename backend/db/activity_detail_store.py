@@ -17,7 +17,7 @@ import re
 import sys
 import zlib
 from array import array
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, cast
@@ -283,41 +283,85 @@ class FullStreamKey:
 
 
 def strength_sets_for_sessions(
-    db: Any, activity_ids: Collection[str]
-) -> dict[str, list[StoredDetailSet]]:
-    """Return the readable strength set lists per session of ``activity_ids``.
+    db: Any,
+    activity_ids: Iterable[str],
+    *,
+    rank: Callable[[StoredDetailSet], Any],
+) -> dict[str, StoredDetailSet]:
+    """Return the one strength set list per session that ``rank`` puts first.
 
-    Lists of sessions merged into one of them belong to that survivor. Deleted
-    sessions are skipped like in ``detail_sets_for_session``.
+    Lists of sessions merged into one of ``activity_ids`` belong to that
+    survivor. Headers are read in chunks; only the chosen list's sets are read.
     """
-    ids = sorted(set(activity_ids))
-    if not ids:
-        return {}
-    marks = ", ".join("?" for _ in ids)
-    stored = _read_sets(
-        db,
-        f"d.detail_kind = ? AND (s.activity_id IN ({marks}) "
-        f"OR (s.state = ? AND s.merged_into IN ({marks})))",
-        (
-            ActivityDetailKind.STRENGTH_SETS.value,
-            *ids,
-            ActivitySessionState.DUPLICATE.value,
-            *ids,
-        ),
+    ids = list(
+        dict.fromkeys(activity_id for activity_id in activity_ids if activity_id)
     )
-    survivors = {
-        row["activity_id"]: row["merged_into"]
-        for row in db.execute(
-            f"SELECT activity_id, merged_into FROM activity_sessions "
-            f"WHERE state = ? AND merged_into IN ({marks})",
-            (ActivitySessionState.DUPLICATE.value, *ids),
+    chosen: dict[str, tuple[Any, dict[str, Any], StoredDetailSet]] = {}
+    for start in range(0, len(ids), 400):
+        chunk = ids[start : start + 400]
+        marks = ", ".join("?" * len(chunk))
+        rows = db.execute(
+            "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE s.activity_id END "
+            "AS owner, d.provider, d.provider_activity_id, d.detail_kind, "
+            "d.mapper_version, d.origin, d.source_kind, d.recorded_by, "
+            "d.source_record_id, d.set_source, d.summary_sha256, d.fetched_at, "
+            "r.activity_id FROM activity_detail_sets AS d "
+            "JOIN activity_records AS r ON r.provider = d.provider "
+            "AND r.provider_activity_id = d.provider_activity_id "
+            "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+            "WHERE r.state = ? AND s.state <> ? AND d.detail_kind = ? "
+            f"AND (s.activity_id IN ({marks}) "
+            f"OR (s.state = ? AND s.merged_into IN ({marks})))",
+            (
+                ActivitySessionState.DUPLICATE.value,
+                ActivityRecordState.ACTIVE.value,
+                ActivitySessionState.DELETED.value,
+                ActivityDetailKind.STRENGTH_SETS.value,
+                *chunk,
+                ActivitySessionState.DUPLICATE.value,
+                *chunk,
+            ),
         ).fetchall()
-    }
-    result: dict[str, list[StoredDetailSet]] = {}
-    for item in stored:
-        owner = survivors.get(item.activity_id, item.activity_id)
-        result.setdefault(owner, []).append(item)
+        for raw in rows:
+            row = dict(raw)
+            # The header alone ranks the list; its sets are read only when chosen.
+            header = _stored(row, _strength_header(row))
+            key = rank(header)
+            current = chosen.get(row["owner"])
+            if current is None or key < current[0]:
+                chosen[row["owner"]] = (key, row, header)
+    result: dict[str, StoredDetailSet] = {}
+    for owner, (_key, row, _header) in chosen.items():
+        try:
+            detail = _rebuild(db, row)
+        except (TypeError, ValueError) as error:
+            _log_unreadable(row, error)
+            continue
+        result[owner] = _stored(row, detail)
     return result
+
+
+def _strength_header(row: Mapping[str, Any]) -> ActivityStrengthSetSet:
+    """A placeholder list with the stored header, for ranking without the sets."""
+    return ActivityStrengthSetSet(
+        provider_activity_id=row["provider_activity_id"],
+        provenance=_provenance(row),
+        origin=ActivityDetailOrigin(row["origin"]),
+        source=StrengthSetSource(row["set_source"]),
+        sets=(ActivityStrengthSet(index=0, set_type=StrengthSetType.ACTIVE),),
+    )
+
+
+def _stored(row: Mapping[str, Any], detail: ActivityDetailSet) -> StoredDetailSet:
+    return StoredDetailSet(
+        provider=row["provider"],
+        provider_activity_id=row["provider_activity_id"],
+        activity_id=row["activity_id"],
+        mapper_version=row["mapper_version"],
+        summary_sha256=row["summary_sha256"],
+        fetched_at=row["fetched_at"],
+        detail=detail,
+    )
 
 
 def full_stream_keys(
@@ -983,32 +1027,37 @@ def _read_sets(
         try:
             detail = _rebuild(db, row)
         except (TypeError, ValueError) as error:
-            # One unreadable set must not hide the others; report it without
-            # stored values or error text so the corruption stays visible.
-            LOGGER.warning(
-                "Stored activity detail set is unreadable",
-                extra={
-                    "event": "activity_detail_unreadable",
-                    "context": {
-                        "provider": row["provider"],
-                        "detail_kind": row["detail_kind"],
-                        "error": type(error).__name__,
-                    },
-                },
-            )
+            _log_unreadable(row, error)
             continue
-        stored.append(
-            StoredDetailSet(
-                provider=row["provider"],
-                provider_activity_id=row["provider_activity_id"],
-                activity_id=row["activity_id"],
-                mapper_version=row["mapper_version"],
-                summary_sha256=row["summary_sha256"],
-                fetched_at=row["fetched_at"],
-                detail=detail,
-            )
-        )
+        stored.append(_stored(row, detail))
     return stored
+
+
+def _log_unreadable(row: Mapping[str, Any], error: Exception) -> None:
+    # One unreadable set must not hide the others; report it without stored
+    # values or error text so the corruption stays visible.
+    LOGGER.warning(
+        "Stored activity detail set is unreadable",
+        extra={
+            "event": "activity_detail_unreadable",
+            "context": {
+                "provider": row["provider"],
+                "detail_kind": row["detail_kind"],
+                "error": type(error).__name__,
+            },
+        },
+    )
+
+
+def _provenance(row: Mapping[str, Any]) -> Provenance:
+    return Provenance(
+        provider=ProviderId(row["provider"]),
+        source_kind=SourceKind(row["source_kind"]),
+        source_record_id=row["source_record_id"],
+        recorded_by=RecordingOrigin(row["recorded_by"]),
+        retrieved_at=_aware_datetime(row["fetched_at"]),
+        label=None,
+    )
 
 
 def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
@@ -1016,14 +1065,7 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
     kind = ActivityDetailKind(row["detail_kind"])
     common = {
         "provider_activity_id": row["provider_activity_id"],
-        "provenance": Provenance(
-            provider=ProviderId(row["provider"]),
-            source_kind=SourceKind(row["source_kind"]),
-            source_record_id=row["source_record_id"],
-            recorded_by=RecordingOrigin(row["recorded_by"]),
-            retrieved_at=_aware_datetime(row["fetched_at"]),
-            label=None,
-        ),
+        "provenance": _provenance(row),
         "origin": ActivityDetailOrigin(row["origin"]),
     }
     if kind is ActivityDetailKind.STREAMS:
