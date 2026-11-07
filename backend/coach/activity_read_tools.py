@@ -37,6 +37,14 @@ _LIST_OMITTED_KEYS: Final = frozenset(
 )
 
 
+def _not_compared() -> dict[str, Any]:
+    """Curve records leave commutes, warm-ups and cool-downs out; say why."""
+    return {
+        "status": "not_covered",
+        "reason": "Pendeln, Einfahren und Ausfahren werden nicht verglichen.",
+    }
+
+
 class CoachActivityReadToolService:
     """Own Coach-specific validation and projections for activity read tools."""
 
@@ -256,11 +264,7 @@ class CoachActivityReadToolService:
                 "reason": "E-Bike-Einheiten werden nicht verglichen (Motorunterstützung).",
             }
         elif summary_is_not_training(own):
-            # Curve records leave commutes, warm-ups and cool-downs out.
-            checks["comparable_sessions"] = {
-                "status": "not_covered",
-                "reason": "Pendeln, Einfahren und Ausfahren werden nicht verglichen.",
-            }
+            checks["comparable_sessions"] = _not_compared()
         elif records is None:
             checks["comparable_sessions"] = {
                 "status": "not_covered",
@@ -347,6 +351,8 @@ class CoachActivityReadToolService:
             }
         if own is None or records is None:
             return _unavailable()
+        if summary_is_not_training(own):
+            return _not_compared()
         return session_comparison(records, stored_activity_key(own))
 
     @staticmethod
