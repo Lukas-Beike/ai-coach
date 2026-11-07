@@ -1067,50 +1067,61 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (!reason || !entry.local_id || entry.is_completed_activity) return null;
     const block = document.createElement("span");
     block.className = "planned-conflict planned-garmin-blocked";
-    const stop = (event) => { event.preventDefault(); event.stopPropagation(); };
-    const coachButton = (label, prompt) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "secondary-button planned-conflict-button";
-      button.textContent = label;
-      button.addEventListener("click", (event) => { stop(event); void globalThis.askCoach?.(prompt); });
-      return button;
-    };
     const unit = `„${entry.name || "Krafteinheit"}“ am ${dateLabel(dateKey)}`;
     if (reason !== "unmapped") {
       const text = document.createElement("span");
       text.textContent = plannedGarminBlockedText(entry);
-      block.append(text, coachButton("Mit Coach strukturieren", `Strukturiere die Krafteinheit ${unit} für die Uhr: Übungen in Reihenfolge mit Sätzen, Wiederholungen, Last und Garmin-Übung. Frag nach, was fehlt.`));
+      block.append(text, plannedCoachButton("Mit Coach strukturieren", `Strukturiere die Krafteinheit ${unit} für die Uhr: Übungen in Reihenfolge mit Sätzen, Wiederholungen, Last und Garmin-Übung. Frag nach, was fehlt.`));
       return block;
     }
-    for (const exercise of Array.isArray(entry.push_unmapped) ? entry.push_unmapped : []) {
-      const row = document.createElement("span");
-      row.className = "planned-garmin-exercise";
-      const text = document.createElement("span");
-      text.textContent = `Keine Garmin-Übung: ${exercise.name}`;
-      row.append(text);
-      for (const suggestion of Array.isArray(exercise.suggestions) ? exercise.suggestions : []) {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "planned-suggestion-chip";
-        chip.textContent = suggestion;
-        chip.addEventListener("click", async (event) => {
-          stop(event);
-          chip.disabled = true;
-          try {
-            await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/garmin-exercise`, { method: "POST", body: JSON.stringify({ exercise_index: exercise.index, garmin_exercise: suggestion, expected_payload_hash: entry.payload_hash }) });
-            await globalThis.load?.();
-          } catch (error) {
-            chip.disabled = false;
-            globalThis.toast?.(error.message, true);
-          }
-        });
-        row.append(chip);
-      }
-      row.append(coachButton("Andere…", `Ordne in der Krafteinheit ${unit} der Übung „${exercise.name}“ die passende Garmin-Übung zu. Frag mich mit Vorschlägen aus dem Katalog.`));
-      block.append(row);
-    }
+    const unmapped = Array.isArray(entry.push_unmapped) ? entry.push_unmapped : [];
+    block.append(...unmapped.map((exercise) => plannedUnmappedExercise(entry, exercise, unit)));
     return block.childElementCount ? block : null;
+  }
+
+  // The button sits in the card summary; a click must not toggle the card.
+  function stopSummaryToggle(event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function plannedCoachButton(label, prompt) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button planned-conflict-button";
+    button.textContent = label;
+    button.addEventListener("click", (event) => { stopSummaryToggle(event); void globalThis.askCoach?.(prompt); });
+    return button;
+  }
+
+  // One unmatched exercise: its catalogue suggestions, each a one-tap pick
+  // that is remembered for the exercise name, and "Andere…" for the Coach.
+  function plannedUnmappedExercise(entry, exercise, unit) {
+    const row = document.createElement("span");
+    row.className = "planned-garmin-exercise";
+    const text = document.createElement("span");
+    text.textContent = `Keine Garmin-Übung: ${exercise.name}`;
+    row.append(text);
+    for (const suggestion of Array.isArray(exercise.suggestions) ? exercise.suggestions : []) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "planned-suggestion-chip";
+      chip.textContent = suggestion;
+      chip.addEventListener("click", async (event) => {
+        stopSummaryToggle(event);
+        chip.disabled = true;
+        try {
+          await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/garmin-exercise`, { method: "POST", body: JSON.stringify({ exercise_index: exercise.index, garmin_exercise: suggestion, expected_payload_hash: entry.payload_hash }) });
+          await globalThis.load?.();
+        } catch (error) {
+          chip.disabled = false;
+          globalThis.toast?.(error.message, true);
+        }
+      });
+      row.append(chip);
+    }
+    row.append(plannedCoachButton("Andere…", `Ordne in der Krafteinheit ${unit} der Übung „${exercise.name}“ die passende Garmin-Übung zu. Frag mich mit Vorschlägen aus dem Katalog.`));
+    return row;
   }
 
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {

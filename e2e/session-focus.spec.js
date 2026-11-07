@@ -23,6 +23,16 @@ test("@responsive session focus chip and select on a planned unit", async ({ pag
   await expect(select.locator("option[value='sweet_spot']")).toHaveCount(0);
   await expect(entry.locator("[data-focus-chip='derived'] .planned-badge")).toContainText("≈");
   await expect(entry.locator("select[name='strength_intensity']")).toHaveCount(0);
+  // The derived focus is offered next to the empty field; one tap sets it.
+  await expect(select).toHaveValue("");
+  const suggestion = entry.locator(".planned-focus-form .planned-suggestion-chip");
+  await expect(suggestion).toHaveText(/^≈ .+ übernehmen$/);
+  expect((await suggestion.boundingBox()).height).toBeGreaterThanOrEqual(32);
+  const suggested = page.waitForResponse((response) => response.url().includes("/focus") && response.request().method() === "POST");
+  await suggestion.click();
+  expect((await suggested).ok()).toBeTruthy();
+  await expect(suggestion).toHaveCount(0);
+  await expect(select).not.toHaveValue("");
   const saved = page.waitForResponse((response) => response.url().includes("/focus") && response.request().method() === "POST");
   await select.selectOption("threshold");
   expect((await saved).ok()).toBeTruthy();
