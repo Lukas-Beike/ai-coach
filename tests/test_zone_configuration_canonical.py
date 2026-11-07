@@ -245,6 +245,28 @@ class CoachZoneTests(unittest.TestCase):
             ],
         )
 
+    def test_current_performance_carries_the_threshold_warning(self) -> None:
+        performance = Mock()
+        performance.current_performance.return_value = {"ftp": 260}
+        warning: dict[str, Any] = {
+            "stale_after_days": 56,
+            "sdk_failure": None,
+            "items": [{}],
+        }
+
+        def service(read):
+            return CoachStructuredContextService(
+                Mock(), Mock(), Mock(), Mock(), performance, threshold_warnings=read
+            )
+
+        self.assertEqual(
+            service(lambda: warning)._current_performance(None)["threshold_warnings"],
+            warning,
+        )
+        self.assertNotIn(
+            "threshold_warnings", service(lambda: None)._current_performance(None)
+        )
+
 
 class LocalZoneEditTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -333,6 +355,21 @@ class LocalZoneEditTests(unittest.TestCase):
             )
         )
 
+    def test_read_carries_the_threshold_warning_only_when_present(self) -> None:
+        self.assertNotIn("threshold_warnings", self.service.read())
+        warning: dict[str, Any] = {
+            "stale_after_days": 56,
+            "sdk_failure": None,
+            "items": [{}],
+        }
+        service = ZoneConfigurationService(
+            self.manager,
+            CanonicalTableReader(),
+            lambda: NOW,
+            threshold_warnings=lambda: warning,
+        )
+        self.assertEqual(service.read()["threshold_warnings"], warning)
+
     def test_committed_save_and_removal_notify_the_change_hook(self) -> None:
         calls: list[bool] = []
         service = ZoneConfigurationService(
@@ -356,6 +393,71 @@ class LocalZoneEditTests(unittest.TestCase):
             {"change_id": change["id"], "expected_current_hash": change["after_hash"]}
         )
         self.assertEqual(self.zone_changes, [True, True])
+
+    def _clocked(self) -> tuple[ZoneConfigurationService, list[str]]:
+        clock = ["2026-08-01T06:00:00+00:00"]
+        service = ZoneConfigurationService(
+            self.manager, CanonicalTableReader(), lambda: clock[0]
+        )
+        unused: Any = None
+        self.undo = HistoryUndoService(
+            self.manager,
+            ChangeHistoryService(self.manager, unused, service),
+            unused,
+            unused,
+            unused,
+            unused,
+            unused,
+            unused,
+            zone_service=service,
+            profile_mutation_coordinator=threading.RLock(),
+        )
+        return service, clock
+
+    def _saved_day(self, key: str) -> date:
+        with self.manager.reader() as db:
+            return canonical_domain_store.local_zone_saved_days(db)[key]
+
+    def _undo(self, change: dict[str, Any]) -> None:
+        self.undo.apply(
+            {"change_id": change["id"], "expected_current_hash": change["after_hash"]}
+        )
+
+    def test_undo_restores_the_save_date_of_the_restored_value(self) -> None:
+        service, clock = self._clocked()
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        clock[0] = "2026-11-07T06:00:00+00:00"
+        self._undo(service.save({**LOCAL_POWER, "threshold": 300})["change"])
+        self.assertEqual(self._saved_day(key), date(2026, 8, 1))
+
+    def test_undo_keeps_a_re_confirmation_date(self) -> None:
+        service, clock = self._clocked()
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        clock[0] = "2026-11-01T06:00:00+00:00"
+        service.save(LOCAL_POWER)
+        self.assertEqual(self._saved_day(key), date(2026, 11, 1))
+        clock[0] = "2026-11-07T06:00:00+00:00"
+        self._undo(service.save({**LOCAL_POWER, "threshold": 300})["change"])
+        self.assertEqual(self._saved_day(key), date(2026, 11, 1))
+
+    def test_re_confirming_a_changed_value_keeps_the_replaced_date(self) -> None:
+        service, clock = self._clocked()
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        clock[0] = "2026-11-01T06:00:00+00:00"
+        change = service.save({**LOCAL_POWER, "threshold": 300})["change"]
+        for day in ("2026-11-02", "2026-11-03"):
+            clock[0] = f"{day}T06:00:00+00:00"
+            service.save({**LOCAL_POWER, "threshold": 300})
+        self.assertEqual(self._saved_day(key), date(2026, 11, 3))
+        self._undo(change)
+        self.assertEqual(self._saved_day(key), date(2026, 8, 1))
+
+    def test_undoing_a_removal_restores_the_removed_save_date(self) -> None:
+        service, clock = self._clocked()
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        clock[0] = "2026-11-07T06:00:00+00:00"
+        self._undo(service.remove({"key": key, "confirmed": True})["change"])
+        self.assertEqual(self._saved_day(key), date(2026, 8, 1))
 
     def test_removal_needs_confirmation_and_can_be_undone(self) -> None:
         key = self.service.save(LOCAL_POWER)["configuration"]["key"]

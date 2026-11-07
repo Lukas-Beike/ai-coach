@@ -241,6 +241,7 @@ from backend.performance.morning_battery_service import (
     MorningBodyBatteryService,
 )
 from backend.performance.source_policy import preferences_from_profile
+from backend.performance.threshold_staleness import ThresholdStalenessService
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
 from backend.planning import library as planning_library
@@ -693,6 +694,8 @@ PROFILE_MUTATION_COORDINATOR = threading.RLock()
 
 # Declared ahead of its first lambda reference; assigned after METRIC_EXPORT below.
 METRIC_EXPORT_RUNNER: MetricExportRunner
+# Declared ahead of its first lambda reference; assigned after METRIC_EXPORT_RUNNER.
+THRESHOLD_WARNINGS: ThresholdStalenessService
 ATHLETE_DATA = AthleteDataAssembly(
     dependencies=AthleteDataAssembly.Inputs(
         database_manager=database_manager,
@@ -716,6 +719,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
             load_inputs_changed=lambda: start_canonical_backfill(),
             thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
+            threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
         ),
     )
 )
@@ -1488,6 +1492,7 @@ COACH_CONTEXT = CoachContextAssembly(
                 coverage=lambda: CANONICAL_READ,
             ),
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+            threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -2129,6 +2134,16 @@ METRIC_EXPORT_RUNNER = MetricExportRunner(
     lambda: METRIC_EXPORT,
     enabled=_intervals_export_configured,
     maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+)
+THRESHOLD_WARNINGS = ThresholdStalenessService(
+    database_manager,
+    lambda: CANONICAL_READ,
+    lambda: ATHLETE_CLOCK.now().date(),
+    zone_configurations=CanonicalTableReader().zone_configurations,
+    preferences=lambda db: preferences_from_profile(
+        ATHLETE_DATA.profile().get_from_db(db)
+    ),
+    sdk_failure=lambda: GARMIN_ASSEMBLY.sync_service().sdk_threshold_failure(),
 )
 
 

@@ -209,6 +209,12 @@ class GarminRemoteReader:
     def _personal_configured(self) -> bool:
         return bool(str(self._config.garmin_personal_api_key or "").strip())
 
+    def sdk_threshold_failure(self) -> dict[str, str] | None:
+        """The failure freezing the Garmin thresholds; None without an SDK setup."""
+        if not self._sdk_configured():
+            return None
+        return self._state_service.sdk_threshold_failure()
+
     def _sdk_configured(self) -> bool:
         return self._client_factory.available() and _garmin_sync_configured(
             self._config, self._garmin_tokens
@@ -1029,6 +1035,12 @@ class GarminSyncSource:
             self._fixture_loader.path() is not None or self._remote_reader.available()
         )
 
+    def sdk_threshold_failure(self) -> dict[str, str] | None:
+        """The SDK failure freezing Garmin thresholds; None in fixture mode."""
+        if self._fixture_loader.path() is not None:
+            return None
+        return self._remote_reader.sdk_threshold_failure()
+
     def configured(self) -> bool:
         return (
             self._fixture_loader.path() is not None or self._remote_reader.configured()
@@ -1210,6 +1222,10 @@ class GarminSyncService:
 
     def available(self) -> bool:
         return self._source.available()
+
+    def sdk_threshold_failure(self) -> dict[str, str] | None:
+        """The failure that freezes the Garmin thresholds, or None (#1768)."""
+        return self._source.sdk_threshold_failure()
 
     def configured(self) -> bool:
         return self._source.configured()

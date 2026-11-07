@@ -195,8 +195,11 @@ class ZoneConfigurationService:
         now: Callable[[], str],
         *,
         on_change: Callable[[], None] = lambda: None,
+        threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None,
     ) -> None:
         self._database_manager = database_manager
+        # Stale-threshold and Garmin SDK warning shown with the zones (#1768).
+        self._threshold_warnings = threshold_warnings
         self._reader = reader
         self._now = now
         # Runs after a save, a removal or an undo: the local load follows it.
@@ -209,7 +212,7 @@ class ZoneConfigurationService:
 
     def read(self) -> dict[str, Any]:
         configurations = self.configurations()
-        return {
+        payload: dict[str, Any] = {
             "sports": [sport.value for sport in EDITABLE_SPORTS],
             "configurations": [
                 public_configuration(configuration)
@@ -217,6 +220,10 @@ class ZoneConfigurationService:
                 if configuration.sport in EDITABLE_SPORTS
             ],
         }
+        warnings = self._threshold_warnings()
+        if warnings:
+            payload["threshold_warnings"] = warnings
+        return payload
 
     def save(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         configuration = local_configuration(payload)
@@ -294,10 +301,18 @@ class ZoneConfigurationService:
         configuration = local_configuration({**(current or {}), **target})
         if canonical_domain_store.zone_configuration_key(configuration) != key:
             raise AppError(409, "Die Änderungshistorie ist beschädigt.")
-        canonical_domain_store.upsert_local_zone_configuration(
-            db, configuration, now=self._now()
+        restored = _audit_value(configuration)
+        # The restored value keeps the age of its own save, so an undo never
+        # makes an old threshold look freshly confirmed (#1768).
+        saved_at = (
+            canonical_domain_store.local_zone_previous_saved_at(db, key)
+            or change_history.value_recorded_at(db, ENTITY_TYPE, key, restored or {})
+            or self._now()
         )
-        return _audit_value(configuration)
+        canonical_domain_store.upsert_local_zone_configuration(
+            db, configuration, now=saved_at, renew=False
+        )
+        return restored
 
     @staticmethod
     def _receipt(
