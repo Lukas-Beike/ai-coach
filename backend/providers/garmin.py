@@ -1336,10 +1336,12 @@ def collect_garmin_activity_detail(
     capability_allowed: CapabilityAllowed | None = None,
     capability_failure: CapabilityFailure | None = None,
     capability_success: CapabilitySuccess | None = None,
+    exercise_sets: bool = False,
 ) -> dict[str, Any]:
     """Collect one Garmin activity's detail parts, keeping each part that succeeds.
 
-    Every part is a separate call. A paused part is skipped without a call and
+    Every part is a separate call. ``exercise_sets`` adds the exercise-set part,
+    which the caller requests for strength activities only. A paused part is skipped without a call and
     its capability is listed in ``skipped``; a failed part is omitted from the
     result and recorded in ``errors`` after redaction. ``errors`` and ``skipped``
     are present only when at least one part failed or was skipped.
@@ -1383,6 +1385,16 @@ def collect_garmin_activity_detail(
             lambda method: method(activity_id),
         ),
     )
+    if exercise_sets:
+        # SDK only: the executed sets, including the athlete's Connect edits.
+        parts += (
+            (
+                "activity_exercise_sets",
+                "exercise_sets",
+                "get_activity_exercise_sets",
+                lambda method: method(activity_id),
+            ),
+        )
     for capability, key, method_name, invoke in parts:
         method = getattr(client, method_name, None)
         if not callable(method):

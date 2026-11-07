@@ -50,6 +50,7 @@ RELEASED_FIXTURES = (
     FIXTURES / "schema_v18.sql.txt",
     FIXTURES / "schema_v19.sql.txt",
     FIXTURES / "schema_v20.sql.txt",
+    FIXTURES / "schema_v21.sql.txt",
     V17_FIXTURE,
 )
 # Columns an upgrade renamed: (table, released name) -> current name. Rows read
@@ -64,6 +65,7 @@ DETAIL_TABLES = {
     "activity_stream_channels",
     "activity_laps",
     "activity_zone_times",
+    "activity_strength_sets",
     "activity_detail_analysis",
 }
 MIRROR_TABLES = {"food_database_entries"}

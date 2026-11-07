@@ -1,8 +1,9 @@
 """Map FIT activity files to canonical detail sets (origin FETCH).
 
 The input is the raw bytes of one FIT activity file, decoded by ``fit_file``.
-Field numbers follow the FIT SDK profile: record messages (20) provide streams
-and lap messages (19) provide device laps. Values are converted to the canonical
+Field numbers follow the FIT SDK profile: record messages (20) provide streams,
+lap messages (19) provide device laps and set messages (225) provide executed
+strength sets. Values are converted to the canonical
 units: metres, metres per second, beats or revolutions per minute, watts,
 degrees Celsius and seconds.
 
@@ -20,6 +21,15 @@ m/s), average and maximum heart rate (15, 16), average cadence (17), average and
 maximum power (19, 20), total ascent (21), normalized power (33) and intensity
 (23: 0 active, 1 rest and 4 recovery, 2 warmup, 3 cooldown, 5 interval as
 ``WORK``; other values map to ``LAP``).
+
+Strength sets (``StrengthSetSource.FIT_SET_MESSAGES``) use these set fields, in
+file order: set_type (5: 0 rest, 1 active; a set without one is dropped),
+repetitions (3), weight (4, /16 kg; 0 means no external load), duration (0,
+/1000 s), start_time (6, seconds from time zero; before it, unknown), category
+(7, the first valid entry of the array: the FIT ``exercise_category`` enum 0-32,
+a newer number maps to ``other``, 65534 unknown to none) and wkt_step_index
+(11, the step number without the message-index flag bits). The per-category
+exercise subtype (8) is not mapped, so FIT sets carry no exercise name.
 
 Not mapped: positions (0, 1), session and activity messages, developer fields,
 device information, and lap run cadence.
@@ -39,10 +49,13 @@ from backend.canonical.activity_detail import (
     MAX_LAPS,
     MAX_STREAM_POINTS,
     MAX_STREAM_SPAN_S,
+    MAX_STRENGTH_SETS,
     ActivityDetailSet,
     ActivityLap,
     ActivityLapSet,
     ActivityStreamSet,
+    ActivityStrengthSet,
+    ActivityStrengthSetSet,
     clean_series,
 )
 from backend.canonical.mapping import IssueReason, MappingIssue, MappingResult
@@ -50,16 +63,20 @@ from backend.canonical.records import Provenance
 from backend.canonical.validation import require_instance, require_text
 from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
+    ExerciseCategory,
     LapKind,
     LapSource,
     StreamChannel,
     StreamResolution,
+    StrengthSetSource,
+    StrengthSetType,
 )
 from backend.providers.fit_file import FitMessage, fit_field, fit_messages
 
 # Version 1: first mapping of FIT activity detail sets (streams and device laps).
 # Version 2: maximum speed per lap.
-MAPPER_VERSION: Final = 2
+# Version 3: executed strength sets from set messages.
+MAPPER_VERSION: Final = 3
 
 # Same limit as the Garmin and Intervals mappers, so issues stay bounded.
 MAX_FIT_ACTIVITY_ID_LENGTH: Final = 200
@@ -72,6 +89,57 @@ _FRACTIONAL_CADENCE_FIELD: Final = 53
 _LAP_START_FIELD: Final = 2
 _LAP_ELAPSED_FIELD: Final = 7
 _LAP_INTENSITY_FIELD: Final = 23
+_SET_MESSAGE: Final = 225
+_SET_DURATION_FIELD: Final = 0
+_SET_REPETITIONS_FIELD: Final = 3
+_SET_WEIGHT_FIELD: Final = 4
+_SET_TYPE_FIELD: Final = 5
+_SET_START_FIELD: Final = 6
+_SET_CATEGORY_FIELD: Final = 7
+_SET_STEP_FIELD: Final = 11
+_SET_TYPES: Final[Mapping[int, StrengthSetType]] = {
+    0: StrengthSetType.REST,
+    1: StrengthSetType.ACTIVE,
+}
+# FIT ``exercise_category`` numbers 0-32, in profile order.
+_FIT_EXERCISE_CATEGORIES: Final[tuple[ExerciseCategory, ...]] = (
+    ExerciseCategory.BENCH_PRESS,
+    ExerciseCategory.CALF_RAISE,
+    ExerciseCategory.CARDIO,
+    ExerciseCategory.CARRY,
+    ExerciseCategory.CHOP,
+    ExerciseCategory.CORE,
+    ExerciseCategory.CRUNCH,
+    ExerciseCategory.CURL,
+    ExerciseCategory.DEADLIFT,
+    ExerciseCategory.FLYE,
+    ExerciseCategory.HIP_RAISE,
+    ExerciseCategory.HIP_STABILITY,
+    ExerciseCategory.HIP_SWING,
+    ExerciseCategory.HYPEREXTENSION,
+    ExerciseCategory.LATERAL_RAISE,
+    ExerciseCategory.LEG_CURL,
+    ExerciseCategory.LEG_RAISE,
+    ExerciseCategory.LUNGE,
+    ExerciseCategory.OLYMPIC_LIFT,
+    ExerciseCategory.PLANK,
+    ExerciseCategory.PLYO,
+    ExerciseCategory.PULL_UP,
+    ExerciseCategory.PUSH_UP,
+    ExerciseCategory.ROW,
+    ExerciseCategory.SHOULDER_PRESS,
+    ExerciseCategory.SHOULDER_STABILITY,
+    ExerciseCategory.SHRUG,
+    ExerciseCategory.SIT_UP,
+    ExerciseCategory.SQUAT,
+    ExerciseCategory.TOTAL_BODY,
+    ExerciseCategory.TRICEPS_EXTENSION,
+    ExerciseCategory.WARM_UP,
+    ExerciseCategory.RUN,
+)
+_FIT_UNKNOWN_CATEGORY: Final = 65534
+# message_index values carry flag bits above the 12-bit index.
+_MESSAGE_INDEX_MASK: Final = 0x0FFF
 # Record field per channel; speed and altitude prefer their enhanced fields.
 _RECORD_CHANNEL_FIELDS: Final[tuple[tuple[StreamChannel, int], ...]] = (
     (StreamChannel.DISTANCE_M, 5),
@@ -135,6 +203,9 @@ def map_fit_activity_detail(
     lap_set = _lap_set(ref, provenance, messages, issues)
     if lap_set is not None:
         records.append(lap_set)
+    strength_set = _strength_set_set(ref, provenance, messages, issues)
+    if strength_set is not None:
+        records.append(strength_set)
     return MappingResult(records=tuple(records), issues=tuple(issues))
 
 
@@ -367,6 +438,111 @@ def _lap_accepts(name: str, value: float) -> bool:
             end_offset_s=0.0,
             **metric,
         )
+    except TypeError, ValueError:
+        return False
+    return True
+
+
+def _strength_set_set(
+    ref: str,
+    provenance: Provenance,
+    messages: list[FitMessage],
+    issues: list[MappingIssue],
+) -> ActivityStrengthSetSet | None:
+    rows = [fields for number, fields in messages if number == _SET_MESSAGE]
+    if not rows:
+        return None
+    zero = _first_record_timestamp(messages)
+    if zero is None:
+        starts = [
+            start
+            for fields in rows
+            if (start := fit_field(fields, _SET_MESSAGE, _SET_START_FIELD)) is not None
+        ]
+        zero = min(starts) if starts else None
+    kept: list[ActivityStrengthSet] = []
+    for fields in rows:
+        item = _strength_set(ref, len(kept), zero, fields, issues)
+        if item is None:
+            continue
+        if len(kept) == MAX_STRENGTH_SETS:
+            _add_issue(issues, ref, "set", IssueReason.OUT_OF_RANGE)
+            break
+        kept.append(item)
+    if not kept:
+        return None
+    return ActivityStrengthSetSet(
+        provider_activity_id=ref,
+        provenance=provenance,
+        origin=ActivityDetailOrigin.FETCH,
+        source=StrengthSetSource.FIT_SET_MESSAGES,
+        sets=tuple(kept),
+    )
+
+
+def _strength_set(
+    ref: str,
+    index: int,
+    zero: float | None,
+    fields: Mapping[int, object],
+    issues: list[MappingIssue],
+) -> ActivityStrengthSet | None:
+    """Build one set, or return None with the issue that drops it."""
+    raw_type = _whole(fields.get(_SET_TYPE_FIELD))
+    set_type = None if raw_type is None else _SET_TYPES.get(raw_type)
+    if set_type is None:
+        _add_issue(issues, ref, "set_type", IssueReason.MISSING)
+        return None
+    values: dict[str, Any] = {
+        "reps": _whole(fields.get(_SET_REPETITIONS_FIELD)),
+        # 0 kg is no external load, never a stand-in value.
+        "weight_kg": fit_field(fields, _SET_MESSAGE, _SET_WEIGHT_FIELD) or None,
+        "duration_s": fit_field(fields, _SET_MESSAGE, _SET_DURATION_FIELD),
+        "workout_step_index": _step_index(fields.get(_SET_STEP_FIELD)),
+        "start_offset_s": None,
+    }
+    start = fit_field(fields, _SET_MESSAGE, _SET_START_FIELD)
+    if start is not None and zero is not None and start >= zero:
+        values["start_offset_s"] = start - zero
+    for name, value in values.items():
+        if value is not None and not _set_accepts(name, value):
+            _add_issue(issues, ref, name, IssueReason.OUT_OF_RANGE)
+            values[name] = None
+    return ActivityStrengthSet(
+        index=index,
+        set_type=set_type,
+        exercise_category=_category(fields.get(_SET_CATEGORY_FIELD)),
+        **values,
+    )
+
+
+def _whole(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _step_index(value: object) -> int | None:
+    step = _whole(value)
+    return None if step is None else step & _MESSAGE_INDEX_MASK
+
+
+def _category(value: object) -> ExerciseCategory | None:
+    """The first valid category of the FIT array (a single value decodes bare)."""
+    entries = value if isinstance(value, list) else [value]
+    for entry in entries:
+        number = _whole(entry)
+        if number is None or number == _FIT_UNKNOWN_CATEGORY:
+            continue
+        if number < len(_FIT_EXERCISE_CATEGORIES):
+            return _FIT_EXERCISE_CATEGORIES[number]
+        return ExerciseCategory.OTHER
+    return None
+
+
+def _set_accepts(name: str, value: object) -> bool:
+    """Whether ActivityStrengthSet accepts one value, so its bounds stay in one place."""
+    metric: dict[str, Any] = {name: value}
+    try:
+        ActivityStrengthSet(index=0, set_type=StrengthSetType.ACTIVE, **metric)
     except TypeError, ValueError:
         return False
     return True

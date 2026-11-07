@@ -1,6 +1,6 @@
 """SQLCipher upgrade, rollback, restart and backup/restore from every released schema.
 
-Each supported released schema (v16 to v20) is populated in an encrypted temporary database
+Each supported released schema (v16 to v21) is populated in an encrypted temporary database
 with the rows of the native migration tests. The upgrade keeps every original
 value, the file stays encrypted, a failing upgrade leaves the database exactly as
 it was, a restart with the same build changes nothing, a wrong key reads nothing,
@@ -25,6 +25,7 @@ from unittest import mock
 import test_db_feedback_rating_time_migration as rating_time
 import test_db_migrations as gate
 import test_db_power_curve_migration as power_curve
+import test_db_strength_sets_migration as strength_sets
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.restore_validation import (
@@ -39,7 +40,7 @@ from backend.db.schema import (
     configure_cipher,
     database_schema_is_current,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V20
+from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V21
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -64,6 +65,9 @@ def builders() -> dict[int, Callable[[Any], None]]:
         20: lambda db: rating_time.populated_feedback_database(
             db, gate.FIXTURES / "schema_v20.sql.txt"
         ),
+        21: lambda db: rating_time.populated_feedback_database(
+            db, gate.FIXTURES / "schema_v21.sql.txt"
+        ),
     }
 
     def populated(db: Any, build: Callable[[Any], Any], version: int) -> None:
@@ -74,6 +78,9 @@ def builders() -> dict[int, Callable[[Any], None]]:
             else ("icu_training_load", "icu_intensity")
         )
         build(db)
+        if version >= 20:
+            # Schema v22 rebuilds the detail set tables of these releases.
+            strength_sets.populate_detail_rows(db)
         db.execute(
             "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (
@@ -206,7 +213,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
 
     def test_a_failing_upgrade_leaves_every_released_schema_unchanged(self) -> None:
         def failing_last_step(connection: Any) -> None:
-            migrations._upgrade_v20_to_v21(connection)
+            migrations._upgrade_v21_to_v22(connection)
             raise RuntimeError("injected migration failure")
 
         for version in builders():
@@ -217,7 +224,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                     with (
                         mock.patch.dict(
                             migrations.UPGRADE_STEPS,
-                            {SHAPE_SCHEMA_V20: (SHAPE_CURRENT, failing_last_step)},
+                            {SHAPE_SCHEMA_V21: (SHAPE_CURRENT, failing_last_step)},
                         ),
                         self.assertRaisesRegex(RuntimeError, "injected"),
                     ):

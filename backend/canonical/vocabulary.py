@@ -495,6 +495,8 @@ class ActivityDetailKind(StrEnum):
     LAPS = "laps"
     HEART_RATE_ZONES = "heart_rate_zones"
     POWER_ZONES = "power_zones"
+    # Executed strength sets (schema version 22).
+    STRENGTH_SETS = "strength_sets"
 
 
 class ActivityDetailOrigin(StrEnum):
@@ -564,6 +566,65 @@ ZONE_DETAIL_KINDS: Final[Mapping[ZoneMetric, ActivityDetailKind]] = {
     ZoneMetric.HEART_RATE: ActivityDetailKind.HEART_RATE_ZONES,
     ZoneMetric.POWER: ActivityDetailKind.POWER_ZONES,
 }
+
+
+class StrengthSetType(StrEnum):
+    """Whether a recorded strength set is work or the rest between sets."""
+
+    ACTIVE = "active"
+    REST = "rest"
+
+
+class StrengthSetSource(StrEnum):
+    """What produced a strength set list."""
+
+    # Garmin's exercise sets, including the athlete's corrections in Connect.
+    GARMIN_EXERCISE_SETS = "garmin_exercise_sets"
+    # The ``set`` messages (225) of the original FIT activity file.
+    FIT_SET_MESSAGES = "fit_set_messages"
+
+
+class ExerciseCategory(StrEnum):
+    """Exercise categories of the FIT profile (``exercise_category``, 0-32).
+
+    Garmin's exercise sets name the same categories in upper case. A category
+    outside this list maps to ``OTHER``; the provider code is kept separately.
+    """
+
+    BENCH_PRESS = "bench_press"
+    CALF_RAISE = "calf_raise"
+    CARDIO = "cardio"
+    CARRY = "carry"
+    CHOP = "chop"
+    CORE = "core"
+    CRUNCH = "crunch"
+    CURL = "curl"
+    DEADLIFT = "deadlift"
+    FLYE = "flye"
+    HIP_RAISE = "hip_raise"
+    HIP_STABILITY = "hip_stability"
+    HIP_SWING = "hip_swing"
+    HYPEREXTENSION = "hyperextension"
+    LATERAL_RAISE = "lateral_raise"
+    LEG_CURL = "leg_curl"
+    LEG_RAISE = "leg_raise"
+    LUNGE = "lunge"
+    OLYMPIC_LIFT = "olympic_lift"
+    PLANK = "plank"
+    PLYO = "plyo"
+    PULL_UP = "pull_up"
+    PUSH_UP = "push_up"
+    ROW = "row"
+    SHOULDER_PRESS = "shoulder_press"
+    SHOULDER_STABILITY = "shoulder_stability"
+    SHRUG = "shrug"
+    SIT_UP = "sit_up"
+    SQUAT = "squat"
+    TOTAL_BODY = "total_body"
+    TRICEPS_EXTENSION = "triceps_extension"
+    WARM_UP = "warm_up"
+    RUN = "run"
+    OTHER = "other"
 
 
 class ZoneBoundarySource(StrEnum):

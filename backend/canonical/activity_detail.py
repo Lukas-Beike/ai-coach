@@ -1,4 +1,5 @@
-"""Immutable detail sets of one provider activity: streams, laps and zone times.
+"""Immutable detail sets of one provider activity: streams, laps, zone times
+and executed strength sets.
 
 Each set belongs to exactly one provider activity, so several providers can
 offer alternative sets for the same canonical session. Choosing between them is
@@ -10,6 +11,7 @@ clean provider values (``clean_series``) before building a set.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from itertools import pairwise
@@ -34,10 +36,13 @@ from backend.canonical.validation import (
 from backend.canonical.vocabulary import (
     ActivityDetailKind,
     ActivityDetailOrigin,
+    ExerciseCategory,
     LapKind,
     LapSource,
     StreamChannel,
     StreamResolution,
+    StrengthSetSource,
+    StrengthSetType,
     ZoneBoundarySource,
     ZoneMetric,
 )
@@ -50,6 +55,14 @@ MAX_SPEED_MPS: Final = 100.0
 MAX_INTENSITY_PCT: Final = 1_000.0
 MAX_LAP_NAME_LENGTH: Final = 200
 MAX_ZONE_LABEL_LENGTH: Final = 64
+MAX_STRENGTH_SETS: Final = 500
+MAX_STRENGTH_REPS: Final = 1_000
+MAX_STRENGTH_WEIGHT_KG: Final = 1_000.0
+MAX_WORKOUT_STEP_INDEX: Final = 999
+MAX_EXERCISE_NAME_LENGTH: Final = 64
+# Provider exercise codes such as ``BARBELL_BACK_SQUAT``: untrusted text, so only
+# upper-case identifiers are kept, never free text.
+EXERCISE_NAME_PATTERN: Final = re.compile(r"[A-Z0-9_]{1,64}")
 
 CHANNEL_BOUNDS: Final[Mapping[StreamChannel, tuple[float, float]]] = {
     StreamChannel.TIME_S: (0.0, MAX_ACTIVITY_DURATION_S),
@@ -327,4 +340,98 @@ class ZoneDistribution:
         return self.metric.detail_kind
 
 
-type ActivityDetailSet = ActivityStreamSet | ActivityLapSet | ZoneDistribution
+def _optional_index(value: object, field: str, upper: int) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field} must be an integer")
+    if not 0 <= value <= upper:
+        raise ValueError(f"{field} must be between 0 and {upper}")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityStrengthSet:
+    """One executed strength set or the rest after it.
+
+    ``weight_kg`` is None when no external load was reported; it is never 0 as
+    a stand-in. ``workout_step_index`` links the set to a step of the planned
+    workout the device ran, when there was one.
+    """
+
+    index: int
+    set_type: StrengthSetType
+    exercise_category: ExerciseCategory | None = None
+    exercise_name: str | None = None
+    reps: int | None = None
+    weight_kg: float | None = None
+    duration_s: float | None = None
+    start_offset_s: float | None = None
+    workout_step_index: int | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.index, bool) or not isinstance(self.index, int):
+            raise TypeError("index must be an integer")
+        if not 0 <= self.index < MAX_STRENGTH_SETS:
+            raise ValueError(f"index must be between 0 and {MAX_STRENGTH_SETS - 1}")
+        require_instance(self.set_type, StrengthSetType, "set_type")
+        if self.exercise_category is not None:
+            require_instance(
+                self.exercise_category, ExerciseCategory, "exercise_category"
+            )
+        name = optional_text(
+            self.exercise_name, "exercise_name", max_length=MAX_EXERCISE_NAME_LENGTH
+        )
+        if name is not None and not EXERCISE_NAME_PATTERN.fullmatch(name):
+            raise ValueError("exercise_name must be an upper-case provider code")
+        _optional_index(self.reps, "reps", MAX_STRENGTH_REPS)
+        _optional_index(
+            self.workout_step_index, "workout_step_index", MAX_WORKOUT_STEP_INDEX
+        )
+        weight = optional_bounded_number(
+            self.weight_kg, "weight_kg", 0.0, MAX_STRENGTH_WEIGHT_KG
+        )
+        if weight == 0:
+            raise ValueError("weight_kg must be None when no load was reported")
+        object.__setattr__(self, "weight_kg", weight)
+        for field in ("duration_s", "start_offset_s"):
+            object.__setattr__(
+                self,
+                field,
+                optional_bounded_number(
+                    getattr(self, field), field, 0.0, MAX_ACTIVITY_DURATION_S
+                ),
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityStrengthSetSet:
+    """The strength sets of one provider activity, from one source only."""
+
+    provider_activity_id: str
+    provenance: Provenance
+    origin: ActivityDetailOrigin
+    source: StrengthSetSource
+    sets: tuple[ActivityStrengthSet, ...]
+
+    @property
+    def kind(self) -> ActivityDetailKind:
+        return ActivityDetailKind.STRENGTH_SETS
+
+    def __post_init__(self) -> None:
+        _require_detail_header(self.provider_activity_id, self.provenance, self.origin)
+        require_instance(self.source, StrengthSetSource, "source")
+        sets = require_instance(self.sets, tuple, "sets")
+        if not 1 <= len(sets) <= MAX_STRENGTH_SETS:
+            raise ValueError(
+                f"sets must contain between 1 and {MAX_STRENGTH_SETS} sets"
+            )
+        for position, item in enumerate(sets):
+            require_instance(item, ActivityStrengthSet, "set")
+            if item.index != position:
+                raise ValueError("set indexes must be consecutive from 0")
+
+
+type ActivityDetailSet = (
+    ActivityStreamSet | ActivityLapSet | ZoneDistribution | ActivityStrengthSetSet
+)

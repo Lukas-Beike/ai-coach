@@ -30,6 +30,7 @@ from backend.db.activity_detail_store import (
     activity_detail_backfill_universe,
     detail_sets_for,
     replace_detail_set,
+    strength_record_ids,
 )
 from backend.db.canonical_store import (
     ACTIVITY_ID_PREFIX,
@@ -55,7 +56,9 @@ BACKFILL_WINDOW: Final = timedelta(days=90)
 BACKFILL_RATE_LIMIT_PAUSE: Final = timedelta(seconds=GARMIN_CAPABILITY_PAUSE_SECONDS)
 BACKFILL_STATE_KEY: Final = "garmin_activity_detail_backfill"
 BACKFILL_RETRY_ATTEMPTS: Final = 3
-# The optional ``activity_fit`` part pauses only itself, never the other parts.
+# The optional ``activity_fit`` and ``activity_exercise_sets`` parts pause only
+# themselves, never the other parts. Exercise sets are fetched for strength
+# activities only.
 DETAIL_CAPABILITIES: Final = (
     "activity_details",
     "activity_splits",
@@ -128,6 +131,7 @@ class GarminActivityDetailService:
             current_summary = active_provider_record_hash(
                 db, GARMIN_ID, ACTIVITY_RECORD_KIND, provider_activity_id
             )
+            strength = bool(strength_record_ids(db, GARMIN_ID, (provider_activity_id,)))
         if _within_cooldown(stored, current_summary, _aware(self._utc_now())):
             return {
                 "status": "unchanged",
@@ -136,7 +140,11 @@ class GarminActivityDetailService:
             }
 
         with self._guard():
-            collected = self._reader.fetch_activity_detail(provider_activity_id)
+            collected = (
+                self._reader.fetch_activity_detail(provider_activity_id, strength=True)
+                if strength
+                else self._reader.fetch_activity_detail(provider_activity_id)
+            )
             now = self._utc_now()
             mapped = _map_collected(collected, recorded_by=recorded_by, now=now)
         # Malformed parts are dropped by the mapper, so they count like failures.
@@ -256,8 +264,10 @@ class GarminActivityDetailService:
     ) -> None:
         """Fetch and store one batch, updating counts, marks and retries in ``outcome``."""
         by_id = {item["provider_activity_id"]: item for item in batch}
+        with self._database_manager.reader() as db:
+            strength_ids = strength_record_ids(db, GARMIN_ID, by_id)
         details = self._reader.fetch_activity_details(
-            list(by_id), cancel_event=cancel_event
+            list(by_id), strength_ids=strength_ids, cancel_event=cancel_event
         )
         try:
             for provider_activity_id, collected in details:

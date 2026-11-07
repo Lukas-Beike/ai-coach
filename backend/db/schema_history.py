@@ -28,6 +28,8 @@ SHAPE_SCHEMA_V17: Final = "schema-v17"
 SHAPE_SCHEMA_V18: Final = "schema-v18"
 # Schema version 20: favorite products.
 SHAPE_SCHEMA_V20: Final = "schema-v20"
+# Schema version 21: the observation lifecycle.
+SHAPE_SCHEMA_V21: Final = "schema-v21"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
@@ -36,6 +38,7 @@ RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
     SHAPE_SCHEMA_V17: "68d69b318f579be15d6bf15eeebccbffac66480296ffc46b876ac0858043c9ee",
     SHAPE_SCHEMA_V18: "ad1f1d68b73dfc400e281bd5aed00798dfee0dfb11e2a177d8bdc1f3c1563bda",
     SHAPE_SCHEMA_V20: "f745323256eb2a0670e31f776bc39adb0820b3a6f05fc085afb491b9644ca265",
+    SHAPE_SCHEMA_V21: "2d81edf3d70d6b81e3eb9b048fc9fefb0c9c4a70885c14cd9848fd18b0cd2052",
 }
 
 # Stored PRAGMA user_version -> schema shapes that version is allowed to hold.
@@ -48,6 +51,7 @@ ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
     18: frozenset({SHAPE_SCHEMA_V18}),
     19: frozenset({SHAPE_SCHEMA_V18}),
     20: frozenset({SHAPE_SCHEMA_V20}),
+    21: frozenset({SHAPE_SCHEMA_V21}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

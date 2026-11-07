@@ -253,6 +253,7 @@ PRIVACY_DELETE_SCOPE = (
             "activity_stream_channels",
             "activity_laps",
             "activity_zone_times",
+            "activity_strength_sets",
             "activity_detail_sets",
             "activity_detail_analysis",
             "activity_records",

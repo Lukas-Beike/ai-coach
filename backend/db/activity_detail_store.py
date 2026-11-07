@@ -1,8 +1,8 @@
 """Persistence of canonical activity detail sets and per-session analysis.
 
 Each provider activity keeps at most one set per detail kind, so several
-providers can hold alternative streams, laps and zone times for one canonical
-session. Functions run inside the caller's unit of work and never commit.
+providers can hold alternative streams, laps, zone times and strength sets for
+one canonical session. Functions run inside the caller's unit of work and never commit.
 Readers return only details of active records whose session is not deleted;
 the rows of tombstoned activities are kept, not destroyed.
 """
@@ -29,6 +29,8 @@ from backend.canonical.activity_detail import (
     ActivityLap,
     ActivityLapSet,
     ActivityStreamSet,
+    ActivityStrengthSet,
+    ActivityStrengthSetSet,
     ZoneBucket,
     ZoneDistribution,
 )
@@ -38,14 +40,18 @@ from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
     ActivityRecordState,
     ActivitySessionState,
+    ExerciseCategory,
     LapKind,
     LapSource,
     ProviderId,
     ProviderRecordState,
     RecordingOrigin,
     SourceKind,
+    Sport,
     StreamChannel,
     StreamResolution,
+    StrengthSetSource,
+    StrengthSetType,
     ZoneBoundarySource,
     ZoneMetric,
 )
@@ -65,6 +71,23 @@ _LAP_COLUMNS: Final = (
     "end_offset_s",
     "name",
     *_LAP_METRIC_COLUMNS,
+)
+_STRENGTH_COLUMNS: Final = (
+    "set_index",
+    "set_type",
+    "exercise_category",
+    "exercise_name",
+    "reps",
+    "weight_kg",
+    "duration_s",
+    "start_offset_s",
+    "workout_step_index",
+)
+_CHILD_TABLES: Final = (
+    "activity_stream_channels",
+    "activity_laps",
+    "activity_zone_times",
+    "activity_strength_sets",
 )
 _ZONE_METRIC_BY_KIND: Final = {metric.detail_kind: metric for metric in ZoneMetric}
 LOGGER = logging.getLogger("intervals_coach")
@@ -187,6 +210,7 @@ def replace_detail_set(
         header["resolution"],
         header["lap_source"],
         header["zone_boundary_source"],
+        header["set_source"],
         summary_sha256,
         content_sha256,
         fetched_at,
@@ -196,8 +220,8 @@ def replace_detail_set(
             "INSERT INTO activity_detail_sets(provider, provider_activity_id, "
             "detail_kind, mapper_version, origin, source_kind, recorded_by, "
             "source_record_id, resolution, lap_source, zone_boundary_source, "
-            "summary_sha256, content_sha256, fetched_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "set_source, summary_sha256, content_sha256, fetched_at, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (*key, *values, now, now),
         )
     else:
@@ -205,7 +229,7 @@ def replace_detail_set(
         db.execute(
             "UPDATE activity_detail_sets SET mapper_version = ?, origin = ?, "
             "source_kind = ?, recorded_by = ?, source_record_id = ?, resolution = ?, "
-            "lap_source = ?, zone_boundary_source = ?, summary_sha256 = ?, "
+            "lap_source = ?, zone_boundary_source = ?, set_source = ?, summary_sha256 = ?, "
             "content_sha256 = ?, fetched_at = ?, updated_at = ? "
             "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
             (*values, now, *key),
@@ -382,6 +406,23 @@ def lap_sets_for_session(db: Any, activity_id: str) -> list[StoredDetailSet]:
             ActivitySessionState.DELETED.value,
         ),
     )
+
+
+def strength_record_ids(
+    db: Any, provider: str, provider_activity_ids: Collection[str]
+) -> set[str]:
+    """Return the given provider activity ids whose record is a strength activity."""
+    ids = sorted(set(provider_activity_ids))
+    if not ids:
+        return set()
+    return {
+        row["provider_activity_id"]
+        for row in db.execute(
+            "SELECT provider_activity_id FROM activity_records WHERE provider = ? "
+            f"AND sport = ? AND provider_activity_id IN ({', '.join('?' for _ in ids)})",
+            (provider, Sport.STRENGTH.value, *ids),
+        ).fetchall()
+    }
 
 
 def activity_detail_backfill_universe(
@@ -729,6 +770,9 @@ def _header(detail: ActivityDetailSet, mapper_version: int) -> dict[str, Any]:
             if isinstance(detail, ZoneDistribution)
             else None
         ),
+        "set_source": (
+            detail.source.value if isinstance(detail, ActivityStrengthSetSet) else None
+        ),
     }
 
 
@@ -752,6 +796,23 @@ def _child_rows(detail: ActivityDetailSet) -> list[tuple[object, ...]]:
                 *(getattr(lap, column) for column in _LAP_METRIC_COLUMNS),
             )
             for lap in detail.laps
+        ]
+    if isinstance(detail, ActivityStrengthSetSet):
+        return [
+            (
+                item.index,
+                item.set_type.value,
+                None
+                if item.exercise_category is None
+                else item.exercise_category.value,
+                item.exercise_name,
+                item.reps,
+                item.weight_kg,
+                item.duration_s,
+                item.start_offset_s,
+                item.workout_step_index,
+            )
+            for item in detail.sets
         ]
     return [
         (
@@ -780,7 +841,7 @@ def _content_hash(header: Mapping[str, Any], children: list[tuple[object, ...]])
 
 
 def _delete_children(db: Any, key: tuple[str, str, str]) -> None:
-    for table in ("activity_stream_channels", "activity_laps", "activity_zone_times"):
+    for table in _CHILD_TABLES:
         db.execute(
             f"DELETE FROM {table} WHERE provider = ? AND provider_activity_id = ? "
             "AND detail_kind = ?",
@@ -811,6 +872,13 @@ def _insert_children(
             f"VALUES ({', '.join('?' * (3 + len(_LAP_COLUMNS)))})",
             [(*key, *row) for row in rows],
         )
+    elif isinstance(detail, ActivityStrengthSetSet):
+        db.executemany(
+            "INSERT INTO activity_strength_sets(provider, provider_activity_id, "
+            f"detail_kind, {', '.join(_STRENGTH_COLUMNS)}) "
+            f"VALUES ({', '.join('?' * (3 + len(_STRENGTH_COLUMNS)))})",
+            [(*key, *row) for row in rows],
+        )
     else:
         db.executemany(
             "INSERT INTO activity_zone_times(provider, provider_activity_id, "
@@ -827,7 +895,8 @@ def _read_sets(
     cursor = db.execute(
         "SELECT d.provider, d.provider_activity_id, d.detail_kind, d.mapper_version, "
         "d.origin, d.source_kind, d.recorded_by, d.source_record_id, d.resolution, "
-        "d.lap_source, d.zone_boundary_source, d.summary_sha256, d.fetched_at, "
+        "d.lap_source, d.zone_boundary_source, d.set_source, d.summary_sha256, "
+        "d.fetched_at, "
         "r.activity_id FROM activity_detail_sets AS d "
         "JOIN activity_records AS r ON r.provider = d.provider "
         "AND r.provider_activity_id = d.provider_activity_id "
@@ -925,6 +994,20 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
         return ActivityLapSet(
             **common, lap_source=LapSource(row["lap_source"]), laps=laps
         )
+    if kind is ActivityDetailKind.STRENGTH_SETS:
+        return ActivityStrengthSetSet(
+            **common,
+            source=StrengthSetSource(row["set_source"]),
+            sets=tuple(
+                _strength_set(item)
+                for item in db.execute(
+                    f"SELECT {', '.join(_STRENGTH_COLUMNS)} FROM activity_strength_sets "
+                    "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ? "
+                    "ORDER BY set_index",
+                    key,
+                ).fetchall()
+            ),
+        )
     buckets = tuple(
         ZoneBucket(
             index=bucket["zone_index"],
@@ -945,6 +1028,21 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
         metric=_ZONE_METRIC_BY_KIND[kind],
         boundary_source=ZoneBoundarySource(row["zone_boundary_source"]),
         buckets=buckets,
+    )
+
+
+def _strength_set(row: Mapping[str, Any]) -> ActivityStrengthSet:
+    category = row["exercise_category"]
+    return ActivityStrengthSet(
+        index=row["set_index"],
+        set_type=StrengthSetType(row["set_type"]),
+        exercise_category=None if category is None else ExerciseCategory(category),
+        exercise_name=row["exercise_name"],
+        reps=row["reps"],
+        weight_kg=row["weight_kg"],
+        duration_s=row["duration_s"],
+        start_offset_s=row["start_offset_s"],
+        workout_step_index=row["workout_step_index"],
     )
 
 
