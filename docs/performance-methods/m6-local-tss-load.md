@@ -116,7 +116,7 @@ uses only the fourth. The value records which branch gave it
 4. **Session RPE** (strength only, v2; k matched by RPE since v4):
    `TSS = AU × k(RPE)`.
    - `AU`: the session-RPE load of card M1, elapsed minutes × RPE, from the
-     local feedback RPE, else the Garmin rating.
+     local feedback RPE, else the provider rating of the session (Garmin).
    - Calibration pairs: the ride and run sessions with a local load (any
      branch) and a local or Garmin rating with RPE > 0, observed in the 365
      days up to the session day. Each pair has its RPE and
