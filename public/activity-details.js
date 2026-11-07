@@ -377,6 +377,12 @@
     return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
   }
 
+  // Reps, else the duration of a timed set.
+  function strengthAmount(set) {
+    if (set.reps != null) return strengthNumber(set.reps, 0);
+    return strengthSeconds(set.duration_s);
+  }
+
   function renderStrengthSets(strength, content) {
     if (!strength?.exercises?.length) return;
     content.append(node("h3", "Kraftsätze"));
@@ -393,21 +399,22 @@
     const thead = node("thead"); const heading = node("tr");
     ["Übung", "Satz", "Wdh. / Dauer", "kg", "Pause"].forEach((label) => { const cell = node("th", label); cell.scope = "col"; heading.append(cell); });
     thead.append(heading); table.append(thead);
-    const body = node("tbody");
     strength.exercises.forEach((exercise) => {
       const setList = Array.isArray(exercise.set_list) ? exercise.set_list : [];
+      // One row group per exercise, so its header covers exactly its own sets.
+      const body = node("tbody");
       setList.forEach((set, index) => {
         const row = node("tr");
         if (index === 0) {
           // One header per exercise spans its sets, so every set row keeps its exercise.
           const nameCell = node("th", strengthExerciseLabel(exercise)); nameCell.scope = "rowgroup"; nameCell.rowSpan = setList.length; row.append(nameCell);
         }
-        const amount = set.reps != null ? strengthNumber(set.reps, 0) : set.duration_s != null ? strengthSeconds(set.duration_s) : "–";
-        row.append(node("td", String(index + 1)), node("td", amount), node("td", strengthNumber(set.weight_kg)), node("td", strengthSeconds(set.rest_s)));
+        row.append(node("td", String(index + 1)), node("td", strengthAmount(set)), node("td", strengthNumber(set.weight_kg)), node("td", strengthSeconds(set.rest_s)));
         body.append(row);
       });
+      table.append(body);
     });
-    table.append(body); tableWrap.append(table); content.append(tableWrap);
+    tableWrap.append(table); content.append(tableWrap);
     const omitted = Number(strength.omitted_exercises) || 0;
     if (omitted) content.append(node("p", `${omitted} weitere ${omitted === 1 ? "Übung" : "Übungen"} nicht angezeigt.`, "muted"));
   }

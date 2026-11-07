@@ -90,9 +90,11 @@ test("one exercise header spans all of its set rows", () => {
   const content = element("div");
   renderStrengthSets(STRENGTH, content);
   const table = content.children.find((child) => child.className === "analysis-chart-table").children[0];
-  const body = table.children.find((child) => child.tag === "tbody");
-  const [first, second] = body.children;
+  const bodies = table.children.filter((child) => child.tag === "tbody");
+  assert.equal(bodies.length, 3, "one row group per exercise");
+  const [first, second] = bodies[0].children;
   assert.equal(first.children[0].tag, "th");
+  assert.equal(first.children[0].scope, "rowgroup");
   assert.equal(first.children[0].rowSpan, 2);
   assert.equal(second.children[0].tag, "td");
 });
