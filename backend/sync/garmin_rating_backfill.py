@@ -139,18 +139,9 @@ def select_rating_candidates(
     intervals = _session_rows(db, ProviderId.INTERVALS.value, rated_only=True)
     garmin = _session_rows(db, ProviderId.GARMIN.value, rated_only=False)
     sessions = _live_sessions(db, [*intervals, *garmin])
-    read_ids = garmin_store.stored_keys(db, ACTIVITY_RATINGS_SECTION)
-    rated_sessions: set[str] = set()
-    unrated: dict[str, tuple[str, str]] = {}
-    for row in garmin:
-        session = sessions.get(str(row["activity_id"]))
-        if session is None:
-            continue
-        identifier = str(row["provider_activity_id"])
-        if row["rated"] or identifier in read_ids:
-            rated_sessions.add(session)
-        else:
-            unrated.setdefault(session, (identifier, str(row["started_at"])))
+    rated_sessions, unrated = _garmin_sessions(
+        garmin, sessions, garmin_store.stored_keys(db, ACTIVITY_RATINGS_SECTION)
+    )
     floor = "" if earliest is None else earliest.isoformat()
     already_rated = no_copy = 0
     found: dict[str, RatingCandidate] = {}
@@ -173,6 +164,29 @@ def select_rating_candidates(
         found.values(), key=lambda item: (item.day, item.session_id), reverse=True
     )
     return RatingSelection(tuple(ordered), already_rated, no_copy)
+
+
+def _garmin_sessions(
+    garmin: Iterable[Any],
+    sessions: Mapping[str, str],
+    read_ids: set[str],
+) -> tuple[set[str], dict[str, tuple[str, str]]]:
+    """Split the live sessions with a Garmin record into rated and unrated ones.
+
+    An unrated session keeps its first Garmin record's id and start.
+    """
+    rated: set[str] = set()
+    unrated: dict[str, tuple[str, str]] = {}
+    for row in garmin:
+        session = sessions.get(str(row["activity_id"]))
+        if session is None:
+            continue
+        identifier = str(row["provider_activity_id"])
+        if row["rated"] or identifier in read_ids:
+            rated.add(session)
+        else:
+            unrated.setdefault(session, (identifier, str(row["started_at"])))
+    return rated, unrated
 
 
 def _day(row: Mapping[str, Any], started: str) -> str:
@@ -300,8 +314,10 @@ class GarminRatingBackfillService:
             oldest=oldest,
             more=more,
         )
-        if failure is not None:
+        if isinstance(failure, RatingReadStopped):
             raise _stop_error(failure)
+        if failure is not None:
+            raise failure
         return {
             "status": "ok",
             "synced_at": fetched_at,
@@ -420,10 +436,8 @@ def _record_outcome(
             state["skipped_ids"] = sorted({*state["skipped_ids"], failed})
 
 
-def _stop_error(failure: Exception) -> Exception:
-    """The job error of a stopped read; other errors pass as they are."""
-    if not isinstance(failure, RatingReadStopped):
-        return failure
+def _stop_error(failure: RatingReadStopped) -> AppError:
+    """The job error of a stopped read."""
     if failure.kind == RATE_LIMITED:
         return AppError(429, "Garmin begrenzt die Anfragen.", reason="rate_limited")
     if failure.kind == KEY_REJECTED:
