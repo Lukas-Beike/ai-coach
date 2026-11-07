@@ -160,6 +160,11 @@ def _key(text: Any) -> str:
     return "".join(_words(text))
 
 
+def name_key(text: Any) -> str:
+    """The key an exercise name is remembered under (see ``resolve_exercise``)."""
+    return _key(text)
+
+
 _ALIASES: Final = {
     _key(alias): name for name, aliases in _ALIAS_GROUPS.items() for alias in aliases
 }
@@ -241,8 +246,11 @@ def stored_pair(item: Mapping[str, Any]) -> GarminExercise | None:
     return GarminExercise(name[:_NAME_LIMIT], category, exercise)
 
 
-def resolve_exercise(item: Mapping[str, Any]) -> GarminExercise | None:
-    """Resolve one exercise: catalogue field, stored pair, its name, then loosely.
+def resolve_exercise(
+    item: Mapping[str, Any],
+    remembered: Mapping[str, GarminExercise] | None = None,
+) -> GarminExercise | None:
+    """Resolve one exercise: catalogue field, stored pair, remembered, its name, loosely.
 
     The stored pair keeps a resolution valid when a later catalogue renames
     the exercise; Garmin's read-back check still catches a pair it dropped.
@@ -251,6 +259,9 @@ def resolve_exercise(item: Mapping[str, Any]) -> GarminExercise | None:
         return explicit
     if (stored := stored_pair(item)) is not None:
         return stored
+    # A catalogue name confirmed for the same exercise name in another unit.
+    if (known := (remembered or {}).get(_key(item.get("name")))) is not None:
+        return known
     if (by_name := catalogue_exercise(item.get("name"))) is not None:
         return by_name
     return _loose_match(item.get("name"))
@@ -355,6 +366,7 @@ def _set_group(
 
 def resolved_exercises(
     exercises: Sequence[Mapping[str, Any]],
+    remembered: Mapping[str, GarminExercise] | None = None,
 ) -> list[GarminExercise]:
     """Resolve every exercise or raise naming each unresolved one with suggestions."""
     if not catalogue_available():
@@ -364,7 +376,7 @@ def resolved_exercises(
     resolved: list[GarminExercise] = []
     missing: list[str] = []
     for item in exercises:
-        found = resolve_exercise(item)
+        found = resolve_exercise(item, remembered)
         if found is None:
             hint = suggestions(item.get("garmin_exercise") or item.get("name"))
             label = str(item.get("name") or "?")
@@ -381,12 +393,16 @@ def resolved_exercises(
 
 
 def strength_workout(
-    *, name: str, description: str, exercises: Sequence[Mapping[str, Any]]
+    *,
+    name: str,
+    description: str,
+    exercises: Sequence[Mapping[str, Any]],
+    remembered: Mapping[str, GarminExercise] | None = None,
 ) -> dict[str, Any]:
     """Return the Garmin workout JSON for a validated, non-empty structure."""
     if not exercises:
         raise GarminStrengthMappingError(NO_STRUCTURE_MESSAGE)
-    resolved = resolved_exercises(exercises)
+    resolved = resolved_exercises(exercises, remembered)
     steps: list[dict[str, Any]] = []
     order = 1
     for item, exercise in zip(exercises, resolved, strict=True):

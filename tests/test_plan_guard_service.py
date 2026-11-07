@@ -392,6 +392,53 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.run_tool("replace_training_plan")
         self.assertEqual(1, self.stored())
 
+    def test_coach_strength_units_need_structure_focus_and_intensity(self) -> None:
+        self.illness = ""
+        free_text = {
+            "local_id": "s",
+            "date": "2026-11-04",
+            "sport": "strength",
+            "name": "Krafttraining Oberkörper",
+            "description": "Face Pulls: 4 Sätze; Dips: 4 Sätze",
+            "planned_duration_s": 2700,
+        }
+        complete = {
+            **free_text,
+            "strength_structure": [{"name": "Face Pulls", "sets": 4, "reps": 12}],
+            "session_focus": "upper",
+            "strength_intensity": "moderate",
+        }
+        cases = {
+            "new unit": ([], [free_text]),
+            "moved unit": ([free_text], [{**free_text, "date": "2026-11-07"}]),
+            "made-up unit": (
+                [],
+                [{**free_text, "local_id": "n", "name": "Kraft – nachgeholt"}],
+            ),
+            "focus only": ([], [{**free_text, "session_focus": "upper"}]),
+        }
+        for label, (before, after) in cases.items():
+            with self.subTest(label):
+                self.units, self.write_units = list(before), after
+                with self.assertRaises(PlanCheckError) as raised:
+                    # Never acceptable: it is data, not a training deviation.
+                    self.run_tool(
+                        "apply_training_changes", accept_plan_findings=["illness_hard"]
+                    )
+                self.assertEqual(
+                    ["strength_incomplete"],
+                    [item["code"] for item in raised.exception.findings],
+                )
+                self.assertEqual(0, self.stored())
+        # A complete unit saves, and an untouched older free-text unit does not
+        # block an unrelated write.
+        self.units, self.write_units = (
+            [free_text],
+            [free_text, {**complete, "local_id": "c"}],
+        )
+        self.run_tool("apply_training_changes")
+        self.assertEqual(1, self.stored())
+
     def test_unchecked_tools_skip_the_guard(self) -> None:
         self.guard = Mock()
         self.run_tool("save_checkin")

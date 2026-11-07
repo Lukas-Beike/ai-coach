@@ -131,6 +131,62 @@ class FallbackTests(unittest.TestCase):
                 found = session_focus(unit(sport, name=text, description=""))
                 self.assertEqual((found.value, found.origin), (expected, "derived"))
 
+    def test_name_focus_wins_and_negated_legs_do_not_count(self):
+        # The athlete's unit of 2026-11-09 (#1802): derived as full body before.
+        upper = unit(
+            "WeightTraining",
+            name="Krafttraining Oberkörper",
+            description=(
+                "Oberkörper moderat: Schrägbankdrücken, Lat Pulldown, Face Pulls, "
+                "Dips, Rudern, Seitheben und Bizeps. Kein Muskelversagen; "
+                "Beine schonen."
+            ),
+        )
+        self.assertEqual(
+            session_focus(upper),
+            SessionFocus("upper", "moderate", "derived", "derived"),
+        )
+        self.assertFalse(session_focus(upper).is_leg_strength)
+        cases = (
+            ("Kraft", "Bankdrücken, Rudern, ohne Beine", "upper"),
+            ("Kraft", "Bankdrücken; kein Beintraining heute", "upper"),
+            ("Strength", "Bench press, rows, no legs", "upper"),
+            ("Krafttraining Unterkörper", "Kniebeuge, dazu Rudern", "legs"),
+            ("Ganzkörper", "Bankdrücken", "full_body"),
+            ("Kraft", "Kniebeuge und Rudern", "full_body"),
+        )
+        for name, text, expected in cases:
+            with self.subTest(text=text):
+                found = session_focus(
+                    unit("WeightTraining", name=name, description=text)
+                )
+                self.assertEqual(found.value, expected)
+
+    def test_strength_intensity_from_text_without_a_structure(self):
+        cases = (
+            ("Kraft schwer", "", "heavy"),
+            ("Kraft", "Oberkörper moderat", "moderate"),
+            ("Kraft leicht", "", "light"),
+            ("Kraft", "nicht schwer, Technik", None),
+            ("Kraft", "3x10", None),
+        )
+        for name, text, expected in cases:
+            with self.subTest(name=name, text=text):
+                found = session_focus(
+                    unit("WeightTraining", name=name, description=text)
+                )
+                self.assertEqual(found.strength_intensity, expected)
+                self.assertEqual(
+                    found.intensity_origin, None if expected is None else "derived"
+                )
+        # A set intensity still wins over the text.
+        found = session_focus(
+            unit("WeightTraining", name="Kraft schwer", strength_intensity="light")
+        )
+        self.assertEqual(
+            (found.strength_intensity, found.intensity_origin), ("light", "set")
+        )
+
     def test_generic_words_do_not_derive_a_hard_focus(self):
         for text in ("Z2 bei 60% FTP", "Sync mit Intervals.icu", "easy Z2"):
             with self.subTest(text=text):

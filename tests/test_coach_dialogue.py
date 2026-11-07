@@ -65,16 +65,24 @@ class DialogueHarness:
         # this off and assert the proposal remains inert.
         self.auto_approve_remote_proposals = True
 
-    def workout(self, day="2026-09-09", name="Oberkörper moderat + Core"):
-        return {
+    def workout(
+        self, day="2026-09-09", name="Oberkörper moderat + Core", sport="WeightTraining"
+    ):
+        workout = {
             "date": day,
             "name": name,
-            "sport": "WeightTraining",
+            "sport": sport,
             "description": "- 30m 60% Synthetic easy workout",
             "duration_minutes": 30,
             "target": "AUTO",
             "rationale": "Synthetic training goal",
         }
+        if sport == "WeightTraining":
+            # The Coach writes every strength unit with all three (#1802).
+            workout["strength_structure"] = [{"name": "Rudern", "sets": 3, "reps": 10}]
+            workout["session_focus"] = "upper"
+            workout["strength_intensity"] = "moderate"
+        return workout
 
     def request(
         self, scope, target="local", period=None, remote_write=False, sync_scope=None
@@ -1152,9 +1160,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                             ],
                         }
                     ],
-                    "workouts": [
-                        {**self.workout(name="Lockerer 10-km-Lauf"), "sport": "Run"}
-                    ],
+                    "workouts": [self.workout(name="Lockerer 10-km-Lauf", sport="Run")],
                     "expected_revision": before["planning_revision"],
                 },
                 [f"planned_unit:{existing['id']}", "local_plan"],
@@ -1498,8 +1504,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_repaired_planning_scope_finishes_without_false_failure_and_replays(self):
         period = {"start": "2026-09-12", "end": "2026-09-14"}
         workouts = [
-            {**self.workout("2026-09-12", "100 km flach"), "sport": "Ride"},
-            {**self.workout("2026-09-14", "Recovery 7 km"), "sport": "Run"},
+            self.workout("2026-09-12", "100 km flach", sport="Ride"),
+            self.workout("2026-09-14", "Recovery 7 km", sport="Run"),
         ]
 
         def apply(scope):
