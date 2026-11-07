@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import unittest
 from contextlib import closing, contextmanager
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -130,6 +131,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     intervals_api_key="fake-intervals-secret",
                     calendar_ical_url="https://calendar.invalid/fake-token",
                     garmin_tokenstore="/does-not-exist/fake-token-store",
+                    sync_history_earliest_date=date(2020, 1, 1),
                 ),
                 settings=SimpleNamespace(
                     selected_model=lambda: "gpt-test",

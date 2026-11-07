@@ -54,6 +54,7 @@ from backend.providers.garmin_rating_history import (
 )
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.intervals_ingest import INGEST_ENABLED_KEY, ingest_enabled_value
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS, RATING_HISTORY_CURSOR
 
 BATCH_LIMIT: Final = 30
@@ -403,9 +404,18 @@ class GarminRatingBackfillService:
         }
 
     def _history_complete(self, db: Any) -> bool:
-        """Return whether the Garmin and Intervals.icu activity chains hit the floor."""
+        """Return whether the activity chains that can still add sessions hit the floor.
+
+        The Intervals.icu chain counts only while its ingest is on: with it off no
+        Intervals.icu session arrives any more, so its cursor never moves.
+        """
         floor = self._earliest_date.isoformat()
+        intervals_on = ingest_enabled_value(
+            self._key_values.get(db, INGEST_ENABLED_KEY)
+        )
         for provider, stream in _HISTORY_CHAINS:
+            if provider == ProviderId.INTERVALS.value and not intervals_on:
+                continue
             cursor = read_cursor(db, provider, stream).get("cursor")
             if not cursor or str(cursor) > floor:
                 return False
@@ -480,16 +490,21 @@ def _read_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
     }
 
 
-def rating_backfill_counts(db: Any, key_values: KeyValueRepository) -> dict[str, Any]:
+def rating_backfill_counts(
+    db: Any, key_values: KeyValueRepository, earliest: date | None = None
+) -> dict[str, Any]:
     """Content-free counts of the rating backfill, for diagnostics and the later
     Intervals.icu data migration's dry run.
 
     ``candidates`` are the sessions still to read, ``already_rated`` those whose
     Garmin record holds a rating or whose rating was read, ``no_garmin_copy``
-    the sessions with an Intervals.icu rating and no Garmin record.
+    the sessions with an Intervals.icu rating and no Garmin record. Sessions
+    before ``earliest`` (the history floor) are no candidates, as for the job.
     """
     state = _read_state(key_values, db)
-    selection = select_rating_candidates(db, excluded=_excluded(state))
+    selection = select_rating_candidates(
+        db, excluded=_excluded(state), earliest=earliest
+    )
     cursor = read_cursor(db, GARMIN_ID, RATING_HISTORY_CURSOR).get("cursor")
     if state["finished"]:
         phase = "finished"

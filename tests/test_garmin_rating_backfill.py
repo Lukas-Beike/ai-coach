@@ -550,6 +550,8 @@ class ServiceTests(unittest.TestCase):
 
     def test_the_chain_parks_until_the_history_chains_reached_the_floor(self) -> None:
         env = self.env
+        # With the Intervals.icu ingest on, its chain must reach the floor too.
+        env.key_values.set(env.db, "intervals_ingest_enabled", "1")
         seed(env, 1, date(2026, 11, 3), intervals={"rpe": 6.0})
         service, _reader = make_service(
             env, _Client({"1": (60, None), "2": (60, None)})
@@ -571,6 +573,19 @@ class ServiceTests(unittest.TestCase):
 
         self.assertTrue(state_of(env)["finished"])
         self.assertEqual(FLOOR.isoformat(), cursor_of(env))
+
+    def test_with_the_intervals_ingest_off_only_garmin_must_reach_the_floor(
+        self,
+    ) -> None:
+        env = self.env
+        seed(env, 1, date(2026, 11, 3), intervals={"rpe": 6.0})
+        write_cursor(env.db, "garmin", "historical", FLOOR.isoformat(), None, NOW)
+        env.db.commit()
+        service, _reader = make_service(env, _Client({"1": (60, None)}))
+
+        service.backfill(None)
+
+        self.assertTrue(state_of(env)["finished"])
 
     def test_the_lock_is_held_per_read_never_across_the_pause(self) -> None:
         env = self.env
