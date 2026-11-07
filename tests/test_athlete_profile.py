@@ -58,6 +58,7 @@ class AthleteProfileTests(unittest.TestCase):
                 "weight_kg": "",
                 "body_fat_pct": "",
                 "height_cm": "",
+                "sex": "",
                 "coaching_style": "Supportive, direct, and evidence-aware",
                 "timezone": os.environ.get("TZ", DEFAULT_TIMEZONE),
                 "weather_location": "",
@@ -124,6 +125,16 @@ class AthleteProfileTests(unittest.TestCase):
         )
         with self.assertRaises(AppError):
             normalize_profile({"training_model": "hiit"}, validate_timezone=True)
+
+    def test_sex_is_male_female_or_unset_and_rejects_unknown_only_when_strict(self):
+        self.assertEqual(normalize_profile({})["sex"], "")
+        for value in ("male", "female", ""):
+            self.assertEqual(
+                normalize_profile({"sex": value}, validate_timezone=True)["sex"], value
+            )
+        self.assertEqual(normalize_profile({"sex": "other"})["sex"], "")
+        with self.assertRaises(AppError):
+            normalize_profile({"sex": "other"}, validate_timezone=True)
 
     def test_normalize_profile_does_not_mutate_input(self):
         value = {"name": "  Ada  ", "timezone": "UTC", "unknown": ["keep"]}

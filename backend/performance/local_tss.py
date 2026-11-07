@@ -8,7 +8,8 @@ the thresholds in effect on its local day, with the first complete branch of:
   speed, else the average speed, ``TSS = hours × IF² × 100``;
 * heart rate (other sports too, walking included; not strength, yoga or
   alpine ski): Banister TRIMP of the average HR, normalised so 60 minutes at the
-  threshold HR is 100;
+  threshold HR is 100, with the constants of the athlete's profile sex (male
+  when not set, marked ``sex_assumed``; method v3, #1774);
 * session RPE (strength only): the session-RPE load (card M1, elapsed minutes x
   RPE) times the athlete's own TSS per AU, the median of ``TSS / AU`` over the
   rated ride and run sessions with a local load of the 365 days up to the
@@ -58,7 +59,7 @@ from backend.performance.session_rpe_load import session_load
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 
 METHOD_ID: Final = "local-tss-load"
-METHOD_VERSION: Final = 2
+METHOD_VERSION: Final = 3
 CARD: Final = "M6"
 
 POWER_BRANCH: Final = "power"
@@ -66,8 +67,11 @@ PACE_BRANCH: Final = "pace"
 HEART_RATE_BRANCH: Final = "heart_rate"
 SESSION_RPE_BRANCH: Final = "session_rpe"
 
-TRIMP_PREFACTOR: Final = 0.64
-TRIMP_COEFFICIENT: Final = 1.92
+# Banister TRIMP prefactor and coefficient by profile sex (card M6 v3); an
+# unset sex takes the male constants and marks the value ``sex_assumed``.
+MALE: Final = "male"
+FEMALE: Final = "female"
+TRIMP_CONSTANTS: Final = {MALE: (0.64, 1.92), FEMALE: (0.86, 1.67)}
 MAX_INTENSITY_FACTOR: Final = 2.0
 RESTING_HR_LOOKBACK_DAYS: Final = 7
 # Yoga and alpine ski get no value; strength only the session-RPE branch and
@@ -303,8 +307,16 @@ def _pace(
     )
 
 
-def _trimp(minutes: float, reserve: float) -> float:
-    return minutes * reserve * TRIMP_PREFACTOR * math.exp(TRIMP_COEFFICIENT * reserve)
+def _trimp(minutes: float, reserve: float, sex: str) -> float:
+    prefactor, coefficient = TRIMP_CONSTANTS[sex]
+    return minutes * reserve * prefactor * math.exp(coefficient * reserve)
+
+
+def trimp_sex(sex: str | None) -> tuple[str, bool]:
+    """The sex whose TRIMP constants apply and whether it was assumed."""
+    if sex in TRIMP_CONSTANTS:
+        return str(sex), False
+    return MALE, True
 
 
 def _heart_rate(
@@ -312,6 +324,7 @@ def _heart_rate(
     sport: Sport,
     seconds: float,
     thresholds: SessionThresholds,
+    sex: str | None,
 ) -> LocalLoad | str | None:
     heart_rate = _positive(summary.get("avg_hr"))
     if heart_rate is None:
@@ -334,12 +347,25 @@ def _heart_rate(
     if not 0 < reserve <= 1:
         return "heart_rate_outside_reserve"
     threshold_reserve = (threshold.value - rest.value) / span
-    load = _trimp(seconds / 60, reserve) / _trimp(60, threshold_reserve) * 100
+    used_sex, assumed = trimp_sex(sex)
+    load = (
+        _trimp(seconds / 60, reserve, used_sex)
+        / _trimp(60, threshold_reserve, used_sex)
+        * 100
+    )
+    inputs: dict[str, Any] = {
+        "sport": sport.value,
+        "duration_s": seconds,
+        "avg_hr": heart_rate,
+        "sex": used_sex,
+    }
+    if assumed:
+        inputs["sex_assumed"] = True
     return _result(
         HEART_RATE_BRANCH,
         load,
         None,
-        {"sport": sport.value, "duration_s": seconds, "avg_hr": heart_rate},
+        inputs,
         {"resting_hr": rest, "threshold_hr": threshold, "max_hr": maximum},
     )
 
@@ -376,6 +402,7 @@ def session_local_load(
     *,
     rating: SessionRating | str | None = None,
     calibration: RpeCalibration | None = None,
+    sex: str | None = None,
 ) -> LocalLoad | str:
     """Return the session's local load, or the reason it has none.
 
@@ -383,7 +410,8 @@ def session_local_load(
     skipped, while a branch that has its input but no valid threshold falls
     through to the next one and its reason is kept if none succeeds. A strength
     session reads only the session-RPE branch with its ``rating`` and the
-    ``calibration`` of its day.
+    ``calibration`` of its day. ``sex`` (profile value, None or empty when not
+    set) chooses the heart-rate branch's TRIMP constants.
     """
     sport = _sport(summary)
     if sport is None or sport in NO_TSS_SPORTS:
@@ -397,7 +425,7 @@ def session_local_load(
     for outcome in (
         _power(summary, sport, seconds, thresholds.ftp),
         _pace(summary, sport, seconds, thresholds.threshold_pace),
-        _heart_rate(summary, sport, seconds, thresholds),
+        _heart_rate(summary, sport, seconds, thresholds, sex),
     ):
         if isinstance(outcome, LocalLoad):
             return outcome
@@ -662,12 +690,15 @@ def session_loads(
     summaries: Sequence[Mapping[str, Any]],
     thresholds: DatedThresholds,
     feedback: Mapping[str, Mapping[str, Any]] | None = None,
+    *,
+    sex: str | None = None,
 ) -> dict[str, LocalLoad | str]:
     """Each summary's local load or no-load reason, by session id.
 
     ``feedback`` maps a summary's stored key to its session's effective local
     feedback (``feedback_by_session``). Strength sessions come last, with the
-    calibration from the other sessions' loads.
+    calibration from the other sessions' loads. ``sex`` is the profile sex the
+    heart-rate branch reads.
     """
     ratings = feedback or {}
     result: dict[str, LocalLoad | str] = {}
@@ -690,6 +721,7 @@ def session_loads(
         result[session_id] = session_local_load(
             summary,
             thresholds.for_session(sport, day, indoor=summary_is_indoor(summary)),
+            sex=sex,
         )
     calibrations = RpeCalibrations(calibration_pairs(summaries, result, ratings))
     for session_id, summary, day in strength:

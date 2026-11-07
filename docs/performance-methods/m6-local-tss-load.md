@@ -1,12 +1,12 @@
 # M6 — Local TSS-scale session load and intensity
 
 - **Card:** M6
-- **Card version:** 2
-- **Method ID:** local-tss-load v2 (#1725, v2 #1726)
+- **Card version:** 3
+- **Method ID:** local-tss-load v3 (#1725, v2 #1726, v3 #1774)
 - **Status:** implemented (`backend/performance/local_tss.py`, `backend/sync/local_load.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-06
-- **Review:** released 2026-11-07 (athlete)
+- **Review:** released 2026-11-07 (athlete); card 3 released 2026-11-07 (athlete, #1774)
 
 ## Target construct
 
@@ -44,6 +44,16 @@ Athlete decisions for v2 (2026-11-06, #1726):
 - Walking takes the heart-rate branch like hiking. Yoga and alpine ski keep no
   value.
 
+Athlete decisions for v3 (2026-11-07, #1774):
+
+- The heart-rate branch takes its TRIMP constants from the profile setting
+  `sex`: male `0.64·e^(1.92·HRr)`, female `0.86·e^(1.67·HRr)`.
+- Without a saved value it uses the male constants and marks the value
+  `sex_assumed` ("Geschlecht nicht gesetzt, männliche Konstanten angenommen").
+  The athlete is male (confirmed 2026-11-07).
+- The value is not prefilled from Garmin or Wahoo; the athlete sets it once in
+  the profile.
+
 ## Formula and units
 
 One versioned method with four branches. Endurance sessions try the first
@@ -72,7 +82,11 @@ uses only the fourth. The value records which branch gave it
 3. **Heart rate** (every sport except strength, yoga and alpine ski, without
    power or pace; walking included since v2):
    - `TSS = TRIMP_session / TRIMP_threshold_hour × 100`.
-   - `TRIMP = minutes × HRr × 0.64 × e^(1.92 × HRr)`.
+   - `TRIMP = minutes × HRr × a × e^(b × HRr)`, with `a = 0.64`, `b = 1.92`
+     for men and `a = 0.86`, `b = 1.67` for women (v3). The prefactor `a`
+     cancels in the ratio; `b` changes the value.
+   - The sex comes from the profile. Without a saved value the male
+     constants apply and the value is marked `sex_assumed`.
    - `HRr = (HR − HR_rest) / (HR_max − HR_rest)`.
    - `TRIMP_session` uses the session's average HR. `TRIMP_threshold_hour`
      is 60 minutes at the threshold HR.
@@ -108,14 +122,15 @@ General rules:
   - `observed_on`: the session's local day.
   - `sport`: the session's sport.
   - `source_kind`: `derived`.
-  - `method`: `local-tss-load`, `method_version`: 2.
+  - `method`: `local-tss-load`, `method_version`: 3.
   - The owner is the canonical session.
   - `details` hold the branch, the pace basis, and the thresholds used with
-    their sources and dates; a session-RPE value also holds `k`, its pair
-    count and window.
+    their sources and dates; a heart-rate value also holds the sex the
+    constants came from and `sex_assumed` when it was not set; a session-RPE
+    value also holds `k`, its pair count and window.
 - **Fingerprint.** `input_fingerprint` is the SHA-256 over the method
-  version, branch, session inputs, thresholds and, for strength, the
-  calibration.
+  version, branch, session inputs (for heart rate including the sex and
+  whether it was assumed), thresholds and, for strength, the calibration.
 - **Recompute.** A method version bump or a changed input gives a new
   fingerprint. A local, idempotent backfill then recomputes the affected
   sessions, so a corrected or backfilled threshold changes past values.
@@ -125,6 +140,8 @@ General rules:
   observations.
 - **Rating changes.** A saved, changed or undone session RPE requests a pass,
   so strength values and the calibration follow it.
+- **Sex changes.** A saved or undone profile sex requests a pass; the
+  heart-rate values get a new fingerprint and are recomputed, and M7 follows.
 
 ## Sources
 
@@ -133,8 +150,9 @@ General rules:
     interest, and its formula is confirmed only in the vendor text V1.
   - R20 relates TSS to fitness change.
   - R27-R29 cover the error and meaning of FTP.
-- **Heart-rate branch:** R19 (Banister TRIMP; constants not verified from
-  the chapter). V2 shows that the "one hour = 100" normalisation is a vendor
+- **Heart-rate branch:** R19 (Banister TRIMP; male and female constants not
+  verified from the chapter; R25 prints 0.84 instead of 0.86 for the female
+  prefactor, which cancels in the normalisation). V2 shows that the "one hour = 100" normalisation is a vendor
   convention without a peer-reviewed source.
 - **Pace branch:** V1 (rTSS convention, formula not verified) and R30 (use
   case only). R25 is evidence against it.
@@ -202,7 +220,9 @@ hour, or a mix of branches on one scale.
 - The strength factor assumes that one AU of strength costs as much TSS as one
   AU of the athlete's rides and runs. Nothing validates this; it is a personal
   scaling, not a measurement.
-- The male coefficient is fixed for this athlete and does not transfer.
+- The constants are chosen by the profile sex. A person outside both
+  reference groups, or an unset profile (male assumed), gets constants that
+  may not fit.
 
 ## Deviations from the studied procedure
 
@@ -244,7 +264,8 @@ hour, or a mix of branches on one scale.
 | TSS formula | hours × IF² × 100, IF = NP/FTP | source | R18 as given in vendor text V1; R20 relates TSS to fitness change. |
 | Branch order | power, pace (run), heart rate | product assumption | Athlete decision 2026-11-06; external load before internal load. |
 | Pace TSS | hours × (v/v_threshold)² × 100 | product assumption | rTSS convention (V1), formula unverified; R25 does not support it. |
-| TRIMP prefactor and coefficient | 0.64 and 1.92 | product assumption | Banister male constants as cited for R19, not verified from the chapter; coefficient chosen by the athlete 2026-11-06. |
+| TRIMP prefactor and coefficient | male 0.64 and 1.92, female 0.86 and 1.67 | product assumption | Banister constants as cited for R19, not verified from the chapter; male coefficient chosen by the athlete 2026-11-06, constants by profile sex 2026-11-07 (v3). |
+| Unset sex | male constants, marked `sex_assumed` | product assumption | Athlete decision 2026-11-07 (#1774); keeps existing values for the male athlete. |
 | HR normalisation | 60 min at threshold HR = 100 | product assumption | Vendor convention (V2); no peer-reviewed source. |
 | HR guards | HR_rest < threshold HR < HR_max, 0 < HRr ≤ 1 | product assumption | Keeps HRr defined and the normalisation positive; not a published rule. |
 | Resting HR look-back | 7 days, else the earliest later value, flagged | product assumption | Keeps HRr on a recent resting HR; the later stand-in follows the athlete decision of 2026-11-06 after the count on the 2026-10-24 copy (2,334 sessions had none within 7 days); not a published value. |
@@ -269,6 +290,7 @@ hour, or a mix of branches on one scale.
 - "This week: 410 TSS from 5 sessions (4 power, 1 heart rate); 1 strength
   session has no TSS."
 - "This value uses the FTP of 2026-03-01 from your local zones."
+- "62 TSS from heart rate; sex not set, male constants assumed."
 - "Krafteinheit 90 TSS: 270 AU × 0,33 TSS/AU aus 42 bewerteten Rad- und
   Laufeinheiten (Schätzung)."
 

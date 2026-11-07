@@ -25,6 +25,9 @@ PREFERRED_SOURCE_FIELDS = (
     "preferred_source_sleep",
 )
 PREFERRED_SOURCES = ("", ProviderId.GARMIN.value)
+# The athlete's sex for sex-specific methods (M6 TRIMP constants, #1774); empty
+# means not set.
+SEXES = ("", "male", "female")
 
 DEFAULT_PROFILE = {
     "name": "",
@@ -47,6 +50,7 @@ DEFAULT_PROFILE = {
     "weight_kg": "",
     "body_fat_pct": "",
     "height_cm": "",
+    "sex": "",
     "coaching_style": "Supportive, direct, and evidence-aware",
     "timezone": os.environ.get("TZ", DEFAULT_TIMEZONE),
     "weather_location": "",
@@ -103,6 +107,12 @@ def normalize_profile(
             )
         result["training_model"] = TRAINING_MODELS[0]
     _normalize_preferred_sources(result, strict=validate_timezone)
+    if result["sex"] not in SEXES:
+        if validate_timezone:
+            raise AppError(
+                400, "Unbekanntes Geschlecht; erlaubt: male, female oder leer."
+            )
+        result["sex"] = ""
     if result["sleep_target_hours"]:
         try:
             target = float(result["sleep_target_hours"])

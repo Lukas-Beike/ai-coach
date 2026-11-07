@@ -156,6 +156,7 @@ COACH_ACTIVITY_FIELDS = (
     "training_load",
     "load_branch",
     "load_threshold_after_session",
+    "load_sex_assumed",
     "load_calibration",
     "aerobic_training_effect",
     "anaerobic_training_effect",

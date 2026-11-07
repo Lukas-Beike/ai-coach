@@ -60,8 +60,10 @@ def _summary(**values: Any) -> dict[str, Any]:
     }
 
 
-def _load(summary: dict[str, Any], thresholds: SessionThresholds) -> LocalLoad:
-    result = session_local_load(summary, thresholds)
+def _load(
+    summary: dict[str, Any], thresholds: SessionThresholds, sex: str | None = None
+) -> LocalLoad:
+    result = session_local_load(summary, thresholds, sex=sex)
     assert isinstance(result, LocalLoad), result
     return result
 
@@ -143,6 +145,50 @@ class SessionLoadWorkedExampleTests(unittest.TestCase):
         self.assertEqual(load.branch, HEART_RATE_BRANCH)
         self.assertAlmostEqual(load.load, 95.01, places=2)
         self.assertIsNone(load.intensity_pct)
+
+    def test_heart_rate_branch_uses_the_profile_sex_constants(self) -> None:
+        # Card M6 v3: 90 min at HR 150 (rest 50, threshold 170, max 190).
+        summary = _summary(sport="hike", moving_duration_s=5400.0, avg_hr=150.0)
+        thresholds = SessionThresholds(
+            resting_hr=_threshold(50.0),
+            threshold_hr=_threshold(170.0),
+            max_hr=_threshold(190.0),
+        )
+        male = _load(summary, thresholds, "male")
+        female = _load(summary, thresholds, "female")
+        unset = _load(summary, thresholds)
+        self.assertAlmostEqual(male.load, 95.01, places=2)
+        self.assertAlmostEqual(female.load, 98.47, places=2)
+        self.assertAlmostEqual(unset.load, male.load, places=12)
+        self.assertEqual(female.details["inputs"]["sex"], "female")
+        self.assertNotIn("sex_assumed", male.details["inputs"])
+        self.assertEqual(unset.details["inputs"]["sex"], "male")
+        self.assertTrue(unset.details["inputs"]["sex_assumed"])
+        # A changed or newly saved sex changes the fingerprint, so the
+        # backfill recomputes the stored value.
+        self.assertEqual(
+            len({male.fingerprint, female.fingerprint, unset.fingerprint}), 3
+        )
+
+    def test_unknown_sex_takes_the_assumed_male_constants(self) -> None:
+        load = _load(
+            _summary(moving_duration_s=3600.0, avg_hr=170.0),
+            SessionThresholds(
+                resting_hr=_threshold(50.0),
+                threshold_hr=_threshold(170.0),
+                max_hr=_threshold(190.0),
+            ),
+            "",
+        )
+        self.assertTrue(load.details["inputs"]["sex_assumed"])
+
+    def test_power_branch_ignores_the_sex(self) -> None:
+        summary = _summary(normalized_power=230.0, moving_duration_s=4200.0)
+        thresholds = SessionThresholds(ftp=_threshold(250.0))
+        self.assertEqual(
+            _load(summary, thresholds, "female").fingerprint,
+            _load(summary, thresholds).fingerprint,
+        )
 
     def test_one_hour_at_threshold_heart_rate_is_one_hundred(self) -> None:
         load = _load(

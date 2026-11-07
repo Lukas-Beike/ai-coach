@@ -43,6 +43,7 @@ def build_canonical_backfill(
     batch_size: int = DEFAULT_BATCH_SIZE,
     session_feedback: FeedbackLookup | None = None,
     planned_units: PlannedUnits = list,
+    athlete_sex: Callable[[Any], str | None] = lambda _db: None,
 ) -> CanonicalBackfillAssembly:
     backfill = CanonicalBackfill(
         key_values=key_values,
@@ -66,6 +67,7 @@ def build_canonical_backfill(
         clock=clock,
         preferences=source_preferences,
         session_feedback=session_feedback,
+        athlete_sex=athlete_sex,
     )
     # Local session metrics (card M8) from summaries and stored streams.
     session_metrics = SessionMetricsStage(

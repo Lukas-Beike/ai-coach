@@ -86,6 +86,9 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                 {"timezone": "Europe/Berlin"}, {"timezone": "UTC"}, db=None
             )
             self.assertEqual(load_input_changes, [True, True])
+            # A saved or undone sex changes the M6 TRIMP constants (#1774).
+            profile._on_location_changed({"sex": ""}, {"sex": "female"}, db=None)
+            self.assertEqual(load_input_changes, [True, True, True])
             self.assertEqual(threshold_changes, [])
         # A local zone change requests a load pass and a threshold export (#1729).
         assembly.zones()._on_change()

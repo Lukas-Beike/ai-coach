@@ -115,13 +115,15 @@ def reconcile_local_loads(
     *,
     now: str,
     feedback: Mapping[str, Mapping[str, Any]] | None = None,
+    sex: str | None = None,
 ) -> dict[str, Any]:
     """Write every session's local load and retire stale rows; return counts.
 
     ``feedback`` is each session's effective local feedback by stored key, which
-    the session-RPE branch of strength sessions and its calibration read.
+    the session-RPE branch of strength sessions and its calibration read;
+    ``sex`` is the profile sex the heart-rate branch reads.
     """
-    loads = session_loads(summaries, thresholds, feedback)
+    loads = session_loads(summaries, thresholds, feedback, sex=sex)
     by_id = {str(summary.get("id")): summary for summary in summaries}
     keep: set[str] = set()
     written = 0
@@ -189,8 +191,10 @@ class LocalLoadStage:
         preferences: Preferences = lambda _db: NO_PREFERENCES,
         reader: CanonicalTableReader | None = None,
         session_feedback: FeedbackLookup | None = None,
+        athlete_sex: Callable[[Any], str | None] = lambda _db: None,
     ) -> None:
         self._session_feedback = session_feedback
+        self._athlete_sex = athlete_sex
         self._key_values = key_values
         self._zone_provider = zone_provider
         self._clock = clock
@@ -224,6 +228,7 @@ class LocalLoadStage:
             feedback=feedback_by_session(
                 rated_sessions(summaries), self._session_feedback
             ),
+            sex=self._athlete_sex(db),
         )
         self._save(
             db,
@@ -332,6 +337,8 @@ def with_local_loads(
             item["load_branch"] = derivation.get("branch")
             if derivation.get("threshold_after_session"):
                 item["load_threshold_after_session"] = True
+            if (derivation.get("inputs") or {}).get("sex_assumed"):
+                item["load_sex_assumed"] = True
             sources["training_load"] = DERIVED_LABEL
             if calibration := derivation.get("calibration"):
                 item["load_calibration"] = {
