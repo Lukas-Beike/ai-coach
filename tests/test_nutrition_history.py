@@ -23,8 +23,9 @@ from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 
-MEAL = {
-    "meal_date": "2026-09-24",
+MEAL_DATE = "2026-09-24"
+MEAL: dict[str, Any] = {
+    "meal_date": MEAL_DATE,
     "meal_type": "lunch",
     "description": "Rice bowl",
     "kcal": 600,
@@ -75,7 +76,7 @@ class NutritionHistoryTests(unittest.TestCase):
             row = db.execute(
                 "SELECT revision FROM nutrition_sync_dates WHERE meal_date=? "
                 "AND sync_state='pending'",
-                (MEAL["meal_date"],),
+                (MEAL_DATE,),
             ).fetchone()
         return int(row["revision"]) if row else 0
 
@@ -105,13 +106,11 @@ class NutritionHistoryTests(unittest.TestCase):
         self.assertEqual(restored["description"], "Rice bowl")
         self.assertEqual(restored["nutrition_basis"], entry["nutrition_basis"])
         # A later sync marks the day; undo of the original log still applies.
-        self.diary.mark_date_synced(MEAL["meal_date"], self.pending_revision())
+        self.diary.mark_date_synced(MEAL_DATE, self.pending_revision())
         _, created = self.collected(lambda: self.diary.log_meal(MEAL))
-        self.diary.mark_date_synced(MEAL["meal_date"], self.pending_revision())
+        self.diary.mark_date_synced(MEAL_DATE, self.pending_revision())
         self.undo(created)
-        self.assertEqual(
-            self.diary.get_day_summary(MEAL["meal_date"])["entry_count"], 1
-        )
+        self.assertEqual(self.diary.get_day_summary(MEAL_DATE)["entry_count"], 1)
         self.assertGreater(self.pending_revision(), 0)
 
     def test_undo_is_refused_after_a_later_edit(self) -> None:

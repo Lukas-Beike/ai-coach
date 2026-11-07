@@ -1267,7 +1267,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         export_thresholds=EXPORT_THRESHOLDS,
     )
 )
-NUTRITION_ASSEMBLY = NutritionAssembly(
+NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
     dependencies=NutritionAssembly.Inputs(
         persistence=NutritionPersistence(
             database_manager, DB_LOCK, observation_reader=lambda: CANONICAL_READ
