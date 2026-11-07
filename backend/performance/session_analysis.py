@@ -6,11 +6,15 @@ import math
 import re
 from typing import Any
 
+from backend.canonical.activity_summary import summary_is_indoor
+from backend.performance.grade_adjustment import grade_adjusted_speeds, grade_stream
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 
 TARGET_BASIS_FTP_KEY = "ftp"
 
-METHOD = "time-weighted-session-analysis-v1"
+# v2: Pa:HR of outdoor runs uses grade-adjusted speed (card M8 v2, #1770).
+METHOD = "time-weighted-session-analysis-v2"
+GRADE_ADJUSTED_SPEED = "grade_adjusted_speed"
 
 
 def _number(value: Any) -> float | None:
@@ -122,6 +126,25 @@ def _aerobic_sensor(activity: dict[str, Any]) -> str | None:
     return None
 
 
+def _aerobic_output(
+    activity: dict[str, Any], sensor: str
+) -> tuple[dict[str, Any], str] | None:
+    """The activity and stream the halves read, or ``None`` for unknown terrain.
+
+    Outdoor runs compare grade-adjusted speed (Minetti 2002); treadmill and
+    virtual runs are flat and keep their speed.
+    """
+    if sensor != "velocity_smooth" or summary_is_indoor(activity):
+        return activity, sensor
+    streams = activity.get("streams") or {}
+    grades = grade_stream(streams)
+    if grades is None:
+        return None
+    adjusted = grade_adjusted_speeds(streams, grades)
+    view = {**activity, "streams": {**streams, GRADE_ADJUSTED_SPEED: adjusted}}
+    return view, GRADE_ADJUSTED_SPEED
+
+
 def aerobic_analysis(
     activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
 ) -> dict[str, Any]:
@@ -139,6 +162,14 @@ def aerobic_analysis(
             "status": "insufficient_data",
             "reason": "Geeignete Sportart oder ausreichend lange Messreihe fehlt.",
         }
+    selected = _aerobic_output(activity, sensor)
+    if selected is None:
+        return {
+            **base,
+            "status": "insufficient_data",
+            "reason": "Gelände unbekannt: Steigung oder Höhe fehlt.",
+        }
+    activity, sensor = selected
     start, end = float(times[0]) + 600, float(times[-1])
     output = _samples(activity, sensor, start, end)
     hr = {

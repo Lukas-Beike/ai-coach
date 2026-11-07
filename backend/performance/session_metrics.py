@@ -33,7 +33,8 @@ from backend.performance.session_analysis import METHOD as ANALYSIS_METHOD
 from backend.performance.session_analysis import aerobic_analysis
 
 METHOD_ID: Final = "local-session-metrics"
-METHOD_VERSION: Final = 1
+# v2: grade-adjusted Pa:HR of outdoor runs (#1770).
+METHOD_VERSION: Final = 2
 CARD: Final = "M8"
 
 METRIC_SPORTS: Final = frozenset({Sport.RIDE.value, Sport.RUN.value})

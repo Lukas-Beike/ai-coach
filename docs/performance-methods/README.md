@@ -198,6 +198,7 @@ accessible text, not a declared absence.
 | R41 | Ettema & Lorås 2009, "Efficiency in cycling: a review", Eur J Appl Physiol 106(1):1-14, PMID 19229554, DOI `10.1007/s00421-009-1008-7` | abstract | Energy expenditure is linear in work rate; gross efficiency depends on work rate. A fixed kJ-to-kcal factor is an approximation. |
 | R42 | Moseley & Jeukendrup 2001, "The reliability of cycling efficiency", Med Sci Sports Exerc 33(4):621-627, PMID 11283439, DOI `10.1097/00005768-200104000-00017` | abstract | 17 men: gross efficiency 19.8 ± 0.6 %, test-retest CV 4.2 %. Lab value, not a field constant. |
 | R43 | Hopker et al. 2009, "The effects of training on gross efficiency in cycling: a review", Int J Sports Med 30(12):845-850, PMID 19941249, DOI `10.1055/s-0029-1237712` | abstract | Training can raise gross efficiency, so work-to-energy varies within an athlete. |
+| R44 | Minetti et al. 2002, "Energy cost of walking and running at extreme uphill and downhill slopes", J Appl Physiol 93(3):1039-1046, PMID 12183501, DOI `10.1152/japplphysiol.01177.2001` | abstract | 10 elite mountain runners on a treadmill, slopes −0.45 to +0.45; cost of running as a polynomial of slope. Laboratory model, not Garmin's GAP; used for grade-adjusted speed (M8, pace at heart rate). |
 | L1 | Phillips & Steven 2026, "Perspective: sleep regularity—where do we go from here?", Sleep 49(8), PMID 42023690, DOI `10.1093/sleep/zsag114` | full text | Perspective without new data, formula, threshold or wearable/athlete content. Background only; not decision evidence. |
 
 ### Vendor documentation (not peer-reviewed)
@@ -219,6 +220,8 @@ M8 search on 2026-11-07 (PubMed E-utilities, Crossref, vendor pages):
 `filter=updates:<doi>` and PubMed `CommentsCorrections` found no correction or
 retraction for R32-R43. No peer-reviewed validity or reliability study of EF or
 VI and no peer-reviewed decoupling threshold was found.
+R44 was added on 2026-11-07 (#1770) from a bibliographic search (PubMed
+ID, repository records); its correction status was not checked.
 
 M6 search on 2026-11-06 (PubMed E-utilities, Europe PMC, publisher and vendor
 pages): `"training stress score"[tiab] AND 2020:2026[dp]`,

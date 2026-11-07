@@ -589,7 +589,7 @@ Personal recovery baselines, sleep goal shortfalls and tag-impact reports SHALL 
 Evidence: `backend/performance/personal_recovery.py:personal_recovery`, `backend/performance/tag_impact.py:tag_impact`; `tests/test_personal_recovery.py:PersonalRecoveryTests`, `tests/test_characterization_recovery.py`, `tests/test_training_record_features.py`, `e2e/analysis-info.spec.js`.
 
 ### Requirement: Session-RPE load is a descriptive local method
-The system SHALL compute the M1 session-RPE load (`session-rpe-load` v1) as elapsed minutes × whole-session RPE in AU for each canonical session, and sum it per athlete-local day, ISO week and sport with the known partial value, rated and total session counts and RPE source counts. AU SHALL never be added to or converted into TSS, provider load or TRIMP.
+The system SHALL compute the M1 session-RPE load (`session-rpe-load` v2) as elapsed minutes × whole-session RPE in AU for each canonical session, mark a session `deviating_duration` with its moving minutes when elapsed minus moving time exceeds 15 minutes or 20 % of the elapsed time (never strength or yoga; the value stays), and sum it per athlete-local day, ISO week and sport with the known partial value, rated and total session counts and RPE source counts. AU SHALL never be added to or converted into TSS, provider load or TRIMP.
 
 #### Scenario: Acceptance values
 - **WHEN** a session of 60 minutes has local RPE 5, one of 30 minutes has RPE 0 and one has no RPE
@@ -657,7 +657,7 @@ Detailed contract:
 
 | Metric | Method id, version | Statuses | Limits | Card, review |
 | --- | --- | --- | --- | --- |
-| Session-RPE load (AU) | `session-rpe-load` v1 | `descriptive`, `insufficient_data` | AU is not TSS, provider load or TRIMP; no injury, readiness or ramp statement | M1, released |
+| Session-RPE load (AU) | `session-rpe-load` v2 | `descriptive`, `insufficient_data` | AU is not TSS, provider load or TRIMP; no injury, readiness or ramp statement | M1, released |
 | HRV, resting HR and sleep duration comparison | `personal-quartiles-v1` | `ok`, `provisional`, `insufficient_data` | own earlier values only, not a normal or clinical range | M2, M3, released |
 | Sleep goal shortfall (last 7 nights) | inside the `personal-quartiles-v1` result, no own id | `ok`, `partial`; none without a 4–12 h goal | no sleep debt | M3, released |
 | Sleep timing variability | `sleep-timing-variability-v2` | `ok`, `provisional`, `insufficient_data` | not the Sleep Regularity Index; no median or deviation below 14 earlier intervals | M3, released |
@@ -666,7 +666,7 @@ Detailed contract:
 | Short- and long-term session-RPE load (AU) | `smoothed-session-load` v1 | `estimate`, `insufficient_data` | smoothed subjective load; no fitness, form, ratio, risk or provider comparison | M5, released |
 | Session load and intensity factor (TSS scale) | `local-tss-load` v2 | stored per session with `load_branch` `power`, `pace`, `heart_rate` or `session_rpe` (strength); none without inputs | branches are not equivalent; strength TSS is a personal sRPE scaling; no fatigue, readiness or injury statement; IF = 1 is not a physiological threshold | M6, released |
 | Local fitness, fatigue and form (TSS/d) | `local-fitness-fatigue` v1 | `estimate`, `insufficient_data` | model estimate from the local load; never mixed with Intervals.icu CTL/ATL/form; no performance, risk or readiness prediction | M7, released |
-| Efficiency factor, variability index, work and aerobic decoupling | `local-session-metrics` v1 | stored per ride or run; none without inputs or full-resolution streams (work, decoupling) | descriptive; no fixed decoupling limit, no fitness, durability or threshold verdict; run and ride values never compared; work is not energy expenditure | M8, released |
+| Efficiency factor, variability index, work and aerobic decoupling | `local-session-metrics` v2 | stored per ride or run; none without inputs or full-resolution streams (work, decoupling) | descriptive; no fixed decoupling limit, no fitness, durability or threshold verdict; run and ride values never compared; work is not energy expenditure | M8, released |
 
 Passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
 
@@ -696,7 +696,7 @@ Detailed contract: thresholds follow `resolve_current_thresholds` per day with t
 Evidence: `backend/performance/local_tss.py`, `backend/sync/local_load.py`, `backend/sync/canonical_backfill_assembly.py`, `backend/sync/executor.py:SyncJobExecutor.run`, `backend/athlete/zones.py:ZoneConfigurationService`, `backend/activities/feedback.py:ActivityFeedbackService`; `tests/test_local_tss.py`, `tests/test_activity_feedback.py`, `tests/test_local_load_store.py`, `tests/test_sync_executor.py`, `tests/test_zone_configuration_canonical.py`, `docs/performance-methods/m6-local-tss-load.md`.
 
 ### Requirement: Local session metrics are stored descriptive values
-The system SHALL compute M8 `local-session-metrics` v1 for each canonical ride and run: EF (ride NP / average HR in W/bpm; run grade-adjusted, else average, speed × 60 / average HR in (m/min)/bpm), VI (ride NP / average power), mechanical work (the device work total, else the integrated full-resolution power stream with at least 85 % coverage of the moving duration) and aerobic decoupling (the drift of the session analysis `aerobic_analysis`). It SHALL store each value as a derived observation owned by the session with method version and input fingerprint, and SHALL NOT use a provider EF, VI, decoupling or work.
+The system SHALL compute M8 `local-session-metrics` v2 for each canonical ride and run: EF (ride NP / average HR in W/bpm; run grade-adjusted, else average, speed × 60 / average HR in (m/min)/bpm), VI (ride NP / average power), mechanical work (the device work total, else the integrated full-resolution power stream with at least 85 % coverage of the moving duration) and aerobic decoupling (the drift of the session analysis `aerobic_analysis`, on Minetti 2002 grade-adjusted speed for outdoor runs and none for an outdoor run without grade or altitude). It SHALL store each value as a derived observation owned by the session with method version and input fingerprint, and SHALL NOT use a provider EF, VI, decoupling or work.
 
 #### Scenario: Ride with stored streams
 - **WHEN** a Garmin ride with NP 210 W, average power 200 W and average HR 142 bpm has 50 minutes of steady full-resolution power and heart-rate streams

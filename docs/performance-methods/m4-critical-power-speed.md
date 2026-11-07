@@ -1,12 +1,12 @@
 # M4 — Critical Power and Critical Speed
 
 - **Card:** M4
-- **Card version:** 2
+- **Card version:** 3
 - **Method ID:** critical-power-speed v1 (`backend/performance/critical_power.py`)
 - **Status:** implemented as an experimental model estimate (#1431) on the local mean-maximal curve (#1430, `mean-max-curve` v1)
 - **Classification:** model estimate
 - **Literature checked:** 2026-10-24
-- **Review:** released 2026-11-02 (athlete)
+- **Review:** released 2026-11-07 (athlete)
 
 ## Target construct
 
@@ -68,6 +68,10 @@ recreational marathon runners, no lab reference.
   session or at least 30 min after the end of every earlier pick of the same
   session. Test intent, sensor and calibration are reported as unknown; nothing
   is persisted and there is no schema change.
+- Power source (card 3, #1770): neither Garmin nor Wahoo delivers a signal
+  that tells measured from estimated cycling power, so estimated power cannot
+  be excluded automatically. Each cycling fit reports its power source as not
+  checked (`power_source: unchecked`); virtual rides stay in the indoor fit.
 
 ## Measurement error and uncertainty
 
@@ -101,8 +105,10 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 - At least three differently long, suitably maximal efforts per sport and
   protocol; two points give no goodness-of-fit check.
 - No numeric result for a non-identifiable fit, non-positive or implausible
-  parameters, incompatible conditions, estimated cycling power, running
-  power or unvalidated elevation correction.
+  parameters, incompatible conditions, running power or unvalidated
+  elevation correction. Estimated cycling power is excluded only where a
+  source marks it; Garmin and Wahoo mark none, so the cycling fit says its
+  power source is not checked.
 - Downsampled streams are excluded or labelled; only full-resolution streams
   feed the curve (#1430). Overlapping bests of one session share an
   `effort_group` and count as one effort.
@@ -146,9 +152,14 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 - Marathon or long-race predictions from the short-duration model.
 - "Scientifically validated" for this athlete's estimate, or validity claimed
   from a high R².
-- A CP from estimated power, running power or a 3-min all-out test.
+- A CP from running power or a 3-min all-out test.
+- Claiming the cycling power was checked as measured power.
 
 ## Open points
+
+- No provider marks estimated cycling power (such as Zwift virtual power
+  without a power meter); a power-meter check from FIT device data is not
+  built.
 
 - No comparison with published reference or controlled validation data yet;
   the estimate stays experimental (gate G4) and never feeds FTP or zones.

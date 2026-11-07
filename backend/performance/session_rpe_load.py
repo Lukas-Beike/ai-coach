@@ -5,7 +5,8 @@ is the athlete's local feedback ``session_rpe`` of the canonical session; only
 without one, the provider RPE of that session (Garmin Connect before its
 Intervals.icu copy) is a labelled fallback, never averaged with it. Copies of one
 provider that disagree within one session give no value. The duration is the session's elapsed duration; a session with only a
-moving time gets no value. RPE 0 is valid, a missing RPE is unknown. Sums keep
+moving time gets no value; a long interruption keeps the value and is marked
+``deviating_duration`` (card v2). RPE 0 is valid, a missing RPE is unknown. Sums keep
 the known partial value and the count of rated and open sessions; values are
 rounded only for output. AU are never added to TSS, Garmin load or TRIMP.
 """
@@ -31,7 +32,8 @@ from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 
 METRIC_ID: Final = "session_rpe_load"
 METHOD_ID: Final = "session-rpe-load"
-METHOD_VERSION: Final = 1
+# v2: long interruptions are marked deviating_duration (#1770).
+METHOD_VERSION: Final = 2
 UNIT: Final = "AU"
 EVIDENCE_CARD: Final = "docs/performance-methods/m1-session-rpe-load.md"
 SOURCE_ATHLETE: Final = "athlete_feedback"
@@ -55,6 +57,13 @@ REASON_NO_RATING: Final = "no_rating"
 REASON_CONFLICTING_PROVIDER_RATINGS: Final = "conflicting_provider_ratings"
 REASON_NO_ELAPSED_DURATION: Final = "no_elapsed_duration"
 REASON_INVALID_DURATION: Final = "invalid_duration"
+
+# A long interruption: elapsed minus moving time above either limit (card M1 v2).
+DURATION_FLAG_DEVIATING: Final = "deviating_duration"
+INTERRUPTION_LIMIT_S: Final = 900.0
+INTERRUPTION_LIMIT_SHARE: Final = 0.2
+# Rests between sets belong to the rated session.
+_UNMARKED_SPORTS: Final = frozenset({"strength", "yoga"})
 
 type FeedbackLookup = Callable[[list[str]], list[dict[str, Any]]]
 
@@ -116,6 +125,17 @@ def _minutes_after_end(
     return round((rated - end).total_seconds() / 60)
 
 
+def _interruption(summary: Mapping[str, Any], elapsed: float | None) -> float | None:
+    """The moving seconds of a session with a long interruption, else ``None``."""
+    moving = _finite(summary.get("moving_duration_s"))
+    if elapsed is None or moving is None or moving <= 0:
+        return None
+    if str(summary.get("sport") or "") in _UNMARKED_SPORTS:
+        return None
+    limit = min(INTERRUPTION_LIMIT_S, INTERRUPTION_LIMIT_SHARE * elapsed)
+    return moving if elapsed - moving > limit else None
+
+
 def session_load(
     summary: Mapping[str, Any],
     feedback: Mapping[str, Any] | None,
@@ -141,6 +161,7 @@ def session_load(
         rated_after_end = _minutes_after_end(
             summary, elapsed, (feedback or {}).get("session_rpe_rated_at")
         )
+    moving = _interruption(summary, elapsed) if value is not None else None
     entry: dict[str, Any] = {
         "activity_id": summary.get("id"),
         "date": summary_local_date(summary, timezone),
@@ -153,6 +174,8 @@ def session_load(
         "rpe_scale": _rpe_scale(source, label),
         "duration_min": None if elapsed is None else round(elapsed / 60, 1),
         "rated_minutes_after_end": rated_after_end,
+        "duration_flag": None if moving is None else DURATION_FLAG_DEVIATING,
+        "moving_duration_min": None if moving is None else round(moving / 60, 1),
         "status": "descriptive" if value is not None else "insufficient_data",
         "reason": reason,
     }
@@ -162,14 +185,17 @@ def session_load(
 def period_load(loads: Sequence[tuple[dict[str, Any], float | None]]) -> dict[str, Any]:
     known = [value for _entry, value in loads if value is not None]
     sources = {SOURCE_ATHLETE: 0, SOURCE_PROVIDER: 0}
+    deviating = 0
     for entry, value in loads:
         if value is not None:
             sources[entry["rpe_source"]] += 1
+            deviating += entry.get("duration_flag") == DURATION_FLAG_DEVIATING
     return {
         "value": round(math.fsum(known), 1) if known else None,
         "rated_sessions": len(known),
         "total_sessions": len(loads),
         "rpe_sources": sources,
+        "deviating_duration_sessions": deviating,
     }
 
 
