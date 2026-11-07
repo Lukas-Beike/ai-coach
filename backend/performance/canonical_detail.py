@@ -141,10 +141,11 @@ class CanonicalDetailReader:
         candidates = detail_candidates(own, stored)
         sets = [candidate.stored for candidate in candidates]
         merged = merge_details(candidates)
-        zone_record = measured_order(own or records)[0]
         zone_settings = self._zone_settings
         if zone_settings is not None:
-            merged = with_stream_zones(merged, lambda: zone_settings(db, zone_record))
+            merged = with_stream_zones(
+                merged, lambda: zone_settings(db, measured_order(own)[0])
+            )
         status = self._status(db, sets)
         stale = any(state.stale for state in status.values())
         analysis = (
@@ -165,14 +166,13 @@ class CanonicalDetailReader:
             if self._envelope is None
             else self._envelope(db, activity_id, intervals_id)
         )
-        return activity_detail_contract(
+        document = activity_detail_contract(
             activity_id,
             records,
             merged,
             sets,
             analysis=analysis,
-            # Intervals.icu details are never served, so they are never offered.
-            refreshable=self._refreshable() - {ProviderId.INTERVALS},
+            refreshable=self._refreshable(),
             status=status,
             envelope=envelope,
             summary_metrics=detail_metric_entries(
@@ -180,6 +180,14 @@ class CanonicalDetailReader:
             ),
             zone=self._zone,
         )
+        # Intervals.icu details are never served, so they get no provider entry.
+        detail_data = document["detail_data"]
+        detail_data["providers"] = [
+            entry
+            for entry in detail_data["providers"]
+            if entry["provider"] != ProviderId.INTERVALS.value
+        ]
+        return document
 
     def _status(
         self, db: Any, sets: Sequence[StoredDetailSet]

@@ -13,7 +13,6 @@ import math
 import re
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
-from datetime import date
 from itertools import islice, pairwise
 from typing import Any
 from urllib.parse import quote
@@ -24,7 +23,6 @@ from backend.activities.activity_reference import (
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
-from backend.canonical.vocabulary import ProviderId
 from backend.db.activity_detail_fingerprints import intervals_detail_fingerprints
 from backend.errors import AppError, public_error_contract
 from backend.providers.intervals_activity_detail_projection import (
@@ -55,7 +53,6 @@ MAX_PREFETCH_PER_RUN = 25
 # Stored fingerprints are read in batches of this many candidates.
 PREFETCH_LOOKUP_BATCH = 100
 MAX_DETAIL_BYTES = 24 * 1024 * 1024
-_INTERVALS = ProviderId.INTERVALS.value
 _NOT_STORED = frozenset({DetailWriteOutcome.NO_RECORD, DetailWriteOutcome.INVALID})
 ACTIVITY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
 
@@ -79,15 +76,6 @@ def normalize_streams(value: Any) -> dict[str, list[Any]]:
             streams[name] = data
     _validate_time_axis(streams)
     return streams
-
-
-def _local_day(row: dict[str, Any] | None) -> date | None:
-    """Return the athlete-local day of a raw Intervals.icu activity row."""
-    text = str((row or {}).get("start_date_local") or "")[:10]
-    try:
-        return date.fromisoformat(text)
-    except ValueError:
-        return None
 
 
 class ActivityDetailRefreshService:

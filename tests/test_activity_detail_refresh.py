@@ -158,8 +158,10 @@ class ActivityDetailRefreshTests(unittest.TestCase):
         self.assertIs(ProviderId.INTERVALS, streams.detail.provenance.provider)
         self.assertEqual(ActivityDetailOrigin.FETCH, streams.detail.origin)
         self.assertEqual("2026-10-02T08:00:00+00:00", streams.fetched_at)
-        # Details only: no session analysis is written by the refresh (#1685).
-        self.assertIsNone(analysis_payload(self.manager, "CaseSensitive-1"))
+        # Details only (#1685): no analysis, only the loaded summary hash.
+        payload = analysis_payload(self.manager, "CaseSensitive-1")
+        self.assertEqual("2026-10-02T08:00:00Z", payload["observed_at"])
+        self.assertNotIn("session_analysis", payload)
         # The refresh writes canonical rows only, never a kv detail record.
         self.assertEqual([], kv_detail_keys(self.manager))
         self.assertEqual(
@@ -397,21 +399,18 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
     def test_analysis_only_row_with_matching_hash_is_not_loaded_again(self):
         self.prefetched_service()
         self.canonical_update("DELETE FROM activity_detail_sets")
-        # An older release stored this analysis-only row with the summary hash.
-        with self.manager.unit_of_work() as db:
-            activity_id = db.execute(
-                "SELECT activity_id FROM activity_records WHERE provider = ? "
-                "AND provider_activity_id = ?",
-                (INTERVALS, "a12"),
-            ).fetchone()["activity_id"]
-            save_analysis(
-                db,
-                activity_id,
-                analysis_version=2,
-                input_sha256="0" * 64,
-                payload={"summary_sha256": summary_fingerprint(self.rows[-1])},
-                now="2026-10-01T08:00:00Z",
-            )
+        # Rows written before analysis version 2 carry no summary hash.
+        self.canonical_update(
+            "UPDATE activity_detail_analysis "
+            "SET payload = json_remove(payload, '$.summary_sha256')"
+        )
+        self.canonical_update(
+            "UPDATE activity_detail_analysis SET payload = json_set(payload, "
+            "'$.summary_sha256', ?) WHERE activity_id = ("
+            "SELECT activity_id FROM activity_records WHERE provider = ? "
+            "AND provider_activity_id = ?)",
+            (summary_fingerprint(self.rows[-1]), INTERVALS, "a12"),
+        )
         self.assertEqual({"fetched": 9, "failed": 0}, self.service().prefetch_new())
         self.assertNotIn("a12", self.fetched_ids())
 
@@ -693,8 +692,11 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
         result = self.service(CanonicalDetailWriter()).refresh("9001")
         self.assertEqual("completed", result["status"])
         self.assertGreater(self.canonical_rows(), 0)
-        # Details only: the session analysis is stored canonically (#1685).
-        self.assertIsNone(analysis_payload(self.manager, "9001"))
+        # Details only (#1685): the row keeps just the loaded summary hash.
+        self.assertEqual(
+            {"observed_at", "summary_sha256"},
+            set(analysis_payload(self.manager, "9001")),
+        )
         self.assertEqual([], kv_detail_keys(self.manager))
 
     def test_prefetch_stores_new_activity_in_the_canonical_tables(self):
@@ -759,9 +761,11 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
                 payload={"target_snapshot": {"basis": "synthetic"}},
                 now="2026-10-01T08:00:00Z",
             )
-        before = analysis_payload(self.manager, "9001")
         self.service(CanonicalDetailWriter()).refresh("9001")
-        self.assertEqual(before, analysis_payload(self.manager, "9001"))
+        payload = analysis_payload(self.manager, "9001")
+        # The frozen snapshot stays; the refresh only updates the summary hash.
+        self.assertEqual({"basis": "synthetic"}, payload["target_snapshot"])
+        self.assertNotIn("session_analysis", payload)
 
 
 if __name__ == "__main__":

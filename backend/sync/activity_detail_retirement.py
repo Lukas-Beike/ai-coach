@@ -2,9 +2,10 @@
 
 The retirement runs after the detail backfill has completed. It reads each
 ``activity_detail:<sha>`` kv record in key order and deletes it only when every
-detail set, lap, zone bucket and analysis value it holds is present in the
-canonical tables; any other record stays unchanged and counts its first failing
-check. Before the laps are compared, lap metrics that the canonical lap set lacks
+detail set, lap and zone bucket it holds is present in the canonical tables and
+its frozen target snapshot is kept in the session's analysis row; the record's
+Intervals.icu analysis values are never read again (#1685). Any other record
+stays unchanged and counts its first failing check. Before the laps are compared, lap metrics that the canonical lap set lacks
 are copied from the record, so older lap sets gain values such as the maximum
 speed. Each batch commits its deletions, refills and cursor in one writer
 transaction, so a failed batch rolls back and the next run resumes from the last
@@ -51,7 +52,8 @@ from backend.sync.activity_detail_canonical import recording_origin
 from backend.sync.canonical_backfill import BackfillStatus, BatchReport
 
 STATE_KEY: Final = "activity_detail_retirement_state"
-RETIREMENT_VERSION: Final = 1
+# Version 2 (#1685): analysis values no longer block a retirement.
+RETIREMENT_VERSION: Final = 2
 DEFAULT_BATCH_SIZE: Final = 20
 MIN_BATCH_SIZE: Final = 1
 MAX_BATCH_SIZE: Final = 100

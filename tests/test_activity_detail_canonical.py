@@ -104,8 +104,9 @@ class CanonicalDetailWriterTests(unittest.TestCase):
         self.assertEqual(DetailWriteOutcome.WRITTEN, self.fetch().outcome)
         self.assertIn("streams", self.kinds())
         self.assertEqual({ActivityDetailOrigin.FETCH.value}, self.origins())
-        # The session analysis is stored canonically (#1685).
-        self.assertEqual(0, self.count("activity_detail_analysis"))
+        # The session analysis is stored canonically (#1685); the fetch keeps
+        # only the summary hash it loaded, for the prefetch.
+        self.assertEqual(1, self.count("activity_detail_analysis"))
 
     def test_fresh_load_without_active_record_writes_nothing(self):
         result = self.fetch(activity_id="no-such-activity")
@@ -113,14 +114,23 @@ class CanonicalDetailWriterTests(unittest.TestCase):
         self.assertEqual(0, self.count("activity_detail_sets"))
         self.assertEqual(0, self.count("activity_detail_analysis"))
 
-    def test_fresh_load_without_any_payload_is_invalid(self):
+    def test_fresh_load_without_detail_settles_its_summary(self):
+        # A session without streams, laps or zone times stores no set, but the
+        # summary hash it was loaded for, so the prefetch does not load it again.
         result = self.fetch(
             detail={"id": "9001"},
             streams={},
             record={"observed_at": NOW, "summary_sha256": SHA},
         )
-        self.assertEqual(DetailWriteOutcome.INVALID, result.outcome)
+        self.assertEqual(DetailWriteOutcome.WRITTEN, result.outcome)
         self.assertEqual(0, self.count("activity_detail_sets"))
+        self.assertEqual(1, self.count("activity_detail_analysis"))
+
+    def test_fresh_load_without_detail_or_summary_hash_is_invalid(self):
+        result = self.fetch(
+            detail={"id": "9001"}, streams={}, record={"observed_at": NOW}
+        )
+        self.assertEqual(DetailWriteOutcome.INVALID, result.outcome)
         self.assertEqual(0, self.count("activity_detail_analysis"))
 
     def test_legacy_record_is_written_with_legacy_origin(self):
@@ -168,7 +178,7 @@ class CanonicalDetailWriterTests(unittest.TestCase):
     def test_rewriting_the_same_fresh_load_is_unchanged(self):
         self.assertEqual(DetailWriteOutcome.WRITTEN, self.fetch().outcome)
         self.assertEqual(DetailWriteOutcome.UNCHANGED, self.fetch().outcome)
-        self.assertEqual(0, self.count("activity_detail_analysis"))
+        self.assertEqual(1, self.count("activity_detail_analysis"))
 
     def test_fetch_never_replaces_a_canonical_analysis_row(self):
         # The one canonical session analysis (#1685) is written by its stage only.
@@ -249,7 +259,7 @@ class CanonicalDetailWriterTests(unittest.TestCase):
             streams={},
             record={"observed_at": NOW, "summary_sha256": SHA},
         )
-        self.assertEqual(DetailWriteOutcome.INVALID, result.outcome)
+        self.assertEqual(DetailWriteOutcome.UNCHANGED, result.outcome)
         self.assertEqual(before, self.kinds())
 
     def test_session_without_local_id_writes_sets_but_no_analysis(self):

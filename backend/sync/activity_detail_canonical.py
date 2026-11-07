@@ -93,9 +93,13 @@ class CanonicalDetailWriter:
             recorded_by=recording_origin(link["recorded_by"]),
             retrieved_at=_aware_time(record.get("observed_at")),
         )
+        marker = _write_fetch_marker(db, link, record, now)
         if not result.records:
-            # Nothing usable arrived: keep the stored sets instead of erasing them.
-            return DetailWriteResult(DetailWriteOutcome.INVALID, len(result.issues))
+            # Nothing usable arrived (a session without streams, laps or zone
+            # times): keep the stored sets; the marker settles this summary.
+            if marker is None:
+                return DetailWriteResult(DetailWriteOutcome.INVALID, len(result.issues))
+            return _result([marker], len(result.issues))
         outcomes = _write_sets(
             db, result.records, _sha256_or_none(record.get("summary_sha256")), now
         )
@@ -107,6 +111,8 @@ class CanonicalDetailWriter:
             keep={item.kind for item in result.records},
         )
         # Details only: the session analysis is stored canonically (#1685).
+        if marker is not None:
+            outcomes.append(marker)
         return _result(outcomes, len(result.issues))
 
     def write_legacy(self, db: Any, *, record: object, now: str) -> DetailWriteResult:
@@ -213,6 +219,39 @@ def _write_analysis(
         activity_id,
         analysis_version=ACTIVITY_DETAIL_ANALYSIS_VERSION,
         input_sha256=_analysis_input_hash(record),
+        payload=payload,
+        now=now,
+    )
+
+
+def _write_fetch_marker(
+    db: Any, link: Mapping[str, Any], record: Mapping[str, Any], now: str
+) -> WriteOutcome | None:
+    """Record which summary version a fetch loaded, so prefetch settles it.
+
+    The fetch computes no analysis any more (#1685), so this keeps the summary
+    hash in the session's older-version row that the prefetch reads; existing
+    values, such as a frozen target snapshot, stay. A canonical row is never
+    touched. Sessions without a local id get no marker.
+    """
+    activity_id = link["activity_id"]
+    summary_sha256 = _sha256_or_none(record.get("summary_sha256"))
+    if activity_id is None or summary_sha256 is None:
+        return None
+    existing = analysis_rows_for(db, [activity_id]).get(activity_id)
+    if existing is not None and existing["analysis_version"] >= CANONICAL_VERSION:
+        return WriteOutcome.UNCHANGED
+    payload = existing["payload"] if existing is not None else {}
+    payload = {
+        **(payload if isinstance(payload, dict) else {}),
+        "summary_sha256": summary_sha256,
+        "observed_at": record.get("observed_at"),
+    }
+    return save_analysis(
+        db,
+        activity_id,
+        analysis_version=ACTIVITY_DETAIL_ANALYSIS_VERSION,
+        input_sha256=hashlib.sha256(summary_sha256.encode()).hexdigest(),
         payload=payload,
         now=now,
     )
