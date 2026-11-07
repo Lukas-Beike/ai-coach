@@ -79,6 +79,7 @@ from backend.performance.report_service import (
     TrainingSeasonReadService,
 )
 from backend.planning.block_review import block_review, last_completed_test
+from backend.planning.race_results import with_race_results
 from backend.planning.season_preparation import load_scenarios, season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -450,6 +451,11 @@ class HttpApiAssembly:
             coach_context_preview_service,
             settings,
             athlete.zones,
+            race_results=lambda competitions: with_race_results(
+                competitions,
+                local_today(),
+                activity_read_service().summaries_on_days,
+            ),
         )
         self.diagnostics_get_routes = DiagnosticsGetRoutes(
             session_auth_service,

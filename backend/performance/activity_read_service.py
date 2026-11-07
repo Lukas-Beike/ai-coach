@@ -119,6 +119,19 @@ class ActivityAnalysisReadService(ActivityReadService):
         with source.database_manager().read_snapshot() as db:
             return list(reader.activity_summaries(db, start=start, end=end))
 
+    def summaries_on_days(
+        self, days: Sequence[date]
+    ) -> dict[date, list[ActivitySummary]]:
+        """Canonical activity summaries of each local day, read in one snapshot."""
+        reader = self._canonical.activity_summary_reader()
+        if reader is None:
+            return {}
+        with self._canonical.database_manager().read_snapshot() as db:
+            return {
+                day: list(reader.activity_summaries(db, start=day, end=day))
+                for day in days
+            }
+
     def session_rpe_load(self, activity_id: Any, today: date) -> dict[str, Any] | None:
         """The session-RPE load the detail document serves for one activity."""
         normalized_id = str(activity_id or "").strip()

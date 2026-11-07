@@ -234,6 +234,24 @@ function competitionDistance(value) {
   return numeric === 0 ? "0 km" : AppFormat.distance(numeric);
 }
 
+function competitionResult(result) {
+  if (!result || typeof result !== "object") return null;
+  const speed = Number(result.avg_speed_mps);
+  const power = Number(result.avg_power);
+  const hasSpeed = Number.isFinite(speed) && speed > 0;
+  let effort = null;
+  if (result.sport === "ride") {
+    if (Number.isFinite(power) && power > 0) effort = `${Math.round(power)} W`;
+    else if (hasSpeed) effort = `${AppFormat.number(speed * 3.6)} km/h`;
+  } else if (hasSpeed) {
+    effort = result.sport === "swim" ? `${AppFormat.clock(100 / speed)} /100 m` : `${AppFormat.clock(1000 / speed)} /km`;
+  }
+  const time = result.duration_s == null ? null : AppFormat.clock(result.duration_s);
+  const value = [time, AppFormat.distance(result.distance_m), effort].filter(Boolean).join(" · ");
+  if (!value) return null;
+  return result.source ? `${value} (${result.source})` : value;
+}
+
 function competitionFact(labelText, value) {
   const item = document.createElement("div");
   const label = document.createElement("span");
@@ -1140,6 +1158,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const details = document.createElement("div");
     details.className = "competition-card-facts";
     const optional = [
+      ["Ergebnis", competitionResult(competition.result)],
       ["Startzeit", competition.starts_at_local ? formatLocalCompetitionTime(competition.starts_at_local) : null],
       ["Ziel", competition.target],
       ["Erwartete Dauer", competition.planned_duration_s == null ? null : AppFormat.duration(competition.planned_duration_s)],
