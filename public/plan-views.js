@@ -602,6 +602,38 @@ function plannedZoneLegend(days) {
   return legend;
 }
 
+// Fixed grid with one column each for planned and completed values; a row appears only when it has a value.
+function plannedWeekMetrics(planned, actual) {
+  const columns = [planned.length ? "planned" : null, actual.length ? "actual" : null].filter(Boolean);
+  if (!columns.length) return null;
+  const totals = document.createElement("span");
+  totals.className = "planned-week-metrics";
+  totals.dataset.columns = String(columns.length);
+  const plannedSeconds = planned.reduce((total, entry) => total + Math.max(0, Number(entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s) || 0), 0);
+  const actualSeconds = actual.reduce((total, entry) => total + Math.max(0, Number(entry.moving_duration_s ?? entry.elapsed_duration_s) || 0), 0);
+  const plannedDistance = planned.reduce((total, entry) => total + Math.max(0, Number(entry.distance) || 0), 0);
+  const rows = [
+    ["Dauer", { planned: plannedSeconds > 0 ? { value: calendarHours(plannedSeconds) } : null, actual: { value: calendarHours(actualSeconds) } }],
+    ["Distanz", { planned: plannedDistance > 0 ? { value: AppFormat.distance(plannedDistance) } : null, actual: calendarWeekDistance(actual) }],
+    ["Belastung", { planned: calendarWeekLoad(planned), actual: calendarWeekLoad(actual) }],
+  ];
+  totals.append(document.createElement("span"));
+  for (const column of columns) {
+    const label = document.createElement("span");
+    label.className = "planned-week-column";
+    label.textContent = column === "planned" ? "Geplant" : "Absolviert";
+    totals.append(label);
+  }
+  for (const [label, cells] of rows) {
+    if (!columns.some((column) => cells[column])) continue;
+    const name = document.createElement("span");
+    name.textContent = label;
+    totals.append(name);
+    for (const column of columns) appendWeekMetricCell(totals, cells[column]);
+  }
+  return totals.childElementCount > columns.length + 1 ? totals : null;
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
@@ -1148,38 +1180,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     toggle.append(heading, content);
     day.append(toggle);
     return day;
-  }
-
-  // Fixed grid with one column each for planned and completed values; a row appears only when it has a value.
-  function plannedWeekMetrics(planned, actual) {
-    const columns = [planned.length ? "planned" : null, actual.length ? "actual" : null].filter(Boolean);
-    if (!columns.length) return null;
-    const totals = document.createElement("span");
-    totals.className = "planned-week-metrics";
-    totals.dataset.columns = String(columns.length);
-    const plannedSeconds = planned.reduce((total, entry) => total + Math.max(0, Number(entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s) || 0), 0);
-    const actualSeconds = actual.reduce((total, entry) => total + Math.max(0, Number(entry.moving_duration_s ?? entry.elapsed_duration_s) || 0), 0);
-    const plannedDistance = planned.reduce((total, entry) => total + Math.max(0, Number(entry.distance) || 0), 0);
-    const rows = [
-      ["Dauer", { planned: plannedSeconds > 0 ? { value: calendarHours(plannedSeconds) } : null, actual: { value: calendarHours(actualSeconds) } }],
-      ["Distanz", { planned: plannedDistance > 0 ? { value: AppFormat.distance(plannedDistance) } : null, actual: calendarWeekDistance(actual) }],
-      ["Belastung", { planned: calendarWeekLoad(planned), actual: calendarWeekLoad(actual) }],
-    ];
-    totals.append(document.createElement("span"));
-    for (const column of columns) {
-      const label = document.createElement("span");
-      label.className = "planned-week-column";
-      label.textContent = column === "planned" ? "Geplant" : "Absolviert";
-      totals.append(label);
-    }
-    for (const [label, cells] of rows) {
-      if (!columns.some((column) => cells[column])) continue;
-      const name = document.createElement("span");
-      name.textContent = label;
-      totals.append(name);
-      for (const column of columns) appendWeekMetricCell(totals, cells[column]);
-    }
-    return totals.childElementCount > columns.length + 1 ? totals : null;
   }
 
   function renderPlannedWeek(view, weekIndex) {

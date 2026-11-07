@@ -1240,6 +1240,11 @@ function chatScrollMovedUp(kind, position) {
   return true;
 }
 
+// Returning to the chat starts a fresh comparison: the browser may clamp the offset the previous panel left, which is no reader gesture.
+function resetChatWindowScrollAnchor() {
+  chatScrollAnchors.window = null;
+}
+
 function scrollWindowForChat(top) {
   globalThis.scrollTo({ top, behavior: "auto" });
   chatScrollAnchors.window = globalThis.scrollY;
