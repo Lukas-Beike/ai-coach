@@ -89,13 +89,13 @@ _EXERCISE_PROPERTIES: dict[str, Any] = {
     "garmin_exercise": {
         "type": ["string", "null"],
         "maxLength": 80,
-        "description": "Exact English Garmin Connect exercise name for the watch, e.g. 'Barbell Back Squat' or 'Romanian Deadlift'; null when unsure. An unknown name is rejected with suggestions.",
+        "description": "Exact English Garmin Connect exercise name for the watch, e.g. 'Barbell Back Squat' or 'Romanian Deadlift'. When unsure, ask the athlete with catalogue suggestions instead of guessing; a confirmed name is remembered for that exercise. An unknown name is rejected with suggestions.",
     },
 }
 STRENGTH_STRUCTURE_SCHEMA: dict[str, Any] = {
     "type": ["array", "null"],
     "maxItems": 12,
-    "description": "Strength only: exercises with sets, reps, optional load and rest. At most one of pct_1rm, rpe or rir per exercise. The server generates the description from it and derives strength_intensity (heavy from 80 % 1RM, RPE 8 or 2 RIR) when not set. Null for free text.",
+    "description": "Strength only, required for every strength unit you create, move or change (the server rejects one without it, without session_focus or without strength_intensity): exercises in order with working sets, reps, optional load and rest. At most one of pct_1rm, rpe or rir per exercise. The server generates the description from it. Null for other sports.",
     "items": {
         "type": "object",
         "additionalProperties": False,
