@@ -11,6 +11,9 @@ Use [README.md](README.md) for setup and operational commands.
 
 - Preserve all athlete data, including records, snapshots, tombstones, plans,
   sessions, settings, conversations, usage, and sync state, not just chat history.
+  Named exception: the #1728 purge removes the stored Intervals.icu ingest store
+  (provider/activity records, observations, snapshots, detail sets) after re-keying
+  athlete-entered data and writing a recovery backup; output ids stay.
 - Schema changes require versioned, transactional SQLCipher migrations from
   supported released schemas, including documented skipped-release upgrades.
   Release 1.13.32 (schema v16) is the oldest schema the code still opens; keep

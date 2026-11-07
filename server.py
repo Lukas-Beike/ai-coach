@@ -391,6 +391,8 @@ from backend.sync.intervals_assembly import (
     IntervalsWindowSettings,
 )
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
+from backend.sync.intervals_purge import BACKUP_LABEL as INTERVALS_PURGE_BACKUP
+from backend.sync.intervals_purge import IntervalsPurgeRunner
 from backend.sync.library import workout_library_sync_running
 from backend.sync.library_assembly import (
     WorkoutLibraryProvider,
@@ -1170,6 +1172,7 @@ INTERVALS_SYNC = IntervalsSyncAssembly(
             logger=LOGGER,
             activity_rows=lambda: CANONICAL_READ,
             table_serving=lambda: CANONICAL_READ,
+            data_dir=lambda: DATA_DIR,
         ),
         operations=IntervalsOperationDependencies(
             operation_observer=PROVIDER_SYNC.operation_observer,
@@ -2151,6 +2154,19 @@ THRESHOLD_WARNINGS = ThresholdStalenessService(
 )
 
 
+# Removes the stored Intervals.icu ingest data once the Garmin rating backfill is
+# finished (#1728), after an encrypted recovery copy beside the database.
+INTERVALS_PURGE = IntervalsPurgeRunner(
+    database=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    backup=lambda: BACKUP_ASSEMBLY.backup_service().write_recovery_copy(
+        INTERVALS_PURGE_BACKUP
+    ),
+    clock=runtime_clock.utc_now,
+    data_dir=lambda: DATA_DIR,
+    sync_lock=INTERVALS_SYNC_LOCK,
+)
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -2168,6 +2184,7 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
     # The heart-rate branch's TRIMP constants follow the profile sex (M6 v3).
     athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
+    maintenance_steps=(INTERVALS_PURGE.run,),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
@@ -2202,6 +2219,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
             canonical_read=lambda: CANONICAL_READ,
             canonical_rows=lambda: CANONICAL_READ,
+            intervals_purge_marker=INTERVALS_PURGE.marker_exists,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,

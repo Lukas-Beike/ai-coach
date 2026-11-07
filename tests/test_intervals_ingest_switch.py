@@ -52,6 +52,11 @@ class IngestSwitchTests(unittest.TestCase):
             self.assertIsNone(self.key_values.get(db, INGEST_ENABLED_KEY))
 
 
+def gate(enabled: bool) -> Any:
+    """An ingest gate of the given state; nothing was purged."""
+    return SimpleNamespace(enabled=lambda: enabled, purged=lambda: False)
+
+
 class IngestGateTests(unittest.TestCase):
     def sync_service(
         self, enabled: bool
@@ -68,7 +73,7 @@ class IngestGateTests(unittest.TestCase):
             Mock(),
             Mock(),
             runtime,
-            ingest_enabled=lambda: enabled,
+            ingest=gate(enabled),
         )
         return service, runtime, followup
 
@@ -103,7 +108,7 @@ class IngestGateTests(unittest.TestCase):
             Mock(),
             Mock(),
             MagicMock(),
-            ingest_enabled=lambda: False,
+            ingest=gate(False),
         )
 
         with self.assertRaises(AppError) as raised:

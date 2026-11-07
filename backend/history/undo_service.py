@@ -12,6 +12,7 @@ _INVALID_HISTORY_ID = "Ungültige Änderungshistorie-ID."
 _MISSING_HISTORY = "Änderung nicht gefunden."
 _ALREADY_UNDONE = "Eine Undo-Aktion kann nicht erneut zurückgenommen werden."
 _NOT_UNDOABLE = "Ein Export an einen Anbieter lässt sich nicht zurücknehmen."
+_NO_LONGER_UNDOABLE = "Diese Änderung lässt sich nicht mehr zurücknehmen."
 _STALE_HISTORY = (
     "Die lokale Änderung wurde inzwischen weiter geändert; Undo wurde abgebrochen."
 )
@@ -163,6 +164,8 @@ class HistoryUndoService:
             raise AppError(409, _ALREADY_UNDONE)
         if history["entity_type"] in change_history.NOT_UNDOABLE_ENTITY_TYPES:
             raise AppError(400, _NOT_UNDOABLE)
+        if not change_history.undoable(history):
+            raise AppError(400, _NO_LONGER_UNDOABLE)
         return normalized_id, history
 
     @staticmethod

@@ -1351,6 +1351,41 @@ def mark_placeholder_deleted(
     return True
 
 
+def tombstone_provider_activities(
+    db: Any, provider: str, *, record_kind: str, now: str
+) -> int:
+    """Tombstone every stored activity of one provider, with its raw record and session.
+
+    Each record that is not deleted yet, or whose session is not, takes the
+    deletion path of a removed activity, oldest first: a deleted surviving
+    session hands its aliases to a new survivor and keeps it as
+    ``merged_into_retained``, so its id still resolves. Returns the number of
+    records passed.
+    """
+    rows = _fetch_all(
+        db,
+        "SELECT r.provider_activity_id, r.activity_id FROM activity_records AS r "
+        "LEFT JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.provider = ? AND (r.state <> ? OR s.state <> ?) "
+        "ORDER BY r.started_at, r.provider_activity_id",
+        (
+            provider,
+            ActivityRecordState.DELETED.value,
+            ActivitySessionState.DELETED.value,
+        ),
+    )
+    for row in rows:
+        _delete_activity(
+            db,
+            provider,
+            record_kind=record_kind,
+            provider_activity_id=row["provider_activity_id"],
+            activity_id=row["activity_id"],
+            now=now,
+        )
+    return len(rows)
+
+
 def _delete_activity(
     db: Any,
     provider: str,

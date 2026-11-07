@@ -34,7 +34,7 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.freshness_sources import intervals_sync_running
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals_compaction import compact_snapshot
-from backend.sync.intervals_ingest import ingest_off_result
+from backend.sync.intervals_ingest import INGEST_ON, IngestGate, ingest_off_result
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.performance import PerformanceRefreshFollowupService
@@ -844,10 +844,10 @@ class IntervalsSyncService:
         status: IntervalsSyncStatus,
         journal: IntervalsSyncJournal,
         runtime: IntervalsSyncRuntime,
-        ingest_enabled: Callable[[], bool] = lambda: True,
+        ingest: IngestGate = INGEST_ON,
     ) -> None:
         self._config = config
-        self._ingest_enabled = ingest_enabled
+        self._ingest = ingest
         self._workflow = workflow
         self._performance_followup_service = performance_followup_service
         self._status = status
@@ -876,10 +876,10 @@ class IntervalsSyncService:
         """Synchronize one window; ``automatic`` lets the daily cadence narrow it.
 
         With the ingest switch off nothing is read unless ``one_off`` asks for a
-        manual one-off read.
+        manual one-off read; after the Intervals.icu purge (#1728) not even then.
         """
-        dormant = bool(self._config.intervals_api_key) and not self._ingest_enabled()
-        if dormant and not one_off:
+        dormant = bool(self._config.intervals_api_key) and not self._ingest.enabled()
+        if dormant and (not one_off or self._ingest.purged()):
             return ingest_off_result()
         with self._runtime.operation(reason, operation_id) as scope:
             result = self._sync_inner(

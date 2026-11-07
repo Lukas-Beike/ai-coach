@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
@@ -33,6 +33,9 @@ ENTITY_TYPES = {
 # The write is remote, so it is shown but never undone.
 METRIC_EXPORT_ENTITY = "metric_export"
 NOT_UNDOABLE_ENTITY_TYPES = frozenset({METRIC_EXPORT_ENTITY})
+# A row whose diff carries ``"undoable": false`` stays listed but is never undone:
+# the Intervals.icu purge (#1728) moved the feedback rows it would restore.
+_UNDOABLE_FIELD = "undoable"
 ACTIONS = {"create", "update", "delete", "undo"}
 # Fields a caller needs to undo a recorded change later.
 UNDO_REFERENCE_FIELDS = ("id", "entity_type", "action", "after_hash")
@@ -513,9 +516,50 @@ def public_view(row: dict[str, Any]) -> dict[str, Any]:
             "before_present": bool(diff.get("before_present")),
             "after_present": bool(diff.get("after_present")),
         },
-        **(
-            {"remote_sync": "remote", "undoable": False}
-            if row["entity_type"] in NOT_UNDOABLE_ENTITY_TYPES
-            else {"remote_sync": "local_only"}
-        ),
+        "remote_sync": "remote"
+        if row["entity_type"] in NOT_UNDOABLE_ENTITY_TYPES
+        else "local_only",
+        **({} if undoable(row) else {"undoable": False}),
     }
+
+
+def undoable(row: Mapping[str, Any]) -> bool:
+    """Whether a recorded change may still be undone."""
+    if row.get("entity_type") in NOT_UNDOABLE_ENTITY_TYPES:
+        return False
+    try:
+        diff = json.loads(row.get("diff") or "{}")
+    except TypeError, ValueError:
+        return True
+    return not (isinstance(diff, dict) and diff.get(_UNDOABLE_FIELD) is False)
+
+
+def mark_not_undoable(
+    db: Any, entity_type: str, *, change_ids: Sequence[str] | None = None
+) -> int:
+    """Keep recorded changes of one entity type listed but never undone.
+
+    ``change_ids`` limits it to those rows; undo rows are left as they are.
+    Returns the number of rows newly marked.
+    """
+    where = (
+        "entity_type = ? AND action <> 'undo' AND json_valid(diff) "
+        "AND json_type(diff, ?) IS NOT 'false'"
+    )
+    path = f"$.{_UNDOABLE_FIELD}"
+    if change_ids is None:
+        batches: list[list[str]] = [[]]
+    else:
+        unique = sorted(set(change_ids))
+        batches = [unique[start : start + 500] for start in range(0, len(unique), 500)]
+    marked = 0
+    for batch in batches:
+        ids = f" AND id IN ({', '.join('?' * len(batch))})" if batch else ""
+        marked += int(
+            db.execute(
+                f"UPDATE change_history SET diff = json_set(diff, ?, json('false')) "
+                f"WHERE {where}{ids}",
+                (path, entity_type, path, *batch),
+            ).rowcount
+        )
+    return marked

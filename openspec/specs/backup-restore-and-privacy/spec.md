@@ -157,3 +157,13 @@ Restore SHALL reject backups with schema versions older than v16 without changin
 - **THEN** validation fails and the active database remains unchanged.
 
 Evidence: `backend/backup/restore_validation.py`; `tests/test_database_restore_validation.py::test_validate_rejects_v9_backup_without_modifying_it` and `tests/test_database_restore_v13_upgrade.py`.
+
+### Requirement: Recovery copy before destructive maintenance
+
+Before a data maintenance step deletes stored records, the system SHALL write a consistent, encrypted copy of the database through the backup snapshot path, without the download size limit, to `<database>.<label>-<timestamp>-<id>` beside it. A later attempt of the same version SHALL reuse it, the startup cleanup of staging files SHALL keep it, and a failed copy SHALL stop the maintenance step before any change.
+
+#### Scenario: Intervals.icu purge
+- **WHEN** the Intervals.icu purge becomes due
+- **THEN** the copy with every Intervals.icu row is written first, then the purge runs.
+
+Evidence: `backend/backup/database.py:DatabaseBackupService.write_recovery_copy`, `backend/backup/staging_sweep.py`; `tests/test_intervals_purge.py`.
