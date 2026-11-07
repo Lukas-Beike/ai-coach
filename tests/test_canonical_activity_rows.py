@@ -110,19 +110,6 @@ class ActivityRowSelectorTests(CanonicalReadFixture):
             len(rows), len(self.intervals["raw_provider_data"]["activities"]) + 1
         )
 
-    def test_complete_backfill_serves_table_rows_for_a_compact_only_snapshot(
-        self,
-    ) -> None:
-        populate(self)
-        selector = make_selector(self)
-        self.intervals = copy.deepcopy(self.intervals)
-        del self.intervals["raw_provider_data"]
-        rows = self.read(selector.intervals_activity_payloads)
-        self.assertEqual(
-            [row["id"] for row in rows],
-            ["i-act-005", "i-act-004", "i-act-001", "i-act-003", "i-act-002"],
-        )
-        self.assertTrue(self.read(selector.activities_need_refresh))
 
     def test_complete_backfill_serves_tables_without_any_snapshot_rows(self) -> None:
         populate(self)

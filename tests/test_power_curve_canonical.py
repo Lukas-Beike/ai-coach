@@ -400,7 +400,6 @@ class PowerCurveReadStateTests(IngestFixture):
             reprojecting_table=CanonicalTableReader(),
             key_values=key_values or KeyValueRepository(lambda: NOW),
             zone=lambda _db: ZONE,
-            compact_only=lambda _db: False,
             competitions=CompetitionRepository(),
         )
 

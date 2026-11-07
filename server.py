@@ -442,7 +442,6 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutProviders,
     SelectedWorkoutSyncAssembly,
 )
-from backend.sync.snapshot_reader import SnapshotRepositoryReader
 from backend.sync.state import SyncStateRepository
 from backend.sync.wahoo_connection_assembly import (
     WahooConnectionAssembly,
@@ -2033,9 +2032,6 @@ PUBLIC_STATE = PublicStateAssembly(
 CANONICAL_READ = build_canonical_read(
     key_values=KEY_VALUE_REPOSITORY,
     profile=ATHLETE_PROFILE_SERVICE,
-    compact_only=SnapshotRepositoryReader(
-        SNAPSHOT_REPOSITORY
-    ).has_unmatched_compact_activity_rows,
 )
 METRIC_EXPORT: MetricExportService = build_metric_export_service(
     database_manager,

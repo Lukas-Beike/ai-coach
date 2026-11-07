@@ -189,9 +189,9 @@ test("body overview falls back to Garmin when the profile fat is absent", () => 
 test("performance status shows only the server's status text", () => {
   const { performanceDataStatus } = loadFunctions("performance-view.js", ["performanceDataStatus"]);
   assert.deepEqual(Array.from(performanceDataStatus({ available: false, reason: "canonical_pending", status: "Daten werden vorbereitet" })), ["Daten werden vorbereitet"]);
-  assert.deepEqual(Array.from(performanceDataStatus({ available: true, activities_need_refresh: true, status: "Aktivitäten: Intervals.icu neu abrufen" })), ["Aktivitäten: Intervals.icu neu abrufen"]);
+  assert.deepEqual(Array.from(performanceDataStatus({ available: true, status: "Daten werden aktualisiert" })), ["Daten werden aktualisiert"]);
   assert.deepEqual(Array.from(performanceDataStatus({ available: false, reason: "canonical_pending" })), []);
-  assert.deepEqual(Array.from(performanceDataStatus({ available: true, activities_need_refresh: true })), []);
+  assert.deepEqual(Array.from(performanceDataStatus({ available: true })), []);
   assert.deepEqual(Array.from(performanceDataStatus({ status: "" })), []);
   assert.deepEqual(Array.from(performanceDataStatus(undefined)), []);
 });

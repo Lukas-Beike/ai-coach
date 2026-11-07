@@ -26,9 +26,6 @@ from support import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
-from backend.providers.snapshot_projection import (
-    intervals_snapshot_has_unmatched_compact_rows,
-)
 from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
     CanonicalBackfill,
@@ -130,9 +127,6 @@ def make_selector(case: CanonicalReadFixture) -> Any:
     return build_canonical_read(
         key_values=case.key_values,
         profile=FixtureProfile(case),
-        compact_only=lambda db: intervals_snapshot_has_unmatched_compact_rows(
-            case.intervals
-        ),
     )
 
 

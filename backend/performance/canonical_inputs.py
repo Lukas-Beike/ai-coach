@@ -87,9 +87,6 @@ class CanonicalPerformanceInputs:
 
     ``pending`` is True while the canonical source serves nothing yet (the first
     backfill has not completed); every value is then empty.
-    ``activities_need_refresh`` is True while stored compact Intervals.icu
-    activities have no raw counterpart and are missing from the tables until the
-    full Intervals.icu reload.
     """
 
     current: CanonicalCurrentInputs = NO_CURRENT_INPUTS
@@ -102,7 +99,6 @@ class CanonicalPerformanceInputs:
     body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
     pending: bool = False
     backfill_failed: bool = False
-    activities_need_refresh: bool = False
     intervals_synced_at: str | None = None
     activities_synced_at: str | None = None
     # The athlete's preferred source per metric group, read with these inputs.
@@ -160,8 +156,7 @@ def with_read_status(
     """Mark the inputs with the canonical read state of ``source``, if it reports one.
 
     Before the first completed backfill the reads are empty and the inputs are
-    ``PENDING_PERFORMANCE_INPUTS``; afterwards a compact-only activity gap is
-    carried as ``activities_need_refresh``. With a coverage reader the inputs
+    ``PENDING_PERFORMANCE_INPUTS``; afterwards they are served unchanged. With a coverage reader the inputs
     carry the stored Intervals.icu sync time (``intervals_synced_at``) and the
     activity sync time of the active providers (``activities_synced_at``).
     """
@@ -195,10 +190,6 @@ def _read_state(
         if status.backfill_failed(db):
             return _changed(PENDING_PERFORMANCE_INPUTS, backfill_failed=True)
         return PENDING_PERFORMANCE_INPUTS
-    if status.activities_need_refresh(db):
-        return _changed(
-            inputs or EMPTY_PERFORMANCE_INPUTS, activities_need_refresh=True
-        )
     return inputs
 
 

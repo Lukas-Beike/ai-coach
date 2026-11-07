@@ -523,32 +523,9 @@ class SelectorTests(CanonicalReadFixture):
                     self.read(self.table.observations, kind),
                 )
 
-    def test_compact_only_snapshot_reads_tables_and_needs_a_refresh(self) -> None:
-        raw = self.intervals
-        self.intervals = {
-            key: value for key, value in raw.items() if key != "raw_provider_data"
-        }
-        populate(self)
+    def test_raw_snapshot_serves_its_activity_payloads_after_completion(self) -> None:
         selector = make_selector(self)
-
-        self._assert_serves_tables(selector)
-        self.assertTrue(self.read(selector.activities_need_refresh))
-        # The compact rows cannot be backfilled: no Intervals.icu activity is served.
-        self.assertEqual(self.read(selector.intervals_activity_payloads), ())
-        self.assertNotIn(
-            ProviderId.INTERVALS.value,
-            {provider for _id, provider in ids(self.read(selector.activities))},
-        )
-
-        # A later sync stores the raw rows; the gap is closed.
-        self.intervals = raw
-        self.assertFalse(self.read(selector.activities_need_refresh))
-
-    def test_raw_snapshot_needs_no_refresh_before_or_after_completion(self) -> None:
-        selector = make_selector(self)
-        self.assertFalse(self.read(selector.activities_need_refresh))
         populate(self)
-        self.assertFalse(self.read(selector.activities_need_refresh))
         self.assertTrue(self.read(selector.intervals_activity_payloads))
 
     def test_metric_windows_are_empty_before_the_first_backfill(self) -> None:

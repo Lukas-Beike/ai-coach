@@ -331,7 +331,6 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "training_focus",
                 "source",
                 "as_of",
-                "activities_need_refresh",
                 "metrics",
                 "thresholds",
                 "current_load",

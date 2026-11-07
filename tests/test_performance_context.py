@@ -1,6 +1,5 @@
 import copy
 import unittest
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 from canonical_recovery_support import (
@@ -30,7 +29,6 @@ class PerformanceContextTests(unittest.TestCase):
             "source": "Gespeicherte Provider-Daten",
             "as_of": None,
             "metrics": {},
-            "activities_need_refresh": False,
         }
         for snapshot in (None, {}):
             result = current_performance_context(
@@ -129,7 +127,6 @@ class PerformanceContextTests(unittest.TestCase):
         # The stored Intervals.icu snapshot names no sync time any more (#1728);
         # these inputs carry no activity coverage.
         self.assertIsNone(result["as_of"])
-        self.assertFalse(result["activities_need_refresh"])
         # The Intervals.icu athlete FTP is no source; Garmin reports none here.
         self.assertIsNone(result["thresholds"]["ftp_w"])
         self.assertNotIn("w_prime_j", result["thresholds"])
@@ -339,28 +336,6 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual(result["personal_recovery"]["baselines"], [])
         self.assertEqual(result["training_focus"]["classified_sessions"], 0)
 
-    def test_compact_only_activity_gap_is_carried(self):
-        today = date(2026, 9, 20)
-        garmin = {"resting_hr": [{"calendarDate": today.isoformat(), "restingHR": 47}]}
-        canonical = replace(recovery_only_inputs(garmin), activities_need_refresh=True)
-
-        result = current_performance_context(
-            GarminSyncStatus.from_state(garmin), {}, today, canonical=canonical
-        )
-        empty = current_performance_context(
-            GarminSyncStatus.from_state({}),
-            {},
-            today,
-            canonical=replace(EMPTY_PERFORMANCE_INPUTS, activities_need_refresh=True),
-        )
-
-        self.assertTrue(result["available"])
-        self.assertTrue(result["activities_need_refresh"])
-        self.assertEqual(result["status"], "Aktivitäten: Intervals.icu neu abrufen")
-        # Inputs without any provider value stay unavailable but keep the mark.
-        self.assertFalse(empty["available"])
-        self.assertTrue(empty["activities_need_refresh"])
-        self.assertEqual(empty["status"], "Aktivitäten: Intervals.icu neu abrufen")
 
     def test_inputs_without_provider_values_are_unavailable(self):
         today = date(2026, 9, 20)

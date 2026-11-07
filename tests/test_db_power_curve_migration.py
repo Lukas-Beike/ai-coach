@@ -322,7 +322,6 @@ class CompletedBackfillUpgradeTests(unittest.TestCase):
             reprojecting_table=CanonicalTableReader(),
             key_values=self.key_values,
             zone=lambda _db: ZONE,
-            compact_only=lambda _db: False,
             competitions=CompetitionRepository(),
         )
         with self.manager.reader() as db:
