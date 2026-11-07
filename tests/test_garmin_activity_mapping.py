@@ -15,6 +15,7 @@ from backend.canonical.mapping import IssueReason, MappingIssue, MappingResult
 from backend.canonical.records import ActivityRecord
 from backend.canonical.sports import classify_sport_text
 from backend.canonical.vocabulary import (
+    DeviceType,
     Environment,
     LoadModel,
     ProviderId,
@@ -81,8 +82,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_eighteen(self) -> None:
-        self.assertEqual(18, MAPPER_VERSION)
+    def test_mapper_version_is_nineteen(self) -> None:
+        self.assertEqual(19, MAPPER_VERSION)
 
     def test_strength_duration_is_the_whole_session_not_the_active_timer(
         self,
@@ -185,7 +186,48 @@ class RecordingOriginTests(unittest.TestCase):
 
         assert record is not None
         self.assertIs(RecordingOrigin.GARMIN, record.provenance.recorded_by)
+        self.assertIsNone(record.device_type)
         self.assertEqual((), issues)
+
+    def test_manufacturer_names_the_recording_origin(self) -> None:
+        cases = (
+            ("GARMIN", RecordingOrigin.GARMIN),
+            ("garmin", RecordingOrigin.GARMIN),
+            ("", RecordingOrigin.GARMIN),
+            (None, RecordingOrigin.GARMIN),
+            (7, RecordingOrigin.GARMIN),
+            ("WAHOO_FITNESS", RecordingOrigin.WAHOO),
+            ("ZWIFT", RecordingOrigin.ZWIFT),
+            ("DEVELOPMENT", RecordingOrigin.UNKNOWN),
+        )
+        for manufacturer, origin in cases:
+            with self.subTest(manufacturer=manufacturer):
+                record, issues = _one(manufacturer=manufacturer)
+
+                assert record is not None
+                self.assertIs(origin, record.provenance.recorded_by)
+                self.assertIs(ProviderId.GARMIN, record.provenance.provider)
+                self.assertEqual((), issues)
+
+    def test_manual_flag_wins_over_the_manufacturer(self) -> None:
+        record, _ = _one(manualActivity=True, manufacturer="WAHOO_FITNESS")
+
+        assert record is not None
+        self.assertIs(RecordingOrigin.MANUAL, record.provenance.recorded_by)
+        self.assertIsNone(record.device_type)
+
+    def test_relayed_wahoo_ride_is_a_bike_computer_recording(self) -> None:
+        ride, _ = _one(manufacturer="WAHOO_FITNESS")
+        run, _ = _one(manufacturer="WAHOO_FITNESS", activityType={"typeKey": "running"})
+        garmin_ride, _ = _one(manufacturer="GARMIN")
+        zwift, _ = _one(manufacturer="ZWIFT", activityType={"typeKey": "virtual_ride"})
+
+        assert ride is not None and run is not None
+        assert garmin_ride is not None and zwift is not None
+        self.assertIs(DeviceType.BIKE_COMPUTER, ride.device_type)
+        self.assertIsNone(run.device_type)
+        self.assertIsNone(garmin_ride.device_type)
+        self.assertIsNone(zwift.device_type)
 
 
 class StartTimeTests(unittest.TestCase):

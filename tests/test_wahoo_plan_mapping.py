@@ -3,17 +3,31 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
-from backend.canonical.vocabulary import Environment, Sport
+from backend.canonical.records import MetricValue, Observation, Provenance
+from backend.canonical.vocabulary import (
+    Environment,
+    MetricKind,
+    ProviderId,
+    RecordingOrigin,
+    SourceKind,
+    Sport,
+)
 from backend.errors import AppError
 from backend.providers.wahoo_plan_mapping import (
     WahooPlanMappingError,
     WahooPlanReferences,
     wahoo_plan,
 )
-from backend.sync.wahoo_workout_export import WahooWorkoutExport, wahoo_external_id
+from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
+from backend.sync.wahoo_workout_export import (
+    WahooWorkoutExport,
+    plan_references,
+    wahoo_external_id,
+)
 
 RIDE_TEXT = "Warmup\n- 10m 150W\n\nMain Set 2x\n- 5m 250-280W\n- 2m 120W"
 
@@ -156,6 +170,133 @@ class ExportSerializationTests(unittest.TestCase):
             self.export().library_plan("1", {}, "2026-10-14")
 
         self.assertEqual("unsupported_export", caught.exception.reason)
+
+
+def threshold(kind: MetricKind, sport: Sport, value: float) -> Observation:
+    return Observation(
+        kind=kind,
+        value=MetricValue(value, kind.unit),
+        observed_on=datetime(2026, 10, 1, tzinfo=UTC).date(),
+        observed_at=None,
+        provenance=Provenance(
+            provider=ProviderId.GARMIN,
+            source_kind=SourceKind.PROVIDER_REPORTED,
+            source_record_id=None,
+            recorded_by=RecordingOrigin.GARMIN,
+            retrieved_at=None,
+            label=None,
+        ),
+        sport=sport,
+    )
+
+
+THRESHOLDS = {
+    (kind, sport): threshold(kind, sport, value)
+    for kind, sport, value in (
+        (MetricKind.FTP, Sport.RIDE, 251.6),
+        (MetricKind.THRESHOLD_HR, Sport.RIDE, 165.0),
+        (MetricKind.MAX_HR, Sport.RIDE, 186.0),
+        (MetricKind.FTP, Sport.RUN, 300.0),
+        (MetricKind.THRESHOLD_HR, Sport.RUN, 170.0),
+        (MetricKind.MAX_HR, Sport.RUN, 190.0),
+        (MetricKind.THRESHOLD_PACE, Sport.RUN, 4.0),
+    )
+}
+
+
+class ExportReferenceTests(unittest.TestCase):
+    """Relative steps resolve against the resolved export thresholds (#1686)."""
+
+    def test_references_are_read_for_the_plan_sport(self) -> None:
+        self.assertEqual(
+            WahooPlanReferences(ftp=252, max_hr=186, threshold_hr=165),
+            plan_references(THRESHOLDS, Sport.RIDE),
+        )
+        self.assertEqual(
+            WahooPlanReferences(
+                ftp=300, max_hr=190, threshold_hr=170, threshold_speed=4.0
+            ),
+            plan_references(THRESHOLDS, Sport.RUN),
+        )
+        self.assertEqual(WahooPlanReferences(), plan_references({}, Sport.RIDE))
+
+    def test_relative_steps_export_with_header_references(self) -> None:
+        sports: list[Sport] = []
+
+        def references(sport: Sport) -> WahooPlanReferences:
+            sports.append(sport)
+            return plan_references(THRESHOLDS, sport)
+
+        export = WahooWorkoutExport(
+            Mock(),
+            now=lambda: datetime(2026, 10, 13, tzinfo=UTC),
+            references=references,
+        )
+        envelope = export.serialize_library(
+            {
+                "local_id": "w1",
+                "type": "Ride",
+                "description": "- 10m 88-94%\n- 5m 80% LTHR",
+            }
+        )
+
+        self.assertEqual([Sport.RIDE], sports)
+        header = envelope["plan"]["header"]
+        self.assertEqual(252, header["ftp"])
+        self.assertEqual(165, header["threshold_hr"])
+
+    def test_missing_reference_is_still_rejected_by_name(self) -> None:
+        export = WahooWorkoutExport(
+            Mock(),
+            now=lambda: datetime(2026, 10, 13, tzinfo=UTC),
+            references=lambda sport: plan_references({}, sport),
+        )
+
+        with self.assertRaises(WahooPlanMappingError) as caught:
+            export.serialize_library(
+                {"local_id": "w1", "type": "Ride", "description": "- 10m 88%"}
+            )
+
+        self.assertIn("FTP", str(caught.exception))
+
+
+class AssemblyReferenceTests(unittest.TestCase):
+    def test_assembled_export_reads_thresholds_inside_a_reader(self) -> None:
+        database = object()
+        seen: list[object] = []
+        manager = Mock()
+        manager.reader.return_value = nullcontext(database)
+
+        def thresholds(db: object) -> dict[tuple[MetricKind, Sport], Observation]:
+            seen.append(db)
+            return THRESHOLDS
+
+        assembly = WahooSyncAssembly(
+            WahooSyncInputs(
+                config=Mock(),
+                connection=Mock(),
+                json_request=Mock(),
+                database_manager=lambda: manager,
+                database_lock=Mock(),
+                key_values=Mock(),
+                daily_markers=Mock(),
+                observer=Mock(),
+                registry=Mock(),
+                zone_provider=Mock(),
+                now=lambda: datetime(2026, 10, 13, tzinfo=UTC),
+                logger=Mock(),
+                redactor=Mock(),
+                resync_gate=Mock(),
+                export_thresholds=thresholds,
+            )
+        )
+
+        envelope = assembly.workout_export().serialize_library(
+            {"local_id": "w1", "type": "Ride", "description": "- 10m 88%"}
+        )
+
+        self.assertEqual([database], seen)
+        self.assertEqual(252, envelope["plan"]["header"]["ftp"])
 
 
 if __name__ == "__main__":

@@ -377,6 +377,10 @@ The system SHALL give activity consumers one provider-neutral summary per live c
 - **WHEN** Intervals.icu and Garmin Connect both report a session that canonical linking bundled
 - **THEN** consumers receive one summary with the local session id, the canonical sport and environment, and each value's source label.
 
+#### Scenario: Recording relayed through Garmin Connect
+- **WHEN** a Garmin Connect activity names a Wahoo or Zwift manufacturer
+- **THEN** its origin is that manufacturer (another non-Garmin manufacturer is unknown), so the Wahoo recording, not the Garmin copy, wins the measured values; Wahoo rides outside a virtual world, including such relayed copies, carry the bike computer device type, and Garmin's own recordings name none.
+
 #### Scenario: Load on different scales
 - **WHEN** a session has only a Garmin training load
 - **THEN** the summary has no provider TSS-like load, still counts its duration and distance, and loads of TSS-like models (Intervals.icu training load, TSS) are kept as `provider_training_load` with their `provider_load_model`.

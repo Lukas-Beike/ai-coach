@@ -138,6 +138,7 @@ from backend.canonical.vocabulary import (
     Sport,
     Terrain,
 )
+from backend.providers.wahoo_activity_mapping import wahoo_device_type
 
 # Version 5: maps the maximum speed, maximum power and step count.
 # Version 4: a row with manualActivity exactly True is recorded as MANUAL origin.
@@ -163,7 +164,10 @@ from backend.canonical.vocabulary import (
 # Version 17: maps eventType.typeKey race and transportation to the activity
 # purpose (#1678).
 # Version 18: maps calories, the device's energy estimate (card M8, #1680).
-MAPPER_VERSION: Final = 18
+# Version 19: the row's manufacturer names the recording origin, so a Wahoo or
+# Zwift recording relayed through Garmin Connect is not a Garmin recording, and a
+# relayed Wahoo ride carries the bike computer device type (#1686).
+MAPPER_VERSION: Final = 19
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -411,9 +415,10 @@ def _map_row(
     power_zones = _zone_times(row, _POWER_ZONE_PREFIX, ref, issues)
     if activity_id is None or started_at is None:
         return None
+    recorded_by = _recorded_by(row)
     return ActivityRecord(
         activity_id=activity_id,
-        provenance=_provenance(activity_id, retrieved_at, _recorded_by(row)),
+        provenance=_provenance(activity_id, retrieved_at, recorded_by),
         sport=sport,
         environment=environment,
         started_at=started_at,
@@ -459,6 +464,11 @@ def _map_row(
         assist=assist,
         native_type=type_key[:MAX_NATIVE_TYPE_LENGTH] if type_key else None,
         purpose=_purpose(row, ref, issues),
+        device_type=(
+            wahoo_device_type(sport, environment)
+            if recorded_by is RecordingOrigin.WAHOO
+            else None
+        ),
     )
 
 
@@ -750,10 +760,26 @@ def _zone_times(
 
 
 def _recorded_by(row: dict[str, object]) -> RecordingOrigin:
-    """Only an explicit boolean True marks a manual entry; anything else is GARMIN."""
+    """Name who recorded the activity.
+
+    Only an explicit boolean True marks a manual entry. Otherwise the list row's
+    ``manufacturer`` (SDK and Personal API) names the recording device: a
+    missing value or GARMIN is a Garmin recording, a Wahoo or Zwift value is that
+    origin, and any other manufacturer is an unknown origin, never Garmin.
+    """
     if row.get("manualActivity") is True:
         return RecordingOrigin.MANUAL
-    return RecordingOrigin.GARMIN
+    manufacturer = row.get("manufacturer")
+    if not isinstance(manufacturer, str) or not manufacturer.strip():
+        return RecordingOrigin.GARMIN
+    text = manufacturer.strip().upper()
+    if text == "GARMIN":
+        return RecordingOrigin.GARMIN
+    if text.startswith("WAHOO"):
+        return RecordingOrigin.WAHOO
+    if text.startswith("ZWIFT"):
+        return RecordingOrigin.ZWIFT
+    return RecordingOrigin.UNKNOWN
 
 
 def _provenance(

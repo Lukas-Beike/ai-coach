@@ -271,6 +271,23 @@ class PrimaryStreamChoiceTests(unittest.TestCase):
             self.assertIs(merged.streams.primary, second)
 
 
+class RelayedWahooRecordingTests(unittest.TestCase):
+    def test_wahoo_laps_beat_the_garmin_copy_of_a_wahoo_recording(self) -> None:
+        # Garmin mapper v18 marks a Wahoo ride relayed through Garmin Connect as
+        # recorded by Wahoo, so the Garmin set is a relayed copy (#1686).
+        garmin_copy = candidate(
+            laps(ProviderId.GARMIN, RecordingOrigin.WAHOO, LapSource.DEVICE_LAPS)
+        )
+        wahoo = candidate(
+            laps(ProviderId.WAHOO, RecordingOrigin.WAHOO, LapSource.DEVICE_LAPS)
+        )
+
+        merged = merge_details([garmin_copy, wahoo])
+
+        assert merged.laps is not None
+        self.assertIs(merged.laps.chosen, wahoo)
+
+
 class PerChannelChoiceTests(unittest.TestCase):
     def test_power_and_heart_rate_come_from_their_best_devices(self) -> None:
         time = (0.0, 1.0, 2.0)

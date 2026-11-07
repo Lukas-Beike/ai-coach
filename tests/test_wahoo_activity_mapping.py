@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from backend.canonical.mapping import IssueReason
 from backend.canonical.vocabulary import (
+    DeviceType,
     Environment,
     LoadModel,
     ProviderId,
@@ -81,6 +82,21 @@ class SportTests(unittest.TestCase):
                 record = mapped(row(workout_type_id=type_id)).records[0]
                 self.assertEqual(expected, (record.sport, record.environment))
                 self.assertEqual(expected, WAHOO_WORKOUT_TYPES[type_id])
+
+    def test_rides_outside_a_virtual_world_are_bike_computer_recordings(
+        self,
+    ) -> None:
+        cases = {
+            0: DeviceType.BIKE_COMPUTER,
+            12: DeviceType.BIKE_COMPUTER,
+            68: None,
+            1: None,
+            25: None,
+        }
+        for type_id, expected in cases.items():
+            with self.subTest(type_id=type_id):
+                record = mapped(row(workout_type_id=type_id)).records[0]
+                self.assertIs(expected, record.device_type)
 
     def test_digit_text_type_ids_are_accepted(self) -> None:
         record = mapped(row(workout_type_id="1")).records[0]
@@ -546,11 +562,11 @@ class StoredRawRecordTests(unittest.TestCase):
 
 
 class ReprojectionTests(unittest.TestCase):
-    def test_mapper_version_is_seven_and_newer_than_the_stored_version_one(
+    def test_mapper_version_is_eight_and_newer_than_the_stored_version_one(
         self,
     ) -> None:
-        self.assertEqual(7, MAPPER_VERSION)
-        self.assertEqual(7, reprojection_mapper_version("wahoo", "activity"))
+        self.assertEqual(8, MAPPER_VERSION)
+        self.assertEqual(8, reprojection_mapper_version("wahoo", "activity"))
 
     def test_a_stored_version_one_row_reprojects_the_new_metrics(self) -> None:
         stored = {

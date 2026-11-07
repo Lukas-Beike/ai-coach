@@ -398,7 +398,10 @@ from backend.sync.library_assembly import (
 )
 from backend.sync.local_load import refresh_after_job
 from backend.sync.metric_export import MetricExportService
-from backend.sync.metric_export_assembly import build_metric_export_service
+from backend.sync.metric_export_assembly import (
+    build_metric_export_service,
+    export_thresholds_reader,
+)
 from backend.sync.metric_export_runner import MetricExportRunner
 from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.planned_calendar_assembly import (
@@ -1246,6 +1249,13 @@ WAHOO_SYNC = WahooSyncAssembly(
         logger=LOGGER,
         redactor=REDACTOR.redact_text,
         resync_gate=WAHOO_RESYNC_GATE,
+        export_thresholds=export_thresholds_reader(
+            lambda: CANONICAL_READ,
+            source_preferences=lambda db: preferences_from_profile(
+                ATHLETE_DATA.profile().get_from_db(db)
+            ),
+            today=lambda: ATHLETE_CLOCK.now().date(),
+        ),
     )
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(
