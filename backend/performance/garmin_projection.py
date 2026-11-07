@@ -11,17 +11,18 @@ from backend.performance.garmin_canonical import GarminCanonicalMetrics
 
 GARMIN_SOURCE = "Garmin Connect"
 
-
+# Provider-neutral keys of the four-week load balance, named after the metric
+# kinds rather than Garmin's wire fields (#1686).
 _BALANCE_FIELDS: Final = {
-    MetricKind.LOAD_BALANCE_AEROBIC_LOW: "monthlyLoadAerobicLow",
-    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MIN: "monthlyLoadAerobicLowTargetMin",
-    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MAX: "monthlyLoadAerobicLowTargetMax",
-    MetricKind.LOAD_BALANCE_AEROBIC_HIGH: "monthlyLoadAerobicHigh",
-    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MIN: "monthlyLoadAerobicHighTargetMin",
-    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MAX: "monthlyLoadAerobicHighTargetMax",
-    MetricKind.LOAD_BALANCE_ANAEROBIC: "monthlyLoadAnaerobic",
-    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MIN: "monthlyLoadAnaerobicTargetMin",
-    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MAX: "monthlyLoadAnaerobicTargetMax",
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW: "aerobic_low",
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MIN: "aerobic_low_target_min",
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MAX: "aerobic_low_target_max",
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH: "aerobic_high",
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MIN: "aerobic_high_target_min",
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MAX: "aerobic_high_target_max",
+    MetricKind.LOAD_BALANCE_ANAEROBIC: "anaerobic",
+    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MIN: "anaerobic_target_min",
+    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MAX: "anaerobic_target_max",
 }
 _DAILY_FIELDS: Final = {
     MetricKind.ACUTE_LOAD: "acute_load",

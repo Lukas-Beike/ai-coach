@@ -295,7 +295,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         self.assertEqual(balance["source"], GARMIN_SOURCE)
         self.assertEqual(balance["freshness"], "current")
         self.assertEqual(balance["date"], "2026-05-04")
-        self.assertEqual(balance["monthlyLoadAerobicLow"], 400)
+        self.assertEqual(balance["aerobic_low"], 400)
 
         stale = _garmin_payload()
         stale["source_freshness"]["training_load_balance"]["freshness"] = "stale"
@@ -304,7 +304,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         stale_balance = stale_result["garmin_training_load"]["four_week_balance"]
         self.assertEqual(stale_balance["source"], GARMIN_SOURCE)
         self.assertEqual(stale_balance["date"], "2026-05-04")
-        self.assertNotIn("monthlyLoadAerobicLow", stale_balance)
+        self.assertNotIn("aerobic_low", stale_balance)
 
         without_balance = _garmin_payload()
         del without_balance["training_load_balance"]

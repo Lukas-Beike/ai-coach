@@ -320,53 +320,6 @@ class DiagnosticFollowupTests(unittest.TestCase):
             "synthetic-ride",
         )
 
-    def test_activity_max_hr_age_uses_the_selected_measurement_not_latest_sync_activity(
-        self,
-    ):
-        for stored_maximum, expected_age, expected_status in (
-            (None, 6, "earlier"),
-            (200, None, "unknown"),
-        ):
-            with self.subTest(stored_maximum=stored_maximum):
-                snapshot = {
-                    "activities": [
-                        {
-                            "type": "Ride",
-                            "startTimeLocal": "2026-09-01T10:00:00",
-                            "maxHR": 190,
-                        },
-                        {
-                            "type": "Ride",
-                            "startTimeLocal": "2026-09-07T10:00:00",
-                            "maxHR": 150,
-                        },
-                    ],
-                    "source_freshness": {
-                        "activities": {
-                            "freshness": "current",
-                            "observed_at": "2026-09-07",
-                            "fetched_at": "2026-09-07T11:00:00Z",
-                        }
-                    },
-                }
-                if stored_maximum:
-                    snapshot["sport_max_hr"] = {"cycling": stored_maximum}
-                original = json.dumps(snapshot, sort_keys=True)
-                metric = garmin_payload_metrics.garmin_payload_performance_metrics(
-                    snapshot, server.ATHLETE_CLOCK.now().date()
-                )["cycling_max_hr_bpm"]
-                self.assertEqual(metric["value"], stored_maximum or 190)
-                self.assertEqual(
-                    metric["observed_at"], None if stored_maximum else "2026-09-01"
-                )
-                self.assertEqual(metric["measurement_status"], expected_status)
-                self.assertEqual(metric["measurement_age_days"], expected_age)
-                self.assertEqual(metric["freshness"], "current")
-                self.assertEqual(metric["fetched_at"], "2026-09-07T11:00:00Z")
-                if expected_age is not None:
-                    self.assertIn("6 Tage alt", metric["note"])
-                self.assertEqual(json.dumps(snapshot, sort_keys=True), original)
-
     def test_duplicate_inspection_returns_facts_without_proposal_or_remote_deletion(
         self,
     ):

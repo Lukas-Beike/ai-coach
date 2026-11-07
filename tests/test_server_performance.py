@@ -28,7 +28,6 @@ from support import complete_canonical_backfill
 from backend.performance import activity_validation
 from backend.performance import context as performance_context
 from backend.performance import load as performance_load
-from backend.performance import max_hr as performance_max_hr
 from backend.performance import morning_battery as performance_morning_battery
 from backend.performance import planning_recovery as performance_planning_recovery
 from backend.performance.freshness import GarminSyncStatus
@@ -318,58 +317,10 @@ class ServerPerformanceTests(ServerTestCase):
             }
         )
         self.assertEqual(result["weight_kg"]["value"], 72.8)
-        self.assertEqual(result["cycling_max_hr_bpm"]["value"], 181)
-        self.assertEqual(result["running_max_hr_bpm"]["value"], 194)
+        # Activity maxima are a read-time fallback over canonical records (#1686).
+        self.assertIsNone(result["cycling_max_hr_bpm"]["value"])
+        self.assertIsNone(result["running_max_hr_bpm"]["value"])
         self.assertEqual(result["weight_kg"]["source"], "Garmin Connect")
-
-    def test_garmin_max_heart_rate_survives_activity_deduplication(self):
-        garmin = [
-            {
-                "activityType": "cycling",
-                "startTimeLocal": "2026-08-29T07:00:00",
-                "duration": 3600,
-                "distance": 30000,
-                "maxHR": 188,
-            },
-            {
-                "activityType": "running",
-                "startTimeLocal": "2026-08-29T08:00:00",
-                "duration": 1800,
-                "distance": 5000,
-                "maxHR": 193,
-            },
-        ]
-        intervals = [
-            {
-                "type": "Ride",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3600,
-                "distance": 30000,
-            },
-            {
-                "type": "Run",
-                "start_date_local": "2026-08-29T08:00:00",
-                "moving_time": 1800,
-                "distance": 5000,
-            },
-        ]
-        kept = [
-            item
-            for item in garmin
-            if not garmin_activity_duplicates_intervals(item, intervals)
-        ]
-        skipped = len(garmin) - len(kept)
-        self.assertEqual(skipped, 2)
-        self.assertEqual(kept, [])
-        metrics = _garmin_metrics(
-            {
-                "activities": kept,
-                "sport_max_hr": performance_max_hr.garmin_activity_max_hr(garmin),
-            }
-        )
-        self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
-        self.assertEqual(metrics["running_max_hr_bpm"]["value"], 193)
-        self.assertEqual(metrics["cycling_max_hr_bpm"]["source"], "Garmin Connect")
 
     def test_garmin_profile_max_heart_rate_overrides_activity_values(self):
         zones = [{"sport": "DEFAULT", "maxHeartRateUsed": 186}]

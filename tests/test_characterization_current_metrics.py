@@ -670,9 +670,10 @@ class CurrentMaxHrTests(unittest.TestCase):
             _snapshot(athlete={"max_hr": 200}, activities=activities),
         )
         self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (200, INTERVALS))
+        # #1686: Intervals.icu summaries no longer serve the activity fallback.
         result = _current(_snapshot(activities=activities))
-        self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (195, INTERVALS))
-        self.assertEqual(_pair(result["running_max_hr_bpm"]), (210, INTERVALS))
+        self.assertIsNone(result["cycling_max_hr_bpm"]["value"])
+        self.assertIsNone(result["running_max_hr_bpm"]["value"])
 
         result = _current(_snapshot(athlete={"max_hr": 186}))
         self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (186, INTERVALS))

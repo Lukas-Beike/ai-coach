@@ -1146,10 +1146,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        "backend.performance.max_hr",
-        ("garmin_activity_max_hr", "merge_garmin_max_hr"),
-    ),
-    (
         "backend.performance.freshness",
         ("measurement_age", "garmin_source_freshness", "garmin_metric_freshness"),
     ),
@@ -1667,8 +1663,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "_garmin_store_direct_race_value",
             "_garmin_collect_race_predictions",
             "_garmin_race_predictions",
-            "_garmin_activity_max_hr_samples",
-            "_garmin_activity_observed_at",
         ),
     ),
     (

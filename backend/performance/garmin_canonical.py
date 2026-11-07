@@ -613,6 +613,20 @@ def profile_max_hr_for(profile: Mapping[str, float], category: str) -> float | N
     return profile.get(category) or profile.get("generic")
 
 
+def provider_activity_max_hr(
+    reader: ObservationReader, db: Any, provider: ProviderId
+) -> dict[str, ActivityMaxHr]:
+    """The highest activity max heart rate per category of one provider's records.
+
+    Empty when the reader stores no activities.
+    """
+    reader = _resolved(reader, db)
+    if not isinstance(reader, ActivityMaxHrReader):
+        return {}
+    low, high = _MAX_HR_RANGE
+    return activity_max_hr(reader.activity_max_hr(db, provider, low=low, high=high))
+
+
 def activity_max_hr(
     by_sport: Iterable[tuple[Sport, float, date]],
 ) -> dict[str, ActivityMaxHr]:

@@ -221,7 +221,7 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
         self.assertEqual(result["cycling_ftp_watts"]["source"], PROVIDER_INTERVALS_NAME)
         self.assertNotIn("cycling_eftp_watts", result)
 
-    def test_max_hr_activity_fallback_by_canonical_sport(self):
+    def test_intervals_summaries_are_no_max_hr_activity_fallback(self):
         # Canonical: the mapper classifies the Intervals.icu type, so the former raw
         # sport/activityName aliases ("Radfahren", "Laufen") and the maxHeartRate
         # key no longer reach the summaries; the type decides the sport.
@@ -250,9 +250,10 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             ],
         }
         result = snapshot_metrics(snapshot, {}, empty_garmin())
-        self.assertEqual(result["cycling_max_hr_bpm"]["value"], 181)
-        self.assertEqual(result["running_max_hr_bpm"]["value"], 191)
-        self.assertEqual(result["cycling_max_hr_bpm"]["source"], "Intervals.icu")
+        # #1686: Intervals.icu summaries no longer serve the activity fallback.
+        self.assertIsNone(result["cycling_max_hr_bpm"]["value"])
+        self.assertIsNone(result["running_max_hr_bpm"]["value"])
+        self.assertIsNone(result["cycling_max_hr_bpm"]["source"])
 
     def test_threshold_zone2_and_prediction_metrics(self):
         snapshot = {
