@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from backend.activities.detail_contract import activity_detail_contract
 from backend.activities.detail_merge import DetailCandidate, merge_details
-from backend.activities.stream_zones import with_stream_zones
+from backend.activities.stream_zones import with_stream_zones, zone_times
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_detail import (
     ActivityStreamSet,
@@ -195,7 +195,7 @@ class StreamZoneTests(unittest.TestCase):
 
         self.assertEqual(4.0, sum(_seconds(_zones(merged, ZoneMetric.HEART_RATE))))
 
-    def test_a_provider_distribution_is_kept(self) -> None:
+    def test_the_derived_distribution_wins_over_the_provider(self) -> None:
         provider = ZoneDistribution(
             provider_activity_id="g1",
             provenance=PROVENANCE,
@@ -210,6 +210,28 @@ class StreamZoneTests(unittest.TestCase):
                 [_streams(SECONDS, heart_rate_bpm=HEART_RATE), _candidate(provider)]
             ),
             _with(SETTINGS),
+        )
+
+        chosen = _zones(merged, ZoneMetric.HEART_RATE)
+        self.assertIs(SourceKind.DERIVED, chosen.provenance.source_kind)
+        alternatives = merged.zones[ZoneMetric.HEART_RATE].alternatives
+        self.assertEqual([provider], [item.stored.detail for item in alternatives])
+
+    def test_a_provider_distribution_stays_without_a_threshold(self) -> None:
+        provider = ZoneDistribution(
+            provider_activity_id="g1",
+            provenance=PROVENANCE,
+            origin=ActivityDetailOrigin.FETCH,
+            metric=ZoneMetric.HEART_RATE,
+            boundary_source=ZoneBoundarySource.PROVIDER_REPORTED,
+            buckets=(ZoneBucket(index=1, seconds=10.0),),
+        )
+
+        merged = with_stream_zones(
+            merge_details(
+                [_streams(SECONDS, heart_rate_bpm=HEART_RATE), _candidate(provider)]
+            ),
+            _with(ZoneSettings()),
         )
 
         self.assertIs(provider, _zones(merged, ZoneMetric.HEART_RATE))
@@ -253,6 +275,52 @@ class StreamZoneTests(unittest.TestCase):
             ("derived", "Zoneneinstellungen"), (source["kind"], source["label"])
         )
         self.assertEqual("profile", doc["zones"]["heart_rate"]["boundary_source"])
+
+
+class ReportZoneTimeTests(unittest.TestCase):
+    """The report zone times (#1743) count like the detail distribution."""
+
+    def test_heart_rate_and_power_follow_the_local_zones(self) -> None:
+        power = (100.0,) * 5 + (200.0,) * 5 + (0.0,)
+        merged = merge_details(
+            [_streams(SECONDS, heart_rate_bpm=HEART_RATE, power_w=power)]
+        )
+
+        times = zone_times(merged.streams, SETTINGS, pace=False)
+
+        self.assertEqual(
+            [4.0, 0.0, 4.0, 0.0, 2.0, 0.0, 0.0],
+            [zone["secs"] for zone in times["heart_rate"]],
+        )
+        self.assertEqual(
+            ["Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7"],
+            [zone["id"] for zone in times["heart_rate"]],
+        )
+        # FTP 250 W: 100 W is Z1, 200 W (80 %) is Z3.
+        self.assertEqual(
+            [5.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0],
+            [zone["secs"] for zone in times["power"]],
+        )
+        self.assertNotIn("pace", times)
+
+    def test_run_pace_counts_against_the_threshold_speed(self) -> None:
+        # Threshold 4 m/s: 3 m/s is 75 % (Z1), 4 m/s is 100 % (Z4); 0 is no reading.
+        speed = (3.0,) * 4 + (4.0,) * 4 + (0.0,) * 3
+        merged = merge_details([_streams(SECONDS, speed_mps=speed)])
+
+        times = zone_times(merged.streams, ZoneSettings(threshold_pace=4.0), pace=True)
+
+        self.assertEqual(
+            [4.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0],
+            [zone["secs"] for zone in times["pace"]],
+        )
+        self.assertEqual({"pace"}, set(times))
+
+    def test_no_threshold_or_stream_gives_no_zone_times(self) -> None:
+        merged = merge_details([_streams(SECONDS, speed_mps=(3.0,) * 11)])
+
+        self.assertEqual({}, zone_times(merged.streams, SETTINGS, pace=True))
+        self.assertEqual({}, zone_times(None, SETTINGS, pace=True))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Final
 
+from backend.activities import stream_zones
 from backend.activities.detail_contract import measured_order
 from backend.activities.detail_merge import MergedDetail, MergedStreams
 from backend.activities.workout_profile import recorded_profile
@@ -173,6 +174,7 @@ def analysis_fingerprint(
                 ANALYSIS_VERSION,
                 METHOD_VERSION,
                 power_profile_module.METHOD_VERSION,
+                stream_zones.ZONE_TIMES_VERSION,
             ],
             "records": [record_part(record) for record in measured_order(records)],
             "sets": sorted(set_hashes),

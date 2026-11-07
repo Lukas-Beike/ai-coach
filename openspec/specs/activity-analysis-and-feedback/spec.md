@@ -79,8 +79,12 @@ The system SHALL read local details without implicit provider refresh, serve onl
 - **THEN** its provider entry lists no kinds, no load error and no refresh, the document serves no Intervals.icu streams, laps, zone times or summary-row metrics, and its staleness withholds nothing.
 
 #### Scenario: Zone times from streams
-- **WHEN** a session has a heart-rate or power stream but no provider zone distribution for that metric (as with the Garmin Personal API)
-- **THEN** the document derives one on read from the merged stream with the zones in effect for the session's sport and day (local configuration, then provider configuration, then the threshold with default limits), labelled derived with profile boundaries; pauses and samples marked not moving count nothing, nothing is stored, and without the threshold no distribution is shown.
+- **WHEN** a session has a heart-rate or power stream
+- **THEN** the document derives a distribution on read from the merged stream with the zones in effect for the session's sport, environment and local day (thresholds local, then Garmin, then Wahoo; limits of the effective local, then Garmin or Wahoo configuration; never Intervals.icu), labelled derived with profile boundaries, chosen over a provider distribution, which stays an alternative; pauses and samples marked not moving count nothing, and without the threshold the provider distribution, if any, stays.
+
+#### Scenario: Report zone times in one zone model
+- **WHEN** the canonical session analysis stage computes a session with streams
+- **THEN** it stores heart-rate, power and (for runs, against the threshold speed) pace seconds per zone counted by the same rule and resolver as the detail document, with the thresholds and limits in the input fingerprint; the activity summaries carry these local zone times with a `zone_models` marker, a session without them keeps its Garmin or Wahoo zone times marked `provider`, Intervals.icu zone times are never read, the zone distribution reports each zone model as its own entry, and the 3-zone intensity adds local zone times only.
 
 #### Scenario: Stored detail without fingerprint
 - **WHEN** a stored detail set has no summary fingerprint

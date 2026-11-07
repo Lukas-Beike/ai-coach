@@ -115,12 +115,15 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(report.locator(".analysis-info-tooltip:popover-open")).toContainText("erfasste Daten");
   await page.keyboard.press("Escape");
   const zones = page.locator("#trainingZoneCharts");
-  await expect(zones.getByRole("heading", { name: "HF-Zonen" })).toBeVisible();
-  await expect(zones.getByRole("heading", { name: "Power-Zonen" })).toBeVisible();
+  // Power counts in the local zones from the streams; the fixture has no threshold
+  // HR and Intervals.icu zone times are never read (#1743).
+  await expect(zones.getByText("HF-Zonen: keine aufgezeichneten Zonenzeiten.")).toBeVisible();
+  await expect(zones.getByRole("heading", { name: /^Power-Zonen Power-Zonen/ })).toBeVisible();
+  await expect(zones.getByRole("heading", { name: /\(Gerät\)/ })).toHaveCount(0);
   await expect(zones.locator("details")).toHaveCount(0);
   expect((await zones.boundingBox()).y).toBeGreaterThan((await report.boundingBox()).y);
   await page.evaluate(() => renderSyncStatus({ running: false, message: null }));
-  await expect(zones.locator("progress")).toHaveCount(12);
+  await expect(zones.locator("progress")).toHaveCount(7);
   await page.evaluate(async () => { await AppRouter.navigate("analysis/performance", { historyMode: "replace" }); });
   const periods = await page.evaluate(() => {
     const history = state.data.performance.history;

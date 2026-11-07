@@ -92,10 +92,8 @@ class ActivitySummaryTests(unittest.TestCase):
         self.assertEqual(60.0, summary["provider_training_load"])
         self.assertEqual("intervals_training_load", summary["provider_load_model"])
         self.assertEqual(78.0, summary["provider_intensity"])
-        self.assertEqual(
-            [{"id": "Z1", "secs": 600.0}, {"id": "Z2", "secs": 1200.0}],
-            summary["heart_rate_zone_times"],
-        )
+        # Intervals.icu zone times are never read (#1743).
+        self.assertNotIn("heart_rate_zone_times", summary)
         self.assertEqual("77", summary["planned_event_id"])
         self.assertEqual("Intervals.icu", summary["source"])
         self.assertEqual("Intervals.icu", summary["sources"]["provider_training_load"])

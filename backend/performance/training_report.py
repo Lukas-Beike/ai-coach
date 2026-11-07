@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.activities.activity_summary import (
     ActivitySummary,
@@ -18,6 +18,11 @@ from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
 from backend.performance.fitness_fatigue import local_fitness_fatigue
 from backend.performance.session_rpe_load import session_rpe_load
 from backend.performance.smoothed_load import complete_before, smoothed_session_load
+from backend.performance.zone_time_reads import (
+    LOCAL_MODEL,
+    PROVIDER_MODEL,
+    zone_model,
+)
 
 METHOD = "local-training-report-v1"
 _SUMMARY_METRICS = ("moving_duration_s", "distance_m", "training_load")
@@ -84,7 +89,20 @@ def _cumulative_load(
     return metric
 
 
+ZONE_METHODS: Final = {
+    LOCAL_MODEL: "Seconds per zone counted from each session's streams with the "
+    "local zones in effect on the session day",
+    PROVIDER_MODEL: "Zones the provider recorded for sessions without local zone "
+    "times (zones set on the device); never added to local zone seconds",
+}
+
+
 def zone_distribution(summaries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Seconds per zone by sport, sensor and zone model (#1743).
+
+    Each entry sums one zone model only: the local zones, or the provider
+    zones of sessions without local zone times.
+    """
     reports = []
     for sport in sorted({_sport(summary) for summary in summaries}):
         if sport == "strength":
@@ -96,30 +114,38 @@ def zone_distribution(summaries: Sequence[Mapping[str, Any]]) -> list[dict[str, 
             ("heart_rate_zone_times", "heart_rate"),
             ("pace_zone_times", "pace"),
         ):
-            zones, measured_sessions = _sensor_zones(sport_rows, key)
-            sources = sorted(
-                {
-                    str(label)
-                    for row in sport_rows
-                    if valid_zones(row.get(key))
-                    and (label := (row.get("sources") or {}).get(key))
-                }
-            )
-            if zones:
-                reports.append(
-                    {
-                        "sport": sport,
-                        "sensor": sensor,
-                        "seconds": dict(zones),
-                        "measured_seconds": sum(zones.values()),
-                        "training_seconds": duration,
-                        "measured_sessions": measured_sessions,
-                        "total_sessions": len(sport_rows),
-                        "source": ", ".join(sources),
-                        "method": "Provider zones recorded for each activity; no recalculation using current thresholds",
-                    }
-                )
+            for model in (LOCAL_MODEL, PROVIDER_MODEL):
+                rows = [row for row in sport_rows if zone_model(row, key) == model]
+                zones, measured_sessions = _sensor_zones(rows, key)
+                if zones:
+                    reports.append(
+                        {
+                            "sport": sport,
+                            "sensor": sensor,
+                            "zone_model": model,
+                            "seconds": dict(zones),
+                            "measured_seconds": sum(zones.values()),
+                            "training_seconds": duration,
+                            "measured_sessions": measured_sessions,
+                            "total_sessions": len(sport_rows),
+                            "source": _zone_sources(rows, key),
+                            "method": ZONE_METHODS[model],
+                        }
+                    )
     return reports
+
+
+def _zone_sources(rows: Sequence[Mapping[str, Any]], key: str) -> str:
+    return ", ".join(
+        sorted(
+            {
+                str(label)
+                for row in rows
+                if valid_zones(row.get(key))
+                and (label := (row.get("sources") or {}).get(key))
+            }
+        )
+    )
 
 
 def _load_curves(
