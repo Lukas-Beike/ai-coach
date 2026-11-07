@@ -150,7 +150,8 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
         self.assertEqual(
             result["source"],
             {
-                "providers": ["Intervals.icu"],
+                "provider": "intervals",
+                "providers": ["intervals"],
                 "label": "Intervals.icu",
                 "synced_at": "2026-09-23T05:00:00",
                 "applies_to": [

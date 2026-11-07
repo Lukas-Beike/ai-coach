@@ -1,4 +1,4 @@
-"""The activity sync time follows the newest current fetch of any provider."""
+"""The activity sync time is the oldest current fetch of the active providers."""
 
 from __future__ import annotations
 
@@ -28,29 +28,39 @@ def _row(provider: ProviderId, day: int | None) -> Any:
 
 
 class ActivitySyncTimeTests(unittest.TestCase):
-    def test_a_garmin_fetch_after_the_last_intervals_fetch_wins(self) -> None:
-        coverage = _Coverage(
-            _row(ProviderId.INTERVALS, 5),
-            _row(ProviderId.GARMIN, 7),
-            _row(ProviderId.WAHOO, 6),
-        )
+    def test_garmin_synced_today_bounds_the_days_without_intervals(self) -> None:
+        coverage = _Coverage(_row(ProviderId.INTERVALS, 1), _row(ProviderId.GARMIN, 7))
 
         self.assertEqual(
             activities_synced_at(coverage, None), "2026-11-07T08:00:00+00:00"
         )
 
-    def test_intervals_only_keeps_its_time(self) -> None:
-        coverage = _Coverage(
-            _row(ProviderId.INTERVALS, 5), _row(ProviderId.GARMIN, None)
-        )
+    def test_the_oldest_active_provider_holds_the_boundary(self) -> None:
+        coverage = _Coverage(_row(ProviderId.GARMIN, 7), _row(ProviderId.WAHOO, 5))
 
         self.assertEqual(
             activities_synced_at(coverage, None), "2026-11-05T08:00:00+00:00"
         )
 
-    def test_no_current_fetch_is_unknown(self) -> None:
+    def test_a_stalled_provider_no_longer_holds_it_back(self) -> None:
+        coverage = _Coverage(
+            _row(ProviderId.GARMIN, 30),
+            SimpleNamespace(
+                provider=ProviderId.WAHOO,
+                activities_retrieved_at=datetime(2026, 10, 1, 8, tzinfo=UTC),
+            ),
+        )
+
+        self.assertEqual(
+            activities_synced_at(coverage, None), "2026-11-30T08:00:00+00:00"
+        )
+
+    def test_without_a_current_fetch_the_time_is_unknown(self) -> None:
         self.assertIsNone(activities_synced_at(_Coverage(), None))
         self.assertIsNone(activities_synced_at(None, None))
+        self.assertIsNone(
+            activities_synced_at(_Coverage(_row(ProviderId.INTERVALS, 5)), None)
+        )
 
 
 if __name__ == "__main__":

@@ -126,12 +126,15 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
             [],
             TODAY,
             [
-                {"id": "g1", "sport": "Ride", "source": "Garmin Connect"},
+                {"id": "g1", "sport": "Ride", "source": _label(ProviderId.GARMIN)},
                 {
                     "id": "w1",
                     "sport": "Ride",
-                    "source": "Wahoo",
-                    "sources": {"average_hr": "Garmin Connect"},
+                    "source": _label(ProviderId.WAHOO),
+                    "sources": {
+                        "average_hr": _label(ProviderId.GARMIN),
+                        "purpose": "Lokale Wettkämpfe",
+                    },
                 },
             ],
             synced_at=SYNCED_AT,
@@ -140,8 +143,9 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
         self.assertEqual(
             projection["source"],
             {
-                "providers": ["Garmin Connect", "Wahoo"],
-                "label": "Garmin Connect, Wahoo",
+                "provider": None,
+                "providers": ["garmin", "wahoo"],
+                "label": f"{_label(ProviderId.GARMIN)}, {_label(ProviderId.WAHOO)}",
                 "synced_at": SYNCED_AT,
                 "applies_to": [
                     "recent_activities_by_sport",
@@ -234,6 +238,7 @@ class CoachDomainSectionFullContextTests(unittest.TestCase):
             activities["source"],
             {
                 # The fixture rows carry no per-session source label.
+                "provider": None,
                 "providers": [],
                 "label": None,
                 "synced_at": context_tests.COVERAGE_SYNCED_AT,

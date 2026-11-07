@@ -119,6 +119,7 @@ class CoachIntervalsContextTests(unittest.TestCase):
             result,
             {
                 "source": {
+                    "provider": None,
                     "providers": [],
                     "label": None,
                     "synced_at": None,

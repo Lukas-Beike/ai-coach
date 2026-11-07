@@ -15,6 +15,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, tzinfo
 from typing import Any, Final
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.garmin_payload import (
     ACTIVITIES_SECTION,
     ITEM_SECTIONS,
@@ -178,20 +179,35 @@ class GarminSnapshotWriter:
         garmin_store.write_state(db, state, now=datetime.now(UTC).isoformat())
 
 
+def complete_activity_read_window(
+    payload: Mapping[str, Any],
+) -> tuple[date, date] | None:
+    """Return this run's activity read window, or None unless the read was complete.
+
+    Only a run whose activity list came back for every date window, without an
+    error, rate limit, capability pause or cancel, vouches for its ``read_window``.
+    """
+    provider_sync = payload.get("provider_sync") or {}
+    stats = (provider_sync.get("pagination") or {}).get("activities") or {}
+    window = provider_sync.get("read_window") or {}
+    if stats.get("complete") is not True:
+        return None
+    try:
+        start = date.fromisoformat(iso_date_prefix(str(window["start"])))
+        end = date.fromisoformat(iso_date_prefix(str(window["end"])))
+    except KeyError, TypeError, ValueError:
+        return None
+    return start, end
+
+
 def _current_activity_read(
     payload: Mapping[str, Any], retrieved_at: datetime | None, zone: tzinfo
 ) -> bool:
     """Return True for a complete activity list read whose window reaches today."""
-    provider_sync = payload.get("provider_sync") or {}
-    stats = (provider_sync.get("pagination") or {}).get("activities") or {}
-    window = provider_sync.get("read_window") or {}
-    if stats.get("complete") is not True or retrieved_at is None:
+    window = complete_activity_read_window(payload)
+    if window is None or retrieved_at is None:
         return False
-    try:
-        end = date.fromisoformat(str(window["end"])[:10])
-    except KeyError, TypeError, ValueError:
-        return False
-    return end >= retrieved_at.astimezone(zone).date()
+    return window[1] >= retrieved_at.astimezone(zone).date()
 
 
 def _identifiers(section: str, value: Any) -> set[str]:

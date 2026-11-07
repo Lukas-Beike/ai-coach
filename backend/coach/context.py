@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.activities.zone_settings import effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
@@ -104,21 +104,33 @@ def _activity_section_source(
     Merged sessions mix providers, so the label lists every primary source and
     every per-value source; ``synced_at`` is the newest current activity fetch.
     """
-    labels: set[str] = set()
+    found: set[ProviderId] = set()
     for activity in activities:
-        if isinstance(source := activity.get("source"), str) and source:
-            labels.add(source)
         sources = activity.get("sources")
-        if isinstance(sources, Mapping):
-            labels.update(
-                label for label in sources.values() if isinstance(label, str) and label
-            )
-    ordered = sorted(labels)
+        labels = [
+            activity.get("source"),
+            *(sources.values() if isinstance(sources, Mapping) else ()),
+        ]
+        # Local labels such as competitions are no providers.
+        found.update(
+            _PROVIDER_BY_LABEL[label]
+            for label in labels
+            if isinstance(label, str) and label in _PROVIDER_BY_LABEL
+        )
+    providers = sorted(found, key=lambda provider: provider.value)
     return {
-        "providers": ordered,
-        "label": ", ".join(ordered) or None,
+        "provider": providers[0].value if len(providers) == 1 else None,
+        "providers": [provider.value for provider in providers],
+        "label": ", ".join(_source_label(provider) for provider in providers) or None,
         "synced_at": synced_at,
     }
+
+
+_PROVIDER_BY_LABEL: Final[Mapping[str, ProviderId]] = {
+    provider_label(provider, view): provider
+    for provider in ProviderId
+    for view in SourceView
+}
 
 
 PLANNED_WORKOUTS_SOURCE = {
