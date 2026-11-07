@@ -9,7 +9,22 @@
     ].filter(Boolean);
   }
 
-globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets });
+globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets, plannedPushTargetLabel, plannedGarminBlockedText });
+
+// What one successful push delivered: Garmin gets the structured workout,
+// Intervals.icu gets strength only as a calendar note.
+function plannedPushTargetLabel(provider, entry, ids = {}) {
+  if (provider === ids.garmin) return "Garmin: strukturiert";
+  if (provider === ids.intervals) return focusSport(entry) === "strength" ? "Intervals.icu: Notiz" : "Intervals.icu";
+  return provider;
+}
+
+function plannedGarminBlockedText(entry) {
+  const reason = entry?.push_blocked && Object.values(entry.push_blocked)[0];
+  if (reason === "no_structure") return "Keine Kraftstruktur – nicht an Garmin gesendet";
+  if (reason === "unmapped") return "Übung ohne Garmin-Zuordnung – nicht an Garmin gesendet";
+  return "";
+}
 
 // Providers this planned unit still needs an explicit push to, in push order:
 // Intervals.icu last, because its sync rewrites the unit and so its payload
@@ -944,13 +959,32 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
         await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/focus`, { method: "POST", body: JSON.stringify(body) });
         previous.splice(0, previous.length, ...parts.map((part) => part.select.value));
         status.textContent = "Gespeichert";
+        return true;
       } catch (error) {
         parts.forEach((part, index) => { part.select.value = previous[index]; });
         status.textContent = error.message;
+        return false;
       }
     };
     for (const part of parts) part.select.addEventListener("change", save);
     form.append(...parts.map((part) => part.field), status);
+    // A derived value is offered next to its empty field; one tap sets it.
+    const derived = [
+      [focus, entry.focus_origin === "derived" ? entry.session_focus : "", FOCUS_LABELS],
+      [parts[1], entry.intensity_origin === "derived" ? entry.strength_intensity : "", STRENGTH_INTENSITY_LABELS],
+    ];
+    for (const [part, value, labels] of derived) {
+      if (!part || !value || !labels[value]) continue;
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "planned-suggestion-chip";
+      chip.textContent = `≈ ${labels[value]} übernehmen`;
+      chip.addEventListener("click", async () => {
+        part.select.value = value;
+        if (await save()) chip.remove();
+      });
+      part.field.after(chip);
+    }
     return form;
   }
 
@@ -978,17 +1012,23 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       button.disabled = true;
       button.classList.add("busy");
       const failures = [];
+      const reached = [];
       for (const provider of targets) {
         try {
           const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }] } }) });
           const done = await globalThis.waitForSyncJob(job.id);
-          if (done.status !== "completed") failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
+          if (done.status === "completed") reached.push(plannedPushTargetLabel(provider, entry, ids));
+          else failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
         } catch (error) {
           failures.push(error.message);
         }
       }
       state.plannedSyncInFlight.delete(entry.local_id);
-      globalThis.toast?.(failures.length ? failures.join(" · ") : "Synchronisiert", failures.length > 0);
+      // Name what arrived where, so a text-only Intervals.icu note is never
+      // mistaken for a workout on the watch.
+      const blocked = plannedGarminBlockedText(entry);
+      const summary = [...reached, ...(blocked ? [blocked] : [])].join(" · ");
+      globalThis.toast?.(failures.length ? [...failures, ...reached].join(" · ") : summary || "Synchronisiert", failures.length > 0);
       button.disabled = false;
       button.classList.remove("busy");
       await globalThis.load?.();
@@ -1019,6 +1059,60 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return conflict;
   }
 
+  // Why a strength unit cannot reach the watch, with the action that fixes it:
+  // the Coach structures a free-text unit; an unmatched exercise takes one of
+  // the catalogue suggestions or goes to the Coach.
+  function plannedGarminBlocked(entry, dateKey) {
+    const reason = entry.push_blocked?.[providerIds().garmin];
+    if (!reason || !entry.local_id || entry.is_completed_activity) return null;
+    const block = document.createElement("span");
+    block.className = "planned-conflict planned-garmin-blocked";
+    const stop = (event) => { event.preventDefault(); event.stopPropagation(); };
+    const coachButton = (label, prompt) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button planned-conflict-button";
+      button.textContent = label;
+      button.addEventListener("click", (event) => { stop(event); void globalThis.askCoach?.(prompt); });
+      return button;
+    };
+    const unit = `„${entry.name || "Krafteinheit"}“ am ${dateLabel(dateKey)}`;
+    if (reason !== "unmapped") {
+      const text = document.createElement("span");
+      text.textContent = plannedGarminBlockedText(entry);
+      block.append(text, coachButton("Mit Coach strukturieren", `Strukturiere die Krafteinheit ${unit} für die Uhr: Übungen in Reihenfolge mit Sätzen, Wiederholungen, Last und Garmin-Übung. Frag nach, was fehlt.`));
+      return block;
+    }
+    for (const exercise of Array.isArray(entry.push_unmapped) ? entry.push_unmapped : []) {
+      const row = document.createElement("span");
+      row.className = "planned-garmin-exercise";
+      const text = document.createElement("span");
+      text.textContent = `Keine Garmin-Übung: ${exercise.name}`;
+      row.append(text);
+      for (const suggestion of Array.isArray(exercise.suggestions) ? exercise.suggestions : []) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "planned-suggestion-chip";
+        chip.textContent = suggestion;
+        chip.addEventListener("click", async (event) => {
+          stop(event);
+          chip.disabled = true;
+          try {
+            await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/garmin-exercise`, { method: "POST", body: JSON.stringify({ exercise_index: exercise.index, garmin_exercise: suggestion, expected_payload_hash: entry.payload_hash }) });
+            await globalThis.load?.();
+          } catch (error) {
+            chip.disabled = false;
+            globalThis.toast?.(error.message, true);
+          }
+        });
+        row.append(chip);
+      }
+      row.append(coachButton("Andere…", `Ordne in der Krafteinheit ${unit} der Übung „${exercise.name}“ die passende Garmin-Übung zu. Frag mich mit Vorschlägen aus dem Katalog.`));
+      block.append(row);
+    }
+    return block.childElementCount ? block : null;
+  }
+
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
     const actual = calendarActualActivity(entry);
     const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -1047,6 +1141,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (profile) cardSummary.append(profile);
     const conflict = plannedConflict(entry, dateKey);
     if (conflict) cardSummary.append(conflict);
+    const garminBlocked = !actual && dateKey >= todayKey ? plannedGarminBlocked(entry, dateKey) : null;
+    if (garminBlocked) cardSummary.append(garminBlocked);
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
     if (syncButton) cardSummary.append(syncButton);

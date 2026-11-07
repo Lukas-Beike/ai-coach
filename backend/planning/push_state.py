@@ -25,7 +25,9 @@ from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_strength_workout import (
     GarminExercise,
     GarminStrengthMappingError,
+    resolve_exercise,
     resolved_exercises,
+    suggestions,
 )
 
 # States from which an explicit Intervals.icu push helps; a conflict needs a
@@ -96,6 +98,27 @@ def _pushable_fingerprint(
     return fingerprint, None
 
 
+def unmapped_exercises(
+    payload: dict[str, Any], remembered: Mapping[str, GarminExercise]
+) -> list[dict[str, Any]]:
+    """Each exercise without a Garmin match: its index, name and suggestions."""
+    try:
+        exercises = strength_structure.normalize_structure(
+            payload.get(STRENGTH_STRUCTURE)
+        )
+    except AppError:
+        return []
+    return [
+        {
+            "index": index,
+            "name": item["name"],
+            "suggestions": suggestions(item.get("garmin_exercise") or item["name"]),
+        }
+        for index, item in enumerate(exercises or [])
+        if resolve_exercise(item, remembered) is None
+    ]
+
+
 def attach_push_state(
     pairs: Iterable[tuple[Any, dict[str, Any]]],
     baselines: dict[str, str | None],
@@ -124,4 +147,9 @@ def attach_push_state(
         payload["push_pending"] = pending
         payload["push_blocked"] = (
             {ProviderId.GARMIN.value: blocked} if blocked is not None else {}
+        )
+        payload["push_unmapped"] = (
+            unmapped_exercises(payload, remembered or {})
+            if blocked == "unmapped"
+            else []
         )

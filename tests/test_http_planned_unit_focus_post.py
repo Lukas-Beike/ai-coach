@@ -49,6 +49,30 @@ class PlannedUnitFocusPostRoutesTests(unittest.TestCase):
             self.routes.handle(self.handler([]), f"/api/planned-units/{LOCAL_ID}/focus")
         self.service.update.assert_not_called()
 
+    def test_garmin_exercise_route_passes_the_pick_to_the_service(self) -> None:
+        self.service.assign_garmin_exercise.return_value = {"status": "local"}
+        handler = self.handler(
+            {
+                "exercise_index": 2,
+                "garmin_exercise": "V-grip Cable Row",
+                "expected_payload_hash": "abc",
+                "name": "ignored",
+            }
+        )
+        self.assertTrue(
+            self.routes.handle(
+                handler, f"/api/planned-units/{LOCAL_ID}/garmin-exercise"
+            )
+        )
+        self.service.assign_garmin_exercise.assert_called_once_with(
+            LOCAL_ID, 2, "V-grip Cable Row", "abc"
+        )
+        handler.send_json.assert_called_once_with(200, {"status": "local"})
+        with self.assertRaises(AppError):
+            self.routes.handle(
+                self.handler([]), f"/api/planned-units/{LOCAL_ID}/garmin-exercise"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
