@@ -48,7 +48,8 @@ BLOCK_WORD_BUDGETS = {
     "_CALENDAR": 45,
     "_PLAN_CHECK": 80,
     "_ADAPTIVE": 140,
-    "_SESSION_CHECKS": 110,
+    # strength_plan compares executed with planned sets (#1683).
+    "_SESSION_CHECKS": 135,
     # The execution and planned-target fields the session analysis reads.
     "_SESSION_NUMBERS": 110,
     # Test planning from planning_brief.last_tests (plan kinds only).

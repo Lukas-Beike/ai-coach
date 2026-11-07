@@ -22,6 +22,7 @@ from backend.activities.detail_merge import (
     clock_offset,
     stream_average,
 )
+from backend.activities.strength_sets import select_strength_sets, strength_summary
 from backend.canonical.activity_detail import (
     LAP_METRIC_FIELDS,
     ActivityLap,
@@ -191,6 +192,7 @@ def activity_detail_contract(
         "streams": _streams(merged.streams),
         "laps": _laps(merged.laps, merged.streams),
         "zones": _zones(merged.zones),
+        "strength_sets": _strength_sets(stored),
         "analysis": analysis,
         "detail_data": {
             "providers": _providers(records, stored, refreshable, status),
@@ -200,6 +202,11 @@ def activity_detail_contract(
     if envelope is not None:
         document.update({key: envelope.get(key) for key in _ENVELOPE_KEYS})
     return document
+
+
+def _strength_sets(stored: Sequence[StoredDetailSet]) -> dict[str, Any] | None:
+    selected = select_strength_sets(stored)
+    return None if selected is None else strength_summary(selected, set_list=True)
 
 
 def session_local_start(

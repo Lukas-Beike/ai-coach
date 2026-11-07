@@ -54,6 +54,12 @@ def _steps(brief: dict[str, Any]) -> list[tuple[str, Any]]:
             ),
         ),
         (
+            "strength_progress.exercises",
+            lambda: _trim_list(
+                brief.get("strength_progress"), "exercises", oldest=False
+            ),
+        ),
+        (
             "strength.weeks",
             lambda: _trim_list(brief.get("strength"), "weeks", oldest=False),
         ),

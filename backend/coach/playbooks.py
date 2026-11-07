@@ -39,7 +39,7 @@ _PLAN_STRUCTURE = """Planning science:
 - Alternate hard and easy days, never back-to-back hard days; distribute intensity per training_model.
 - Plan no single run much longer than the longest of the last 30 days (Frandsen 2025).
 - Adjust load to HRV or readiness data when present (Kiviniemi 2007; Javaloyes 2019; moderate).
-- Set session_focus on every new unit, named in the Typ column. Describe strength with strength_structure (server derives strength_intensity; free text needs it set): progress load or reps weekly, deload in the lighter week.
+- Set session_focus on every new unit, named in the Typ column. Describe strength with strength_structure (server derives strength_intensity; free text needs it set): progress load or reps weekly, deload in the lighter week; from planning_brief.strength_progress top sets: all reps done, progress; reps missed, hold.
 - Local units only; no Intervals.icu write."""
 
 _STRENGTH_LEGS = """- Heavy strength 2 times per week in base and build, 1 (maintenance) in peak and taper (Ronnestad & Mujika 2014; Blagrove 2018), 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): same counts, at most 3; after or on hard days, or 24 h or more before hard or long sessions. Name deviations."""
@@ -64,7 +64,8 @@ _ANSWER = """Answer:
 _SESSION_CHECKS = """Session checks (get_activity_details):
 - focus: judge the session against its session_focus (easy stayed easy; threshold or vo2max work reached and held its target); say when unknown and name a derived origin as a guess.
 - pace_at_heart_rate: compare with comparable runs only when status is ok, and name their count; a positive difference is slower; not_covered is unknown, not zero or a change.
-- strength_before: heavy or moderate leg strength (legs true) within 48 h (origin completed; planned_not_confirmed is not known to be done) is a possible explanation for a worse pace, power or heart-rate response, never a proven cause. Count and intensity only, no load."""
+- strength_before: heavy or moderate leg strength (legs true) within 48 h (origin completed; planned_not_confirmed is not known to be done) is a possible explanation for a worse pace, power or heart-rate response, never a proven cause. Count and intensity only, no load.
+- strength_plan: planned against executed sets per exercise (completed_sets reached the planned reps; unknown exercises are not misses); name missed sets, load changes and rest from strength_sets."""
 
 _SESSION_NUMBERS = """Session numbers (get_activity_details):
 - Read laps from analysis.execution and targets from planned_targets, not from raw streams. Per rep: deviation_pct and time_in_target_pct against the plan, start_change_pct (started too fast), within_rep_change_pct, variability_pct, heart_rate_end and peak, stride length and cadence halves (fatigue), elevation_change_m (hills). Recoveries: heart_rate_drop_60s, heart_rate_end, recovery_s against planned_recovery_s.

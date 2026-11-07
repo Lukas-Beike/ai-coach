@@ -4,9 +4,11 @@ Only the number and the intensity of leg strength sessions count. There is no
 tonnage, no per-exercise volume and no planned strength load, and strength stays
 out of the endurance low/moderate/high distribution and the weekly load notes.
 
-- Leg: the session focus first (``legs``, ``full_body`` and ``plyometrics`` are
-  leg, other foci not), whether set or keyword-derived (``session_focus``); no
-  focus means unknown.
+- Leg: for a completed session the categories of its executed strength sets
+  (any leg exercise is leg; only known non-leg exercises are not), else the
+  session focus (``legs``, ``full_body`` and ``plyometrics`` are leg, other foci
+  not), whether set or keyword-derived (``session_focus``); no focus means
+  unknown.
 - Intensity: the set strength intensity, else the planned intensity
   (heavy from 0.85, moderate from 0.70), else RPE (heavy from 8, moderate from
   6), else the text; otherwise unknown.
@@ -112,7 +114,11 @@ def classify(unit: Mapping[str, Any]) -> StrengthClass | None:
     if planned_sport_environment(unit)[0] is not Sport.STRENGTH:
         return None
     focus = session_focus(unit)
-    leg = None if focus.value is None else focus.is_leg_strength
+    executed = unit.get("executed_leg")
+    if isinstance(executed, bool):
+        leg: bool | None = executed
+    else:
+        leg = None if focus.value is None else focus.is_leg_strength
     return StrengthClass(leg, _intensity(unit, focus))
 
 
@@ -145,6 +151,7 @@ def completed_unit(row: Mapping[str, Any]) -> dict[str, Any]:
         "description": row.get("description"),
         "planned_intensity": row.get("intensity"),
         "rpe": row.get("rpe"),
+        "executed_leg": (row.get("strength_sets") or {}).get("leg"),
     }
 
 

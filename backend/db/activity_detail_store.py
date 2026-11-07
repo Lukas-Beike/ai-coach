@@ -282,6 +282,44 @@ class FullStreamKey:
     fetched_at: str
 
 
+def strength_sets_for_sessions(
+    db: Any, activity_ids: Collection[str]
+) -> dict[str, list[StoredDetailSet]]:
+    """Return the readable strength set lists per session of ``activity_ids``.
+
+    Lists of sessions merged into one of them belong to that survivor. Deleted
+    sessions are skipped like in ``detail_sets_for_session``.
+    """
+    ids = sorted(set(activity_ids))
+    if not ids:
+        return {}
+    marks = ", ".join("?" for _ in ids)
+    stored = _read_sets(
+        db,
+        f"d.detail_kind = ? AND (s.activity_id IN ({marks}) "
+        f"OR (s.state = ? AND s.merged_into IN ({marks})))",
+        (
+            ActivityDetailKind.STRENGTH_SETS.value,
+            *ids,
+            ActivitySessionState.DUPLICATE.value,
+            *ids,
+        ),
+    )
+    survivors = {
+        row["activity_id"]: row["merged_into"]
+        for row in db.execute(
+            f"SELECT activity_id, merged_into FROM activity_sessions "
+            f"WHERE state = ? AND merged_into IN ({marks})",
+            (ActivitySessionState.DUPLICATE.value, *ids),
+        ).fetchall()
+    }
+    result: dict[str, list[StoredDetailSet]] = {}
+    for item in stored:
+        owner = survivors.get(item.activity_id, item.activity_id)
+        result.setdefault(owner, []).append(item)
+    return result
+
+
 def full_stream_keys(
     db: Any, activity_ids: Iterable[str]
 ) -> dict[str, tuple[FullStreamKey, ...]]:
