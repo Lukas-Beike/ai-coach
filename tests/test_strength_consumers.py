@@ -232,6 +232,26 @@ class PlanComparisonTests(unittest.TestCase):
         self.assertEqual(comparison["percentage"], 75)
         self.assertEqual([row["done_sets"] for row in comparison["exercises"]], [6, 3])
 
+    def test_executed_warmup_sets_are_not_working_sets(self) -> None:
+        def compare(reps: list[int]) -> dict[str, Any]:
+            rows = [(ACTIVE, SQUAT, None, count, 80.0, None) for count in reps]
+            summary = strength_summary(stored(set_list(rows)), set_list=False)
+            item = {
+                **planned("Squat", "SQUAT", "BARBELL_BACK_SQUAT", 3, 8),
+                "warmup": {"sets": 1, "reps": 5},
+            }
+            comparison = plan_comparison([item], summary)
+            assert comparison is not None
+            return comparison["exercises"][0]
+
+        # The warm-up was done first: all three working sets count.
+        self.assertEqual(compare([5, 8, 8, 8])["reps"], [8, 8, 8])
+        # A failed last working set stays visible behind a high-rep warm-up.
+        failed = compare([12, 8, 8, 6])
+        self.assertEqual((failed["reps"], failed["completed_sets"]), ([8, 8, 6], 2))
+        # A skipped warm-up costs no working set.
+        self.assertEqual(compare([8, 8, 8])["reps"], [8, 8, 8])
+
     def test_no_usable_side_gives_no_comparison(self) -> None:
         self.assertIsNone(plan_comparison([], self.summary()))
         no_categories = strength_summary(
