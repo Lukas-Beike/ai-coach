@@ -293,6 +293,13 @@ def _planned_row(
         or (not pool and unrecognized)
     ):
         return {**row, "status": "unknown"}
+    # Garmin records the planned warm-up sets first, as ordinary sets of the
+    # same category; they are not working sets. Only sets beyond the planned
+    # working sets count as warm-ups, so a skipped warm-up costs no working set.
+    warmup = item.get("warmup")
+    warmup_sets = int(warmup.get("sets") or 0) if isinstance(warmup, Mapping) else 0
+    skip = min(warmup_sets, max(0, len(pool) - planned_sets))
+    pool = pool[skip:]
     taken, pools[category.value] = pool[:planned_sets], pool[planned_sets:]
     completed = sum(1 for reps in taken if reps is None or reps >= planned_reps)
     return {

@@ -177,7 +177,8 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         return {
             "id": event_id,
             "external_id": external_id or f"intervals-coach-{LOCAL_ID}",
-            "category": "WORKOUT",
+            # Strength units are calendar notes at Intervals.icu (#1802).
+            "category": "NOTE",
             "start_date_local": TODAY.isoformat() + "T06:00:00",
             "name": name,
             "type": "WeightTraining",
@@ -774,7 +775,11 @@ class PlannedCalendarSyncTests(unittest.TestCase):
 
         self.add_unit()
         self.client.events = [
-            self.remote_event("unlinked-event", external_id="unrelated-external-id")
+            self.remote_event(
+                "unlinked-event",
+                external_id="unrelated-external-id",
+                category="WORKOUT",
+            )
         ]
         with self.assertRaises(AppError) as caught:
             service.repair_entry(LOCAL_ID, self.payload_hash())

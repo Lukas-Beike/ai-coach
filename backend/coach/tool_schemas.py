@@ -60,11 +60,32 @@ _EXERCISE_PROPERTIES: dict[str, Any] = {
     "name": {"type": "string", "minLength": 1, "maxLength": 80},
     "sets": {"type": "integer", "minimum": 1, "maximum": 10},
     "reps": {"type": "integer", "minimum": 1, "maximum": 100},
-    "kg": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+    "kg": {
+        "type": ["number", "null"],
+        "minimum": 0,
+        "maximum": 1000,
+        "description": "Added weight per working set; 0 for bodyweight without added weight.",
+    },
     "pct_1rm": {"type": ["number", "null"], "minimum": 1, "maximum": 150},
     "rpe": {"type": ["number", "null"], "minimum": 1, "maximum": 10},
     "rir": {"type": ["integer", "null"], "minimum": 0, "maximum": 10},
     "rest_s": {"type": ["integer", "null"], "minimum": 0, "maximum": 600},
+    "warmup": {
+        "type": ["object", "null"],
+        "additionalProperties": False,
+        "required": ["sets", "reps", "kg"],
+        "description": "Warm-up sets done before the working sets, e.g. 1 set of 12 at 20 kg; null without warm-up sets. sets/reps above count working sets only.",
+        "properties": {
+            "sets": {"type": "integer", "minimum": 1, "maximum": 5},
+            "reps": {"type": "integer", "minimum": 1, "maximum": 100},
+            "kg": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+        },
+    },
+    "note": {
+        "type": ["string", "null"],
+        "maxLength": 100,
+        "description": "Short cue for this exercise, e.g. 'nicht bis zum Muskelversagen'; null otherwise.",
+    },
     "garmin_exercise": {
         "type": ["string", "null"],
         "maxLength": 80,

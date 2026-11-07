@@ -39,9 +39,10 @@ from backend.planning.push_state import garmin_fingerprint
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_personal import GarminTransportClient
 from backend.providers.garmin_strength_workout import (
+    NO_STRUCTURE_MESSAGE,
     GarminStrengthMappingError,
     strength_workout,
-    workout_exercise_pairs,
+    workout_exercise_steps,
 )
 from backend.sync.garmin_service import _persist_garmin_tokens, shared_garmin_sync_lock
 from backend.sync.gates import ProviderResyncGate
@@ -241,7 +242,7 @@ class GarminStrengthPushService:
             unit.get("strength_structure")
         )
         if not exercises:
-            raise ValueError("Die Einheit hat keine Kraftstruktur.")
+            raise ValueError(NO_STRUCTURE_MESSAGE)
         document = strength_workout(
             name=str(unit.get("name") or ""),
             description=strength_structure.render(exercises),
@@ -328,9 +329,9 @@ class GarminStrengthPushService:
     def _verified(client: Any, workout_id: str, document: dict[str, Any]) -> bool:
         """Whether the saved workout kept every sent exercise step."""
         saved = _call(client.get_workout_by_id, workout_id)
-        return isinstance(saved, dict) and workout_exercise_pairs(
+        return isinstance(saved, dict) and workout_exercise_steps(
             saved
-        ) == workout_exercise_pairs(document)
+        ) == workout_exercise_steps(document)
 
     def _drop_broken(
         self,

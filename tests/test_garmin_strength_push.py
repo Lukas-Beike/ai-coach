@@ -70,6 +70,96 @@ class MappingTests(unittest.TestCase):
             with self.subTest(alias=alias):
                 self.assertIsNotNone(mapping.catalogue_exercise(name))
 
+    def test_no_alias_is_shadowed_by_a_catalogue_name(self) -> None:
+        for name, aliases in mapping._ALIAS_GROUPS.items():
+            for alias in aliases:
+                with self.subTest(alias=alias):
+                    found = mapping.resolve_exercise({"name": alias})
+                    self.assertEqual(name, found.name if found else None)
+
+    def test_the_athletes_upper_body_exercises_resolve(self) -> None:
+        expected = {
+            "Hyperextensions": "Hyperextension",
+            "Schrägbankdrücken": "Incline Barbell Bench Press",
+            "Lat-Pulldown": "Lat Pull-down",
+            "Lat Pulldowns": "Lat Pull-down",
+            "Face Pulls": "Face Pull",
+            "Dips": "Body-weight Dip",
+            "Enges Rudern im Sitzen": "V-grip Cable Row",
+            "Seitenheben": "Lateral Raise",
+            "Bizeps am Seilzug": "Cable Biceps Curl",
+        }
+        for name, catalogue_name in expected.items():
+            with self.subTest(name=name):
+                found = mapping.resolve_exercise({"name": name})
+                self.assertEqual(catalogue_name, found.name if found else None)
+
+    def test_word_fallback_needs_one_closest_entry(self) -> None:
+        found = mapping.resolve_exercise({"name": "Pull Face"})
+        self.assertEqual("Face Pull", found.name if found else None)
+        # "Press" is part of many entries, none of them closest on its own.
+        self.assertIsNone(mapping.resolve_exercise({"name": "Press"}))
+
+    def test_warmup_sets_are_their_own_step_before_the_working_sets(self) -> None:
+        document = mapping.strength_workout(
+            name="Oberkörper",
+            description="",
+            exercises=[
+                {
+                    "name": "Schrägbankdrücken",
+                    "sets": 3,
+                    "reps": 8,
+                    "kg": 40,
+                    "rest_s": 90,
+                    "warmup": {"sets": 1, "reps": 12, "kg": 20},
+                    "note": "nicht bis zum Muskelversagen",
+                    "rir": 2,
+                },
+                {"name": "Dips", "sets": 4, "reps": 10, "kg": 0},
+            ],
+        )
+        warmup, working, dips = document["workoutSegments"][0]["workoutSteps"]
+        warmup_step = warmup["workoutSteps"][0]
+        self.assertEqual(
+            ("warmup", 1, 12.0, 20000.0),
+            (
+                warmup_step["stepType"]["stepTypeKey"],
+                warmup["numberOfIterations"],
+                warmup_step["endConditionValue"],
+                warmup_step["weightValue"],
+            ),
+        )
+        self.assertNotIn("description", warmup_step)
+        working_step = working["workoutSteps"][0]
+        self.assertEqual(
+            ("interval", 3, 40000.0, "2 RIR · nicht bis zum Muskelversagen"),
+            (
+                working_step["stepType"]["stepTypeKey"],
+                working["numberOfIterations"],
+                working_step["weightValue"],
+                working_step["description"],
+            ),
+        )
+        # Bodyweight sends no weight target.
+        self.assertNotIn("weightValue", dips["workoutSteps"][0])
+        orders = [
+            order
+            for group in (warmup, working, dips)
+            for order in (
+                group["stepOrder"],
+                *(step["stepOrder"] for step in group["workoutSteps"]),
+            )
+        ]
+        self.assertEqual(list(range(1, 9)), orders)
+        self.assertEqual(
+            [
+                ("warmup", "BENCH_PRESS", "INCLINE_BARBELL_BENCH_PRESS"),
+                ("interval", "BENCH_PRESS", "INCLINE_BARBELL_BENCH_PRESS"),
+                ("interval", "TRICEPS_EXTENSION", "BODY_WEIGHT_DIP"),
+            ],
+            mapping.workout_exercise_steps(document),
+        )
+
     def test_document_has_a_repeat_group_per_exercise(self) -> None:
         document = mapping.strength_workout(
             name="Kraft A", description="Kniebeuge: 4x5", exercises=[SQUAT, PLANK]
@@ -116,8 +206,11 @@ class MappingTests(unittest.TestCase):
         self.assertEqual([5], [step["stepOrder"] for step in plank["workoutSteps"]])
         self.assertNotIn("weightValue", plank["workoutSteps"][0])
         self.assertEqual(
-            [("SQUAT", "BARBELL_BACK_SQUAT"), ("PLANK", "SIDE_PLANK")],
-            mapping.workout_exercise_pairs(document),
+            [
+                ("interval", "SQUAT", "BARBELL_BACK_SQUAT"),
+                ("interval", "PLANK", "SIDE_PLANK"),
+            ],
+            mapping.workout_exercise_steps(document),
         )
 
     def test_an_unresolved_exercise_blocks_the_whole_workout(self) -> None:

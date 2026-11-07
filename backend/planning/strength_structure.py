@@ -23,11 +23,25 @@ MAX_PCT: Final = 150
 MAX_REST_S: Final = 600
 MAX_RPE: Final = 10
 MAX_RIR: Final = 10
+MAX_WARMUP_SETS: Final = 5
+MAX_NOTE: Final = 100
 LOAD_KEYS: Final = ("kg", "pct_1rm", "rpe", "rir")
 # ``garmin_exercise`` names a Garmin catalogue exercise; ``garmin_pair`` is its
 # category/exercise pair, always derived from the catalogue on write.
 GARMIN_KEYS: Final = ("garmin_exercise", "garmin_pair")
-EXERCISE_KEYS: Final = ("name", "sets", "reps", *LOAD_KEYS, "rest_s", *GARMIN_KEYS)
+# ``warmup`` holds warm-up sets done before the working sets, with their own
+# reps and optional kg; ``kg`` 0 means no added weight (bodyweight).
+WARMUP_KEYS: Final = ("sets", "reps", "kg")
+EXERCISE_KEYS: Final = (
+    "name",
+    "sets",
+    "reps",
+    *LOAD_KEYS,
+    "rest_s",
+    "warmup",
+    "note",
+    *GARMIN_KEYS,
+)
 # Heavy from 80 % 1RM, RPE 8 or 2 reps in reserve; moderate from 65 %, RPE 6, RIR 4.
 HEAVY_PCT: Final = 80
 MODERATE_PCT: Final = 65
@@ -74,7 +88,32 @@ def _exercise(item: Any) -> dict[str, Any]:
             result[key] = _bounded(item[key], key, low, high, whole=whole)
     if sum(key in result for key in ("pct_1rm", "rpe", "rir")) > 1:
         raise _invalid("Pro Übung nur eine relative Last: %1RM, RPE oder RIR.")
+    warmup = _warmup(item.get("warmup"))
+    if warmup:
+        result["warmup"] = warmup
+    note = " ".join(str(item.get("note") or "").split())[:MAX_NOTE]
+    if note:
+        result["note"] = note
     _garmin_exercise(item, result)
+    return result
+
+
+def _warmup(value: Any) -> dict[str, Any] | None:
+    """Warm-up sets before the working sets, or ``None`` without any."""
+    if value in (None, "", {}):
+        return None
+    if not isinstance(value, Mapping) or set(value) - set(WARMUP_KEYS):
+        raise _invalid("Aufwärmsätze brauchen Sätze, Wiederholungen und optional kg.")
+    result: dict[str, Any] = {
+        "sets": _bounded(
+            value.get("sets"), "Aufwärmsätze", 1, MAX_WARMUP_SETS, whole=True
+        ),
+        "reps": _bounded(
+            value.get("reps"), "Aufwärm-Wiederholungen", 1, MAX_REPS, whole=True
+        ),
+    }
+    if value.get("kg") not in (None, ""):
+        result["kg"] = _bounded(value["kg"], "Aufwärm-kg", 0, MAX_KG, whole=False)
     return result
 
 
@@ -138,10 +177,14 @@ def _plain(value: float) -> str:
     return str(int(value)) if float(value) == int(value) else f"{value:g}"
 
 
+def _kg_text(kg: float) -> str:
+    return f"{_plain(kg)} kg" if kg else "ohne Zusatzgewicht"
+
+
 def _load_text(item: Mapping[str, Any]) -> str:
     parts = []
     if "kg" in item:
-        parts.append(f"{_plain(item['kg'])} kg")
+        parts.append(_kg_text(item["kg"]))
     if "pct_1rm" in item:
         parts.append(f"{_plain(item['pct_1rm'])} % 1RM")
     if "rpe" in item:
@@ -152,15 +195,28 @@ def _load_text(item: Mapping[str, Any]) -> str:
 
 
 def render(exercises: Sequence[Mapping[str, Any]]) -> str:
-    """One readable line per exercise, e.g. ``Kniebeuge: 4x5 @ 85 % 1RM, 180 s Pause``."""
+    """One readable line per exercise, e.g. ``Kniebeuge: 4x5 @ 85 % 1RM, 180 s Pause``.
+
+    Warm-up sets come first (``Aufwärmen 1x10 @ 20 kg, dann 3x8 @ 40 kg``) and
+    a note follows after a dash.
+    """
     lines = []
     for item in exercises:
-        line = f"{item['name']}: {item['sets']}x{item['reps']}"
+        line = f"{item['name']}: "
+        warmup = item.get("warmup")
+        if warmup:
+            line += f"Aufwärmen {warmup['sets']}x{warmup['reps']}"
+            if "kg" in warmup:
+                line += f" @ {_kg_text(warmup['kg'])}"
+            line += ", dann "
+        line += f"{item['sets']}x{item['reps']}"
         load = _load_text(item)
         if load:
             line += f" @ {load}"
         if "rest_s" in item:
             line += f", {item['rest_s']} s Pause"
+        if item.get("note"):
+            line += f" – {item['note']}"
         lines.append(line)
     return "\n".join(lines)
 

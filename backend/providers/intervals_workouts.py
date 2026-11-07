@@ -26,11 +26,16 @@ from backend.canonical.stored_sports import (
     resolve_workout_sport,
     workout_sport_from_record,
 )
-from backend.canonical.vocabulary import Environment
+from backend.canonical.vocabulary import Environment, Sport
 from backend.providers.intervals_activity_fields import REMOTE_EVENT_METRIC_KEYS
 from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 
 INTERVALS_EVENT_CATEGORY = "WORKOUT"
+# Strength units go to the Intervals.icu calendar as notes: Intervals.icu
+# forwards WORKOUT events to Garmin as one unnamed step, notes it keeps. The
+# structured strength workout reaches the watch only by the direct Garmin push.
+INTERVALS_NOTE_CATEGORY = "NOTE"
+INTERVALS_STRENGTH_TYPE = "WeightTraining"
 # Workout payload field holding structured interval text.
 WORKOUT_INTERVALS_FIELD = "intervals"
 # Remote-derived fields that stop being valid once a local workout is edited.
@@ -89,7 +94,7 @@ def intervals_event_payload(
 ) -> dict[str, Any]:
     """Render one planned-workout export model as an Intervals.icu event payload."""
     return {
-        "category": INTERVALS_EVENT_CATEGORY,
+        "category": intervals_event_category(export.sport),
         "start_date_local": export.starts_at_local,
         "type": intervals_workout_type(
             StoredSport(export.sport, export.environment, export.sport_token or None)
@@ -100,6 +105,13 @@ def intervals_event_payload(
         "target": export.target,
         "external_id": intervals_external_id(local_id),
     }
+
+
+def intervals_event_category(sport: Sport) -> str:
+    """Return the event category a planned unit of ``sport`` is sent with."""
+    return (
+        INTERVALS_NOTE_CATEGORY if sport is Sport.STRENGTH else INTERVALS_EVENT_CATEGORY
+    )
 
 
 COACH_EVENT_EXTERNAL_PREFIX = "intervals-coach-"
@@ -207,9 +219,22 @@ def intervals_event_start_date(event: Any) -> str:
     return str(event.get("start_date_local") or "")
 
 
+def intervals_event_is_coach_note(event: Any) -> bool:
+    """Return whether an Intervals.icu event is a strength note this app sent."""
+    return event.get("category") == INTERVALS_NOTE_CATEGORY and str(
+        event.get("external_id") or ""
+    ).startswith(COACH_EVENT_EXTERNAL_PREFIX)
+
+
 def intervals_event_is_planned(event: Any) -> bool:
-    """Return whether an Intervals.icu event is a planned workout."""
-    return event.get("category") == INTERVALS_EVENT_CATEGORY
+    """Return whether an Intervals.icu event is a planned workout.
+
+    A strength note counts only when this app sent it; other notes are not
+    planned training.
+    """
+    return event.get(
+        "category"
+    ) == INTERVALS_EVENT_CATEGORY or intervals_event_is_coach_note(event)
 
 
 def intervals_event_is_paired(event: Any) -> bool:

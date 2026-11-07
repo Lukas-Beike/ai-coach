@@ -19,7 +19,6 @@ from backend.canonical.planned_workout import PlannedWorkoutExport
 from backend.planning import workouts as planning_workouts
 from backend.providers.intervals_client import IntervalsClient
 from backend.providers.intervals_workouts import (
-    INTERVALS_EVENT_CATEGORY,
     intervals_event_confirms_schedule,
     intervals_event_external_id,
     intervals_event_identity,
@@ -56,10 +55,14 @@ class IntervalsWorkoutExport:
         return self._client_factory().get_event(remote_id)
 
     def list_window(self, *, oldest: str, newest: str) -> list[dict[str, Any]]:
+        # Unfiltered, because strength units are notes: the repair checks
+        # match events by identity and treat only planned ones (workouts and
+        # this app's notes) as namesakes, so races and other notes stay apart,
+        # and an identified event of another category is a conflict.
         return self._client_factory().list_events_window(
             oldest=oldest,
             newest=newest,
-            category=INTERVALS_EVENT_CATEGORY,
+            category=None,
             collection=PLANNED_WINDOW_COLLECTION,
         )
 
