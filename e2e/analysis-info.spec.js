@@ -163,7 +163,8 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
       { metric: "sleep", source: "Garmin Connect", measurement: "duration", observed_at: "2026-10-01", nights: 1,
         history: [{ date: "2026-09-30", value: 7 }, { date: "2026-10-01", value: 11 }] },
       { metric: "hrv", source: "Garmin Connect", measurement: "RMSSD", observed_at: "2026-10-01", nights: 28,
-        status: "ok", lower: 50, upper: 60, position: "within", continuity: "unknown", context_changed_on: null, history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
+        status: "ok", lower: 50, upper: 60, position: "within", continuity: "unknown", context_changed_on: null,
+        rolling: { method: "rolling-lnrmssd-v1", status: "provisional", window_nights: 3, mean_ms: 55.2, lower_ms: 53, upper_ms: 62.2, position: "within", cv_pct: 2.5 }, history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
       { metric: "resting_hr", source: "Intervals.icu", measurement: "resting", observed_at: "2026-10-01", nights: 1,
         status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", continuity: "known", context_changed_on: "2026-09-30", history: [{ date: "2026-10-01", value: 48 }] },
     ],
@@ -182,7 +183,7 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(info).toContainText("Im Bereich deiner früheren Werte · 50 ms–60 ms");
   await expect(info).toContainText("Vergleich mit 28 früheren Nächten.");
   await expect(info).toContainText("Mindestens 14 frühere passende Nächte erforderlich.");
-  await expect(info).toContainText("Vergleich mit 28 früheren Nächten. Messkontext unbekannt.");
+  await expect(info).toContainText("Vergleich mit 28 früheren Nächten. Messkontext unbekannt. 7-Tage-Mittel 55,2 ms (3 Nächte) · in deinem Bereich 53 ms–62,2 ms · Schwankung 2,5 % · vorläufig.");
   await expect(info).toContainText(/Messkontext geändert am 30\.09\.2026\./);
   await expect(info).toContainText("Durchschnitt der angezeigten Werte");
   await page.keyboard.press("Escape");

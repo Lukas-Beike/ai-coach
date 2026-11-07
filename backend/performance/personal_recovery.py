@@ -26,6 +26,7 @@ from backend.canonical.sleep_bounds import bounds_fields
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.canonical_recovery import CanonicalRecoveryInputs
 from backend.performance.display_sources import preferred_providers
+from backend.performance.rolling_hrv import rolling_lnrmssd
 from backend.performance.source_policy import NO_PREFERENCES
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -60,7 +61,10 @@ _NOTE: Final = (
     "Die mittleren zwei Quartile enthalten per Definition etwa die Hälfte der "
     "Werte; ein Wert außerhalb ist weder selten noch ein Warnsignal. Keine "
     "Diagnose, keine Trainingsfreigabe und keine Trainingsänderung allein aus "
-    "einer Abweichung. Krankheit und Schmerzen separat berücksichtigen. Quellen "
+    "einer Abweichung. Das 7-Tage-Mittel der logarithmierten RMSSD-Werte "
+    "vergleicht mit Mittelwert ± 0,5 Standardabweichung deiner Nächte der 42 "
+    "Tage davor; auch das ist keine Erholungsaussage. "
+    "Krankheit und Schmerzen separat berücksichtigen. Quellen "
     "und Messfelder werden nicht gemischt. Die Schlafdauer ist eine Schätzung "
     "des jeweiligen Geräts, kein gemessener Schlafbedarf. Der Fehlbetrag zum "
     "Schlafziel summiert nur bekannte Nächte und wird nicht mit längeren Nächten "
@@ -245,6 +249,14 @@ def _baseline(
         )
     else:
         baseline["reason"] = _reason(current=current, changed=changed_on is not None)
+    # The seven-day ln(RMSSD) comparison (#1772) reads local-method providers only.
+    if (metric, field) == ("hrv", "RMSSD") and provider is not ProviderId.INTERVALS:
+        baseline["rolling"] = rolling_lnrmssd(
+            records,
+            observed,
+            current=current,
+            segment_start=_segment_start(records, observations, observed),
+        )
 
     return baseline
 
