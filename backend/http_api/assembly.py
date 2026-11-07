@@ -482,8 +482,10 @@ class HttpApiAssembly:
         )
         report_plan = lambda: public_plan_state_service().read(local_only=True)
         report_checkins = lambda: checkin_service().list(365)
-        report_feedback = lambda: (
-            athlete.activity_feedback().list(500) if athlete.activity_feedback else []
+        report_feedback = lambda keys: (
+            athlete.activity_feedback().for_activity_ids(keys)
+            if athlete.activity_feedback
+            else []
         )
         report_timezone = lambda: str(profile_service().get().get("timezone") or "UTC")
         report_recovery = lambda: (

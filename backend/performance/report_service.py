@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.activities.activity_summary import (
+    ActivitySummary,
     stored_activity_key,
     summary_duration_s,
     summary_is_electric,
@@ -441,7 +442,7 @@ class TrainingReportReadService:
         read_synced_at: Callable[[Any], str | None],
         read_plan: Callable[[], Any],
         read_checkins: Callable[[], Any],
-        read_feedback: Callable[[], list[dict[str, Any]]],
+        read_feedback: Callable[[list[str]], list[dict[str, Any]]],
         today: Callable[[], date],
         load_scenarios: Callable[..., dict[str, Any]],
         season_source: SeasonSource,
@@ -550,6 +551,18 @@ class TrainingReportReadService:
             observed_at=observed_at,
         )
 
+    def _feedback_of(
+        self, summaries: Sequence[ActivitySummary]
+    ) -> list[dict[str, Any]]:
+        """The effective feedback of the summaries' sessions, keyed by stored key.
+
+        Rows stored under a provider record id of a session are found as well.
+        """
+        keys = list(
+            dict.fromkeys(key for s in summaries if (key := stored_activity_key(s)))
+        )
+        return self._read_feedback(keys) if keys else []
+
     def block_review(
         self,
         values: dict[str, Any],
@@ -582,7 +595,7 @@ class TrainingReportReadService:
             plan=plan,
             checkins=self._read_checkins(),
             summaries=summaries,
-            activity_feedback=self._read_feedback(),
+            activity_feedback=self._feedback_of(summaries),
             timezone=timezone,
             training_model=self._training_model(),
         )
@@ -628,7 +641,7 @@ class TrainingReportReadService:
             sport=sport,
             plan=self._read_plan(),
             checkins=self._read_checkins(),
-            activity_feedback=self._read_feedback(),
+            activity_feedback=self._feedback_of(period),
             timezone=timezone,
             activity_summaries=summaries,
             observed_at=observed_at,

@@ -213,7 +213,7 @@ The power profile SHALL carry `critical-power-speed` version 1 (card M4) as an e
 Evidence: `backend/performance/critical_power.py:critical_power_speed`; `tests/test_critical_power.py`, `tests/test_performance_coach_ui_parity.py:test_mean_max_curve_is_the_analysis_route_payload`, `e2e/performance-values.spec.js`.
 
 ### Requirement: Durable athlete feedback separate from provider values
-The system SHALL normalize and persist local notes, session RPE from 0 through 10, and deviation reason against the resolved activity reference. Omitted fields SHALL preserve existing values; explicit clearing of all meaningful fields SHALL delete the local feedback. Coach saves SHALL require a currently known local activity and nonempty feedback.
+The system SHALL normalize and persist local notes, session RPE from 0 through 10, and deviation reason under the live local session id the activity reference resolves to. Omitted fields SHALL preserve existing values; explicit clearing of all meaningful fields SHALL delete the local feedback. Coach saves SHALL require a currently known local activity and nonempty feedback.
 
 #### Scenario: RPE-only correction
 - **WHEN** the athlete submits only a valid RPE, including zero
@@ -257,11 +257,15 @@ Detailed contract: Detail loading SHALL happen only through the explicit authent
 Evidence: `backend/http_api/analysis.py:AnalysisRoutes`, `backend/http_api/sync_get.py:SyncGetRoutes`, `backend/http_api/feedback_post.py:FeedbackPostRoutes`, `backend/sync/analysis_refresh.py:AnalysisRefreshService.refresh`; `tests/test_training_report.py:test_get_authentication_precedes_analysis_reads`, `tests/test_training_report.py:test_analysis_refresh_rejects_unknown_area`, `tests/test_analysis_refresh.py:test_failed_provider_does_not_discard_other_fresh_results`. `tests/test_http_sync_get_routes.py:test_authentication_precedes_every_detail_read`, `tests/test_detail_envelope.py:test_refresh_is_offered_for_configured_detail_providers_only`, and `e2e/activity-details.spec.js` ("Garmin-only session shows per-provider notes and its own refresh").
 
 ### Requirement: Session-owned effective feedback
-Feedback SHALL resolve to canonical session identity across provider imports. Each session SHALL expose one effective feedback and one effective sRPE contribution. Legacy conflicting feedback SHALL remain recoverable with deterministic selection; heuristic similarity alone SHALL not combine athlete feedback.
+Feedback and equipment assignments SHALL be stored under the live local session id and resolve to it across provider imports. Each session SHALL expose one effective feedback and one effective sRPE contribution. Rows stored under a provider record id of the session SHALL still be found; the session-id row wins, conflicting legacy feedback stays recoverable, and heuristic similarity alone SHALL not combine athlete feedback.
 
 #### Scenario: Same session through two providers
 - **WHEN** two provider activities are confirmed copies of one session and feedback is saved through either supported reference
 - **THEN** reads expose the same effective feedback and session-RPE is counted once.
+
+#### Scenario: Feedback stored under a provider record id
+- **WHEN** feedback or an equipment assignment was stored under an Intervals.icu record id of a session
+- **THEN** every reader (detail, load rollups, block review, training report, equipment usage) finds it for the session, and a row under the session id wins over it.
 
 #### Scenario: Existing conflicting feedback
 - **WHEN** an upgrade or confirmed merge encounters different feedback on two provider copies

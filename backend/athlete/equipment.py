@@ -112,9 +112,16 @@ class EquipmentService:
         garmin_ids = [str(item) for ids in listed.values() for item in ids]
         if self._match_activities is None or not garmin_ids or not rows:
             return {}
-        return self._match_activities(
-            db, garmin_ids, [str(row.get("id")) for row in rows]
+        # The matcher compares provider records, so it gets their ids, not the sessions.
+        record_ids = sorted(
+            {
+                reference
+                for row in rows
+                for reference in row["references"]
+                if reference != str(row.get("id"))
+            }
         )
+        return self._match_activities(db, garmin_ids, record_ids)
 
     def _records(self, db: Any, prefix: str, limit: int | None) -> list[dict[str, Any]]:
         """Return the newest records of a kind; a limit of None reads them all."""
@@ -152,10 +159,9 @@ class EquipmentService:
             )
             partial = _partial_garmin_history(items, gear)
             # Every explicit assignment, including an unassignment, overrides the link.
-            explicit = {
-                row["activity_id"]: row
-                for row in self._records(db, "equipment_assignment", None)
-            }
+            explicit = _session_assignments(
+                db, rows, self._records(db, "equipment_assignment", None)
+            )
             links = {key: value for key, value in links.items() if key not in explicit}
             if item_id:
                 selected = db.execute(
@@ -237,10 +243,11 @@ class EquipmentService:
                     if item.gear_id not in by_garmin:
                         _insert_initial_garmin_item(db, item, self._today(), now)
             # An explicit assignment, including an unassignment, overrides the link.
-            explicit = {
-                row["activity_id"]
-                for row in self._records(db, "equipment_assignment", None)
-            }
+            explicit = set(
+                _session_assignments(
+                    db, activity_rows, self._records(db, "equipment_assignment", None)
+                )
+            )
             links = _garmin_links(
                 local_rows,
                 listed,
@@ -961,8 +968,8 @@ def _partial_garmin_history(
 def _session_rows(summaries: Sequence[ActivitySummary]) -> list[dict[str, Any]]:
     """Return the summaries keyed as assignments are stored, with their references.
 
-    ``id`` is the assignment key (the Intervals.icu id when the session holds
-    one, else the session id); ``references`` are the other ids naming the session.
+    ``id`` is the assignment key, the session id; ``references`` are the other ids
+    naming the session.
     """
     rows = []
     for summary in summaries:
@@ -1066,12 +1073,41 @@ def _rows_by_garmin_id(
     for garmin_id, session in sessions.items():
         if session in keys:
             by_garmin.setdefault(garmin_id, set()).add(keys[session])
-    key_set = set(keys.values())
+    # A match names a provider activity id; the session key is the session id.
+    by_reference = {
+        reference: str(row["id"]) for row in rows for reference in row["references"]
+    }
     for garmin_id, matched in matches.items():
         for activity_id in matched:
-            if activity_id in key_set:
-                by_garmin.setdefault(str(garmin_id), set()).add(activity_id)
+            if activity_id in by_reference:
+                by_garmin.setdefault(str(garmin_id), set()).add(
+                    by_reference[activity_id]
+                )
     return by_garmin
+
+
+def _session_assignments(
+    db: Any, rows: list[dict[str, Any]], records: list[dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """Return the explicit assignments keyed by the session id they belong to.
+
+    New assignments are stored under the session id. One stored under a provider
+    record id of a session (before that rule) still counts for the session, and
+    the session-id assignment wins over it. A record of no known session keeps
+    its stored key.
+    """
+    stored = {str(record["activity_id"]): record for record in records}
+    legacy = canonical_store.session_record_ids(
+        db, [str(row["id"]) for row in rows if row["id"]]
+    )
+    result = dict(stored)
+    for row in rows:
+        key = str(row["id"])
+        for record_id in legacy.get(key, ()):
+            old = result.pop(record_id, None) if record_id != key else None
+            if old is not None and key not in stored and key not in result:
+                result[key] = {**old, "activity_id": key}
+    return result
 
 
 def _effective_assignments(

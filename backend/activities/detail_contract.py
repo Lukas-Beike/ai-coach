@@ -54,9 +54,9 @@ _ENVELOPE_KEYS: Final = (
     "session_rpe_load",
 )
 _PROVIDER_ORDER: Final[tuple[ProviderId, ...]] = (
-    ProviderId.INTERVALS,
-    ProviderId.GARMIN,
     ProviderId.WAHOO,
+    ProviderId.GARMIN,
+    ProviderId.INTERVALS,
 )
 _MEASURED_METRICS: Final[tuple[tuple[str, str], ...]] = (
     ("duration_s", "s"),

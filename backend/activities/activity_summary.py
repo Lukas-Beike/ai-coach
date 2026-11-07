@@ -41,6 +41,7 @@ from backend.activities.session_purpose import session_purpose
 from backend.canonical.activity_summary import (
     TSS_LIKE_LOAD_MODELS,
     ActivitySummary,
+    legacy_activity_keys,
     stored_activity_key,
     summary_duration_s,
     summary_is_electric,
@@ -263,9 +264,9 @@ def activity_summaries(
 # as session bundling decides; other origins follow.
 _ORIGIN_RANK: Final = {RecordingOrigin.WAHOO: 0, RecordingOrigin.GARMIN: 1}
 _PROVIDER_RANK: Final = {
-    ProviderId.INTERVALS: 0,
+    ProviderId.WAHOO: 0,
     ProviderId.GARMIN: 1,
-    ProviderId.WAHOO: 2,
+    ProviderId.INTERVALS: 2,
 }
 
 
@@ -314,6 +315,7 @@ __all__ = [
     "ActivitySummary",
     "activity_summaries",
     "activity_summary",
+    "legacy_activity_keys",
     "stored_activity_key",
     "summary_duration_s",
     "summary_is_electric",

@@ -2,11 +2,16 @@
 
 Feedback belongs to the canonical session it was written for. Rows whose
 sessions lead to one effective session through confirmed merges form a group;
-the group exposes one effective row, the newest by ``updated_at`` with the
-smaller original id first on a tie, so session RPE counts once. Hidden rows stay
+the group exposes one effective row, so session RPE counts once: a row keyed by
+a local session id before one keyed by a provider record id, then the newest by
+``updated_at`` with the smaller original id first on a tie. Hidden rows stay
 stored, and differing ones are listed as ``conflicting_feedback``. Rows without
 a session (unknown or ambiguous references) stand alone; proximity never groups
 feedback.
+
+New feedback is stored under the live local session id. Rows stored under a
+provider record id of the session are still found, by the group of their
+session or, without one, by the record ids of the session (``for_activity_ids``).
 """
 
 from __future__ import annotations
@@ -143,9 +148,10 @@ def _audit_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _ordered(group: Iterable[dict[str, Any]]) -> builtins.list[dict[str, Any]]:
-    """Group rows, effective first: newest update, then the smaller original id."""
+    """Group rows, effective first: session-keyed, newest update, smaller original id."""
     rows = sorted(group, key=lambda row: str(row["activity_id"]))
     rows.sort(key=lambda row: str(row["updated_at"]), reverse=True)
+    rows.sort(key=lambda row: row["activity_id"] != row.get("session_id"))
     return rows
 
 
@@ -271,6 +277,13 @@ class ActivityFeedbackService:
             effective = canonical_store.effective_session_ids(
                 db, list(origins.values())
             )
+            record_ids = (
+                {}
+                if sessions_only
+                else canonical_store.session_record_ids(
+                    db, sorted({effective.get(o, o) for o in origins.values()})
+                )
+            )
         member_keys = {
             str(row["activity_id"]): key
             for key, group in groups.items()
@@ -291,10 +304,16 @@ class ActivityFeedbackService:
                 and activity_id not in origins
             ):
                 continue
-            if key is not None and key in groups:
-                found.append(
-                    {**_effective_view(groups[key]), "activity_id": activity_id}
+            rows = list(groups.get(key, ())) if key is not None else []
+            if key is not None and key[0] == "session":
+                # Older rows without a session sit under a record id of it.
+                rows.extend(
+                    row
+                    for record_id in record_ids.get(key[1], ())
+                    for row in groups.get(("activity", record_id), ())
                 )
+            if rows:
+                found.append({**_effective_view(rows), "activity_id": activity_id})
         return found
 
     def _groups(self, db: Any) -> dict[tuple[str, str], builtins.list[dict[str, Any]]]:
@@ -331,7 +350,7 @@ class ActivityFeedbackService:
                     "Zu viele Rückmeldungen für diese Einheit, um sie mit Undo zu ändern.",
                 )
             existing = _ordered(group)[0] if group else {}
-            if existing:
+            if existing and origin != key:
                 feedback["activity_id"] = existing["activity_id"]
             own_row = feedback["activity_id"] == key
             _keep_omitted_fields(feedback, value, existing)

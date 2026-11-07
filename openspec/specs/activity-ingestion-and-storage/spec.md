@@ -73,7 +73,7 @@ The system SHALL infer missing-activity deletion only from a completely read Int
 Evidence: `backend/sync/canonical_ingest.py:intervals_deletion_window`, `backend/sync/canonical_ingest.py:ingest_intervals_snapshot`, `backend/sync/canonical_ingest.py:ingest_garmin_payload`, `backend/sync/garmin.py:activity_deletion_window`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_canonical_ingest.py:test_full_fetch_never_deletes_on_the_edge_days_of_its_window`, `tests/test_canonical_ingest.py:test_historical_fetch_never_deletes`, `tests/test_canonical_ingest.py:test_a_complete_activity_read_tombstones_a_deleted_activity`, `tests/test_canonical_ingest.py:test_a_failed_or_paused_activity_read_deletes_nothing`, `tests/test_canonical_ingest.py:test_a_row_without_an_activity_id_blocks_the_deletion`, `tests/test_garmin_snapshot_writer.py:ActivityWindowTests`, `tests/test_wahoo_sync.py:test_a_complete_listing_tombstones_a_workout_deleted_in_wahoo`, `tests/test_wahoo_sync.py:test_a_truncated_unreadable_or_unidentified_listing_deletes_nothing`.
 
 ### Requirement: Deterministic provider-copy session identity
-The system SHALL bundle supported provider copies into canonical sessions using deterministic start, sport-family, duration, distance, and recording-origin rules. The matching start window is 30 minutes, with duration tolerance at least 120 seconds or 10 percent and distance tolerance at least 500 metres or 10 percent under each implemented pairing rule. Intervals remains primary over direct Wahoo and Garmin; Wahoo-recorded rides can retain Garmin copies as alternatives.
+The system SHALL bundle supported provider copies into canonical sessions using deterministic start, sport-family, duration, distance, and recording-origin rules. The matching start window is 30 minutes, with duration tolerance at least 120 seconds or 10 percent and distance tolerance at least 500 metres or 10 percent under each implemented pairing rule. Intervals.icu is output only and ranks last: Wahoo leads a session, then Garmin; Wahoo-recorded rides can retain Garmin copies.
 
 #### Scenario: Exact upstream reference
 - **WHEN** an Intervals copy with `source=GARMIN_CONNECT` or `WAHOO` names a stored upstream activity by `external_id`, even if trimmed, paused or shifted beyond the tolerances
@@ -81,7 +81,7 @@ The system SHALL bundle supported provider copies into canonical sessions using 
 
 #### Scenario: Several recordings of one ride
 - **WHEN** compatible Intervals, direct Wahoo, and Garmin records represent the same measured session
-- **THEN** each input belongs to exactly one canonical session with deterministic primary and duplicate-link metadata.
+- **THEN** each input belongs to exactly one canonical session with deterministic primary and duplicate-link metadata; the Wahoo record leads, else the Garmin record, else the Intervals.icu record.
 
 #### Scenario: Ambiguous nearby activity
 - **WHEN** candidates lack enough comparable data or conflict with matching tolerances

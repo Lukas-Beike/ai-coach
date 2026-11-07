@@ -377,8 +377,8 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
         self.reader = CanonicalDetailReader(
             CanonicalTableReader().session_activities,
             refreshable=frozenset,
-            envelope=lambda db, activity_id, provider_id: {
-                "activity_feedback": {"activity_id": provider_id},
+            envelope=lambda db, activity_id: {
+                "activity_feedback": {"activity_id": activity_id},
                 "equipment": [],
             },
             fingerprints=CanonicalTableReader(),
@@ -425,9 +425,22 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
         assert by_local is not None
 
         self.assertEqual(by_local, self.reader.read(self.db, "i-ride-99"))
-        self.assertEqual("i-ride-99", by_local["activity_feedback"]["activity_id"])
+        self.assertEqual("act_1", by_local["activity_feedback"]["activity_id"])
         self.assertIsNone(self.reader.read(self.db, "unknown-id"))
         self.assertIsNone(read_reference(self.db, "act_missing"))
+
+    def test_a_deleted_alias_resolves_to_the_session_it_retained(self) -> None:
+        self.add_session("act_8")
+        self.add_record(GARMIN, "g-ride-96", "act_8")
+        self.add_session("act_9", "deleted")
+        self.db.execute(
+            "UPDATE activity_sessions SET merged_into_retained = 'act_8' "
+            "WHERE activity_id = 'act_9'"
+        )
+
+        self.assertEqual("act_8", read_reference(self.db, "act_9"))
+        self.assertEqual("act_8", read_reference(self.db, "act_8"))
+        self.assertIsNone(read_reference(self.db, "act_unknown"))
 
     def test_merged_duplicate_resolves_to_the_primary_session(self) -> None:
         self.add_session("act_5")

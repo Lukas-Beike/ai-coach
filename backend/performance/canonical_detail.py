@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, tzinfo
-from typing import Any, Final, Protocol, cast
+from typing import Any, Protocol, cast
 
 from backend.activities.detail_contract import (
     ProviderStatus,
@@ -32,7 +32,6 @@ from backend.canonical.activity_detail import (
 )
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
-    ActivitySessionState,
     ProviderId,
 )
 from backend.db import activity_detail_store, canonical_store
@@ -47,8 +46,6 @@ from backend.performance.session_metrics_reads import (
 )
 from backend.runtime.ports import ActivityFingerprintReader
 
-_MAX_MERGE_DEPTH: Final = 64
-
 
 class SessionRecordReader(Protocol):
     """Return the active activity records of one canonical session."""
@@ -57,45 +54,40 @@ class SessionRecordReader(Protocol):
 
 
 class EnvelopeReader(Protocol):
-    """Return the feedback, equipment and activity validation of one session.
+    """Return the feedback, equipment and activity validation of one session."""
 
-    ``provider_activity_id`` is the session's Intervals.icu activity id, the key
-    older feedback is stored under, when it holds one.
-    """
-
-    def __call__(
-        self, db: Any, activity_id: str, provider_activity_id: str | None, /
-    ) -> Mapping[str, Any]: ...
+    def __call__(self, db: Any, activity_id: str, /) -> Mapping[str, Any]: ...
 
 
 RefreshableProviders = Callable[[], frozenset[ProviderId]]
 
 
 def read_reference(db: Any, any_id: str) -> str | None:
-    """Return the canonical session id of a local or Intervals.icu activity id.
+    """Return the canonical session id of a local or provider activity id.
 
-    A local ``act_`` id is used directly, any other id is looked up as an
-    Intervals.icu provider activity id. A duplicate session resolves to the
-    session it was merged into. An unknown id returns None.
+    A local ``act_`` id is used directly, any other id is looked up as the
+    activity id of a provider record. An alias session resolves to the session its
+    merge led to, also after its own deletion kept the survivor
+    (``merged_into_retained``). An unknown id returns None.
     """
     text = any_id.strip()
-    if text.startswith(canonical_store.ACTIVITY_ID_PREFIX):
-        current: str | None = text
-    else:
-        current = canonical_store.activity_local_ids(
-            db, ProviderId.INTERVALS.value, [text]
-        ).get(text)
-    seen: set[str] = set()
-    while current is not None and current not in seen and len(seen) < _MAX_MERGE_DEPTH:
-        seen.add(current)
-        session = canonical_store.activity_sessions_by_ids(db, [current]).get(current)
-        if session is None:
-            return None
-        merged_into = session["merged_into"]
-        if session["state"] != ActivitySessionState.DUPLICATE.value or not merged_into:
-            return current
-        current = str(merged_into)
-    return None
+    current: str | None = text
+    if not text.startswith(canonical_store.ACTIVITY_ID_PREFIX):
+        current = next(
+            (
+                session
+                for provider in ProviderId
+                if (
+                    session := canonical_store.activity_local_ids(
+                        db, provider.value, [text]
+                    ).get(text)
+                )
+            ),
+            None,
+        )
+    if current is None:
+        return None
+    return canonical_store.effective_session_ids(db, [current]).get(current)
 
 
 # The zone settings in effect for one session's primary record, or None.
@@ -154,19 +146,7 @@ class CanonicalDetailReader:
             if stale or not own
             else session_analysis(own, merged, stored_targets(db, activity_id, records))
         )
-        intervals_id = next(
-            (
-                record.activity_id
-                for record in records
-                if record.provenance.provider is ProviderId.INTERVALS
-            ),
-            None,
-        )
-        envelope = (
-            None
-            if self._envelope is None
-            else self._envelope(db, activity_id, intervals_id)
-        )
+        envelope = None if self._envelope is None else self._envelope(db, activity_id)
         return activity_detail_contract(
             activity_id,
             records,
@@ -225,11 +205,7 @@ def detail_candidates(
 
 def primary_analysis_record(records: Sequence[ActivityRecord]) -> ActivityRecord:
     """The record whose sport and environment the session analysis uses."""
-    ordered = measured_order(records)
-    return next(
-        (r for r in ordered if r.provenance.provider is ProviderId.INTERVALS),
-        ordered[0],
-    )
+    return measured_order(records)[0]
 
 
 def _provider_text(record: ActivityRecord) -> str | None:

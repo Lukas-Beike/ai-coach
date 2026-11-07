@@ -2010,7 +2010,7 @@ def activity_sessions_by_ids(
         for row in _fetch_all(
             db,
             "SELECT activity_id, primary_provider, primary_provider_activity_id, "
-            "state, merged_into FROM activity_sessions "
+            "state, merged_into, merged_into_retained FROM activity_sessions "
             f"WHERE activity_id IN ({_placeholders(chunk)})",
             tuple(chunk),
         ):
@@ -2482,6 +2482,37 @@ def merge_candidate_rows(
             ActivityRecordState.ACTIVE.value,
         ),
     )
+
+
+def session_record_ids(db: Any, session_ids: Sequence[str]) -> dict[str, list[str]]:
+    """Map each session to the provider activity ids of its records.
+
+    A session's own records and those of every alias that merged into it count,
+    through ``merged_into`` or, for a deleted alias, ``merged_into_retained``, in
+    any record state. Rows stored before the local session id became the key sit
+    under such an id. Unknown sessions are absent; ids are sorted.
+    """
+    found: dict[str, set[str]] = {}
+    for chunk in _chunked(session_ids):
+        for row in _fetch_all(
+            db,
+            "WITH RECURSIVE family(root, activity_id, depth) AS ("
+            "SELECT activity_id, activity_id, 0 FROM activity_sessions "
+            f"WHERE activity_id IN ({_placeholders(chunk)}) "
+            "UNION ALL "
+            "SELECT family.root, alias.activity_id, family.depth + 1 "
+            "FROM activity_sessions AS alias JOIN family "
+            "ON COALESCE(alias.merged_into, alias.merged_into_retained) "
+            "= family.activity_id WHERE family.depth < ?) "
+            "SELECT DISTINCT family.root, records.provider_activity_id "
+            "FROM family JOIN activity_records AS records "
+            "ON records.activity_id = family.activity_id",
+            (*chunk, _MAX_MERGE_HOPS),
+        ):
+            found.setdefault(str(row["root"]), set()).add(
+                str(row["provider_activity_id"])
+            )
+    return {root: sorted(ids) for root, ids in found.items()}
 
 
 def feedback_origin_sessions(

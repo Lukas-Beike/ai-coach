@@ -41,7 +41,7 @@ ALIGNMENT_TOLERANCE_INTERVALS: Final = 2.0
 _PROVIDER_RANK: Final[Mapping[str, int]] = {
     provider.value: rank
     for rank, provider in enumerate(
-        (ProviderId.INTERVALS, ProviderId.GARMIN, ProviderId.WAHOO)
+        (ProviderId.GARMIN, ProviderId.WAHOO, ProviderId.INTERVALS)
     )
 }
 _UNKNOWN_PROVIDER_RANK: Final = len(_PROVIDER_RANK)
@@ -50,9 +50,9 @@ _RESOLUTION_RANK: Final[Mapping[StreamResolution, int]] = {
     StreamResolution.DOWNSAMPLED: 1,
 }
 _LAP_SOURCE_RANK: Final[Mapping[LapSource, int]] = {
-    LapSource.PROVIDER_INTERVALS: 0,
-    LapSource.DEVICE_LAPS: 1,
-    LapSource.SPLITS: 2,
+    LapSource.DEVICE_LAPS: 0,
+    LapSource.SPLITS: 1,
+    LapSource.PROVIDER_INTERVALS: 2,
 }
 # Lower rank is better; channels missing here have no device ranking.
 _DEVICE_PREFERENCE: Final[Mapping[StreamChannel, tuple[DeviceType, ...]]] = {

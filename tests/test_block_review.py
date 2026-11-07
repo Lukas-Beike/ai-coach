@@ -49,7 +49,7 @@ def _service(rows=(), plan=None, checkins=(), feedback=(), model="pyramidal"):
         read_synced_at=lambda _db: None,
         read_plan=lambda: plan,
         read_checkins=lambda: list(checkins),
-        read_feedback=lambda: list(feedback),
+        read_feedback=lambda keys: list(feedback),
         today=lambda: TODAY,
         load_scenarios=load_scenarios,
         season_source=_empty_season_source(),

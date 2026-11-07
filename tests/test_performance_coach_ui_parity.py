@@ -167,7 +167,7 @@ class CoachUiParityTests(unittest.TestCase):
                 read_synced_at=Mock(),
                 read_plan=lambda: None,
                 read_checkins=list,
-                read_feedback=list,
+                read_feedback=lambda keys: [],
                 today=lambda: TODAY,
                 load_scenarios=Mock(),
                 season_source=Mock(),

@@ -242,7 +242,7 @@ class PrimaryStreamChoiceTests(unittest.TestCase):
             )
             merged = merge_details([wahoo, intervals])
             assert merged.streams is not None
-            self.assertIs(merged.streams.primary, intervals)
+            self.assertIs(merged.streams.primary, wahoo)
         with self.subTest("newest fetch wins within one provider"):
             older = candidate(
                 streams(
@@ -579,7 +579,7 @@ class AlignmentTests(unittest.TestCase):
 
 
 class LapAndZoneChoiceTests(unittest.TestCase):
-    def test_laps_prefer_provider_intervals_then_device_laps_then_splits(self) -> None:
+    def test_laps_prefer_device_laps_then_splits_then_provider_intervals(self) -> None:
         intervals = candidate(
             laps(
                 ProviderId.INTERVALS,
@@ -593,12 +593,12 @@ class LapAndZoneChoiceTests(unittest.TestCase):
         wahoo = candidate(
             laps(ProviderId.WAHOO, RecordingOrigin.WAHOO, LapSource.SPLITS)
         )
-        merged = merge_details([wahoo, garmin, intervals])
+        merged = merge_details([wahoo, intervals, garmin])
         assert merged.laps is not None
-        self.assertIs(merged.laps.chosen, intervals)
+        self.assertIs(merged.laps.chosen, garmin)
         self.assertEqual(len(merged.laps.alternatives), 2)
-        self.assertIs(merged.laps.alternatives[0], garmin)
-        self.assertIs(merged.laps.alternatives[1], wahoo)
+        self.assertIs(merged.laps.alternatives[0], wahoo)
+        self.assertIs(merged.laps.alternatives[1], intervals)
 
     def test_own_copy_breaks_lap_source_ties(self) -> None:
         relay = candidate(
@@ -657,7 +657,7 @@ class LapAndZoneChoiceTests(unittest.TestCase):
         self.assertIs(power.chosen, power_bounded)
         self.assertIs(power.alternatives[0], power_unbounded)
 
-    def test_zone_tie_break_prefers_intervals_and_absent_metrics_are_omitted(
+    def test_zone_tie_break_ranks_intervals_last_and_absent_metrics_are_omitted(
         self,
     ) -> None:
         relay = candidate(
@@ -679,7 +679,7 @@ class LapAndZoneChoiceTests(unittest.TestCase):
             )
         )
         merged = merge_details([reported, relay])
-        self.assertIs(merged.zones[ZoneMetric.HEART_RATE].chosen, relay)
+        self.assertIs(merged.zones[ZoneMetric.HEART_RATE].chosen, reported)
         self.assertNotIn(ZoneMetric.POWER, merged.zones)
 
 

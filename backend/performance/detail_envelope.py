@@ -34,12 +34,7 @@ class DetailEnvelopeReader:
         self._performance = performance
         self._summary = summary
 
-    def __call__(
-        self,
-        _db: Any,
-        activity_id: str,
-        _provider_activity_id: str | None,
-    ) -> dict[str, Any]:
+    def __call__(self, _db: Any, activity_id: str) -> dict[str, Any]:
         reference = str(self._references.resolve_reference(activity_id).activity_id)
         # The session's effective feedback, through the reference or, for
         # feedback saved before the merged record resolved, the requested id.

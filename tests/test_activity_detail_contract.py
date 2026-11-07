@@ -676,9 +676,9 @@ class LapAndZoneTests(unittest.TestCase):
 
         laps = doc["laps"]
         self.assertFalse(laps["on_stream_clock"])
-        self.assertEqual("provider_intervals", laps["lap_source"])
-        self.assertEqual("intervals", laps["source"]["provider"])
-        self.assertEqual(3, len(laps["laps"]))
+        self.assertEqual("device_laps", laps["lap_source"])
+        self.assertEqual("garmin", laps["source"]["provider"])
+        self.assertEqual(5, len(laps["laps"]))
         first = laps["laps"][0]
         self.assertEqual(
             {"index", "kind", "start_offset_s", "end_offset_s", "name"}
@@ -692,14 +692,14 @@ class LapAndZoneTests(unittest.TestCase):
         self.assertEqual(
             [
                 {
-                    "lap_source": "device_laps",
+                    "lap_source": "provider_intervals",
                     "source": {
-                        "provider": "garmin",
-                        "label": "Garmin",
+                        "provider": "intervals",
+                        "label": "Intervals.icu",
                         "kind": "measured",
-                        "recorded_by": "garmin",
+                        "recorded_by": "wahoo",
                     },
-                    "count": 5,
+                    "count": 3,
                 }
             ],
             laps["alternatives"],
@@ -782,18 +782,18 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(
             [
                 {
-                    "provider": "intervals",
-                    "label": "Intervals.icu",
-                    "kinds": ["streams"],
-                    "fetched_at": FETCHED,
-                    "refreshable": True,
-                },
-                {
                     "provider": "wahoo",
                     "label": "Wahoo",
                     "kinds": [],
                     "fetched_at": None,
                     "refreshable": False,
+                },
+                {
+                    "provider": "intervals",
+                    "label": "Intervals.icu",
+                    "kinds": ["streams"],
+                    "fetched_at": FETCHED,
+                    "refreshable": True,
                 },
             ],
             doc["detail_data"]["providers"],
@@ -852,7 +852,7 @@ class StatusTests(unittest.TestCase):
             status={INTERVALS: ProviderStatus(stale=True, load_error=error)},
         )
 
-        intervals, wahoo = doc["detail_data"]["providers"]
+        wahoo, intervals = doc["detail_data"]["providers"]
         self.assertTrue(intervals["stale"])
         self.assertEqual(error, intervals["load_error"])
         self.assertEqual(
