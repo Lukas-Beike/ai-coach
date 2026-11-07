@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import threading
 from collections.abc import Callable, Hashable, Iterator, Mapping
@@ -11,7 +10,12 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 
-from backend.canonical.records import MetricValue, Observation, Provenance
+from backend.canonical.records import (
+    MetricValue,
+    Observation,
+    Provenance,
+    fingerprint_inputs,
+)
 from backend.canonical.vocabulary import (
     MetricKind,
     ProviderId,
@@ -41,7 +45,6 @@ _VALUE_KINDS = {
     "morning": MetricKind.MORNING_BODY_BATTERY,
 }
 _SLEEP_KEYS = ("sleep_start_at", "sleep_end_at")
-_VALUE_KEYS = (*_VALUE_KINDS, *_SLEEP_KEYS)
 
 
 class GarminSnapshotSink(Protocol):
@@ -105,7 +108,7 @@ class MorningBatteryStore:
         if not rows:
             # A night without values; a record stored before #1686 keeps its own.
             return {**dict.fromkeys(_VALUE_KINDS), **view}
-        record = {key: value for key, value in view.items() if key not in _VALUE_KEYS}
+        record = {key: value for key, value in view.items() if key not in _VALUE_KINDS}
         for name, kind in _VALUE_KINDS.items():
             row = next((item for item in rows if item["metric"] == kind.value), None)
             record[name] = (
@@ -113,10 +116,6 @@ class MorningBatteryStore:
                 if row is None
                 else {"observed_at": row["observed_at"], "value": round(row["value"])}
             )
-            if row is not None:
-                for key in _SLEEP_KEYS:
-                    if row["derivation"].get(key):
-                        record[key] = row["derivation"][key]
         return record
 
     def persist(
@@ -156,9 +155,11 @@ class MorningBatteryStore:
                     attempts=attempts,
                 )
             view = record
-            if self._canonical is not None and not record.get("error"):
+            if self._canonical is not None:
+                # A failed refresh stores no values and retires the night's earlier
+                # ones, so its record shows none, as the refresh produced.
                 _store_values(db, checkin_date, record, now=fetched_at)
-                view = {k: v for k, v in record.items() if k not in _VALUE_KEYS}
+                view = {k: v for k, v in record.items() if k not in _VALUE_KINDS}
             self._garmin_snapshots.write_refresh(
                 db,
                 fetched_at=fetched_at,
@@ -239,20 +240,17 @@ def _store_values(
 
     Each observation is dated on the night (``sleep_date``) at its sample time and
     owned by the night, so a refresh that picks another sample, or none, retires
-    the night's earlier rows.
+    the night's earlier rows. Each value's fingerprint covers its own sample and
+    the sleep bounds.
     """
     owner = _night_owner(checkin_date.isoformat())
     derivation = {key: record[key] for key in _SLEEP_KEYS if record.get(key)}
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            {key: record.get(key) for key in _VALUE_KEYS}, sort_keys=True
-        ).encode("utf-8")
-    ).hexdigest()
     keep: set[str] = set()
     for name, kind in _VALUE_KINDS.items():
         sample = record.get(name)
         if not isinstance(sample, Mapping):
             continue
+        fingerprint = fingerprint_inputs({"sample": dict(sample), **derivation})
         observation = Observation(
             kind=kind,
             value=MetricValue(float(sample["value"]), kind.unit),
@@ -279,8 +277,8 @@ def _store_values(
             owner=owner,
             derivation=derivation,
         )
-    canonical_store.retire_owner_derived_observations(
-        db, METHOD_ID, owner, keep=keep, now=now
+    canonical_store.retire_derived_observations(
+        db, METHOD_ID, keep=keep, now=now, owner=owner
     )
 
 

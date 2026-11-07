@@ -1157,17 +1157,32 @@ def derived_observation_rows(
 
 
 def retire_derived_observations(
-    db: Any, method: str, *, keep: Collection[str], now: str
+    db: Any,
+    method: str,
+    *,
+    keep: Collection[str],
+    now: str,
+    owner: str | None = None,
 ) -> int:
-    """Retire active local derived rows of ``method`` whose key is not in ``keep``."""
+    """Retire active local derived rows of ``method`` whose key is not in ``keep``.
+
+    ``owner`` limits the retirement to that owner's rows; None covers every row.
+    """
+    sql = (
+        "SELECT natural_key FROM observations WHERE provider IS NULL "
+        "AND method = ? AND source_kind = ? AND state = ?"
+    )
+    params: tuple[object, ...] = (
+        method,
+        SourceKind.DERIVED.value,
+        ProjectionState.ACTIVE.value,
+    )
+    if owner is not None:
+        sql += " AND owner_record_id = ?"
+        params = (*params, owner)
     stale = [
         row["natural_key"]
-        for row in _fetch_all(
-            db,
-            "SELECT natural_key FROM observations WHERE provider IS NULL "
-            "AND method = ? AND source_kind = ? AND state = ?",
-            (method, SourceKind.DERIVED.value, ProjectionState.ACTIVE.value),
-        )
+        for row in _fetch_all(db, sql, params)
         if row["natural_key"] not in keep
     ]
     for start in range(0, len(stale), _RETIRE_BATCH):
@@ -1176,28 +1191,6 @@ def retire_derived_observations(
             "UPDATE observations SET state = ?, updated_at = ? "
             f"WHERE natural_key IN ({', '.join('?' * len(batch))})",
             (ProjectionState.RETIRED.value, now, *batch),
-        )
-    return len(stale)
-
-
-def retire_owner_derived_observations(
-    db: Any, method: str, owner: str, *, keep: Collection[str], now: str
-) -> int:
-    """Retire one owner's active local derived rows of ``method`` not in ``keep``."""
-    stale = [
-        row["natural_key"]
-        for row in _fetch_all(
-            db,
-            "SELECT natural_key FROM observations WHERE provider IS NULL "
-            "AND method = ? AND source_kind = ? AND state = ? AND owner_record_id = ?",
-            (method, SourceKind.DERIVED.value, ProjectionState.ACTIVE.value, owner),
-        )
-        if row["natural_key"] not in keep
-    ]
-    for key in stale:
-        db.execute(
-            "UPDATE observations SET state = ?, updated_at = ? WHERE natural_key = ?",
-            (ProjectionState.RETIRED.value, now, key),
         )
     return len(stale)
 

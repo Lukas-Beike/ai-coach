@@ -249,7 +249,7 @@ The system SHALL derive a morning reading from validated Garmin samples around a
 
 #### Scenario: Stored as derived observations
 - **WHEN** a canonical morning refresh derives the night's levels
-- **THEN** the before-sleep and morning levels are stored as local derived observations of the night (`body_battery_before_sleep`, `morning_body_battery`, method `morning_body_battery`, at their sample time, with the sleep bounds), a later refresh of that night retires its earlier rows, the Garmin state view keeps only the refresh bookkeeping, and readers get the record assembled from both; a record stored before this keeps its inline values until its night is refreshed.
+- **THEN** the before-sleep and morning levels are stored as local derived observations of the night (`body_battery_before_sleep`, `morning_body_battery`, method `morning_body_battery`, at their sample time), a later or failed refresh of that night retires its earlier rows, the Garmin state view keeps the refresh bookkeeping and the sleep bounds but no levels, and readers get the record assembled from both; a record stored before this keeps its inline values until its night is refreshed.
 
 Detailed contract: Before-sleep samples SHALL be limited to four hours before sleep; morning samples SHALL fall between sleep end and at most one hour later, bounded by the attempt instant.
 
