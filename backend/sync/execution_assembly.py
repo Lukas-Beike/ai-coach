@@ -39,6 +39,7 @@ class IntervalsJobDependencies:
     operation_observer: Callable[[], SyncOperationObserver]
     resync_gate: ProviderResyncGate
     activity_detail_service: Callable[[], Any] | None = None
+    ingest_enabled: Callable[[], bool] = lambda: True
 
 
 @dataclass(frozen=True)

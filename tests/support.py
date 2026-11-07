@@ -295,6 +295,12 @@ def reset_application_state(server) -> None:
             "INSERT INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
             (runtime_clock.utc_now(),),
         )
+        # Server tests cover the Intervals.icu ingest switched on; the off
+        # default is covered by tests/test_intervals_ingest_switch.py.
+        db.execute(
+            "INSERT INTO kv(key, value, updated_at) VALUES ('intervals_ingest_enabled', '1', ?)",
+            (runtime_clock.utc_now(),),
+        )
     server.ATHLETE_DATA.profile().save({})
     coach_streams.CHAT_STREAM_REGISTRY.clear_state()
 

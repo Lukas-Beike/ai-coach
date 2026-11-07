@@ -118,6 +118,26 @@ class ActivityDetailRefreshTests(unittest.TestCase):
             ],
         ]
 
+    def test_ingest_off_refuses_refresh_and_skips_prefetch(self):
+        service = ActivityDetailRefreshService(
+            api_client=self.api,
+            database_manager=self.manager,
+            row_reader=self.rows,
+            store=self.store,
+            utc_now=lambda: "2026-10-02T08:00:00Z",
+            configured=True,
+            canonical=CanonicalDetailWriter(),
+            ingest_enabled=lambda: False,
+        )
+
+        with self.assertRaises(AppError) as raised:
+            service.refresh("CaseSensitive-1")
+
+        self.assertEqual(409, raised.exception.status)
+        self.assertEqual("intervals_ingest_off", raised.exception.reason)
+        self.assertEqual({"fetched": 0, "failed": 0}, service.prefetch_new())
+        self.api.get.assert_not_called()
+
     def test_refresh_keeps_full_resolution_and_provenance_across_restart(self):
         self.api.get.side_effect = self.responses()
         self.assertEqual("completed", self.service.refresh("CaseSensitive-1")["status"])

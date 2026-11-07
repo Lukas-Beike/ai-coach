@@ -555,6 +555,10 @@ def _normalize_refresh_job(
         normalized_payload["automatic"] = _normalize_refresh_flag(
             values["automatic"], "automatic"
         )
+    if "one_off" in values:
+        normalized_payload["one_off"] = _normalize_refresh_flag(
+            values["one_off"], "one_off"
+        )
     if "end_date" in values:
         normalized_payload["end_date"] = _normalize_refresh_end_date(values["end_date"])
     if values.get("reason") is not None:

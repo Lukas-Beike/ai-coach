@@ -24,6 +24,7 @@ from backend.planning import season as planning_season
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
 from backend.runtime.ports import ProviderStateReader
 from backend.sync import intervals_state
+from backend.sync.intervals_ingest import INGEST_ENABLED_KEY
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import connection_status
 
@@ -209,10 +210,14 @@ class PublicStateService:
                     "state": deps.workout_library_sync_state.summary(),
                 },
                 "sync_settings": {
-                    f"{provider_id}_days": deps.sync_state.sync_period(
-                        provider_id, deps.sync_period_defaults, deps.all_sync_days
-                    )
-                    for provider_id in registry.sync_period_defaults()
+                    **{
+                        f"{provider_id}_days": deps.sync_state.sync_period(
+                            provider_id, deps.sync_period_defaults, deps.all_sync_days
+                        )
+                        for provider_id in registry.sync_period_defaults()
+                    },
+                    INGEST_ENABLED_KEY: self._get_value(INGEST_ENABLED_KEY, manager)
+                    == "1",
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {

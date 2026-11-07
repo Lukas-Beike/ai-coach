@@ -1623,6 +1623,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
         operation_observer=PROVIDER_SYNC.operation_observer,
         resync_gate=INTERVALS_RESYNC_GATE,
+        ingest_enabled=lambda: INTERVALS_SYNC.ingest_switch().enabled(),
     ),
     garmin=GarminJobDependencies(
         sync_service=GARMIN_ASSEMBLY.sync_service,
@@ -2338,6 +2339,7 @@ HTTP_API = HttpApiAssembly(
             provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
             garmin_login=lambda: GARMIN_LOGIN,
             connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
+            intervals_ingest=INTERVALS_SYNC.ingest_switch,
         ),
     ),
 )

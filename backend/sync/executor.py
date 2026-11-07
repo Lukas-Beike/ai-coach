@@ -26,6 +26,7 @@ from backend.sync.garmin_service import (
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals import IntervalsSyncService
+from backend.sync.intervals_ingest import INGEST_OFF_REASON
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
@@ -271,7 +272,13 @@ class IntervalsSyncJobOwner:
             sync_kwargs["end_date"] = historical_end
         elif payload.get("automatic") is True:
             sync_kwargs["automatic"] = True
+        if payload.get("one_off") is True:
+            sync_kwargs["one_off"] = True
         result = self._intervals_sync_service.sync(**sync_kwargs)
+        ingest_off = result.get("reason") == INGEST_OFF_REASON
+        if ingest_off and str(job.get("type") or "") == "historical_backfill":
+            # The backfill cursor stays put until the ingest is on again.
+            return result
         if str(job.get("type") or "") == "historical_backfill":
             self._historical_sync.add_next_end(
                 INTERVALS_ID, payload, result, historical_end, days
@@ -280,7 +287,7 @@ class IntervalsSyncJobOwner:
             return result
         if result.get("status") == "already_running":
             return result
-        if self._activity_detail_service is not None:
+        if self._activity_detail_service is not None and not ingest_off:
             try:
                 result["detail_prefetch"] = self._activity_detail_service.prefetch_new(
                     self._intervals_resync_gate.operation

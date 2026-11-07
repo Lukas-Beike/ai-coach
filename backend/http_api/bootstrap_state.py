@@ -11,6 +11,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
+from backend.sync.intervals_ingest import INGEST_ENABLED_KEY
 from backend.sync.intervals_state import latest_library_timestamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import connection_status
@@ -226,10 +227,16 @@ class PublicBootstrapService:
                     "state": deps.workout_library_sync_state_service().summary(),
                 },
                 "sync_settings": {
-                    f"{provider_id}_days": deps.sync_state_repository().sync_period(
-                        provider_id, deps.sync_period_defaults, deps.all_sync_days
+                    **{
+                        f"{provider_id}_days": deps.sync_state_repository().sync_period(
+                            provider_id, deps.sync_period_defaults, deps.all_sync_days
+                        )
+                        for provider_id in registry.sync_period_defaults()
+                    },
+                    INGEST_ENABLED_KEY: deps.key_values.get_in_transaction(
+                        db, INGEST_ENABLED_KEY
                     )
-                    for provider_id in registry.sync_period_defaults()
+                    == "1",
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {

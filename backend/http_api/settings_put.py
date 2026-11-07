@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from backend.settings import SettingsService
@@ -10,8 +11,14 @@ from backend.settings import SettingsService
 class SettingsPutRoutes:
     """Dispatch local settings writes through the settings state owner."""
 
-    def __init__(self, settings: SettingsService) -> None:
+    def __init__(
+        self,
+        settings: SettingsService,
+        *,
+        intervals_ingest: Callable[[], Any] | None = None,
+    ) -> None:
         self._settings = settings
+        self._intervals_ingest = intervals_ingest
 
     def handle(self, handler: Any, path: str) -> bool:
         if path == "/api/settings/model":
@@ -30,6 +37,11 @@ class SettingsPutRoutes:
             result = self._settings.save_activity_detail_prefetch_floor(
                 handler.read_json()
             )
+        elif (
+            path == "/api/settings/intervals-ingest"
+            and self._intervals_ingest is not None
+        ):
+            result = self._intervals_ingest().save(handler.read_json())
         else:
             return False
 

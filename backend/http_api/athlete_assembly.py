@@ -23,6 +23,7 @@ from backend.canonical.activity_summary import ActivitySummary
 from backend.performance.source_policy import PREFERENCE_PROFILE_FIELDS
 from backend.runtime.ports import ActivityRowAndSummaryReader, CanonicalTableServing
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.intervals_ingest import IntervalsIngestSwitch
 from backend.weather.cache import invalidate_for_location_change
 
 
@@ -144,6 +145,9 @@ class AthleteDataAssembly:
             CanonicalTableReader(),
             self._athlete_zone,
             self._table_serving(),
+            IntervalsIngestSwitch(
+                self._database_manager(), self._key_value_repository
+            ).enabled,
         )
 
     def session_corrections(self) -> SessionCorrectionService:

@@ -98,6 +98,7 @@ class ProviderReviewTests(unittest.TestCase):
             "historical_sync": {"window": "past"},
         }
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(initial)
+        server.INTERVALS_SYNC.ingest_switch().save({"enabled": True})
         entered, release = threading.Event(), threading.Event()
         errors = []
 

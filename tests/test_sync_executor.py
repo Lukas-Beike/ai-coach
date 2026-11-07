@@ -29,6 +29,7 @@ from backend.sync.executor import (
     build_job_owners,
     dispatch_provider_job,
 )
+from backend.sync.intervals_ingest import ingest_off_result
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 
@@ -731,6 +732,36 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(result["detail_prefetch"], {"status": "error"})
         self.assertEqual(result["competitions"], {"status": "ok", "count": 2})
         self.assertNotEqual(result.get("status"), "failed")
+
+    def test_ingest_off_refresh_only_reconciles_competitions(self) -> None:
+        self.intervals.result = ingest_off_result()
+
+        result = self.executor.execute(self.job("intervals"))
+
+        self.details.prefetch_new.assert_not_called()
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["competitions"], {"status": "ok", "count": 2})
+
+    def test_ingest_off_backfill_keeps_its_cursor(self) -> None:
+        self.intervals.result = ingest_off_result()
+
+        self.executor.run(
+            self.job(
+                "intervals",
+                "historical_backfill",
+                {"days": 90, "end_date": "2026-09-01"},
+            )
+        )
+
+        self.assertEqual(self.queue.calls, [])
+        self.assertEqual(self.competitions.calls, [])
+
+    def test_one_off_refresh_reaches_the_sync(self) -> None:
+        self.executor.run(self.job("intervals", payload={"days": 42, "one_off": True}))
+        self.executor.run(self.job("intervals", payload={"days": 42}))
+
+        flags = [kwargs.get("one_off") for _args, kwargs in self.intervals.calls]
+        self.assertEqual(flags, [True, None])
 
     def test_historical_chunk_does_not_prefetch_details(self) -> None:
         self.executor.run(

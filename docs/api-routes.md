@@ -95,7 +95,7 @@ provider-keyed.
 
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
-| PUT | `/api/settings/model`, `/api/settings/service-tier`, `/api/settings/thinking-level`, `/api/settings/calendar-display`, `/api/settings/activity-detail-floor` | Update settings | CSRF |
+| PUT | `/api/settings/model`, `/api/settings/service-tier`, `/api/settings/thinking-level`, `/api/settings/calendar-display`, `/api/settings/activity-detail-floor`, `/api/settings/intervals-ingest` | Update settings | CSRF |
 | PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile | CSRF |
 | PUT | `/api/zones` | Save one local zone configuration; returns a receipt with an undo reference | CSRF |
 | PUT | `/api/zones/remove` | Remove one local zone configuration; needs `confirmed: true` | CSRF |
