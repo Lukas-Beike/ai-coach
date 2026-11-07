@@ -2466,7 +2466,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     def test_both_exposed_sport_fields_change_canonical_and_provider_sport(self):
         unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout()]
+            [self.workout(sport="Ride")]
         )[0]
         for field, sport in (("sport", "Run"), ("type", "Swim")):
             state = self.state()

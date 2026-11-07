@@ -18,6 +18,7 @@ from backend.errors import CORRUPT_PLANNING_ERROR, AppError
 from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
 from backend.planning.conflicts import calendar_item_window
+from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.push_state import attach_push_state, garmin_baselines
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.planning.session_focus import carry_focus
@@ -350,13 +351,14 @@ class PlannedUnitService:
                 since=since,
             )
             baselines = garmin_baselines(db) if push_state else {}
+            remembered = remembered_exercises(db) if push_state else {}
         pairs = [
             (row, payload)
             for row in rows
             if (payload := planned_unit_payload(row, include_archived)) is not None
         ]
         if push_state:
-            attach_push_state(pairs, baselines)
+            attach_push_state(pairs, baselines, remembered)
         return [payload for _row, payload in pairs]
 
     def list_for_coach(self, limit: int = 250) -> dict[str, Any]:

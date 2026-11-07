@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -35,11 +35,13 @@ from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import strength_structure
+from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.push_state import garmin_fingerprint
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_personal import GarminTransportClient
 from backend.providers.garmin_strength_workout import (
     NO_STRUCTURE_MESSAGE,
+    GarminExercise,
     GarminStrengthMappingError,
     strength_workout,
     workout_exercise_steps,
@@ -202,6 +204,7 @@ class GarminStrengthPushService:
                 "SELECT payload, tombstone FROM planned_units WHERE local_id=?",
                 (local_id,),
             ).fetchone()
+            remembered = remembered_exercises(db)
         if not row or row["tombstone"]:
             return _error_result(local_id, "Einheit nicht gefunden", "conflict")
         payload_hash = planning_library.library_payload_hash(row["payload"])
@@ -209,7 +212,7 @@ class GarminStrengthPushService:
             return _error_result(local_id, "Seit der Vorschau geändert", "conflict")
         try:
             unit = json.loads(row["payload"] or "{}")
-            plan_date, document = self._document(unit)
+            plan_date, document = self._document(unit, remembered)
         except (AppError, GarminStrengthMappingError, TypeError, ValueError) as exc:
             return _error_result(local_id, self._redact(str(exc))[:500])
         return _Prepared(
@@ -221,7 +224,9 @@ class GarminStrengthPushService:
             garmin_fingerprint(unit),
         )
 
-    def _document(self, unit: Any) -> tuple[str, dict[str, Any]]:
+    def _document(
+        self, unit: Any, remembered: Mapping[str, GarminExercise]
+    ) -> tuple[str, dict[str, Any]]:
         if (
             not isinstance(unit, dict)
             or unit.get("local_deleted")
@@ -247,6 +252,7 @@ class GarminStrengthPushService:
             name=str(unit.get("name") or ""),
             description=strength_structure.render(exercises),
             exercises=exercises,
+            remembered=remembered,
         )
         return plan_date, document
 
