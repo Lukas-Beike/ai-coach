@@ -9,20 +9,28 @@ writes, mapped on the Garmin scales).
 Selection: every live canonical session with an active Intervals.icu record that
 has an RPE or feel, and an active Garmin record in the same session, whose Garmin
 record holds no rating and has no stored rating row. A session without a Garmin
-copy is only counted, never guessed.
+copy is only counted, never guessed. Sessions before the history floor are never
+read.
 
 The chain walks the sessions newest first, at most ``BATCH_LIMIT`` activities per
 job (the whole last day of a batch is included, so a day is never split). The
 ``rating_history`` cursor moves to the oldest day of a complete batch; a rate
 limit leaves it where it is and the rows already read stay stored. A second run
 finds nothing to read: a rated or already read Garmin record is not selected.
+
+An activity whose read is skipped (a client error) or fails three runs in a row is
+kept in the state (its id, never in diagnostics) and not selected again; an
+activity without a stored raw Garmin row is kept out the same way and counted
+separately. The chain is only finished for good once the Garmin and Intervals.icu
+historical chains reached the floor; before that it parks and the startup
+scheduler queues it again. The Garmin lock is held per read and per write only.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Mapping
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final, Protocol
@@ -37,27 +45,47 @@ from backend.db import canonical_store, garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.providers.descriptors import GARMIN_ID
+from backend.providers.garmin_personal import PERSONAL_KEY_REJECTED_REASON
+from backend.providers.garmin_rating_history import (
+    FAILED,
+    KEY_REJECTED,
+    RATE_LIMITED,
+    RatingReadStopped,
+)
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
-from backend.sync.jobs import RATING_HISTORY_CURSOR
+from backend.sync.jobs import BACKFILL_CURSOR_STREAMS, RATING_HISTORY_CURSOR
 
 BATCH_LIMIT: Final = 30
-# A backfill chunk waits this long for a running Garmin sync before it fails.
+FAILURE_LIMIT: Final = 3
+# A read or write waits this long for a running Garmin sync before it fails.
 LOCK_WAIT_SECONDS: Final = 120.0
 STATE_KEY: Final = "garmin_rating_backfill_state"
 ALLOWED_SOURCES: Final = frozenset({ACTIVITY_RATINGS_SECTION, ACTIVITIES_SECTION})
+_SESSION_CHUNK: Final = 500
+_HISTORY_STREAM: Final = BACKFILL_CURSOR_STREAMS["historical_backfill"]
+_HISTORY_CHAINS: Final = (
+    (GARMIN_ID, _HISTORY_STREAM),
+    (ProviderId.INTERVALS.value, _HISTORY_STREAM),
+)
 _RATED_SQL: Final = (
     "(json_extract(details, '$.rpe') IS NOT NULL "
     "OR json_extract(details, '$.feel') IS NOT NULL)"
 )
 
 type RatingSink = Callable[[dict[str, Any]], None]
+type SkipSink = Callable[[str], None]
+type Guard = Callable[[], AbstractContextManager[Any]]
 
 
 class RatingReader(Protocol):
     def fetch_activity_ratings(
-        self, activities: list[tuple[str, str]], sink: RatingSink
-    ) -> int: ...
+        self,
+        activities: list[tuple[str, str]],
+        on_row: RatingSink,
+        on_skip: SkipSink,
+        guard: Guard,
+    ) -> None: ...
 
 
 class SyncCoordination(Protocol):
@@ -97,14 +125,21 @@ class RatingSelection:
         return eligible[:size], size < len(eligible)
 
 
-def select_rating_candidates(db: Any) -> RatingSelection:
-    """Classify the live sessions that carry an Intervals.icu rating."""
+def select_rating_candidates(
+    db: Any,
+    *,
+    excluded: frozenset[str] = frozenset(),
+    earliest: date | None = None,
+) -> RatingSelection:
+    """Classify the live sessions that carry an Intervals.icu rating.
+
+    ``excluded`` holds Garmin activity ids that are not read again; sessions
+    before ``earliest`` are not candidates.
+    """
     intervals = _session_rows(db, ProviderId.INTERVALS.value, rated_only=True)
     garmin = _session_rows(db, ProviderId.GARMIN.value, rated_only=False)
     sessions = _live_sessions(db, [*intervals, *garmin])
-    read_ids = {
-        item.key for _, item in garmin_store.iter_items(db, (ACTIVITY_RATINGS_SECTION,))
-    }
+    read_ids = garmin_store.stored_keys(db, ACTIVITY_RATINGS_SECTION)
     rated_sessions: set[str] = set()
     unrated: dict[str, tuple[str, str]] = {}
     for row in garmin:
@@ -116,6 +151,7 @@ def select_rating_candidates(db: Any) -> RatingSelection:
             rated_sessions.add(session)
         else:
             unrated.setdefault(session, (identifier, str(row["started_at"])))
+    floor = "" if earliest is None else earliest.isoformat()
     already_rated = no_copy = 0
     found: dict[str, RatingCandidate] = {}
     seen: set[str] = set()
@@ -128,9 +164,9 @@ def select_rating_candidates(db: Any) -> RatingSelection:
             already_rated += 1
         elif session in unrated:
             identifier, started = unrated[session]
-            found[session] = RatingCandidate(
-                session, _day(row, started), started, identifier
-            )
+            day = _day(row, started)
+            if identifier not in excluded and day >= floor:
+                found[session] = RatingCandidate(session, day, started, identifier)
         else:
             no_copy += 1
     ordered = sorted(
@@ -159,12 +195,19 @@ def _live_sessions(db: Any, rows: Iterable[Any]) -> dict[str, str]:
     """Map each record's session id to the live session it leads to."""
     references = list(dict.fromkeys(str(row["activity_id"]) for row in rows))
     effective = canonical_store.effective_session_ids(db, references)
-    live = {
-        str(row["activity_id"])
-        for row in db.execute(
-            "SELECT activity_id FROM activity_sessions WHERE state = 'active'"
+    targets = sorted(set(effective.values()))
+    live: set[str] = set()
+    for start in range(0, len(targets), _SESSION_CHUNK):
+        chunk = targets[start : start + _SESSION_CHUNK]
+        marks = ", ".join("?" for _ in chunk)
+        live.update(
+            str(row["activity_id"])
+            for row in db.execute(
+                "SELECT activity_id FROM activity_sessions WHERE state = 'active' "
+                f"AND activity_id IN ({marks})",
+                tuple(chunk),
+            )
         )
-    }
     return {
         reference: target for reference, target in effective.items() if target in live
     }
@@ -198,6 +241,19 @@ class GarminRatingBackfillService:
         """Return whether a real Garmin read is configured (never in fixture mode)."""
         return self._configured()
 
+    @contextmanager
+    def _guard(self) -> Iterator[None]:
+        """Hold the Garmin coordination lock for one read or one write only."""
+        with self._coordination.operation():
+            if not self._coordination.acquire(timeout=LOCK_WAIT_SECONDS):
+                raise AppError(
+                    503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
+                )
+            try:
+                yield
+            finally:
+                self._coordination.release()
+
     def backfill(self, end: date | None) -> dict[str, Any]:
         """Read one batch ending on day ``end`` (None: newest); return the job result.
 
@@ -209,106 +265,177 @@ class GarminRatingBackfillService:
             raise AppError(
                 503, "Garmin ist nicht konfiguriert.", reason="not_configured"
             )
-        with self._coordination.operation():
-            if not self._coordination.acquire(timeout=LOCK_WAIT_SECONDS):
-                raise AppError(
-                    503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
-                )
-            try:
-                return self._run(end)
-            finally:
-                self._coordination.release()
-
-    def _run(self, end: date | None) -> dict[str, Any]:
         with self._database_manager.reader() as db:
-            selection = select_rating_candidates(db)
+            state = _read_state(self._key_values, db)
+            selection = select_rating_candidates(
+                db, excluded=_excluded(state), earliest=self._earliest_date
+            )
         batch, more = selection.batch(end)
         rows: list[dict[str, Any]] = []
-        skipped = 0
+        skipped: list[str] = []
         failure: Exception | None = None
         if batch:
             try:
-                skipped = self._reader.fetch_activity_ratings(
+                self._reader.fetch_activity_ratings(
                     [(item.garmin_activity_id, item.started_at) for item in batch],
                     rows.append,
+                    skipped.append,
+                    self._guard,
                 )
             except Exception as exc:  # noqa: BLE001 - stored first, then re-raised.
                 failure = exc
         fetched_at = self._utc_now()
         oldest = batch[-1].day if batch else None
+        failed = (
+            failure.activity_id
+            if isinstance(failure, RatingReadStopped) and failure.kind == FAILED
+            else None
+        )
         counts = self._write(
             rows,
-            skipped=skipped,
+            skipped,
+            failed=failed,
             fetched_at=fetched_at,
             advance=failure is None,
             oldest=oldest,
             more=more,
         )
         if failure is not None:
-            raise failure
+            raise _stop_error(failure)
         return {
             "status": "ok",
             "synced_at": fetched_at,
             "candidates": len(batch),
             "window_records": len(rows),
             "historical_next_end": _next_end(oldest) if more else None,
-            "skipped": skipped,
+            "skipped": len(skipped),
             **counts,
         }
 
     def _write(
         self,
         rows: list[dict[str, Any]],
+        skipped: list[str],
         *,
-        skipped: int,
+        failed: str | None,
         fetched_at: str,
         advance: bool,
         oldest: str | None,
         more: bool,
     ) -> dict[str, int]:
-        backfilled = sum(
-            1
-            for row in rows
-            if row.get("directWorkoutRpe") is not None
-            or row.get("directWorkoutFeel") is not None
-        )
-        with self._database_manager.unit_of_work() as db:
-            if rows:
-                sections: dict[str, Any] = {ACTIVITY_RATINGS_SECTION: rows}
+        with self._guard(), self._database_manager.unit_of_work() as db:
+            stored: list[dict[str, Any]] = []
+            raws: list[dict[str, Any]] = []
+            missing: list[str] = []
+            for row in rows:
+                raw = garmin_store.read_activity(db, str(row["activityId"]))
+                if raw is None:
+                    missing.append(str(row["activityId"]))
+                else:
+                    stored.append(row)
+                    raws.append(raw)
+            if stored:
                 # The stored activity rows are mapped again, so the rating reaches
                 # the canonical records.
-                activities = [
-                    raw
-                    for row in rows
-                    if (raw := garmin_store.read_activity(db, str(row["activityId"])))
-                ]
-                if activities:
-                    sections[ACTIVITIES_SECTION] = activities
                 self._snapshot_writer.write_refresh(
                     db,
                     fetched_at=fetched_at,
-                    sections=sections,
+                    sections={
+                        ACTIVITY_RATINGS_SECTION: stored,
+                        ACTIVITIES_SECTION: raws,
+                    },
                     view={},
                     windows={},
                     allowed=ALLOWED_SOURCES,
                 )
+            backfilled = sum(
+                1
+                for row in stored
+                if row.get("directWorkoutRpe") is not None
+                or row.get("directWorkoutFeel") is not None
+            )
             state = _read_state(self._key_values, db)
-            finished = advance and not more
+            _record_outcome(state, stored, skipped, missing, failed)
+            finished = bool(state["finished"]) or (
+                advance and not more and self._history_complete(db)
+            )
             state.update(
                 backfilled=state["backfilled"] + backfilled,
-                no_rating=state["no_rating"] + len(rows) - backfilled,
-                skipped=state["skipped"] + skipped,
-                finished=bool(state["finished"]) or finished,
+                no_rating=state["no_rating"] + len(stored) - backfilled,
+                finished=finished,
                 updated_at=fetched_at,
             )
             self._key_values.set(db, STATE_KEY, json.dumps(state, sort_keys=True))
-            if advance and (finished or oldest is not None):
-                # The floor marks a finished chain, so a restart does not resume it.
-                cursor = self._earliest_date.isoformat() if finished else str(oldest)
-                write_cursor(
-                    db, GARMIN_ID, RATING_HISTORY_CURSOR, cursor, fetched_at, fetched_at
-                )
-        return {"backfilled": backfilled, "no_rating": len(rows) - backfilled}
+            if advance:
+                # The floor marks a finished chain, so a restart does not resume it;
+                # a parked chain keeps the day it reached. Never below the floor.
+                floor = self._earliest_date.isoformat()
+                cursor = floor if finished else oldest
+                if cursor is not None:
+                    write_cursor(
+                        db,
+                        GARMIN_ID,
+                        RATING_HISTORY_CURSOR,
+                        max(cursor, floor),
+                        fetched_at,
+                        fetched_at,
+                    )
+        return {
+            "backfilled": backfilled,
+            "no_rating": len(stored) - backfilled,
+            "no_raw_row": len(missing),
+        }
+
+    def _history_complete(self, db: Any) -> bool:
+        """Return whether the Garmin and Intervals.icu activity chains hit the floor."""
+        floor = self._earliest_date.isoformat()
+        for provider, stream in _HISTORY_CHAINS:
+            cursor = read_cursor(db, provider, stream).get("cursor")
+            if not cursor or str(cursor) > floor:
+                return False
+        return True
+
+
+def _excluded(state: Mapping[str, Any]) -> frozenset[str]:
+    return frozenset(state["skipped_ids"]) | frozenset(state["no_raw_ids"])
+
+
+def _record_outcome(
+    state: dict[str, Any],
+    stored: list[dict[str, Any]],
+    skipped: list[str],
+    missing: list[str],
+    failed: str | None,
+) -> None:
+    """Fold one run into the state: ids kept out of later selections, failure counts."""
+    failures: dict[str, int] = state["failures"]
+    for identifier in [str(row["activityId"]) for row in stored] + skipped + missing:
+        failures.pop(identifier, None)
+    state["skipped_ids"] = sorted({*state["skipped_ids"], *skipped})
+    state["no_raw_ids"] = sorted({*state["no_raw_ids"], *missing})
+    if failed is not None:
+        failures[failed] = failures.get(failed, 0) + 1
+        if failures[failed] >= FAILURE_LIMIT:
+            del failures[failed]
+            state["skipped_ids"] = sorted({*state["skipped_ids"], failed})
+
+
+def _stop_error(failure: Exception) -> Exception:
+    """The job error of a stopped read; other errors pass as they are."""
+    if not isinstance(failure, RatingReadStopped):
+        return failure
+    if failure.kind == RATE_LIMITED:
+        return AppError(429, "Garmin begrenzt die Anfragen.", reason="rate_limited")
+    if failure.kind == KEY_REJECTED:
+        return AppError(
+            401,
+            "Der Garmin-Personal-API-Schlüssel wurde abgelehnt.",
+            reason=PERSONAL_KEY_REJECTED_REASON,
+        )
+    # A 401 on a data read or a transient failure: the key flag stays untouched.
+    return AppError(
+        503, "Garmin ist vorübergehend nicht erreichbar.", reason="provider_unavailable"
+    )
 
 
 def _next_end(oldest: str | None) -> str | None:
@@ -325,10 +452,15 @@ def _read_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
         stored = {}
     if not isinstance(stored, dict):
         stored = {}
+    failures = stored.get("failures")
     return {
         "backfilled": int(stored.get("backfilled") or 0),
         "no_rating": int(stored.get("no_rating") or 0),
-        "skipped": int(stored.get("skipped") or 0),
+        "skipped_ids": [str(item) for item in stored.get("skipped_ids") or []],
+        "no_raw_ids": [str(item) for item in stored.get("no_raw_ids") or []],
+        "failures": {str(key): int(count) for key, count in failures.items()}
+        if isinstance(failures, dict)
+        else {},
         "finished": bool(stored.get("finished")),
         "updated_at": stored.get("updated_at"),
     }
@@ -342,8 +474,8 @@ def rating_backfill_counts(db: Any, key_values: KeyValueRepository) -> dict[str,
     Garmin record holds a rating or whose rating was read, ``no_garmin_copy``
     the sessions with an Intervals.icu rating and no Garmin record.
     """
-    selection = select_rating_candidates(db)
     state = _read_state(key_values, db)
+    selection = select_rating_candidates(db, excluded=_excluded(state))
     cursor = read_cursor(db, GARMIN_ID, RATING_HISTORY_CURSOR).get("cursor")
     if state["finished"]:
         phase = "finished"
@@ -354,7 +486,8 @@ def rating_backfill_counts(db: Any, key_values: KeyValueRepository) -> dict[str,
         "backfilled": state["backfilled"],
         "no_rating_at_garmin": state["no_rating"],
         "already_rated": selection.already_rated,
-        "skipped_by_error": state["skipped"],
+        "skipped_by_error": len(state["skipped_ids"]),
+        "no_raw_row": len(state["no_raw_ids"]),
         "no_garmin_copy": selection.no_garmin_copy,
         "cursor": phase,
         "finished": phase == "finished",

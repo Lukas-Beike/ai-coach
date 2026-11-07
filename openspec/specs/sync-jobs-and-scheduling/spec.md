@@ -113,7 +113,7 @@ The system SHALL walk Intervals and Garmin history in inclusive chunks of at mos
 
 #### Scenario: Garmin rating history
 - **WHEN** Garmin is configured and its `rating_history` cursor has not reached the floor
-- **THEN** startup queues one `rating_backfill` chain; each job reads at most 30 single activities, newest session first, paced, over one transport client (one Personal API token), for sessions whose Intervals.icu copy has an RPE or feel and whose Garmin copy has no stored rating, and stores them as Garmin ratings. A rate limit fails the job and keeps the cursor; a rejected key stops it and flags the key; one unreadable activity is skipped and counted.
+- **THEN** startup queues one `rating_backfill` chain; each job reads at most 30 single activities, newest session first, paced, over one transport client (one Personal API token), for sessions whose Intervals.icu copy has an RPE or feel and whose Garmin copy has no stored rating, and stores them as Garmin ratings. A rate limit fails the job and keeps the cursor; only a failed key exchange flags the key; an activity with a client error, or failing three runs, is skipped and counted. The chain finishes once the Garmin and Intervals.icu activity chains reached the floor, and never reads before it.
 
 Detailed contract: Historical work SHALL yield to non-backfill jobs and active foreground Coach work, and repeated completion SHALL not fork a second continuation chain. Each backfill chain keeps its own cursor (`historical` for activities, `wellness_history` for the Garmin wellness walk, `rating_history` for the Garmin rating walk).
 

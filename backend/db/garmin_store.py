@@ -324,6 +324,17 @@ def _items(
             yield decoded
 
 
+def stored_keys(db: Any, section: str) -> set[str]:
+    """Return the keys of the active stored elements of ``section``, unread."""
+    clause, params = _section_clause([section])
+    rows = db.execute(
+        "SELECT source_record_id FROM provider_records WHERE provider = ? "
+        f"AND record_kind = ? AND state = ? AND {clause}",
+        (GARMIN_PROVIDER, HEALTH_RECORD_KIND, _ACTIVE, *params),
+    )
+    return {key_of(str(row["source_record_id"])) for row in rows}
+
+
 def read_item(db: Any, section: str, key: str) -> Any | None:
     """Return the stored element ``key`` of ``section``, or None when none is stored."""
     row = db.execute(

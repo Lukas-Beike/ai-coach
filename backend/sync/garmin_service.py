@@ -34,8 +34,7 @@ from backend.providers.garmin_personal import (
     GarminTransportClient,
 )
 from backend.providers.garmin_rating_history import (
-    RatingReadRateLimited,
-    RatingReadRejected,
+    RatingReadHooks,
     collect_activity_ratings,
 )
 from backend.providers.garmin_wellness_history import (
@@ -414,37 +413,36 @@ class GarminRemoteReader:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
     def fetch_activity_ratings(
-        self, activities: list[tuple[str, str]], sink: Callable[[dict[str, Any]], None]
-    ) -> int:
+        self,
+        activities: list[tuple[str, str]],
+        on_row: Callable[[dict[str, Any]], None],
+        on_skip: Callable[[str], None],
+        guard: Callable[[], AbstractContextManager[Any]],
+    ) -> None:
         """Read the watch ratings of past activities for the one-off backfill (#1728).
 
         One authenticated client serves the whole batch, so the Personal API token
-        is exchanged once. A rate limit or a rejected key ends the read as an
-        error; a rejected key is also marked for the connection card.
+        is exchanged once. Only a failed token exchange flags the Personal API key
+        (the client does that); the classification is the sync owner's.
         """
         if not self.configured():
             raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
         client, login_argument = self._authenticated_client(call_external)
         try:
-            return collect_activity_ratings(
-                client, activities, sink, external_call=call_external
+            collect_activity_ratings(
+                client,
+                activities,
+                on_row,
+                on_skip,
+                external_call=call_external,
+                hooks=RatingReadHooks(
+                    error_class=sync_job_error_class,
+                    skippable=_skippable_history_error,
+                    key_rejected=self._state_service.personal_key_rejected,
+                    guard=guard,
+                ),
             )
-        except RatingReadRateLimited:
-            raise AppError(
-                429, "Garmin begrenzt die Anfragen.", reason="rate_limited"
-            ) from None
-        except RatingReadRejected:
-            if client.personal is None:
-                raise AppError(
-                    401, "Der Garmin-Zugang wurde abgelehnt.", reason="auth_required"
-                ) from None
-            self._record_key_result(False)
-            raise AppError(
-                401,
-                "Der Garmin-Personal-API-Schlüssel wurde abgelehnt.",
-                reason=PERSONAL_KEY_REJECTED_REASON,
-            ) from None
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
