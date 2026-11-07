@@ -14,6 +14,11 @@ version-3 row whose session lost its sets is rewritten without an analysis.
 Existing target snapshots, including those of older rows, are carried over
 unchanged; a session without one freezes its matched planned targets when it is
 first computed. Intervals.icu records, detail sets and thresholds are never read.
+
+Each row also stores the session's report zone times (``zone_times``, #1743):
+heart-rate, power and run pace seconds per zone counted from the merged streams
+with the zones in effect on the session day (``session_zones``). Their
+thresholds and limits are part of the fingerprint.
 """
 
 from __future__ import annotations
@@ -27,12 +32,16 @@ from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any, Final
 
 from backend.activities.activity_summary import activity_summaries
-from backend.activities.detail_merge import merge_details
+from backend.activities.detail_merge import MergedDetail, merge_details
+from backend.activities.stream_zones import LABEL as ZONE_LABEL
+from backend.activities.stream_zones import zone_times
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_summary import (
     stored_activity_key,
     summary_is_indoor,
     summary_local_date,
 )
+from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import ActivityRecord
 from backend.canonical.vocabulary import ProviderId, Sport
 from backend.db import activity_detail_store
@@ -48,6 +57,12 @@ from backend.performance.canonical_session_analysis import (
     session_analysis,
 )
 from backend.performance.local_tss import THRESHOLD_KINDS, DatedThresholds
+from backend.performance.session_zones import (
+    dated_thresholds,
+    own_configurations,
+    session_zone_settings,
+    zone_settings_part,
+)
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.target_snapshot import freeze_targets
 from backend.sync.canonical_backfill import BatchReport
@@ -81,6 +96,8 @@ class _Session:
     thresholds: dict[str, Any]
     # The Intervals.icu summary hash a detail fetch settled; kept, not an input.
     fetched_summary: str | None = None
+    # The zones the report zone times are counted with (part of ``thresholds``).
+    zones: ZoneSettings | None = None
 
     @property
     def session_id(self) -> str:
@@ -106,38 +123,41 @@ class _Tally:
 
 def _thresholds(
     db: Any, reader: CanonicalTableReader, preferences: SourcePreferences
-) -> DatedThresholds:
-    """Local, Garmin and Wahoo thresholds by day; Intervals.icu values are skipped."""
-    return DatedThresholds(
-        [
-            item
-            for kind in THRESHOLD_KINDS
-            for item in reader.observations(db, kind)
-            if item.provenance.provider is not ProviderId.INTERVALS
-        ],
-        [
-            item
-            for item in reader.zone_configurations(db)
-            if item.provenance.provider is not ProviderId.INTERVALS
-        ],
-        preferences=preferences,
+) -> tuple[DatedThresholds, tuple[ZoneConfiguration, ...]]:
+    """Local, Garmin and Wahoo thresholds by day, and their zone configurations.
+
+    Intervals.icu values are skipped.
+    """
+    configurations = own_configurations(reader.zone_configurations(db))
+    thresholds = dated_thresholds(
+        [item for kind in THRESHOLD_KINDS for item in reader.observations(db, kind)],
+        configurations,
+        preferences,
     )
+    return thresholds, configurations
 
 
 def _threshold_parts(
-    summary: Mapping[str, Any], thresholds: DatedThresholds
+    summary: Mapping[str, Any],
+    thresholds: DatedThresholds,
+    zones: ZoneSettings | None,
 ) -> dict[str, Any]:
-    """The FTP and threshold HR of the session's sport on its local day."""
+    """The FTP and threshold HR of the session's sport on its local day.
+
+    ``zones`` adds the thresholds and limits of the report zone times.
+    """
     try:
         sport = Sport(str(summary.get("sport")))
         day = date.fromisoformat(summary_local_date(summary))
     except ValueError:
         return {}
     chosen = thresholds.for_session(sport, day, indoor=summary_is_indoor(summary))
-    return {
+    parts: dict[str, Any] = {
         name: None if value is None else value.fingerprint_part()
         for name, value in (("ftp", chosen.ftp), ("threshold_hr", chosen.threshold_hr))
     }
+    parts["zones"] = zone_settings_part(zones)
+    return parts
 
 
 def _is_stale(
@@ -266,7 +286,9 @@ class SessionAnalysisStage:
                 for key in values
             },
         )
-        thresholds = _thresholds(db, self._reader, self._preferences(db))
+        thresholds, configurations = _thresholds(
+            db, self._reader, self._preferences(db)
+        )
         sessions: list[tuple[_Session, Mapping[str, Any] | None]] = []
         for summary in summaries:
             session_id = str(summary["id"])
@@ -277,6 +299,11 @@ class SessionAnalysisStage:
                 own = ()
             if not own and _version(row) != ANALYSIS_VERSION:
                 continue
+            zones = (
+                session_zone_settings(summary, thresholds, configurations)
+                if own
+                else None
+            )
             session = _Session(
                 summary=summary,
                 records=records,
@@ -284,8 +311,9 @@ class SessionAnalysisStage:
                 keys=own,
                 stale=_is_stale(own, current),
                 targets=_stored_targets(row),
-                thresholds=_threshold_parts(summary, thresholds) if own else {},
+                thresholds=_threshold_parts(summary, thresholds, zones) if own else {},
                 fetched_summary=_fetched_summary(row),
+                zones=zones,
             )
             sessions.append((session, row))
         return summaries, sessions
@@ -327,6 +355,7 @@ class SessionAnalysisStage:
             "target_snapshot": targets,
             "session_analysis": None,
             "calendar_profile": None,
+            "zone_times": None,
             "stale": session.stale,
             "source": " / ".join(
                 dict.fromkeys(
@@ -359,6 +388,7 @@ class SessionAnalysisStage:
             return payload
         payload["session_analysis"] = analysis
         payload["calendar_profile"] = profile
+        payload["zone_times"] = _zone_times(session, merged)
         return payload
 
     def mark_failed(self, db: Any) -> None:
@@ -377,6 +407,18 @@ class SessionAnalysisStage:
         self._key_values.set(
             db, STATE_KEY, json.dumps(state, sort_keys=True, separators=(",", ":"))
         )
+
+
+def _zone_times(session: _Session, merged: MergedDetail) -> dict[str, Any] | None:
+    """The stored report zone times of one session, or None without any."""
+    if session.zones is None:
+        return None
+    times = zone_times(
+        merged.streams,
+        session.zones,
+        pace=session.summary.get("sport") == Sport.RUN.value,
+    )
+    return {"label": ZONE_LABEL, **times} if times else None
 
 
 def _version(row: Mapping[str, Any] | None) -> int | None:

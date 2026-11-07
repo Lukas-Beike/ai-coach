@@ -282,9 +282,8 @@
       row.append(node("span", item.id.slice(0, 20), "activity-analysis-zone-label"), bar, node("span", `${clock(item.secs)} · ${Math.round(share * 100)} %`, "activity-analysis-zone-value"));
       rows.append(row);
     }
-    // Derived zones follow the current zone settings, not those of the recording day.
-    const when = zone.source?.kind === "derived" ? "" : " zum Zeitpunkt der Aufzeichnung";
-    section.append(rows, node("p", `Zonen laut ${zone.source?.label || "Anbieter"}${when}.`, "muted"));
+    // Derived zones use the zone settings of the session day, as the reports (#1743).
+    section.append(rows, node("p", `Zonen laut ${zone.source?.label || "Anbieter"} am Tag der Einheit.`, "muted"));
     return section;
   }
 

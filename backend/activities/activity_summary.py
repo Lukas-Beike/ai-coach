@@ -87,10 +87,15 @@ _DERIVED: Final = (
     ("grade_adjusted_speed_mps", "grade_adjusted_speed_mps"),
     ("ftp_w", "ftp_w"),
     ("vo2max", "vo2max"),
+    ("planned_event_id", "planned_event_id"),
+)
+# Summary key -> ActivityRecord field of provider zone times, in derived order
+# without Intervals.icu records (#1743): the readers replace them with the
+# stored local zone times where a session has them.
+_ZONE_FIELDS: Final = (
     ("power_zone_times", "power_zone_times_s"),
     ("heart_rate_zone_times", "hr_zone_times_s"),
     ("pace_zone_times", "pace_zone_times_s"),
-    ("planned_event_id", "planned_event_id"),
 )
 _ZONE_KEYS: Final = frozenset(
     {"power_zone_times", "heart_rate_zone_times", "pace_zone_times"}
@@ -130,6 +135,15 @@ def activity_summary(
     sources = (
         _values(summary, measured, _MEASURED)
         | _values(summary, derived, _DERIVED)
+        | _values(
+            summary,
+            [
+                record
+                for record in derived
+                if record.provenance.provider is not ProviderId.INTERVALS
+            ],
+            _ZONE_FIELDS,
+        )
         | _values(summary, rating_order(records), _RATINGS)
     )
     load = next(

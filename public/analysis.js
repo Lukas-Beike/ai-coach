@@ -1507,16 +1507,33 @@ function appendTrainingFocusShare(report, categories, root) {
   } else root.append(reportNode("p", "Noch keine Garmin-Einheiten mit auswertbarer Trainingswirkung vorhanden.", "muted"));
 }
 
+function trainingFocusZoneSeconds(items) {
+  const seconds = new Map();
+  for (const item of items) for (const [zone, value] of Object.entries(item.seconds)) seconds.set(zone, (seconds.get(zone) || 0) + value);
+  return [...seconds.entries()].sort(([a], [b]) => Number(a.slice(1)) - Number(b.slice(1))).map(([label, value]) => ({label, value}));
+}
+
+function trainingFocusZoneInfo(report, model, items) {
+  const period = trainingFocusPeriodLabel(report).toLowerCase();
+  const source = [...new Set(items.map((item) => item.source).filter(Boolean))].join(", ");
+  // Each zone model is summed on its own (#1743); a session can appear for HF and power.
+  const basis = model === "provider" ? "Zonen des Geräts, für Einheiten ohne lokale Zonenzeiten" : "Lokale Zonen am Tag der Einheit, aus den Streams gezählt";
+  return `${basis} (${period}). Quelle: ${source || "unbekannt"}.`;
+}
+
 function appendTrainingFocusZones(report, details) {
   const zones = report.zones || [];
   for (const sensor of ["heart_rate", "power"]) {
+    const name = sensor === "heart_rate" ? "HF-Zonen" : "Power-Zonen";
     const matching = zones.filter((item) => item.sensor === sensor);
-    const title = sensor === "heart_rate" ? "HF-Zonen" : "Power-Zonen";
-    const seconds = new Map();
-    for (const item of matching) for (const [zone, value] of Object.entries(item.seconds)) seconds.set(zone, (seconds.get(zone) || 0) + value);
-    if (![...seconds.values()].some((value) => value > 0)) { details.append(reportNode("p", `${title}: keine aufgezeichneten Zonenzeiten.`, "muted")); continue; }
-    details.append(trainingFocusDistribution(title, [...seconds.entries()].sort(([a], [b]) => Number(a.slice(1)) - Number(b.slice(1))).map(([label, value]) => ({label, value})), "seconds",
-      `Intervals.icu: aufgezeichnete Zonenzeiten aller Sportarten im Zeitraum (${trainingFocusPeriodLabel(report).toLowerCase()}). HF und Power werden separat summiert; eine Einheit kann in beiden Ansichten vorkommen. Zonen beziehen sich auf die jeweils aufgezeichneten sportartspezifischen Schwellen. Fehlende Messungen werden nicht als null gewertet.`));
+    if (!matching.some((item) => item.measured_seconds > 0)) { details.append(reportNode("p", `${name}: keine aufgezeichneten Zonenzeiten.`, "muted")); continue; }
+    for (const model of ["local", "provider"]) {
+      const items = matching.filter((item) => (item.zone_model || "provider") === model);
+      const readings = trainingFocusZoneSeconds(items);
+      if (!readings.some((item) => item.value > 0)) continue;
+      const title = model === "provider" ? `${name} (Gerät)` : name;
+      details.append(trainingFocusDistribution(title, readings, "seconds", trainingFocusZoneInfo(report, model, items)));
+    }
   }
   if (!zones.length) details.append(reportNode("p", "Noch keine aufgezeichneten HF- oder Power-Zonenzeiten vorhanden.", "muted"));
 }

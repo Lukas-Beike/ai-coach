@@ -35,6 +35,7 @@ from backend.performance.session_analysis_reads import (
     analysis_summaries,
     calendar_profiles,
 )
+from backend.performance.zone_time_reads import read_zone_times, with_zone_times
 from backend.providers.garmin_health_mapping import MAPPER_VERSION
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
@@ -258,6 +259,49 @@ class SessionAnalysisStageTests(unittest.TestCase):
         segment = row["payload"]["calendar_profile"]["segments"][0]
         # 200 W at a Garmin FTP of 200 W is zone 4; 400 W would make it zone 1.
         self.assertEqual(4, segment["zone"])
+
+    def test_report_zone_times_use_the_local_zones_of_the_day(self) -> None:
+        self._write(
+            lambda db: _streams(db, GARMIN, "g1"),
+            lambda db: _ftp(db, INTERVALS, 400.0),
+            lambda db: _ftp(db, GARMIN, 200.0),
+        )
+
+        self._run()
+
+        row = self._row("act_g1")
+        assert row is not None
+        zones = row["payload"]["zone_times"]
+        self.assertEqual("Zoneneinstellungen", zones["label"])
+        power = {zone["id"]: zone["secs"] for zone in zones["power"]}
+        # 200 W at the Garmin FTP of 200 W is Z4; the Intervals FTP is never read.
+        self.assertEqual(float(SECONDS), power["Z4"])
+        self.assertEqual(float(SECONDS), sum(power.values()))
+        self.assertNotIn("heart_rate", zones)  # no threshold HR
+        with self.manager.reader() as db:
+            read = read_zone_times(db, ["act_g1"])
+        summary = with_zone_times([{"id": "act_g1", "sport": "ride"}], read)[0]
+        self.assertEqual(zones["power"], summary["power_zone_times"])
+        self.assertEqual({"power_zone_times": "local"}, summary["zone_models"])
+        self.assertEqual("Zoneneinstellungen", summary["sources"]["power_zone_times"])
+
+    def test_a_new_threshold_recomputes_the_zone_times(self) -> None:
+        self._write(
+            lambda db: _streams(db, GARMIN, "g1"),
+            lambda db: _ftp(db, GARMIN, 200.0),
+        )
+        self._run()
+
+        self._write(lambda db: _ftp(db, GARMIN, 400.0))
+        self.assertEqual(1, self._run()["counts"]["computed"])
+
+        row = self._row("act_g1")
+        assert row is not None
+        power = {
+            zone["id"]: zone["secs"] for zone in row["payload"]["zone_times"]["power"]
+        }
+        # 200 W is 50 % of 400 W: Z1.
+        self.assertEqual(float(SECONDS), power["Z1"])
 
     def test_older_target_snapshots_carry_over_unchanged(self) -> None:
         self._write(

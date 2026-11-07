@@ -57,6 +57,7 @@ from backend.performance.session_metrics_reads import (
     stored_session_metrics,
     with_session_metrics,
 )
+from backend.performance.zone_time_reads import read_zone_times, with_zone_times
 from backend.runtime.ports import (
     ActivityReader,
     ActivityRowReader,
@@ -259,6 +260,7 @@ class CanonicalReadSelector(
         ``training_load`` and ``intensity`` are the stored local load (card M6);
         stored competitions mark and link their races (``with_competitions``).
         EF, VI, work and decoupling are the stored local session metrics (card M8).
+        Zone times are the stored local ones where a session has them (#1743).
         """
         source = self._source(db)
         summaries = activity_summaries(
@@ -267,9 +269,12 @@ class CanonicalReadSelector(
             limit=limit,
         )
         ids = [summary["id"] for summary in summaries]
-        loaded = with_session_metrics(
-            with_local_loads(summaries, stored_local_loads(db, ids)),
-            stored_session_metrics(db, ids),
+        loaded = with_zone_times(
+            with_session_metrics(
+                with_local_loads(summaries, stored_local_loads(db, ids)),
+                stored_session_metrics(db, ids),
+            ),
+            read_zone_times(db, ids),
         )
         days = sorted(filter(None, (summary_local_date(row) for row in loaded)))
         if not days:

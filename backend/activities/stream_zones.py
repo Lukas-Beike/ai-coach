@@ -1,11 +1,11 @@
 """Time in zone of a session derived from its streams with the athlete's zones.
 
-Garmin's Personal API serves no zone times (#1724), so a session can have full
-heart-rate and power streams but no provider distribution. For a metric without
-one, the seconds per zone are counted from the merged stream with the zones in
-effect for the session's sport and day (``ZoneSettings``: local configuration,
-then provider configuration, then the canonical threshold with default limits).
-Nothing is stored: the result follows the current zone settings on every read.
+Garmin's Personal API serves no zone times (#1724), and the zones set on a
+device differ from the athlete's local zones. For every metric with a stream,
+the seconds per zone are counted from the merged stream with the zones in
+effect for the session's sport and day (``ZoneSettings``, resolved by
+``performance.session_zones``) and win over the provider distribution, which
+stays an alternative (#1743), so the detail view counts what the reports count.
 
 A sample counts the time until the next sample. A gap longer than
 ``max(MIN_GAP_S, GAP_FACTOR x median step)`` is a pause or a dropout and counts
@@ -14,6 +14,10 @@ not. Where the streams carry ``moving``, only moving samples count, as for the
 stream averages (``stream_average``). Power 0 W (coasting) counts in the lowest zone; heart rate 0 is no reading.
 A metric without its threshold, or without any counted second, gets no
 distribution. A zone bound outside the canonical boundary range is left open.
+
+``zone_times`` counts the same way for the cross-session reports (#1743): heart
+rate and power always from the streams, and for runs the pace zones from the
+speed stream against the threshold pace (speed 0 is no reading).
 """
 
 from __future__ import annotations
@@ -30,7 +34,7 @@ from backend.activities.detail_merge import (
     MergedStreams,
     SetChoice,
 )
-from backend.activities.zone_settings import ZoneSettings
+from backend.activities.zone_settings import ZoneSettings, percent_zone
 from backend.canonical.activity_detail import (
     MAX_ZONES,
     ZONE_BOUNDARY_BOUNDS,
@@ -48,6 +52,8 @@ from backend.canonical.vocabulary import (
 from backend.db.activity_detail_store import StoredDetailSet
 
 METHOD_VERSION: Final = 1
+# Bump when ``zone_times`` counts differently, so stored report zones recompute.
+ZONE_TIMES_VERSION: Final = 1
 LABEL: Final = "Zoneneinstellungen"
 MIN_GAP_S: Final = 30.0
 GAP_FACTOR: Final = 3.0
@@ -61,26 +67,32 @@ _CHANNELS: Final[Mapping[ZoneMetric, tuple[StreamChannel, str]]] = {
 def with_stream_zones(
     merged: MergedDetail, settings: Callable[[], ZoneSettings | None]
 ) -> MergedDetail:
-    """Add a derived distribution for each metric the providers left without one.
+    """Choose a derived distribution for each metric that has a stream.
 
-    ``settings`` is read only when a stream of such a metric exists.
+    A provider distribution of that metric becomes an alternative. ``settings``
+    is read only when such a stream exists.
     """
     streams = merged.streams
     if streams is None:
         return merged
-    missing = [
+    metrics = [
         metric
         for metric, (channel, _unit) in _CHANNELS.items()
-        if metric not in merged.zones and channel in streams.channels
+        if channel in streams.channels
     ]
-    resolved = settings() if missing else None
+    resolved = settings() if metrics else None
     if resolved is None:
         return merged
     added: dict[ZoneMetric, SetChoice] = {}
-    for metric in missing:
+    for metric in metrics:
         candidate = _derived(streams, metric, resolved)
-        if candidate is not None:
-            added[metric] = SetChoice(chosen=candidate, alternatives=())
+        if candidate is None:
+            continue
+        provider = merged.zones.get(metric)
+        alternatives = (
+            () if provider is None else (provider.chosen, *provider.alternatives)
+        )
+        added[metric] = SetChoice(chosen=candidate, alternatives=alternatives)
     if not added:
         return merged
     return MergedDetail(
@@ -88,6 +100,70 @@ def with_stream_zones(
         laps=merged.laps,
         zones=MappingProxyType({**merged.zones, **added}),
     )
+
+
+def zone_times(
+    streams: MergedStreams | None, settings: ZoneSettings, *, pace: bool
+) -> dict[str, list[dict[str, object]]]:
+    """Seconds per zone ``[{"id": "Z1", "secs": ...}]`` by report sensor.
+
+    Keys are ``heart_rate``, ``power`` and, with ``pace``, ``pace``; a sensor
+    without its stream, threshold or any counted second is left out.
+    """
+    if streams is None:
+        return {}
+    sensors: list[tuple[str, StreamChannel, float | None, tuple[float, ...]]] = [
+        ("heart_rate", StreamChannel.HEART_RATE_BPM, settings.lthr, settings.hr_limits),
+        ("power", StreamChannel.POWER_W, settings.ftp, settings.power_limits),
+    ]
+    if pace:
+        sensors.append(
+            (
+                "pace",
+                StreamChannel.SPEED_MPS,
+                settings.threshold_pace,
+                settings.pace_limits,
+            )
+        )
+    result: dict[str, list[dict[str, object]]] = {}
+    for sensor, channel, threshold, limits in sensors:
+        seconds = _channel_seconds(streams, channel, threshold, limits)
+        if seconds is not None:
+            result[sensor] = [
+                {"id": f"Z{index}", "secs": round(value, 1)}
+                for index, value in enumerate(seconds, start=1)
+            ]
+    return result
+
+
+def _channel_seconds(
+    streams: MergedStreams,
+    channel: StreamChannel,
+    threshold: float | None,
+    limits: tuple[float, ...],
+) -> list[float] | None:
+    """Seconds per zone of one channel against percent ``limits`` of ``threshold``."""
+    choice = streams.channels.get(channel)
+    moving = streams.channels.get(StreamChannel.MOVING)
+    size = len(streams.time_s)
+    if (
+        choice is None
+        or not threshold
+        or threshold <= 0
+        or len(limits) + 1 > MAX_ZONES
+        or len(choice.values) != size
+        or (moving is not None and len(moving.values) != size)
+    ):
+        return None
+    seconds = _seconds(
+        streams.time_s,
+        choice.values,
+        None if moving is None else moving.values,
+        lambda value: percent_zone(value / threshold * 100, limits),
+        len(limits) + 1,
+        count_zero=channel is StreamChannel.POWER_W,
+    )
+    return seconds if any(seconds) else None
 
 
 def _limits(

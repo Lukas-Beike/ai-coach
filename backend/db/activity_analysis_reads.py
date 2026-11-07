@@ -7,10 +7,13 @@ in "Z" and "+00:00" notation compare correctly. Rows of other versions are never
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterable
 from typing import Any, Final
 
 from backend.canonical.vocabulary import ActivitySessionState
 
+_CHUNK: Final = 500
 _SQL: Final = """
     SELECT a.activity_id AS id,
         json_extract(a.payload, '$.observed_at') AS observed_at,
@@ -29,6 +32,28 @@ _SQL: Final = """
         AND json_type(a.payload, '$.session_analysis') = 'object'
     ORDER BY instant DESC, id LIMIT ?
 """
+
+
+def stored_zone_times(
+    db: Any, analysis_version: int, session_ids: Iterable[str]
+) -> dict[str, dict[str, Any]]:
+    """The stored report zone times of ``analysis_version`` rows, by session id."""
+    ids = list(dict.fromkeys(session_ids))
+    result: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(ids), _CHUNK):
+        chunk = ids[start : start + _CHUNK]
+        rows = db.execute(
+            "SELECT activity_id, json_extract(payload, '$.zone_times') AS zones "
+            "FROM activity_detail_analysis WHERE analysis_version = ? "
+            "AND json_type(payload, '$.zone_times') = 'object' "
+            f"AND activity_id IN ({', '.join('?' * len(chunk))})",
+            (analysis_version, *chunk),
+        ).fetchall()
+        for row in rows:
+            zones = json.loads(row["zones"])
+            if isinstance(zones, dict):
+                result[row["activity_id"]] = zones
+    return result
 
 
 def recent_session_analyses(

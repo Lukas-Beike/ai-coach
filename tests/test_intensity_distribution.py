@@ -194,6 +194,7 @@ def done(day: str, sport: str, minutes: int, zone: str) -> dict:
             {"id": f"Z{number}", "secs": minutes * 60 if f"Z{number}" == zone else 0}
             for number in range(1, 8)
         ],
+        "zone_models": {"power_zone_times": "local"},
     }
 
 

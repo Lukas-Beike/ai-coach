@@ -49,6 +49,8 @@ class ZoneSettings:
     ftp: float | None = None
     lthr: float | None = None
     max_hr: float | None = None
+    # Threshold running speed in m/s; pace limits are percent of it.
+    threshold_pace: float | None = None
     power_limits: tuple[float, ...] = POWER_ZONE_LIMITS
     hr_limits: tuple[float, ...] = HR_ZONE_LIMITS
     pace_limits: tuple[float, ...] = PACE_ZONE_LIMITS
@@ -59,8 +61,8 @@ class ZoneSettings:
     ) -> ZoneSettings:
         """Thresholds of ``sport`` from its canonical athlete settings, default limits.
 
-        ``observations`` are the sport-scoped FTP, threshold and maximum heart rate
-        winners; the first of each kind for ``sport`` is used.
+        ``observations`` are the sport-scoped FTP, threshold pace, threshold and
+        maximum heart rate winners; the first of each kind for ``sport`` is used.
         """
         values: dict[MetricKind, float] = {}
         for observation in observations:
@@ -70,6 +72,7 @@ class ZoneSettings:
             ftp=values.get(MetricKind.FTP),
             lthr=values.get(MetricKind.THRESHOLD_HR),
             max_hr=values.get(MetricKind.MAX_HR),
+            threshold_pace=values.get(MetricKind.THRESHOLD_PACE),
         )
 
     @classmethod
@@ -107,6 +110,8 @@ class ZoneSettings:
             ftp=_threshold(power, base.ftp, "threshold"),
             lthr=_threshold(heart_rate, base.lthr, "threshold"),
             max_hr=_threshold(heart_rate, base.max_hr, "maximum"),
+            # The threshold pace comes from the fallback only (resolved upstream).
+            threshold_pace=base.threshold_pace,
             power_limits=_percent_limits(power) or base.power_limits,
             hr_limits=_percent_limits(heart_rate) or base.hr_limits,
             pace_limits=_percent_limits(pace) or base.pace_limits,
