@@ -51,7 +51,21 @@ BODY_BATTERY_RANGE_DAYS: Final = 31
 PERSONAL_KEY_REJECTED_REASON: Final = "personal_key_rejected"
 
 # SDK method names the Personal API serves. With a Personal key these families
-# always use it; every other method stays on the SDK.
+# always use it; every other method stays on the SDK (athlete rule 2026-11-07:
+# Personal whenever it serves the same content).
+#
+# Routing table, probed against the Personal API on 2026-11-06/07 (#1767):
+#   Personal  activities (list, single, details), FIT download, sleep (range,
+#             night), HRV, daily summaries, user summary, heart rates, body
+#             battery, weigh-ins, heart-rate zones (``/heartRateZones/v2``: the
+#             SDK fields plus resting HR, LTHR and training method).
+#   SDK       404 on the Personal API: gear (inventory, stats, activities),
+#             user settings (``user-settings``; Personal ``settings`` has no
+#             profile id, which the gear reads need), training load activities,
+#             endurance score, race predictions, running tolerance, load
+#             balance, daily/weekly/aggregated training status, training
+#             readiness, max metrics, cycling FTP (latest and range), lactate
+#             threshold, activity splits, activity HR/power time in zones.
 PERSONAL_METHODS: Final = frozenset(
     {
         "get_activities_by_date",
@@ -63,6 +77,7 @@ PERSONAL_METHODS: Final = frozenset(
         "get_daily_summaries",
         "get_user_summary",
         "get_heart_rates",
+        "get_heart_rate_zones",
         "get_body_battery",
         "get_weigh_ins",
         # Not an SDK method: the original FIT file is read only through Personal.
@@ -405,6 +420,18 @@ class GarminPersonalClient:
         return self._get(
             "/wellness-service/wellness/dailyHeartRate", {"date": _day(cdate)}
         )
+
+    def get_heart_rate_zones(self) -> Any:
+        """Return the heart-rate zones per sport, in the SDK's list shape.
+
+        The Personal API serves them under ``/v2``; the SDK path is not served.
+        """
+        value = self._get("/biometric-service/heartRateZones/v2")
+        if value is not None and not isinstance(value, list):
+            raise provider_http.ProviderInvalidResponse(
+                "Invalid Garmin heart-rate zones"
+            )
+        return value
 
     def get_body_battery(self, startdate: str, enddate: str | None = None) -> list[Any]:
         rows: list[Any] = []

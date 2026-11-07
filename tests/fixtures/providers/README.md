@@ -33,6 +33,12 @@ without a live account.
   would reject them. They feed `collect_garmin_activity_detail` shapes into
   `backend.providers.garmin_activity_detail_mapping`.
 
+- `garmin/personal/`: Personal API response shapes whose path or fields differ
+  from the SDK section, synthetic values derived from a sanitized probe.
+  `heart_rate_zones.json` is `/biometric-service/heartRateZones/v2` (the SDK
+  fields plus resting HR, LTHR and training method). A subdirectory for the
+  same reason as `activity_detail/`.
+
 ## How the tests use them
 
 - `tests/test_provider_wire_fixtures.py` loads each file, feeds the Intervals
