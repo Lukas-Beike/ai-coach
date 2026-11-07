@@ -169,14 +169,71 @@ def _structure(unit: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     )
 
 
+_WORD_RUN = r"[\w-]+"
+# A negated mention names what the session spares, not what it trains:
+# "Beine schonen", "ohne Beine", "kein Beintraining", "nicht schwer", "no legs".
+_NEGATED: Final = re.compile(
+    rf"\b(?:ohne|keine?[nmrs]?|nicht|no|without|not)\s+{_WORD_RUN}"
+    rf"|{_WORD_RUN}\s+(?:schonen|entlasten|auslassen|weglassen|pausieren)\b",
+    re.IGNORECASE,
+)
+# An explicit focus term in the unit name wins over exercise keywords.
+_NAME_FOCUS: Final = tuple(
+    (focus, re.compile(pattern, re.IGNORECASE))
+    for focus, pattern in (
+        ("full_body", r"ganzk(?:ö|o|oe)rper|full[ -]?body"),
+        ("upper", r"oberk(?:ö|o|oe)rper|upper[ -]?body"),
+        ("legs", r"unterk(?:ö|o|oe)rper|lower[ -]?body|\bbeine?\b|beintag|leg day"),
+        ("core", r"\bcore\b|rumpf"),
+        ("mobility", r"mobility|mobilit(?:ä|a|ae)t"),
+    )
+)
+_TEXT_INTENSITY: Final = tuple(
+    (intensity, re.compile(pattern, re.IGNORECASE))
+    for intensity, pattern in (
+        ("heavy", r"\b(?:heavy|schwer|[1-6]\s*rm)\b"),
+        ("moderate", r"\b(?:moderate|moderat|mittel(?:schwer)?)\b"),
+        ("light", r"\b(?:light|leicht)\b"),
+    )
+)
+
+
+def _affirmed(text: Any) -> str:
+    """Text without negated mentions."""
+    return _NEGATED.sub(" ", str(text or ""))
+
+
+def _name_focus(unit: Mapping[str, Any]) -> str | None:
+    """The one focus the name names explicitly, else ``None``."""
+    name = _affirmed(unit.get("name"))
+    found = [focus for focus, rx in _NAME_FOCUS if rx.search(name)]
+    return found[0] if len(found) == 1 else None
+
+
 def _keyword_focus(unit: Mapping[str, Any], sport: Sport) -> str | None:
-    text = f"{unit.get('name') or ''} {unit.get('description') or ''}"
+    text = _affirmed(f"{unit.get('name') or ''} {unit.get('description') or ''}")
     if sport is Sport.STRENGTH:
+        if (named := _name_focus(unit)) is not None:
+            return named
         found = [f for f, rx in _COMPILED["strength"] if rx.search(text)]
         if "legs" in found and "upper" in found:
             return "full_body"
         return found[0] if found else None
     return next((f for f, rx in _COMPILED["endurance"] if rx.search(text)), None)
+
+
+def structure_intensity(unit: Mapping[str, Any]) -> str | None:
+    """Hardest relative load of the unit's stored structure, else ``None``."""
+    return strength_structure.derived_intensity(_structure(unit))
+
+
+def text_intensity(unit: Mapping[str, Any]) -> str | None:
+    """Intensity a strength unit's name or description names, the hardest first.
+
+    Negated mentions do not count.
+    """
+    text = _affirmed(f"{unit.get('name') or ''} {unit.get('description') or ''}")
+    return next((value for value, rx in _TEXT_INTENSITY if rx.search(text)), None)
 
 
 def _step_focus(estimate: WorkoutEstimate | None) -> str | None:
@@ -203,13 +260,13 @@ def _step_focus(estimate: WorkoutEstimate | None) -> str | None:
 def _intensity(
     unit: Mapping[str, Any], sport: Sport
 ) -> tuple[str | None, Origin | None]:
-    """Set strength intensity, else the one derived from the structure."""
+    """Set strength intensity, else derived from the structure, else the text."""
     if sport is not Sport.STRENGTH:
         return None, None
     intensity = _text_value(unit, INTENSITY_KEY)
     if intensity in STRENGTH_INTENSITIES:
         return intensity, "set"
-    derived = strength_structure.derived_intensity(_structure(unit))
+    derived = structure_intensity(unit) or text_intensity(unit)
     return derived, None if derived is None else "derived"
 
 
@@ -218,7 +275,9 @@ def session_focus(
 ) -> SessionFocus:
     """Set focus first, then the step-derived, then the keyword-derived focus.
 
-    The strength intensity is the set one, else derived from the structure.
+    For strength an explicit focus term in the name beats exercise keywords,
+    and negated mentions ("Beine schonen") never count. The strength intensity
+    is the set one, else derived from the structure, else from the text.
     """
     sport = planned_sport_environment(unit)[0]
     allowed = allowed_foci(sport)

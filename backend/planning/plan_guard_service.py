@@ -464,6 +464,7 @@ class PlanGuardService:
             *intensity_distribution.distribution_findings(
                 self._training_model(), self._planned_weeks(units, today, completed)
             ),
+            *plan_checks.strength_incomplete(units),
         ]
 
     def _reported_illness(self) -> str:
@@ -496,8 +497,11 @@ class PlanGuardService:
         blocking = [
             item
             for item in new
-            if item["code"] in plan_checks.BLOCKING_CODES
-            and item["code"] not in accepted
+            if item["code"] in plan_checks.REQUIRED_CODES
+            or (
+                item["code"] in plan_checks.BLOCKING_CODES
+                and item["code"] not in accepted
+            )
         ]
         if blocking:
             raise PlanCheckError(blocking)
