@@ -446,7 +446,7 @@ The system SHALL classify why an activity was done as training, race, commute, w
 
 #### Scenario: Commutes, warm-ups and cool-downs are never maximal efforts or plan completions
 - **WHEN** a session has purpose commute, warm-up or cool-down
-- **THEN** it stays out of the power and speed best values, mean-max curves, CP/CS fits and session comparisons, completes a planned workout only through the provider's own pairing (never by date or sport), and a commute still counts in weekly volume, named again as `commute_sessions` and `commute_duration_s`.
+- **THEN** it stays out of the power and speed best values, mean-max curves, CP/CS fits and session comparisons, never completes a planned workout (a workout the provider paired with it stays open instead of matching another session by date), and a commute still counts in weekly volume, named again as `commute_sessions` and `commute_duration_s`.
 
 #### Scenario: Races are flagged for analysis
 - **WHEN** a session has purpose race

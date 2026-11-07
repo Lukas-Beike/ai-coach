@@ -241,8 +241,8 @@ def match_planned_workouts(
 ) -> dict[int, dict[str, Any]]:
     """Match completed activities to planned workouts without reusing one activity.
 
-    A commute, warm-up or cool-down completes a planned workout only through the
-    provider's own pairing, never by date or sport.
+    A commute, warm-up or cool-down never completes a planned workout; a workout
+    the provider paired with one stays open instead of matching by date.
     """
     activity_rows = [item for item in activities if isinstance(item, dict)]
     unused = set(range(len(activity_rows)))
@@ -256,19 +256,26 @@ def match_planned_workouts(
     )
 
     # planned_event_id is the reliable provider association.
+    blocked: set[int] = set()
     for event_index, event in workout_rows:
         selected_index = _paired_activity_match(
             event, activity_rows, by_paired_id, unused
         )
-        if selected_index is not None:
+        if selected_index is None:
+            continue
+        unused.remove(selected_index)
+        if summary_is_not_training(activity_rows[selected_index]):
+            blocked.add(event_index)
+        else:
             matches[event_index] = activity_rows[selected_index]
-            unused.remove(selected_index)
     unused -= {
         index for index in unused if summary_is_not_training(activity_rows[index])
     }
 
     unmatched = [
-        (index, event) for index, event in workout_rows if index not in matches
+        (index, event)
+        for index, event in workout_rows
+        if index not in matches and index not in blocked
     ]
     timed_units = [
         (index, event)
