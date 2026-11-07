@@ -130,7 +130,7 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
                 "source": "Intervals.icu",
             },
         )
-        self.assertEqual(set(row) - {"purpose_label"}, set(COACH_ACTIVITY_FIELDS))
+        self.assertEqual(set(row), {*COACH_ACTIVITY_FIELDS, "purpose_label"})
 
     def test_projection_groups_and_rolls_up_with_unchanged_labels_and_numbers(self):
         result = CoachIntervalsContextService().project(

@@ -185,8 +185,10 @@ class CanonicalReadSelector(
         key_values: KeyValueRepository,
         zone: Callable[[Any], tzinfo],
         compact_only: Callable[[Any], bool],
+        competitions: CompetitionRepository,
     ) -> None:
         self._zone = zone
+        self._competitions = competitions
         self._compact_only = compact_only
         self._table = table
         self._reprojecting_table = reprojecting_table
@@ -253,8 +255,9 @@ class CanonicalReadSelector(
         ``training_load`` and ``intensity`` are the stored local load (card M6);
         stored competitions mark and link their races (``with_competitions``).
         """
+        source = self._source(db)
         summaries = activity_summaries(
-            self._source(db).activity_sessions(db, start=start, end=end, newest=limit),
+            source.activity_sessions(db, start=start, end=end, newest=limit),
             self._zone(db),
             limit=limit,
         )
@@ -262,9 +265,35 @@ class CanonicalReadSelector(
             summaries,
             stored_local_loads(db, (summary["id"] for summary in summaries)),
         )
+        days = sorted(filter(None, (summary_local_date(row) for row in loaded)))
+        if not days:
+            return cast(tuple[ActivitySummary, ...], loaded)
+        competitions = self._competitions.between(db, days[0], days[-1])
+        if not competitions:
+            return cast(tuple[ActivitySummary, ...], loaded)
+        # A limit can cut the oldest day: link over all its sessions, so the
+        # race hint never depends on the page size.
+        whole_day: tuple[ActivitySummary, ...] = ()
+        if limit is not None:
+            oldest = date.fromisoformat(days[0])
+            whole_day = activity_summaries(
+                source.activity_sessions(db, start=oldest, end=oldest),
+                self._zone(db),
+            )
+        page = {str(row["id"]) for row in loaded}
+        linked = {
+            str(row["id"]): row
+            for row in with_competitions(
+                [
+                    *loaded,
+                    *(row for row in whole_day if str(row["id"]) not in page),
+                ],
+                competitions,
+            )
+        }
         return cast(
             tuple[ActivitySummary, ...],
-            tuple(with_competitions(loaded, _competitions(db, loaded))),
+            tuple(linked[str(row["id"])] for row in loaded),
         )
 
     def local_load_days(self, db: Any) -> dict[str, float]:
@@ -354,10 +383,3 @@ class CanonicalReadSelector(
 
     def _read_state(self, db: Any) -> ReadState:
         return read_state(self._key_values, db, zone=self._zone(db))
-
-
-def _competitions(db: Any, summaries: Iterable[Any]) -> tuple[dict[str, Any], ...]:
-    days = sorted(filter(None, (summary_local_date(row) for row in summaries)))
-    if not days:
-        return ()
-    return CompetitionRepository().between(db, days[0], days[-1])

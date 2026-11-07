@@ -27,7 +27,7 @@ from backend.canonical.domain_records import (
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, SourceKind
 from backend.db import DatabaseManager, canonical_domain_store, row_factory
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.performance.canonical_inputs import read_performance_inputs
 from backend.providers.canonical_plans import (
@@ -400,6 +400,7 @@ class PowerCurveReadStateTests(IngestFixture):
             key_values=key_values or KeyValueRepository(lambda: NOW),
             zone=lambda _db: ZONE,
             compact_only=lambda _db: False,
+            competitions=CompetitionRepository(),
         )
 
     def test_nothing_is_read_before_the_first_completed_backfill(self) -> None:

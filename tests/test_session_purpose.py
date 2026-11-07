@@ -183,6 +183,70 @@ class CompetitionLinkTests(unittest.TestCase):
         self.assertEqual(with_competitions(rows, [_competition(sport="Schach")]), rows)
 
 
+class CompetitionReviewCaseTests(unittest.TestCase):
+    def test_a_stored_midnight_start_counts_as_unknown(self) -> None:
+        shakeout = _summary("act_a", "2026-10-11T07:00:00", duration=1200.0)
+        race = _summary("act_b", "2026-10-11T10:00:00", duration=5400.0)
+
+        result = with_competitions(
+            [shakeout, race], [_competition(starts_at_local="2026-10-11T00:00:00")]
+        )
+
+        self.assertEqual([row.get("competition_id") for row in result], [None, "c-1"])
+
+    def test_each_competition_takes_one_provider_race_and_no_hint(self) -> None:
+        prologue = _summary("act_p", "2026-10-11T09:00:00", purpose="race")
+        main = _summary("act_m", "2026-10-11T14:00:00", purpose="race")
+        jog = _summary("act_j", "2026-10-11T16:00:00", duration=9000.0)
+
+        result = with_competitions(
+            [prologue, main, jog],
+            [
+                _competition("c-1", starts_at_local="2026-10-11T09:00"),
+                _competition("c-2", starts_at_local="2026-10-11T14:00"),
+                _competition("c-3"),
+            ],
+        )
+
+        self.assertEqual(
+            [row.get("competition_id") for row in result], ["c-1", "c-2", None]
+        )
+        self.assertNotIn("purpose", result[2])
+
+    def test_indoor_and_outdoor_must_agree_when_known(self) -> None:
+        outdoor = _summary(
+            "act_o", "2026-10-11T08:00:00", sport="ride", duration=9000.0
+        )
+        outdoor["environment"] = "outdoor"
+        virtual = _summary(
+            "act_v", "2026-10-11T18:00:00", sport="ride", duration=3600.0
+        )
+        virtual["environment"] = "virtual"
+        race = {**_competition(sport="ride"), "environment": "virtual"}
+
+        result = with_competitions([outdoor, virtual], [race])
+
+        self.assertEqual([row.get("competition_id") for row in result], [None, "c-1"])
+
+    def test_hint_needs_half_the_planned_duration(self) -> None:
+        jog = _summary("act_j", "2026-10-11T10:00:00", duration=1500.0)
+        planned = {**_competition(), "planned_duration_s": 3600}
+
+        self.assertEqual(with_competitions([jog], [planned]), [jog])
+
+    def test_a_session_without_a_start_ranks_last(self) -> None:
+        broken = _summary("act_x", "2026-10-11T10:00:00")
+        broken["started_at_local"] = "2026-10-11"
+        timed = _summary("act_t", "2026-10-11T09:00:00")
+        broken_day = {**_competition(), "event_date": "2026-10-11"}
+
+        result = with_competitions(
+            [timed, broken], [{**broken_day, "starts_at_local": "2026-10-11T10:00"}]
+        )
+
+        self.assertEqual([row.get("competition_id") for row in result], ["c-1", None])
+
+
 class SelectorCompetitionTests(CanonicalReadFixture):
     def test_reader_serves_purpose_and_competition_link(self) -> None:
         self.garmin["activities"][0]["eventType"] = {"typeKey": "race"}
@@ -206,6 +270,27 @@ class SelectorCompetitionTests(CanonicalReadFixture):
         self.assertNotIn("competition_id", by_sport["ride"])
         self.assertEqual(by_sport["run"]["purpose"], "race")
         self.assertEqual(by_sport["run"]["competition_id"], "c-run")
+
+    def test_a_limited_read_links_over_the_whole_oldest_day(self) -> None:
+        populate(self)
+        self.execute(
+            "INSERT INTO competitions(id, name, event_date, sport, priority, distance, "
+            "target, course_profile, notes, created_at, updated_at) "
+            "VALUES ('c-run', 'Lauf', '2026-03-29', 'run', 'A', '', '', '', '', "
+            "'2026-10-01T00:00:00', '2026-10-01T00:00:00')"
+        )
+        selector = make_selector(self)
+
+        full = {
+            row["id"]: row.get("competition_id")
+            for row in self.read(selector.activity_summaries)
+        }
+        limited = self.read(selector.activity_summaries, limit=5)
+
+        self.assertEqual(len(limited), 5)
+        for row in limited:
+            self.assertEqual(row.get("competition_id"), full[row["id"]])
+        self.assertEqual(list(full.values()).count("c-run"), 1)
 
 
 if __name__ == "__main__":
