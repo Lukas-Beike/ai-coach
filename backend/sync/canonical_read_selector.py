@@ -42,6 +42,8 @@ from datetime import date, tzinfo
 from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
+from backend.activities.session_purpose import with_competitions
+from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.domain_records import (
     EMPTY_POWER_CURVE,
@@ -50,7 +52,7 @@ from backend.canonical.domain_records import (
 )
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.runtime.ports import (
     ActivityReader,
     ActivityRowReader,
@@ -248,19 +250,21 @@ class CanonicalReadSelector(
     ) -> tuple[ActivitySummary, ...]:
         """Return one neutral summary per session, newest first.
 
-        ``training_load`` and ``intensity`` are the stored local load (card M6).
+        ``training_load`` and ``intensity`` are the stored local load (card M6);
+        stored competitions mark and link their races (``with_competitions``).
         """
         summaries = activity_summaries(
             self._source(db).activity_sessions(db, start=start, end=end, newest=limit),
             self._zone(db),
             limit=limit,
         )
+        loaded = with_local_loads(
+            summaries,
+            stored_local_loads(db, (summary["id"] for summary in summaries)),
+        )
         return cast(
             tuple[ActivitySummary, ...],
-            with_local_loads(
-                summaries,
-                stored_local_loads(db, (summary["id"] for summary in summaries)),
-            ),
+            tuple(with_competitions(loaded, _competitions(db, loaded))),
         )
 
     def local_load_days(self, db: Any) -> dict[str, float]:
@@ -350,3 +354,10 @@ class CanonicalReadSelector(
 
     def _read_state(self, db: Any) -> ReadState:
         return read_state(self._key_values, db, zone=self._zone(db))
+
+
+def _competitions(db: Any, summaries: Iterable[Any]) -> tuple[dict[str, Any], ...]:
+    days = sorted(filter(None, (summary_local_date(row) for row in summaries)))
+    if not days:
+        return ()
+    return CompetitionRepository().between(db, days[0], days[-1])

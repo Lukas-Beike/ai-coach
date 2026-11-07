@@ -59,6 +59,9 @@ the same moment.
 * ``hrTimeInZone_<n>`` and ``powerTimeInZone_<n>`` (seconds, by Garmin's own
   zones) -> ``hr_zone_times_s`` and ``power_zone_times_s`` as zones ``Z<n>``.
   One invalid zone drops that distribution with one issue.
+* ``eventType.typeKey`` ``race`` -> ``purpose`` RACE and ``transportation`` ->
+  COMMUTE; every other event type (``uncategorized``, ``training`` ...) leaves
+  ``purpose`` unset, as does a missing key. A key that is not text is one issue.
 
 * ``directWorkoutRpe`` (10..100) / 10 -> ``rpe`` (1..10); ``directWorkoutFeel``
   (0 very weak .. 100 very strong) -> ``feel`` on the 1 (strong) .. 5 (weak)
@@ -122,6 +125,7 @@ from backend.canonical.validation import (
     require_aware_datetime,
 )
 from backend.canonical.vocabulary import (
+    ActivityPurpose,
     Assist,
     Environment,
     LoadModel,
@@ -153,7 +157,9 @@ from backend.canonical.vocabulary import (
 # load (card M6, #1725).
 # Version 16: maps the athlete's RPE and feel and the minimum heart rate from the
 # merged activity_ratings rows (#1724).
-MAPPER_VERSION: Final = 16
+# Version 17: maps eventType.typeKey race and transportation to the activity
+# purpose (#1678).
+MAPPER_VERSION: Final = 17
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -172,6 +178,12 @@ _ELEVATION_GAIN_KEYS: Final = ("elevationGain",)
 _NORMALIZED_POWER_KEYS: Final = ("normPower",)
 _VO2MAX_KEYS: Final = ("vO2MaxValue",)
 _TRAINING_EFFECT_LABEL_KEY: Final = "trainingEffectLabel"
+_EVENT_TYPE_KEY: Final = "eventType"
+# Garmin event types that name a purpose; every other type is plain training.
+_EVENT_PURPOSES: Final = {
+    "race": ActivityPurpose.RACE,
+    "transportation": ActivityPurpose.COMMUTE,
+}
 _TRAINING_LOAD_KEY: Final = "activityTrainingLoad"
 _AEROBIC_EFFECT_KEYS: Final = ("aerobicTrainingEffect", "trainingEffect")
 _ANAEROBIC_EFFECT_KEYS: Final = ("anaerobicTrainingEffect",)
@@ -438,6 +450,7 @@ def _map_row(
         terrain=terrain,
         assist=assist,
         native_type=type_key[:MAX_NATIVE_TYPE_LENGTH] if type_key else None,
+        purpose=_purpose(row, ref, issues),
     )
 
 
@@ -497,6 +510,21 @@ def _with_load_fields(
                 result.pop(key, None)
             result.update(carried)
     return result
+
+
+def _purpose(
+    row: dict[str, object], ref: str | None, issues: list[MappingIssue]
+) -> ActivityPurpose | None:
+    event = row.get(_EVENT_TYPE_KEY)
+    if event is None:
+        return None
+    key = event.get("typeKey") if isinstance(event, dict) else event
+    if key is None:
+        return None
+    if not isinstance(key, str):
+        issues.append(MappingIssue(ref, _EVENT_TYPE_KEY, IssueReason.INVALID_TYPE))
+        return None
+    return _EVENT_PURPOSES.get(key.strip().casefold())
 
 
 def _training_effect_label(

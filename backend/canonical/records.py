@@ -36,6 +36,7 @@ from backend.canonical.validation import (
     validate_metric_value,
 )
 from backend.canonical.vocabulary import (
+    ActivityPurpose,
     Assist,
     DeviceType,
     Environment,
@@ -474,6 +475,8 @@ class ActivityRecord:
     terrain: Terrain = Terrain.UNKNOWN
     assist: Assist = Assist.UNKNOWN
     native_type: str | None = None
+    # Why the activity was done, when the provider's event type says so.
+    purpose: ActivityPurpose | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -485,6 +488,8 @@ class ActivityRecord:
         optional_text(
             self.native_type, "native_type", max_length=MAX_NATIVE_TYPE_LENGTH
         )
+        if self.purpose is not None:
+            require_instance(self.purpose, ActivityPurpose, "purpose")
         require_aware_datetime(self.started_at, "started_at")
         object.__setattr__(
             self,

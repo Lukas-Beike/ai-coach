@@ -64,6 +64,22 @@ class Environment(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ActivityPurpose(StrEnum):
+    """Why an activity was done, where a source says so.
+
+    RACE and COMMUTE come from the provider's event type (Garmin
+    ``eventType.typeKey``) or, for RACE, from a stored competition on the same
+    local date and sport. WARMUP and COOLDOWN are reserved for the athlete's own
+    marking. An activity without any of these is ordinary training.
+    """
+
+    TRAINING = "training"
+    RACE = "race"
+    COMMUTE = "commute"
+    WARMUP = "warmup"
+    COOLDOWN = "cooldown"
+
+
 class Terrain(StrEnum):
     """The surface an activity was done on, where the provider type names it.
 
