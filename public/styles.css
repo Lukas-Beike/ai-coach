@@ -324,6 +324,8 @@ h2 {
   font-size: .79rem;
   backdrop-filter: blur(18px) saturate(135%);
 }
+.status-card { flex-wrap: wrap; }
+.status-card > * { min-width: 0; overflow-wrap: anywhere; }
 .status-card[hidden] { display: none; }
 .status-card-row { display: flex; align-items: center; gap: 8px; color: var(--ink); }
 .pulse { width: 8px; height: 8px; border-radius: 999px; background: var(--accent-bright); box-shadow: 0 0 0 5px var(--accent-soft); }
@@ -1264,6 +1266,16 @@ input:focus, textarea:focus:not(#messageInput), select:focus { border-color: var
 .nav-item:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .nav-item b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 2px; place-items: center; border-radius: 50%; color: var(--white); background: var(--accent); font-size: .62rem; }
 .nav-item b:empty { display: none; }
+/* Large text: the links keep their aria-label, so icons alone stay named. */
+.bottom-nav, .desktop-nav { container-type: inline-size; }
+.nav-item > span { white-space: nowrap; }
+@container (max-width: 17rem) {
+  .bottom-nav .nav-item > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .bottom-nav .nav-item > .nav-icon { margin-bottom: 0; }
+}
+@container (max-width: 3.9rem) {
+  .desktop-nav .nav-item > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}
 .collapsible-section > summary, .library-sport > summary { min-height: 44px; }
 
 dialog { width: min(90vw, 420px); border: 1px solid var(--line); border-radius: 22px; padding: 24px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow); }

@@ -11,6 +11,44 @@ const routes = [
   ["analysis/sessions", (page) => page.locator("#activityAnalysis")],
 ];
 
+test("@responsive navigation and banners keep their text inside at 200 % text size", async ({ page }) => {
+  await page.goto("/#coach");
+  await page.waitForFunction(() => state.initialStateLoaded);
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "200%";
+    const show = (selector, update) => {
+      const element = document.querySelector(selector);
+      update(element);
+      element.hidden = false;
+    };
+    show("#statusCard", (card) => {
+      card.hidden = false;
+      card.querySelector("#statusTitle").textContent = "Das OpenAI-Guthaben ist aufgebraucht";
+      card.querySelector("#statusDetail").textContent = "Bitte im OpenAI-Billing Guthaben hinzufügen.";
+    });
+    show("#connectivityNotice", (notice) => { notice.textContent = "Offline – Änderungen können gerade nicht gespeichert werden."; });
+    show("#providerAttentionBanner", () => { document.querySelector("#providerAttentionDetail").textContent = "2 Anbindungen benötigen manuelles Eingreifen."; });
+    show("#setupBanner", () => { document.querySelector("#setupBannerDetail").textContent = "Garmin Connect und Intervals.icu fehlen"; });
+  });
+  const overflow = await page.evaluate(() => {
+    const containers = [".bottom-nav", ".desktop-nav", "#statusCard", "#connectivityNotice", "#providerAttentionBanner", "#setupBanner"]
+      .map((selector) => document.querySelector(selector))
+      .filter((element) => element && element.getClientRects().length);
+    const problems = [];
+    for (const container of containers) {
+      const box = container.getBoundingClientRect();
+      if (box.left < 0 || box.right > document.documentElement.clientWidth + 1) problems.push(`${container.className || container.id} leaves the viewport`);
+      for (const element of [container, ...container.querySelectorAll("*")]) {
+        // Skip SVG and visually hidden accessible names (1 px clip boxes).
+        if (!element.getClientRects().length || element instanceof SVGElement || element.clientWidth <= 1) continue;
+        if (element.scrollWidth > element.clientWidth + 1) problems.push(`${container.id || container.className} > ${element.tagName.toLowerCase()}.${element.className} "${element.textContent.trim().slice(0, 30)}"`);
+      }
+    }
+    return problems;
+  });
+  expect(overflow).toEqual([]);
+});
+
 test("@responsive pages do not scroll horizontally at 200 % text size", async ({ page, request }) => {
   test.setTimeout(180_000);
   expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
