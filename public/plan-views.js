@@ -59,16 +59,17 @@ function plannedDayStatusLabel(dayStatus) {
   return PLANNED_DAY_STATUS_LABELS.get(dayStatus) || null;
 }
 
-function plannedConflictBadgeSpecs(conflicts) {
-  return (Array.isArray(conflicts) ? conflicts : [])
+function plannedConflictLabels(conflicts) {
+  return [...new Set((Array.isArray(conflicts) ? conflicts : [])
     .map((conflict) => String(conflict?.label || "").trim())
-    .filter(Boolean)
-    .map((label) => ({ kind: "conflict", icon: "⚠", text: `Konflikt: ${label}` }));
+    .filter(Boolean))];
 }
 
-function plannedDayBadgeSpecs(dayContext, competitions, dateKey) {
+// Day context is plain text lines in one neutral style; conflicts belong to the planned session itself.
+function plannedDayNoteSpecs(dayContext, competitions, dateKey) {
   const context = dayContext && typeof dayContext === "object" ? dayContext : {};
-  const appointments = Array.isArray(context.appointments) ? context.appointments : [];
+  const appointments = (Array.isArray(context.appointments) ? context.appointments : [])
+    .filter((event) => event && (event.training_relevant !== false || calendarMarkerKeys(event).length > 0));
   const specs = (Array.isArray(competitions) ? competitions : [])
     .filter((competition) => String(competition?.event_date || "").slice(0, 10) === dateKey)
     .map((competition) => ({
@@ -79,9 +80,11 @@ function plannedDayBadgeSpecs(dayContext, competitions, dateKey) {
   const dayStatus = plannedDayStatusLabel(context.day_status);
   if (dayStatus) specs.push({ kind: "day-status", icon: "", text: dayStatus });
   const markerKeys = new Set(appointments.concat([context]).flatMap((source) => calendarMarkerKeys(source)));
-  for (const { key, label } of CALENDAR_MARKERS) {
-    if (markerKeys.has(key)) specs.push({ kind: "marker", icon: "", text: label });
-  }
+  const calendarParts = [
+    ...appointments.map(plannedAppointmentLabel).filter(Boolean),
+    ...CALENDAR_MARKERS.filter(({ key }) => markerKeys.has(key)).map(({ label }) => label),
+  ];
+  if (calendarParts.length) specs.push({ kind: "calendar", icon: "📅", text: calendarParts.join(" · ") });
   return specs;
 }
 
@@ -154,20 +157,38 @@ function plannedWeatherFlags(weather) {
 }
 
 // Every activity with a positive distance adds to the total; only distance sports without one count as missing.
-function calendarWeekDistanceLabel(activities) {
+function calendarWeekDistance(activities) {
   const measured = activities.filter((entry) => Number(entry.distance_m) > 0);
   const unmeasured = activities.filter((entry) => {
     const distance = Number(entry.distance_m);
     return distance <= 0 || Number.isNaN(distance);
   });
   const missing = unmeasured.filter((entry) => DISTANCE_SPORTS.has(String(entry.sport || "").toLowerCase())).length;
-  if (!measured.length && !missing) return "–";
+  if (!measured.length && !missing) return null;
   const total = measured.length
     ? AppFormat.distance(measured.reduce((sum, entry) => sum + Number(entry.distance_m), 0))
     : "–";
-  if (!missing) return total;
-  return `${total} · ohne ${missing} ${missing === 1 ? "Aktivität" : "Aktivitäten"}`;
+  return { value: total, note: missing ? `${missing} ${missing === 1 ? "Aktivität" : "Aktivitäten"} ohne Distanz` : null };
 }
+
+// Load sums only the sessions that carry a value and names the rest; no value at all hides the cell.
+function calendarWeekLoad(items) {
+  const known = items.filter((item) => item.training_load != null && item.training_load !== "" && Number.isFinite(Number(item.training_load)));
+  if (!known.length) return null;
+  const missing = items.length - known.length;
+  return {
+    value: calendarMetricNumber(known.reduce((sum, item) => sum + Math.max(0, Number(item.training_load)), 0)),
+    note: missing ? `${missing} ${missing === 1 ? "Einheit" : "Einheiten"} ohne Belastung` : null,
+  };
+}
+
+// The week summary uses one duration format, hours and minutes.
+function calendarHours(seconds) {
+  const minutes = Math.round(Math.max(0, Number(seconds) || 0) / 60);
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} h`;
+}
+
+const CALENDAR_SPORT_ICONS = { Radfahren: "🚴", "Rad indoor": "🚴", Laufen: "🏃", Schwimmen: "🏊", Kraft: "🏋", Gehen: "🚶", Wandern: "🚶" };
 
 function calendarIntensityLabel(value) {
   if (value == null || value === "") return null;
@@ -308,18 +329,26 @@ function appendPlannedExecution(cardSummary, entry, status) {
   }
 }
 
-function plannedDayNotes(dayContext) {
+function plannedDayNotes(dayContext, competitions, dateKey) {
   const notes = document.createElement("div");
   notes.className = "planned-day-notes";
-  const appointments = (Array.isArray(dayContext.appointments) ? dayContext.appointments : [])
-    .filter((event) => event && (event.training_relevant !== false || calendarMarkerKeys(event).length > 0))
-    .map(plannedAppointmentLabel)
-    .filter(Boolean);
-  if (appointments.length) {
-    const calendarNotice = document.createElement("p");
-    calendarNotice.className = "planned-day-context planned-day-calendar";
-    calendarNotice.textContent = `Kalender: ${appointments.join(", ")}`;
-    notes.append(calendarNotice);
+  for (const { kind, icon, text } of plannedDayNoteSpecs(dayContext, competitions, dateKey)) {
+    const note = document.createElement("p");
+    note.className = `planned-day-context planned-day-${kind}`;
+    if (icon) {
+      const glyph = document.createElement("span");
+      glyph.setAttribute("aria-hidden", "true");
+      glyph.textContent = `${icon} `;
+      note.append(glyph);
+    }
+    if (kind === "calendar") {
+      const label = document.createElement("span");
+      label.className = "sr-only";
+      label.textContent = "Kalender: ";
+      note.append(label);
+    }
+    note.append(document.createTextNode(text));
+    notes.append(note);
   }
   const checkin = dayContext.checkin && typeof dayContext.checkin === "object" ? dayContext.checkin : {};
   const illness = String(checkin.illness || "").trim();
@@ -395,8 +424,10 @@ function appendPlannedCalendarComparison(details, entry, actual) {
   details.append(comparison);
 }
 
-function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey) {
-  if (status !== "completed" && status !== "missed" && status !== "skipped") return;
+// "Zusätzlich" only means something next to a plan, so an extra activity in a week without one shows no status.
+function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey, weekHasPlan) {
+  if (entry.is_completed_activity && !weekHasPlan) return;
+  if (cardSummary.textContent) cardSummary.append(" · ");
   const statusText = document.createElement("span");
   statusText.className = "planned-entry-status";
   statusText.textContent = status === "skipped" ? `Entfallen (${restDayLabel})` : calendarStatusLabel(entry, dateKey, todayKey);
@@ -721,18 +752,40 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     details.append(primaryMetrics, facts);
   }
 
-  function appendPlannedSessionHeader(cardSummary, entry, actual) {
+  // One compact row: sport icon, title, sport/time/status line, duration and distance.
+  function plannedSessionHeader(entry, actual, title, appendStatus) {
     const displayed = actual || entry;
+    const sportLabel = activitySportLabel(calendarSportType(displayed));
     const header = document.createElement("span");
     header.className = "planned-session-header";
-    const sport = document.createElement("span");
-    sport.textContent = [activitySportLabel(calendarSportType(displayed)), actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local)].filter(Boolean).join(" · ");
+    const icon = document.createElement("span");
+    icon.className = "planned-session-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = CALENDAR_SPORT_ICONS[sportLabel] || "•";
+    const cardTitle = document.createElement("strong");
+    cardTitle.className = "planned-session-title";
+    cardTitle.textContent = title;
+    const line = document.createElement("span");
+    line.className = "planned-session-line";
+    line.textContent = [sportLabel, actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local)].filter(Boolean).join(" · ");
+    appendStatus(line);
+    const value = document.createElement("span");
+    value.className = "planned-session-value";
     const duration = document.createElement("strong");
-    duration.textContent = plannedEntryDurationLabel(actual, entry);
-    const distance = document.createElement("span");
+    duration.textContent = plannedEntryDurationLabel(actual, entry) || "–";
+    value.append(duration);
     const shownDistance = actual ? actual.distance_m : entry.distance;
-    distance.textContent = shownDistance > 0 ? distanceLabel(shownDistance) : "";
-    header.append(sport, duration, distance);
+    if (shownDistance > 0) {
+      const distance = document.createElement("span");
+      distance.textContent = distanceLabel(shownDistance);
+      value.append(distance);
+    }
+    header.append(icon, cardTitle, line, value);
+    return header;
+  }
+
+  function plannedSessionMetrics(entry, actual) {
+    const displayed = actual || entry;
     const metrics = document.createElement("span");
     metrics.className = "planned-session-metrics";
     metrics.textContent = [
@@ -740,8 +793,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       actual ? calendarMetricNumber(actual.avg_power, " W") : null,
       calendarMetricNumber(displayed.training_load) != null ? `Belastung ${calendarMetricNumber(displayed.training_load)}` : null,
     ].filter(Boolean).join(" · ");
-    cardSummary.append(header);
-    if (metrics.textContent) cardSummary.append(metrics);
+    return metrics.textContent ? metrics : null;
   }
 
   function calendarWorkoutProfile(profile) {
@@ -852,7 +904,29 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return button;
   }
 
-  function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {
+  // One conflict component per planned session; its single action hands the conflict to the Coach.
+  function plannedConflict(entry, dateKey) {
+    const labels = plannedConflictLabels(entry.conflicts);
+    if (!labels.length) return null;
+    const conflict = document.createElement("span");
+    conflict.className = "planned-conflict";
+    const text = document.createElement("span");
+    text.textContent = `⚠ Konflikt: ${labels.join(" · ")}`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button planned-conflict-button";
+    button.textContent = "Mit Coach lösen";
+    button.addEventListener("click", (event) => {
+      // The button sits in the card summary; a click must not toggle the card.
+      event.preventDefault();
+      event.stopPropagation();
+      void globalThis.askCoach?.(`Die geplante Einheit „${entry.name || "Training"}" am ${dateLabel(dateKey)} kollidiert mit: ${labels.join(", ")}. Schlage eine Anpassung vor.`);
+    });
+    conflict.append(text, button);
+    return conflict;
+  }
+
+  function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
     const actual = calendarActualActivity(entry);
     const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
     const restDayLabel = baseStatus === "missed" ? plannedDayStatusLabel(dayContext.day_status) : null;
@@ -861,8 +935,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     card.className = `planned-entry is-${status}`;
     card.open = false;
     const cardSummary = document.createElement("summary");
-    const cardTitle = document.createElement("strong");
-    cardTitle.textContent = actual?.name || entry.name || "Trainingseinheit";
     const meta = document.createElement("span");
     meta.className = "planned-meta";
     const displayed = actual || entry;
@@ -872,21 +944,23 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local),
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
-    appendPlannedSessionHeader(cardSummary, entry, actual);
-    cardSummary.append(meta);
-    appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey);
+    const title = actual?.name || entry.name || "Trainingseinheit";
+    cardSummary.append(plannedSessionHeader(entry, actual, title, (line) => {
+      appendPlannedEntryStatus(line, entry, status, restDayLabel, dateKey, todayKey, weekHasPlan);
+      appendFocusChip(line, entry);
+    }), meta);
     appendPlannedExecution(cardSummary, entry, status);
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
     if (profile) cardSummary.append(profile);
-    cardSummary.append(cardTitle);
-    appendFocusChip(cardSummary, entry);
-    const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
-    if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
+    const conflict = plannedConflict(entry, dateKey);
+    if (conflict) cardSummary.append(conflict);
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
     if (syncButton) cardSummary.append(syncButton);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
+    const metrics = plannedSessionMetrics(entry, actual);
+    if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
     if (actual && (actual.id || actual.activity_id)) {
       const activityButton = document.createElement("button");
@@ -924,8 +998,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return Array.isArray(days) ? days.find((item) => item?.date === dateKey) : null;
   }
 
-  function appendPlannedDayHeading(day, weather, dateKey, todayKey) {
-    const heading = document.createElement("div");
+  function plannedDayHeading(day, weather, dateKey, todayKey, tag = "div") {
+    const heading = document.createElement(tag);
     heading.className = "planned-day-heading";
     const title = document.createElement("h5");
     title.id = `planned-day-${dateKey}`;
@@ -933,11 +1007,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     day.setAttribute("aria-labelledby", title.id);
     const dayDate = document.createElement("time");
     dayDate.dateTime = dateKey;
-    const dayNumber = document.createElement("strong");
-    dayNumber.textContent = new Intl.DateTimeFormat("de-DE", { day: "2-digit" }).format(dateFromKey(dateKey));
-    const month = document.createElement("span");
-    month.textContent = new Intl.DateTimeFormat("de-DE", { month: "short" }).format(dateFromKey(dateKey));
-    dayDate.append(dayNumber, month);
+    dayDate.textContent = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit" }).format(dateFromKey(dateKey));
     heading.append(title, dayDate);
     if (dateKey === todayKey) {
       const today = document.createElement("span");
@@ -961,23 +1031,62 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
         heading.append(flagText);
       }
     }
-    day.append(heading);
+    return heading;
   }
 
-  function renderPlannedDay(view, dateKey) {
-    const { eventsByDate, planningContextByDate, todayKey } = view;
+  // Extra activities that look the same (title, sport, duration, distance, no profile) collapse into one row.
+  function plannedEntryGroups(dayEntries) {
+    const groups = [];
+    for (const entry of dayEntries) {
+      const key = entry.is_completed_activity && !entry.workout_profile
+        ? JSON.stringify([entry.name || "", activitySportLabel(calendarSportType(entry)), entry.moving_duration_s ?? entry.elapsed_duration_s ?? null, Number(entry.distance_m) > 0 ? Number(entry.distance_m) : null])
+        : null;
+      const previous = groups.at(-1);
+      if (key && previous?.key === key) previous.entries.push(entry);
+      else groups.push({ key, entries: [entry] });
+    }
+    return groups;
+  }
+
+  function renderPlannedGroup(entries, dateKey, todayKey, dayContext, weekHasPlan) {
+    const group = document.createElement("details");
+    group.className = "planned-group";
+    const first = entries[0];
+    group.dataset.sport = activitySportLabel(calendarSportType(first));
+    const summary = document.createElement("summary");
+    summary.append(plannedSessionHeader(first, first, `${entries.length}× ${first.name || "Trainingseinheit"}`, () => {}));
+    const items = document.createElement("div");
+    items.className = "planned-group-items";
+    items.append(...entries.map((entry) => renderPlannedEntry(entry, dateKey, todayKey, dayContext, weekHasPlan)));
+    group.append(summary, items);
+    return group;
+  }
+
+  function plannedDayOverview(dayEntries) {
+    const actual = dayEntries.map(calendarActualActivity).filter(Boolean);
+    const seconds = actual.reduce((total, item) => total + Math.max(0, Number(item.moving_duration_s ?? item.elapsed_duration_s) || 0), 0);
+    const overview = document.createElement("span");
+    overview.className = "planned-day-overview";
+    overview.textContent = [
+      `${dayEntries.length} ${dayEntries.length === 1 ? "Einheit" : "Einheiten"}`,
+      seconds > 0 ? AppFormat.duration(seconds) : null,
+    ].filter(Boolean).join(" · ");
+    return overview;
+  }
+
+  function renderPlannedDay(view, dateKey, weekHasPlan) {
+    const { eventsByDate, planningContextByDate, previousDayOpenState, todayKey } = view;
     const dayEntries = eventsByDate.get(dateKey) || [];
     const dayContext = planningContextByDate.get(dateKey) || {};
     const weather = plannedDayWeather(dayContext, dateKey);
     const day = document.createElement("section");
-    day.className = `planned-day${dateKey === todayKey ? " is-today" : ""}`;
+    // Past days with sessions collapse to one line; today and later stay open.
+    const collapsible = dateKey < todayKey && dayEntries.length > 0;
+    day.className = `planned-day${dateKey === todayKey ? " is-today" : ""}${collapsible ? " is-past" : ""}`;
     day.dataset.date = dateKey;
-    appendPlannedDayHeading(day, weather, dateKey, todayKey);
     const content = document.createElement("div");
     content.className = "planned-day-content";
-    const notes = plannedDayNotes(dayContext);
-    const dayBadges = plannedDayBadgeSpecs(dayContext, state.data?.competitions, dateKey);
-    if (dayBadges.length) notes.prepend(calendarBadgeRow(dayBadges));
+    const notes = plannedDayNotes(dayContext, state.data?.competitions, dateKey);
     if (notes.childElementCount) content.append(notes);
     if (!dayEntries.length) {
       const empty = document.createElement("p");
@@ -985,9 +1094,84 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       empty.textContent = dateKey < todayKey ? "Keine Aktivität" : "Keine Einheit geplant";
       content.append(empty);
     }
-    dayEntries.forEach((entry) => content.append(renderPlannedEntry(entry, dateKey, todayKey, dayContext)));
-    day.append(content);
+    for (const group of plannedEntryGroups(dayEntries)) {
+      content.append(group.entries.length > 1
+        ? renderPlannedGroup(group.entries, dateKey, todayKey, dayContext, weekHasPlan)
+        : renderPlannedEntry(group.entries[0], dateKey, todayKey, dayContext, weekHasPlan));
+    }
+    if (!collapsible) {
+      day.append(plannedDayHeading(day, weather, dateKey, todayKey), content);
+      return day;
+    }
+    const toggle = document.createElement("details");
+    toggle.className = "planned-day-toggle";
+    toggle.open = previousDayOpenState.get(dateKey) === true;
+    const heading = plannedDayHeading(day, weather, dateKey, todayKey, "summary");
+    heading.append(plannedDayOverview(dayEntries));
+    toggle.append(heading, content);
+    day.append(toggle);
     return day;
+  }
+
+  function appendWeekMetricCell(grid, cell) {
+    const value = document.createElement("strong");
+    value.textContent = cell?.value ?? "–";
+    if (cell?.note) {
+      const note = document.createElement("small");
+      note.textContent = cell.note;
+      value.append(note);
+    }
+    grid.append(value);
+  }
+
+  // Fixed grid with one column each for planned and completed values; a row appears only when it has a value.
+  function plannedWeekMetrics(planned, actual) {
+    const columns = [planned.length ? "planned" : null, actual.length ? "actual" : null].filter(Boolean);
+    if (!columns.length) return null;
+    const totals = document.createElement("span");
+    totals.className = "planned-week-metrics";
+    totals.dataset.columns = String(columns.length);
+    const plannedSeconds = planned.reduce((total, entry) => total + Math.max(0, Number(entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s) || 0), 0);
+    const actualSeconds = actual.reduce((total, entry) => total + Math.max(0, Number(entry.moving_duration_s ?? entry.elapsed_duration_s) || 0), 0);
+    const plannedDistance = planned.reduce((total, entry) => total + Math.max(0, Number(entry.distance) || 0), 0);
+    const rows = [
+      ["Dauer", { planned: plannedSeconds > 0 ? { value: calendarHours(plannedSeconds) } : null, actual: { value: calendarHours(actualSeconds) } }],
+      ["Distanz", { planned: plannedDistance > 0 ? { value: AppFormat.distance(plannedDistance) } : null, actual: calendarWeekDistance(actual) }],
+      ["Belastung", { planned: calendarWeekLoad(planned), actual: calendarWeekLoad(actual) }],
+    ];
+    totals.append(document.createElement("span"));
+    for (const column of columns) {
+      const label = document.createElement("span");
+      label.className = "planned-week-column";
+      label.textContent = column === "planned" ? "Geplant" : "Absolviert";
+      totals.append(label);
+    }
+    for (const [label, cells] of rows) {
+      if (!columns.some((column) => cells[column])) continue;
+      const name = document.createElement("span");
+      name.textContent = label;
+      totals.append(name);
+      for (const column of columns) appendWeekMetricCell(totals, cells[column]);
+    }
+    return totals;
+  }
+
+  function plannedZoneLegend(days) {
+    const zones = [...new Set([...days.querySelectorAll(".calendar-workout-profile [data-zone]")].map((node) => node.dataset.zone))]
+      .filter((zone) => zone !== "unknown")
+      .sort((left, right) => Number(left) - Number(right));
+    if (!zones.length) return null;
+    const legend = document.createElement("p");
+    legend.className = "planned-zone-legend";
+    for (const zone of zones) {
+      const item = document.createElement("span");
+      const swatch = document.createElement("i");
+      swatch.dataset.zone = zone;
+      swatch.setAttribute("aria-hidden", "true");
+      item.append(swatch, document.createTextNode(`Z${zone}`));
+      legend.append(item);
+    }
+    return legend;
   }
 
   function renderPlannedWeek(view, weekIndex) {
@@ -1007,38 +1191,23 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     count.className = "planned-week-summary";
     count.textContent = calendarCountLabel(weekEntries, todayKey) || "Keine Einheiten";
     heading.append(title, count);
-    const totals = document.createElement("span");
-    totals.className = "planned-week-metrics";
-    const sum = (items, metric) => items.reduce((total, item) => total + Math.max(0, Number(metric(item)) || 0), 0);
     const planned = weekEntries.filter((entry) => !entry.is_completed_activity);
     const actual = weekEntries.map(calendarActualActivity).filter(Boolean);
-    const plannedSeconds = sum(planned, (entry) => entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s);
-    const actualSeconds = sum(actual, (entry) => entry.moving_duration_s ?? entry.elapsed_duration_s);
-    for (const [label, value] of [
-      ["Geplant", plannedSeconds > 0 ? AppFormat.duration(plannedSeconds) : "–"],
-      ["Absolviert", AppFormat.duration(actualSeconds)],
-      ["Distanz", calendarWeekDistanceLabel(actual)],
-      ["Belastung geplant", planned.length && planned.every((entry) => entry.training_load != null) ? calendarMetricNumber(sum(planned, (entry) => entry.training_load)) : "–"],
-      ["Belastung absolviert", actual.length && actual.every((entry) => entry.training_load != null) ? calendarMetricNumber(sum(actual, (entry) => entry.training_load)) : "–"],
-    ]) {
-      const metric = document.createElement("span");
-      const number = document.createElement("strong");
-      number.textContent = value;
-      metric.append(document.createTextNode(`${label} `), number);
-      totals.append(metric);
-    }
-    heading.append(totals);
+    const totals = plannedWeekMetrics(planned, actual);
+    if (totals) heading.append(totals);
     week.append(heading);
     const days = document.createElement("div");
     days.className = "planned-week-days";
-    for (let offset = 0; offset < 7; offset += 1) days.append(renderPlannedDay(view, addDateKey(weekKey, offset)));
+    for (let offset = 0; offset < 7; offset += 1) days.append(renderPlannedDay(view, addDateKey(weekKey, offset), planned.length > 0));
     week.append(days);
+    const legend = plannedZoneLegend(days);
+    if (legend) week.append(legend);
     if (weekEntries.length) {
       const additionalCompleted = weekEntries.filter((entry) => entry.is_completed_activity).length;
       const details = document.createElement("p");
       details.className = "planned-week-totals";
       const summary = plannedWeekSummary(weekKey, weekEndKey, weekEntries, weeklyCompliance.get(weekKey), todayKey);
-      details.textContent = additionalCompleted ? `${summary} · +${additionalCompleted} zusätzlich` : summary;
+      details.textContent = additionalCompleted && planned.length ? `${summary} · +${additionalCompleted} zusätzlich` : summary;
       week.append(details);
     }
     return week;
@@ -1065,6 +1234,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const nextWeekKey = addDateKey(currentWeekKey, 7);
     const previousWeekOpenState = new Map(
       [...root.querySelectorAll(".planned-week[data-week-key]")].map((week) => [week.dataset.weekKey, week.open]),
+    );
+    const previousDayOpenState = new Map(
+      [...root.querySelectorAll(".planned-day[data-date] > .planned-day-toggle")].map((toggle) => [toggle.parentElement.dataset.date, toggle.open]),
     );
     root.replaceChildren();
     const weeklyCompliance = new Map(
@@ -1099,6 +1271,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       firstWeekKey,
       nextWeekKey,
       planningContextByDate,
+      previousDayOpenState,
       previousWeekOpenState,
       todayKey,
       weeklyCompliance,
