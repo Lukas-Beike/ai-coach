@@ -249,6 +249,7 @@ class GarminProjectionService:
                 start=today - timedelta(days=COACH_RECOVERY_DAYS - 1),
             )
             state = read_garmin_state(observations, db) if include_performance else None
+            body_battery = self._morning_body_battery_service.current_in(db)
         context = {
             "synced_at": status.synced_at,
             "start": status.start,
@@ -258,7 +259,7 @@ class GarminProjectionService:
             ),
             "recovery": {
                 **recovery,
-                "body_battery": self._morning_body_battery_service.current() or {},
+                "body_battery": body_battery or {},
             },
             "scope": "Nur der aktuellste Garmin-Recovery-Datensatz. Leistungswerte und Aktivitäten stehen in den deduplizierten bzw. abgeleiteten Abschnitten.",
             "errors": [

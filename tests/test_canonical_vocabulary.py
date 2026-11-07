@@ -143,6 +143,8 @@ class CanonicalVocabularyTests(unittest.TestCase):
                 "variability_index": "ratio",
                 "mechanical_work": "kJ",
                 "aerobic_decoupling": "%",
+                "body_battery_before_sleep": "score",
+                "morning_body_battery": "score",
             },
             {kind.value: kind.unit for kind in MetricKind},
         )

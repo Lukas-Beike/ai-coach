@@ -210,6 +210,10 @@ class MetricKind(StrEnum):
     VARIABILITY_INDEX = "variability_index"
     MECHANICAL_WORK = "mechanical_work"
     AEROBIC_DECOUPLING = "aerobic_decoupling"
+    # Garmin Body Battery levels around one night, derived locally (#1686): the
+    # last level up to four hours before sleep and the first after waking.
+    BODY_BATTERY_BEFORE_SLEEP = "body_battery_before_sleep"
+    MORNING_BODY_BATTERY = "morning_body_battery"
 
     @property
     def unit(self) -> str:
@@ -285,6 +289,8 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.VARIABILITY_INDEX: "ratio",
     MetricKind.MECHANICAL_WORK: "kJ",
     MetricKind.AEROBIC_DECOUPLING: "%",
+    MetricKind.BODY_BATTERY_BEFORE_SLEEP: "score",
+    MetricKind.MORNING_BODY_BATTERY: "score",
 }
 
 
@@ -321,6 +327,17 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
             MetricKind.VARIABILITY_INDEX,
             MetricKind.MECHANICAL_WORK,
             MetricKind.AEROBIC_DECOUPLING,
+        )
+    },
+    **{
+        kind: (
+            "derived locally per night by backend.performance.morning_battery_service "
+            "from the Garmin NIGHT period and BODY_BATTERY levels, never by a "
+            "provider mapper"
+        )
+        for kind in (
+            MetricKind.BODY_BATTERY_BEFORE_SLEEP,
+            MetricKind.MORNING_BODY_BATTERY,
         )
     },
 }

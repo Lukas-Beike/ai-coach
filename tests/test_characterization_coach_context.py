@@ -254,6 +254,7 @@ def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionServ
     payload_service.sync_status_in.return_value = GarminSyncStatus.from_state(snapshot)
     battery_service = Mock()
     battery_service.current.return_value = None
+    battery_service.current_in.return_value = None
     redactor = Mock()
     redactor.redact_text.side_effect = lambda text: text
     return GarminProjectionService(

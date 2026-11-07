@@ -116,8 +116,14 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 "sleep_date": day.isoformat(),
                 "status": "ready",
                 "attempted_at": runtime_clock.utc_now(),
-                "morning": {"value": 78},
-                "before_sleep": {"value": 30},
+                "morning": {
+                    "observed_at": f"{day.isoformat()}T05:30:00+00:00",
+                    "value": 78,
+                },
+                "before_sleep": {
+                    "observed_at": f"{day.isoformat()}T00:30:00+00:00",
+                    "value": 30,
+                },
             }
             # The service derives the stored record from canonical data.
             with (

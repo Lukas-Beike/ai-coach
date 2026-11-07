@@ -92,6 +92,9 @@ class _Battery:
     def current(self) -> dict[str, Any]:
         return BODY_BATTERY
 
+    def current_in(self, _db: Any) -> dict[str, Any]:
+        return BODY_BATTERY
+
 
 class _Observations:
     """A fixed list of observations behind the reader port."""

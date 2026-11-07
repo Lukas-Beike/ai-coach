@@ -106,6 +106,9 @@ class _MorningBodyBatteryService:
         self.reads += 1
         return self.value
 
+    def current_in(self, _db):
+        return self.current()
+
 
 class _GarminClientFactory:
     def __init__(self, available=False):
