@@ -169,7 +169,7 @@ class ActivityReferenceResolverTests(_Fixture):
             summary=lambda: None,
         )
         with self.manager.reader() as db:
-            block = envelope(db, garmin, "ride-merged", None)
+            block = envelope(db, garmin, "ride-merged")
         self.assertEqual(6, block["activity_feedback"]["session_rpe"])
 
     def test_garmin_primary_session_passes_through_unchanged(self) -> None:

@@ -41,9 +41,6 @@ from backend.db.activity_detail_store import (
 )
 from backend.db.canonical_store import activity_record_link, canonical_json
 from backend.db.repositories import KeyValueRepository
-from backend.performance.canonical_session_analysis import (
-    ANALYSIS_VERSION as CANONICAL_VERSION,
-)
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
     STREAM_KEY_CHANNELS,
@@ -75,7 +72,6 @@ _REASONS: Final = (
     "analysis_mismatch",
 )
 _COUNTER_NAMES: Final = (RETIRED, *_REASONS, LAPS_REFILLED)
-_ANALYSIS_KEYS: Final = ("target_snapshot", "session_analysis", "calendar_profile")
 _INTERVALS: Final = ProviderId.INTERVALS.value
 
 
@@ -379,33 +375,23 @@ def _zones_equal(legacy: ZoneDistribution, canonical: ActivityDetailSet) -> bool
 def _analysis_proven(
     db: Any, activity_id: str, record: Mapping[str, Any], *, compared: bool
 ) -> bool:
-    """Whether the stored session analysis holds the record's analysis values.
+    """Whether the stored session analysis keeps the record's frozen targets.
 
-    A record without compared detail sets is proven only by an existing payload.
+    The session analysis is recomputed canonically from Garmin, Wahoo and local
+    detail (#1685), so the Intervals.icu analysis values of a record are never
+    read again; only the athlete's target snapshot must survive. A record
+    without compared detail sets is proven only by an existing row.
     """
+    try:
+        targets = normalize_legacy_detail_targets(record).get("target_snapshot")
+    except RuntimeError:
+        return False
     row = analysis_row_for_record(db, _INTERVALS, activity_id)
     if row is None:
-        has_analysis = any(record.get(key) is not None for key in _ANALYSIS_KEYS)
-        return compared and not has_analysis
+        return compared and targets is None
     payload = row["payload"]
     if not isinstance(payload, dict):
         return False
-    canonical = row["analysis_version"] >= CANONICAL_VERSION
-    if not canonical and payload.get("summary_sha256") != record.get("summary_sha256"):
-        return False
-    try:
-        record = normalize_legacy_detail_targets(record)
-    except RuntimeError:
-        return False
-    if canonical:
-        # The canonical analysis is recomputed from Garmin, Wahoo and local
-        # detail (#1685); only the athlete's frozen targets must be kept.
-        targets = record.get("target_snapshot")
-        return targets is None or canonical_json(
-            {"t": payload.get("target_snapshot")}
-        ) == canonical_json({"t": targets})
-    return all(
-        canonical_json({key: payload.get(key)})
-        == canonical_json({key: record.get(key)})
-        for key in _ANALYSIS_KEYS
-    )
+    return targets is None or canonical_json(
+        {"t": payload.get("target_snapshot")}
+    ) == canonical_json({"t": targets})

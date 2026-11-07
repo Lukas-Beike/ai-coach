@@ -283,7 +283,8 @@ class ActivityDetailRouteTests(unittest.TestCase):
                 body = self.get(requested)
                 self.assertEqual("activity_detail.v1", body["contract"])
                 self.assertEqual("act_i", body["session"]["activity_id"])
-                self.assertEqual(8.5, body["metrics"]["avg_speed_mps"]["value"])
+                # No Intervals.icu summary-row metric is served (#1685).
+                self.assertNotIn("avg_speed_mps", body["metrics"])
                 self.assertEqual(
                     {"activity_feedback", "equipment"},
                     {"activity_feedback", "equipment", "activity_validation"}

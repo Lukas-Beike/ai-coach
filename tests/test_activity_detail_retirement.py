@@ -16,7 +16,7 @@ from canonical_detail_support import (
 
 from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.vocabulary import LapKind
-from backend.db.activity_detail_store import detail_sets_for
+from backend.db.activity_detail_store import detail_sets_for, save_analysis
 from backend.db.repositories import KeyValueRepository
 from backend.providers.intervals_activity_detail_projection import _downsample_series
 from backend.runtime.maintenance import MaintenanceGate
@@ -143,6 +143,24 @@ class RetirementTestCase(unittest.TestCase):
             canonical=writer,
         ).refresh(activity_id)
         record = writer.records[activity_id]
+        # The earlier release also stored the session analysis row of the load.
+        with self.manager.unit_of_work() as db:
+            session_id = db.execute(
+                "SELECT activity_id FROM activity_records WHERE provider = 'intervals' "
+                "AND provider_activity_id = ?",
+                (activity_id,),
+            ).fetchone()["activity_id"]
+            save_analysis(
+                db,
+                session_id,
+                analysis_version=2,
+                input_sha256="0" * 64,
+                payload={
+                    "target_snapshot": None,
+                    "summary_sha256": record.get("summary_sha256"),
+                },
+                now=NOW,
+            )
         legacy_detail_kv.save(self.manager, activity_id, record)
         return record
 
@@ -422,7 +440,12 @@ class KeptRecordTests(RetirementTestCase):
         self.assert_kept("analysis_mismatch", "9315")
 
     def test_analysis_missing_from_the_canonical_tables(self):
-        self.load("9312")
+        self.changed(
+            "9312",
+            lambda record: record.update(
+                target_snapshot={"steps": [], "basis": {"ftp": 250}}
+            ),
+        )
         self.execute("DELETE FROM activity_detail_analysis")
         self.assert_kept("analysis_mismatch", "9312")
 

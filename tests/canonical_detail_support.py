@@ -117,3 +117,110 @@ def add_session_record(
                 *measured.values(),
             ),
         )
+
+
+def add_garmin_copy(
+    manager: DatabaseManager,
+    intervals_id: str,
+    streams: dict,
+    laps: list[dict] | None = None,
+) -> str:
+    """Bundle a Garmin copy with full streams (and laps) into an Intervals session.
+
+    The activity detail document reads Garmin, Wahoo and local detail only
+    (#1685), so tests that stored Intervals.icu streams use this copy instead.
+    ``streams`` uses the legacy stream keys; returns the Garmin activity id.
+    """
+    from backend.canonical.activity_detail import (
+        ActivityLap,
+        ActivityLapSet,
+        ActivityStreamSet,
+    )
+    from backend.canonical.records import Provenance
+    from backend.canonical.vocabulary import (
+        ActivityDetailOrigin,
+        LapKind,
+        LapSource,
+        RecordingOrigin,
+        SourceKind,
+        StreamResolution,
+    )
+    from backend.db.activity_detail_store import replace_detail_set
+    from backend.providers.intervals_activity_detail_mapping import (
+        STREAM_KEY_CHANNELS,
+    )
+
+    garmin_id = f"garmin-{intervals_id}"
+    provenance = Provenance(
+        provider=ProviderId.GARMIN,
+        source_kind=SourceKind.PROVIDER_REPORTED,
+        source_record_id=None,
+        recorded_by=RecordingOrigin.GARMIN,
+        retrieved_at=datetime.fromisoformat(NOW),
+        label="Garmin Connect",
+    )
+    with manager.unit_of_work() as db:
+        row = db.execute(
+            "SELECT activity_id, sport, environment, started_at, name "
+            "FROM activity_records WHERE provider = ? AND provider_activity_id = ?",
+            (INTERVALS, intervals_id),
+        ).fetchone()
+        db.execute(
+            "INSERT INTO activity_records(provider, provider_activity_id, "
+            "activity_id, state, mapper_version, source_kind, recorded_by, sport, "
+            "environment, started_at, load_model, name, fetched_at, created_at, "
+            "updated_at) VALUES ('garmin', ?, ?, 'active', 1, 'provider_reported', "
+            "'garmin', ?, ?, ?, 'unknown', ?, ?, ?, ?)",
+            (
+                garmin_id,
+                row["activity_id"],
+                row["sport"],
+                row["environment"],
+                row["started_at"],
+                row["name"],
+                NOW,
+                NOW,
+                NOW,
+            ),
+        )
+        replace_detail_set(
+            db,
+            ActivityStreamSet(
+                provider_activity_id=garmin_id,
+                provenance=provenance,
+                origin=ActivityDetailOrigin.FETCH,
+                resolution=StreamResolution.FULL,
+                channels={
+                    STREAM_KEY_CHANNELS[key]: tuple(
+                        None if value is None else float(value) for value in values
+                    )
+                    for key, values in streams.items()
+                },
+            ),
+            mapper_version=1,
+            summary_sha256=None,
+            now=NOW,
+        )
+        if laps:
+            replace_detail_set(
+                db,
+                ActivityLapSet(
+                    provider_activity_id=garmin_id,
+                    provenance=provenance,
+                    origin=ActivityDetailOrigin.FETCH,
+                    lap_source=LapSource.DEVICE_LAPS,
+                    laps=tuple(
+                        ActivityLap(
+                            index=index,
+                            kind=LapKind.LAP,
+                            start_offset_s=float(lap["start_time"]),
+                            end_offset_s=float(lap["end_time"]),
+                        )
+                        for index, lap in enumerate(laps)
+                    ),
+                ),
+                mapper_version=1,
+                summary_sha256=None,
+                now=NOW,
+            )
+    return garmin_id
