@@ -180,7 +180,12 @@ class GarminProjectionService:
                 else {}
             ),
             "metric_export_enabled": bool(metric_export_fields),
-            "metric_export_fields": fields_view(metric_export_fields),
+            # The field checkboxes show only while the export is enabled.
+            **(
+                {"metric_export_fields": fields_view(metric_export_fields)}
+                if metric_export_fields
+                else {}
+            ),
             "last_error": parsed_error,
             **self._personal_api_state(today, tokens_connected),
             "pagination": dict(status.pagination),

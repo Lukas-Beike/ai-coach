@@ -220,6 +220,8 @@ class GarminProjectionServiceTests(unittest.TestCase):
             result = service.public_state()
         self.assertNotIn("metric_export_status", result)
         self.assertIs(result["metric_export_enabled"], False)
+        # The field list is sent only while the export is enabled (bootstrap bound).
+        self.assertNotIn("metric_export_fields", result)
 
     def test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors(self):
         # Canonical reads (#1416): sessions replace the raw Garmin activity rows.
