@@ -192,8 +192,11 @@ class LocalLoadStoreTests(unittest.TestCase):
         row = [{"id": "act_hike", "sport": "hike"}]
         (assumed,) = with_local_loads(row, stored({"sex": "male", "sex_assumed": True}))
         (saved,) = with_local_loads(row, stored({"sex": "male"}))
-        self.assertTrue(assumed["load_sex_assumed"])
-        self.assertNotIn("load_sex_assumed", saved)
+        self.assertEqual(
+            assumed["load_assumption"],
+            "Geschlecht nicht gesetzt, männliche Konstanten angenommen",
+        )
+        self.assertNotIn("load_assumption", saved)
 
     def test_pass_reads_the_profile_sex_in_its_transaction(self) -> None:
         seen: list[Any] = []

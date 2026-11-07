@@ -6,7 +6,7 @@
 - **Status:** implemented (`backend/performance/local_tss.py`, `backend/sync/local_load.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-06
-- **Review:** released 2026-11-07 (athlete); card 3 released 2026-11-07 (athlete, #1774)
+- **Review:** released 2026-11-07 (athlete)
 
 ## Target construct
 

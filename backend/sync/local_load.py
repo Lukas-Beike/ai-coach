@@ -261,6 +261,10 @@ class LocalLoadStage:
         )
 
 
+# Card M6 v3: a heart-rate value computed without a saved profile sex.
+SEX_ASSUMED_LABEL: Final = "Geschlecht nicht gesetzt, männliche Konstanten angenommen"
+
+
 # Providers whose completed jobs can change a session or a threshold.
 LOAD_INPUT_PROVIDERS: Final = frozenset(
     {ProviderId.INTERVALS.value, ProviderId.GARMIN.value, ProviderId.WAHOO.value}
@@ -338,7 +342,7 @@ def with_local_loads(
             if derivation.get("threshold_after_session"):
                 item["load_threshold_after_session"] = True
             if (derivation.get("inputs") or {}).get("sex_assumed"):
-                item["load_sex_assumed"] = True
+                item["load_assumption"] = SEX_ASSUMED_LABEL
             sources["training_load"] = DERIVED_LABEL
             if calibration := derivation.get("calibration"):
                 item["load_calibration"] = {
