@@ -166,13 +166,14 @@ class CanonicalDetailReader:
             if self._envelope is None
             else self._envelope(db, activity_id, intervals_id)
         )
-        document = activity_detail_contract(
+        return activity_detail_contract(
             activity_id,
             records,
             merged,
             sets,
             analysis=analysis,
-            refreshable=self._refreshable(),
+            # Intervals.icu details are never served, so they are never offered.
+            refreshable=self._refreshable() - {ProviderId.INTERVALS},
             status=status,
             envelope=envelope,
             summary_metrics=detail_metric_entries(
@@ -180,14 +181,6 @@ class CanonicalDetailReader:
             ),
             zone=self._zone,
         )
-        # Intervals.icu details are never served, so they get no provider entry.
-        detail_data = document["detail_data"]
-        detail_data["providers"] = [
-            entry
-            for entry in detail_data["providers"]
-            if entry["provider"] != ProviderId.INTERVALS.value
-        ]
-        return document
 
     def _status(
         self, db: Any, sets: Sequence[StoredDetailSet]
