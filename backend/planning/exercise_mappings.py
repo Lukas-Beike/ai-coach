@@ -29,18 +29,21 @@ _ROWS_SQL = (
 )
 
 
+def _structure(raw: Any) -> list[Any]:
+    """The stored exercises of one payload; anything unreadable gives none."""
+    try:
+        payload = json.loads(raw or "{}")
+    except TypeError, ValueError:
+        return []
+    structure = payload.get(STRENGTH_STRUCTURE) if isinstance(payload, dict) else None
+    return structure if isinstance(structure, list) else []
+
+
 def remembered_exercises(db: Any) -> dict[str, GarminExercise]:
     """Confirmed Garmin exercise per exercise-name key; the newest wins."""
     remembered: dict[str, GarminExercise] = {}
     for row in db.execute(_ROWS_SQL).fetchall():
-        try:
-            payload = json.loads(row["payload"] or "{}")
-        except TypeError, ValueError:
-            continue
-        structure = (
-            payload.get(STRENGTH_STRUCTURE) if isinstance(payload, dict) else None
-        )
-        for item in structure if isinstance(structure, list) else []:
+        for item in _structure(row["payload"]):
             if not isinstance(item, dict):
                 continue
             pair = stored_pair(item)
