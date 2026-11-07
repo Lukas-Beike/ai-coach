@@ -12,6 +12,7 @@ from canonical_detail_support import (
 )
 
 from backend.canonical.vocabulary import ActivityDetailOrigin, RecordingOrigin
+from backend.db.activity_detail_fingerprints import intervals_detail_fingerprints
 from backend.db.activity_detail_store import detail_origins, save_analysis
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
@@ -195,7 +196,8 @@ class CanonicalDetailWriterTests(unittest.TestCase):
                 payload={"canonical": True},
                 now=NOW,
             )
-        # Even a fetch with Intervals-frozen targets leaves the row alone.
+        # Even a fetch with Intervals-frozen targets leaves the analysis alone;
+        # the row only gains the summary hash that settles the prefetch.
         self.fetch(
             record={
                 **fresh_record(),
@@ -206,12 +208,42 @@ class CanonicalDetailWriterTests(unittest.TestCase):
         self.legacy()
         with self.manager.reader() as db:
             row = db.execute(
-                "SELECT analysis_version, payload FROM activity_detail_analysis"
+                "SELECT analysis_version, input_sha256, payload "
+                "FROM activity_detail_analysis"
             ).fetchone()
         self.assertEqual(
-            (3, {"canonical": True}),
-            (row["analysis_version"], json.loads(row["payload"])),
+            (3, "0" * 64, {"canonical": True, "summary_sha256": SHA}),
+            (
+                row["analysis_version"],
+                row["input_sha256"],
+                json.loads(row["payload"]),
+            ),
         )
+
+    def test_detail_less_fetch_settles_a_canonical_session(self):
+        with self.manager.unit_of_work() as db:
+            activity_id = db.execute(
+                "SELECT activity_id FROM activity_records WHERE provider_activity_id = ?",
+                ("9001",),
+            ).fetchone()["activity_id"]
+            save_analysis(
+                db,
+                activity_id,
+                analysis_version=3,
+                input_sha256="0" * 64,
+                payload={"canonical": True},
+                now=NOW,
+            )
+        empty = {
+            "detail": {"id": "9001"},
+            "streams": {},
+            "record": {"observed_at": NOW, "summary_sha256": SHA},
+        }
+        self.assertEqual(DetailWriteOutcome.WRITTEN, self.fetch(**empty).outcome)
+        self.assertEqual(DetailWriteOutcome.UNCHANGED, self.fetch(**empty).outcome)
+        with self.manager.reader() as db:
+            settled = intervals_detail_fingerprints(db, ["9001"], batch_size=10)
+        self.assertEqual({"9001": {SHA}}, settled)
 
     def test_legacy_targets_reach_a_canonical_row_without_a_snapshot(self):
         targets = {"steps": [], "basis": {"ftp": 250}}

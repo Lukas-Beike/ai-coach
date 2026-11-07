@@ -297,6 +297,27 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertEqual(2, untouched["analysis_version"])
         self.assertNotIn("act_i2", calendar_profiles(self.manager))
 
+    def test_settled_intervals_summary_hash_survives_a_recompute(self) -> None:
+        # The hash only tells the Intervals.icu prefetch the copy was loaded.
+        self._write(
+            lambda db: _streams(db, GARMIN, "g1"),
+            lambda db: save_analysis(
+                db,
+                "act_g1",
+                analysis_version=2,
+                input_sha256="0" * 64,
+                payload={"summary_sha256": "b" * 64},
+                now=NOW,
+            ),
+        )
+
+        self._run()
+
+        row = self._row("act_g1")
+        assert row is not None
+        self.assertEqual(ANALYSIS_VERSION, row["analysis_version"])
+        self.assertEqual("b" * 64, row["payload"]["summary_sha256"])
+
     def test_snapshot_of_a_merged_session_carries_over(self) -> None:
         add_session_record(
             self.manager, INTERVALS, "i3", "act_i3", merged_into="act_g1"

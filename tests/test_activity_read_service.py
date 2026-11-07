@@ -186,23 +186,12 @@ class ActivityReadServiceTests(unittest.TestCase):
             canonical=canonical_source(rows, _Manager, fetched_at=fetched_at),
         )
 
-    def test_page_keeps_activities_with_failed_details_and_names_the_error(self):
+    def test_page_names_no_intervals_detail_failure(self):
+        # Intervals.icu details are never served (#1685), so a stored failure
+        # note marks no listed session.
         page = self.service(_FailedDetails()).page(today=date(2026, 9, 20))
-        self.assertEqual(
-            {"act_new": None, "act_old": "Detaildaten fehlerhaft."},
-            {item["id"]: item["detail_error"] for item in page["activities"]},
-        )
-
-    def test_page_hides_a_failure_note_of_an_older_summary_version(self):
-        class _OlderNote:
-            def failures(self, activity_ids):
-                note = {"message": "Detaildaten fehlerhaft.", "summary_sha256": "x"}
-                return {"old": note} if "old" in set(activity_ids) else {}
-
-        page = self.service(_OlderNote()).page(today=date(2026, 9, 20))
-        self.assertEqual(
-            {"act_new": None, "act_old": None},
-            {item["id"]: item["detail_error"] for item in page["activities"]},
+        self.assertFalse(
+            [item for item in page["activities"] if "detail_error" in item]
         )
 
     def test_page_filters_orders_attaches_feedback_and_uses_cursor(self):

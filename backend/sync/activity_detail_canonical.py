@@ -230,29 +230,40 @@ def _write_fetch_marker(
     """Record which summary version a fetch loaded, so prefetch settles it.
 
     The fetch computes no analysis any more (#1685), so this keeps the summary
-    hash in the session's older-version row that the prefetch reads; existing
-    values, such as a frozen target snapshot, stay. A canonical row is never
-    touched. Sessions without a local id get no marker.
+    hash in the session's analysis row that the prefetch reads; existing
+    values, such as a frozen target snapshot, stay, and a canonical row keeps
+    its analysis and fingerprint. Sessions without a local id get no marker.
     """
     activity_id = link["activity_id"]
     summary_sha256 = _sha256_or_none(record.get("summary_sha256"))
     if activity_id is None or summary_sha256 is None:
         return None
     existing = analysis_rows_for(db, [activity_id]).get(activity_id)
+    stored = existing["payload"] if existing is not None else {}
+    stored = stored if isinstance(stored, dict) else {}
     if existing is not None and existing["analysis_version"] >= CANONICAL_VERSION:
-        return WriteOutcome.UNCHANGED
-    payload = existing["payload"] if existing is not None else {}
-    payload = {
-        **(payload if isinstance(payload, dict) else {}),
-        "summary_sha256": summary_sha256,
-        "observed_at": record.get("observed_at"),
-    }
+        # The canonical row keeps its version and fingerprint, so the analysis
+        # is not recomputed; it only gains the loaded summary hash.
+        if stored.get("summary_sha256") == summary_sha256:
+            return WriteOutcome.UNCHANGED
+        return save_analysis(
+            db,
+            activity_id,
+            analysis_version=existing["analysis_version"],
+            input_sha256=existing["input_sha256"],
+            payload={**stored, "summary_sha256": summary_sha256},
+            now=now,
+        )
     return save_analysis(
         db,
         activity_id,
         analysis_version=ACTIVITY_DETAIL_ANALYSIS_VERSION,
         input_sha256=hashlib.sha256(summary_sha256.encode()).hexdigest(),
-        payload=payload,
+        payload={
+            **stored,
+            "summary_sha256": summary_sha256,
+            "observed_at": record.get("observed_at"),
+        },
         now=now,
     )
 

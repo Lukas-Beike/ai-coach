@@ -246,7 +246,7 @@ class PendingAndTableReadTests(_ActivityCase):
         ]
         for key in ("id", "started_at", "started_at_local", "sport", "record_ids"):
             self.assertIn(key, row)
-        self.assertIn("detail_error", row)
+        self.assertNotIn("detail_error", row)
         self.assertFalse(
             [
                 key
