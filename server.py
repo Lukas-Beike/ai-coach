@@ -2283,6 +2283,7 @@ HTTP_API = HttpApiAssembly(
                 job_queue=SYNC_JOB_QUEUE.service,
                 state_repository=sync_state_repository,
                 garmin_analysis_refresh=GARMIN_ASSEMBLY.analysis_refresh_service,
+                wahoo_sync=WAHOO_SYNC.sync_service,
                 full_resync=PROVIDER_RESYNC.full_resync_service,
                 period_defaults=SYNC_PERIOD_DEFAULTS,
                 all_sync_days=ALL_SYNC_DAYS,

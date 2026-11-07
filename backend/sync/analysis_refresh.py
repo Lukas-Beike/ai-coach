@@ -1,4 +1,4 @@
-"""Coordinate the bounded provider read used by an Analyse view."""
+"""Coordinate the bounded provider reads used by an Analyse view."""
 
 from __future__ import annotations
 
@@ -16,40 +16,88 @@ _SOURCE_NAMES = {
 }
 
 
+# Names of the Wahoo read per Analyse area; the other areas have no Wahoo data.
+_WAHOO_SOURCE_NAMES = {
+    "sessions": "Wahoo-Aktivitätsübersicht",
+    "performance": "Wahoo-Leistungswerte",
+}
+_WAHOO_WINDOW_DAYS = {"sessions": 42, "performance": 90}
+
+
 class AnalysisRefreshService:
-    """Refresh the selected view and report the provider's outcome."""
+    """Refresh the selected view and report each configured source separately.
+
+    Garmin reads the area's endpoints; Wahoo adds its workout read for the
+    activity and performance areas. A source that is not configured is neither
+    refreshed nor reported as missing.
+    """
 
     def __init__(
         self,
         garmin_refresh: Callable[[], Any],
         local_today: Callable[[], date],
+        wahoo_sync: Callable[[], Any] | None = None,
     ) -> None:
         self._garmin_refresh = garmin_refresh
         self._local_today = local_today
+        self._wahoo_sync = wahoo_sync
 
     def refresh(self, area: str, *, days: int | None = None) -> dict[str, Any]:
         _validate_request(area, days)
-        name = _SOURCE_NAMES[area]
-        try:
-            outcome = self._refresh_garmin(area, days)
-        except Exception:  # noqa: BLE001 - keep optional provider failures scoped.
-            outcome = {"status": "failed"}
-        status = outcome.get("status")
-        refreshed = status in {"ok", "partial"} and any(
-            outcome.get("sources", {}).values()
-        )
-        incomplete = refreshed and status == "partial"
-        pending = status == "already_running"
+        outcomes = self._run_refreshes(area, days)
+        refreshed, incomplete, pending, missing = [], [], [], []
+        for name, outcome in outcomes.items():
+            status = outcome.get("status")
+            if status in {"ok", "partial"} and outcome.get("read"):
+                refreshed.append(name)
+                if status == "partial":
+                    incomplete.append(name)
+            elif status == "already_running":
+                pending.append(name)
+            else:
+                missing.append(name)
         return {
             "area": area,
-            "status": _overall_status(refreshed, incomplete, pending),
-            "refreshed_sources": [name] if refreshed else [],
-            "incomplete_sources": [name] if incomplete else [],
-            "pending_sources": [name] if pending else [],
-            "not_refreshed_sources": [] if refreshed or pending else [name],
+            "status": _overall_status(
+                bool(refreshed), bool(incomplete or missing), bool(pending)
+            ),
+            "refreshed_sources": refreshed,
+            "incomplete_sources": incomplete,
+            "pending_sources": pending,
+            "not_refreshed_sources": missing,
             "truncated_sources": [],
-            "source_status": {name: status or "failed"},
+            "source_status": {
+                name: outcome.get("status") or "failed"
+                for name, outcome in outcomes.items()
+            },
         }
+
+    def _run_refreshes(self, area: str, days: int | None) -> dict[str, dict[str, Any]]:
+        outcomes: dict[str, dict[str, Any]] = {}
+        garmin = self._guarded(lambda: self._refresh_garmin(area, days))
+        if garmin.get("reason") != "not_configured":
+            outcomes[_SOURCE_NAMES[area]] = {
+                **garmin,
+                "read": any(garmin.get("sources", {}).values()),
+            }
+        wahoo = self._wahoo_sync() if self._wahoo_sync is not None else None
+        if (
+            wahoo is not None
+            and area in _WAHOO_SOURCE_NAMES
+            and self._guarded(wahoo.configured) is True
+        ):
+            result = self._guarded(
+                lambda: wahoo.sync(_WAHOO_WINDOW_DAYS[area], "Analyse-Aktualisierung")
+            )
+            outcomes[_WAHOO_SOURCE_NAMES[area]] = {**result, "read": True}
+        return outcomes
+
+    @staticmethod
+    def _guarded(action: Callable[[], Any]) -> Any:
+        try:
+            return action()
+        except Exception:  # noqa: BLE001 - keep optional provider failures scoped.
+            return {"status": "failed"}
 
     def _refresh_garmin(self, area: str, days: int | None) -> dict[str, Any]:
         end = self._local_today()

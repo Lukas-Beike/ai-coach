@@ -241,6 +241,7 @@ class HttpSyncServices:
     job_queue: Callable[[], Any]
     state_repository: Callable[[], Any]
     garmin_analysis_refresh: Callable[[], Any]
+    wahoo_sync: Callable[[], Any] | None
     full_resync: Callable[[], Any]
     period_defaults: Any
     all_sync_days: int
@@ -405,6 +406,7 @@ class HttpApiAssembly:
         sync_job_queue_service = sync.job_queue
         sync_state_repository = sync.state_repository
         garmin_analysis_refresh_service = sync.garmin_analysis_refresh
+        wahoo_sync_service = sync.wahoo_sync
         full_provider_resync_service = sync.full_resync
         sync_period_defaults = sync.period_defaults
         all_sync_days = sync.all_sync_days
@@ -563,6 +565,7 @@ class HttpApiAssembly:
             lambda: AnalysisRefreshService(
                 garmin_analysis_refresh_service,
                 local_today,
+                wahoo_sync_service,
             ),
         )
         self.history_undo_post_routes = HistoryUndoPostRoutes(
