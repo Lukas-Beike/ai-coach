@@ -139,6 +139,10 @@ class CanonicalVocabularyTests(unittest.TestCase):
                 "indoor_ftp": "W",
                 "session_load": "load",
                 "intensity_factor": "%",
+                "efficiency_factor": "ratio",
+                "variability_index": "ratio",
+                "mechanical_work": "kJ",
+                "aerobic_decoupling": "%",
             },
             {kind.value: kind.unit for kind in MetricKind},
         )

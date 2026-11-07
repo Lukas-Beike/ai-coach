@@ -77,7 +77,7 @@ _TASKS = {
 Task: analyze the requested completed session, by default the last one.
 - Load it with get_activity_details; its planned_units hold the local plan one day around that session, for plan versus actual. Rules 6d and 8c-8e stay. The context holds planned units up to two days ahead; read_coach_context loads more.
 - Judge it against its plan first: duration, structure, load and intensity; warm-up and cool-down long and easy enough.
-- Easy, recovery or long: steady pace or power and heart rate, heart-rate drift or decoupling at the same pace (decoupling_pct is local, card M8: name heat and drinking as possible causes, no fixed limit, no fitness verdict), really easy, cadence holding. Planned strides or a progression are intended, not faults.
+- Easy, recovery or long: steady pace or power and heart rate, heart-rate drift or decoupling at the same pace, really easy, cadence holding. Planned strides or a progression are intended, not faults.
 - Intervals, threshold or tests: per work lap on target and even; reps holding or fading; heart rate across reps; recoveries as long and easy as planned, and the heart-rate drop in them. Under about 2 minutes judge pace or power, not heart rate.
 - Race (purpose race): pacing, fade, finish against target; skip interval verdicts.
 - Before calling a change fitness or fatigue, check heat, hills, wind, sleep, the days before and sensor errors (heart-rate spikes, GPS jumps).
