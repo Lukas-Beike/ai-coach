@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import unittest
 from contextlib import closing, contextmanager
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -130,6 +131,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     intervals_api_key="fake-intervals-secret",
                     calendar_ical_url="https://calendar.invalid/fake-token",
                     garmin_tokenstore="/does-not-exist/fake-token-store",
+                    sync_history_earliest_date=date(2020, 1, 1),
                 ),
                 settings=SimpleNamespace(
                     selected_model=lambda: "gpt-test",
@@ -195,6 +197,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "canonical_session_conflicts",
                 "canonical_provider_composition",
                 "local_load",
+                "rating_backfill",
                 "session_metrics",
                 "session_analysis",
                 "logs",
@@ -285,8 +288,9 @@ class DiagnosticReportServiceTests(unittest.TestCase):
             )
         ]
         # The provider composition adds five reads (sessions, observations and
-        # three domain tables) to the same snapshot.
-        self.assertEqual(len(self.db.queries), 20)
+        # three domain tables) to the same snapshot; the rating backfill counts
+        # add three more (Intervals.icu and Garmin records, live sessions).
+        self.assertEqual(len(self.db.queries), 23)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
@@ -301,8 +305,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         )
         # Two extra reads: the Garmin configured signal checks the token blob and
         # the disconnect marker inside the same snapshot (see transactions above).
-        # One more reads the local load state (card M6).
-        self.assertEqual(self.key_values.get.call_count, 13)
+        # One more reads the local load state (card M6), one the rating backfill state.
+        self.assertEqual(self.key_values.get.call_count, 14)
 
     def test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:

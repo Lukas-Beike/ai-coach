@@ -34,16 +34,27 @@ JOB_TYPES = frozenset(
         "nutrition_sync",
         "historical_backfill",
         "wellness_backfill",
+        "rating_backfill",
     }
 )
 # Backfill chains and the sync-state cursor stream each one walks back.
 WELLNESS_BACKFILL = "wellness_backfill"
 WELLNESS_HISTORY_CURSOR = "wellness_history"
+RATING_BACKFILL = "rating_backfill"
+RATING_HISTORY_CURSOR = "rating_history"
 BACKFILL_CURSOR_STREAMS: dict[str, str] = {
     "historical_backfill": "historical",
     WELLNESS_BACKFILL: WELLNESS_HISTORY_CURSOR,
+    RATING_BACKFILL: RATING_HISTORY_CURSOR,
 }
 BACKFILL_JOB_TYPES = frozenset(BACKFILL_CURSOR_STREAMS)
+_BACKFILL_PROVIDER_MESSAGES = {
+    "historical_backfill": (
+        "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
+    ),
+    WELLNESS_BACKFILL: "Der Wellness-Backfill ist nur für Garmin zulässig.",
+    RATING_BACKFILL: "Der Bewertungs-Backfill ist nur für Garmin zulässig.",
+}
 # Built from the fixed type names above, never from request data.
 _BACKFILL_TYPES_SQL = "({})".format(
     ", ".join(f"'{job_type}'" for job_type in sorted(BACKFILL_JOB_TYPES))
@@ -271,11 +282,7 @@ def normalize_sync_job_request(
     if type_value in BACKFILL_JOB_TYPES and not registry.supports_job(
         provider_value, type_value
     ):
-        raise JobValidationError(
-            "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
-            if type_value == "historical_backfill"
-            else "Der Wellness-Backfill ist nur für Garmin zulässig."
-        )
+        raise JobValidationError(_BACKFILL_PROVIDER_MESSAGES[type_value])
     if type_value == "activity_details":
         normalized_payload = _normalize_activity_details_job(
             provider_value, values, registry

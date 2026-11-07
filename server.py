@@ -1650,6 +1650,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         activity_detail_service=GARMIN_ASSEMBLY.activity_detail_service,
         strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
         wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
+        rating_backfill_service=GARMIN_ASSEMBLY.rating_backfill_service,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,

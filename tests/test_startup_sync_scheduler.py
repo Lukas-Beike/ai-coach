@@ -159,6 +159,12 @@ class StartupSyncSchedulerTests(unittest.TestCase):
                     {"days": 45, "reason": "startup wellness backfill"},
                     "startup",
                 ),
+                (
+                    "garmin",
+                    "rating_backfill",
+                    {"days": 45, "reason": "startup rating backfill"},
+                    "startup",
+                ),
                 ("weather", "refresh", {"force": True, "reason": "startup"}, "startup"),
             ],
         )
@@ -168,6 +174,7 @@ class StartupSyncSchedulerTests(unittest.TestCase):
                 ("intervals", "historical"),
                 ("garmin", "historical"),
                 ("garmin", "wellness_history"),
+                ("garmin", "rating_history"),
             ],
         )
         self.assertEqual(sync_state.period_reads[0][0], "intervals")
@@ -178,7 +185,12 @@ class StartupSyncSchedulerTests(unittest.TestCase):
             for provider, kinds in {
                 "calendar": ("refresh",),
                 "intervals": ("refresh", "historical_backfill"),
-                "garmin": ("refresh", "historical_backfill", "wellness_backfill"),
+                "garmin": (
+                    "refresh",
+                    "historical_backfill",
+                    "wellness_backfill",
+                    "rating_backfill",
+                ),
                 "weather": ("refresh",),
             }.items()
             for kind in kinds
@@ -201,6 +213,7 @@ class StartupSyncSchedulerTests(unittest.TestCase):
                 ("garmin", "refresh"),
                 ("garmin", "historical_backfill"),
                 ("garmin", "wellness_backfill"),
+                ("garmin", "rating_backfill"),
                 ("weather", "refresh"),
             ],
         )
