@@ -986,6 +986,8 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .planned-session-line .planned-badges { display: inline-flex; margin-left: 6px; vertical-align: middle; }
 .planned-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border: 1px solid var(--warning-border); border-radius: 8px; color: var(--ink); background: var(--warning-surface-soft); font-size: .75rem; font-weight: 650; }
 .planned-conflict-button { min-height: 44px; margin-left: auto; }
+.planned-garmin-exercise { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
+.planned-suggestion-chip { min-height: 36px; padding: 4px 12px; border: 1px dashed currentColor; border-radius: 999px; background: none; color: inherit; font: inherit; font-size: .75rem; cursor: pointer; }
 .planned-group-items { display: grid; gap: 6px; padding: 0 6px 6px; }
 .planned-day-toggle > summary { min-height: 44px; align-items: center; cursor: pointer; list-style: none; }
 .planned-day-toggle > summary::-webkit-details-marker { display: none; }
