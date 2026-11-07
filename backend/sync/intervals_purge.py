@@ -365,7 +365,11 @@ def _plan(
         # stored item, then the smaller key.
         ordered = sorted(pool, key=lambda entry: entry[1])
         ordered.sort(
-            key=lambda entry: (entry[0], entry[1] == target, entry[1] not in moving),
+            key=lambda entry, survivor=target: (
+                entry[0],
+                entry[1] == survivor,
+                entry[1] not in moving,
+            ),
             reverse=True,
         )
         (_, winner), *losers = ordered
