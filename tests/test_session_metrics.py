@@ -161,13 +161,15 @@ class SessionMetricsTests(unittest.TestCase):
             self.assertNotEqual(base, other)
 
 
-def _store_streams(db: Any, provider_activity_id: str) -> None:
+def _store_streams(
+    db: Any, provider_activity_id: str, *, provider: ProviderId = ProviderId.GARMIN
+) -> None:
     replace_detail_set(
         db,
         ActivityStreamSet(
             provider_activity_id=provider_activity_id,
             provenance=Provenance(
-                provider=ProviderId.GARMIN,
+                provider=provider,
                 source_kind=SourceKind.PROVIDER_REPORTED,
                 source_record_id=None,
                 recorded_by=RecordingOrigin.GARMIN,
@@ -290,6 +292,16 @@ class SessionMetricsStageTests(unittest.TestCase):
         self.assertEqual(state["counts"]["retired"], 1)  # its EF row
         with self.manager.reader() as db:
             self.assertEqual(set(stored_session_metrics(db)), {"act_g1"})
+
+    def test_intervals_streams_are_not_read(self) -> None:
+        # Athlete decision 2026-11-07 (#1685): only Garmin, Wahoo and local data.
+        add_session_record(self.manager, ProviderId.INTERVALS, "i1", "act_g1")
+        with self.manager.unit_of_work() as db:
+            _store_streams(db, "i1", provider=ProviderId.INTERVALS)
+        self._run()
+        summary = self._served()
+        self.assertNotIn("work_kj", summary)
+        self.assertNotIn("decoupling_pct", summary)
 
     def test_session_without_values_is_not_recomputed(self) -> None:
         add_session_record(self.manager, ProviderId.GARMIN, "g2", "act_g2", sport="run")

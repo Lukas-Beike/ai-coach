@@ -43,6 +43,7 @@ from backend.providers.intervals_activity_fields import (
     ACTIVITY_DETAIL_STREAM_TYPES,
     activity_detail_laps,
 )
+from backend.providers.intervals_activity_keys import activity_ftp, activity_lthr
 from backend.providers.intervals_activity_mapping import intervals_analysis_sport
 from backend.providers.intervals_performance_fields import CONFIGURED_FTP
 from backend.runtime.ports import ActivityRowAndSummaryReader
@@ -221,7 +222,14 @@ class ActivityDetailRefreshService:
         }
         if len(json.dumps(record, allow_nan=False).encode()) > MAX_DETAIL_BYTES:
             raise AppError(502, "Die Detaildaten überschreiten die unterstützte Größe.")
-        record = {**record, "calendar_profile": recorded_profile(projected)}
+        record = {
+            **record,
+            "calendar_profile": recorded_profile(
+                projected,
+                ftp_w=activity_ftp(projected),
+                threshold_hr_bpm=activity_lthr(projected),
+            ),
+        }
         # One transaction: the canonical rows commit with the cleared failure note.
         with self._database_manager.unit_of_work() as db:
             written = self._canonical.write_fetch(

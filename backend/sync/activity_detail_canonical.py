@@ -25,6 +25,7 @@ from backend.canonical.vocabulary import (
     RecordingOrigin,
 )
 from backend.db.activity_detail_store import (
+    analysis_rows_for,
     detail_origins,
     remove_detail_sets,
     replace_detail_set,
@@ -34,6 +35,9 @@ from backend.db.canonical_store import (
     WriteOutcome,
     activity_record_link,
     canonical_json,
+)
+from backend.performance.canonical_session_analysis import (
+    ANALYSIS_VERSION as CANONICAL_VERSION,
 )
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
@@ -130,7 +134,7 @@ class CanonicalDetailWriter:
             db, result.records, _sha256_or_none(record.get("summary_sha256")), now
         )
         normalized_record = normalize_legacy_detail_targets(record)
-        analysis = _write_analysis(db, link, normalized_record, now)
+        analysis = _write_analysis(db, link, normalized_record, now, carry_targets=True)
         if analysis is not None:
             outcomes.append(analysis)
         return _result(outcomes, len(result.issues))
@@ -190,11 +194,23 @@ def _write_analysis(
     link: Mapping[str, Any],
     record: Mapping[str, Any],
     now: str,
+    *,
+    carry_targets: bool = False,
 ) -> WriteOutcome | None:
-    """Store the session analysis; only sessions with a local id have one."""
+    """Store the session analysis; only sessions with a local id have one.
+
+    A canonical row (#1685) is never replaced: it carries the snapshot over
+    and holds the one analysis every consumer reads. Only the legacy kv copy
+    (``carry_targets``) hands its frozen targets to such a row without one.
+    """
     activity_id = link["activity_id"]
     if activity_id is None or not _has_analysis_payload(record):
         return None
+    existing = analysis_rows_for(db, [activity_id]).get(activity_id)
+    if existing is not None and existing["analysis_version"] >= CANONICAL_VERSION:
+        if not carry_targets:
+            return WriteOutcome.UNCHANGED
+        return _carry_targets(db, activity_id, existing, record, now)
     payload = {key: record.get(key) for key in _ANALYSIS_KEYS}
     payload["summary_sha256"] = record.get("summary_sha256")
     payload["observed_at"] = record.get("observed_at")
@@ -204,6 +220,36 @@ def _write_analysis(
         analysis_version=ACTIVITY_DETAIL_ANALYSIS_VERSION,
         input_sha256=_analysis_input_hash(record),
         payload=payload,
+        now=now,
+    )
+
+
+def _carry_targets(
+    db: Any,
+    activity_id: str,
+    existing: Mapping[str, Any],
+    record: Mapping[str, Any],
+    now: str,
+) -> WriteOutcome:
+    """Give a canonical row without a snapshot the record's frozen targets.
+
+    The row keeps its fingerprint, so the next session-analysis pass sees the
+    changed input and recomputes the analysis with these targets.
+    """
+    payload = existing["payload"]
+    targets = record.get("target_snapshot")
+    if (
+        not isinstance(payload, dict)
+        or payload.get("target_snapshot") is not None
+        or not isinstance(targets, Mapping)
+    ):
+        return WriteOutcome.UNCHANGED
+    return save_analysis(
+        db,
+        activity_id,
+        analysis_version=existing["analysis_version"],
+        input_sha256=existing["input_sha256"],
+        payload={**payload, "target_snapshot": dict(targets)},
         now=now,
     )
 

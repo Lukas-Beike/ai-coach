@@ -14,13 +14,10 @@ from contextlib import closing, contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import Mock, patch
 
 from activity_row_support import (
-    FixedActivityRows,
     SnapshotActivityRows,
     canonical_source,
-    summaries_of_rows,
 )
 from canonical_detail_support import NOW, seed_intervals_activity
 
@@ -29,14 +26,9 @@ from backend.activities.detail_store import ActivityDetailStore, summary_fingerp
 from backend.activities.workout_profile import recorded_profile
 from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
-from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.detail_envelope import activity_equipment
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
-from backend.performance.report_service import TrainingRecordsService
-from backend.planning import calendar_read_model
-from backend.planning import season as planning_season
-from backend.planning.compact_activities import ActivitySummarySource
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
@@ -334,20 +326,13 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         with cast(DatabaseManager, self.database).unit_of_work() as db:
             CanonicalDetailWriter().write_legacy(db, record=record, now=NOW)
 
-    def test_fresh_record_returns_analysis_with_provenance(self) -> None:
+    def test_fresh_record_returns_provenance_without_intervals_analysis(
+        self,
+    ) -> None:
         self._save_analysis()
         result = self._detail([self.RAW])
-        # The analysis is recomputed from the canonical streams, not the cached one.
-        self.assertEqual(
-            {
-                "interval_quality",
-                "execution",
-                "aerobic",
-                "power_profile",
-                "running_profile",
-            },
-            set(result["analysis"]),
-        )
+        # An Intervals.icu-only session has no canonical analysis (#1685).
+        self.assertIsNone(result["analysis"])
         entry = _intervals_entry(result)
         self.assertFalse(entry["stale"])
         self.assertEqual("2026-05-04T06:00:00+00:00", entry["fetched_at"])
@@ -388,7 +373,6 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         self._save_analysis(summary_sha256=None)
         result = self._detail([{**self.RAW, "moving_time": 9999}])
         self.assertFalse(_intervals_entry(result)["stale"])
-        self.assertIsNotNone(result["analysis"])
 
     def test_missing_record_reports_no_detail_sets(self) -> None:
         result = self._detail([self.RAW])
@@ -398,7 +382,7 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         self.assertIsNone(entry["fetched_at"])
         self.assertEqual({}, entry["coverage"])
         self.assertIsNone(entry["load_error"])
-        self.assertIsNotNone(result["analysis"])
+        self.assertIsNone(result["analysis"])
 
     def test_recorded_load_failure_is_reported_until_details_are_saved(self) -> None:
         store = ActivityDetailStore(self.database)
@@ -450,213 +434,6 @@ class ActivityEquipmentTests(unittest.TestCase):
             [row["id"] for row in activity_equipment(equipment, "a1")],
         )
         self.assertEqual([], activity_equipment(equipment, "a3"))
-
-
-class TrainingRecordObservationCharacterizationTests(_StorageCase):
-    OK_RIDE = _activity(
-        "ride-ok",
-        DAY,
-        name="Threshold",
-        device_name="Wahoo ELEMNT",
-        moving_time=3600,
-    )
-    STALE_RIDE = _activity("ride-stale", PREVIOUS_DAY, name="Endurance")
-
-    def _observations(self, raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        service = TrainingRecordsService(
-            database_manager=self.database,
-            read_equipment=dict,
-            read_record=None,
-            canonical=canonical_source(FixedActivityRows(raw), lambda: self.database),
-        )
-        return service.observations()
-
-    def _save_analysis(
-        self, activity_id: str, fingerprint: str | None, aerobic: Any = None
-    ) -> None:
-        # Analyses are read for linked activities only.
-        _save_canonical(
-            self.database,
-            {
-                "activity_id": activity_id,
-                "activity": {},
-                "source": "Intervals.icu",
-                "observed_at": "2026-05-04T06:00:00Z",
-                "summary_sha256": fingerprint,
-                "session_analysis": {"aerobic": aerobic},
-            },
-        )
-
-    def test_observations_skip_entries_whose_fingerprint_does_not_match(self) -> None:
-        self._save_analysis(
-            "ride-ok", summary_fingerprint(self.OK_RIDE), {"status": "ok"}
-        )
-        self._save_analysis(
-            "ride-stale",
-            summary_fingerprint({**self.STALE_RIDE, "moving_time": 1800}),
-            {"status": "ok"},
-        )
-        records = self._observations([self.OK_RIDE, self.STALE_RIDE])
-        self.assertEqual(["ride-ok"], [record["activity_id"] for record in records])
-
-    def test_matching_observation_carries_snapshot_fields(self) -> None:
-        self._save_analysis(
-            "ride-ok", summary_fingerprint(self.OK_RIDE), {"status": "ok"}
-        )
-        (record,) = self._observations([self.OK_RIDE])
-        self.assertEqual("2026-05-04", record["date"])
-        # Canonical: the observation carries the summary sport, not the raw type.
-        self.assertEqual("ride", record["sport"])
-        self.assertEqual(3600, record["duration"])
-        # Canonical: the device is the summary's recording origin.
-        self.assertEqual("Wahoo ELEMNT", record["device"])
-        self.assertEqual("Intervals.icu", record["source"])
-        self.assertEqual({"status": "ok"}, record["aerobic"])
-
-    def test_observations_skip_unknown_activities_and_missing_aerobic(self) -> None:
-        self._save_analysis("ride-gone", "0" * 64, {"status": "ok"})
-        self._save_analysis(
-            "ride-stale",
-            summary_fingerprint(self.STALE_RIDE),
-            None,
-        )
-        self.assertEqual([], self._observations([self.STALE_RIDE]))
-
-    def test_observations_skip_records_without_a_fingerprint(self) -> None:
-        # Quirk pinned: observations() requires an exact fingerprint match, so a
-        # record without one is excluded, while activity detail treats the same
-        # record as not stale.
-        self._save_analysis("ride-ok", None, {"status": "ok"})
-        self.assertEqual([], self._observations([self.OK_RIDE]))
-
-    def test_observations_are_sorted_newest_first(self) -> None:
-        self._save_analysis(
-            "ride-ok", summary_fingerprint(self.OK_RIDE), {"status": "ok"}
-        )
-        self._save_analysis(
-            "ride-stale",
-            summary_fingerprint(self.STALE_RIDE),
-            {"status": "insufficient"},
-        )
-        records = self._observations([self.STALE_RIDE, self.OK_RIDE])
-        self.assertEqual(["ride-ok", "ride-stale"], [r["activity_id"] for r in records])
-
-
-class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
-    RAW = _activity("ride-1", DAY, name="Threshold", average_heartrate=150)
-    COMPACT_MATCHING = _activity("ride-1", DAY, name="Threshold", average_heartrate=150)
-    COMPACT_LEAN = _activity("ride-1", DAY, name="Threshold")
-
-    def _save_profile(self) -> None:
-        _save_canonical(
-            self.database,
-            {
-                "activity_id": "ride-1",
-                "activity": {
-                    "streams": {
-                        "time": list(range(3600)),
-                        "watts": [200] * 3600,
-                    }
-                },
-                "source": "Intervals.icu",
-                "observed_at": "2026-05-04T06:00:00Z",
-                "summary_sha256": summary_fingerprint(self.RAW),
-                "session_analysis": {"aerobic": {"status": "ok"}},
-            },
-        )
-
-    def _plan_service(
-        self,
-        snapshot: dict[str, Any],
-        compact: list[dict[str, Any]],
-        raw: list[dict[str, Any]],
-    ) -> PublicPlanStateService:
-        return PublicPlanStateService(
-            PublicPlanDependencies(
-                sync_state=Mock(
-                    sync_metadata=Mock(
-                        return_value={
-                            "provider_sync": snapshot.get("provider_sync", {})
-                        }
-                    )
-                ),
-                planned_units=Mock(list=Mock(return_value=[])),
-                activity_feedback=Mock(attach_to_activities=lambda rows: list(rows)),
-                weather=Mock(state=Mock(return_value={})),
-                adaptive_followup=Mock(),
-                database_manager_factory=lambda: cast(DatabaseManager, self.database),
-                key_values=Mock(get=Mock(return_value=None)),
-                training_plans=Mock(list=Mock(return_value=[])),
-                external_calendar=Mock(
-                    list_events=Mock(return_value=[]),
-                    list_events_in_window=Mock(return_value=[]),
-                    state=Mock(return_value={}),
-                ),
-                external_calendar_sync=Mock(running=Mock(return_value=False)),
-                daily_context=Mock(build=Mock(return_value={})),
-                checkins=Mock(list=Mock(return_value=[])),
-                competitions=Mock(list=Mock(return_value=[])),
-                adaptive_preview=Mock(
-                    latest_preview=Mock(return_value=None),
-                    status=Mock(return_value={}),
-                ),
-                coach_quick_actions=Mock(state=Mock(return_value={})),
-                today=lambda: TODAY,
-                external_calendar_configured=False,
-                external_calendar_window_days=14,
-                default_workout_name="Workout",
-                # The plan shows summaries; the raw rows behind them fingerprint
-                # the stored workout profiles.
-                activity_rows=cast(
-                    ActivitySummarySource,
-                    Mock(compact=Mock(return_value=list(summaries_of_rows(compact)))),
-                ),
-                fingerprint_reader=lambda: FixedActivityRows(raw),
-            )
-        )
-
-    def _planning_activities(
-        self, compact: list[dict[str, Any]], raw: list[dict[str, Any]] | None = None
-    ) -> list[Any]:
-        snapshot = _snapshot(compact, [self.RAW])
-        captured: list[Any] = []
-
-        def capture(*args: Any, **_kwargs: Any) -> dict[str, Any]:
-            captured.append(args[1])
-            return {}
-
-        with (
-            patch.object(
-                calendar_read_model, "project_planning_calendar", side_effect=capture
-            ),
-            patch.object(planning_season, "planning_state", return_value={}),
-        ):
-            self._plan_service(snapshot, compact, raw or [self.RAW]).read()
-        return captured[0]
-
-    def test_compact_row_with_matching_projection_gets_recorded_profile(self) -> None:
-        self._save_profile()
-        (row,) = self._planning_activities([self.COMPACT_MATCHING])
-        self.assertEqual("recorded", row["workout_profile"]["source"])
-
-    def test_profile_follows_the_raw_row_not_the_compact_summary(self) -> None:
-        # Canonical: the plan fingerprints the raw row behind each summary, so a
-        # summary that omits a projected field keeps its profile while the stored
-        # record is fresh (the former compact-row fingerprint quirk no longer applies).
-        self._save_profile()
-        (row,) = self._planning_activities([self.COMPACT_LEAN])
-        self.assertEqual("recorded", row["workout_profile"]["source"])
-        snapshots = _Snapshots(_snapshot([self.COMPACT_LEAN], [self.RAW]))
-        detail = _detail_service(self.database, snapshots).detail(
-            "ride-1", garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=TODAY
-        )
-        self.assertFalse(_intervals_entry(detail)["stale"])
-
-    def test_changed_raw_row_hides_the_stored_profile(self) -> None:
-        self._save_profile()
-        changed = {**self.RAW, "average_heartrate": 151}
-        (row,) = self._planning_activities([self.COMPACT_MATCHING], [changed])
-        self.assertNotIn("workout_profile", row)
 
 
 if __name__ == "__main__":

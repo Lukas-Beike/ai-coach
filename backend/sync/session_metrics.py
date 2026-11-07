@@ -33,6 +33,7 @@ from backend.canonical.records import (
     Provenance,
 )
 from backend.canonical.vocabulary import (
+    ProviderId,
     RecordingOrigin,
     SourceKind,
     Sport,
@@ -44,6 +45,7 @@ from backend.performance.canonical_detail import (
     detail_candidates,
     primary_analysis_record,
 )
+from backend.performance.canonical_session_analysis import analysis_records
 from backend.performance.session_metrics import (
     METHOD_ID,
     METHOD_VERSION,
@@ -64,6 +66,7 @@ _LOGGER = logging.getLogger("intervals_coach")
 STAGE: Final = "session_metrics"
 STATE_KEY: Final = "session_metrics_state"
 DEFAULT_BATCH_SIZE: Final = 100
+_INTERVALS: Final = ProviderId.INTERVALS.value
 
 
 def _members(records: Sequence[ActivityRecord]) -> list[list[object]]:
@@ -82,13 +85,14 @@ def _analysis_activity(
     db: Any, session_id: str, records: Sequence[ActivityRecord]
 ) -> dict[str, Any]:
     """The merged analysis input of the session's full-resolution streams."""
+    own = analysis_records(records)
     stored = activity_detail_store.full_stream_sets_for_session(db, session_id)
-    merged = merge_details(detail_candidates(records, stored))
+    merged = merge_details(detail_candidates(own, stored))
     adapted = analysis_input(
-        primary_analysis_record(records),
+        primary_analysis_record(own),
         merged.streams,
         None,
-        members=measured_order(records),
+        members=measured_order(own),
     )
     return adapted.activity
 
@@ -245,9 +249,15 @@ class SessionMetricsStage:
             )
             if wants_metrics(summary)
         ]
-        stream_keys = activity_detail_store.full_stream_keys(
-            db, [str(summary["id"]) for summary in summaries]
-        )
+        # Like the session analysis (#1685), Intervals.icu streams are not read.
+        stream_keys = {
+            session_id: own
+            for session_id, keys in activity_detail_store.full_stream_keys(
+                db, [str(summary["id"]) for summary in summaries]
+            ).items()
+            if (own := tuple(key for key in keys if key.provider != _INTERVALS))
+            and analysis_records(sessions[session_id])
+        }
         stored = stored_session_metrics(db)
         state = self._state(db)
         plan = _plan(summaries, sessions, stream_keys, stored, state.get("empty") or {})

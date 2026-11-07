@@ -41,6 +41,9 @@ from backend.db.activity_detail_store import (
 )
 from backend.db.canonical_store import activity_record_link, canonical_json
 from backend.db.repositories import KeyValueRepository
+from backend.performance.canonical_session_analysis import (
+    ANALYSIS_VERSION as CANONICAL_VERSION,
+)
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
     STREAM_KEY_CHANNELS,
@@ -387,12 +390,20 @@ def _analysis_proven(
     payload = row["payload"]
     if not isinstance(payload, dict):
         return False
-    if payload.get("summary_sha256") != record.get("summary_sha256"):
+    canonical = row["analysis_version"] >= CANONICAL_VERSION
+    if not canonical and payload.get("summary_sha256") != record.get("summary_sha256"):
         return False
     try:
         record = normalize_legacy_detail_targets(record)
     except RuntimeError:
         return False
+    if canonical:
+        # The canonical analysis is recomputed from Garmin, Wahoo and local
+        # detail (#1685); only the athlete's frozen targets must be kept.
+        targets = record.get("target_snapshot")
+        return targets is None or canonical_json(
+            {"t": payload.get("target_snapshot")}
+        ) == canonical_json({"t": targets})
     return all(
         canonical_json({key: payload.get(key)})
         == canonical_json({key: record.get(key)})

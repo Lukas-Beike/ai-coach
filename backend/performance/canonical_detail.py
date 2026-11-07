@@ -10,7 +10,6 @@ the current summary row when it carries them. The caller owns the transaction:
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, tzinfo
@@ -23,8 +22,6 @@ from backend.activities.detail_contract import (
 )
 from backend.activities.detail_merge import (
     DetailCandidate,
-    MergedDetail,
-    MergedStreams,
     merge_details,
 )
 from backend.activities.detail_store import summary_fingerprint
@@ -33,22 +30,19 @@ from backend.activities.stream_zones import with_stream_zones
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_detail import (
     ActivityDetailSet,
-    ActivityStreamSet,
     ZoneDistribution,
 )
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     ActivitySessionState,
     ProviderId,
-    StreamChannel,
-    StreamResolution,
 )
 from backend.db import activity_detail_store, canonical_store
 from backend.db.activity_detail_store import StoredDetailSet
-from backend.performance.analysis_input import analysis_input
-from backend.performance.power_profile import power_profile, running_profile
-from backend.performance.session_analysis import aerobic_analysis, interval_quality
-from backend.performance.session_execution import session_execution
+from backend.performance.canonical_session_analysis import (
+    analysis_records,
+    session_analysis,
+)
 from backend.performance.session_metrics_reads import (
     detail_metric_entries,
     stored_session_metrics,
@@ -189,12 +183,14 @@ class CanonicalDetailReader:
                 merged, lambda: zone_settings(db, analysis_record)
             )
         status = self._status(db, sets, intervals_id, summary)
-        stale = any(state.stale for state in status.values())
-        analysis = (
-            None
-            if stale
-            else self._analysis(db, activity_id, analysis_record, merged, records)
+        # Intervals.icu detail is no analysis input (#1685), so its staleness
+        # withholds nothing.
+        stale = any(
+            state.stale
+            for provider, state in status.items()
+            if provider is not ProviderId.INTERVALS
         )
+        analysis = None if stale else self._analysis(db, activity_id, stored, records)
         envelope = (
             None
             if self._envelope is None
@@ -224,64 +220,22 @@ class CanonicalDetailReader:
         self,
         db: Any,
         activity_id: str,
-        analysis_record: ActivityRecord,
-        merged: MergedDetail,
+        stored: Sequence[StoredDetailSet],
         records: Sequence[ActivityRecord],
-    ) -> dict[str, Any]:
-        """Recompute the session analysis from the merged streams and laps."""
-        payload = _stored_payload(db, activity_id, analysis_record)
-        adapted = analysis_input(
-            analysis_record,
-            merged.streams,
-            merged.laps,
-            decoupling=_decoupling(payload),
-            members=measured_order(records),
+    ) -> dict[str, Any] | None:
+        """The canonical session analysis of the session's non-Intervals detail.
+
+        The same computation as the stored analysis (#1685); without Garmin,
+        Wahoo or local records the session has none.
+        """
+        own = analysis_records(records)
+        if not own:
+            return None
+        merged = merge_details(detail_candidates(own, stored))
+        targets = stored_targets(db, activity_id, records)
+        return session_analysis(
+            own, merged, targets if isinstance(targets, dict) else None
         )
-        targets = payload.get("target_snapshot")
-        # Each analysis credits only the providers of the channels it reads.
-        return {
-            "interval_quality": interval_quality(
-                adapted.activity,
-                targets if isinstance(targets, dict) else None,
-                source_label=adapted.label_for(
-                    "watts", "heartrate", "velocity_smooth", "laps"
-                ),
-            ),
-            "execution": session_execution(
-                adapted.activity,
-                source_label=adapted.label_for(
-                    "watts", "heartrate", "velocity_smooth", "cadence", "laps"
-                ),
-            ),
-            "aerobic": aerobic_analysis(
-                adapted.activity,
-                source_label=adapted.label_for(
-                    "watts", "heartrate", "velocity_smooth", "moving"
-                ),
-            ),
-            "power_profile": {
-                **power_profile(
-                    adapted.activity, source_label=adapted.label_for("watts", "moving")
-                ),
-                "stream_resolution": stream_resolution(
-                    merged.streams, StreamChannel.POWER_W, StreamChannel.MOVING
-                ),
-            },
-            "running_profile": {
-                **running_profile(
-                    adapted.activity,
-                    source_label=adapted.label_for(
-                        "velocity_smooth", "distance", "moving"
-                    ),
-                ),
-                "stream_resolution": stream_resolution(
-                    merged.streams,
-                    StreamChannel.SPEED_MPS,
-                    StreamChannel.DISTANCE_M,
-                    StreamChannel.MOVING,
-                ),
-            },
-        }
 
     def _status(
         self,
@@ -337,27 +291,6 @@ class CanonicalDetailReader:
         if not note or note.get("summary_sha256") != fingerprint:
             return None
         return {"message": note.get("message"), "observed_at": note.get("observed_at")}
-
-
-def stream_resolution(
-    streams: MergedStreams | None, *channels: StreamChannel
-) -> str | None:
-    """Return the resolution: downsampled when the time axis or a read channel is."""
-    if streams is None:
-        return None
-    sources = [streams.primary] + [
-        streams.channels[channel].source
-        for channel in channels
-        if channel in streams.channels
-    ]
-    downsampled = any(
-        isinstance(source.stored.detail, ActivityStreamSet)
-        and source.stored.detail.resolution is StreamResolution.DOWNSAMPLED
-        for source in sources
-    )
-    return (
-        StreamResolution.DOWNSAMPLED if downsampled else StreamResolution.FULL
-    ).value
 
 
 def detail_candidates(
@@ -490,34 +423,23 @@ def _summary_metrics(
     return metrics
 
 
-def _stored_payload(
-    db: Any, activity_id: str, record: ActivityRecord
-) -> dict[str, Any]:
-    """Return the stored analysis of the record's own session, else the session's."""
-    provider = _provider_text(record)
-    row = (
-        None
-        if provider is None
-        else activity_detail_store.analysis_row_for_record(
-            db, provider, record.activity_id
-        )
+def stored_targets(
+    db: Any, activity_id: str, records: Sequence[ActivityRecord]
+) -> dict[str, Any] | None:
+    """The frozen target snapshot of the session, else of a session merged into it.
+
+    Snapshots are athlete-plan context, so a row kept under any record's own
+    session counts, Intervals.icu records included.
+    """
+    rows = [activity_detail_store.analysis_rows_for(db, [activity_id]).get(activity_id)]
+    rows.extend(
+        activity_detail_store.analysis_row_for_record(db, provider, record.activity_id)
+        for record in records
+        if (provider := _provider_text(record)) is not None
     )
-    if row is None:
-        row = activity_detail_store.analysis_rows_for(db, [activity_id]).get(
-            activity_id
-        )
-    if row is None:
-        return {}
-    payload = row.get("payload")
-    return payload if isinstance(payload, dict) else {}
-
-
-def _decoupling(payload: Mapping[str, Any]) -> float | None:
-    """Return the stored provider decoupling when it is a finite number."""
-    session = payload.get("session_analysis")
-    aerobic = session.get("aerobic") if isinstance(session, dict) else None
-    provider = aerobic.get("provider_decoupling") if isinstance(aerobic, dict) else None
-    value = provider.get("value") if isinstance(provider, dict) else None
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value) if math.isfinite(value) else None
+    for row in rows:
+        payload = None if row is None else row.get("payload")
+        targets = payload.get("target_snapshot") if isinstance(payload, dict) else None
+        if isinstance(targets, dict):
+            return targets
+    return None

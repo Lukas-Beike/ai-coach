@@ -15,7 +15,6 @@ from backend.activities.activity_summary import (
     summary_is_indoor,
     summary_local_date,
 )
-from backend.activities.detail_analysis_reads import analysis_summaries
 from backend.activities.session_purpose import summary_is_not_training, summary_is_race
 from backend.canonical.stored_sports import resolve_workout_sport
 from backend.canonical.vocabulary import ProviderId
@@ -23,7 +22,6 @@ from backend.db import activity_detail_store
 from backend.errors import AppError
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
-    activity_summaries_and_fingerprints,
     activity_summaries_for,
     activity_summaries_with_load_days,
     activity_summaries_with_sync_time,
@@ -50,6 +48,7 @@ from backend.performance.season_inputs import (
     read_activity_summaries,
     read_season_load_inputs,
 )
+from backend.performance.session_analysis_reads import analysis_summaries
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.smoothed_load import history_start
 from backend.performance.tag_impact import tag_impact
@@ -111,26 +110,26 @@ class TrainingRecordsService:
         return recurring_training_comparisons(self.observations())
 
     def observations(self) -> list[dict[str, Any]]:
+        """Stored canonical session analyses (#1685) with their session fields."""
         stored_analyses = analysis_summaries(self._database_manager)
-        summaries, fingerprints = activity_summaries_and_fingerprints(
-            self._canonical, [stored["activity_id"] for stored in stored_analyses]
-        )
-        known = {stored_activity_key(summary): summary for summary in summaries}
+        known = {
+            str(summary.get("id")): summary
+            for summary in activity_summaries_for(self._canonical)
+        }
         records = []
         for stored in stored_analyses:
-            summary = known.get(stored["activity_id"])
-            if summary is None or stored["summary_sha256"] != fingerprints.get(
-                stored["activity_id"]
-            ):
+            summary = known.get(stored["session_id"])
+            if summary is None:
                 continue
+            fields = {
+                key: value for key, value in stored.items() if key != "session_id"
+            }
             records.append(
                 {
-                    **stored,
+                    **fields,
                     **summary_fields(summary),
-                    # Stored analyses come from the Intervals.icu detail.
-                    "source": "Intervals.icu"
-                    if ProviderId.INTERVALS.value in (summary.get("record_ids") or {})
-                    else summary.get("source") or "Intervals.icu",
+                    "activity_id": stored_activity_key(summary),
+                    "source": stored.get("source") or summary.get("source"),
                     "average_temp": summary.get("avg_temp_c"),
                     "duration": summary_duration_s(summary),
                 }
