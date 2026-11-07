@@ -24,7 +24,7 @@ The system SHALL assemble an `activity_detail.v1` document for a canonical sessi
 
 #### Scenario: Executed strength sets in plan compliance
 - **WHEN** a completed strength session with executed sets is matched to a planned unit with a `strength_structure`
-- **THEN** its compliance uses basis `strength_sets`: per planned exercise, matched by the exercise category of its Garmin catalogue exercise, the sets done at or above the planned reps against the planned sets; exercises without a known category are `unknown`, never a miss, and without a matched exercise or executed sets the duration or load basis stays.
+- **THEN** its compliance uses basis `strength_sets`: per planned exercise, matched by the exercise category of its Garmin catalogue exercise, the sets done at or above the planned reps against the planned sets; exercises without a known category are `unknown`, never a miss, and without a matched exercise or executed sets the duration or load basis stays. The PWA calendar entry lists each planned exercise with its completed sets, executed reps and plan, and the activity detail shows every executed set with exercise, reps, kg and rest.
 
 Evidence: `backend/activities/strength_sets.py:plan_comparison`, `backend/activities/calendar_projection.py:workout_compliance`; `tests/test_strength_consumers.py`.
 

@@ -1594,6 +1594,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   .activity-series svg { min-width: 0; }
 }
 .activity-laps { padding-left: 22px; }
+.planned-strength { margin: 4px 0 0; padding-left: 18px; }
 .report-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .weekly-chart svg { width: 100%; height: auto; max-width: 480px; margin-inline: auto; }
 .weekly-chart { padding-top: 8px; }

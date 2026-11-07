@@ -74,6 +74,7 @@
     content.append(...providerNotes(payload));
     renderSeries(session, payload.streams, content);
     renderLaps(payload.laps, content);
+    renderStrengthSets(payload.strength_sets, content);
     renderIntervalQuality(payload, content);
     renderAerobic(payload, content);
     renderPower(payload, content);
@@ -351,6 +352,50 @@
       });
       content.append(list);
     }
+  }
+
+
+  const STRENGTH_SOURCES = { garmin_exercise_sets: "Garmin-Sätze", fit_set_messages: "FIT-Datei" };
+
+  const STRENGTH_CATEGORIES = { squat: "Kniebeuge", deadlift: "Kreuzheben", lunge: "Ausfallschritt", leg_curl: "Beinbeuger", calf_raise: "Wadenheben", hip_raise: "Hüftheben", hip_swing: "Kettlebell-Swing", olympic_lift: "Olympisches Heben", plyo: "Sprünge", total_body: "Ganzkörper", bench_press: "Bankdrücken", row: "Rudern", pull_up: "Klimmzug", push_up: "Liegestütz", shoulder_press: "Schulterdrücken", lateral_raise: "Seitheben", curl: "Bizepscurl", triceps_extension: "Trizeps", plank: "Plank", core: "Rumpf", crunch: "Crunch", sit_up: "Sit-up", carry: "Tragen", other: "Unbekannte Übung" };
+
+  // Provider codes such as BARBELL_BACK_SQUAT become words; the category labels the rest.
+  function strengthExerciseLabel(exercise) {
+    if (exercise.name) return exercise.name.toLowerCase().split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+    return STRENGTH_CATEGORIES[exercise.category] || "Übung";
+  }
+
+  function strengthNumber(value, digits = 1) {
+    return value == null ? "–" : Number(value).toLocaleString("de-DE", { maximumFractionDigits: digits });
+  }
+
+  function renderStrengthSets(strength, content) {
+    if (!strength?.exercises?.length) return;
+    content.append(node("h3", "Kraftsätze"));
+    content.append(node("p", [
+      `${strength.active_sets} Sätze`,
+      strength.total_reps != null ? `${strength.total_reps} Wdh.` : null,
+      strength.volume_kg != null ? `${strengthNumber(strength.volume_kg)} kg Volumen` : null,
+      STRENGTH_SOURCES[strength.source],
+    ].filter(Boolean).join(" · "), "muted"));
+    const tableWrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table strength-sets"), "Kraftsätze");
+    const table = node("table");
+    table.append(node("caption", "Ausgeführte Sätze je Übung"));
+    const thead = node("thead"); const heading = node("tr");
+    ["Übung", "Satz", "Wdh.", "kg", "Pause"].forEach((label) => { const cell = node("th", label); cell.scope = "col"; heading.append(cell); });
+    thead.append(heading); table.append(thead);
+    const body = node("tbody");
+    strength.exercises.forEach((exercise) => {
+      const name = strengthExerciseLabel(exercise);
+      (exercise.set_list || []).forEach((set, index) => {
+        const row = node("tr");
+        const nameCell = node("th", index === 0 ? name : ""); nameCell.scope = "row"; row.append(nameCell);
+        row.append(node("td", String(index + 1)), node("td", strengthNumber(set.reps, 0)), node("td", strengthNumber(set.weight_kg)), node("td", set.rest_s != null ? `${set.rest_s} s` : "–"));
+        body.append(row);
+      });
+    });
+    table.append(body); tableWrap.append(table); content.append(tableWrap);
+    if (strength.omitted_exercises) content.append(node("p", `${strength.omitted_exercises} weitere Übungen nicht angezeigt.`, "muted"));
   }
 
 

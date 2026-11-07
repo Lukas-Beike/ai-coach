@@ -342,6 +342,21 @@ function plannedEntryDurationLabel(actual, entry) {
   return AppFormat.duration(entry.planned_duration_s);
 }
 
+function plannedStrengthRows(strength) {
+  if (!strength?.exercises?.length) return null;
+  const list = document.createElement("ul");
+  list.className = "planned-strength";
+  strength.exercises.forEach((exercise) => {
+    const plan = `${exercise.planned_sets}×${exercise.planned_reps}${exercise.planned_kg != null ? ` @ ${calendarMetricNumber(exercise.planned_kg)} kg` : ""}`;
+    const item = document.createElement("li");
+    item.textContent = exercise.status === "matched"
+      ? `${exercise.name}: ${exercise.completed_sets}/${exercise.planned_sets} Sätze erreicht · Ist ${(exercise.reps || []).map((reps) => reps ?? "?").join("/") || "–"} Wdh. · Plan ${plan}`
+      : `${exercise.name}: nicht zugeordnet · Plan ${plan}`;
+    list.append(item);
+  });
+  return list;
+}
+
 function appendPlannedCalendarComparison(details, entry, actual) {
   if (!actual || entry.is_completed_activity) return;
   const comparison = document.createElement("div");
@@ -365,6 +380,8 @@ function appendPlannedCalendarComparison(details, entry, actual) {
     ratio.textContent = `${ratioLabel} Plan/Ist: ${entry.compliance.percentage} %`;
     comparison.append(ratio);
   }
+  const strengthRows = plannedStrengthRows(entry.compliance?.strength_sets);
+  if (strengthRows) comparison.append(strengthRows);
   details.append(comparison);
 }
 
