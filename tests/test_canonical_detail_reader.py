@@ -243,66 +243,76 @@ class CanonicalDetailReaderTests(unittest.TestCase):
         self.assertIsNone(self.read("act_4"))
         self.assertIsNone(self.read("act_missing"))
 
+    def garmin_ride(self, activity_id="act_5", provider_id="g-ride-98") -> None:
+        """A Garmin ride with power, heart rate and work laps."""
+        self.add_session(activity_id)
+        self.add_record(GARMIN, provider_id, activity_id)
+        self.store_streams(GARMIN, provider_id, {HR: heart_rate(), POWER: power()})
+        self.store_laps(GARMIN, provider_id)
+
     def test_stored_target_snapshot_reaches_interval_quality(self) -> None:
-        self.ride_session()
-        without_targets = self.read("act_1")["analysis"]["interval_quality"]
+        self.garmin_ride()
+        without_targets = self.read("act_5")["analysis"]["interval_quality"]
 
         save_analysis(
             self.db,
-            "act_1",
+            "act_5",
             analysis_version=1,
             input_sha256="0" * 64,
             payload={"target_snapshot": TARGETS},
             now=STAMP,
         )
-        with_targets = self.read("act_1")["analysis"]["interval_quality"]
+        with_targets = self.read("act_5")["analysis"]["interval_quality"]
 
         self.assertEqual("ok", with_targets["status"])
         self.assertNotEqual(without_targets, with_targets)
 
-    def test_stored_decoupling_reaches_the_aerobic_analysis(self) -> None:
-        self.ride_session()
+    def test_intervals_detail_and_decoupling_are_never_analysis_inputs(self) -> None:
+        # Athlete decision 2026-11-07 (#1685): Garmin, Wahoo and local data only.
+        self.add_session("act_7")
+        self.add_record(INTERVALS, "i-only-97", "act_7")
+        self.store_streams(INTERVALS, "i-only-97", {HR: heart_rate(), POWER: power()})
+        self.assertIsNone(self.read("act_7")["analysis"])
+
+        self.garmin_ride()
         save_analysis(
             self.db,
-            "act_1",
-            analysis_version=1,
+            "act_5",
+            analysis_version=2,
             input_sha256="0" * 64,
             payload={
                 "session_analysis": {"aerobic": {"provider_decoupling": {"value": 4.2}}}
             },
             now=STAMP,
         )
+        aerobic = self.read("act_5")["analysis"]["aerobic"]
+        self.assertNotIn("provider_decoupling", aerobic)
 
-        aerobic = self.read("act_1")["analysis"]["aerobic"]
+    def test_ride_session_analysis_reads_only_the_garmin_streams(self) -> None:
+        self.ride_session()
 
-        self.assertEqual(4.2, aerobic["provider_decoupling"]["value"])
+        analysis = self.read("act_1")["analysis"]
 
-    def test_analysis_of_a_merged_intervals_session_is_read(self) -> None:
-        self.add_session("act_5")
-        self.add_record(GARMIN, "g-ride-98", "act_5")
-        self.store_streams(GARMIN, "g-ride-98", {HR: heart_rate(), POWER: power()})
+        self.assertEqual(ANALYSIS_KEYS, set(analysis))
+        self.assertIn("Garmin", analysis["aerobic"]["source"])
+        self.assertNotIn("Intervals", analysis["aerobic"]["source"])
+
+    def test_target_snapshot_of_a_merged_session_is_read(self) -> None:
+        self.garmin_ride()
         self.add_session("act_6", "duplicate", merged_into="act_5")
         self.add_record(INTERVALS, "i-ride-98", "act_6")
-        self.store_streams(
-            INTERVALS,
-            "i-ride-98",
-            {HR: heart_rate(), POWER: power()},
-            recorded_by=RecordingOrigin.WAHOO,
-        )
         save_analysis(
             self.db,
             "act_6",
-            analysis_version=1,
+            analysis_version=2,
             input_sha256="0" * 64,
-            payload={
-                "session_analysis": {"aerobic": {"provider_decoupling": {"value": 4.2}}}
-            },
+            payload={"target_snapshot": TARGETS},
             now=STAMP,
         )
 
-        aerobic = self.read("act_5")["analysis"]["aerobic"]
+        quality = self.read("act_5")["analysis"]["interval_quality"]
 
-        self.assertEqual(4.2, aerobic["provider_decoupling"]["value"])
+        self.assertEqual("ok", quality["status"])
 
     def test_stored_sets_carry_the_labels_of_their_records(self) -> None:
         self.ride_session()
@@ -539,7 +549,6 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
         intervals = self.provider(doc, "intervals")
         self.assertFalse(intervals["stale"])
         self.assertEqual(["heart_rate_zones", "streams"], intervals["kinds"])
-        self.assertIsNotNone(doc["analysis"])
 
     def test_live_zone_times_are_served_without_a_stored_zone_set(self) -> None:
         self.store(summary_fingerprint(self.summary))
@@ -557,10 +566,6 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
 
     def test_stale_provider_withholds_analysis_and_shows_current_scalars(self) -> None:
         self.store(summary_fingerprint(self.summary))
-        fresh = self.reader.read(self.db, "act_1")
-        assert fresh is not None
-        self.assertIsNotNone(fresh["analysis"])
-
         self.summary["average_speed"] = 9.5
         doc = self.reader.read(self.db, "act_1")
         assert doc is not None
@@ -599,7 +604,8 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
         assert doc is not None
 
         self.assertFalse(self.provider(doc, "intervals")["stale"])
-        self.assertEqual(ANALYSIS_KEYS, set(doc["analysis"]))
+        # An Intervals.icu-only session has no canonical analysis.
+        self.assertIsNone(doc["analysis"])
 
     def test_refreshable_providers_are_read_per_document(self) -> None:
         self.store(None)

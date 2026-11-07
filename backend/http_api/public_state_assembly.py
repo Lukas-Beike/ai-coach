@@ -36,7 +36,6 @@ from backend.performance.source_policy import (
 )
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.runtime.ports import (
-    ActivityFingerprintReader,
     ActivityRowAndSummaryReader,
     CanonicalReadStatus,
     ObservationReader,
@@ -244,12 +243,6 @@ class PublicStateAssembly:
             self._activity_summary_reader,
         )
 
-    def _fingerprint_reader(self) -> ActivityFingerprintReader:
-        """The canonical read selector, which also serves summary fingerprints."""
-        if self._activity_summary_reader is None:
-            raise RuntimeError("The plan state needs an activity summary reader.")
-        return self._activity_summary_reader()
-
     def activity_summary_source(self) -> ActivitySummarySource | None:
         if self._activity_summary_reader is None:
             return None
@@ -380,7 +373,6 @@ class PublicStateAssembly:
                 external_calendar_window_days=self._external_calendar_window_days(),
                 default_workout_name=self._planned_workout_label(),
                 activity_rows=self.activity_summary_source(),
-                fingerprint_reader=self._fingerprint_reader,
                 zone_configurations=athlete.zones().configurations,
                 sport_thresholds=self._plan_zone_thresholds,
             )

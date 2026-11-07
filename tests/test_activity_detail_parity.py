@@ -331,7 +331,11 @@ class ActivityDetailParityTests(unittest.TestCase):
                 (entry,) = document["detail_data"]["providers"]
                 self.assertEqual(provider, entry["provider"])
                 self.assertFalse(entry["stale"])
-                self.assertTrue(document["analysis"])
+                # The canonical analysis never reads Intervals.icu detail (#1685).
+                if provider == "intervals":
+                    self.assertIsNone(document["analysis"])
+                else:
+                    self.assertTrue(document["analysis"])
         # The old projection hid the analysis of details older than the summary.
         stale = self.store_intervals("0" * 64)
         (entry,) = stale["detail_data"]["providers"]

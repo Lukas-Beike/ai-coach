@@ -117,8 +117,9 @@ uncontrolled outdoor sessions.
 - Each value covers one session; no history window.
 - EF, VI and a device work total come from the canonical session summary.
 - Stream work and decoupling come from the session's stored full-resolution
-  streams, merged across providers as in the activity detail. Downsampled
-  sets never count. Missing streams are not fetched by this method.
+  streams of its Garmin, Wahoo and local records, merged as in the canonical
+  session analysis; Intervals.icu streams are not read (athlete decision
+  2026-11-07, #1685). Downsampled sets never count. Missing streams are not fetched by this method.
 - Decoupling needs a steady session: at least 30 minutes of recording, 20
   minutes after the warm-up, and the eligibility rules of the session
   analysis (below).

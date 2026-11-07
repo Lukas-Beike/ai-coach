@@ -262,7 +262,6 @@ class GoldenParityTests(unittest.TestCase):
             record(Sport.RIDE),
             merged.streams,
             merged.laps,
-            decoupling=projected.get("decoupling"),
         )
         targets = {
             "steps": [{"kind": "power", "target": "100%", "duration": 600}] * 3,
@@ -384,7 +383,6 @@ class AnalysisInputMappingTests(unittest.TestCase):
         self.assertEqual({}, adapted.activity["streams"])
         self.assertEqual([], adapted.activity["laps"])
         self.assertEqual("Intervals.icu", adapted.source_label)
-        self.assertIsNone(adapted.activity["decoupling"])
 
     def test_laps_keep_offsets_in_lap_order(self) -> None:
         lap_set = ActivityLapSet(
@@ -479,9 +477,9 @@ class AnalysisInputMappingTests(unittest.TestCase):
             adapted.activity["laps"],
         )
 
-    def test_decoupling_is_passed_through(self) -> None:
-        adapted = analysis_input(record(Sport.RIDE), None, None, decoupling=4.5)
-        self.assertEqual(4.5, adapted.activity["decoupling"])
+    def test_no_provider_decoupling_is_an_input(self) -> None:
+        adapted = analysis_input(record(Sport.RIDE), None, None)
+        self.assertNotIn("decoupling", adapted.activity)
 
 
 class SourceLabelTests(unittest.TestCase):
@@ -553,7 +551,7 @@ class SourceLabelTests(unittest.TestCase):
         adapted = analysis_input(record(Sport.RIDE), merged_detail.streams, None)
         result = aerobic_analysis(adapted.activity, source_label="Wahoo")
         self.assertEqual("derived from Wahoo original streams", result["source"])
-        self.assertEqual("Intervals.icu", result["provider_decoupling"]["source"])
+        self.assertNotIn("provider_decoupling", result)
 
 
 class NonMutationTests(unittest.TestCase):

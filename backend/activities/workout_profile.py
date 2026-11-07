@@ -11,7 +11,6 @@ from backend.activities.zone_settings import (
     ZoneSettings,
     percent_zone,
 )
-from backend.providers.intervals_activity_keys import activity_ftp, activity_lthr
 
 _ZONE_TARGET = re.compile(r"Z([1-7])(?:\s*-\s*Z([1-7]))?(?:\s+(?:HR|PACE))?")
 
@@ -64,16 +63,20 @@ def planned_profile(
     return profile
 
 
-def recorded_profile(activity: dict[str, Any]) -> dict[str, Any] | None:
+def recorded_profile(
+    activity: dict[str, Any],
+    *,
+    ftp_w: float | None = None,
+    threshold_hr_bpm: float | None = None,
+) -> dict[str, Any] | None:
+    """Profile of the recorded watts, else heart rate, colored by the threshold."""
     streams = _profile_streams(activity)
     if streams is None:
         return None
     times, values, kind, start, end = streams
     width = (end - start) / 60
     totals, known = _bucket_totals(times, values, kind, start, end)
-    threshold = _number(
-        activity_ftp(activity) if kind == "watts" else activity_lthr(activity)
-    )
+    threshold = _number(ftp_w if kind == "watts" else threshold_hr_bpm)
     segments = [
         _recorded_segment(total, coverage, width, kind, threshold)
         for total, coverage in zip(totals, known, strict=True)

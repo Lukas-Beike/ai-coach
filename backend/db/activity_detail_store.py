@@ -284,6 +284,18 @@ def lap_set_keys(
     )
 
 
+def analysis_set_keys(
+    db: Any, activity_ids: Iterable[str]
+) -> dict[str, tuple[FullStreamKey, ...]]:
+    """Return the keys of each session's stream and lap sets of any resolution."""
+    return _set_keys(
+        db,
+        activity_ids,
+        "d.detail_kind IN (?, ?)",
+        (ActivityDetailKind.STREAMS.value, ActivityDetailKind.LAPS.value),
+    )
+
+
 def _set_keys(
     db: Any,
     activity_ids: Iterable[str],

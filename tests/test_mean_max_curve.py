@@ -282,10 +282,8 @@ class SessionCurveReaderTests(unittest.TestCase):
             self.db, GARMIN, "g-1", ride_power(350.0), StreamResolution.DOWNSAMPLED
         )
         add_session(self.db, "act_2")
-        add_record(self.db, INTERVALS, "i-2", "act_2")
-        store_streams(
-            self.db, INTERVALS, "i-2", ride_power(350.0), StreamResolution.FULL
-        )
+        add_record(self.db, WAHOO, "w-2", "act_2")
+        store_streams(self.db, WAHOO, "w-2", ride_power(350.0), StreamResolution.FULL)
         reader = CanonicalDetailReader(
             CanonicalTableReader().session_activities,
             refreshable=lambda: frozenset({INTERVALS}),

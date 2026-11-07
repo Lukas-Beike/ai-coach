@@ -1,0 +1,183 @@
+"""The one canonical session analysis of a session (#1685).
+
+Pure computation shared by the stored analysis (``SessionAnalysisStage``), the
+activity detail document, the Coach detail tool, the calendar and the training
+report. Its input is the session's Garmin, Wahoo and local records with their
+merged detail sets; Intervals.icu records and detail sets are never read
+(athlete decision 2026-11-07, epic #1732). Thresholds come from the local
+resolver at the session date, never from a provider activity. No I/O.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Final
+
+from backend.activities.detail_contract import measured_order
+from backend.activities.detail_merge import MergedDetail, MergedStreams
+from backend.activities.workout_profile import recorded_profile
+from backend.canonical.activity_detail import ActivityStreamSet
+from backend.canonical.records import ActivityRecord, fingerprint_inputs
+from backend.canonical.vocabulary import ProviderId, StreamChannel, StreamResolution
+from backend.performance import power_profile as power_profile_module
+from backend.performance.analysis_input import analysis_input
+from backend.performance.power_profile import power_profile, running_profile
+from backend.performance.session_analysis import aerobic_analysis, interval_quality
+from backend.performance.session_execution import session_execution
+
+# Stored ``activity_detail_analysis.analysis_version`` of canonical analyses.
+ANALYSIS_VERSION: Final = 3
+# Bump when the computation below changes, so the stage recomputes every row.
+METHOD_VERSION: Final = 1
+
+
+def analysis_records(records: Iterable[ActivityRecord]) -> tuple[ActivityRecord, ...]:
+    """The session records the canonical analysis reads: every non-Intervals one."""
+    return tuple(
+        record
+        for record in records
+        if record.provenance.provider is not ProviderId.INTERVALS
+    )
+
+
+def stream_resolution(
+    streams: MergedStreams | None, *channels: StreamChannel
+) -> str | None:
+    """Return the resolution: downsampled when the time axis or a read channel is."""
+    if streams is None:
+        return None
+    sources = [streams.primary] + [
+        streams.channels[channel].source
+        for channel in channels
+        if channel in streams.channels
+    ]
+    downsampled = any(
+        isinstance(source.stored.detail, ActivityStreamSet)
+        and source.stored.detail.resolution is StreamResolution.DOWNSAMPLED
+        for source in sources
+    )
+    return (
+        StreamResolution.DOWNSAMPLED if downsampled else StreamResolution.FULL
+    ).value
+
+
+def session_analysis(
+    records: Sequence[ActivityRecord],
+    merged: MergedDetail,
+    targets: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Compute the session analysis from the merged streams and laps.
+
+    ``records`` are the session's analysis records (see ``analysis_records``),
+    at least one. Each analysis credits only the providers of the channels it
+    reads.
+    """
+    ordered = measured_order(records)
+    adapted = analysis_input(ordered[0], merged.streams, merged.laps, members=ordered)
+    activity = adapted.activity
+    return {
+        "interval_quality": interval_quality(
+            activity,
+            dict(targets) if isinstance(targets, Mapping) else None,
+            source_label=adapted.label_for(
+                "watts", "heartrate", "velocity_smooth", "laps"
+            ),
+        ),
+        "execution": session_execution(
+            activity,
+            source_label=adapted.label_for(
+                "watts", "heartrate", "velocity_smooth", "cadence", "laps"
+            ),
+        ),
+        "aerobic": aerobic_analysis(
+            activity,
+            source_label=adapted.label_for(
+                "watts", "heartrate", "velocity_smooth", "moving"
+            ),
+        ),
+        "power_profile": {
+            **power_profile(
+                activity, source_label=adapted.label_for("watts", "moving")
+            ),
+            "stream_resolution": stream_resolution(
+                merged.streams, StreamChannel.POWER_W, StreamChannel.MOVING
+            ),
+        },
+        "running_profile": {
+            **running_profile(
+                activity,
+                source_label=adapted.label_for("velocity_smooth", "distance", "moving"),
+            ),
+            "stream_resolution": stream_resolution(
+                merged.streams,
+                StreamChannel.SPEED_MPS,
+                StreamChannel.DISTANCE_M,
+                StreamChannel.MOVING,
+            ),
+        },
+    }
+
+
+def calendar_profile(
+    records: Sequence[ActivityRecord],
+    merged: MergedDetail,
+    *,
+    ftp_w: float | None,
+    threshold_hr_bpm: float | None,
+) -> dict[str, Any] | None:
+    """The recorded workout profile of the calendar, from the merged streams.
+
+    Power segments are colored against ``ftp_w``, heart-rate segments against
+    ``threshold_hr_bpm``, both resolved locally for the session date.
+    """
+    ordered = measured_order(records)
+    adapted = analysis_input(ordered[0], merged.streams, None, members=ordered)
+    return recorded_profile(
+        adapted.activity, ftp_w=ftp_w, threshold_hr_bpm=threshold_hr_bpm
+    )
+
+
+def record_part(record: ActivityRecord) -> list[object]:
+    """The record fields the analysis reads, for the input fingerprint."""
+    provider = record.provenance.provider
+    return [
+        None if provider is None else provider.value,
+        record.activity_id,
+        record.provenance.recorded_by.value,
+        record.provenance.label,
+        None if record.device_type is None else record.device_type.value,
+        record.sport.value,
+        record.environment.value,
+        record.terrain.value,
+        record.started_at.isoformat(),
+    ]
+
+
+def analysis_fingerprint(
+    records: Sequence[ActivityRecord],
+    set_hashes: Iterable[str],
+    *,
+    stale: bool,
+    targets: Mapping[str, Any] | None,
+    thresholds: Mapping[str, Any],
+) -> str:
+    """Fingerprint of every input of one stored session analysis.
+
+    Covers the method versions, the analysis records, the content hashes of
+    the stream and lap sets (each hash covers its mapper version), whether a
+    provider detail is stale, the frozen targets and the thresholds used.
+    """
+    return fingerprint_inputs(
+        {
+            "versions": [
+                ANALYSIS_VERSION,
+                METHOD_VERSION,
+                power_profile_module.METHOD_VERSION,
+            ],
+            "records": [record_part(record) for record in measured_order(records)],
+            "sets": sorted(set_hashes),
+            "stale": stale,
+            "targets": None if targets is None else dict(targets),
+            "thresholds": dict(thresholds),
+        }
+    )

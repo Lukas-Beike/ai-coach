@@ -132,7 +132,7 @@ class SessionAnalysisTests(unittest.TestCase):
     def test_source_label_names_the_stream_provider(self):
         result = aerobic_analysis(ride(), source_label="Garmin")
         self.assertEqual("derived from Garmin original streams", result["source"])
-        self.assertEqual("Intervals.icu", result["provider_decoupling"]["source"])
+        self.assertNotIn("provider_decoupling", result)
         self.assertEqual(
             "derived from Intervals.icu original streams",
             aerobic_analysis(ride())["source"],

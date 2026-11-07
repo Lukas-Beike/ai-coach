@@ -125,14 +125,8 @@ def _aerobic_sensor(activity: dict[str, Any]) -> str | None:
 def aerobic_analysis(
     activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
 ) -> dict[str, Any]:
-    provider = _number(activity.get("decoupling"))
     base = {
         "method": METHOD,
-        "provider_decoupling": {
-            "value": provider,
-            "unit": "%",
-            "source": "Intervals.icu",
-        },
         "source": f"derived from {source_label} original streams",
         "warmup_excluded_seconds": 600,
         "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps >5 seconds, stops and non-positive output excluded. No universal fitness cutoff.",

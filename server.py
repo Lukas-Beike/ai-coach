@@ -2145,6 +2145,8 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     session_feedback=lambda keys: ATHLETE_DATA.activity_feedback().for_activity_ids(
         keys, sessions_only=True
     ),
+    # Session analyses freeze matched planned targets (#1685).
+    planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(

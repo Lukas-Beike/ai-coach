@@ -145,29 +145,29 @@ class WorkoutProfileTests(unittest.TestCase):
         )
         self.assertEqual(4, low_threshold["segments"][0]["zone"])
 
-    def test_recorded_heart_rate_profile_uses_the_activity_threshold(self):
+    def test_recorded_heart_rate_profile_uses_the_given_threshold(self):
         activity = {
             "streams": {"time": list(range(61)), "heartrate": [140] * 61},
             "lthr": 170,
         }
-        self.assertEqual(2, recorded_profile(activity)["segments"][0]["zone"])
-        activity.pop("lthr")
+        profile = recorded_profile(activity, threshold_hr_bpm=170)
+        self.assertEqual(2, profile["segments"][0]["zone"])
+        # A provider threshold in the activity is never read.
         self.assertIsNone(recorded_profile(activity)["segments"][0]["zone"])
 
-    def test_recorded_profile_keeps_gaps_and_uses_only_historical_ftp(self):
+    def test_recorded_profile_keeps_gaps_and_uses_the_given_ftp(self):
         samples = [100] * 61
         samples[20:40] = [None] * 20
         activity = {
             "streams": {"time": list(range(61)), "watts": samples},
             "icu_ftp": 200,
         }
-        profile = recorded_profile(activity)
+        profile = recorded_profile(activity, ftp_w=200)
         self.assertEqual("recorded", profile["source"])
         self.assertEqual(60, len(profile["segments"]))
         self.assertEqual(100, profile["segments"][0]["value"])
         self.assertEqual(1, profile["segments"][0]["zone"])
         self.assertIsNone(profile["segments"][25]["value"])
-        activity.pop("icu_ftp")
         self.assertIsNone(recorded_profile(activity)["segments"][0]["zone"])
 
     def test_sparse_or_invalid_recordings_are_not_filled(self):

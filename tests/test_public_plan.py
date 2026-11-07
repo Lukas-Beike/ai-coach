@@ -7,7 +7,6 @@ from datetime import date
 from typing import Any, ClassVar
 from unittest.mock import MagicMock, Mock, patch
 
-from backend.activities.detail_store import summary_fingerprint
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 
 
@@ -240,31 +239,23 @@ class PublicPlanStateServiceTests(unittest.TestCase):
 
 
 class WorkoutProfileAttachmentTests(unittest.TestCase):
-    ROW: ClassVar[dict[str, Any]] = {"id": "i7", "name": "Ride", "moving_time": 3600}
     SUMMARY: ClassVar[dict[str, Any]] = {
         "id": "act_1",
-        "record_ids": {"intervals": "i7"},
+        "record_ids": {"intervals": "i7", "garmin": "g7"},
         "started_at_local": "2026-01-01T07:00:00",
     }
 
-    def profiles(self, fingerprint):
-        return {"i7": {"fingerprint": fingerprint, "profile": {"zones": [1]}}}
-
-    def test_profile_attaches_under_the_stored_key_when_the_raw_row_matches(self):
-        fingerprint = summary_fingerprint(self.ROW)
+    def test_profile_attaches_by_session_id(self):
         result = PublicPlanStateService._with_profile(
-            self.SUMMARY, self.profiles(fingerprint), {"i7": fingerprint}
+            self.SUMMARY, {"act_1": {"zones": [1]}}
         )
         self.assertEqual(result["workout_profile"], {"zones": [1]})
         self.assertNotIn("workout_profile", self.SUMMARY)
 
-    def test_stale_or_unverifiable_profile_is_not_attached(self):
-        stale = self.profiles("old")
-        current = {"i7": summary_fingerprint(self.ROW)}
-        for profiles, fingerprints in ((stale, current), (stale, {}), ({}, current)):
+    def test_profile_of_another_key_is_not_attached(self):
+        # Stored canonical profiles are keyed by session, never by provider id.
+        for profiles in ({}, {"i7": {"zones": [1]}}):
             self.assertEqual(
-                PublicPlanStateService._with_profile(
-                    self.SUMMARY, profiles, fingerprints
-                ),
+                PublicPlanStateService._with_profile(self.SUMMARY, profiles),
                 self.SUMMARY,
             )

@@ -38,7 +38,8 @@ class ActivityDetailProjectionTests(unittest.TestCase):
         projected = detailed_activity(activity)
 
         self.assertEqual(projected["lthr"], 170)
-        self.assertEqual(2, recorded_profile(projected)["segments"][0]["zone"])
+        profile = recorded_profile(projected, threshold_hr_bpm=projected["lthr"])
+        self.assertEqual(2, profile["segments"][0]["zone"])
 
     def test_stream_allowlist_downsampling_and_endpoints(self):
         points = list(range(3000))

@@ -12,7 +12,6 @@ import legacy_detail_kv
 from activity_row_support import FixedActivityRows
 from canonical_detail_support import INTERVALS, open_manager, seed_intervals_activity
 
-from backend.activities.detail_analysis_reads import calendar_profiles
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.canonical.vocabulary import (
     ActivityDetailKind,
@@ -24,6 +23,7 @@ from backend.canonical.vocabulary import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
 from backend.errors import AppError, ProviderErrorClassifier, provider_error
+from backend.performance.session_analysis_reads import calendar_profiles
 from backend.providers.intervals_activity_detail_projection import (
     DETAIL_PROJECTION_VERSION,
 )
@@ -46,7 +46,8 @@ def detail_sets(manager, activity_id):
     """Return the stored canonical detail sets of one Intervals activity by kind."""
     with manager.reader() as db:
         return {
-            item.detail.kind: item for item in detail_sets_for(db, INTERVALS, activity_id)
+            item.detail.kind: item
+            for item in detail_sets_for(db, INTERVALS, activity_id)
         }
 
 
@@ -146,7 +147,9 @@ class ActivityDetailRefreshTests(unittest.TestCase):
         self.manager = DatabaseManager(
             Path(self.directory.name) / "detail.db", sqlite3, row_factory=row_factory
         )
-        streams = detail_sets(self.manager, "CaseSensitive-1")[ActivityDetailKind.STREAMS]
+        streams = detail_sets(self.manager, "CaseSensitive-1")[
+            ActivityDetailKind.STREAMS
+        ]
         self.assertEqual(StreamResolution.FULL, streams.detail.resolution)
         self.assertEqual(3001, len(streams.detail.channels[StreamChannel.POWER_W]))
         self.assertIs(ProviderId.INTERVALS, streams.detail.provenance.provider)
@@ -183,7 +186,9 @@ class ActivityDetailRefreshTests(unittest.TestCase):
             ],
         ]
         self.service.refresh("CaseSensitive-1")
-        streams = detail_sets(self.manager, "CaseSensitive-1")[ActivityDetailKind.STREAMS]
+        streams = detail_sets(self.manager, "CaseSensitive-1")[
+            ActivityDetailKind.STREAMS
+        ]
         self.assertEqual(
             (14.0, 15.0), streams.detail.channels[StreamChannel.TEMPERATURE_C]
         )

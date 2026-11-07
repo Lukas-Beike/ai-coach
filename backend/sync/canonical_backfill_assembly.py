@@ -17,6 +17,7 @@ from backend.sync.activity_detail_retirement import ActivityDetailRetirement
 from backend.sync.canonical_backfill import DEFAULT_BATCH_SIZE, CanonicalBackfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.local_load import LocalLoadStage, Preferences
+from backend.sync.session_analysis_stage import PlannedUnits, SessionAnalysisStage
 from backend.sync.session_metrics import SessionMetricsStage
 
 
@@ -28,6 +29,7 @@ class CanonicalBackfillAssembly:
     detail_retirement: ActivityDetailRetirement
     local_load: LocalLoadStage
     session_metrics: SessionMetricsStage
+    session_analysis: SessionAnalysisStage
 
 
 def build_canonical_backfill(
@@ -40,6 +42,7 @@ def build_canonical_backfill(
     source_preferences: Preferences = lambda _db: NO_PREFERENCES,
     batch_size: int = DEFAULT_BATCH_SIZE,
     session_feedback: FeedbackLookup | None = None,
+    planned_units: PlannedUnits = list,
 ) -> CanonicalBackfillAssembly:
     backfill = CanonicalBackfill(
         key_values=key_values,
@@ -68,11 +71,24 @@ def build_canonical_backfill(
     session_metrics = SessionMetricsStage(
         key_values=key_values, zone_provider=zone_provider, clock=clock
     )
+    # The one canonical session analysis per session (#1685), after M8.
+    session_analysis = SessionAnalysisStage(
+        key_values=key_values,
+        zone_provider=zone_provider,
+        clock=clock,
+        planned_units=planned_units,
+    )
     worker = CanonicalBackfillWorker(
         backfill=backfill,
         database=database,
         maintenance_gate=maintenance_gate,
-        followups=(local_load, session_metrics, detail_backfill, detail_retirement),
+        followups=(
+            local_load,
+            session_metrics,
+            session_analysis,
+            detail_backfill,
+            detail_retirement,
+        ),
     )
     return CanonicalBackfillAssembly(
         worker=worker,
@@ -81,4 +97,5 @@ def build_canonical_backfill(
         detail_retirement=detail_retirement,
         local_load=local_load,
         session_metrics=session_metrics,
+        session_analysis=session_analysis,
     )

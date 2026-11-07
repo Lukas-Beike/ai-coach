@@ -262,8 +262,6 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
             "backend/performance/morning_battery.py",
             "backend/performance/personal_recovery.py",
             "backend/performance/planning_recovery.py",
-            "backend/performance/report_service.py",
-            "backend/performance/session_analysis.py",
             "backend/performance/training_focus.py",
         )
     },
