@@ -121,16 +121,27 @@ class CoachDomainSectionAliasTests(unittest.TestCase):
 
 
 class CoachDomainSectionSourceTests(unittest.TestCase):
-    def test_activities_source_block_comes_first_and_uses_provider_label(self):
+    def test_activities_source_block_comes_first_and_names_the_session_sources(self):
         projection = CoachIntervalsContextService().project(
-            [], TODAY, synced_at=SYNCED_AT
+            [],
+            TODAY,
+            [
+                {"id": "g1", "sport": "Ride", "source": "Garmin Connect"},
+                {
+                    "id": "w1",
+                    "sport": "Ride",
+                    "source": "Wahoo",
+                    "sources": {"average_hr": "Garmin Connect"},
+                },
+            ],
+            synced_at=SYNCED_AT,
         )
         self.assertEqual(next(iter(projection)), "source")
         self.assertEqual(
             projection["source"],
             {
-                "provider": ProviderId.INTERVALS.value,
-                "label": _label(ProviderId.INTERVALS),
+                "providers": ["Garmin Connect", "Wahoo"],
+                "label": "Garmin Connect, Wahoo",
                 "synced_at": SYNCED_AT,
                 "applies_to": [
                     "recent_activities_by_sport",
@@ -138,7 +149,6 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
                 ],
             },
         )
-        self.assertEqual(projection["source"]["label"], "Intervals.icu")
         self.assertEqual(projection["synced_at"], SYNCED_AT)
 
     def test_recovery_source_block_wraps_unchanged_garmin_projection(self):
@@ -223,8 +233,9 @@ class CoachDomainSectionFullContextTests(unittest.TestCase):
         self.assertEqual(
             activities["source"],
             {
-                "provider": ProviderId.INTERVALS.value,
-                "label": _label(ProviderId.INTERVALS),
+                # The fixture rows carry no per-session source label.
+                "providers": [],
+                "label": None,
                 "synced_at": context_tests.COVERAGE_SYNCED_AT,
                 "applies_to": [
                     "recent_activities_by_sport",

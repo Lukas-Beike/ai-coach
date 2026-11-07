@@ -119,8 +119,8 @@ class CoachIntervalsContextTests(unittest.TestCase):
             result,
             {
                 "source": {
-                    "provider": "intervals",
-                    "label": "Intervals.icu",
+                    "providers": [],
+                    "label": None,
                     "synced_at": None,
                     "applies_to": [
                         "recent_activities_by_sport",

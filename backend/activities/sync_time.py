@@ -1,4 +1,4 @@
-"""Freshness of the stored Intervals.icu data, read from canonical provider coverage."""
+"""Freshness of stored provider data, read from canonical provider coverage."""
 
 from __future__ import annotations
 
@@ -28,17 +28,18 @@ def intervals_synced_at(coverage: ProviderCoverageReader | None, db: Any) -> str
 def activities_synced_at(
     coverage: ProviderCoverageReader | None, db: Any
 ) -> str | None:
-    """Return when the Intervals.icu activities were last fetched, or None if unknown.
+    """Return the newest current activity fetch of any provider, or None if unknown.
 
-    The time is the one persisted with the canonical coverage at ingest; the stored
-    snapshot's own timestamp is never consulted.
+    Each provider's time is the one persisted with its canonical coverage at
+    ingest: a Garmin, Wahoo or Intervals.icu read that reached today. Days after
+    it may still lack sessions; the stored snapshot's own timestamp is never
+    consulted.
     """
     if coverage is None:
         return None
-    for summary in coverage.coverage(db):
-        if (
-            summary.provider is ProviderId.INTERVALS
-            and summary.activities_retrieved_at is not None
-        ):
-            return summary.activities_retrieved_at.isoformat()
-    return None
+    fetched = [
+        summary.activities_retrieved_at
+        for summary in coverage.coverage(db)
+        if summary.activities_retrieved_at is not None
+    ]
+    return max(fetched).isoformat() if fetched else None

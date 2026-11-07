@@ -96,6 +96,31 @@ def _section_source(provider: ProviderId, synced_at: Any) -> dict[str, Any]:
     }
 
 
+def _activity_section_source(
+    activities: Sequence[Mapping[str, Any]], synced_at: Any
+) -> dict[str, Any]:
+    """Label the activity section with the providers its sessions came from.
+
+    Merged sessions mix providers, so the label lists every primary source and
+    every per-value source; ``synced_at`` is the newest current activity fetch.
+    """
+    labels: set[str] = set()
+    for activity in activities:
+        if isinstance(source := activity.get("source"), str) and source:
+            labels.add(source)
+        sources = activity.get("sources")
+        if isinstance(sources, Mapping):
+            labels.update(
+                label for label in sources.values() if isinstance(label, str) and label
+            )
+    ordered = sorted(labels)
+    return {
+        "providers": ordered,
+        "label": ", ".join(ordered) or None,
+        "synced_at": synced_at,
+    }
+
+
 PLANNED_WORKOUTS_SOURCE = {
     "kind": "local_planning",
     "label": "Lokale Planung",
@@ -356,7 +381,7 @@ class CoachIntervalsContextService:
         planned = future_coach_planned_workouts(source_planned, today)
         return {
             "source": {
-                **_section_source(ProviderId.INTERVALS, synced_at),
+                **_activity_section_source(summaries, synced_at),
                 "applies_to": [
                     "recent_activities_by_sport",
                     "activity_rollups_by_sport",
