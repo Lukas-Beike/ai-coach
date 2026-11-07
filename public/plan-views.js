@@ -234,6 +234,19 @@ function competitionDistance(value) {
   return numeric === 0 ? "0 km" : AppFormat.distance(numeric);
 }
 
+function competitionResult(result, sport) {
+  if (!result || typeof result !== "object") return null;
+  const speed = Number(result.avg_speed_mps);
+  const power = Number(result.avg_power);
+  const effort = sport === "ride" && Number.isFinite(power) && power > 0
+    ? `${Math.round(power)} W`
+    : Number.isFinite(speed) && speed > 0
+      ? `${AppFormat.clock(1000 / speed)} /km`
+      : null;
+  const time = result.duration_s == null ? null : AppFormat.clock(result.duration_s);
+  return [time, AppFormat.distance(result.distance_m), effort].filter(Boolean).join(" · ") || null;
+}
+
 function competitionFact(labelText, value) {
   const item = document.createElement("div");
   const label = document.createElement("span");
@@ -1140,6 +1153,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const details = document.createElement("div");
     details.className = "competition-card-facts";
     const optional = [
+      ["Ergebnis", competitionResult(competition.result, competition.sport)],
       ["Startzeit", competition.starts_at_local ? formatLocalCompetitionTime(competition.starts_at_local) : null],
       ["Ziel", competition.target],
       ["Erwartete Dauer", competition.planned_duration_s == null ? null : AppFormat.duration(competition.planned_duration_s)],

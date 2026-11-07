@@ -17,3 +17,16 @@ test("invalid event dates stay undated rather than rolling into another month", 
   for (const event_date of [null, "", "2026-02-30", "not-a-date"]) assert.equal(context.competitionDate({ event_date }, "2026-10-24"), false);
   assert.equal(context.competitionDate({ event_date: "2026-10-24" }, "2026-10-24"), true);
 });
+
+test("race results show time, distance and pace or power", () => {
+  assert.equal(context.competitionResult(null, "run"), null);
+  assert.equal(
+    context.competitionResult({ duration_s: 2400, distance_m: 10000, avg_speed_mps: 10000 / 2400 }, "run"),
+    "40:00 · 10,0 km · 4:00 /km",
+  );
+  assert.equal(
+    context.competitionResult({ duration_s: 3725, distance_m: 40000, avg_power: 251.4, avg_speed_mps: 10.7 }, "ride"),
+    "1:02:05 · 40,0 km · 251 W",
+  );
+  assert.equal(context.competitionResult({ activity_id: "act_1" }, "run"), null);
+});

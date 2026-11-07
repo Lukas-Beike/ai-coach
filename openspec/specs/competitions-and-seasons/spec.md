@@ -211,6 +211,10 @@ The system SHALL link each stored competition to the completed sessions of its l
 - **WHEN** a session has another sport, another local date, the other side of indoor (indoor, virtual) versus outdoor when both are known, or purpose commute, warm-up or cool-down, or the competition's sport is unsupported
 - **THEN** the session is not linked and keeps its own purpose.
 
+#### Scenario: A past competition shows its race result
+- **WHEN** the athlete opens the competition overview and a past competition has a linked session
+- **THEN** its expanded details show "Ergebnis" with the session's time, distance and average pace (average power for rides), read on `GET /api/profile` without any write; a competition without a linked session shows no result.
+
 Detailed contract: a session links to at most one competition (competitions in date then id order). A limited read links over every session of its oldest day, so the hint never depends on the page size. Unlinking by athlete marking is not yet implemented (#1759).
 
-Evidence: `backend/activities/session_purpose.py:with_competitions`, `backend/sync/canonical_read_selector.py:activity_summaries`, `backend/db/repositories.py:CompetitionRepository.between`; `tests/test_session_purpose.py`.
+Evidence: `backend/activities/session_purpose.py:with_competitions`, `backend/sync/canonical_read_selector.py:activity_summaries`, `backend/db/repositories.py:CompetitionRepository.between`, `backend/planning/race_results.py:with_race_results` (newest 100 past competition days, one read each), `backend/http_api/athlete_get.py`, `public/plan-views.js:competitionResult`; `tests/test_session_purpose.py`, `tests/test_race_results.py`, `tests/competition-overview.test.cjs`.
