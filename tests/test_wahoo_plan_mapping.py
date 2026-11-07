@@ -261,7 +261,7 @@ class ExportReferenceTests(unittest.TestCase):
 
 
 class AssemblyReferenceTests(unittest.TestCase):
-    def test_assembled_export_reads_thresholds_inside_a_reader(self) -> None:
+    def test_assembled_export_reads_thresholds_once_per_run_inside_a_reader(self) -> None:
         database = object()
         seen: list[object] = []
         manager = Mock()
@@ -291,8 +291,12 @@ class AssemblyReferenceTests(unittest.TestCase):
             )
         )
 
-        envelope = assembly.workout_export().serialize_library(
+        export = assembly.workout_export()
+        envelope = export.serialize_library(
             {"local_id": "w1", "type": "Ride", "description": "- 10m 88%"}
+        )
+        export.serialize_library(
+            {"local_id": "w2", "type": "Ride", "description": "- 5m 90%"}
         )
 
         self.assertEqual([database], seen)

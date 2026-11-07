@@ -18,6 +18,7 @@ from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.providers.wahoo_client import WahooReconnectRequiredError
+from backend.providers.wahoo_plan_mapping import WahooPlanReferences
 from backend.sync.wahoo_plan_push import WahooPlanPushService
 from backend.sync.wahoo_workout_export import WahooWorkoutExport, wahoo_external_id
 
@@ -158,6 +159,30 @@ class PushTests(PushCase):
             self.wahoo.writes(),
         )
         self.assertEqual("101", self.link(W1).remote_id)
+
+    def test_a_re_push_after_an_ftp_change_sends_and_remembers_the_new_ftp(
+        self,
+    ) -> None:
+        references = {"ftp": 250}
+        self.export = WahooWorkoutExport(
+            lambda: self.wahoo,
+            now=lambda: NOW,
+            references=lambda sport: WahooPlanReferences(**references),
+        )
+        digest = self.insert(W1, {**RIDE, "description": "- 10m 88%"})
+        self.push((W1, digest))
+        first = self.link(W1).baseline_hash
+        references["ftp"] = 280
+
+        result = self.push((W1, digest))
+
+        self.assertEqual("synced", result["results"][0]["status"])
+        self.assertEqual(280, self.wahoo.plans[101]["plan"]["header"]["ftp"])
+        second = self.link(W1).baseline_hash
+        self.assertNotIn(digest, (first, second))
+        self.assertNotEqual(first, second)
+        self.push((W1, digest))
+        self.assertEqual(second, self.link(W1).baseline_hash)
 
     def test_a_plan_deleted_at_wahoo_is_created_again(self) -> None:
         digest = self.insert(W1, RIDE)

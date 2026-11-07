@@ -50,17 +50,14 @@ def build_metric_export_service(
     *,
     database_lock: Any,
     intervals_client: Callable[[], IntervalsClient],
-    source_preferences: Callable[[Any], SourcePreferences],
+    thresholds: Callable[[Any], dict[ThresholdKey, Observation]],
     today: Callable[[], date],
     utc_now: Callable[[], datetime],
 ) -> MetricExportService:
     """Return the service; a provider client is opened only by a confirmed write.
 
-    Thresholds come from ``export_thresholds_reader``.
+    ``thresholds`` is the shared ``export_thresholds_reader``.
     """
-    thresholds = export_thresholds_reader(
-        observation_reader, source_preferences=source_preferences, today=today
-    )
     return MetricExportService(
         database_manager,
         observation_reader,

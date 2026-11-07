@@ -83,12 +83,12 @@ class SportTests(unittest.TestCase):
                 self.assertEqual(expected, (record.sport, record.environment))
                 self.assertEqual(expected, WAHOO_WORKOUT_TYPES[type_id])
 
-    def test_rides_outside_a_virtual_world_are_bike_computer_recordings(
+    def test_rides_not_indoor_or_virtual_are_bike_computer_recordings(
         self,
     ) -> None:
         cases = {
             0: DeviceType.BIKE_COMPUTER,
-            12: DeviceType.BIKE_COMPUTER,
+            12: None,
             68: None,
             1: None,
             25: None,

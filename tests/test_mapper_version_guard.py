@@ -44,7 +44,8 @@ REPLAYED_BY: Final[dict[str, tuple[str, ...]]] = {
     "intervals_wellness_mapping": ("intervals_wellness_mapping",),
     "intervals_zone_mapping": ("intervals_wellness_mapping",),
     "sleep_period_mapping": ("garmin_health_mapping", "intervals_wellness_mapping"),
-    "wahoo_activity_mapping": ("wahoo_activity_mapping",),
+    # garmin_activity_mapping uses wahoo_device_type for relayed Wahoo rides.
+    "wahoo_activity_mapping": ("wahoo_activity_mapping", "garmin_activity_mapping"),
     "wahoo_threshold_mapping": ("wahoo_threshold_mapping",),
 }
 # Mapping modules that project nothing that is stored and replayed.
@@ -63,7 +64,7 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     ),
     "garmin_activity_mapping": (
         (19,),
-        "62ecdbc58b839cd3067e1646a6e435bdb131781a216596e4ef7d6254baa02845",
+        "712e33735d19e7349e69a0271d6cf5c97f009f762cceb7299d75402b3ca2cfae",
     ),
     "garmin_gear_mapping": (
         (18,),
@@ -106,8 +107,8 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "77efab15de0cda5414ed02c0d5005a9fe6fb1a650ec103bdb40e01cef065cf0f",
     ),
     "wahoo_activity_mapping": (
-        (8,),
-        "a27bf2c0acf62701cd41524afd890d8952eb1ea46f281ab263a79c69265c6d0b",
+        (8, 19),
+        "9b74c3dca726d23d18e782b7dd8f351572a6a24c2230187db13a5cb5ba181312",
     ),
     "wahoo_threshold_mapping": (
         (2,),

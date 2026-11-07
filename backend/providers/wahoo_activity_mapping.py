@@ -88,8 +88,8 @@ from backend.canonical.vocabulary import (
 # mountain and road biking and lap swimming name no environment, like the same
 # Garmin types (#1670).
 # Version 7: maps calories_accum, the device's energy estimate (card M8, #1680).
-# Version 8: a ride outside a virtual world carries the bike computer device type
-# (#1686).
+# Version 8: a ride that is not indoor or virtual carries the bike computer device
+# type (#1686).
 MAPPER_VERSION: Final = 8
 WAHOO_LABEL: Final = "Wahoo"
 MAX_NAME_LENGTH: Final = 200
@@ -375,10 +375,14 @@ def _map_row(
 def wahoo_device_type(sport: Sport, environment: Environment) -> DeviceType | None:
     """Return the device type of a Wahoo recording, where it is certain.
 
-    A Wahoo ride outside a virtual world is an ELEMNT bike computer recording. Other
-    Wahoo recordings (indoor app rides, runs) name no device type.
+    A Wahoo ride that is not indoor or virtual is an ELEMNT bike computer
+    recording; road, mountain and track rides name no environment, so an unknown
+    environment counts. Indoor or app rides and other sports name no device type.
     """
-    if sport is Sport.RIDE and environment is not Environment.VIRTUAL:
+    if sport is Sport.RIDE and environment in (
+        Environment.OUTDOOR,
+        Environment.UNKNOWN,
+    ):
         return DeviceType.BIKE_COMPUTER
     return None
 

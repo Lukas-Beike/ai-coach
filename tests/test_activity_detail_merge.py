@@ -18,21 +18,25 @@ from backend.canonical.activity_detail import (
     ZoneBucket,
     ZoneDistribution,
 )
-from backend.canonical.records import Provenance
+from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
     DeviceType,
+    Environment,
     LapKind,
     LapSource,
+    LoadModel,
     ProviderId,
     RecordingOrigin,
     SourceKind,
+    Sport,
     StreamChannel,
     StreamResolution,
     ZoneBoundarySource,
     ZoneMetric,
 )
 from backend.db.activity_detail_store import StoredDetailSet
+from backend.performance.canonical_detail import detail_candidates
 
 STARTED = datetime(2026, 10, 18, 7, 0, tzinfo=UTC)
 FETCHED = "2026-10-18T08:00:00+00:00"
@@ -273,7 +277,7 @@ class PrimaryStreamChoiceTests(unittest.TestCase):
 
 class RelayedWahooRecordingTests(unittest.TestCase):
     def test_wahoo_laps_beat_the_garmin_copy_of_a_wahoo_recording(self) -> None:
-        # Garmin mapper v18 marks a Wahoo ride relayed through Garmin Connect as
+        # Garmin mapper v19 marks a Wahoo ride relayed through Garmin Connect as
         # recorded by Wahoo, so the Garmin set is a relayed copy (#1686).
         garmin_copy = candidate(
             laps(ProviderId.GARMIN, RecordingOrigin.WAHOO, LapSource.DEVICE_LAPS)
@@ -286,6 +290,49 @@ class RelayedWahooRecordingTests(unittest.TestCase):
 
         assert merged.laps is not None
         self.assertIs(merged.laps.chosen, wahoo)
+
+
+class StoredOriginTests(unittest.TestCase):
+    def test_a_stored_set_takes_the_current_record_origin(self) -> None:
+        # Stored before Garmin mapper v19 re-named the relayed origin (#1686).
+        stored_garmin = candidate(
+            laps(ProviderId.GARMIN, RecordingOrigin.GARMIN, LapSource.DEVICE_LAPS)
+        ).stored
+        stored_wahoo = candidate(
+            laps(ProviderId.WAHOO, RecordingOrigin.WAHOO, LapSource.DEVICE_LAPS)
+        ).stored
+        records = [
+            ActivityRecord(
+                activity_id=f"{provider.value}-activity",
+                provenance=Provenance(
+                    provider=provider,
+                    source_kind=SourceKind.PROVIDER_REPORTED,
+                    source_record_id=None,
+                    recorded_by=RecordingOrigin.WAHOO,
+                    retrieved_at=None,
+                    label=provider.value,
+                ),
+                sport=Sport.RIDE,
+                environment=Environment.OUTDOOR,
+                started_at=STARTED,
+                duration_s=3600.0,
+                distance_m=None,
+                load=None,
+                load_model=LoadModel.UNKNOWN,
+                avg_hr=None,
+                avg_power=None,
+                name="Ride",
+            )
+            for provider in (ProviderId.GARMIN, ProviderId.WAHOO)
+        ]
+
+        candidates = detail_candidates(records, [stored_garmin, stored_wahoo])
+        merged = merge_details(candidates)
+
+        garmin = candidates[0].stored.detail.provenance
+        self.assertIs(RecordingOrigin.WAHOO, garmin.recorded_by)
+        assert merged.laps is not None
+        self.assertEqual("wahoo", merged.laps.chosen.stored.provider)
 
 
 class PerChannelChoiceTests(unittest.TestCase):

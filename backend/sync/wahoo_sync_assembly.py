@@ -52,7 +52,7 @@ class WahooSyncInputs:
     redactor: Callable[[str], str]
     resync_gate: ProviderResyncGate
     # ``db -> export thresholds`` (local zones, Garmin, Wahoo) for plan references.
-    export_thresholds: Callable[[Any], Mapping[ThresholdKey, Observation]] | None = None
+    export_thresholds: Callable[[Any], Mapping[ThresholdKey, Observation]]
 
 
 class WahooSyncAssembly:
@@ -115,18 +115,23 @@ class WahooSyncAssembly:
             return self._details
 
     def workout_export(self) -> WahooWorkoutExport:
-        """Create the library export target; the client resolves per remote call."""
-        return WahooWorkoutExport(
-            self.client, now=self._inputs.now, references=self._references
-        )
+        """Create the library export target; the client resolves per remote call.
 
-    def _references(self, sport: Sport) -> WahooPlanReferences | None:
-        """Read the plan references of ``sport`` from the resolved thresholds."""
-        thresholds = self._inputs.export_thresholds
-        if thresholds is None:
-            return None
-        with self._inputs.database_manager().reader() as db:
-            return plan_references(thresholds(db), sport)
+        One export serves one push run, so the thresholds are read once per run
+        and plan sport, not once per workout.
+        """
+        cache: dict[Sport, WahooPlanReferences] = {}
+
+        def references(sport: Sport) -> WahooPlanReferences:
+            if sport not in cache:
+                with self._inputs.database_manager().reader() as db:
+                    thresholds = self._inputs.export_thresholds(db)
+                cache[sport] = plan_references(thresholds, sport)
+            return cache[sport]
+
+        return WahooWorkoutExport(
+            self.client, now=self._inputs.now, references=references
+        )
 
     def plan_push_service(self) -> WahooPlanPushService:
         """Share one plan-push service so its run lock serializes every caller."""

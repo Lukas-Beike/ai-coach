@@ -1233,6 +1233,15 @@ WAHOO_CONNECTION = WahooConnectionAssembly(
         utc_now=runtime_clock.utc_now,
     )
 )
+# The thresholds every outbound export sends (Intervals.icu metrics, Wahoo plan
+# headers): local zones, then Garmin, then Wahoo, current on the athlete's today.
+EXPORT_THRESHOLDS = export_thresholds_reader(
+    lambda: CANONICAL_READ,
+    source_preferences=lambda db: preferences_from_profile(
+        ATHLETE_DATA.profile().get_from_db(db)
+    ),
+    today=lambda: ATHLETE_CLOCK.now().date(),
+)
 WAHOO_SYNC = WahooSyncAssembly(
     WahooSyncInputs(
         config=lambda: CONFIG,
@@ -1249,13 +1258,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         logger=LOGGER,
         redactor=REDACTOR.redact_text,
         resync_gate=WAHOO_RESYNC_GATE,
-        export_thresholds=export_thresholds_reader(
-            lambda: CANONICAL_READ,
-            source_preferences=lambda db: preferences_from_profile(
-                ATHLETE_DATA.profile().get_from_db(db)
-            ),
-            today=lambda: ATHLETE_CLOCK.now().date(),
-        ),
+        export_thresholds=EXPORT_THRESHOLDS,
     )
 )
 NUTRITION_ASSEMBLY = NutritionAssembly(
@@ -2112,9 +2115,7 @@ METRIC_EXPORT: MetricExportService = build_metric_export_service(
     lambda: CANONICAL_READ,
     database_lock=DB_LOCK,
     intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
-    source_preferences=lambda db: preferences_from_profile(
-        ATHLETE_DATA.profile().get_from_db(db)
-    ),
+    thresholds=EXPORT_THRESHOLDS,
     today=lambda: ATHLETE_CLOCK.now().date(),
     utc_now=lambda: datetime.now(UTC),
 )

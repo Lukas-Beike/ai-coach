@@ -198,7 +198,8 @@ class RecordingOriginTests(unittest.TestCase):
             (7, RecordingOrigin.GARMIN),
             ("WAHOO_FITNESS", RecordingOrigin.WAHOO),
             ("ZWIFT", RecordingOrigin.ZWIFT),
-            ("DEVELOPMENT", RecordingOrigin.UNKNOWN),
+            ("DEVELOPMENT", RecordingOrigin.GARMIN),
+            ("wahoo fitness", RecordingOrigin.WAHOO),
         )
         for manufacturer, origin in cases:
             with self.subTest(manufacturer=manufacturer):
