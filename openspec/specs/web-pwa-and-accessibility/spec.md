@@ -30,6 +30,10 @@ The client SHALL use semantic labels, focusable controls and scroll regions, cur
 - **WHEN** the viewport narrows, rotates, or shrinks around a focused chat input
 - **THEN** the composer and relevant controls remain reachable using the visible viewport and safe-area layout instead of being covered by navigation.
 
+#### Scenario: Large text size
+- **WHEN** the text size grows up to 200 %
+- **THEN** navigation labels that no longer fit collapse to named icons and banners wrap, so neither clips text nor leaves the viewport.
+
 #### Scenario: Dialog opens and closes
 - **WHEN** an accessible application dialog opens and later closes
 - **THEN** initial focus enters an available control and returns to the connected, enabled originating control when appropriate.
@@ -38,7 +42,7 @@ The client SHALL use semantic labels, focusable controls and scroll regions, cur
 - **WHEN** content exceeds the viewport or reduced motion is requested
 - **THEN** designated scroll regions remain keyboard focusable and labelled, chart/table alternatives remain available, and reduced-motion CSS applies to the relevant animations.
 
-Evidence: `public/components.js::showAccessibleDialog`, `public/components.js::restoreDialogFocus`, `public/shared.js::updateMobileViewportLayout`, `public/shared.js::makeScrollRegionFocusable`, `public/styles.css` (touch targets, safe-area, focus-visible, reduced-motion rules); `e2e/coach.spec.js::core views satisfy WCAG AA checks`, `e2e/coach-layout.spec.js::coach composer keeps a stable bottom edge and publishes its height @responsive`, `e2e/analysis-info.spec.js::@responsive legend info buttons are at least 44x44 and never overlap each other`. These tests were inspected; no browser accessibility scan ran here.
+Evidence: `public/components.js::showAccessibleDialog`, `public/components.js::restoreDialogFocus`, `public/shared.js::updateMobileViewportLayout`, `public/shared.js::makeScrollRegionFocusable`, `public/styles.css` (touch targets, safe-area, focus-visible, reduced-motion, large-text navigation container rules); `e2e/coach.spec.js::core views satisfy WCAG AA checks`, `e2e/text-reflow.spec.js::@responsive navigation and banners keep their text inside at 200 % text size`, `e2e/coach-layout.spec.js::coach composer keeps a stable bottom edge and publishes its height @responsive`, `e2e/analysis-info.spec.js::@responsive legend info buttons are at least 44x44 and never overlap each other`. These tests were inspected; no browser accessibility scan ran here.
 
 ### Requirement: Markdown and external display text remain inert
 The client SHALL escape untrusted content before rendering its supported Markdown, permit only supported HTTP(S) links, and render external values through safe text or escaped templates. Tables SHALL have semantic headers and labelled scroll containers.
