@@ -312,6 +312,7 @@ h2 {
 
 .status-card {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
@@ -324,6 +325,7 @@ h2 {
   font-size: .79rem;
   backdrop-filter: blur(18px) saturate(135%);
 }
+.status-card > * { min-width: 0; overflow-wrap: anywhere; }
 .status-card[hidden] { display: none; }
 .status-card-row { display: flex; align-items: center; gap: 8px; color: var(--ink); }
 .pulse { width: 8px; height: 8px; border-radius: 999px; background: var(--accent-bright); box-shadow: 0 0 0 5px var(--accent-soft); }
@@ -331,7 +333,7 @@ h2 {
 .status-card.working .pulse { animation: pulse 1.2s ease-in-out infinite; }
 .connectivity-notice { margin: -4px 0 16px; padding: 10px 13px; border: 1px solid var(--warning-border); border-radius: 12px; background: var(--warning-surface-soft); color: var(--orange); font-size: .76rem; line-height: 1.4; }
 .connectivity-notice[hidden] { display: none; }
-.provider-attention-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: -4px 0 16px; padding: 12px 13px; border: 1px solid var(--danger-border-strong); border-radius: 12px; background: var(--danger-surface); color: var(--ink); font-size: .76rem; line-height: 1.4; }
+.provider-attention-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin: -4px 0 16px; padding: 12px 13px; border: 1px solid var(--danger-border-strong); border-radius: 12px; background: var(--danger-surface); color: var(--ink); font-size: .76rem; line-height: 1.4; }
 .provider-attention-banner[hidden] { display: none; }
 .provider-attention-banner > div { display: grid; gap: 2px; min-width: 0; }
 .provider-attention-banner strong { color: var(--danger-soft-ink); }
@@ -1258,12 +1260,27 @@ input:focus, textarea:focus:not(#messageInput), select:focus { border-color: var
 }
 .nav-item { display: flex; min-height: 48px; align-items: center; justify-content: center; flex-direction: column; border: 0; border-radius: 14px; color: var(--muted); background: var(--transparent); font-size: .68rem; font-weight: 650; text-decoration: none; transition: color .16s ease, background .16s ease; }
 .nav-item > .nav-icon { display: block; margin-bottom: 2px; }
-.nav-item .nav-label-full, .nav-item .nav-label-short { display: block; margin: 0; font-size: inherit; }
-.nav-item .nav-label-short { display: none; }
 .nav-item.active { color: var(--ink); background: var(--surface-raised); }
 .nav-item:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .nav-item b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 2px; place-items: center; border-radius: 50%; color: var(--white); background: var(--accent); font-size: .62rem; }
 .nav-item b:empty { display: none; }
+/* Large text: labels that no longer fit collapse to icons; each link keeps its aria-label as accessible name.
+   Thresholds are the bar's content width in rem at which the widest label ("Ernährung") stops fitting. */
+.bottom-nav, .desktop-nav { container-type: inline-size; }
+.nav-item > span { white-space: nowrap; }
+@container (max-width: 17rem) {
+  .bottom-nav .nav-item > span { display: none; }
+  .bottom-nav .nav-item > .nav-icon { margin-bottom: 0; }
+}
+@media (min-width: 560px) {
+  @container (max-width: 19.5rem) {
+    .bottom-nav .nav-item > span { display: none; }
+    .bottom-nav .nav-item > .nav-icon { margin-bottom: 0; }
+  }
+}
+@container (max-width: 3.6rem) {
+  .desktop-nav .nav-item > span { display: none; }
+}
 .collapsible-section > summary, .library-sport > summary { min-height: 44px; }
 
 dialog { width: min(90vw, 420px); border: 1px solid var(--line); border-radius: 22px; padding: 24px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow); }
@@ -1301,7 +1318,12 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .shell { grid-template-columns: 216px minmax(0, 1fr); gap: 0 32px; padding-right: 32px; }
   .desktop-nav { padding: 32px 16px; }
   .desktop-nav .nav-item { display: flex; min-height: 48px; flex-direction: row; justify-content: flex-start; gap: 12px; padding: 10px 14px; }
-  .desktop-nav .nav-item > span { display: inline; font-size: 14px; font-weight: 700; }
+  .desktop-nav .nav-item > span { display: inline; font-size: .875rem; font-weight: 700; }
+  /* Large-text collapse of the wide rail; after the declarations above so it wins the cascade. */
+  @container (max-width: 7.5rem) {
+    .desktop-nav .nav-item { justify-content: center; }
+    .desktop-nav .nav-item > span { display: none; }
+  }
   #chatPanel { max-width: 1100px; }
   #chatPanel .messages,
   #chatPanel .composer,
@@ -1391,8 +1413,6 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .performance-card { padding: 13px; }
   .performance-section-heading { align-items: flex-start; }
   .performance-section-heading .tab-sync-detail { white-space: normal; }
-  .nav-item .nav-label-full { display: none; }
-  .nav-item .nav-label-short { display: block; }
   .nav-item { padding-right: 2px; padding-left: 2px; font-size: .62rem; }
 }
 
