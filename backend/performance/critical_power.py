@@ -205,6 +205,12 @@ def _select_efforts(
                 "activity_id": row.get("activity_id"),
                 "date": row.get("date"),
                 "source": row.get("source"),
+                # A race is the most likely maximal effort; flag it.
+                **(
+                    {"effort_context": "race"}
+                    if row.get("effort_context") == "race"
+                    else {}
+                ),
             }
             for row in records
             if _fits(row, sport, environment)

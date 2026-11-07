@@ -13,6 +13,7 @@ from backend.activities.activity_summary import summary_duration_s
 from backend.activities.identity import activity_datetime as _activity_datetime
 from backend.activities.identity import activity_sport as _activity_sport
 from backend.activities.identity import summary_sport as _summary_sport
+from backend.activities.session_purpose import summary_is_not_training
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
@@ -238,8 +239,15 @@ def _unpaired_activity_match(
 def match_planned_workouts(
     planned: list[Any], activities: Sequence[Any]
 ) -> dict[int, dict[str, Any]]:
-    """Match completed activities to planned workouts without reusing one activity."""
-    activity_rows = [item for item in activities if isinstance(item, dict)]
+    """Match completed activities to planned workouts without reusing one activity.
+
+    A commute, warm-up or cool-down never completes a planned workout.
+    """
+    activity_rows = [
+        item
+        for item in activities
+        if isinstance(item, dict) and not summary_is_not_training(item)
+    ]
     unused = set(range(len(activity_rows)))
     matches: dict[int, dict[str, Any]] = {}
     workout_rows = _planned_workout_rows(planned)

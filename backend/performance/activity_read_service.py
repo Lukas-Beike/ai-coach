@@ -164,8 +164,14 @@ class ActivityAnalysisReadService(ActivityReadService):
                 return None
             return summary_reader.intervals_summary_row(db, provider_activity_id)
 
+        found: dict[str, ActivitySummary | None] = {}
+
         def requested_summary() -> ActivitySummary | None:
-            return _find_summary(load_inputs(normalized_id), normalized_id)
+            if "summary" not in found:
+                found["summary"] = _find_summary(
+                    load_inputs(normalized_id), normalized_id
+                )
+            return found["summary"]
 
         def performance() -> Mapping[str, Any]:
             if not inputs:
@@ -205,7 +211,20 @@ class ActivityAnalysisReadService(ActivityReadService):
                     reason="activity_details_not_found",
                 )
             records = self._session_records(db, document["session"]["activity_id"])
+        _add_purpose(document["session"], requested_summary())
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
+
+
+def _add_purpose(session: dict[str, Any], summary: ActivitySummary | None) -> None:
+    """Copy the session's purpose and competition link from its summary."""
+    if summary is None:
+        return
+    for key in ("purpose", "competition_id"):
+        if key in summary:
+            session[key] = summary[key]  # type: ignore[literal-required]
+    source = summary.get("sources", {}).get("purpose")
+    if source:
+        session["purpose_source"] = source
 
 
 def _session_zone_settings(

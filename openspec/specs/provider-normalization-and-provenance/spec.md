@@ -444,6 +444,14 @@ The system SHALL classify why an activity was done as training, race, commute, w
 - **WHEN** an Intervals.icu activity carries `sub_type`, `race` or `commute`
 - **THEN** its record has no purpose.
 
+#### Scenario: Commutes, warm-ups and cool-downs are never maximal efforts or plan completions
+- **WHEN** a session has purpose commute, warm-up or cool-down
+- **THEN** it stays out of the power and speed best values, mean-max curves and CP/CS fits, never completes a planned workout, and a commute still counts in weekly volume, named again as `commute_sessions` and `commute_duration_s`.
+
+#### Scenario: Races are flagged for analysis
+- **WHEN** a session has purpose race
+- **THEN** its curve record and CP/CS efforts carry `effort_context` "race", the activity detail session carries `purpose`, `competition_id` and `purpose_source`, and the session-analysis playbook judges pacing, fade and finish instead of interval execution.
+
 Detailed contract: the purpose is stored in the record details (`purpose`), so no migration is needed; an unknown stored value is ignored on read. The Garmin activity mapper version 17 replays stored payloads. The Coach activity list adds `purpose_label` (Training, Wettkampf, Pendeln, Einfahren, Ausfahren). Warm-up and cool-down are reserved for the athlete's own marking, which is not yet implemented.
 
-Evidence: `backend/canonical/vocabulary.py:ActivityPurpose`, `backend/providers/garmin_activity_mapping.py:_purpose`, `backend/activities/session_purpose.py:session_purpose`, `backend/db/canonical_store.py:activity_summary_values`, `backend/coach/context.py:compact_coach_activity`; `tests/test_session_purpose.py`, `tests/test_coach_activity_summary_parity.py`.
+Evidence: `backend/canonical/vocabulary.py:ActivityPurpose`, `backend/providers/garmin_activity_mapping.py:_purpose`, `backend/activities/session_purpose.py:session_purpose`, `backend/db/canonical_store.py:activity_summary_values`, `backend/coach/context.py:compact_coach_activity`, `backend/performance/report_service.py:curve_records`, `backend/performance/critical_power.py:_select_efforts`, `backend/activities/matching.py:match_planned_workouts`, `backend/performance/progress_report.py:_bucket`, `backend/performance/activity_read_service.py:_add_purpose`, `backend/coach/playbooks.py`; `tests/test_session_purpose.py`, `tests/test_coach_activity_summary_parity.py`, `tests/test_activity_purpose_consumers.py`, `tests/test_mean_max_curve.py:test_commutes_stay_out_and_races_are_flagged`, `tests/test_critical_power.py:EffortContextTests`, `tests/test_activity_matching.py:test_commutes_and_warmups_never_complete_a_planned_workout`.
