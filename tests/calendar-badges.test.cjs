@@ -12,7 +12,7 @@ function helpers() {
   assert.ok(start >= 0 && end > start);
   const context = vm.createContext({});
   vm.runInContext(
-    `${source.slice(start, end)};globalThis.helpers = { stripCalendarMarkers, calendarMarkerKeys, plannedDayStatusLabel, plannedDayBadgeSpecs, plannedConflictBadgeSpecs, plannedAppointmentLabel };`,
+    `${source.slice(start, end)};globalThis.helpers = { stripCalendarMarkers, calendarMarkerKeys, plannedDayStatusLabel, plannedDayNoteSpecs, plannedConflictLabels, plannedAppointmentLabel };`,
     context,
   );
   return context.helpers;
@@ -40,9 +40,9 @@ test("marker flags and raw tokens both map to marker keys in a stable order", ()
   assert.deepEqual(plain(calendarMarkerKeys(null)), []);
 });
 
-test("day badges show competition, confirmed rest status and deduplicated markers", () => {
-  const { plannedDayBadgeSpecs } = helpers();
-  const specs = plannedDayBadgeSpecs(
+test("day notes show competition, confirmed rest status and one calendar line with deduplicated markers", () => {
+  const { plannedDayNoteSpecs } = helpers();
+  const specs = plannedDayNoteSpecs(
     {
       day_status: "rest",
       no_training: true,
@@ -57,29 +57,30 @@ test("day badges show competition, confirmed rest status and deduplicated marker
   assert.deepEqual(plain(specs), [
     { kind: "competition", icon: "🏁", text: "A-Wettkampf: Stadtlauf" },
     { kind: "day-status", icon: "", text: "Ruhetag" },
-    { kind: "marker", icon: "", text: "Kein Training" },
+    { kind: "calendar", icon: "📅", text: "Arzt · Kein Training" },
   ]);
 });
 
 test("pause status and unknown status values are handled explicitly", () => {
-  const { plannedDayStatusLabel, plannedDayBadgeSpecs } = helpers();
+  const { plannedDayStatusLabel, plannedDayNoteSpecs } = helpers();
   assert.equal(plannedDayStatusLabel("pause"), "Trainingspause");
   assert.equal(plannedDayStatusLabel("unknown"), null);
   assert.equal(plannedDayStatusLabel("constructor"), null);
-  assert.deepEqual(plain(plannedDayBadgeSpecs({}, [], "2026-10-10")), []);
+  assert.deepEqual(plain(plannedDayNoteSpecs({}, [], "2026-10-10")), []);
 });
 
-test("conflict badges use the backend labels as text and skip empty entries", () => {
-  const { plannedConflictBadgeSpecs } = helpers();
+test("conflicts use the backend labels as text, skip empty entries and drop duplicates", () => {
+  const { plannedConflictLabels } = helpers();
   assert.deepEqual(
-    plain(plannedConflictBadgeSpecs([
+    plain(plannedConflictLabels([
       { code: "short_only", label: "Nur kurze Einheiten" },
       { code: "competition_ab", label: "" },
+      { code: "short_only", label: "Nur kurze Einheiten" },
       null,
     ])),
-    [{ kind: "conflict", icon: "⚠", text: "Konflikt: Nur kurze Einheiten" }],
+    ["Nur kurze Einheiten"],
   );
-  assert.deepEqual(plain(plannedConflictBadgeSpecs(undefined)), []);
+  assert.deepEqual(plain(plannedConflictLabels(undefined)), []);
 });
 
 test("tolerant marker spellings are stripped and detected like the backend", () => {

@@ -814,7 +814,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("daily_planning_context", plan_views)
         self.assertIn("card.open = false", plan_views)
         self.assertIn("section.open = false", plan_views)
-        self.assertIn("planned-day-calendar", plan_views)
+        self.assertIn("planned-day-${kind}", plan_views)
+        self.assertIn('kind: "calendar"', plan_views)
         self.assertIn("planned-day-health", plan_views)
         self.assertNotIn("function renderPlanned(", app)
         plan_markup = index[
@@ -832,8 +833,9 @@ class ServerFrontendTests(ServerTestCase):
         for helper in (
             "function stripCalendarMarkers(",
             "function calendarMarkerKeys(",
-            "function plannedDayBadgeSpecs(",
-            "function plannedConflictBadgeSpecs(",
+            "function plannedDayNoteSpecs(",
+            "function plannedConflictLabels(",
+            "function plannedConflict(",
             "function calendarBadge(",
             "function calendarBadgeRow(",
         ):
@@ -844,23 +846,25 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(
             'new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]])', plan_views
         )
-        self.assertIn("`Konflikt: ${label}`", plan_views)
+        self.assertIn("`⚠ Konflikt: ${labels.join(\" · \")}`", plan_views)
+        self.assertIn('"Mit Coach lösen"', plan_views)
+        self.assertIn("globalThis.askCoach?.(", plan_views)
         self.assertIn("`Entfallen (${restDayLabel})`", plan_views)
         self.assertIn('glyph.setAttribute("aria-hidden", "true");', plan_views)
         self.assertIn("calendarMarkerKeys(event).length > 0", plan_views)
         self.assertIn(
-            "plannedDayBadgeSpecs(dayContext, state.data?.competitions, dateKey)",
+            "plannedDayNotes(dayContext, state.data?.competitions, dateKey)",
             plan_views,
         )
-        self.assertIn("notes.prepend(calendarBadgeRow(dayBadges))", plan_views)
-        self.assertIn("plannedConflictBadgeSpecs(entry.conflicts)", plan_views)
+        self.assertIn("plannedConflictLabels(entry.conflicts)", plan_views)
         self.assertIn("state.data?.competitions, state.data?.weather", plan_views)
         self.assertNotIn("plannedDayCheckin", plan_views)
         self.assertNotIn("innerHTML", plan_views)
-        self.assertIn(
-            ".planned-badge.is-conflict { border-color: var(--danger-border-strong); color: var(--danger-ink);",
-            styles,
-        )
+        # Conflicts use one component; day markers are neutral note text, not pills or link-blue text.
+        self.assertNotIn(".planned-badge.is-conflict", styles)
+        self.assertNotIn(".planned-badge.is-marker", styles)
+        self.assertNotIn("var(--link)", styles[styles.index(".planned-day-calendar") :][:200])
+        self.assertIn(".planned-conflict {", styles)
         self.assertIn(".planned-entry.is-skipped .planned-entry-status", styles)
         self.assertIn(".planned-badges { display: flex; flex-wrap: wrap;", styles)
 
@@ -891,10 +895,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("weatherMissing", plan_views)
         self.assertIn(".planned-weather-hint {", styles)
         # Calendar titles wrap at word boundaries and may hyphenate German compounds.
-        for selector in (
-            ".planned-entry > summary > strong",
-            ".planned-session-header > :first-child",
-        ):
+        for selector in (".planned-session-title",):
             rule = css_rule(selector)
             self.assertIn("overflow-wrap: break-word; hyphens: auto;", rule)
             self.assertNotIn("overflow-wrap: anywhere", rule)
