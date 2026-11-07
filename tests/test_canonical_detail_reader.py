@@ -429,6 +429,15 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
         self.assertIsNone(self.reader.read(self.db, "unknown-id"))
         self.assertIsNone(read_reference(self.db, "act_missing"))
 
+    def test_an_id_of_records_in_several_sessions_is_not_a_reference(self) -> None:
+        self.add_session("act_a")
+        self.add_record(INTERVALS, "shared-id", "act_a")
+        self.add_session("act_b")
+        self.add_record(GARMIN, "shared-id", "act_b")
+
+        self.assertIsNone(read_reference(self.db, "shared-id"))
+        self.assertEqual("act_a", read_reference(self.db, "act_a"))
+
     def test_a_deleted_alias_resolves_to_the_session_it_retained(self) -> None:
         self.add_session("act_8")
         self.add_record(GARMIN, "g-ride-96", "act_8")

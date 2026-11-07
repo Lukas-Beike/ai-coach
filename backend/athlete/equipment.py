@@ -1092,12 +1092,12 @@ def _session_assignments(
     """Return the explicit assignments keyed by the session id they belong to.
 
     New assignments are stored under the session id. One stored under a provider
-    record id of a session (before that rule) still counts for the session, and
-    the session-id assignment wins over it. A record of no known session keeps
+    record id or an alias session id of a session (before that rule) still counts
+    for the session; the session-id assignment wins over it, else the newest. A record of no known session keeps
     its stored key.
     """
     stored = {str(record["activity_id"]): record for record in records}
-    legacy = canonical_store.session_record_ids(
+    legacy = canonical_store.session_legacy_keys(
         db, [str(row["id"]) for row in rows if row["id"]]
     )
     result = dict(stored)

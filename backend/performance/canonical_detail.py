@@ -66,25 +66,14 @@ def read_reference(db: Any, any_id: str) -> str | None:
     """Return the canonical session id of a local or provider activity id.
 
     A local ``act_`` id is used directly, any other id is looked up as the
-    activity id of a provider record. An alias session resolves to the session its
-    merge led to, also after its own deletion kept the survivor
-    (``merged_into_retained``). An unknown id returns None.
+    activity id of the only provider record carrying it. An alias session
+    resolves to the session its merge led to, also after its own deletion kept
+    the survivor (``merged_into_retained``). An unknown or ambiguous id returns
+    None.
     """
     text = any_id.strip()
-    current: str | None = text
-    if not text.startswith(canonical_store.ACTIVITY_ID_PREFIX):
-        current = next(
-            (
-                session
-                for provider in ProviderId
-                if (
-                    session := canonical_store.activity_local_ids(
-                        db, provider.value, [text]
-                    ).get(text)
-                )
-            ),
-            None,
-        )
+    # An id that names records of several sessions is not a reference.
+    current = canonical_store.feedback_origin_sessions(db, [(text, None)]).get(text)
     if current is None:
         return None
     return canonical_store.effective_session_ids(db, [current]).get(current)

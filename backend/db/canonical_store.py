@@ -2484,13 +2484,13 @@ def merge_candidate_rows(
     )
 
 
-def session_record_ids(db: Any, session_ids: Sequence[str]) -> dict[str, list[str]]:
-    """Map each session to the provider activity ids of its records.
+def session_legacy_keys(db: Any, session_ids: Sequence[str]) -> dict[str, list[str]]:
+    """Map each session to the other ids athlete data may be stored under.
 
-    A session's own records and those of every alias that merged into it count,
-    through ``merged_into`` or, for a deleted alias, ``merged_into_retained``, in
-    any record state. Rows stored before the local session id became the key sit
-    under such an id. Unknown sessions are absent; ids are sorted.
+    Those are the provider activity ids of the records of the session and of every
+    alias that merged into it (through ``merged_into`` or, for a deleted alias,
+    ``merged_into_retained``, in any record state), and the alias session ids.
+    Unknown sessions are absent; ids are sorted.
     """
     found: dict[str, set[str]] = {}
     for chunk in _chunked(session_ids):
@@ -2504,14 +2504,15 @@ def session_record_ids(db: Any, session_ids: Sequence[str]) -> dict[str, list[st
             "FROM activity_sessions AS alias JOIN family "
             "ON COALESCE(alias.merged_into, alias.merged_into_retained) "
             "= family.activity_id WHERE family.depth < ?) "
-            "SELECT DISTINCT family.root, records.provider_activity_id "
+            "SELECT family.root AS root, family.activity_id AS other FROM family "
+            "UNION "
+            "SELECT family.root, records.provider_activity_id "
             "FROM family JOIN activity_records AS records "
             "ON records.activity_id = family.activity_id",
             (*chunk, _MAX_MERGE_HOPS),
         ):
-            found.setdefault(str(row["root"]), set()).add(
-                str(row["provider_activity_id"])
-            )
+            if row["other"] != row["root"]:
+                found.setdefault(str(row["root"]), set()).add(str(row["other"]))
     return {root: sorted(ids) for root, ids in found.items()}
 
 

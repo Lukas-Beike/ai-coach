@@ -50,9 +50,9 @@ from backend.canonical.activity_summary import (
 )
 from backend.canonical.records import ActivityRecord, session_assist, session_terrain
 from backend.canonical.vocabulary import (
+    PROVIDER_PRECEDENCE,
     Assist,
     LoadModel,
-    ProviderId,
     RecordingOrigin,
     Terrain,
 )
@@ -264,9 +264,7 @@ def activity_summaries(
 # as session bundling decides; other origins follow.
 _ORIGIN_RANK: Final = {RecordingOrigin.WAHOO: 0, RecordingOrigin.GARMIN: 1}
 _PROVIDER_RANK: Final = {
-    ProviderId.WAHOO: 0,
-    ProviderId.GARMIN: 1,
-    ProviderId.INTERVALS: 2,
+    provider: rank for rank, provider in enumerate(PROVIDER_PRECEDENCE)
 }
 
 

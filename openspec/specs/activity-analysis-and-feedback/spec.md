@@ -45,7 +45,7 @@ Detailed contract: Derived metrics SHALL identify source and load model. Every `
 Evidence: `backend/activities/detail_contract.py:activity_detail_contract`, `backend/performance/canonical_detail.py:CanonicalDetailReader`; `tests/test_activity_detail_contract.py:test_document_has_the_contract_sections`, `tests/test_activity_detail_contract.py:test_recorders_own_copy_provides_the_measured_value_and_others_are_alternatives`, `tests/test_activity_detail_contract.py:test_status_adds_stale_load_error_and_coverage_per_provider`. Served contract: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `backend/http_api/activity_assembly.py`; `tests/test_activity_detail_parity.py:test_old_projection_values_appear_in_the_v1_fields`, `tests/test_activity_detail_parity.py:test_data_scope_names_the_provider_and_the_recorder`, `tests/test_detail_envelope.py:test_envelope_is_filled_for_intervals_garmin_and_wahoo_sessions`, `tests/test_http_sync_get_routes.py:test_garmin_only_session_is_served`, `tests/test_http_sync_get_routes.py:test_unknown_session_is_not_found`, and `e2e/activity-details.spec.js` on all five Playwright projects.
 
 ### Requirement: Sample provenance and clock-aware detail merging
-The system SHALL merge alternative detail sets deterministically without mutating them, prefer full-resolution streams over downsampled streams, choose channels by eligible device/source quality, and place them on a common clock only when alignment is supported. Laps SHALL prefer provider intervals before device laps and splits; zones SHALL retain sensor and boundary-source identity. Presentation downsampling SHALL retain aligned equal-length channels and identify that sampling occurred.
+The system SHALL merge alternative detail sets deterministically without mutating them, prefer full-resolution over downsampled streams, choose channels by device and source quality, and align them to a common clock only when supported. Provider ties follow Wahoo, Garmin, Intervals.icu; laps prefer device laps, then provider intervals, then splits; zones keep sensor and boundary-source identity. Downsampling keeps aligned equal-length channels and is flagged.
 
 #### Scenario: Complementary sensors
 - **WHEN** a chest-strap heart-rate stream and a power-meter power stream can align to the selected axis
@@ -266,6 +266,10 @@ Feedback and equipment assignments SHALL be stored under the live local session 
 #### Scenario: Feedback stored under a provider record id
 - **WHEN** feedback or an equipment assignment was stored under an Intervals.icu record id of a session
 - **THEN** every reader (detail, load rollups, block review, training report, equipment usage) finds it for the session, and a row under the session id wins over it.
+
+#### Scenario: Legacy row without a session
+- **WHEN** a feedback row has no stored session and its id names exactly one record (of its provider, when set)
+- **THEN** it joins that session's group for reads, edits and clearing; an id that names records of several sessions stays standalone, and an edit moves the effective row to the session id instead of adding one.
 
 #### Scenario: Existing conflicting feedback
 - **WHEN** an upgrade or confirmed merge encounters different feedback on two provider copies

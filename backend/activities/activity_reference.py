@@ -10,8 +10,10 @@ keeps its own not-found or validation response.
 
 The provider calls (detail refresh) and the duplicate deletion still need the
 Intervals.icu record id of a session while that ingest data exists:
-``provider_reference`` finds it through a session's primary record or a merged
-Intervals.icu record, and the strict ``resolve`` through the primary alone.
+``provider_reference`` finds it through a session's primary record, a merged
+Intervals.icu record or the survivor a deleted alias retained; the strict
+``resolve`` (duplicate deletion, detail jobs) uses the primary alone and passes
+deleted sessions through.
 """
 
 from __future__ import annotations
@@ -86,7 +88,9 @@ class ActivityReferences(ActivityReferenceResolver):
         if not candidate.startswith(canonical_store.ACTIVITY_ID_PREFIX):
             return ActivityReference(reference)
         with self._database_manager.reader() as db:
-            provider_activity_id = _intervals_provider_activity_id(db, candidate)
+            provider_activity_id = _intervals_provider_activity_id(
+                db, candidate, follow_retained=merged_copies
+            )
             if provider_activity_id is None and merged_copies:
                 record = canonical_store.activity_record_for_session(
                     db, ProviderId.INTERVALS.value, candidate
@@ -144,7 +148,9 @@ class NoActivityReferences(ActivityReferenceResolver):
 _MAX_ALIAS_DEPTH: Final = 64
 
 
-def _intervals_provider_activity_id(db: Any, activity_id: str) -> str | None:
+def _intervals_provider_activity_id(
+    db: Any, activity_id: str, *, follow_retained: bool
+) -> str | None:
     seen: set[str] = set()
     current: str | None = activity_id
     while current is not None and current not in seen and len(seen) < _MAX_ALIAS_DEPTH:
@@ -153,6 +159,8 @@ def _intervals_provider_activity_id(db: Any, activity_id: str) -> str | None:
         if session is None:
             return None
         if session["state"] == ActivitySessionState.DELETED.value:
+            if not follow_retained:
+                return None
             # A deleted alias keeps the survivor its deletion retained.
             retained = session["merged_into_retained"]
             current = str(retained) if retained else None

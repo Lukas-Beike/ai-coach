@@ -194,9 +194,13 @@ class ActivityReferenceResolverTests(_Fixture):
                 "merged_into_retained = ? WHERE activity_id = ?",
                 (survivor, alias),
             )
+        references = ActivityReferences(self.manager)
         self.assertEqual(
-            "ride-survivor", ActivityReferences(self.manager).resolve(alias)
+            ActivityReference("ride-survivor", ProviderId.INTERVALS.value),
+            references.provider_reference(alias),
         )
+        # The strict resolution keeps a deleted session unchanged.
+        self.assertEqual(alias, references.resolve(alias))
 
     def test_unresolvable_references_pass_through(self) -> None:
         local = self.seed("ride-1")

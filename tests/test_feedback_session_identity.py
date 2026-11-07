@@ -199,12 +199,86 @@ class FeedbackSessionTests(FeedbackSessionFixture):
             (saved["activity_id"], saved["notes"], saved["session_rpe"]),
             (session, "legacy", 5),
         )
-        self.assertEqual(
-            {row["activity_id"] for row in stored_rows(self)}, {INTERVALS_ID, session}
-        )
+        # The effective row moved to the session id; the group did not grow.
+        self.assertEqual([row["activity_id"] for row in stored_rows(self)], [session])
         (found,) = self.service.for_activity_ids([session])
         self.assertEqual(found["session_rpe"], 5)
+        self.assertNotIn("conflicting_feedback", found)
         self.assertEqual(len(self.service.list()), 1)
+
+    def test_ordinary_edits_never_add_rows_or_conflicts(self) -> None:
+        session = self.session_id()
+        self.store_legacy(
+            INTERVALS_ID,
+            "legacy",
+            "2026-09-19",
+            session=self.sessions["intervals"],
+            rpe=4,
+        )
+        for rpe in (5, 6, 7):
+            self.service.save(session, {"session_rpe": rpe})
+            self.service.save(INTERVALS_ID, {"notes": f"note {rpe}"})
+            self.assertEqual(
+                [row["activity_id"] for row in stored_rows(self)], [session]
+            )
+            (effective,) = self.service.list()
+            self.assertNotIn("conflicting_feedback", effective)
+            (found,) = self.service.for_activity_ids([session])
+            self.assertNotIn("conflicting_feedback", found)
+        self.assertEqual((found["session_rpe"], found["notes"]), (7, "note 7"))
+
+    def test_a_save_keeps_the_fields_of_a_legacy_row_without_a_session(self) -> None:
+        session = self.session_id()
+        self.store_legacy(INTERVALS_ID, "legacy", "2026-09-19", session=None, rpe=4)
+
+        saved = self.service.save(session, {"deviation_reason": "illness"})
+        saved = saved["activity_feedback"]
+
+        self.assertEqual(
+            (saved["notes"], saved["session_rpe"], saved["deviation_reason"]),
+            ("legacy", 4, "illness"),
+        )
+        self.assertEqual([row["activity_id"] for row in stored_rows(self)], [session])
+
+    def test_clearing_removes_the_session_row_and_its_legacy_rows(self) -> None:
+        session = self.session_id()
+        self.store_legacy(INTERVALS_ID, "legacy", "2026-09-21", session=None)
+        self.store_legacy(session, "current", "2026-09-19", session=session)
+
+        result = self.service.save(session, {"notes": ""})
+
+        self.assertIsNone(result["activity_feedback"])
+        self.assertEqual((self.service.list(), stored_rows(self)), ([], []))
+        self.assertEqual(self.service.for_activity_ids([session]), [])
+
+    def test_a_row_of_another_provider_does_not_join_the_session(self) -> None:
+        session = self.session_id()
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO activity_feedback(activity_id, notes, created_at, "
+                "updated_at, provider) VALUES (?, 'other', ?, ?, 'garmin')",
+                (INTERVALS_ID, "2026-09-19", "2026-09-19"),
+            )
+        self.assertEqual(self.service.for_activity_ids([session]), [])
+        self.assertEqual([item["notes"] for item in self.service.list()], ["other"])
+
+    def test_an_unambiguous_legacy_row_counts_for_sessions_only(self) -> None:
+        session = self.session_id()
+        self.store_legacy(INTERVALS_ID, "legacy", "2026-09-19", session=None, rpe=4)
+
+        (found,) = self.service.for_activity_ids([session], sessions_only=True)
+
+        self.assertEqual((found["activity_id"], found["session_rpe"]), (session, 4))
+
+    def test_a_row_under_an_alias_session_id_does_not_beat_a_newer_row(self) -> None:
+        session = self.session_id()
+        (alias,) = {*self.sessions.values()} - {session}
+        self.store_legacy(alias, "old alias", "2026-09-19", session=alias)
+        self.store_legacy(INTERVALS_ID, "newer", "2026-09-21", session=session)
+
+        (found,) = self.service.for_activity_ids([session])
+
+        self.assertEqual(found["notes"], "newer")
 
     def test_conflicting_originals_stay_stored_and_are_named(self) -> None:
         with self.manager.unit_of_work() as db:

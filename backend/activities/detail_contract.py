@@ -34,6 +34,7 @@ from backend.canonical.local_time import wall_time
 from backend.canonical.rating_scales import ACTIVITY_RATING_SCALES, rating_fields
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
+    PROVIDER_PRECEDENCE,
     ProviderId,
     SourceKind,
     StreamChannel,
@@ -53,11 +54,7 @@ _ENVELOPE_KEYS: Final = (
     "activity_validation",
     "session_rpe_load",
 )
-_PROVIDER_ORDER: Final[tuple[ProviderId, ...]] = (
-    ProviderId.WAHOO,
-    ProviderId.GARMIN,
-    ProviderId.INTERVALS,
-)
+_PROVIDER_ORDER: Final[tuple[ProviderId, ...]] = PROVIDER_PRECEDENCE
 _MEASURED_METRICS: Final[tuple[tuple[str, str], ...]] = (
     ("duration_s", "s"),
     ("moving_duration_s", "s"),

@@ -955,6 +955,14 @@ class ActivityFeedbackRepository:
             "DELETE FROM activity_feedback WHERE activity_id = ?", (activity_id,)
         )
 
+    def rekey(self, db: Any, activity_id: str, new_activity_id: str) -> None:
+        """Move one row to the session id it belongs to; times and rating stay."""
+        db.execute(
+            "UPDATE activity_feedback SET activity_id = ?, provider = NULL, "
+            "session_id = ? WHERE activity_id = ?",
+            (new_activity_id, new_activity_id, activity_id),
+        )
+
     def upsert(
         self,
         db: Any,

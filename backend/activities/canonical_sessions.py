@@ -77,6 +77,7 @@ from typing import Final
 from backend.canonical.records import ActivityRecord
 from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import (
+    PROVIDER_PRECEDENCE,
     ActivityLinkKind,
     ProviderId,
     RecordingOrigin,
@@ -534,9 +535,7 @@ def _sessions(
 
 
 _LEAD_PROVIDER_RANK: Final = {
-    ProviderId.WAHOO: 0,
-    ProviderId.GARMIN: 1,
-    ProviderId.INTERVALS: 2,
+    provider: rank for rank, provider in enumerate(PROVIDER_PRECEDENCE)
 }
 
 
