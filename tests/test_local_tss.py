@@ -31,6 +31,7 @@ from backend.performance.local_tss import (
     HEART_RATE_BRANCH,
     PACE_BRANCH,
     POWER_BRANCH,
+    CalibrationPair,
     DatedThresholds,
     LocalLoad,
     RpeCalibration,
@@ -261,7 +262,9 @@ class SessionLoadWorkedExampleTests(unittest.TestCase):
         self.assertEqual(
             session_local_load(strength, heart_rate, rating=rating), "not_calibrated"
         )
-        calibration = RpeCalibration(0.2, 20, date(2025, 6, 2), DAY)
+        calibration = RpeCalibration(
+            0.2, 20, date(2025, 6, 2), DAY, (4.0, 6.0), {"garmin": 20}
+        )
         load = session_local_load(
             strength, heart_rate, rating=rating, calibration=calibration
         )
@@ -506,17 +509,29 @@ class DatedThresholdTests(unittest.TestCase):
         self.assertNotIn("threshold_after_session", load.details)
 
 
-def _ride(index: int, day: date, *, rpe_label: str = "Garmin Connect") -> dict:
-    """A 60-min ride at NP 250 W (100 TSS at FTP 250) rated RPE 5 (300 AU)."""
+def _pair(day: date, rpe: float, ratio: float) -> CalibrationPair:
+    return CalibrationPair(day, rpe, ratio, "garmin")
+
+
+def _ride(
+    index: int,
+    day: date,
+    *,
+    rpe_label: str = "Garmin Connect",
+    rpe: float = 5.0,
+    np: float = 250.0,
+    minutes: float = 60.0,
+) -> dict:
+    """By default a 60-min ride at NP 250 W (100 TSS at FTP 250), RPE 5 (300 AU)."""
     return {
         "id": f"act_r{index}",
         "sport": "ride",
         "started_at": f"{day.isoformat()}T06:00:00+00:00",
         "started_at_local": f"{day.isoformat()}T08:00:00",
-        "moving_duration_s": 3600.0,
-        "elapsed_duration_s": 3600.0,
-        "normalized_power": 250.0,
-        "rpe": 5.0,
+        "moving_duration_s": minutes * 60,
+        "elapsed_duration_s": minutes * 60,
+        "normalized_power": np,
+        "rpe": rpe,
         "sources": {"rpe": rpe_label},
     }
 
@@ -576,30 +591,33 @@ class SessionRpeCalibrationTests(unittest.TestCase):
         for ride in rides:
             ride.pop("rpe")
         feedback = {ride["id"]: {"session_rpe": 4.0} for ride in rides}
-        feedback["act_gym"] = {"session_rpe": 8.0}
+        feedback["act_gym"] = {"session_rpe": 5.0}
         loads = session_loads(
             [*rides, _strength(DAY, rpe=None)], self.thresholds, feedback
         )
         load = loads["act_gym"]
         assert isinstance(load, LocalLoad), load
-        # 100 TSS / 240 AU; 45 min x RPE 8 = 360 AU -> 150 TSS.
-        self.assertAlmostEqual(load.load, 150.0, places=6)
+        # 100 TSS / 240 AU; 45 min x RPE 5 = 225 AU -> 93.75 TSS.
+        self.assertAlmostEqual(load.load, 93.75, places=6)
+        self.assertEqual(load.details["calibration"]["pairs_by_source"], {"local": 20})
 
     def test_pairs_older_than_365_days_drop_out(self) -> None:
         rides = [_ride(i, DAY - timedelta(days=365 + i)) for i in range(20)]
         self.assertEqual(
             self._loads(rides, _strength(DAY))["act_gym"], "not_calibrated"
         )
-        calibrations = RpeCalibrations([(DAY - timedelta(days=364), 0.5)] * 20)
-        found = calibrations.on(DAY)
+        calibrations = RpeCalibrations(
+            [_pair(DAY - timedelta(days=364), 5.0, 0.5)] * 20
+        )
+        found = calibrations.on(DAY, 5.0)
         assert found is not None
         self.assertEqual(
             (found.factor, found.window_start), (0.5, DAY - timedelta(days=364))
         )
 
     def test_median_resists_an_outlier(self) -> None:
-        pairs = [(DAY, 0.3)] * 20 + [(DAY, 5.0)]
-        found = RpeCalibrations(pairs).on(DAY)
+        pairs = [_pair(DAY, 5.0, 0.3)] * 20 + [_pair(DAY, 5.0, 5.0)]
+        found = RpeCalibrations(pairs).on(DAY, 5.0)
         assert found is not None
         self.assertEqual(found.factor, 0.3)
 
@@ -613,6 +631,46 @@ class SessionRpeCalibrationTests(unittest.TestCase):
         self.assertEqual(
             self._loads(rides, _strength(DAY))["act_gym"], "not_calibrated"
         )
+
+    def test_easy_pairs_no_longer_inflate_hard_strength(self) -> None:
+        # Card M6 v4 worked example: 30 easy rides (60 min, IF 0.65, RPE 2)
+        # and 22 threshold rides (50 min, IF 0.90, RPE 7).
+        easy = [_ride(i, DAY - timedelta(days=i), rpe=2.0, np=162.5) for i in range(30)]
+        hard = [
+            _ride(100 + i, DAY - timedelta(days=i), rpe=7.0, np=225.0, minutes=50)
+            for i in range(22)
+        ]
+        gym = {**_strength(DAY, rpe=7.0), "elapsed_duration_s": 3600.0}
+        load = self._loads([*easy, *hard], gym)["act_gym"]
+        assert isinstance(load, LocalLoad), load
+        # 67.5 TSS / 350 AU per threshold ride; 420 AU -> 81 TSS (v3: 147.9).
+        self.assertAlmostEqual(load.load, 420 * 67.5 / 350, places=6)
+        calibration = load.details["calibration"]
+        self.assertEqual(calibration["rpe_band"], [6.0, 8.0])
+        self.assertEqual(calibration["pairs"], 22)
+        table = {row["rpe"]: row for row in calibration["by_rpe"]}
+        self.assertAlmostEqual(table[2]["tss_per_au"], 42.25 / 120, places=6)
+        self.assertNotIn(4, table)
+        self.assertEqual(table[7]["pairs"], 22)
+
+    def test_band_widens_to_two_then_gives_no_value(self) -> None:
+        rides = [_ride(i, DAY - timedelta(days=i), rpe=3.0) for i in range(20)]
+        load = self._loads(rides, _strength(DAY, rpe=5.0))["act_gym"]
+        assert isinstance(load, LocalLoad), load
+        self.assertEqual(load.details["calibration"]["rpe_band"], [3.0, 7.0])
+        self.assertEqual(
+            self._loads(rides, _strength(DAY, rpe=6.0))["act_gym"], "not_calibrated"
+        )
+
+    def test_pair_au_uses_the_tss_duration(self) -> None:
+        # 60 min moving inside 90 min elapsed: 100 TSS over 60 min x RPE 5.
+        rides = [
+            {**_ride(i, DAY - timedelta(days=i)), "elapsed_duration_s": 5400.0}
+            for i in range(20)
+        ]
+        load = self._loads(rides, _strength(DAY, rpe=5.0))["act_gym"]
+        assert isinstance(load, LocalLoad), load
+        self.assertAlmostEqual(load.details["calibration"]["tss_per_au"], 1 / 3)
 
     def test_rated_sessions_only_with_strength(self) -> None:
         rides = [_ride(i, DAY) for i in range(3)]

@@ -199,6 +199,8 @@ accessible text, not a declared absence.
 | R42 | Moseley & Jeukendrup 2001, "The reliability of cycling efficiency", Med Sci Sports Exerc 33(4):621-627, PMID 11283439, DOI `10.1097/00005768-200104000-00017` | abstract | 17 men: gross efficiency 19.8 ± 0.6 %, test-retest CV 4.2 %. Lab value, not a field constant. |
 | R43 | Hopker et al. 2009, "The effects of training on gross efficiency in cycling: a review", Int J Sports Med 30(12):845-850, PMID 19941249, DOI `10.1055/s-0029-1237712` | abstract | Training can raise gross efficiency, so work-to-energy varies within an athlete. |
 | R44 | Minetti et al. 2002, "Energy cost of walking and running at extreme uphill and downhill slopes", J Appl Physiol 93(3):1039-1046, PMID 12183501, DOI `10.1152/japplphysiol.01177.2001` | abstract | 10 elite mountain runners on a treadmill, slopes −0.45 to +0.45; cost of running as a polynomial of slope. Laboratory model, not Garmin's GAP; used for grade-adjusted speed (M8, pace at heart rate). |
+| R45 | Sweet et al. 2004, "Quantitation of resistance training using the session rating of perceived exertion method", J Strength Cond Res 18(4):796-802, PMID 15574104, DOI `10.1519/14153.1` | abstract | Session RPE in resistance training rose with lifting intensity while total work fell; session RPE may underrate the mean of per-set ratings. Supports the AU of strength sessions, not a conversion into TSS. |
+| R46 | Day et al. 2004, "Monitoring exercise intensity during resistance training using the session RPE scale", J Strength Cond Res 18(2):353-358, PMID 15142026, DOI `10.1519/R-13113.1` | abstract | Session RPE distinguished resistance-training intensities; ICC 0.88. No TSS conversion. |
 | L1 | Phillips & Steven 2026, "Perspective: sleep regularity—where do we go from here?", Sleep 49(8), PMID 42023690, DOI `10.1093/sleep/zsag114` | full text | Perspective without new data, formula, threshold or wearable/athlete content. Background only; not decision evidence. |
 
 ### Vendor documentation (not peer-reviewed)
@@ -222,6 +224,10 @@ retraction for R32-R43. No peer-reviewed validity or reliability study of EF or
 VI and no peer-reviewed decoupling threshold was found.
 R44 was added on 2026-11-07 (#1770) from a bibliographic search (PubMed
 ID, repository records); its correction status was not checked.
+R45 and R46 were added on 2026-11-07 (#1771) from a web and PubMed search
+(`session RPE resistance training`, TrainingPeaks and Intervals.icu pages on
+TSS from RPE); no study converting session-RPE AU into TSS was found. Their
+correction status was not checked.
 
 M6 search on 2026-11-06 (PubMed E-utilities, Europe PMC, publisher and vendor
 pages): `"training stress score"[tiab] AND 2020:2026[dp]`,

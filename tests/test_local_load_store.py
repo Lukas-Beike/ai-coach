@@ -177,6 +177,44 @@ class LocalLoadStoreTests(unittest.TestCase):
             {"tss_per_au": 1 / 3, "pairs": 20, "session_rpe_au": 270.0},
         )
 
+    def test_served_strength_load_names_its_rpe_band_and_slope(self) -> None:
+        calibration = {
+            "tss_per_au": 0.19,
+            "pairs": 22,
+            "rpe_band": [6.0, 8.0],
+            "pairs_by_source": {"garmin": 12, "local": 10},
+            "by_rpe": [
+                {"rpe": 2, "tss_per_au": 0.352083, "pairs": 30},
+                {"rpe": 5, "tss_per_au": None, "pairs": 4},
+            ],
+        }
+        stored = {
+            "act_gym": {
+                "session_load": {
+                    "value": 80.0,
+                    "method_version": 4,
+                    "derivation": {
+                        "branch": "session_rpe",
+                        "inputs": {"session_rpe_au": 420.0},
+                        "calibration": calibration,
+                    },
+                }
+            }
+        }
+        (served,) = with_local_loads([{"id": "act_gym", "sport": "strength"}], stored)
+        served_calibration = served["load_calibration"]
+        self.assertEqual(served_calibration["rpe_band"], [6.0, 8.0])
+        self.assertEqual(
+            served_calibration["pairs_by_rating_source"], {"garmin": 12, "local": 10}
+        )
+        self.assertEqual(
+            served_calibration["tss_per_au_by_rpe"],
+            [
+                {"rpe": 2, "tss_per_au": 0.352, "pairs": 30},
+                {"rpe": 5, "tss_per_au": None, "pairs": 4},
+            ],
+        )
+
     def test_served_heart_rate_load_marks_the_assumed_sex(self) -> None:
         def stored(inputs: dict[str, Any]) -> dict[str, Any]:
             return {
