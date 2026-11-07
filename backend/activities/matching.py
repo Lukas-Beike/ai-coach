@@ -256,21 +256,24 @@ def match_planned_workouts(
     )
 
     # planned_event_id is the reliable provider association.
+    not_training = {
+        index for index, row in enumerate(activity_rows) if summary_is_not_training(row)
+    }
     blocked: set[int] = set()
     for event_index, event in workout_rows:
+        # A paired training session wins over a paired commute of the same event.
         selected_index = _paired_activity_match(
-            event, activity_rows, by_paired_id, unused
+            event, activity_rows, by_paired_id, unused - not_training
         )
-        if selected_index is None:
-            continue
-        unused.remove(selected_index)
-        if summary_is_not_training(activity_rows[selected_index]):
-            blocked.add(event_index)
-        else:
+        if selected_index is not None:
             matches[event_index] = activity_rows[selected_index]
-    unused -= {
-        index for index in unused if summary_is_not_training(activity_rows[index])
-    }
+            unused.remove(selected_index)
+        elif (
+            _paired_activity_match(event, activity_rows, by_paired_id, unused)
+            is not None
+        ):
+            blocked.add(event_index)
+    unused -= not_training
 
     unmatched = [
         (index, event)
