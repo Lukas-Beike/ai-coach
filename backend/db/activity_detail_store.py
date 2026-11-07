@@ -325,7 +325,12 @@ def strength_sets_for_sessions(
         for raw in rows:
             row = dict(raw)
             # The header alone ranks the list; its sets are read only when chosen.
-            header = _stored(row, _strength_header(row))
+            # An unreadable header skips that list only, like an unreadable set.
+            try:
+                header = _stored(row, _strength_header(row))
+            except (TypeError, ValueError) as error:
+                _log_unreadable(row, error)
+                continue
             key = rank(header)
             current = chosen.get(row["owner"])
             if current is None or key < current[0]:

@@ -396,6 +396,15 @@ class SessionReadTests(unittest.TestCase):
         summaries = strength_summaries(self.db, ["act_1", "act_3"])
         self.assertEqual(set(summaries), {"act_1"})
         self.assertEqual(summaries["act_1"]["source"], "garmin_exercise_sets")
+        # A corrupt header of one list skips that list, not the whole read.
+        self.db.execute("PRAGMA ignore_check_constraints = ON")
+        self.db.execute(
+            "UPDATE activity_detail_sets SET set_source = 'bogus' WHERE provider_activity_id = 'g2'"
+        )
+        self.db.execute("PRAGMA ignore_check_constraints = OFF")
+        with self.assertLogs("intervals_coach", level="WARNING"):
+            fallback = strength_summaries(self.db, ["act_1"])
+        self.assertEqual(fallback["act_1"]["source"], "fit_set_messages")
         many = strength_summaries(
             self.db, ["act_1", *(f"act_x{i}" for i in range(1200))]
         )
