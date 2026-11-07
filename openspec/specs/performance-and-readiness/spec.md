@@ -397,7 +397,7 @@ Affected history, recovery, nutrition and Coach reads SHALL obtain retained prov
 - **WHEN** a proprietary provider score is not recorded
 - **THEN** it remains unknown and no local recreation is substituted.
 
-Evidence baseline: `backend/performance/personal_recovery.py`, `backend/performance/canonical_personal_recovery.py`, `backend/performance/chart_history.py`, `backend/performance/garmin_projection.py`; `tests/test_personal_recovery.py`, `tests/test_performance_chart_history.py`. Canonical-only reads and parity require new regression evidence.
+Evidence baseline: `backend/performance/personal_recovery.py`, `backend/performance/chart_history.py`, `backend/performance/garmin_projection.py`; `tests/test_personal_recovery.py`, `tests/test_performance_chart_history.py`. Canonical-only reads and parity require new regression evidence.
 
 ### Requirement: Garmin current performance metrics are read from canonical data only
 The current Garmin performance metrics (weight, thresholds, VO2max, maximum heart rate and race predictions) SHALL be read from canonical Garmin data only. The Garmin sync status SHALL supply only source freshness on these read paths. Only the sync's performance-history merge SHALL parse a fetched Garmin payload, before it is stored.
@@ -542,7 +542,7 @@ The system SHALL read stored Intervals.icu wellness-day observations, identified
 
 Detailed contract: the stored wellness kinds read are weight, body fat, resting HR, HRV, sleep, readiness and VO2max, for the history view only; CTL, ATL, form and the subjective ratings are not read. The snapshot rows not read are `recent_wellness` and `raw_provider_data.wellness`. The history view covers every stored wellness day.
 
-Evidence: `backend/performance/wellness_days.py:read_wellness_days`, `backend/performance/canonical_inputs.py:read_performance_inputs`; `tests/test_performance_wellness_days.py:WellnessDayTests`, `tests/test_performance_canonical_sections.py:SectionHelperTests` and `SectionReadTests`, `tests/test_performance_canonical_parity.py:CanonicalInputEdgeTests`, `tests/test_performance_context.py:PerformanceContextTests`, `tests/test_performance_canonical_parity.py:CanonicalReadStatusEndToEndTests`, and `tests/test_performance_canonical_body_history.py:CanonicalBodyLedgerCaseTests`.
+Evidence: `backend/performance/wellness_days.py:read_wellness_days`, `backend/performance/canonical_inputs.py:read_performance_inputs`; `tests/test_performance_wellness_days.py:WellnessDayTests` and `SectionReadTests`, `tests/test_performance_canonical_parity.py:CanonicalInputEdgeTests`, `tests/test_performance_context.py:PerformanceContextTests`, `tests/test_performance_canonical_parity.py:CanonicalReadStatusEndToEndTests`, and `tests/test_performance_canonical_body_history.py:CanonicalBodyLedgerCaseTests`.
 
 ### Requirement: Wellness `sportInfo` threshold fallbacks are not read
 The system SHALL NOT read cycling or running FTP, LTHR, maximum heart rate, VO2max, threshold pace or Zone-2 pace from Intervals.icu wellness `sportInfo` entries. These values SHALL come only from their remaining sources: Garmin, athlete sport settings, the athlete record, Wahoo and the manual profile. The 30-day `run_threshold_watts` average SHALL read only Garmin's run threshold power history and SHALL be unknown when the current value has another source.

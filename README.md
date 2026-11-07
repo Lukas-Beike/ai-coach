@@ -636,7 +636,7 @@ When a database restore is initiated:
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Intervals.icu Ingest Purge
-Once the Garmin rating backfill reports `finished` and no Intervals.icu sync holds its lock, the canonical backfill worker removes the stored Intervals.icu ingest data once (purge version 1). It first saves one encrypted recovery copy beside the database (`intervals-coach.db.pre-intervals-purge-v1-<timestamp>-<id>`, without the backup-download size limit, reused by a later attempt and kept by the startup cleanup), then in one transaction:
+Once the Garmin rating backfill reports `finished` and the Intervals.icu exclusion lock is free (no Intervals.icu data is read any more, so only the purge takes it), the canonical backfill worker removes the stored Intervals.icu ingest data once (purge version 1). It first saves one encrypted recovery copy beside the database (`intervals-coach.db.pre-intervals-purge-v1-<timestamp>-<id>`, without the backup-download size limit, reused by a later attempt and kept by the startup cleanup), then in one transaction:
 
 - tombstones every Intervals.icu activity, so the Garmin or Wahoo copy becomes the session and old session ids still resolve;
 - moves activity notes, equipment assignments and frozen target snapshots to that session (the newest wins against everything stored under the session's ids); data of a session without a Garmin or Wahoo copy is dropped and counted;
