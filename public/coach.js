@@ -1915,22 +1915,26 @@ function appendFailedTurnRetry(node, message, latest) {
   retry.type = "button";
   retry.className = "secondary-button message-retry";
   retry.textContent = "Erneut senden";
-  retry.addEventListener("click", () => resendChatText(String(request.content)));
+  retry.addEventListener("click", () => resendChatText(String(request.content), message.coach_request_kind));
   node.append(retry);
 }
 
-// Sends a text through the normal composer path while keeping the athlete's draft and attachments.
-function resendChatText(text) {
+// Sends a text (with its quick-action kind) through the normal composer path while keeping the athlete's draft.
+function resendChatText(text, requestKind = null) {
   const input = $("#messageInput");
   if (!input) return;
   const draft = input.value;
+  const draftKind = input.dataset.requestKind;
   const attachments = state.chatAttachments || [];
   state.chatAttachments = [];
   input.value = text;
-  delete input.dataset.requestKind;
+  if (requestKind) input.dataset.requestKind = requestKind;
+  else delete input.dataset.requestKind;
   input.dispatchEvent(new Event("input"));
   $("#chatForm").requestSubmit();
   input.value = draft;
+  if (draftKind) input.dataset.requestKind = draftKind;
+  else delete input.dataset.requestKind;
   state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
   renderChatAttachments();
   resizeChatInput(input);

@@ -144,6 +144,8 @@ class CoachTurnFailureService:
                 receipt["message"]["coach_changes"] = summary
             if status == "failed":
                 receipt["message"]["coach_failed"] = True
+                if receipt.get("request_kind"):
+                    receipt["message"]["coach_request_kind"] = receipt["request_kind"]
             db.execute(
                 "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? "
                 "WHERE client_turn_id=?",

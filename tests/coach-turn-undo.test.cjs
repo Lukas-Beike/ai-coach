@@ -184,9 +184,10 @@ function retryHarness(messages, { draft = "", attachments = [] } = {}) {
 test("the newest failed reply sends its request again and keeps the draft", () => {
   const messages = [
     { role: "user", client_turn_id: "turn-1", content: "Plane meine Woche" },
-    { role: "assistant", client_turn_id: "turn-1", content: "Timeout", coach_failed: true },
+    { role: "assistant", client_turn_id: "turn-1", content: "Timeout", coach_failed: true, coach_request_kind: "plan_week" },
   ];
   const { context, state, input, submitted } = retryHarness(messages, { draft: "Entwurf", attachments: ["a.fit"] });
+  input.dataset.requestKind = "morning_checkin";
   const node = new FakeElement("div");
   node.classList = { add(name) { node.className += ` ${name}`; } };
   context.appendFailedTurnRetry(node, messages[1], true);
@@ -194,8 +195,9 @@ test("the newest failed reply sends its request again and keeps the draft", () =
   assert.equal(retry.textContent, "Erneut senden");
   assert.match(node.className, /is-failed/);
   retry.listeners.click();
-  assert.deepEqual(JSON.parse(JSON.stringify(submitted)), [{ text: "Plane meine Woche", attachments: [] }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(submitted)), [{ text: "Plane meine Woche", attachments: [], requestKind: "plan_week" }]);
   assert.equal(input.value, "Entwurf");
+  assert.equal(input.dataset.requestKind, "morning_checkin");
   assert.deepEqual([...state.chatAttachments], ["a.fit"]);
 });
 

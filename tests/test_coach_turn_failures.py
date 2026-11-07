@@ -319,6 +319,14 @@ class CoachTurnFailureTests(unittest.TestCase):
         with reader.reader() as db:
             return next(m for m in self.chat.list(db) if m["role"] == "assistant")
 
+    def test_failed_quick_action_keeps_its_kind_for_the_retry(self) -> None:
+        self._seed({"command_receipts": [], "request_kind": "plan_week"})
+        result = self.service.persist(
+            "turn-1", {}, AppError(504, "late", reason="provider_timeout")
+        )
+        self.assertEqual(result["message"]["coach_request_kind"], "plan_week")
+        self.assertEqual(self._reloaded_reply()["coach_request_kind"], "plan_week")
+
     def test_cancelled_turn_is_not_marked_as_failed(self) -> None:
         self._seed({"command_receipts": []})
         result = self.service.persist(
