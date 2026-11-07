@@ -53,6 +53,7 @@ from backend.canonical.vocabulary import (
     PROVIDER_PRECEDENCE,
     Assist,
     LoadModel,
+    ProviderId,
     RecordingOrigin,
     Terrain,
 )

@@ -1093,8 +1093,8 @@ def _session_assignments(
 
     New assignments are stored under the session id. One stored under a provider
     record id or an alias session id of a session (before that rule) still counts
-    for the session; the session-id assignment wins over it, else the newest. A record of no known session keeps
-    its stored key.
+    for the session; the session-id assignment wins over it, else the newest by
+    ``observed_at``. A record of no known session keeps its stored key.
     """
     stored = {str(record["activity_id"]): record for record in records}
     legacy = canonical_store.session_legacy_keys(
@@ -1103,10 +1103,16 @@ def _session_assignments(
     result = dict(stored)
     for row in rows:
         key = str(row["id"])
-        for record_id in legacy.get(key, ()):
-            old = result.pop(record_id, None) if record_id != key else None
-            if old is not None and key not in stored and key not in result:
-                result[key] = {**old, "activity_id": key}
+        candidates = [
+            old
+            for record_id in legacy.get(key, ())
+            if record_id != key and (old := result.pop(record_id, None)) is not None
+        ]
+        if candidates and key not in stored and key not in result:
+            newest = max(
+                candidates, key=lambda item: str(item.get("observed_at") or "")
+            )
+            result[key] = {**newest, "activity_id": key}
     return result
 
 

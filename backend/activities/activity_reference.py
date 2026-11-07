@@ -158,15 +158,22 @@ def _intervals_provider_activity_id(
         session = canonical_store.activity_sessions_by_ids(db, [current]).get(current)
         if session is None:
             return None
-        if session["state"] == ActivitySessionState.DELETED.value:
-            if not follow_retained:
-                return None
-            # A deleted alias keeps the survivor its deletion retained.
-            retained = session["merged_into_retained"]
-            current = str(retained) if retained else None
-            continue
-        if session["primary_provider"] == ProviderId.INTERVALS.value:
+        if session["primary_provider"] == ProviderId.INTERVALS.value and (
+            session["state"] != ActivitySessionState.DELETED.value
+        ):
             return str(session["primary_provider_activity_id"])
-        merged_into = session["merged_into"]
-        current = str(merged_into) if merged_into else None
+        current = _next_alias(session, follow_retained=follow_retained)
     return None
+
+
+def _next_alias(session: Any, *, follow_retained: bool) -> str | None:
+    """The session an alias points at; a deleted one only keeps its retained target.
+
+    A deleted session leads nowhere unless ``follow_retained`` asks for the survivor
+    its deletion retained.
+    """
+    if session["state"] == ActivitySessionState.DELETED.value:
+        retained = session["merged_into_retained"] if follow_retained else None
+        return str(retained) if retained else None
+    merged_into = session["merged_into"]
+    return str(merged_into) if merged_into else None

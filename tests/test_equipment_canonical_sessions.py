@@ -727,6 +727,25 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         self.assertEqual(self.usage("New bike")["assigned_sessions"], 1)
         self.assertEqual(self.usage("Old bike")["assigned_sessions"], 0)
 
+    def test_an_older_alias_row_loses_to_a_newer_record_id_row(self) -> None:
+        old, new = self.local_bike(name="Old bike"), self.local_bike(name="New bike")
+        session = session_of(self.manager, "i1")
+        with self.manager.reader() as db:
+            local = canonical_store.activity_local_ids(db, "garmin", ["910"])["910"]
+        alias = local if local != session else None
+        if alias is None:
+            with self.manager.reader() as db:
+                alias = canonical_store.activity_local_ids(db, "intervals", ["i1"])[
+                    "i1"
+                ]
+        # The alias-session id sorts first but is older: the newest still wins.
+        self.store_assignment(alias, old["id"], "2026-09-19T08:00:00+00:00")
+        self.store_assignment("i1", new["id"], "2026-09-21T08:00:00+00:00")
+
+        (listed,) = self.service.read(activity_id=session)["assignments"]
+
+        self.assertEqual(listed["equipment_id"], new["id"])
+
     def test_a_legacy_unassignment_still_overrides_the_garmin_link(self) -> None:
         with self.manager.reader() as db:
             from backend.db import garmin_store

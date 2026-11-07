@@ -62,6 +62,16 @@ def stored_rows(fixture: Any) -> list[dict[str, Any]]:
         return sorted(fixture.repository.all(db), key=lambda row: row["activity_id"])
 
 
+def merged_session_id(case: Any) -> str:
+    """The one effective session the case's Intervals and Garmin records lead to."""
+    with case.manager.reader() as db:
+        effective = canonical_store.effective_session_ids(
+            db, list(case.sessions.values())
+        )
+    (session,) = set(effective.values())
+    return session
+
+
 class FeedbackSessionFixture(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -117,14 +127,6 @@ class FeedbackSessionFixture(unittest.TestCase):
             references=ActivityReferences(self.manager),
         )
 
-    def session_id(self) -> str:
-        with self.manager.reader() as db:
-            effective = canonical_store.effective_session_ids(
-                db, list(self.sessions.values())
-            )
-        (session,) = set(effective.values())
-        return session
-
     def store_legacy(
         self, key: str, notes: str, updated: str, *, session: str | None, rpe=None
     ) -> None:
@@ -148,7 +150,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.service.save(INTERVALS_ID, {"notes": "Heavy legs", "session_rpe": 6})
         saved = self.service.save(GARMIN_ID, {"session_rpe": 5})["activity_feedback"]
 
-        session = self.session_id()
+        session = merged_session_id(self)
         self.assertEqual(
             (saved["activity_id"], saved["notes"], saved["session_rpe"]),
             (session, "Heavy legs", 5),
@@ -163,7 +165,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual(by_id[GARMIN_ID]["notes"], by_id[INTERVALS_ID]["notes"])
 
     def test_a_legacy_row_under_the_intervals_id_is_found_for_the_session(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         for stored_session in (self.sessions["intervals"], None):
             with self.subTest(session=stored_session):
                 self.store_legacy(
@@ -178,7 +180,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
                     db.execute("DELETE FROM activity_feedback")
 
     def test_a_row_under_the_session_id_wins_over_a_legacy_row(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         # The legacy row is the newer one, yet the session-id row still wins.
         self.store_legacy(INTERVALS_ID, "legacy", "2026-09-21", session=None, rpe=9)
         self.store_legacy(session, "current", "2026-09-19", session=session, rpe=3)
@@ -188,7 +190,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual((found["notes"], found["session_rpe"]), ("current", 3))
 
     def test_a_new_save_over_a_legacy_row_is_stored_under_the_session_id(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         self.store_legacy(
             INTERVALS_ID, "legacy", "2026-09-19", session=self.sessions["intervals"]
         )
@@ -207,7 +209,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual(len(self.service.list()), 1)
 
     def test_ordinary_edits_never_add_rows_or_conflicts(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         self.store_legacy(
             INTERVALS_ID,
             "legacy",
@@ -228,7 +230,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual((found["session_rpe"], found["notes"]), (7, "note 7"))
 
     def test_a_save_keeps_the_fields_of_a_legacy_row_without_a_session(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         self.store_legacy(INTERVALS_ID, "legacy", "2026-09-19", session=None, rpe=4)
 
         saved = self.service.save(session, {"deviation_reason": "illness"})
@@ -241,7 +243,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual([row["activity_id"] for row in stored_rows(self)], [session])
 
     def test_clearing_removes_the_session_row_and_its_legacy_rows(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         self.store_legacy(INTERVALS_ID, "legacy", "2026-09-21", session=None)
         self.store_legacy(session, "current", "2026-09-19", session=session)
 
@@ -252,7 +254,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual(self.service.for_activity_ids([session]), [])
 
     def test_a_row_of_another_provider_does_not_join_the_session(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO activity_feedback(activity_id, notes, created_at, "
@@ -263,7 +265,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual([item["notes"] for item in self.service.list()], ["other"])
 
     def test_an_unambiguous_legacy_row_counts_for_sessions_only(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         self.store_legacy(INTERVALS_ID, "legacy", "2026-09-19", session=None, rpe=4)
 
         (found,) = self.service.for_activity_ids([session], sessions_only=True)
@@ -271,7 +273,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.assertEqual((found["activity_id"], found["session_rpe"]), (session, 4))
 
     def test_a_row_under_an_alias_session_id_does_not_beat_a_newer_row(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         (alias,) = {*self.sessions.values()} - {session}
         self.store_legacy(alias, "old alias", "2026-09-19", session=alias)
         self.store_legacy(INTERVALS_ID, "newer", "2026-09-21", session=session)
@@ -395,7 +397,7 @@ class ReportFeedbackTests(FeedbackSessionFixture):
         )
 
     def test_legacy_feedback_is_found_for_the_session(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         self.store_legacy(
             INTERVALS_ID, "legacy note", "2026-09-19", session=None, rpe=4
         )
@@ -403,14 +405,14 @@ class ReportFeedbackTests(FeedbackSessionFixture):
         self.assertEqual(self.notes(session), (["legacy note"], ["legacy note"]))
 
     def test_feedback_under_the_session_id_wins_over_a_legacy_row(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         self.store_legacy(INTERVALS_ID, "legacy note", "2026-09-21", session=None)
         self.store_legacy(session, "new note", "2026-09-19", session=session)
 
         self.assertEqual(self.notes(session), (["new note"], ["new note"]))
 
     def test_feedback_saved_through_a_local_id_is_found(self) -> None:
-        session = self.session_id()
+        session = merged_session_id(self)
         self.service.save(session, {"notes": "saved now"})
 
         self.assertEqual(self.notes(session), (["saved now"], ["saved now"]))
