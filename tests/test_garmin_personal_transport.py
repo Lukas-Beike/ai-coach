@@ -19,6 +19,8 @@ from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
+from support import PROVIDER_FIXTURE_ROOT
+
 from backend.canonical.section_items import merge_records, record_identity
 from backend.providers import http as provider_http
 from backend.providers.garmin import (
@@ -74,6 +76,14 @@ def _flat_sleep(day: str = DAY, sleep_id: int = 1) -> dict[str, Any]:
         "avgHeartRate": 49.0,
         "sleepScores": {"overall": {"value": 84}},
     }
+
+
+def _personal_heart_rate_zones() -> Any:
+    return json.loads(
+        (PROVIDER_FIXTURE_ROOT / "garmin" / "heart_rate_zones_personal.json").read_text(
+            encoding="utf-8"
+        )
+    )
 
 
 def _zip(members: dict[str, bytes]) -> bytes:
@@ -166,6 +176,8 @@ class FakePersonalApi:
             return {"calendarDate": query["calendarDate"][0], "bmrKilocalories": 1700}
         if path == "/wellness-service/wellness/dailyHeartRate":
             return {"calendarDate": query["date"][0], "restingHeartRate": 45}
+        if path == "/biometric-service/heartRateZones/v2":
+            return _personal_heart_rate_zones()
         if path == "/wellness-service/wellness/bodyBattery/reports/daily":
             return [{"date": query["startDate"][0], "charged": 71}]
         if path.startswith("/weight-service/weight/range/"):
@@ -211,6 +223,18 @@ class FakeSdk:
     def get_activities_by_date(self, *_args: Any) -> list[dict[str, Any]]:
         self.calls.append("get_activities_by_date")
         return [_activity()]
+
+    def get_heart_rate_zones(self) -> list[dict[str, Any]]:
+        self.calls.append("get_heart_rate_zones")
+        return [{"sport": "DEFAULT", "maxHeartRateUsed": 190}]
+
+    def __getattr__(self, name: str) -> Any:
+        # Any other SDK family is a recorded no-op, so routing can be asserted.
+        if name.startswith("get_"):
+            method = lambda *_args, **_kwargs: self.calls.append(name)
+            self.__dict__[name] = method
+            return method
+        raise AttributeError(name)
 
 
 class PersonalClientTests(unittest.TestCase):
@@ -264,6 +288,7 @@ class PersonalClientTests(unittest.TestCase):
         client.get_hrv_data_range(DAY, DAY)
         client.get_body_battery(DAY, DAY)
         client.get_weigh_ins(DAY, DAY)
+        client.get_heart_rate_zones()
 
         self.assertEqual(
             api.data_paths(),
@@ -274,6 +299,7 @@ class PersonalClientTests(unittest.TestCase):
                 f"/hrv-service/hrv/daily/{DAY}/{DAY}",
                 "/wellness-service/wellness/bodyBattery/reports/daily",
                 f"/weight-service/weight/range/{DAY}/{DAY}",
+                "/biometric-service/heartRateZones/v2",
             ],
         )
         self.assertEqual(PERSONAL_BASE_URL, "https://personal.connectapi.garmin.com")
@@ -330,6 +356,46 @@ class TransportRoutingTests(unittest.TestCase):
         self.assertEqual(client.login("synthetic"), (None, None))
         self.assertEqual(sdk.calls[-1], "login")
 
+    def test_heart_rate_zones_use_the_personal_api_when_a_key_exists(self) -> None:
+        api = FakePersonalApi()
+        sdk = FakeSdk()
+
+        zones = GarminTransportClient(_client(api), sdk).get_heart_rate_zones()
+
+        self.assertEqual(zones, _personal_heart_rate_zones())
+        self.assertEqual(api.data_paths(), ["/biometric-service/heartRateZones/v2"])
+        self.assertEqual(sdk.calls, [])
+
+    def test_sdk_only_families_stay_on_the_sdk_with_a_key(self) -> None:
+        sdk = FakeSdk()
+        client = GarminTransportClient(_client(FakePersonalApi()), sdk)
+
+        for name in (
+            "get_user_profile",
+            "get_gear",
+            "get_gear_stats",
+            "get_gear_activities",
+            "get_training_load_activities",
+            "get_endurance_score",
+            "get_race_predictions",
+            "get_running_tolerance",
+            "get_training_four_week_load_balance",
+            "get_weekly_training_status",
+            "get_daily_training_status",
+            "get_training_readiness",
+            "get_training_readiness_range",
+            "get_training_status",
+            "get_max_metrics_range",
+            "get_cycling_ftp",
+            "get_functional_threshold_power_range",
+            "get_lactate_threshold",
+            "get_activity_splits",
+            "get_activity_hr_in_timezones",
+            "get_activity_power_in_timezones",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(getattr(client, name), getattr(sdk, name))
+
     def test_without_the_sdk_its_families_are_absent(self) -> None:
         client = GarminTransportClient(_client(FakePersonalApi()), None)
 
@@ -342,8 +408,9 @@ class TransportRoutingTests(unittest.TestCase):
         client = GarminTransportClient(None, sdk)
 
         client.get_activities_by_date(DAY, DAY)
+        client.get_heart_rate_zones()
 
-        self.assertEqual(sdk.calls, ["get_activities_by_date"])
+        self.assertEqual(sdk.calls, ["get_activities_by_date", "get_heart_rate_zones"])
 
 
 def _external_call(_service: str, _operation: str, call: Any, _details: Any) -> Any:
@@ -390,6 +457,7 @@ class PersonalOnlyCollectionTests(unittest.TestCase):
         self.assertEqual(payload["daily_stats"][0]["calendarDate"], DAY)
         self.assertEqual(payload["resting_hr"][0]["restingHeartRate"], 45)
         self.assertIn("dailyWeightSummaries", payload["weight"])
+        self.assertEqual(payload["heart_rate_zones"], _personal_heart_rate_zones())
         for absent in (
             "readiness",
             "race_predictions",
