@@ -26,6 +26,7 @@ ENTITY_TYPES = {
     "zone_configuration",
     "activity_feedback",
     "activity_session",
+    "nutrition_entry",
     "metric_export",
 }
 # A metric export to a provider; its entity id is "<provider>:<remote record>".
@@ -161,7 +162,27 @@ ACTIVITY_FEEDBACK_FIELDS = ("rows",)
 MAX_FEEDBACK_GROUP_ROWS = 32
 # The bundling columns of the sessions one session correction touched.
 ACTIVITY_SESSION_FIELDS = ("sessions",)
-_FIELD_LIMITS = {"activity_feedback": 400_000, "activity_session": 20_000}
+# One logged meal; sync bookkeeping is left out so a provider sync keeps undo.
+NUTRITION_ENTRY_FIELDS = (
+    "id",
+    "meal_date",
+    "logged_at",
+    "meal_type",
+    "description",
+    "kcal",
+    "carbs_g",
+    "protein_g",
+    "fat_g",
+    "source",
+    "nutrition_basis",
+    "logged_time_known",
+)
+# A composite meal keeps its ingredient snapshots in nutrition_basis.
+_FIELD_LIMITS = {
+    "activity_feedback": 400_000,
+    "activity_session": 20_000,
+    "nutrition_entry": 100_000,
+}
 _DEFAULT_FIELD_LIMIT = 4000
 # A local zone configuration; its entity id is the configuration key.
 ZONE_CONFIGURATION_FIELDS = (
@@ -198,6 +219,7 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "zone_configuration": set(ZONE_CONFIGURATION_FIELDS),
         "activity_feedback": set(ACTIVITY_FEEDBACK_FIELDS),
         "activity_session": set(ACTIVITY_SESSION_FIELDS),
+        "nutrition_entry": set(NUTRITION_ENTRY_FIELDS),
         METRIC_EXPORT_ENTITY: set(METRIC_EXPORT_FIELDS),
     }
     try:

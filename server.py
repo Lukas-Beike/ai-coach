@@ -833,6 +833,8 @@ HISTORY = HistoryAssembly(
             zone_service=ATHLETE_DATA.zones,
             feedback_service=ATHLETE_DATA.activity_feedback,
             session_corrections=ATHLETE_DATA.session_corrections,
+            # Defined further down; resolved only when a history service is built.
+            nutrition_diary=lambda: NUTRITION_ASSEMBLY.diary_service(),
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,

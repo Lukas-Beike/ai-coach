@@ -33,6 +33,7 @@ class HistoryUndoService:
         zone_service: Any | None = None,
         feedback_service: Any | None = None,
         session_corrections: Any | None = None,
+        nutrition_diary: Any | None = None,
         *,
         profile_mutation_coordinator: Any,
     ):
@@ -48,6 +49,7 @@ class HistoryUndoService:
         self._zone_service = zone_service
         self._feedback_service = feedback_service
         self._session_corrections = session_corrections
+        self._nutrition_diary = nutrition_diary
 
     @property
     def profile_mutation_coordinator(self) -> Any:
@@ -220,6 +222,10 @@ class HistoryUndoService:
             )
         if entity_type == "activity_session" and self._session_corrections is not None:
             return self._session_corrections.restore_in_transaction(
+                db, entity_id, current, target
+            )
+        if entity_type == "nutrition_entry" and self._nutrition_diary is not None:
+            return self._nutrition_diary.restore_in_transaction(
                 db, entity_id, current, target
             )
         raise AppError(400, "Unbekannte lokale Änderung.")

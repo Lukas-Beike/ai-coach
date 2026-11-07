@@ -304,6 +304,28 @@ class CoachTurnFailureTests(unittest.TestCase):
                 "SELECT content FROM messages WHERE role='assistant'"
             ).fetchone()
         self.assertEqual(message["content"], expected)
+        self.assertIs(result["message"]["coach_failed"], True)
+        # The chat offers to send a failed turn again, after a reload too.
+        self.assertIs(self._reloaded_reply()["coach_failed"], True)
+
+    def _reloaded_reply(self) -> dict:
+        # The chat reader projects dict rows, as the production database does.
+        reader = DatabaseManager(
+            Path(self.temporary.name) / "failure.sqlite",
+            sqlite3,
+            row_factory=production_row_factory,
+            persist_connections=False,
+        )
+        with reader.reader() as db:
+            return next(m for m in self.chat.list(db) if m["role"] == "assistant")
+
+    def test_cancelled_turn_is_not_marked_as_failed(self) -> None:
+        self._seed({"command_receipts": []})
+        result = self.service.persist(
+            "turn-1", {}, AppError(499, "stopped", reason="chat_cancelled")
+        )
+        self.assertNotIn("coach_failed", result["message"])
+        self.assertNotIn("coach_failed", self._reloaded_reply())
 
 
 if __name__ == "__main__":

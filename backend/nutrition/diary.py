@@ -9,6 +9,7 @@ from contextlib import AbstractContextManager
 from datetime import datetime, timedelta
 from typing import Any
 
+from backend import change_history
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import NutritionRepository, nutrition_macro_totals
 from backend.errors import AppError
@@ -30,6 +31,7 @@ from backend.runtime.ports import ObservationReader
 
 INVALID_ENTRY_ID = "Ungültige Eintrags-ID."
 ENTRY_NOT_FOUND = "Ernährungseintrag nicht gefunden."
+ENTITY_TYPE = "nutrition_entry"
 # Alternative names the Coach and API clients use for stored entry fields.
 MEAL_FIELD_ALIASES = {
     "date": "meal_date",
@@ -180,7 +182,7 @@ class NutritionDiaryService:
                 payload, local_now_factory=self._local_now
             )
             entry["id"] = uuid.uuid4().hex
-            return self._nutrition_repository.create(db, entry)
+            return self._create(db, entry)
 
     @staticmethod
     def _scale_composite_basis(basis: dict[str, Any], amount: float) -> dict[str, Any]:
@@ -231,7 +233,7 @@ class NutritionDiaryService:
                     values, local_now_factory=self._local_now
                 )
                 entry["id"] = str(entry.get("id") or uuid.uuid4().hex)
-                return self._nutrition_repository.create(db, entry)
+                return self._create(db, entry)
         values = self._meal_library.prepare_values(payload)
         if payload.get("product_id"):
             calculation = self._meal_library.calculate_product(
@@ -249,7 +251,7 @@ class NutritionDiaryService:
         if not entry.get("id"):
             entry["id"] = uuid.uuid4().hex
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            return self._nutrition_repository.create(db, entry)
+            return self._create(db, entry)
 
     def get_meal(self, entry_id: str) -> dict[str, Any]:
         clean_id = str(entry_id or "").strip()
@@ -303,7 +305,7 @@ class NutritionDiaryService:
                     "nutrition_basis", {"kind": "manual"}
                 )
             entry["id"] = clean_id
-            updated = self._nutrition_repository.update(db, clean_id, entry)
+            updated = self._update(db, existing, entry)
         if not updated:
             raise AppError(404, ENTRY_NOT_FOUND)
         return updated
@@ -421,7 +423,7 @@ class NutritionDiaryService:
             entry = self._apply_meal_correction(
                 db, existing, changes, calculation, resolved_database
             )
-            updated = self._nutrition_repository.update(db, clean_id, entry)
+            updated = self._update(db, existing, entry)
         if not updated:
             raise AppError(404, ENTRY_NOT_FOUND)
         return updated
@@ -494,10 +496,55 @@ class NutritionDiaryService:
         if not clean_id:
             raise AppError(400, INVALID_ENTRY_ID)
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            deleted = self._nutrition_repository.delete(db, clean_id)
+            existing = self._nutrition_repository.get(db, clean_id)
+            deleted = bool(existing) and self._nutrition_repository.delete(db, clean_id)
+            if deleted:
+                change_history.record_change(
+                    db, ENTITY_TYPE, clean_id, "delete", existing, None
+                )
         if not deleted:
             raise AppError(404, ENTRY_NOT_FOUND)
         return {"status": "ok", "deleted_id": clean_id}
+
+    def _create(self, db: Any, entry: dict[str, Any]) -> dict[str, Any]:
+        created = self._nutrition_repository.create(db, entry)
+        change_history.record_change(
+            db, ENTITY_TYPE, str(created["id"]), "create", None, created
+        )
+        return created
+
+    def _update(
+        self, db: Any, existing: dict[str, Any], entry: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        updated = self._nutrition_repository.update(db, str(existing["id"]), entry)
+        if updated:
+            change_history.record_change(
+                db, ENTITY_TYPE, str(existing["id"]), "update", existing, updated
+            )
+        return updated
+
+    def current(
+        self, db: Any, entity_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """The stored entry of one recorded change, for change history."""
+        value = self._nutrition_repository.get(db, entity_id)
+        return value, change_history.audit_projection(ENTITY_TYPE, value)
+
+    def restore_in_transaction(
+        self,
+        db: Any,
+        entity_id: str,
+        current: dict[str, Any] | None,
+        target: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Put one entry back as recorded; the day is marked for sync again."""
+        if target is None:
+            self._nutrition_repository.delete(db, entity_id)
+            return None
+        entry = {**(current or {}), **target, "id": entity_id, "sync_state": "local"}
+        if current:
+            return self._nutrition_repository.update(db, entity_id, entry)
+        return self._nutrition_repository.create(db, entry)
 
     def get_day_summary(self, meal_date: str) -> dict[str, Any]:
         return self._sync_status.get_day_summary(meal_date)

@@ -60,10 +60,11 @@ test("an undoable turn lists its changes with one undo button", () => {
   const { context } = harness();
   const line = render(context, { role: "assistant", client_turn_id: "turn-1", coach_changes: changes() });
   assert.equal(line.className, "message-changes");
-  assert.equal(line.children[0].textContent, "Geändert: Profil aktualisiert · Trainingsvorlagen bearbeitet (2)");
-  assert.equal(line.children[1].className, "message-undo");
-  assert.equal(line.children[1].type, "button");
-  assert.equal(line.children[1].textContent, "Rückgängig");
+  assert.equal(line.children[0].className, "message-changes-icon");
+  assert.equal(line.children[1].textContent, "Profil aktualisiert · Trainingsvorlagen bearbeitet (2)");
+  assert.equal(line.children[2].className, "message-undo");
+  assert.equal(line.children[2].type, "button");
+  assert.equal(line.children[2].textContent, "Rückgängig");
 });
 
 test("plan notes render safe labels, dates, evidence and warning emphasis", () => {
@@ -90,13 +91,13 @@ test("undone, untracked and turn-less changes show no undo button", () => {
   const { context } = harness();
   const cases = [
     [{ client_turn_id: "turn-1", coach_changes: changes({ undone_at: "2026-10-14T10:00:00Z" }) }, "Zurückgenommen: "],
-    [{ client_turn_id: "turn-1", coach_changes: changes({ undoable: false }) }, "Geändert: "],
-    [{ coach_changes: changes() }, "Geändert: "],
+    [{ client_turn_id: "turn-1", coach_changes: changes({ undoable: false }) }, "Profil aktualisiert"],
+    [{ coach_changes: changes() }, "Profil aktualisiert"],
   ];
   for (const [message, prefix] of cases) {
     const line = render(context, { role: "assistant", ...message });
-    assert.equal(line.children.length, 1);
-    assert.ok(line.children[0].textContent.startsWith(prefix));
+    assert.equal(line.children.length, 2);
+    assert.ok(line.children[1].textContent.startsWith(prefix));
   }
 });
 
@@ -156,4 +157,60 @@ test("a second click while the undo runs is ignored", async () => {
   await context.undoCoachTurn("turn-1", button);
   assert.deepEqual(calls.confirm, []);
   assert.deepEqual(calls.api, []);
+});
+
+function retryHarness(messages, { draft = "", attachments = [] } = {}) {
+  const submitted = [];
+  const input = { value: draft, dataset: { requestKind: "plan_week" }, dispatchEvent() {} };
+  const state = { data: { messages }, chatAttachments: [...attachments] };
+  const context = vm.createContext({
+    state,
+    document: { createElement: (tag) => new FakeElement(tag) },
+    messageAttachmentLabel: (names) => (names?.length ? names.join(", ") : ""),
+    $: (selector) => (selector === "#messageInput" ? input : { requestSubmit() {
+      submitted.push({ text: input.value, attachments: state.chatAttachments, requestKind: input.dataset.requestKind });
+      input.value = "";
+      state.chatAttachments = [];
+    } }),
+    Event: class { constructor(type) { this.type = type; } },
+    renderChatAttachments() {},
+    resizeChatInput() {},
+    updateChatControls() {},
+  });
+  vm.runInContext(source.slice(start, end), context);
+  return { context, state, input, submitted };
+}
+
+test("the newest failed reply sends its request again and keeps the draft", () => {
+  const messages = [
+    { role: "user", client_turn_id: "turn-1", content: "Plane meine Woche" },
+    { role: "assistant", client_turn_id: "turn-1", content: "Timeout", coach_failed: true },
+  ];
+  const { context, state, input, submitted } = retryHarness(messages, { draft: "Entwurf", attachments: ["a.fit"] });
+  const node = new FakeElement("div");
+  node.classList = { add(name) { node.className += ` ${name}`; } };
+  context.appendFailedTurnRetry(node, messages[1], true);
+  const retry = node.children[0];
+  assert.equal(retry.textContent, "Erneut senden");
+  assert.match(node.className, /is-failed/);
+  retry.listeners.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(submitted)), [{ text: "Plane meine Woche", attachments: [] }]);
+  assert.equal(input.value, "Entwurf");
+  assert.deepEqual([...state.chatAttachments], ["a.fit"]);
+});
+
+test("older, attached or successful replies offer no retry", () => {
+  const user = { role: "user", client_turn_id: "turn-1", content: "Analyse" };
+  const failed = { role: "assistant", client_turn_id: "turn-1", content: "Timeout", coach_failed: true };
+  const cases = [
+    [[user, failed], failed, false],
+    [[{ ...user, attachment_names: ["ride.fit"] }, failed], failed, true],
+    [[user, { ...failed, coach_failed: undefined }], { ...failed, coach_failed: undefined }, true],
+  ];
+  for (const [messages, message, latest] of cases) {
+    const { context } = retryHarness(messages);
+    const node = new FakeElement("div");
+    context.appendFailedTurnRetry(node, message, latest);
+    assert.equal(node.children.length, 0);
+  }
 });

@@ -10,7 +10,7 @@
   --surface-raised: #242426;
   --surface-input: #2c2c2e;
   --control-bg: #303033;
-  --composer-bg: rgba(44, 44, 46, .94);
+  --composer-bg: #2c2c2e;
   --nav-bg: #242426;
   --composer-offset: calc(74px + max(12px, env(safe-area-inset-bottom)));
   --user-message-bg: #29292b;
@@ -155,7 +155,7 @@
   --surface-raised: #f4f4f4;
   --surface-input: #ffffff;
   --control-bg: #f4f4f4;
-  --composer-bg: rgba(255, 255, 255, .96);
+  --composer-bg: #fff;
   --nav-bg: #ffffff;
   --user-message-bg: #f4f4f4;
   --code-bg: #f4f4f4;
@@ -552,10 +552,17 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .message-action:hover { color: var(--ink); background-color: var(--surface-raised); }
 .message-action:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .message-action svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.message-changes { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; margin-top: 8px; color: var(--muted); font-size: .78rem; }
+.message-changes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 10px; padding: 6px 6px 6px 12px; border: 1px solid var(--line-strong); border-radius: 14px; color: var(--ink); background: var(--surface-raised); font-size: .9rem; line-height: 1.35; white-space: normal; }
+.message-changes-icon { display: inline-flex; flex: 0 0 auto; color: var(--accent-bright); }
+.message-changes-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.message-changes.is-undone { color: var(--muted); }
+.message-changes.is-undone .message-changes-icon { color: var(--muted); }
+.message-changes-text { flex: 1 1 12rem; min-width: 0; }
+.message.assistant.is-failed { padding: 12px 14px; border: 1px solid var(--danger-border-strong); border-radius: 16px; background: var(--surface-raised); }
+.message-retry { display: block; min-height: 44px; margin-top: 10px; }
 .message-plan-note { margin-top: 4px; color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
 .message-plan-note.is-warning { color: var(--ink); font-weight: 700; }
-.message-undo { min-height: 44px; margin: -8px 0; padding: 0 8px; border: 0; color: var(--accent-bright); background: var(--transparent); font: inherit; font-weight: 650; }
+.message-undo { min-height: 44px; margin: -6px 0 -6px auto; padding: 0 10px; border: 0; color: var(--accent-bright); background: var(--transparent); font: inherit; font-weight: 650; }
 .message-undo:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .message-undo:disabled { color: var(--subtle); }
 .empty { margin: auto; padding: 48px 24px; overflow-wrap: anywhere; color: var(--muted); text-align: center; }
