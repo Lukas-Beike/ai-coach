@@ -35,14 +35,22 @@ class DuplicateInspector:
         activities: ActivityReader,
         zone: Callable[[], tzinfo],
         serving: CanonicalTableServing,
+        ingest_enabled: Callable[[], bool] = lambda: True,
     ) -> None:
+        self._ingest_enabled = ingest_enabled
         self._database_manager = database_manager
         self._activities = activities
         self._serving = serving
         self._zone = zone
 
     def latest(self) -> dict[str, Any] | None:
-        """Return the newest exact-source ride pair, always keeping Wahoo canonical."""
+        """Return the newest exact-source ride pair, always keeping Wahoo canonical.
+
+        Nothing while the Intervals.icu ingest is off: the stored copies are not
+        current, so no remote delete may be based on them.
+        """
+        if not self._ingest_enabled():
+            return None
         with self._database_manager.read_snapshot() as db:
             if not self._serving.serves_tables(db):
                 return None

@@ -21,6 +21,7 @@ from backend.sync.garmin_service import (
     refresh_morning_battery_after_sync,
 )
 from backend.sync.intervals import IntervalsSyncService
+from backend.sync.intervals_ingest import INGEST_OFF_REASON
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_runtime import SynchronousRefresh
 from backend.sync.queue import SyncJobQueueService
@@ -60,6 +61,15 @@ class IntervalsSynchronousRefresh:
             **_cancel_kwargs(cancel_event),
         )
         _raise_if_busy(result, "Intervals.icu")
+        if result.get("reason") == INGEST_OFF_REASON:
+            # Nothing was read: the Coach must not present the data as fresh.
+            return {
+                "ok": True,
+                "status": "skipped",
+                "reason": INGEST_OFF_REASON,
+                "provider": provider,
+                "synchronous_refresh": True,
+            }
         try:
             completed_days = int(result.get("activity_days"))
         except TypeError, ValueError:

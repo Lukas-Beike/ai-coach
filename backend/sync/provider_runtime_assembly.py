@@ -155,6 +155,7 @@ def intervals_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBindi
             competition_service=intervals.competition_sync_service(),
             gate=gate,
             all_sync_days=all_sync_days,
+            ingest_enabled=intervals.ingest_enabled,
         )
 
     def synchronous_refresh() -> IntervalsSynchronousRefresh:

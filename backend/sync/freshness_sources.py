@@ -22,6 +22,7 @@ from backend.providers.descriptors import (
     WAHOO_ID,
     WEATHER_ID,
 )
+from backend.sync.intervals_ingest import INGEST_ENABLED_KEY, ingest_enabled_value
 from backend.sync.provider_runtime import FreshnessInputs, FreshnessSource
 from backend.sync.wahoo_connection import connection_status
 from backend.weather import cache as weather_cache
@@ -52,6 +53,13 @@ def _stored_source(
 
 def _intervals_configured(inputs: FreshnessInputs) -> bool:
     return bool(inputs.config.intervals_api_key)
+
+
+def _intervals_ingest_configured(inputs: FreshnessInputs) -> bool:
+    """Ingest areas age only while the athlete reads Intervals.icu data."""
+    return _intervals_configured(inputs) and ingest_enabled_value(
+        inputs.get_value(INGEST_ENABLED_KEY)
+    )
 
 
 def _garmin_configured(inputs: FreshnessInputs) -> bool:
@@ -92,7 +100,7 @@ def _weather_cached_at(inputs: FreshnessInputs) -> Any:
 _INTERVALS_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
     {
         "activities": _stored_source(
-            "last_sync_at", "last_sync_error", _intervals_configured
+            "last_sync_at", "last_sync_error", _intervals_ingest_configured
         ),
         "competitions": _stored_source(
             "last_competition_sync_at",
@@ -102,7 +110,7 @@ _INTERVALS_SOURCES: Mapping[str, FreshnessSource] = MappingProxyType(
         "performance": _stored_source(
             "last_performance_refresh_at",
             "last_performance_error",
-            _intervals_configured,
+            _intervals_ingest_configured,
         ),
     }
 )

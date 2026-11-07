@@ -26,6 +26,7 @@ from backend.sync.garmin_service import (
 )
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals import IntervalsSyncService
+from backend.sync.intervals_ingest import INGEST_OFF_REASON
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
@@ -271,7 +272,13 @@ class IntervalsSyncJobOwner:
             sync_kwargs["end_date"] = historical_end
         elif payload.get("automatic") is True:
             sync_kwargs["automatic"] = True
+        if payload.get("one_off") is True:
+            sync_kwargs["one_off"] = True
         result = self._intervals_sync_service.sync(**sync_kwargs)
+        ingest_off = result.get("reason") == INGEST_OFF_REASON
+        if ingest_off and str(job.get("type") or "") == "historical_backfill":
+            # The backfill cursor stays put until the ingest is on again.
+            return result
         if str(job.get("type") or "") == "historical_backfill":
             self._historical_sync.add_next_end(
                 INTERVALS_ID, payload, result, historical_end, days
@@ -280,16 +287,26 @@ class IntervalsSyncJobOwner:
             return result
         if result.get("status") == "already_running":
             return result
-        if self._activity_detail_service is not None:
-            try:
-                result["detail_prefetch"] = self._activity_detail_service.prefetch_new(
-                    self._intervals_resync_gate.operation
-                )
-            except Exception:  # noqa: BLE001 - prefetch is best effort; the window is synced
-                result["detail_prefetch"] = {"status": "error"}
+        if not ingest_off:
+            self._prefetch_details(result)
+        return self._reconcile_competitions(result, reason, job["id"])
+
+    def _prefetch_details(self, result: dict[str, Any]) -> None:
+        if self._activity_detail_service is None:
+            return
+        try:
+            result["detail_prefetch"] = self._activity_detail_service.prefetch_new(
+                self._intervals_resync_gate.operation
+            )
+        except Exception:  # noqa: BLE001 - prefetch is best effort; the window is synced
+            result["detail_prefetch"] = {"status": "error"}
+
+    def _reconcile_competitions(
+        self, result: dict[str, Any], reason: str, operation_id: str
+    ) -> dict[str, Any]:
         try:
             result["competitions"] = self._sync_competitions(
-                reason, push_local=False, operation_id=job["id"]
+                reason, push_local=False, operation_id=operation_id
             )
         except Exception:  # noqa: BLE001 - competition failure remains a partial refresh
             # The job stays partial so the competitions section can be retried;

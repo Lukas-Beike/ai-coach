@@ -305,8 +305,11 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         job_types=_ALL_INTERVALS_JOB_TYPES,
         # Refresh payload fields; backend/sync/jobs.py enforces them via the
         # registry's refresh_fields. ``automatic`` marks a scheduled refresh,
-        # which reads the short window after the day's full-period read.
-        refresh_fields=frozenset({"days", "reason", "end_date", "automatic"}),
+        # which reads the short window after the day's full-period read;
+        # ``one_off`` is the manual read while the ingest switch is off.
+        refresh_fields=frozenset(
+            {"days", "reason", "end_date", "automatic", "one_off"}
+        ),
         # Default sync window reported by ProviderRegistry.sync_period_defaults to
         # http_api public and bootstrap state. The sync services still take their
         # window from the separate server.py SYNC_PERIOD_DEFAULTS literal, so the

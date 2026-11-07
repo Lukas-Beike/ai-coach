@@ -18,6 +18,7 @@ from typing import Any, cast
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.sync.full_resync import FullProviderResyncService
+from backend.sync.intervals_ingest import ONE_OFF_DAYS
 from backend.sync.performance import PerformanceRefreshService
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.queue import SyncJobQueueService
@@ -262,6 +263,14 @@ class SyncCommandEndpoint:
     ) -> tuple[int, dict[str, Any]]:
         self._require_provider_configured(provider_id)
         fixed = dict(fixed_payload)
+        if isinstance(payload, dict) and payload.get("one_off") is True:
+            # A one-off read leaves the athlete's stored sync period alone.
+            return 202, self._queue.enqueue(
+                provider_id,
+                "refresh",
+                {"days": ONE_OFF_DAYS, "one_off": True, **fixed},
+                requested_by="user",
+            )
         if not uses_sync_period:
             return 202, self._queue.enqueue(
                 provider_id, "refresh", fixed, requested_by="user"

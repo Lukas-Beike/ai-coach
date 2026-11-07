@@ -77,6 +77,25 @@ Detailed contract: Garmin's slowly changing metric sources SHALL be reread when 
 
 Evidence: `backend/sync/intervals.py:IntervalsSyncService`, `backend/sync/garmin.py:GarminPayloadService.automatic_sync_window`, `backend/providers/garmin.py:GarminCollectionOptions`, `backend/sync/wahoo_sync.py:sync_window_days`; `tests/test_sync_intervals_flow.py:test_automatic_refresh_reads_full_period_once_per_day`, `tests/test_sync_garmin_service.py:test_current_refresh_reads_daily_metrics_only_when_due`, `tests/test_wahoo_sync.py:test_all_sentinel_and_zero_mean_the_descriptor_maximum`.
 
+### Requirement: Dormant Intervals.icu ingest
+The system SHALL read Intervals.icu activities, wellness, athlete record, performance refresh, analysis sessions and activity details only while the athlete's ingest switch is on; a missing switch means off. While off, a scheduled or Coach refresh SHALL only reconcile competitions, a historical chunk SHALL keep its cursor, and a full resync SHALL be refused. Output writes and their read-backs SHALL stay unchanged. Stored Intervals.icu records SHALL be kept.
+
+#### Scenario: Daily run while off
+- **WHEN** the switch is off and the daily Intervals.icu refresh runs
+- **THEN** no activities, wellness, athlete, events, power curve or detail endpoint is read, no detail prefetch or performance follow-up runs, and only the competition reconciliation runs.
+
+#### Scenario: Manual one-off read
+- **WHEN** the switch is off and the athlete presses "Einmal abrufen"
+- **THEN** one refresh job with `one_off: true` reads the last 42 days as an ordinary sync, the stored sync period is unchanged, and the switch stays off.
+
+#### Scenario: Duplicate delete while off
+- **WHEN** the switch is off
+- **THEN** the duplicate inspector reports no Intervals.icu duplicate, so neither the Coach nor a proposal can delete one remotely; stored Intervals.icu copies stay linked to their sessions.
+
+Detailed contract: The switch is the kv key `intervals_ingest_enabled` (`PUT /api/settings/intervals-ingest` with `{"enabled": bool}`), shown as "Einlesen einschalten/ausschalten" in the Intervals.icu card and exposed as `sync_settings.intervals_ingest_enabled`. No schema change. Turning it on restores the scheduled ingest.
+
+Evidence: `backend/sync/intervals_ingest.py:IntervalsIngestSwitch`, `backend/sync/intervals.py:IntervalsSyncService.sync`, `backend/sync/executor.py:IntervalsSyncJobOwner.execute_sync`, `backend/activities/duplicate_inspection.py:DuplicateInspector.latest`; `tests/test_intervals_ingest_switch.py`, `tests/test_sync_executor.py:test_ingest_off_refresh_only_reconciles_competitions`, `tests/test_http_sync_commands.py:test_one_off_intervals_read_keeps_the_stored_period`.
+
 ### Requirement: Bounded resumable historical backfill
 The system SHALL walk Intervals and Garmin history in inclusive chunks of at most 90 days down to the configured history floor. A restart SHALL resume before the persisted historical cursor. Complete chunks may schedule their next chunk after 15 seconds; partial chunks SHALL stop continuation. Two consecutive completely empty chunks SHALL end the walk and persist the floor.
 

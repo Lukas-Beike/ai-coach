@@ -268,6 +268,10 @@ The system SHALL detect and inspect the newest Wahoo/Garmin duplicate ride pair 
 - **WHEN** a newer unrelated Intervals.icu activity exists, a record of the pair is deleted, or an id is missing or equal
 - **THEN** inspection returns no pair.
 
+#### Scenario: Intervals.icu ingest off
+- **WHEN** the Intervals.icu ingest switch is off
+- **THEN** inspection returns no pair before reading any record, so no proposal, Coach delete or delete submission can reach Intervals.icu.
+
 #### Scenario: Legacy-state selector
 - **WHEN** the canonical read selector still serves the snapshot projection (before the first completed backfill)
 - **THEN** no pair is offered at all: inspection returns none, so a Coach proposal cannot be created and `inspect_activity_duplicates` reports none, and a delete submission is rejected with a conflict before any provider call. This holds even for a copy tombstoned earlier whose record a later sync revived from the unchanged snapshot, and a pair that exists only in the snapshot is never offered. Once the tables serve reads, inspection and the delete validation read only the canonical tables, so a tombstoned copy is not offered again and a repeated confirmation is rejected with a conflict. Lists and reports served from the snapshot projection may still show a deleted copy until the backfill completes.

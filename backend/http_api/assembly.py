@@ -290,6 +290,8 @@ class HttpDomainRouteServices:
     provider_credentials: Any | None = None
     garmin_login: Callable[[], Any] | None = None
     connection_checks: Callable[[], Any] | None = None
+    intervals_ingest: Callable[[], Any] | None = None
+    resume_provider_schedule: Callable[[str], None] | None = None
 
 
 def _present(route: Any) -> tuple[Any, ...]:
@@ -614,7 +616,11 @@ class HttpApiAssembly:
             session_auth_service,
             StateEventTransport(state_event_buffer),
         )
-        self.settings_put_routes = SettingsPutRoutes(settings)
+        self.settings_put_routes = SettingsPutRoutes(
+            settings,
+            intervals_ingest=dependencies.domains.intervals_ingest,
+            resume_provider_schedule=dependencies.domains.resume_provider_schedule,
+        )
         provider_credentials = dependencies.domains.provider_credentials
         self.credentials_put_routes = (
             CredentialsPutRoutes(provider_credentials) if provider_credentials else None

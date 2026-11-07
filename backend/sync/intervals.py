@@ -34,6 +34,7 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.freshness_sources import intervals_sync_running
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.intervals_compaction import compact_snapshot
+from backend.sync.intervals_ingest import ingest_off_result
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.performance import PerformanceRefreshFollowupService
@@ -843,8 +844,10 @@ class IntervalsSyncService:
         status: IntervalsSyncStatus,
         journal: IntervalsSyncJournal,
         runtime: IntervalsSyncRuntime,
+        ingest_enabled: Callable[[], bool] = lambda: True,
     ) -> None:
         self._config = config
+        self._ingest_enabled = ingest_enabled
         self._workflow = workflow
         self._performance_followup_service = performance_followup_service
         self._status = status
@@ -868,8 +871,16 @@ class IntervalsSyncService:
         wait_for_performance: bool = False,
         cancel_event: threading.Event | None = None,
         automatic: bool = False,
+        one_off: bool = False,
     ) -> dict[str, Any]:
-        """Synchronize one window; ``automatic`` lets the daily cadence narrow it."""
+        """Synchronize one window; ``automatic`` lets the daily cadence narrow it.
+
+        With the ingest switch off nothing is read unless ``one_off`` asks for a
+        manual one-off read.
+        """
+        dormant = bool(self._config.intervals_api_key) and not self._ingest_enabled()
+        if dormant and not one_off:
+            return ingest_off_result()
         with self._runtime.operation(reason, operation_id) as scope:
             result = self._sync_inner(
                 reason,
@@ -880,6 +891,7 @@ class IntervalsSyncService:
                 wait_for_performance,
                 cancel_event,
                 automatic,
+                dormant,
             )
             scope.result = result
             return result
@@ -894,13 +906,16 @@ class IntervalsSyncService:
         wait_for_performance: bool,
         cancel_event: threading.Event | None,
         automatic: bool = False,
+        dormant: bool = False,
     ) -> dict[str, Any]:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         if activity_days is None:
             activity_days = self._workflow.sync_period()
-        # An automatic refresh narrowed to the short window skips the follow-up.
-        follow_up = True
+        # An automatic refresh narrowed to the short window skips the follow-up,
+        # and so does a one-off read while the ingest is off: the performance
+        # refresh stays dormant then.
+        follow_up = not dormant
         if automatic and end_date is None:
             activity_days = self._workflow.automatic_days(activity_days)
             follow_up = self._workflow.full_window(activity_days)

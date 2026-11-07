@@ -60,6 +60,22 @@ class SyncCommandEndpointTests(unittest.TestCase):
             "garmin", "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
         )
 
+    def test_one_off_intervals_read_keeps_the_stored_period(self):
+        self.queue.enqueue.return_value = {"id": "job-2"}
+
+        self.assertEqual(
+            self.endpoint.execute("/api/sync", {"one_off": True}),
+            (202, {"id": "job-2"}),
+        )
+
+        self.state.set_sync_period.assert_not_called()
+        self.queue.enqueue.assert_called_once_with(
+            "intervals",
+            "refresh",
+            {"days": 42, "one_off": True, "reason": "manual"},
+            requested_by="user",
+        )
+
     def test_full_resync_requires_exact_confirmation_before_provider_call(self):
         with self.assertRaises(AppError):
             self.endpoint.execute("/api/intervals/full-resync", {"confirm": "yes"})

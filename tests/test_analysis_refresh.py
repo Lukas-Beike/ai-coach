@@ -40,6 +40,19 @@ class AnalysisRefreshTests(unittest.TestCase):
         )
         self.assertEqual(2, len(result["refreshed_sources"]))
 
+    def test_dormant_intervals_ingest_is_neither_refreshed_nor_missing(self):
+        service, intervals, _sessions, _garmin = self.make_service()
+        intervals.refresh.return_value = {
+            "status": "skipped",
+            "reason": "intervals_ingest_off",
+        }
+
+        result = service.refresh("performance")
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual([], result["not_refreshed_sources"])
+        self.assertEqual(1, len(result["refreshed_sources"]))
+
     def test_recovery_refreshes_its_own_garmin_area_and_reports_partial_sources(self):
         service, intervals, sessions, garmin = self.make_service()
         garmin.refresh.return_value = {
