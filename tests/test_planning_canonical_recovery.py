@@ -148,7 +148,7 @@ class _FakeKeyValues:
 
 
 class _NoBattery:
-    def current(self, snapshot: Any) -> None:
+    def current_in(self, db: Any) -> None:
         return None
 
 
