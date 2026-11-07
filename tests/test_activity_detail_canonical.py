@@ -177,7 +177,14 @@ class CanonicalDetailWriterTests(unittest.TestCase):
                 "UPDATE activity_detail_analysis SET analysis_version = 3, "
                 "payload = '{\"canonical\":true}'"
             )
-        self.fetch(record={**fresh_record(), "observed_at": "2026-10-19T08:00:00Z"})
+        # Even a fetch with Intervals-frozen targets leaves the row alone.
+        self.fetch(
+            record={
+                **fresh_record(),
+                "observed_at": "2026-10-19T08:00:00Z",
+                "target_snapshot": {"steps": [], "basis": {"ftp": 300}},
+            }
+        )
         self.legacy()
         with self.manager.reader() as db:
             row = db.execute(
