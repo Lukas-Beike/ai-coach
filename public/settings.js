@@ -344,9 +344,59 @@ let zoneConfigurations = [];
 
 async function loadZones() {
   try {
-    zoneConfigurations = (await api("/api/zones")).configurations || [];
+    const result = await api("/api/zones");
+    zoneConfigurations = result.configurations || [];
     renderZoneEditor();
-  } catch (error) { toast(error.message, true); }
+    renderZoneWarnings(result.threshold_warnings);
+  } catch (error) {
+    renderZoneWarnings(null);
+    toast(error.message, true);
+  }
+}
+
+const SDK_FAILURE_TEXT = {
+  login_failed: "Garmin-Login fehlgeschlagen",
+  mfa_required: "Garmin-Login braucht MFA",
+  requests_failed: "Garmin-Abruf schlägt wiederholt fehl",
+};
+
+// Pure: one line per stale threshold with value, source and age (#1768).
+function zoneWarningLine(item) {
+  if (item.reason === "indoor_missing") {
+    return item.value_text
+      ? `${item.label} fehlt – Indoor-Fahrten nutzen FTP Rad ${item.value_text}`
+      : `${item.label} fehlt`;
+  }
+  const age = item.age_days == null ? "" : ` · ${item.age_days} ${item.age_days === 1 ? "Tag" : "Tage"} alt`;
+  const suffix = { expired: " – nicht mehr verwendet", sdk_failed: " – wird nicht aktualisiert" }[item.reason] || "";
+  return `${item.label} ${item.value_text} · ${item.source_label}${age}${suffix}`;
+}
+
+function zoneWarningTitle(warnings) {
+  const sdk = warnings.sdk_failure ? `${SDK_FAILURE_TEXT[warnings.sdk_failure.reason] || "Garmin-SDK ausgefallen"} · ` : "";
+  return `${sdk}Schwellen prüfen und neue Werte hier lokal speichern`;
+}
+
+function renderZoneWarnings(warnings) {
+  const node = $("#zoneWarnings");
+  if (!node) return;
+  const items = Array.isArray(warnings?.items) ? warnings.items : [];
+  node.hidden = !items.length;
+  if (!items.length) {
+    node.replaceChildren();
+    return;
+  }
+  const title = document.createElement("strong");
+  title.textContent = zoneWarningTitle(warnings);
+  const list = document.createElement("ul");
+  list.replaceChildren(...items.map((item) => {
+    const line = document.createElement("li");
+    line.textContent = zoneWarningLine(item);
+    return line;
+  }));
+  node.replaceChildren(title, list);
+  const section = $("#zoneSettings");
+  if (section) section.open = true;
 }
 
 function selectedZoneConfigurations() {

@@ -13,6 +13,13 @@ PROVIDER_ERROR_LABELS: Final[Mapping[str, str]] = {
     ProviderId.INTERVALS.value: "Intervals.icu",
 }
 
+# Short provider names a source column shows beside a value.
+PROVIDER_SHORT_LABELS: Final[Mapping[ProviderId, str]] = {
+    ProviderId.GARMIN: "Garmin",
+    ProviderId.WAHOO: "Wahoo",
+    ProviderId.INTERVALS: "Intervals.icu",
+}
+
 SPORT_LABELS_DE: Final[Mapping[Sport, str]] = {
     Sport.RIDE: "Radfahren",
     Sport.RUN: "Laufen",

@@ -267,11 +267,22 @@ def replace_zone_configurations(
 def upsert_local_zone_configuration(
     db: Any, configuration: ZoneConfiguration, *, now: str
 ) -> WriteOutcome:
-    """Write one zone configuration the athlete set locally, which has no provider."""
+    """Write one zone configuration the athlete set locally, which has no provider.
+
+    Saving unchanged values still dates the row, so a re-confirmed threshold
+    counts as current (``local_zone_saved_days``).
+    """
     require_instance(configuration, ZoneConfiguration, "configuration")
     if configuration.provenance.provider is not None:
         raise ValueError("a local zone configuration has no provider")
-    return _upsert(db, _ZONES, _zone_row(configuration, None), now=now)
+    row = _zone_row(configuration, None)
+    outcome = _upsert(db, _ZONES, row, now=now)
+    if outcome is WriteOutcome.UNCHANGED:
+        db.execute(
+            f"UPDATE {_ZONES.name} SET updated_at = ? WHERE config_key = ?",
+            (now, row["config_key"]),
+        )
+    return outcome
 
 
 def retire_local_zone_configuration(db: Any, config_key: str, *, now: str) -> bool:
@@ -494,6 +505,25 @@ def active_sleep_period_rows(
 def active_zone_configuration_rows(db: Any) -> list[dict[str, Any]]:
     """Return active zone rows, local and provider ones, by configuration key."""
     return _active_rows(db, _ZONES, [], [], "config_key")
+
+
+def local_zone_saved_days(db: Any) -> dict[str, date]:
+    """Return the day each active local zone configuration was last saved, by key."""
+    rows = _fetch_all(
+        db,
+        f"SELECT config_key, updated_at FROM {_ZONES.name} "
+        "WHERE provider IS NULL AND state = ?",
+        (_ACTIVE,),
+    )
+    saved: dict[str, date] = {}
+    for row in rows:
+        try:
+            saved[str(row["config_key"])] = date.fromisoformat(
+                str(row["updated_at"])[:10]
+            )
+        except ValueError:
+            continue
+    return saved
 
 
 def active_categorical_rows(

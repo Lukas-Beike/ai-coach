@@ -405,6 +405,37 @@ class GarminSyncStateServiceTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             self.key_values.set(db, key, value)
 
+    def test_sdk_threshold_failure_counts_syncs_in_a_row(self):
+        failed = {"errors": [{"source": "cycling_ftp", "message": "x"}]}
+        for _ in range(2):
+            self.service._track_threshold_reads(failed)
+        self.assertIsNone(self.service.sdk_threshold_failure())
+        # A refresh that skips the daily threshold reads keeps the count.
+        self.service._track_threshold_reads({"errors": [], "steps": []})
+        self.service._track_threshold_reads(failed)
+        self.assertEqual(
+            self.service.sdk_threshold_failure(),
+            {"reason": "requests_failed", "at": UTC_NOW},
+        )
+        self.service._track_threshold_reads({"errors": [], "cycling_ftp": {}})
+        self.assertIsNone(self.service.sdk_threshold_failure())
+        for _ in range(3):
+            self.service._track_threshold_reads(failed)
+        self.assertEqual(
+            self.service.sdk_threshold_failure(),
+            {"reason": "requests_failed", "at": UTC_NOW},
+        )
+        self.service._track_threshold_reads({"errors": [], "running_threshold": {}})
+        self.assertIsNone(self.service.sdk_threshold_failure())
+        self.assertFalse(self._get("garmin_sdk_threshold_failures"))
+
+    def test_skipped_sdk_login_freezes_thresholds_at_once(self):
+        self.service.record_sdk_skipped("mfa_required")
+        self.assertEqual(
+            self.service.sdk_threshold_failure(),
+            {"reason": "mfa_required", "at": UTC_NOW},
+        )
+
     def test_persist_error_redacts_secrets_and_truncates_to_1000_characters(self):
         self.service.persist_error("synthetic-password " + "x" * 1100)
 

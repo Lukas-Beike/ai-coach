@@ -186,16 +186,21 @@ def _wahoo_ftp(
     reader: ObservationReader, db: Any, *, as_of: date
 ) -> Observation | None:
     """The newest stored Wahoo cycling FTP when it is current on ``as_of``."""
+    newest = newest_wahoo_ftp(reader, db)
+    if newest is None:
+        return None
+    return select_current([newest], MetricKind.FTP, sport=Sport.RIDE, as_of=as_of)
+
+
+def newest_wahoo_ftp(reader: ObservationReader, db: Any) -> Observation | None:
+    """The newest stored Wahoo cycling FTP, whatever its age."""
     ftps = [
         observation
         for observation in reader.observations(db, MetricKind.FTP)
         if observation.provenance.provider is ProviderId.WAHOO
         and observation.sport is Sport.RIDE
     ]
-    newest = max(ftps, key=_newest_first, default=None)
-    if newest is None:
-        return None
-    return select_current([newest], MetricKind.FTP, sport=Sport.RIDE, as_of=as_of)
+    return max(ftps, key=_newest_first, default=None)
 
 
 def _newest_first(observation: Observation) -> tuple[date, datetime]:

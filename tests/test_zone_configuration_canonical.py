@@ -245,6 +245,28 @@ class CoachZoneTests(unittest.TestCase):
             ],
         )
 
+    def test_current_performance_carries_the_threshold_warning(self) -> None:
+        performance = Mock()
+        performance.current_performance.return_value = {"ftp": 260}
+        warning: dict[str, Any] = {
+            "stale_after_days": 56,
+            "sdk_failure": None,
+            "items": [{}],
+        }
+
+        def service(read):
+            return CoachStructuredContextService(
+                Mock(), Mock(), Mock(), Mock(), performance, threshold_warnings=read
+            )
+
+        self.assertEqual(
+            service(lambda: warning)._current_performance(None)["threshold_warnings"],
+            warning,
+        )
+        self.assertNotIn(
+            "threshold_warnings", service(lambda: None)._current_performance(None)
+        )
+
 
 class LocalZoneEditTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -332,6 +354,21 @@ class LocalZoneEditTests(unittest.TestCase):
                 for row in self.service.read()["configurations"]
             )
         )
+
+    def test_read_carries_the_threshold_warning_only_when_present(self) -> None:
+        self.assertNotIn("threshold_warnings", self.service.read())
+        warning: dict[str, Any] = {
+            "stale_after_days": 56,
+            "sdk_failure": None,
+            "items": [{}],
+        }
+        service = ZoneConfigurationService(
+            self.manager,
+            CanonicalTableReader(),
+            lambda: NOW,
+            threshold_warnings=lambda: warning,
+        )
+        self.assertEqual(service.read()["threshold_warnings"], warning)
 
     def test_committed_save_and_removal_notify_the_change_hook(self) -> None:
         calls: list[bool] = []

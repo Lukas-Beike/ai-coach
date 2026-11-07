@@ -751,7 +751,9 @@ class CoachStructuredContextService:
         zone_configurations: Callable[[], Sequence[ZoneConfiguration]] | None = None,
         planning_brief: Callable[[], Any] | None = None,
         today: Callable[[], date] = date.today,
+        threshold_warnings: Callable[[], Any] | None = None,
     ) -> None:
+        self._threshold_warnings = threshold_warnings
         self._planning_brief = planning_brief
         self._nutrition_meal_library = nutrition_meal_library
         self._zone_configurations = zone_configurations
@@ -823,7 +825,13 @@ class CoachStructuredContextService:
         self, performance_inputs: CanonicalPerformanceInputs | None
     ) -> Any:
         current = self._performance_reader.current_performance(performance_inputs)
-        if self._zone_configurations is None or not isinstance(current, dict):
+        if not isinstance(current, dict):
+            return current
+        if self._threshold_warnings is not None and (
+            warnings := self._threshold_warnings()
+        ):
+            current = {**current, "threshold_warnings": warnings}
+        if self._zone_configurations is None:
             return current
         zones = coach_training_zones(self._zone_configurations(), self._today())
         return {**current, "training_zones": zones} if zones else current

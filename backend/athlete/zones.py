@@ -195,8 +195,11 @@ class ZoneConfigurationService:
         now: Callable[[], str],
         *,
         on_change: Callable[[], None] = lambda: None,
+        threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None,
     ) -> None:
         self._database_manager = database_manager
+        # Stale-threshold and Garmin SDK warning shown with the zones (#1768).
+        self._threshold_warnings = threshold_warnings
         self._reader = reader
         self._now = now
         # Runs after a save, a removal or an undo: the local load follows it.
@@ -209,7 +212,7 @@ class ZoneConfigurationService:
 
     def read(self) -> dict[str, Any]:
         configurations = self.configurations()
-        return {
+        payload: dict[str, Any] = {
             "sports": [sport.value for sport in EDITABLE_SPORTS],
             "configurations": [
                 public_configuration(configuration)
@@ -217,6 +220,10 @@ class ZoneConfigurationService:
                 if configuration.sport in EDITABLE_SPORTS
             ],
         }
+        warnings = self._threshold_warnings()
+        if warnings:
+            payload["threshold_warnings"] = warnings
+        return payload
 
     def save(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         configuration = local_configuration(payload)

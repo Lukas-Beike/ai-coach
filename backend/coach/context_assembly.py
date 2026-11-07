@@ -36,6 +36,8 @@ class CoachContextPerformanceSources:
     activity_rows: ActivitySummarySource | None = None
     # When set, current performance lists the zones in effect (local first).
     zone_configurations: Callable[[], Any] | None = None
+    # When set, current performance carries the stale-threshold warning (#1768).
+    threshold_warnings: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,7 @@ class CoachContextAssembly:
         self._canonical = performance.canonical
         self._activity_rows = performance.activity_rows
         self._zone_configurations = performance.zone_configurations
+        self._threshold_warnings = performance.threshold_warnings
         self._checkin_service = planning.checkin_service
         self._planned_unit_service = planning.planned_unit_service
         self._daily_context_service = planning.daily_context_service
@@ -131,6 +134,7 @@ class CoachContextAssembly:
             ),
             nutrition_meal_library=self._nutrition_meal_library,
             zone_configurations=self._zone_configurations,
+            threshold_warnings=self._threshold_warnings,
             planning_brief=self._planning_brief,
             today=self._local_date,
         )
