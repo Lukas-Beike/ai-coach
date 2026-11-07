@@ -408,7 +408,11 @@ The current Garmin performance metrics (weight, thresholds, VO2max, maximum hear
 
 #### Scenario: Equivalent stored payload and canonical data
 - **WHEN** a Garmin payload is stored and projected into canonical observations and activity records
-- **THEN** the Garmin performance metrics read from the canonical data equal the metrics the payload parser gives for that payload, including the activity maximum heart rate and its date.
+- **THEN** the Garmin performance metrics read from the canonical data equal the metrics the payload parser gives for that payload, except the activity maximum heart rate: only the canonical read derives it, and the payload parser keeps no activity maximum.
+
+#### Scenario: Activity maximum across providers
+- **WHEN** a sport's current maximum heart rate has no resolved threshold
+- **THEN** the highest activity maximum of every provider's session summaries, Garmin's canonical activity maximum included, is used with the provider its summary names; Garmin's value wins a tie.
 
 #### Scenario: No canonical Garmin data
 - **WHEN** the stored Garmin view has performance sections but no canonical Garmin observation or activity record exists

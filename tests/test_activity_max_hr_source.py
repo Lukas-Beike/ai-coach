@@ -51,6 +51,32 @@ class ActivityMaxHrSourceTests(unittest.TestCase):
 
         self.assertIsNone(result["value"])
 
+    def test_a_higher_wahoo_activity_beats_the_garmin_activity_maximum(self) -> None:
+        # #1686: the activity fallback reads every provider, not Garmin first.
+        garmin = {
+            "value": 182,
+            "unit": "bpm",
+            "source": "Garmin Connect",
+            "observed_at": "2026-10-01",
+        }
+        higher = _max_hr_metric(
+            "cycling",
+            Sport.RIDE,
+            [_summary(191, "Wahoo")],
+            {},
+            {"cycling_max_hr_bpm": garmin},
+        )
+        lower = _max_hr_metric(
+            "cycling",
+            Sport.RIDE,
+            [_summary(175, "Wahoo")],
+            {},
+            {"cycling_max_hr_bpm": garmin},
+        )
+
+        self.assertEqual((191, "Wahoo"), (higher["value"], higher["source"]))
+        self.assertIs(garmin, lower)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -198,18 +198,15 @@ def _max_hr_metric(
     """Return sport max HR: the source-policy winner, else the activity maximum.
 
     The winner is the local zone configuration, Garmin's profile value, then the
-    Intervals setting or athlete record. Without any, the Garmin activity maximum,
-    else the highest activity value, which keeps the provider its summary names.
+    Intervals setting or athlete record. Without any, the highest activity
+    maximum of every provider (Garmin's stored activity maximum included) wins and
+    keeps the provider its summary names; Garmin's value wins a tie.
     """
     key = f"{category}_max_hr_bpm"
     resolved = thresholds.get((MetricKind.MAX_HR, sport))
     if resolved is not None:
         return _resolved_metric(garmin_metrics, key, resolved)
     garmin = garmin_metrics[key]
-    # Only Garmin's activity maximum (it carries ``observed_at``) is a fallback;
-    # its profile max HR is a threshold the resolver has already aged.
-    if garmin["value"] is not None and garmin.get("observed_at"):
-        return garmin
     activity_values = [
         found
         for activity in activities
@@ -217,6 +214,14 @@ def _max_hr_metric(
         and (found := _activity_max_hr(activity)) is not None
     ]
     best = max(activity_values, default=None, key=lambda item: item[0])
+    # Only Garmin's activity maximum (it carries ``observed_at``) is a fallback;
+    # its profile max HR is a threshold the resolver has already aged.
+    if (
+        garmin["value"] is not None
+        and garmin.get("observed_at")
+        and (best is None or float(garmin["value"]) >= best[0])
+    ):
+        return garmin
     if best is None:
         return metric(None, "bpm", None)
     number, provider = best

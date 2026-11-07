@@ -10,7 +10,6 @@ from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from typing import Any
 
-from backend.activities.identity import activity_kind
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.mapping import coerce_comma_decimal_number
 from backend.performance import freshness as performance_freshness
@@ -408,63 +407,21 @@ def _garmin_payload_thresholds(
     return cycling_ftp, running_power, running_pace, running_hr, cycling_hr
 
 
-def _garmin_activity_max_hr_samples(
-    activities: list[Any], kind: str
-) -> list[float | int]:
-    values: list[float | int] = []
-    for activity in activities:
-        if not isinstance(activity, dict) or activity_kind(activity) != kind:
-            continue
-        value = _as_number(
-            _first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate"))
-        )
-        if value is not None and 80 <= float(value) <= 260:
-            values.append(value)
-    return values
-
-
 def _garmin_payload_max_hr_samples(
     snapshot: dict[str, Any],
 ) -> tuple[dict[str, float | int], dict[str, list[float | int]], dict[str, str | None]]:
-    """Profile max HR, else the stored sport max HR and the payload's activities."""
+    """The profile max HR only; activity maxima are read from canonical records.
+
+    The activity maximum is a read-time fallback over the stored activity records
+    (``garmin_canonical``), so the ingest-only history keeps no copy of it.
+    """
     profile_max_hr = garmin_profile_max_hr(snapshot)
     values: dict[str, list[float | int]] = {"cycling": [], "running": []}
-    stored = snapshot.get("sport_max_hr")
-    if not isinstance(stored, dict):
-        stored = {}
-    activities = snapshot.get("activities")
-    if not isinstance(activities, list):
-        activities = []
     for kind, samples in values.items():
         profile_value = profile_max_hr_for(profile_max_hr, kind)
         if profile_value is not None:
             samples.append(profile_value)
-            continue
-        stored_value = _as_number(stored.get(kind))
-        if stored_value is not None and 80 <= float(stored_value) <= 260:
-            samples.append(stored_value)
-        samples.extend(_garmin_activity_max_hr_samples(activities, kind))
-    observed_at = {
-        kind: _garmin_activity_observed_at(activities, kind, max(samples, default=None))
-        for kind, samples in values.items()
-    }
-    return profile_max_hr, values, observed_at
-
-
-def _garmin_activity_observed_at(
-    activities: list[Any], kind: str, maximum_hr: Any
-) -> str | None:
-    observed_dates = [
-        garmin_source_observed_at(activity)
-        for activity in activities
-        if isinstance(activity, dict)
-        and activity_kind(activity) == kind
-        and _as_number(
-            _first_present(activity, ("maxHR", "maxHeartRate", "max_heartrate"))
-        )
-        == maximum_hr
-    ]
-    return max((value for value in observed_dates if value), default=None)
+    return profile_max_hr, values, dict.fromkeys(values)
 
 
 def garmin_payload_performance_metrics(

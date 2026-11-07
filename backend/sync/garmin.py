@@ -24,7 +24,6 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance.freshness import GarminSyncStatus
-from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
 from backend.provider_credentials import GARMIN_PERSONAL_KEY_REJECTED_KEY
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
@@ -445,10 +444,6 @@ class GarminPayloadService:
             payload["activities"] = deduplicate_api_records(
                 payload.get("activities", [])
             )
-        payload["sport_max_hr"] = merge_garmin_max_hr(
-            garmin_activity_max_hr(payload.get("activities")),
-            previous.get("sport_max_hr"),
-        )
         if fixture:
             payload["provider_sync"].setdefault(
                 "pagination",

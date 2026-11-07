@@ -618,6 +618,47 @@ class OwnerReadGuardTests(unittest.TestCase):
             entries,
         )
 
+    def test_consumers_cannot_read_the_garmin_state_view(self) -> None:
+        # #1686: values come from canonical observations, not garmin_store.
+        read = "state = garmin_store.read_state(db)\n"
+        entries = _owner_reads(
+            {
+                "backend/performance/consumer.py": read,
+                "backend/planning/consumer.py": (
+                    "from backend.db.garmin_store import read_state\n"
+                ),
+                "backend/sync/garmin.py": read,
+                "backend/db/garmin_store.py": read,
+            }
+        )
+        self.assertEqual(
+            [
+                ("legacy_read", "backend/performance/consumer.py", "read_state", 1),
+                ("legacy_read", "backend/planning/consumer.py", "read_state", 1),
+            ],
+            entries,
+        )
+
+    def test_consumers_cannot_import_the_garmin_morning_reader(self) -> None:
+        importer = "from backend.providers.garmin_morning import latest\n"
+        entries = _owner_reads(
+            {
+                "backend/planning/consumer.py": importer,
+                "backend/sync/garmin.py": importer,
+            }
+        )
+        self.assertEqual(
+            [
+                (
+                    "field_module_import",
+                    "backend/planning/consumer.py",
+                    "garmin_morning",
+                    1,
+                )
+            ],
+            entries,
+        )
+
     def test_raw_view_docstrings_owners_and_lookalikes_are_not_flagged(self) -> None:
         read = "view = garmin_store.read_view(db, None)\n"
         entries = _owner_reads(

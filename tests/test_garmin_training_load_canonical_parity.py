@@ -99,10 +99,10 @@ class TrainingLoadParityTests(unittest.TestCase):
                 "measurement_age_days": 0,
                 "measurement_status": "today",
                 "date": "2026-10-06",
-                "monthlyLoadAerobicLow": 75,
-                "monthlyLoadAerobicLowTargetMin": 40,
-                "monthlyLoadAnaerobic": 0,
-                "monthlyLoadAnaerobicTargetMax": 20.5,
+                "aerobic_low": 75,
+                "aerobic_low_target_min": 40,
+                "anaerobic": 0,
+                "anaerobic_target_max": 20.5,
             },
         )
         self.assertEqual(
@@ -132,7 +132,7 @@ class TrainingLoadParityTests(unittest.TestCase):
                 self.assertIsNone(result["daily_status"]["acute_load"])
                 self.assertIsNone(result["daily_status"]["chronic_load"])
                 self.assertIsNone(result["daily_status"]["acute_chronic_ratio"])
-                self.assertNotIn("monthlyLoadAerobicLow", result["four_week_balance"])
+                self.assertNotIn("aerobic_low", result["four_week_balance"])
 
     def test_without_values_there_is_no_section(self) -> None:
         self.assertEqual(self.project({"source_freshness": {}}), {})

@@ -133,8 +133,9 @@ SNAPSHOT_READ_NAME = "latest_snapshot"
 # ``legacy_read`` flags, in the Epic A consumer packages (#1407), a reference to a
 # raw provider view: the snapshot sections ``recent_wellness`` and
 # ``raw_provider_data`` and the raw Garmin views ``read_view``, ``recent_view`` and
-# ``recent_view_in``, as a name, attribute, import alias or a word in a string, and
-# a string holding a kv ``activity_detail:`` record key. Docstrings do not count.
+# ``recent_view_in`` and the Garmin state reader ``read_state`` (#1686), as a
+# name, attribute, import alias or a word in a string, and a string holding a kv
+# ``activity_detail:`` record key. Docstrings do not count.
 # ``latest_snapshot`` is the ``snapshot_key`` rule, which covers these packages too.
 # Consumers read canonical records instead.
 LEGACY_READ_SCOPES = (
@@ -149,6 +150,7 @@ LEGACY_READ_SCOPES = (
 LEGACY_READ_NAMES = frozenset(
     {
         "raw_provider_data",
+        "read_state",
         "read_view",
         "recent_view",
         "recent_view_in",
@@ -156,7 +158,8 @@ LEGACY_READ_NAMES = frozenset(
     }
 )
 LEGACY_READ_PATTERN = re.compile(
-    r"\b(raw_provider_data|read_view|recent_view_in|recent_view|recent_wellness)\b"
+    r"\b(raw_provider_data|read_state|read_view|recent_view_in|recent_view"
+    r"|recent_wellness)\b"
     r"|activity_detail:"
 )
 # ``source_label`` flags a quoted string that is exactly a provider display name.
@@ -186,6 +189,7 @@ FIELD_NAME_MODULES = frozenset(
     {
         "garmin_fields",
         "garmin_gear_fields",
+        "garmin_morning",
         "garmin_performance_fields",
         "intervals_activity_fields",
         "intervals_performance_fields",
@@ -208,12 +212,20 @@ _SUMMARY_FINGERPRINT = (
     "mapping: summary_fingerprint hashes the stored provider activity summary, "
     "excluding the later-added zone-time keys, to detect stale details"
 )
+_MORNING_VIEW = (
+    "awaiting-kind: reads the morning Body Battery from the Garmin state view; "
+    "#1686 item 5 moves it to a derived observation"
+)
 # repository-relative path -> (reason, field-name modules it may still import).
 # A new module in an allowlisted file fails the guard as well.
 _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "backend/activities/detail_store.py": (
         _SUMMARY_FINGERPRINT,
         ("intervals_performance_fields",),
+    ),
+    "backend/performance/morning_battery_service.py": (
+        _MORNING_VIEW,
+        ("garmin_morning",),
     ),
 }
 FIELD_MODULE_IMPORTS_ALLOWED = frozenset(
@@ -235,6 +247,12 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SOURCE_LABEL, "backend/athlete/equipment.py"): _LEGACY_LABEL,
     (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,
     (RULE_LEGACY_READ, "backend/activities/detail_store.py"): _DETAIL_RETIREMENT,
+    (RULE_LEGACY_READ, "backend/athlete/equipment.py"): _SYNC_STATUS,
+    (RULE_LEGACY_READ, "backend/nutrition/sync_status.py"): _SYNC_STATUS,
+    (RULE_LEGACY_READ, "backend/performance/morning_battery_service.py"): (
+        _MORNING_VIEW
+    ),
+    (RULE_LEGACY_READ, "backend/planning/daily_context_service.py"): _MORNING_VIEW,
     **{
         (RULE_SOURCE_LABEL, path): _LEGACY_LABEL
         for path in (
