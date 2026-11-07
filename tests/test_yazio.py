@@ -11,6 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlsplit
 
 from backend.config import load_config
 from backend.errors import AppError
@@ -391,6 +392,23 @@ class YazioClientTests(unittest.TestCase):
         self.assertTrue(search.full_url.startswith("https://yzapi.yazio.com/v22/"))
         self.assertEqual(search.get_header("Authorization"), "Bearer access-1")
         self.assertIn("YAZIO", search.get_header("User-agent"))
+
+    def test_search_sends_the_profile_sex_and_none_when_unset(self):
+        for sex, expected in (("", None), ("male", "male"), ("female", "female")):
+            with self.subTest(sex=sex):
+                script = Script(tokens=[token()], api=[[hit()]])
+                cfg = config()
+                client = YazioClient(
+                    lambda cfg=cfg: cfg,
+                    opener=script,
+                    clock=Mock(return_value=0.0),
+                    athlete_sex=lambda sex=sex: sex,
+                )
+                client.search("Skyr")
+                query = parse_qs(urlsplit(script.requests[1].full_url).query)
+                self.assertEqual(
+                    query.get("sex"), None if expected is None else [expected]
+                )
 
     def test_expired_token_is_refreshed_then_login_is_the_fallback(self):
         clock = Mock(return_value=0.0)

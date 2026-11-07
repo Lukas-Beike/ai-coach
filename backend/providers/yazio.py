@@ -173,8 +173,10 @@ class YazioClient:
         *,
         opener: Any = urlopen,
         clock: Callable[[], float] = time.monotonic,
+        athlete_sex: Callable[[], str] = lambda: "",
     ) -> None:
         self._config = config
+        self._athlete_sex = athlete_sex
         self._opener = opener
         self._clock = clock
         self._lock = threading.Lock()
@@ -259,10 +261,12 @@ class YazioClient:
                 return dict(self._last_check)
 
     def search(self, query: str) -> list[dict[str, Any]]:
+        # The profile sex, or no sex parameter while it is not set (#1774).
+        sex = self._athlete_sex()
         params = urlencode(
             {
                 "query": query,
-                "sex": "male",
+                **({"sex": sex} if sex in ("male", "female") else {}),
                 "countries": self._country(),
                 "locales": "de_" + self._country(),
             }

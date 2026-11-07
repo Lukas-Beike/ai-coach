@@ -194,12 +194,13 @@ class AthleteDataAssembly:
     ) -> None:
         """Invalidate location caches; a new preferred source changes local loads.
 
-        A new time zone moves the local day the stored loads are dated by (M6, M7).
+        A new time zone moves the local day the stored loads are dated by (M6, M7);
+        the sex chooses the M6 TRIMP constants.
         """
         invalidate_for_location_change(previous, current, **kwargs)
         if any(
             previous.get(field) != current.get(field)
-            for field in (*PREFERENCE_PROFILE_FIELDS.values(), "timezone")
+            for field in (*PREFERENCE_PROFILE_FIELDS.values(), "timezone", "sex")
         ):
             self._load_inputs_changed()
 

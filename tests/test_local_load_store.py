@@ -177,6 +177,44 @@ class LocalLoadStoreTests(unittest.TestCase):
             {"tss_per_au": 1 / 3, "pairs": 20, "session_rpe_au": 270.0},
         )
 
+    def test_served_heart_rate_load_marks_the_assumed_sex(self) -> None:
+        def stored(inputs: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "act_hike": {
+                    "session_load": {
+                        "value": 60.0,
+                        "method_version": 3,
+                        "derivation": {"branch": "heart_rate", "inputs": inputs},
+                    }
+                }
+            }
+
+        row = [{"id": "act_hike", "sport": "hike"}]
+        (assumed,) = with_local_loads(row, stored({"sex": "male", "sex_assumed": True}))
+        (saved,) = with_local_loads(row, stored({"sex": "male"}))
+        self.assertEqual(
+            assumed["load_assumption"],
+            "Geschlecht nicht gesetzt, männliche Konstanten angenommen",
+        )
+        self.assertNotIn("load_assumption", saved)
+
+    def test_pass_reads_the_profile_sex_in_its_transaction(self) -> None:
+        seen: list[Any] = []
+
+        def sex(db: Any) -> str:
+            seen.append(db)
+            return "female"
+
+        stage = LocalLoadStage(
+            key_values=self.key_values,
+            zone_provider=lambda: ZONE,
+            clock=lambda: NOW,
+            athlete_sex=sex,
+        )
+        with self.manager.unit_of_work() as db:
+            stage.run_batch(db)
+        self.assertEqual(seen, [db])
+
     def test_pass_reads_no_feedback_without_strength(self) -> None:
         requested: list[list[str]] = []
 

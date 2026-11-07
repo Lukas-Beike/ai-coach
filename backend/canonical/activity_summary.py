@@ -90,6 +90,7 @@ class ActivitySummary(TypedDict, total=False):
     load_method_version: int
     load_branch: str
     load_threshold_after_session: bool
+    load_assumption: str
     load_calibration: dict[str, Any]
     provider_training_load: float
     provider_load_model: str

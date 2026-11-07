@@ -115,13 +115,15 @@ def reconcile_local_loads(
     *,
     now: str,
     feedback: Mapping[str, Mapping[str, Any]] | None = None,
+    sex: str | None = None,
 ) -> dict[str, Any]:
     """Write every session's local load and retire stale rows; return counts.
 
     ``feedback`` is each session's effective local feedback by stored key, which
-    the session-RPE branch of strength sessions and its calibration read.
+    the session-RPE branch of strength sessions and its calibration read;
+    ``sex`` is the profile sex the heart-rate branch reads.
     """
-    loads = session_loads(summaries, thresholds, feedback)
+    loads = session_loads(summaries, thresholds, feedback, sex=sex)
     by_id = {str(summary.get("id")): summary for summary in summaries}
     keep: set[str] = set()
     written = 0
@@ -189,8 +191,10 @@ class LocalLoadStage:
         preferences: Preferences = lambda _db: NO_PREFERENCES,
         reader: CanonicalTableReader | None = None,
         session_feedback: FeedbackLookup | None = None,
+        athlete_sex: Callable[[Any], str | None] = lambda _db: None,
     ) -> None:
         self._session_feedback = session_feedback
+        self._athlete_sex = athlete_sex
         self._key_values = key_values
         self._zone_provider = zone_provider
         self._clock = clock
@@ -224,6 +228,7 @@ class LocalLoadStage:
             feedback=feedback_by_session(
                 rated_sessions(summaries), self._session_feedback
             ),
+            sex=self._athlete_sex(db),
         )
         self._save(
             db,
@@ -254,6 +259,10 @@ class LocalLoadStage:
         self._key_values.set(
             db, STATE_KEY, json.dumps(state, sort_keys=True, separators=(",", ":"))
         )
+
+
+# Card M6 v3: a heart-rate value computed without a saved profile sex.
+SEX_ASSUMED_LABEL: Final = "Geschlecht nicht gesetzt, männliche Konstanten angenommen"
 
 
 # Providers whose completed jobs can change a session or a threshold.
@@ -313,6 +322,29 @@ def daily_local_loads(db: Any) -> dict[str, float]:
     )
 
 
+def _load_fields(load: Mapping[str, Any]) -> dict[str, Any]:
+    """The served fields of one stored local load row and its derivation."""
+    derivation = load["derivation"]
+    inputs = derivation.get("inputs") or {}
+    fields: dict[str, Any] = {
+        "training_load": load["value"],
+        "load_method": METHOD_ID,
+        "load_method_version": load.get("method_version"),
+        "load_branch": derivation.get("branch"),
+    }
+    if derivation.get("threshold_after_session"):
+        fields["load_threshold_after_session"] = True
+    if inputs.get("sex_assumed"):
+        fields["load_assumption"] = SEX_ASSUMED_LABEL
+    if calibration := derivation.get("calibration"):
+        fields["load_calibration"] = {
+            "tss_per_au": calibration.get("tss_per_au"),
+            "pairs": calibration.get("pairs"),
+            "session_rpe_au": inputs.get("session_rpe_au"),
+        }
+    return fields
+
+
 def with_local_loads(
     summaries: Iterable[Mapping[str, Any]],
     stored: Mapping[str, Mapping[str, Any]],
@@ -325,22 +357,8 @@ def with_local_loads(
         rows = stored.get(str(item.get("id")), {})
         load = rows.get(MetricKind.SESSION_LOAD.value)
         if load is not None:
-            derivation = load["derivation"]
-            item["training_load"] = load["value"]
-            item["load_method"] = METHOD_ID
-            item["load_method_version"] = load.get("method_version")
-            item["load_branch"] = derivation.get("branch")
-            if derivation.get("threshold_after_session"):
-                item["load_threshold_after_session"] = True
+            item.update(_load_fields(load))
             sources["training_load"] = DERIVED_LABEL
-            if calibration := derivation.get("calibration"):
-                item["load_calibration"] = {
-                    "tss_per_au": calibration.get("tss_per_au"),
-                    "pairs": calibration.get("pairs"),
-                    "session_rpe_au": (derivation.get("inputs") or {}).get(
-                        "session_rpe_au"
-                    ),
-                }
         intensity = rows.get(MetricKind.INTENSITY_FACTOR.value)
         if intensity is not None:
             item["intensity"] = intensity["value"]

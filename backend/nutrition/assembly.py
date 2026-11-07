@@ -37,6 +37,8 @@ class NutritionRuntime:
     local_now: Callable[[], Any]
     intervals_request: Callable[[], Callable[..., Any]]
     photo_extractor: Callable[[], NutritionPhotoExtractionService] | None = None
+    # The profile sex Yazio searches send; empty sends none (#1774).
+    athlete_sex: Callable[[], str] = lambda: ""
 
 
 class NutritionAssembly:
@@ -63,7 +65,10 @@ class NutritionAssembly:
             self._database_manager, self._database_lock, self._utc_now
         )
         self._food_database = FoodDatabaseService(
-            mirror=self._food_mirror, yazio=YazioClient(self._config)
+            mirror=self._food_mirror,
+            yazio=YazioClient(
+                self._config, athlete_sex=dependencies.runtime.athlete_sex
+            ),
         )
         self._product_repository = NutritionProductRepository()
         self._template_repository = NutritionTemplateRepository()

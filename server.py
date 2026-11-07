@@ -1284,6 +1284,7 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
                 ),
                 openai_path=OPENAI_RESPONSES_PATH,
             ),
+            athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
         ),
     )
 )
@@ -2165,6 +2166,8 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     ),
     # Session analyses freeze matched planned targets (#1685).
     planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
+    # The heart-rate branch's TRIMP constants follow the profile sex (M6 v3).
+    athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
