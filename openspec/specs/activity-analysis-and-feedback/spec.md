@@ -311,7 +311,7 @@ The system SHALL store when the athlete last set a feedback row's session RPE, k
 Evidence: `backend/db/repositories.py:ActivityFeedbackRepository.upsert`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `public/activity-details.js:rpeSelect`; `tests/test_db_feedback_rating_time_migration.py::test_upgraded_feedback_records_its_rating_time_only_on_an_rpe_change`, `tests/test_detail_envelope.py`, `e2e/activity-details.spec.js`.
 
 ### Requirement: One activity list entry per canonical session
-The activity list (`GET /api/activities`) and the Coach tool `list_recent_activities` SHALL list each live canonical session exactly once, from every provider, as its session summary keyed by the local session id, newest first. Paging SHALL use a version-3 keyset cursor; any other cursor SHALL restart at page one. `detail_error` SHALL name only an Intervals.icu failure note of the current summary fingerprint.
+The activity list (`GET /api/activities`) and the Coach tool `list_recent_activities` SHALL list each live canonical session exactly once, from every provider, as its session summary keyed by the local session id, newest first. Paging SHALL use a version-3 keyset cursor; any other cursor SHALL restart at page one. Rows SHALL carry no `detail_error`: Intervals.icu details are never served (#1685), so their failure notes mark no session.
 
 #### Scenario: Sessions from several providers
 - **WHEN** the tables hold Intervals.icu-only sessions, a Garmin-only session, a bundled Intervals.icu and Garmin session, and an Intervals.icu duplicate pair bundled into one session
@@ -321,11 +321,11 @@ The activity list (`GET /api/activities`) and the Coach tool `list_recent_activi
 - **WHEN** a client sends a version-2 cursor
 - **THEN** the first page is returned.
 
-#### Scenario: Failure note of another summary version
-- **WHEN** a listed session's Intervals.icu record has a failure note whose fingerprint differs from the current one
-- **THEN** its `detail_error` is null.
+#### Scenario: Intervals.icu failure note
+- **WHEN** a listed session's Intervals.icu record has a stored detail failure note
+- **THEN** the row carries no `detail_error`.
 
-Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService.recent`; `tests/test_activity_canonical_reads.py:test_read_service_lists_nothing_until_the_tables_serve`, `tests/test_activity_canonical_reads.py:test_limit_one_pages_walk_every_session_and_old_cursors_restart`, `tests/test_activity_canonical_reads.py:test_garmin_only_session_is_listed_and_its_detail_loads`, `tests/test_activity_read_service.py:test_page_hides_a_failure_note_of_an_older_summary_version`; `e2e/activity-details.spec.js::@responsive analysis lists a Garmin-only indoor session and loads more`.
+Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService.recent`; `tests/test_activity_canonical_reads.py:test_read_service_lists_nothing_until_the_tables_serve`, `tests/test_activity_canonical_reads.py:test_limit_one_pages_walk_every_session_and_old_cursors_restart`, `tests/test_activity_canonical_reads.py:test_garmin_only_session_is_listed_and_its_detail_loads`, `tests/test_activity_read_service.py:test_page_names_no_intervals_detail_failure`; `e2e/activity-details.spec.js::@responsive analysis lists a Garmin-only indoor session and loads more`.
 
 ### Requirement: Summary fingerprints from one sync-owned port
 Freshness checks outside the sync owner SHALL read current summary fingerprints only through the `summary_fingerprints` port, for the requested activities only. Intervals.icu fingerprints SHALL keep the value of `summary_fingerprint` of the stored payload; other providers SHALL use the payload hash of the active raw record.
