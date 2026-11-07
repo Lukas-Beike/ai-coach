@@ -14,39 +14,38 @@ const routes = [
 test("@responsive navigation and banners keep their text inside at 200 % text size", async ({ page }) => {
   await page.goto("/#coach");
   await page.waitForFunction(() => state.initialStateLoaded);
-  await page.evaluate(() => {
+  // Banner content and measurement share one evaluate so a sync poll cannot hide a banner in between.
+  const measure = () => page.evaluate(() => {
     document.documentElement.style.fontSize = "200%";
-    const show = (selector, update) => {
-      const element = document.querySelector(selector);
-      update(element);
-      element.hidden = false;
+    const texts = {
+      "#statusTitle": "Das OpenAI-Guthaben ist aufgebraucht",
+      "#statusDetail": "Bitte im OpenAI-Billing Guthaben hinzufügen.",
+      "#connectivityNotice": "Offline – Änderungen können gerade nicht gespeichert werden.",
+      "#providerAttentionDetail": "2 Anbindungen benötigen manuelles Eingreifen.",
+      "#setupBannerDetail": "Garmin Connect und Intervals.icu fehlen",
     };
-    show("#statusCard", (card) => {
-      card.hidden = false;
-      card.querySelector("#statusTitle").textContent = "Das OpenAI-Guthaben ist aufgebraucht";
-      card.querySelector("#statusDetail").textContent = "Bitte im OpenAI-Billing Guthaben hinzufügen.";
-    });
-    show("#connectivityNotice", (notice) => { notice.textContent = "Offline – Änderungen können gerade nicht gespeichert werden."; });
-    show("#providerAttentionBanner", () => { document.querySelector("#providerAttentionDetail").textContent = "2 Anbindungen benötigen manuelles Eingreifen."; });
-    show("#setupBanner", () => { document.querySelector("#setupBannerDetail").textContent = "Garmin Connect und Intervals.icu fehlen"; });
-  });
-  const overflow = await page.evaluate(() => {
-    const containers = [".bottom-nav", ".desktop-nav", "#statusCard", "#connectivityNotice", "#providerAttentionBanner", "#setupBanner"]
-      .map((selector) => document.querySelector(selector))
-      .filter((element) => element && element.getClientRects().length);
-    const problems = [];
-    for (const container of containers) {
+    for (const [selector, text] of Object.entries(texts)) document.querySelector(selector).textContent = text;
+    const banners = ["#statusCard", "#connectivityNotice", "#providerAttentionBanner", "#setupBanner"].map((selector) => document.querySelector(selector));
+    for (const banner of banners) banner.hidden = false;
+    const nav = [".bottom-nav", ".desktop-nav"].map((selector) => document.querySelector(selector)).filter((element) => element.getClientRects().length);
+    const problems = nav.length === 1 ? [] : [`${nav.length} navigation bars visible`];
+    for (const container of [...nav, ...banners]) {
       const box = container.getBoundingClientRect();
-      if (box.left < 0 || box.right > document.documentElement.clientWidth + 1) problems.push(`${container.className || container.id} leaves the viewport`);
+      if (!box.width) problems.push(`${container.id || container.className} not rendered`);
+      if (box.left < 0 || box.right > document.documentElement.clientWidth + 1) problems.push(`${container.id || container.className} leaves the viewport`);
       for (const element of [container, ...container.querySelectorAll("*")]) {
-        // Skip SVG and visually hidden accessible names (1 px clip boxes).
-        if (!element.getClientRects().length || element instanceof SVGElement || element.clientWidth <= 1) continue;
+        if (!element.getClientRects().length || element instanceof SVGElement) continue;
         if (element.scrollWidth > element.clientWidth + 1) problems.push(`${container.id || container.className} > ${element.tagName.toLowerCase()}.${element.className} "${element.textContent.trim().slice(0, 30)}"`);
       }
     }
     return problems;
   });
-  expect(overflow).toEqual([]);
+  expect(await measure()).toEqual([]);
+  // Phone projects also cover the 560-767 px band, where the bottom bar uses its larger label size.
+  if (page.viewportSize().width < 560) {
+    await page.setViewportSize({ width: 600, height: 900 });
+    expect(await measure(), "600 px").toEqual([]);
+  }
 });
 
 test("@responsive pages do not scroll horizontally at 200 % text size", async ({ page, request }) => {
