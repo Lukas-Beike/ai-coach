@@ -220,6 +220,17 @@ def read_activities(
     return found[::-1] if limit is not None else found
 
 
+def read_activity(db: Any, activity_id: str) -> dict[str, Any] | None:
+    """Return the stored raw Garmin activity row of ``activity_id``, or None."""
+    row = db.execute(
+        "SELECT payload FROM provider_records WHERE provider = ? AND record_kind = ? "
+        "AND state = ? AND source_record_id = ?",
+        (GARMIN_PROVIDER, ACTIVITY_RECORD_KIND, _ACTIVE, activity_id),
+    ).fetchone()
+    value = None if row is None else _decoded(row["payload"])
+    return value if isinstance(value, dict) else None
+
+
 def _decoded(text: Any) -> Any | None:
     try:
         return json.loads(text)

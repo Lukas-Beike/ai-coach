@@ -31,6 +31,7 @@ from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
     BACKFILL_JOB_TYPES,
+    RATING_BACKFILL,
     WELLNESS_BACKFILL,
     JobValidationError,
     decode_job_payload,
@@ -351,9 +352,11 @@ class GarminSyncJobOwner:
         all_sync_days: int,
         activity_detail_service: Any = None,
         wellness_history_service: GarminWellnessBackfill | None = None,
+        rating_backfill_service: GarminRatingBackfill | None = None,
     ) -> None:
         self._historical_sync = historical_sync
         self._wellness_history_service = wellness_history_service
+        self._rating_backfill_service = rating_backfill_service
         self._garmin_sync_service = garmin_sync_service
         self._morning_body_battery_service = morning_body_battery_service
         self._garmin_fixture_loader = garmin_fixture_loader
@@ -371,6 +374,8 @@ class GarminSyncJobOwner:
             return self._activity_detail_service.refresh(payload["activity_id"])
         if job_type == WELLNESS_BACKFILL:
             return self._wellness_backfill(payload)
+        if job_type == RATING_BACKFILL:
+            return self._rating_backfill(payload)
         days, historical_end = self._historical_sync.window(
             payload, job_type, lambda: self._sync_days(job_type)
         )
@@ -422,6 +427,17 @@ class GarminSyncJobOwner:
         )
         return result
 
+    def _rating_backfill(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run one rating backfill batch (newest first; stored ratings only)."""
+        if self._rating_backfill_service is None:
+            raise AppError(503, "Der Bewertungs-Backfill ist nicht verfügbar.")
+        if not self._rating_backfill_service.available():
+            # Fixture mode: no remote read, no cursor move, no continuation.
+            return {"status": "ok", "reason": "not_configured", "window_records": 0}
+        end_date = payload.get("end_date")
+        end = date.fromisoformat(iso_date_prefix(str(end_date))) if end_date else None
+        return self._rating_backfill_service.backfill(end)
+
     def _sync_days(self, job_type: str) -> int:
         """Return the default window: backfills use the automatic refresh span."""
         if job_type == "historical_backfill":
@@ -435,6 +451,14 @@ class GarminWellnessBackfill(Protocol):
     def available(self) -> bool: ...
 
     def backfill(self, days: int, end: date) -> dict[str, Any]: ...
+
+
+class GarminRatingBackfill(Protocol):
+    """Backfills the watch ratings of one batch of past activities."""
+
+    def available(self) -> bool: ...
+
+    def backfill(self, end: date | None) -> dict[str, Any]: ...
 
 
 class CalendarWeatherSyncJobOwner:

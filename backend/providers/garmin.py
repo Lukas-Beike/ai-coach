@@ -1510,7 +1510,7 @@ def _collect_activity_ratings(
             if warn:
                 warn(ACTIVITY_RATINGS_SECTION, redact(str(exc))[:500], exc)
             break
-        row = _rating_row(value, activity_id, started)
+        row = rating_row(value, activity_id, started)
         if row is not None:
             ratings.append(row)
     if ratings:
@@ -1541,7 +1541,7 @@ def _rating_candidates(
     ][:MAX_ACTIVITY_RATING_READS]
 
 
-def _rating_row(value: Any, activity_id: str, started: str) -> dict[str, Any] | None:
+def rating_row(value: Any, activity_id: str, started: str) -> dict[str, Any] | None:
     """The stored rating row of one single-activity read, or None without a summary.
 
     Every key is present, so a rating cleared on the watch clears the stored one.

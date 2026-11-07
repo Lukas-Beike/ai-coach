@@ -33,6 +33,11 @@ from backend.providers.garmin_personal import (
     GarminPersonalClient,
     GarminTransportClient,
 )
+from backend.providers.garmin_rating_history import (
+    RatingReadRateLimited,
+    RatingReadRejected,
+    collect_activity_ratings,
+)
 from backend.providers.garmin_wellness_history import (
     WellnessHistoryHooks,
     collect_wellness_history,
@@ -405,6 +410,41 @@ class GarminRemoteReader:
                     capability_success=self._state_service.record_capability_success,
                 ),
             )
+        finally:
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
+
+    def fetch_activity_ratings(
+        self, activities: list[tuple[str, str]], sink: Callable[[dict[str, Any]], None]
+    ) -> int:
+        """Read the watch ratings of past activities for the one-off backfill (#1728).
+
+        One authenticated client serves the whole batch, so the Personal API token
+        is exchanged once. A rate limit or a rejected key ends the read as an
+        error; a rejected key is also marked for the connection card.
+        """
+        if not self.configured():
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
+        call_external = self._external_call(None)
+        client, login_argument = self._authenticated_client(call_external)
+        try:
+            return collect_activity_ratings(
+                client, activities, sink, external_call=call_external
+            )
+        except RatingReadRateLimited:
+            raise AppError(
+                429, "Garmin begrenzt die Anfragen.", reason="rate_limited"
+            ) from None
+        except RatingReadRejected:
+            if client.personal is None:
+                raise AppError(
+                    401, "Der Garmin-Zugang wurde abgelehnt.", reason="auth_required"
+                ) from None
+            self._record_key_result(False)
+            raise AppError(
+                401,
+                "Der Garmin-Personal-API-Schlüssel wurde abgelehnt.",
+                reason=PERSONAL_KEY_REJECTED_REASON,
+            ) from None
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 

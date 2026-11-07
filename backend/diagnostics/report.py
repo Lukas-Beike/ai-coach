@@ -29,6 +29,7 @@ from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.plan_sync import summarize_plan_sync
 from backend.diagnostics.provider_composition import summarize_provider_composition
+from backend.diagnostics.rating_backfill import summarize_rating_backfill
 from backend.diagnostics.session_conflicts import summarize_session_conflicts
 from backend.observability import DiagnosticCapture, Redactor
 from backend.provider_credentials import garmin_tokens_connected
@@ -227,6 +228,9 @@ class DiagnosticReportService:
                 "canonical_session_conflicts": summarize_session_conflicts(db),
                 "canonical_provider_composition": summarize_provider_composition(db),
                 "local_load": summarize_local_load(deps.key_values, db),
+                "rating_backfill": summarize_rating_backfill(
+                    deps.key_values, db, deps.config.sync_history_earliest_date
+                ),
                 "session_metrics": summarize_session_metrics(deps.key_values, db),
                 "session_analysis": summarize_session_analysis(deps.key_values, db),
                 "logs": deps.recent_logs.list(),

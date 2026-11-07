@@ -20,6 +20,7 @@ from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
 )
+from backend.sync.garmin_rating_backfill import GarminRatingBackfillService
 from backend.sync.garmin_service import (
     GarminAnalysisRefreshService,
     GarminNutritionRefreshService,
@@ -325,6 +326,24 @@ class GarminAssembly:
             coordination=self._sync_coordination(),
             utc_now=self._utc_now,
             configured=lambda: fixture_loader.path() is None and reader.configured(),
+        )
+
+    def rating_backfill_service(self) -> GarminRatingBackfillService:
+        """Compose the one-off backfill of the watch ratings of past activities."""
+        fixture_loader = self.fixture_loader()
+        reader = self.remote_reader()
+        return GarminRatingBackfillService(
+            reader=reader,
+            database_manager=self._database_manager(),
+            snapshot_writer=GarminSnapshotWriter(
+                self._key_values,
+                lambda: self._athlete_clock.now().tzinfo,
+            ),
+            key_values=self._key_values,
+            coordination=self._sync_coordination(),
+            utc_now=self._utc_now,
+            configured=lambda: fixture_loader.path() is None and reader.configured(),
+            earliest_date=self._earliest_date,
         )
 
     def analysis_refresh_service(self) -> GarminAnalysisRefreshService:
