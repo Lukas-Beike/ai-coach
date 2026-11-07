@@ -357,47 +357,60 @@
 
   const STRENGTH_SOURCES = { garmin_exercise_sets: "Garmin-Sätze", fit_set_messages: "FIT-Datei" };
 
-  const STRENGTH_CATEGORIES = { squat: "Kniebeuge", deadlift: "Kreuzheben", lunge: "Ausfallschritt", leg_curl: "Beinbeuger", calf_raise: "Wadenheben", hip_raise: "Hüftheben", hip_swing: "Kettlebell-Swing", olympic_lift: "Olympisches Heben", plyo: "Sprünge", total_body: "Ganzkörper", bench_press: "Bankdrücken", row: "Rudern", pull_up: "Klimmzug", push_up: "Liegestütz", shoulder_press: "Schulterdrücken", lateral_raise: "Seitheben", curl: "Bizepscurl", triceps_extension: "Trizeps", plank: "Plank", core: "Rumpf", crunch: "Crunch", sit_up: "Sit-up", carry: "Tragen", other: "Unbekannte Übung" };
-
-  // Provider codes such as BARBELL_BACK_SQUAT become words; the category labels the rest.
+  // "Kniebeuge – Barbell Back Squat": the category links it to the plan, the code names the exercise.
   function strengthExerciseLabel(exercise) {
-    if (exercise.name) return exercise.name.toLowerCase().split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
-    return STRENGTH_CATEGORIES[exercise.category] || "Übung";
+    const category = AppFormat.strengthCategory(exercise.category);
+    const code = typeof exercise.name === "string" && exercise.name
+      ? exercise.name.toLowerCase().split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ")
+      : null;
+    return [category, code].filter(Boolean).join(" – ") || "Übung";
   }
 
   function strengthNumber(value, digits = 1) {
-    return value == null ? "–" : Number(value).toLocaleString("de-DE", { maximumFractionDigits: digits });
+    const number = Number(value);
+    return value == null || !Number.isFinite(number) ? "–" : AppFormat.number(number, { digits: Number.isInteger(number) ? 0 : digits });
+  }
+
+  function strengthSeconds(value) {
+    const seconds = Number(value);
+    if (value == null || !Number.isFinite(seconds)) return "–";
+    return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
   }
 
   function renderStrengthSets(strength, content) {
     if (!strength?.exercises?.length) return;
     content.append(node("h3", "Kraftsätze"));
+    const sets = Number(strength.active_sets) || 0;
     content.append(node("p", [
-      `${strength.active_sets} Sätze`,
+      `${sets} ${sets === 1 ? "Satz" : "Sätze"}`,
       strength.total_reps != null ? `${strength.total_reps} Wdh.` : null,
       strength.volume_kg != null ? `${strengthNumber(strength.volume_kg)} kg Volumen` : null,
       STRENGTH_SOURCES[strength.source],
     ].filter(Boolean).join(" · "), "muted"));
-    const tableWrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table strength-sets"), "Kraftsätze");
+    const tableWrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table"), "Kraftsätze");
     const table = node("table");
     table.append(node("caption", "Ausgeführte Sätze je Übung"));
     const thead = node("thead"); const heading = node("tr");
-    ["Übung", "Satz", "Wdh.", "kg", "Pause"].forEach((label) => { const cell = node("th", label); cell.scope = "col"; heading.append(cell); });
+    ["Übung", "Satz", "Wdh. / Dauer", "kg", "Pause"].forEach((label) => { const cell = node("th", label); cell.scope = "col"; heading.append(cell); });
     thead.append(heading); table.append(thead);
     const body = node("tbody");
     strength.exercises.forEach((exercise) => {
-      const name = strengthExerciseLabel(exercise);
-      (exercise.set_list || []).forEach((set, index) => {
+      const setList = Array.isArray(exercise.set_list) ? exercise.set_list : [];
+      setList.forEach((set, index) => {
         const row = node("tr");
-        const nameCell = node("th", index === 0 ? name : ""); nameCell.scope = "row"; row.append(nameCell);
-        row.append(node("td", String(index + 1)), node("td", strengthNumber(set.reps, 0)), node("td", strengthNumber(set.weight_kg)), node("td", set.rest_s != null ? `${set.rest_s} s` : "–"));
+        if (index === 0) {
+          // One header per exercise spans its sets, so every set row keeps its exercise.
+          const nameCell = node("th", strengthExerciseLabel(exercise)); nameCell.scope = "rowgroup"; nameCell.rowSpan = setList.length; row.append(nameCell);
+        }
+        const amount = set.reps != null ? strengthNumber(set.reps, 0) : set.duration_s != null ? strengthSeconds(set.duration_s) : "–";
+        row.append(node("td", String(index + 1)), node("td", amount), node("td", strengthNumber(set.weight_kg)), node("td", strengthSeconds(set.rest_s)));
         body.append(row);
       });
     });
     table.append(body); tableWrap.append(table); content.append(tableWrap);
-    if (strength.omitted_exercises) content.append(node("p", `${strength.omitted_exercises} weitere Übungen nicht angezeigt.`, "muted"));
+    const omitted = Number(strength.omitted_exercises) || 0;
+    if (omitted) content.append(node("p", `${omitted} weitere ${omitted === 1 ? "Übung" : "Übungen"} nicht angezeigt.`, "muted"));
   }
-
 
   function renderIntervalQuality(payload, content) {
     const quality = payload.analysis?.interval_quality;

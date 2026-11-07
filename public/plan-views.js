@@ -349,9 +349,12 @@ function plannedStrengthRows(strength) {
   strength.exercises.forEach((exercise) => {
     const plan = `${exercise.planned_sets}×${exercise.planned_reps}${exercise.planned_kg != null ? ` @ ${calendarMetricNumber(exercise.planned_kg)} kg` : ""}`;
     const item = document.createElement("li");
+    const category = AppFormat.strengthCategory(exercise.category);
+    const planned = typeof exercise.name === "string" && exercise.name ? exercise.name : null;
+    const name = planned ? (category && category !== planned ? `${planned} (${category})` : planned) : category || "Übung";
     item.textContent = exercise.status === "matched"
-      ? `${exercise.name}: ${exercise.completed_sets}/${exercise.planned_sets} Sätze erreicht · Ist ${(exercise.reps || []).map((reps) => reps ?? "?").join("/") || "–"} Wdh. · Plan ${plan}`
-      : `${exercise.name}: nicht zugeordnet · Plan ${plan}`;
+      ? `${name}: ${exercise.completed_sets}/${exercise.planned_sets} Sätze erreicht · Ist ${(exercise.reps || []).map((reps) => reps ?? "?").join("/") || "–"} Wdh. · Plan ${plan}`
+      : `${name}: nicht zugeordnet · Plan ${plan}`;
     list.append(item);
   });
   return list;

@@ -95,7 +95,14 @@
     return days > 0 ? `in ${days} Tagen` : `vor ${-days} Tagen`;
   }
 
-  const AppFormat = Object.freeze({ number, distance, duration, clock, date, dateTime, relativeDay });
+  // German labels of the canonical exercise categories (ExerciseCategory).
+  const STRENGTH_CATEGORIES = Object.freeze({ bench_press: "Bankdrücken", calf_raise: "Wadenheben", cardio: "Cardio", carry: "Tragen", chop: "Holzhacker", core: "Rumpf", crunch: "Crunch", curl: "Bizepscurl", deadlift: "Kreuzheben", flye: "Fliegende", hip_raise: "Hüftheben", hip_stability: "Hüftstabilität", hip_swing: "Kettlebell-Swing", hyperextension: "Rückenstrecker", lateral_raise: "Seitheben", leg_curl: "Beinbeuger", leg_raise: "Beinheben", lunge: "Ausfallschritt", olympic_lift: "Olympisches Heben", plank: "Unterarmstütz", plyo: "Sprünge", pull_up: "Klimmzug", push_up: "Liegestütz", row: "Rudern", shoulder_press: "Schulterdrücken", shoulder_stability: "Schulterstabilität", shrug: "Schulterheben", sit_up: "Sit-up", squat: "Kniebeuge", total_body: "Ganzkörper", triceps_extension: "Trizepsstrecken", warm_up: "Aufwärmen", run: "Laufen", other: "Unbekannte Übung" });
+
+  function strengthCategory(category) {
+    return typeof category === "string" ? STRENGTH_CATEGORIES[category] || null : null;
+  }
+
+  const AppFormat = Object.freeze({ number, distance, duration, clock, date, dateTime, relativeDay, strengthCategory, STRENGTH_CATEGORIES });
   globalThis.AppFormat = AppFormat;
   if (typeof module !== "undefined") module.exports = AppFormat;
 })();
