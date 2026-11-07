@@ -112,23 +112,23 @@ The system SHALL fetch full-resolution Intervals detail only for a valid locally
 
 #### Scenario: Successful refresh writes only canonical state
 - **WHEN** an explicit or automatic Intervals.icu detail load succeeds
-- **THEN** the canonical sets and analysis payload are written, the failure note of that activity is deleted in the same transaction, and no `activity_detail:<sha>` kv row is created or updated.
+- **THEN** the canonical detail sets are written (no session analysis, which the canonical stage owns, #1685), the failure note of that activity is deleted in the same transaction, and no `activity_detail:<sha>` kv row is created or updated.
 
 #### Scenario: Canonical write fails
 - **WHEN** the canonical detail write raises inside the refresh transaction
-- **THEN** no canonical set, analysis payload or failure-note deletion is committed.
+- **THEN** no canonical set or failure-note deletion is committed.
 
 #### Scenario: Prefetch settledness
 - **WHEN** prefetch decides whether an activity still needs loading
 - **THEN** it uses only the summary fingerprints stored with canonical detail sets and analysis payloads, plus failure notes for the same fingerprint. A remaining kv detail record does not mark an activity settled.
 
-#### Scenario: Target reuse after reload
-- **WHEN** a session already has a canonical analysis payload with a `target_snapshot` and its detail is reloaded
-- **THEN** that frozen snapshot is reused instead of re-freezing targets from the current plan.
+#### Scenario: Stored analysis untouched by a reload
+- **WHEN** a session already has a stored analysis row with a `target_snapshot` and its Intervals.icu detail is reloaded
+- **THEN** the row and its frozen snapshot stay unchanged; targets are frozen only by the canonical session analysis stage.
 
-Detailed contract: Summary fingerprints SHALL prevent redundant loads and invalidate stale data/failure notes after corrections. Failure notes and the prefetch floor remain small kv keys. Older activities SHALL remain available for explicit detail loading. The refresh use case SHALL require a canonical detail writer. Frozen planned targets SHALL be reused from the stored canonical analysis payload of the session.
+Detailed contract: Summary fingerprints SHALL prevent redundant loads and invalidate stale data/failure notes after corrections. Failure notes and the prefetch floor remain small kv keys. Older activities SHALL remain available for explicit detail loading. The refresh use case SHALL require a canonical detail writer. The refresh SHALL NOT compute or write a session analysis, calendar profile or target snapshot.
 
-Evidence: `backend/sync/activity_details.py:ActivityDetailRefreshService.refresh`, `backend/sync/activity_details.py:INITIAL_PREFETCH_ACTIVITIES`, `backend/activities/detail_store.py:ActivityDetailStore`, `backend/db/activity_detail_fingerprints.py:intervals_detail_fingerprints`; `tests/test_activity_detail_refresh.py:test_first_run_loads_the_ten_newest_activities_once`, `tests/test_activity_detail_refresh.py:test_changed_summary_is_loaded_again`, `tests/test_activity_detail_refresh.py:test_failed_canonical_write_commits_nothing`. `tests/test_activity_detail_refresh.py:test_refresh_writes_canonical_rows_without_a_kv_record`, `tests/test_activity_detail_refresh.py:test_frozen_targets_are_reused_from_the_canonical_analysis`, `tests/test_activity_detail_refresh.py:test_leftover_kv_record_does_not_settle_prefetch`, `tests/test_activity_detail_refresh.py:test_unstored_write_fails_and_keeps_the_failure_note`.
+Evidence: `backend/sync/activity_details.py:ActivityDetailRefreshService.refresh`, `backend/sync/activity_details.py:INITIAL_PREFETCH_ACTIVITIES`, `backend/activities/detail_store.py:ActivityDetailStore`, `backend/db/activity_detail_fingerprints.py:intervals_detail_fingerprints`; `tests/test_activity_detail_refresh.py:test_first_run_loads_the_ten_newest_activities_once`, `tests/test_activity_detail_refresh.py:test_changed_summary_is_loaded_again`, `tests/test_activity_detail_refresh.py:test_failed_canonical_write_commits_nothing`. `tests/test_activity_detail_refresh.py:test_refresh_writes_canonical_rows_without_a_kv_record`, `tests/test_activity_detail_refresh.py:test_refresh_leaves_a_stored_analysis_untouched`, `tests/test_activity_detail_refresh.py:test_leftover_kv_record_does_not_settle_prefetch`, `tests/test_activity_detail_refresh.py:test_unstored_write_fails_and_keeps_the_failure_note`.
 
 ### Requirement: Garmin detail acquisition and recovery
 The system SHALL fetch Garmin detail kinds independently for locally known active nonmanual Garmin records, persist returned valid sets without erasing omitted kinds, and report partial outcomes when only some kinds arrive.

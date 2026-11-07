@@ -282,8 +282,8 @@ class ActivityReadServiceTests(unittest.TestCase):
         old = service.detail(
             "old", garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=today
         )
-        # The current summary row of the old activity fills its summary scalars.
-        self.assertEqual(3.1, old["metrics"]["avg_speed_mps"]["value"])
+        # The Intervals.icu summary row is never read for scalars (#1685).
+        self.assertNotIn("avg_speed_mps", old["metrics"])
         self.assertTrue(old["activity_validation"]["available"])
         self.assertEqual([date(2025, 9, 21), date(2025, 9, 21), None], rows.starts)
         # The full-history lookup shares the read snapshot of the windowed read.
@@ -363,7 +363,8 @@ class ActivityReadServiceTests(unittest.TestCase):
             today=date(2026, 9, 20),
         )
 
-        self.assertEqual(3.3, result["metrics"]["avg_speed_mps"]["value"])
+        self.assertEqual("act_new", result["session"]["activity_id"])
+        self.assertNotIn("avg_speed_mps", result["metrics"])
 
     def test_detail_service_requires_a_canonical_source(self):
         with self.assertRaises(TypeError):

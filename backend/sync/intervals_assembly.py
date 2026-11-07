@@ -163,11 +163,6 @@ class IntervalsSyncAssembly:
             references=ActivityReferences(self._database_manager()),
             canonical=CanonicalDetailWriter(),
             local_date=lambda: self._athlete_clock().now().date().isoformat(),
-            read_planned_units=lambda: (
-                self._planned_unit_service().list(500)
-                if self._planned_unit_service
-                else []
-            ),
         )
 
     def snapshot_storage(self) -> SnapshotStorage:

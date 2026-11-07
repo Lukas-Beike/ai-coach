@@ -52,11 +52,11 @@ The system SHALL merge alternative detail sets deterministically without mutatin
 Evidence: `backend/activities/detail_merge.py:merge_details`, `backend/activities/detail_merge.py:clock_offset`, `backend/activities/detail_contract.py:activity_detail_contract`; `tests/test_activity_detail_merge.py:test_full_set_beats_downsampled_even_when_relayed`, `tests/test_activity_detail_merge.py:test_power_and_heart_rate_come_from_their_best_devices`, `tests/test_activity_detail_contract.py:test_unalignable_laps_keep_their_own_clock`.
 
 ### Requirement: Current cached analysis and truthful freshness
-The system SHALL read local details without implicit provider refresh and compare each provider's stored canonical detail fingerprint with that provider's current summary fingerprint. The reader SHALL compute the canonical session analysis from the session's merged Garmin, Wahoo and local detail and SHALL withhold it while a provider contributing streams or laps is stale. Detail failures SHALL preserve usable summaries and matching load-error metadata.
+The system SHALL read local details without implicit provider refresh, serve only the detail sets of the session's Garmin, Wahoo and local records, and compare each provider's stored canonical detail fingerprint with that provider's current summary fingerprint. The reader SHALL compute the canonical session analysis from that merged detail and SHALL withhold it while a provider contributing streams or laps is stale. Intervals.icu detail sets, summary rows and failure notes SHALL NOT be read.
 
 #### Scenario: Summary corrected after analysis
-- **WHEN** the Intervals.icu summary fingerprint no longer matches the fingerprint stored with that record's canonical detail sets
-- **THEN** that provider entry reports `stale: true`, `analysis` is null, and the session metrics show the current summary values rather than values cached with the older detail.
+- **WHEN** a Garmin or Wahoo record's current payload hash no longer matches the fingerprint stored with its canonical detail sets
+- **THEN** that provider entry reports `stale: true`, `analysis` is null, and the session metrics show the current record values rather than values cached with the older detail.
 
 #### Scenario: Valid old activity
 - **WHEN** a local activity lies outside the recent performance-input window
@@ -64,7 +64,7 @@ The system SHALL read local details without implicit provider refresh and compar
 
 #### Scenario: Lookup without snapshot rows
 - **WHEN** a known local activity is requested and the stored snapshot holds no activity rows
-- **THEN** the summary row is found in the canonical rows and the document is returned, and an unknown id gives the existing not-found response.
+- **THEN** the session is found in the canonical rows and the document is returned, and an unknown id gives the existing not-found response.
 
 #### Scenario: Canonical merged analysis
 - **WHEN** canonical detail sets from multiple providers are available and none is stale
@@ -74,9 +74,9 @@ The system SHALL read local details without implicit provider refresh and compar
 - **WHEN** a session's records, stream or lap sets, staleness, frozen targets or locally resolved thresholds change, or the method version changes
 - **THEN** the canonical backfill stage `session_analysis` recomputes its `activity_detail_analysis` version 3 row (analysis, recorded workout profile, carried-over target snapshot, input fingerprint) in bounded batches, an unchanged input writes nothing, and the detail view, Coach detail tool, calendar profiles and recurring comparisons show the same values for Garmin- and Wahoo-only sessions too.
 
-#### Scenario: Live zone times
-- **WHEN** the current Intervals.icu summary row carries heart-rate or power zone times that differ from the stored zone sets
-- **THEN** the served Intervals zone buckets use the live values and the provider entry is not marked stale for that difference alone.
+#### Scenario: Intervals.icu copy not served
+- **WHEN** a session holds an Intervals.icu record with stored detail sets, zone times or a failure note
+- **THEN** its provider entry lists no kinds, no load error and no refresh, the document serves no Intervals.icu streams, laps, zone times or summary-row metrics, and its staleness withholds nothing.
 
 #### Scenario: Zone times from streams
 - **WHEN** a session has a heart-rate or power stream but no provider zone distribution for that metric (as with the Garmin Personal API)
@@ -86,13 +86,9 @@ The system SHALL read local details without implicit provider refresh and compar
 - **WHEN** a stored detail set has no summary fingerprint
 - **THEN** it is never reported stale.
 
-#### Scenario: Load failure note
-- **WHEN** a failure note exists for the current summary fingerprint
-- **THEN** the Intervals.icu provider entry reports its message and time. A note keyed by another fingerprint is ignored, and a later successful detail write removes the note in the same transaction.
+Detailed contract: A session SHALL be found in the canonical activity rows only; the stored snapshot SHALL NOT be a lookup source. Session scalars SHALL come from the canonical activity records and the local session metrics (card M8); no provider summary row is read. Analysis aggregation for reports and calendar profiles SHALL read only version-3 canonical analysis rows of live sessions, keyed by session id, except the best-effort curve, which reads full-resolution canonical stream sets; Intervals.icu-path rows and kv records are never read. The recorded profile colors power by the FTP and heart rate by the threshold HR resolved locally (local, Garmin, Wahoo) for the session day. Existing target snapshots, also those kept under a session merged into another, carry over unchanged; a session without one freezes its matched planned targets at its first computation. Analyses retained only in unverifiable kv records are no longer displayed but remain stored. Old known activities are resolvable beyond the recent performance window. The analysis read service requires its canonical source at construction.
 
-Detailed contract: The current summary row of a session SHALL be found in the canonical activity rows only; the stored snapshot SHALL NOT be a lookup source. Session scalars SHALL come from the current summary row. Intervals.icu zone times SHALL come from the current summary row when present, outside the fingerprint. Analysis aggregation for reports and calendar profiles SHALL read only version-3 canonical analysis rows of live sessions, keyed by session id, except the best-effort curve, which reads full-resolution canonical stream sets; Intervals.icu-path rows and kv records are never read. The recorded profile colors power by the FTP and heart rate by the threshold HR resolved locally (local, Garmin, Wahoo) for the session day. Existing target snapshots, also those kept under a session merged into another, carry over unchanged; a session without one freezes its matched planned targets at its first computation. Analyses retained only in unverifiable kv records are no longer displayed but remain stored. Old known activities are resolvable beyond the recent performance window. The analysis read service requires its canonical source at construction.
-
-Evidence: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/report_service.py:TrainingRecordsService.observations`, `backend/performance/canonical_detail.py:CanonicalDetailReader.read`, `backend/activities/stream_zones.py:with_stream_zones`; `tests/test_stream_zones.py`, `tests/test_activity_read_service.py:test_detail_reads_an_activity_older_than_the_performance_window`, `tests/test_activity_read_service.py:test_page_keeps_activities_with_failed_details_and_names_the_error`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`, `tests/test_canonical_detail_reader.py:test_intervals_detail_and_decoupling_are_never_analysis_inputs`, `tests/test_session_analysis_stage.py`. `tests/test_canonical_detail_reader.py:test_live_zone_times_replace_stored_zones_without_marking_stale`, `tests/test_canonical_detail_reader.py:test_stale_provider_withholds_analysis_and_shows_current_scalars`, `tests/test_canonical_detail_reader.py:test_set_without_a_fingerprint_is_never_stale`, `tests/test_characterization_activity_reads.py:test_changed_provider_summary_marks_record_stale_and_hides_analysis`. Missing evidence (planned in this change): lookup with a snapshot that has no activity rows and construction without a canonical source.
+Evidence: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/report_service.py:TrainingRecordsService.observations`, `backend/performance/canonical_detail.py:CanonicalDetailReader.read`, `backend/activities/stream_zones.py:with_stream_zones`; `tests/test_stream_zones.py`, `tests/test_activity_read_service.py:test_detail_reads_an_activity_older_than_the_performance_window`, `tests/test_activity_read_service.py:test_page_keeps_activities_with_failed_details_and_names_the_error`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`, `tests/test_canonical_detail_reader.py:test_intervals_detail_and_decoupling_are_never_analysis_inputs`, `tests/test_session_analysis_stage.py`. `tests/test_canonical_detail_reader.py:test_intervals_copies_are_never_served`, `tests/test_canonical_detail_reader.py:test_stale_provider_withholds_analysis_and_keeps_the_streams`, `tests/test_canonical_detail_reader.py:test_set_without_a_fingerprint_is_never_stale`, `tests/test_characterization_activity_reads.py:test_intervals_detail_is_never_served`. Missing evidence (planned in this change): lookup with a snapshot that has no activity rows and construction without a canonical source.
 
 ### Requirement: Descriptive session execution
 The system SHALL describe how one run or ride was executed from its own merged streams and laps, without a plan match, norms or other sessions: structure, work laps, recoveries, warm-up, cool-down, halves of a continuous main part, and sensor-quality flags. Other sports are not applicable.

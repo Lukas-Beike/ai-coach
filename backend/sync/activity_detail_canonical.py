@@ -93,7 +93,7 @@ class CanonicalDetailWriter:
             recorded_by=recording_origin(link["recorded_by"]),
             retrieved_at=_aware_time(record.get("observed_at")),
         )
-        if not result.records and not _has_analysis_payload(record):
+        if not result.records:
             # Nothing usable arrived: keep the stored sets instead of erasing them.
             return DetailWriteResult(DetailWriteOutcome.INVALID, len(result.issues))
         outcomes = _write_sets(
@@ -106,9 +106,7 @@ class CanonicalDetailWriter:
             activity_id,
             keep={item.kind for item in result.records},
         )
-        analysis = _write_analysis(db, link, record, now)
-        if analysis is not None:
-            outcomes.append(analysis)
+        # Details only: the session analysis is stored canonically (#1685).
         return _result(outcomes, len(result.issues))
 
     def write_legacy(self, db: Any, *, record: object, now: str) -> DetailWriteResult:

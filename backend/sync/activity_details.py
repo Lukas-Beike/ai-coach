@@ -13,7 +13,7 @@ import math
 import re
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
-from datetime import date, timedelta
+from datetime import date
 from itertools import islice, pairwise
 from typing import Any
 from urllib.parse import quote
@@ -23,15 +23,10 @@ from backend.activities.activity_reference import (
     NoActivityReferences,
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
-from backend.activities.workout_profile import recorded_profile
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
 from backend.canonical.vocabulary import ProviderId
 from backend.db.activity_detail_fingerprints import intervals_detail_fingerprints
-from backend.db.activity_detail_store import analysis_row_for_record
 from backend.errors import AppError, public_error_contract
-from backend.performance.power_profile import power_profile, running_profile
-from backend.performance.session_analysis import aerobic_analysis, interval_quality
-from backend.planning.target_snapshot import freeze_targets
 from backend.providers.intervals_activity_detail_projection import (
     COACH_ACTIVITY_DETAIL_STREAM_FIELDS,
     DETAIL_PROJECTION_VERSION,
@@ -43,9 +38,6 @@ from backend.providers.intervals_activity_fields import (
     ACTIVITY_DETAIL_STREAM_TYPES,
     activity_detail_laps,
 )
-from backend.providers.intervals_activity_keys import activity_ftp, activity_lthr
-from backend.providers.intervals_activity_mapping import intervals_analysis_sport
-from backend.providers.intervals_performance_fields import CONFIGURED_FTP
 from backend.runtime.ports import ActivityRowAndSummaryReader
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
@@ -110,7 +102,6 @@ class ActivityDetailRefreshService:
         store: ActivityDetailStore,
         utc_now: Callable[[], str],
         configured: bool,
-        read_planned_units: Callable[[], list[dict[str, Any]]] = list,
         references: ActivityReferenceResolver | None = None,
         canonical: CanonicalDetailWriter,
         local_date: Callable[[], str] | None = None,
@@ -123,25 +114,9 @@ class ActivityDetailRefreshService:
         self._store = store
         self._utc_now = utc_now
         self._configured = configured
-        self._read_planned_units = read_planned_units
         self._references = NoActivityReferences() if references is None else references
         self._canonical = canonical
         self._local_date = local_date
-
-    def _target_candidates(self, db: Any, summary: dict[str, Any] | None) -> list[Any]:
-        """Return the summaries around the activity's day that target freezing compares.
-
-        Matching only pairs activities of the same local day, so a day either side
-        is enough.
-        """
-        day = _local_day(summary)
-        if day is None:
-            return []
-        return list(
-            self._row_reader.activity_summaries(
-                db, start=day - timedelta(days=1), end=day + timedelta(days=1)
-            )
-        )
 
     def refresh(self, activity_id: str) -> dict[str, Any]:
         activity_id = normalize_activity_id(
@@ -155,7 +130,6 @@ class ActivityDetailRefreshService:
                 (row for row in rows if str(row.get("id")) == activity_id),
                 None,
             )
-            summaries = self._target_candidates(db, summary)
         if summary is None:
             raise AppError(
                 404,
@@ -184,28 +158,14 @@ class ActivityDetailRefreshService:
         )
         projected = detailed_activity({**detail, "laps": activity_detail_laps(detail)})
         projected["streams"] = streams
-        analysed = {**projected, **intervals_analysis_sport(projected)}
+        # Details only: the session analysis is computed canonically (#1685).
         observed_at = self._utc_now()
-        targets = self._stored_targets(activity_id) or freeze_targets(
-            self._read_planned_units(),
-            summaries,
-            activity_id,
-            {"ftp": projected.get(CONFIGURED_FTP)},
-            observed_at,
-        )
         record = {
             "activity_id": activity_id,
             "projection_version": DETAIL_PROJECTION_VERSION,
             "activity": projected,
             "source": "Intervals.icu",
             "observed_at": observed_at,
-            "target_snapshot": targets,
-            "session_analysis": {
-                "interval_quality": interval_quality(projected, targets),
-                "aerobic": aerobic_analysis(analysed),
-                "power_profile": power_profile(analysed),
-                "running_profile": running_profile(analysed),
-            },
             "full_resolution": True,
             "available_streams": sorted(streams),
             "summary_sha256": summary_fingerprint(summary),
@@ -222,14 +182,6 @@ class ActivityDetailRefreshService:
         }
         if len(json.dumps(record, allow_nan=False).encode()) > MAX_DETAIL_BYTES:
             raise AppError(502, "Die Detaildaten überschreiten die unterstützte Größe.")
-        record = {
-            **record,
-            "calendar_profile": recorded_profile(
-                projected,
-                ftp_w=activity_ftp(projected),
-                threshold_hr_bpm=activity_lthr(projected),
-            ),
-        }
         # One transaction: the canonical rows commit with the cleared failure note.
         with self._database_manager.unit_of_work() as db:
             written = self._canonical.write_fetch(
@@ -256,14 +208,6 @@ class ActivityDetailRefreshService:
                 },
             )
         return {"status": "completed", "activity_id": activity_id}
-
-    def _stored_targets(self, activity_id: str) -> dict[str, Any] | None:
-        """Return the target snapshot frozen by an earlier load, so targets stay fixed."""
-        with self._database_manager.reader() as db:
-            row = analysis_row_for_record(db, _INTERVALS, activity_id)
-        payload = row["payload"] if row is not None else None
-        targets = payload.get("target_snapshot") if isinstance(payload, dict) else None
-        return targets if isinstance(targets, dict) else None
 
     def prefetch_new(
         self,

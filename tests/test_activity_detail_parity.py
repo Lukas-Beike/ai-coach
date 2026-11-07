@@ -239,6 +239,10 @@ class ActivityDetailParityTests(unittest.TestCase):
                     self.old["moving_time"], metrics["duration_s"]["value"]
                 )
                 self.assertEqual(self.old["distance"], metrics["distance_m"]["value"])
+                if provider == "intervals":
+                    # Intervals.icu detail sets are never served (#1685).
+                    self.assertIsNone(document["streams"])
+                    continue
                 self.assertEqual(old_time, document["streams"]["time_s"])
                 self.assertEqual(
                     old_channels,
@@ -336,10 +340,11 @@ class ActivityDetailParityTests(unittest.TestCase):
                     self.assertIsNone(document["analysis"])
                 else:
                     self.assertTrue(document["analysis"])
-        # The old projection hid the analysis of details older than the summary.
+        # An outdated Intervals.icu copy is unread, so it is never stale; the
+        # Garmin and Wahoo staleness is covered by test_canonical_detail_reader.
         stale = self.store_intervals("0" * 64)
         (entry,) = stale["detail_data"]["providers"]
-        self.assertTrue(entry["stale"])
+        self.assertFalse(entry["stale"])
         self.assertIsNone(stale["analysis"])
         self.assertEqual(DURATION_S, stale["metrics"]["duration_s"]["value"])
 

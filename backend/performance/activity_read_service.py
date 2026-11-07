@@ -172,12 +172,6 @@ class ActivityAnalysisReadService(ActivityReadService):
 
         summary_reader = self._canonical.activity_summary_reader()
 
-        def summary_row(db: Any, provider_activity_id: str) -> dict | None:
-            # The stored Intervals.icu row behind the detail's summary metrics.
-            if summary_reader is None:
-                return None
-            return summary_reader.intervals_summary_row(db, provider_activity_id)
-
         @functools.cache
         def requested_summary() -> ActivitySummary | None:
             return _find_summary(load_inputs(normalized_id), normalized_id)
@@ -196,11 +190,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         reader = CanonicalDetailReader(
             self._session_records,
             refreshable=self._refreshable,
-            summary_row=summary_row,
             fingerprints=summary_reader,
-            failures=None
-            if self._detail_store is None
-            else self._detail_store.failures,
             envelope=DetailEnvelopeReader(
                 feedback_service=self._feedback_service,
                 read_equipment=self._read_equipment,

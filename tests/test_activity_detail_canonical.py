@@ -100,11 +100,12 @@ class CanonicalDetailWriterTests(unittest.TestCase):
         with self.manager.reader() as db:
             return detail_origins(db, INTERVALS, "9001")
 
-    def test_fresh_load_writes_stream_set_and_analysis(self):
+    def test_fresh_load_writes_detail_sets_only(self):
         self.assertEqual(DetailWriteOutcome.WRITTEN, self.fetch().outcome)
         self.assertIn("streams", self.kinds())
         self.assertEqual({ActivityDetailOrigin.FETCH.value}, self.origins())
-        self.assertEqual(1, self.count("activity_detail_analysis"))
+        # The session analysis is stored canonically (#1685).
+        self.assertEqual(0, self.count("activity_detail_analysis"))
 
     def test_fresh_load_without_active_record_writes_nothing(self):
         result = self.fetch(activity_id="no-such-activity")
@@ -167,15 +168,22 @@ class CanonicalDetailWriterTests(unittest.TestCase):
     def test_rewriting_the_same_fresh_load_is_unchanged(self):
         self.assertEqual(DetailWriteOutcome.WRITTEN, self.fetch().outcome)
         self.assertEqual(DetailWriteOutcome.UNCHANGED, self.fetch().outcome)
-        self.assertEqual(1, self.count("activity_detail_analysis"))
+        self.assertEqual(0, self.count("activity_detail_analysis"))
 
     def test_fetch_never_replaces_a_canonical_analysis_row(self):
         # The one canonical session analysis (#1685) is written by its stage only.
-        self.fetch()
         with self.manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE activity_detail_analysis SET analysis_version = 3, "
-                "payload = '{\"canonical\":true}'"
+            activity_id = db.execute(
+                "SELECT activity_id FROM activity_records WHERE provider_activity_id = ?",
+                ("9001",),
+            ).fetchone()["activity_id"]
+            save_analysis(
+                db,
+                activity_id,
+                analysis_version=3,
+                input_sha256="0" * 64,
+                payload={"canonical": True},
+                now=NOW,
             )
         # Even a fetch with Intervals-frozen targets leaves the row alone.
         self.fetch(
@@ -191,7 +199,8 @@ class CanonicalDetailWriterTests(unittest.TestCase):
                 "SELECT analysis_version, payload FROM activity_detail_analysis"
             ).fetchone()
         self.assertEqual(
-            (3, '{"canonical":true}'), (row["analysis_version"], row["payload"])
+            (3, {"canonical": True}),
+            (row["analysis_version"], json.loads(row["payload"])),
         )
 
     def test_legacy_targets_reach_a_canonical_row_without_a_snapshot(self):

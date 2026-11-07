@@ -160,14 +160,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/activities/detail_summary_metrics.py",
-      "capabilities": [
-        "activity-ingestion-and-storage",
-        "activity-analysis-and-feedback"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/activities/duplicate_inspection.py",
       "capabilities": [
         "activity-ingestion-and-storage",

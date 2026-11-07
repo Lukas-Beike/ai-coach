@@ -326,91 +326,19 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         with cast(DatabaseManager, self.database).unit_of_work() as db:
             CanonicalDetailWriter().write_legacy(db, record=record, now=NOW)
 
-    def test_fresh_record_returns_provenance_without_intervals_analysis(
-        self,
-    ) -> None:
+    def test_intervals_detail_is_never_served(self) -> None:
+        # Athlete decision 2026-11-07 (#1685): no Intervals.icu fallback, so the
+        # stored copy, its failure note and its summary row stay unread.
         self._save_analysis()
-        result = self._detail([self.RAW])
-        # An Intervals.icu-only session has no canonical analysis (#1685).
-        self.assertIsNone(result["analysis"])
-        entry = _intervals_entry(result)
-        self.assertFalse(entry["stale"])
-        self.assertEqual("2026-05-04T06:00:00+00:00", entry["fetched_at"])
-        self.assertEqual(["streams"], entry["kinds"])
-        self.assertEqual("Intervals.icu", entry["label"])
-        self.assertEqual({"power_w"}, set(result["streams"]["channels"]))
-
-    def test_changed_provider_summary_marks_record_stale_and_hides_analysis(
-        self,
-    ) -> None:
-        self._save_analysis()
-        changed = {**self.RAW, "moving_time": 3700}
-        self._ingest(changed)
-        result = self._detail([changed])
-        self.assertTrue(_intervals_entry(result)["stale"])
-        self.assertIsNone(result["analysis"])
-        # Intended change: scalars come from the current record, so the cached
-        # detail value (3600) no longer overlays the changed summary.
-        self.assertEqual(3700, result["metrics"]["duration_s"]["value"])
-        self.assertEqual(["streams"], _intervals_entry(result)["kinds"])
-
-    def test_live_zone_times_override_cached_zone_times(self) -> None:
-        # Zone times are outside the fingerprint, so recalculated provider zones
-        # must win over the stored zone set without marking it stale.
-        self._save_analysis(
-            activity={"name": "Threshold", "icu_hr_zone_times": [100, 200]}
-        )
-        live = {**self.RAW, "icu_hr_zone_times": [300, 400]}
-        result = self._detail([live])
-        self.assertFalse(_intervals_entry(result)["stale"])
-        self.assertEqual(
-            [300, 400],
-            [bucket["seconds"] for bucket in result["zones"]["heart_rate"]["buckets"]],
-        )
-
-    def test_record_without_fingerprint_is_never_stale(self) -> None:
-        # Quirk pinned: a falsy summary_sha256 disables the staleness check.
-        self._save_analysis(summary_sha256=None)
-        result = self._detail([{**self.RAW, "moving_time": 9999}])
-        self.assertFalse(_intervals_entry(result)["stale"])
-
-    def test_missing_record_reports_no_detail_sets(self) -> None:
-        result = self._detail([self.RAW])
-        entry = _intervals_entry(result)
-        self.assertFalse(entry["stale"])
-        self.assertEqual([], entry["kinds"])
-        self.assertIsNone(entry["fetched_at"])
-        self.assertEqual({}, entry["coverage"])
-        self.assertIsNone(entry["load_error"])
-        self.assertIsNone(result["analysis"])
-
-    def test_recorded_load_failure_is_reported_until_details_are_saved(self) -> None:
-        store = ActivityDetailStore(self.database)
-        store.save_failure(
-            "ride-1",
-            summary_fingerprint(self.RAW),
-            "Detaildaten fehlerhaft.",
-            "2026-05-04T06:00:00Z",
-        )
-        self.assertEqual(
-            {
-                "message": "Detaildaten fehlerhaft.",
-                "observed_at": "2026-05-04T06:00:00Z",
-            },
-            _intervals_entry(self._detail([self.RAW]))["load_error"],
-        )
-        # A successful load stores the details and clears the note.
-        self._save_analysis()
-        store.clear_failure("ride-1")
-        self.assertIsNone(_intervals_entry(self._detail([self.RAW]))["load_error"])
-
-    def test_failure_note_for_another_summary_version_is_ignored(self) -> None:
         ActivityDetailStore(self.database).save_failure(
-            "ride-1", "1" * 64, "Detaildaten fehlerhaft.", "2026-05-05T06:00:00Z"
+            self.RAW["id"], summary_fingerprint(self.RAW), "Synthetic note", NOW
         )
-        self.assertIsNone(_intervals_entry(self._detail([self.RAW]))["load_error"])
-        self._save_analysis()
-        self.assertIsNone(_intervals_entry(self._detail([self.RAW]))["load_error"])
+        result = self._detail([self.RAW])
+        entry = _intervals_entry(result)
+        self.assertEqual(([], None), (entry["kinds"], entry["load_error"]))
+        self.assertFalse(entry["refreshable"])
+        self.assertIsNone(result["analysis"])
+        self.assertIsNone(result["streams"])
 
 
 class ActivityEquipmentTests(unittest.TestCase):

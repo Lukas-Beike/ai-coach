@@ -39,7 +39,6 @@ class DetailEnvelopeReader:
         _db: Any,
         activity_id: str,
         _provider_activity_id: str | None,
-        _raw_summary: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         reference = str(self._references.resolve_reference(activity_id).activity_id)
         # The session's effective feedback, through the reference or, for

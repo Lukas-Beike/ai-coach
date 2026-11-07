@@ -1,11 +1,11 @@
 """Read use case of the ``activity_detail.v1`` document of one canonical session.
 
-The document combines the session's stored detail sets, its active activity
-records and the stored target and decoupling values of the session analysis. The
-analysis is recomputed from the merged streams at read time and withheld while
-any merged provider's stored detail is stale. Intervals.icu zone times come from
-the current summary row when it carries them. The caller owns the transaction:
-``db`` is an open connection and this module only reads from it.
+The document combines the detail sets of the session's Garmin, Wahoo and local
+records, its active activity records, the local session metrics (card M8) and
+the one canonical session analysis (#1685), computed at read time with the
+stored target snapshot and withheld while a merged provider's detail is stale.
+Intervals.icu detail sets and summary rows are never read. The caller owns the
+transaction: ``db`` is an open connection and this module only reads from it.
 """
 
 from __future__ import annotations
@@ -24,13 +24,10 @@ from backend.activities.detail_merge import (
     DetailCandidate,
     merge_details,
 )
-from backend.activities.detail_store import summary_fingerprint
-from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.activities.stream_zones import with_stream_zones
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_detail import (
     ActivityDetailSet,
-    ZoneDistribution,
 )
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
@@ -47,10 +44,6 @@ from backend.performance.session_metrics_reads import (
     detail_metric_entries,
     stored_session_metrics,
 )
-from backend.providers.intervals_activity_detail_mapping import (
-    MAPPER_VERSION,
-    map_intervals_summary_zones,
-)
 from backend.runtime.ports import ActivityFingerprintReader
 
 _MAX_MERGE_DEPTH: Final = 64
@@ -62,31 +55,18 @@ class SessionRecordReader(Protocol):
     def __call__(self, db: Any, activity_id: str) -> Sequence[ActivityRecord]: ...
 
 
-class SummaryRowReader(Protocol):
-    """Return the current Intervals.icu summary row of a provider activity id."""
-
-    def __call__(
-        self, db: Any, provider_activity_id: str, /
-    ) -> Mapping[str, Any] | None: ...
-
-
 class EnvelopeReader(Protocol):
     """Return the feedback, equipment and activity validation of one session.
 
-    ``summary`` is the current Intervals.icu summary row, when there is one.
+    ``provider_activity_id`` is the session's Intervals.icu activity id, the key
+    older feedback is stored under, when it holds one.
     """
 
     def __call__(
-        self,
-        db: Any,
-        activity_id: str,
-        provider_activity_id: str | None,
-        summary: Mapping[str, Any] | None,
-        /,
+        self, db: Any, activity_id: str, provider_activity_id: str | None, /
     ) -> Mapping[str, Any]: ...
 
 
-FailureReader = Callable[[Iterable[str]], Mapping[str, Mapping[str, Any]]]
 RefreshableProviders = Callable[[], frozenset[ProviderId]]
 
 
@@ -129,9 +109,7 @@ class CanonicalDetailReader:
         session_records: SessionRecordReader,
         *,
         refreshable: RefreshableProviders,
-        summary_row: SummaryRowReader | None = None,
         fingerprints: ActivityFingerprintReader | None = None,
-        failures: FailureReader | None = None,
         envelope: EnvelopeReader | None = None,
         zone: tzinfo = UTC,
         zone_settings: ZoneSettingsReader | None = None,
@@ -139,10 +117,8 @@ class CanonicalDetailReader:
         self._session_records = session_records
         self._zone = zone
         self._refreshable = refreshable
-        self._summary_row = summary_row
         # Without it no stored set is reported stale.
         self._fingerprints = fingerprints
-        self._failures = failures
         self._envelope = envelope
         # Without it no zone distribution is derived from the streams.
         self._zone_settings = zone_settings
@@ -150,7 +126,9 @@ class CanonicalDetailReader:
     def read(self, db: Any, any_id: str) -> dict[str, Any] | None:
         """Return the document, or None when the session has no readable records.
 
-        ``any_id`` is a local session id or an Intervals.icu activity id.
+        ``any_id`` is a local session id or an Intervals.icu activity id. Detail
+        sets come from the session's Garmin, Wahoo and local records only; the
+        Intervals.icu copies are never read (#1685).
         """
         activity_id = read_reference(db, any_id)
         if activity_id is None:
@@ -158,43 +136,34 @@ class CanonicalDetailReader:
         records = tuple(self._session_records(db, activity_id))
         if not records:
             return None
+        own = analysis_records(records)
         stored = activity_detail_store.detail_sets_for_session(db, activity_id)
-        candidates = detail_candidates(records, stored)
+        candidates = detail_candidates(own, stored)
         sets = [candidate.stored for candidate in candidates]
-        analysis_record = primary_analysis_record(records)
-        intervals_id = (
-            analysis_record.activity_id
-            if analysis_record.provenance.provider is ProviderId.INTERVALS
-            else None
-        )
-        summary = (
-            self._summary_row(db, intervals_id)
-            if self._summary_row is not None and intervals_id is not None
-            else None
-        )
-        if summary is not None:
-            candidates = _with_live_zones(
-                candidates, activity_id, analysis_record, summary
-            )
         merged = merge_details(candidates)
+        zone_record = measured_order(own or records)[0]
         zone_settings = self._zone_settings
         if zone_settings is not None:
-            merged = with_stream_zones(
-                merged, lambda: zone_settings(db, analysis_record)
-            )
-        status = self._status(db, sets, intervals_id, summary)
-        # Intervals.icu detail is no analysis input (#1685), so its staleness
-        # withholds nothing.
-        stale = any(
-            state.stale
-            for provider, state in status.items()
-            if provider is not ProviderId.INTERVALS
+            merged = with_stream_zones(merged, lambda: zone_settings(db, zone_record))
+        status = self._status(db, sets)
+        stale = any(state.stale for state in status.values())
+        analysis = (
+            None
+            if stale or not own
+            else session_analysis(own, merged, stored_targets(db, activity_id, records))
         )
-        analysis = None if stale else self._analysis(db, activity_id, stored, records)
+        intervals_id = next(
+            (
+                record.activity_id
+                for record in records
+                if record.provenance.provider is ProviderId.INTERVALS
+            ),
+            None,
+        )
         envelope = (
             None
             if self._envelope is None
-            else self._envelope(db, activity_id, intervals_id, summary)
+            else self._envelope(db, activity_id, intervals_id)
         )
         return activity_detail_contract(
             activity_id,
@@ -202,95 +171,32 @@ class CanonicalDetailReader:
             merged,
             sets,
             analysis=analysis,
-            refreshable=self._refreshable(),
+            # Intervals.icu details are never served, so they are never offered.
+            refreshable=self._refreshable() - {ProviderId.INTERVALS},
             status=status,
             envelope=envelope,
-            summary_metrics=_summary_metrics(
-                None
-                if summary is None
-                else intervals_summary_metrics(
-                    summary, recorded_by=analysis_record.provenance.recorded_by
-                ),
-                stored_session_metrics(db, [activity_id]).get(activity_id, {}),
+            summary_metrics=detail_metric_entries(
+                stored_session_metrics(db, [activity_id]).get(activity_id, {})
             ),
             zone=self._zone,
         )
 
-    def _analysis(
-        self,
-        db: Any,
-        activity_id: str,
-        stored: Sequence[StoredDetailSet],
-        records: Sequence[ActivityRecord],
-    ) -> dict[str, Any] | None:
-        """The canonical session analysis of the session's non-Intervals detail.
-
-        The same computation as the stored analysis (#1685); without Garmin,
-        Wahoo or local records the session has none.
-        """
-        own = analysis_records(records)
-        if not own:
-            return None
-        merged = merge_details(detail_candidates(own, stored))
-        targets = stored_targets(db, activity_id, records)
-        return session_analysis(
-            own, merged, targets if isinstance(targets, dict) else None
-        )
-
     def _status(
-        self,
-        db: Any,
-        sets: Sequence[StoredDetailSet],
-        intervals_id: str | None,
-        summary: Mapping[str, Any] | None,
+        self, db: Any, sets: Sequence[StoredDetailSet]
     ) -> dict[ProviderId, ProviderStatus]:
-        """Compare each provider's stored sets with its current summary version.
-
-        The loaded Intervals.icu summary row belongs to one record only, so only
-        that record's sets are compared for Intervals.icu; other providers'
-        fingerprints come from the port.
-        """
-        fingerprint = None if summary is None else summary_fingerprint(dict(summary))
-        others = [
-            (item.provider, item.provider_activity_id)
-            for item in sets
-            if item.provider != ProviderId.INTERVALS.value
-        ]
+        """Compare each provider's stored sets with its current summary version."""
+        keys = [(item.provider, item.provider_activity_id) for item in sets]
         current = (
             {}
-            if self._fingerprints is None or not others
-            else self._fingerprints.summary_fingerprints(db, others)
+            if self._fingerprints is None or not keys
+            else self._fingerprints.summary_fingerprints(db, keys)
         )
         status: dict[ProviderId, ProviderStatus] = {}
         for item in sets:
-            provider = ProviderId(item.provider)
-            if provider is ProviderId.INTERVALS:
-                latest = (
-                    fingerprint if item.provider_activity_id == intervals_id else None
-                )
-            else:
-                latest = current.get((item.provider, item.provider_activity_id))
+            latest = current.get((item.provider, item.provider_activity_id))
             if item.summary_sha256 and latest and item.summary_sha256 != latest:
-                status[provider] = ProviderStatus(stale=True)
-        load_error = self._load_error(intervals_id, fingerprint)
-        if load_error is not None:
-            status[ProviderId.INTERVALS] = ProviderStatus(
-                stale=status.get(ProviderId.INTERVALS, ProviderStatus()).stale,
-                load_error=load_error,
-            )
+                status[ProviderId(item.provider)] = ProviderStatus(stale=True)
         return status
-
-    def _load_error(
-        self, intervals_id: str | None, fingerprint: str | None
-    ) -> dict[str, Any] | None:
-        """Return the failure note of the current Intervals.icu summary, if any."""
-        if intervals_id is None or fingerprint is None or not self._failures:
-            return None
-        note = self._failures([intervals_id]).get(intervals_id)
-        # A note left by another summary version no longer describes this one.
-        if not note or note.get("summary_sha256") != fingerprint:
-            return None
-        return {"message": note.get("message"), "observed_at": note.get("observed_at")}
 
 
 def detail_candidates(
@@ -328,59 +234,6 @@ def _provider_text(record: ActivityRecord) -> str | None:
     return None if provider is None else provider.value
 
 
-def _with_live_zones(
-    candidates: Sequence[DetailCandidate],
-    activity_id: str,
-    record: ActivityRecord,
-    summary: Mapping[str, Any],
-) -> list[DetailCandidate]:
-    """Replace the record's stored zone sets by the summary row's zone times.
-
-    A replaced set keeps its stored bookkeeping; a zone metric without a stored
-    set is added with the record's retrieval time.
-    """
-    live = {
-        zone.metric: zone
-        for zone in map_intervals_summary_zones(
-            summary,
-            provider_activity_id=record.activity_id,
-            provenance=record.provenance,
-        ).records
-    }
-    result: list[DetailCandidate] = []
-    for candidate in candidates:
-        item = candidate.stored
-        detail = item.detail
-        own = (
-            item.provider == ProviderId.INTERVALS.value
-            and item.provider_activity_id == record.activity_id
-        )
-        if own and isinstance(detail, ZoneDistribution) and detail.metric in live:
-            stored = cast(
-                StoredDetailSet, replace(item, detail=live.pop(detail.metric))
-            )
-            candidate = cast(DetailCandidate, replace(candidate, stored=stored))
-        result.append(candidate)
-    retrieved = record.provenance.retrieved_at
-    for zone in live.values():
-        result.append(
-            DetailCandidate(
-                stored=StoredDetailSet(
-                    provider=ProviderId.INTERVALS.value,
-                    provider_activity_id=record.activity_id,
-                    activity_id=activity_id,
-                    mapper_version=MAPPER_VERSION,
-                    summary_sha256=None,
-                    fetched_at="" if retrieved is None else retrieved.isoformat(),
-                    detail=zone,
-                ),
-                started_at=record.started_at,
-                device_type=record.device_type,
-            )
-        )
-    return result
-
-
 def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
     """Attach the record's label and origin; stored sets do not keep labels.
 
@@ -405,22 +258,6 @@ def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
         fetched_at=item.fetched_at,
         detail=cast(ActivityDetailSet, replace(item.detail, provenance=provenance)),
     )
-
-
-def _summary_metrics(
-    provider: Mapping[str, Mapping[str, Any]] | None,
-    stored: Mapping[str, Mapping[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """Local session metrics (card M8) win; a provider value of the same key stays an alternative."""
-    metrics = {key: dict(entry) for key, entry in (provider or {}).items()}
-    for key, entry in detail_metric_entries(stored).items():
-        other = metrics.get(key)
-        if other is not None:
-            entry["alternatives"] = [
-                {"value": other.get("value"), "source": other.get("source")}
-            ]
-        metrics[key] = entry
-    return metrics
 
 
 def stored_targets(
