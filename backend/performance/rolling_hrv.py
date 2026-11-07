@@ -59,7 +59,9 @@ def rolling_lnrmssd(
     end = date.fromisoformat(observed)
     window_start = end - timedelta(days=WINDOW_DAYS - 1)
     baseline_start = window_start - timedelta(days=BASELINE_DAYS)
-    if segment_start is not None:
+    # Only a change after the earliest baseline night limits this comparison.
+    changed = segment_start is not None and segment_start > baseline_start.isoformat()
+    if segment_start is not None and changed:
         start = date.fromisoformat(segment_start)
         window_start = max(window_start, start)
         baseline_start = max(baseline_start, start)
@@ -79,7 +81,7 @@ def rolling_lnrmssd(
     if len(window) < MIN_WINDOW_NIGHTS or len(baseline) < MIN_BASELINE_NIGHTS:
         result["reason"] = _reason(
             window=len(window),
-            changed=segment_start is not None,
+            changed=changed,
         )
         return result
     mean_ln = fmean(window)

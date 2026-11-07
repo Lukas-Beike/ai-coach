@@ -125,6 +125,16 @@ class RollingLnRmssdTests(unittest.TestCase):
                 restarted["reason"],
             ),
         )
+        long_ago = rolling_lnrmssd(
+            series(WORKED, BASELINE[:13]),
+            day(0),
+            current=True,
+            segment_start=day(80),
+        )
+        self.assertEqual(
+            "Mindestens 14 frühere passende Nächte vor den letzten 7 Tagen erforderlich.",
+            long_ago["reason"],
+        )
         window_only = rolling_lnrmssd(
             series(WORKED), day(0), current=True, segment_start=day(2)
         )
