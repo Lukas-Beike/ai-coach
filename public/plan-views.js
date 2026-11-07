@@ -188,7 +188,7 @@ function calendarHours(seconds) {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} h`;
 }
 
-const CALENDAR_SPORT_ICONS = { Radfahren: "🚴", "Rad indoor": "🚴", Laufen: "🏃", Schwimmen: "🏊", Kraft: "🏋", Gehen: "🚶", Wandern: "🚶" };
+const CALENDAR_SPORT_ICONS = { Radfahren: "🚴", "Rad indoor": "🚴", Laufen: "🏃", Schwimmen: "🏊", Kraft: "🏋" };
 
 function calendarIntensityLabel(value) {
   if (value == null || value === "") return null;
@@ -426,6 +426,7 @@ function appendPlannedCalendarComparison(details, entry, actual) {
 
 // "Zusätzlich" only means something next to a plan, so an extra activity in a week without one shows no status.
 function appendPlannedEntryStatus(cardSummary, entry, status, restDayLabel, dateKey, todayKey, weekHasPlan) {
+  if (status === "planned" || status === "today") return;
   if (entry.is_completed_activity && !weekHasPlan) return;
   if (cardSummary.textContent) cardSummary.append(" · ");
   const statusText = document.createElement("span");
@@ -920,7 +921,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       // The button sits in the card summary; a click must not toggle the card.
       event.preventDefault();
       event.stopPropagation();
-      void globalThis.askCoach?.(`Die geplante Einheit „${entry.name || "Training"}" am ${dateLabel(dateKey)} kollidiert mit: ${labels.join(", ")}. Schlage eine Anpassung vor.`);
+      const session = [activitySportLabel(calendarSportType(entry)), plannedEntryDurationLabel(null, entry)].filter(Boolean).join(", ");
+      void globalThis.askCoach?.(`Die geplante Einheit am ${dateLabel(dateKey)} (${session}) kollidiert mit: ${labels.join(", ")}. Schlage eine Anpassung vor.`);
     });
     conflict.append(text, button);
     return conflict;
@@ -1039,7 +1041,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const groups = [];
     for (const entry of dayEntries) {
       const key = entry.is_completed_activity && !entry.workout_profile
-        ? JSON.stringify([entry.name || "", activitySportLabel(calendarSportType(entry)), entry.moving_duration_s ?? entry.elapsed_duration_s ?? null, Number(entry.distance_m) > 0 ? Number(entry.distance_m) : null])
+        ? JSON.stringify([entry.name || "", entry.type || entry.sport || "", entry.environment || "", entry.moving_duration_s ?? entry.elapsed_duration_s ?? null, Number(entry.distance_m) > 0 ? Number(entry.distance_m) : null])
         : null;
       const previous = groups.at(-1);
       if (key && previous?.key === key) previous.entries.push(entry);
@@ -1069,7 +1071,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     overview.className = "planned-day-overview";
     overview.textContent = [
       `${dayEntries.length} ${dayEntries.length === 1 ? "Einheit" : "Einheiten"}`,
-      seconds > 0 ? AppFormat.duration(seconds) : null,
+      seconds > 0 ? calendarHours(seconds) : null,
     ].filter(Boolean).join(" · ");
     return overview;
   }
@@ -1081,7 +1083,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const weather = plannedDayWeather(dayContext, dateKey);
     const day = document.createElement("section");
     // Past days with sessions collapse to one line; today and later stay open.
-    const collapsible = dateKey < todayKey && dayEntries.length > 0;
+    const needsAttention = dayEntries.some((entry) => calendarEntryStatus(entry, dateKey, todayKey) === "missed" || plannedConflictLabels(entry.conflicts).length)
+      || Boolean(String(dayContext.checkin?.illness || "").trim() || String(dayContext.checkin?.pain || "").trim());
+    const collapsible = dateKey < todayKey && dayEntries.length > 0 && !needsAttention;
     day.className = `planned-day${dateKey === todayKey ? " is-today" : ""}${collapsible ? " is-past" : ""}`;
     day.dataset.date = dateKey;
     const content = document.createElement("div");
@@ -1153,7 +1157,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       totals.append(name);
       for (const column of columns) appendWeekMetricCell(totals, cells[column]);
     }
-    return totals;
+    return totals.childElementCount > columns.length + 1 ? totals : null;
   }
 
   function plannedZoneLegend(days) {

@@ -927,7 +927,6 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .planned-day-health { padding: 10px 12px; border: 1px solid var(--orange); border-radius: 10px; color: var(--ink); background: var(--surface); text-align: center; font-weight: 650; }
 .planned-day-empty { margin: 0; color: var(--subtle); font-size: .78rem; line-height: 1.5; }
 .planned-entry, .planned-group { --session-color: var(--planned-session-default); --session-on-color: var(--planned-session-default-on); --session-soft: var(--planned-session-default-surface); overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); }
-.planned-entry + .planned-entry { margin-top: 12px; }
 .planned-entry > summary, .planned-group > summary { position: relative; display: grid; gap: 4px; min-height: 48px; padding: 6px 10px; cursor: pointer; list-style: none; }
 .planned-entry > summary::-webkit-details-marker, .planned-group > summary::-webkit-details-marker { display: none; }
 .planned-entry > summary:focus-visible, .planned-group > summary:focus-visible, .planned-day-toggle > summary:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; border-radius: 8px; }
@@ -974,8 +973,8 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .planned-week-metrics[data-columns="1"] { grid-template-columns: auto minmax(0, 1fr); }
 .planned-week-metrics small { display: block; color: var(--subtle); font-size: .68rem; font-weight: 400; }
 .planned-week-column { color: var(--subtle); font-size: .68rem; }
-.planned-entry:is(.is-planned, .is-today) { border: 1.5px dashed var(--accent-bright); background: var(--transparent); }
-.planned-entry:is(.is-planned, .is-today) .planned-session-header { background: var(--transparent); }
+.planned-entry:is(.is-planned, .is-today, .is-missed, .is-skipped) { border: 1.5px dashed var(--accent-bright); background: var(--transparent); }
+.planned-entry:is(.is-planned, .is-today, .is-missed, .is-skipped) .planned-session-header { background: var(--transparent); }
 .planned-entry .calendar-workout-profile { height: 16px; margin: 0; }
 .planned-session-line .planned-badges { display: inline-flex; margin-left: 6px; vertical-align: middle; }
 .planned-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border: 1px solid var(--warning-border); border-radius: 8px; color: var(--ink); background: var(--warning-surface-soft); font-size: .75rem; font-weight: 650; }
