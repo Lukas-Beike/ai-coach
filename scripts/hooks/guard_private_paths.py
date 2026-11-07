@@ -20,7 +20,7 @@ PRIVATE = tuple(
         r"(?:^|[\s\"'=:/\\*])\.env(?:\.[\w-]+)*(?![\w.-])",  # .env, *.env, .env.local
         START + r"(?:\.{1,2}[/\\]|/)data" + END,  # ./data, ../data, /data
         START + r"data[/\\]",  # data/... relative to the repo
-        r"[/\\]ai-coach[/\\]data" + END,  # primary checkout data dir
+        r"[/\\](?:ai-coach|pacecraft)[/\\]data" + END,  # primary checkout data dir
         r"[/\\]garmin_tokens|garmin_tokens[/\\]",  # Garmin token store as a path
     )
 )

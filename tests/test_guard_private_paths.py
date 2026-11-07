@@ -37,6 +37,8 @@ class GuardPrivatePathsTests(unittest.TestCase):
             f"Get-Content ./{DATA}coach.db",
             f"cat ../{DATA}coach.db",
             f"Get-Content C:\\Users\\x\\ai-coach\\{bare}\\coach.db",
+            f"Get-Content C:\\Users\\x\\pacecraft\\{bare}\\coach.db",
+            f"cat /home/x/pacecraft/{bare}/coach.db",
             f"docker exec ai-coach ls /{bare}",
             f"docker exec ai-coach ls /{DATA}backups",
             f"type C:\\x\\{bare}\\{TOKENS}",
