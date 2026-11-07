@@ -61,12 +61,14 @@ class MetricExportRunner:
         if not self._enabled():
             return
         with self._lock:
+            # stop() is final: a request during shutdown starts nothing.
+            if self._stop_event.is_set():
+                return
             if self._active:
                 self._rerun = True
                 return
             self._active = True
             self._rerun = False
-            self._stop_event.clear()
             self._thread_factory(
                 target=self._run_loop, name="metric-export", daemon=True
             ).start()
@@ -97,7 +99,10 @@ class MetricExportRunner:
                     self._rerun = False
                 self._run_once()
                 with self._lock:
+                    # Deciding to exit and clearing _active share one critical
+                    # section, so a request in between is never lost.
                     if not self._rerun:
+                        self._active = False
                         return
         finally:
             with self._lock:

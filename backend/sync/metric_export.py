@@ -348,23 +348,9 @@ class MetricExportService:
                 return None
             target = ProviderId.INTERVALS
             port = self._port(target)
-            candidates = [
-                candidate
-                for candidate in self._candidates(target, port, consented=consented)
-            ]
-            groups: dict[str, list[_Candidate]] = {}
-            conflicts = 0
-            for candidate in candidates:
-                if candidate.status == UNCHANGED:
-                    self._record(target, port, [candidate])
-                elif not candidate.field.dated:
-                    groups.setdefault(candidate.record, []).append(candidate)
-                elif candidate.status == ALREADY_EXPORTED or self._automatic_conflict(
-                    target, candidate
-                ):
-                    conflicts += 1
-                elif candidate.status == READY:
-                    groups.setdefault(candidate.record, []).append(candidate)
+            groups, conflicts = self._automatic_groups(
+                target, port, self._candidates(target, port, consented=consented)
+            )
             items: list[dict[str, Any]] = []
             for group in groups.values():
                 # Re-read immediately before writing, just like the manual preview.
@@ -377,37 +363,86 @@ class MetricExportService:
                         self._group_items(group, "target_unavailable", "Intervals.icu")
                     )
                     continue
-                stable: list[_Candidate] = []
-                for item in group:
-                    live = current.get(item.field.field)
-                    if item.field.dated:
-                        if _same_remote(live, item.remote):
-                            stable.append(item)
-                        else:
-                            conflicts += 1
-                        continue
-                    fresh = replace(item, remote=live)
-                    if live is not None and _same_value(
-                        live, port.normalize_value(item.field, item.value)
-                    ):
-                        self._record(target, port, [fresh])
-                    else:
-                        stable.append(fresh)
-                if not stable:
-                    continue
-                recalc = port.supports_hr_zone_recalc and any(
-                    item.field.kind in _HR_ZONE_KINDS for item in stable
-                )
-                failure = self._write(port, stable, recalc_hr_zones=recalc)
-                if failure is None:
-                    self._record(target, port, stable, history="automatic")
-                items.extend(self._group_items(stable, failure, "Intervals.icu"))
+                stable, changed = self._still_writable(target, port, group, current)
+                conflicts += changed
+                if stable:
+                    items.extend(self._automatic_write(target, port, stable))
             exported = sum(item["status"] == EXPORTED for item in items)
             return {
                 "exported": exported,
                 "failed": len(items) - exported,
                 "conflicts": conflicts,
             }
+
+    def _automatic_groups(
+        self,
+        target: ProviderId,
+        port: MetricExportPort,
+        candidates: Sequence[_Candidate],
+    ) -> tuple[dict[str, list[_Candidate]], int]:
+        """Group the values to write per remote record; count wellness conflicts.
+
+        An unchanged value only records its baseline. Thresholds are always
+        written; a wellness value waits while its target changed independently.
+        """
+        groups: dict[str, list[_Candidate]] = {}
+        conflicts = 0
+        for candidate in candidates:
+            if candidate.status == UNCHANGED:
+                self._record(target, port, [candidate])
+            elif not candidate.field.dated:
+                groups.setdefault(candidate.record, []).append(candidate)
+            elif candidate.status == ALREADY_EXPORTED or self._automatic_conflict(
+                target, candidate
+            ):
+                conflicts += 1
+            elif candidate.status == READY:
+                groups.setdefault(candidate.record, []).append(candidate)
+        return groups, conflicts
+
+    def _still_writable(
+        self,
+        target: ProviderId,
+        port: MetricExportPort,
+        group: Sequence[_Candidate],
+        current: Mapping[str, float],
+    ) -> tuple[list[_Candidate], int]:
+        """Return the group's values to write after the re-read, and new conflicts.
+
+        A threshold carries the re-read value as its previous value; one that
+        already matches records its baseline instead. A wellness value whose
+        target changed since the first read is a conflict.
+        """
+        stable: list[_Candidate] = []
+        conflicts = 0
+        for item in group:
+            live = current.get(item.field.field)
+            if item.field.dated:
+                if _same_remote(live, item.remote):
+                    stable.append(item)
+                else:
+                    conflicts += 1
+                continue
+            fresh = replace(item, remote=live)
+            if live is not None and _same_value(
+                live, port.normalize_value(item.field, item.value)
+            ):
+                self._record(target, port, [fresh])
+            else:
+                stable.append(fresh)
+        return stable, conflicts
+
+    def _automatic_write(
+        self, target: ProviderId, port: MetricExportPort, stable: Sequence[_Candidate]
+    ) -> list[dict[str, Any]]:
+        """Write one record; heart-rate thresholds recalculate the target zones."""
+        recalc = port.supports_hr_zone_recalc and any(
+            item.field.kind in _HR_ZONE_KINDS for item in stable
+        )
+        failure = self._write(port, stable, recalc_hr_zones=recalc)
+        if failure is None:
+            self._record(target, port, stable, history="automatic")
+        return self._group_items(stable, failure, "Intervals.icu")
 
     def record_status(self, message: str) -> None:
         """Store the athlete-facing status line of the last automatic export."""

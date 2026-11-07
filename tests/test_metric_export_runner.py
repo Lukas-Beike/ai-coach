@@ -109,6 +109,13 @@ class MetricExportRunnerTests(unittest.TestCase):
         self.assertNotIn("secret", "\n".join(logs.output))
         self.assertIn("fehlgeschlagen", service.statuses[0])
 
+    def test_a_stopped_runner_starts_nothing(self) -> None:
+        service = _Service({"exported": 0, "failed": 0, "conflicts": 0})
+        runner = self._runner(service)
+        runner.stop()
+        runner.request()
+        self.assertEqual((self.threads, service.runs), ([], 0))
+
     def test_only_a_wahoo_job_requests_a_run(self) -> None:
         runner = self._runner(_Service())
         with patch.object(runner, "request") as request:
