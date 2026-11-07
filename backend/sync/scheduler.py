@@ -245,6 +245,13 @@ class StartupSyncScheduler:
             if self._registry.supports_job(provider_id, job_type):
                 self._enqueue_historical_backfill(provider_id, job_type)
 
+    def resume_provider(self, provider_id: str) -> None:
+        """Queue one provider's startup refresh and backfill again, e.g. when
+        the athlete turns its ingest back on."""
+        policy = self._policies.get(provider_id)
+        if policy is not None:
+            self._schedule_provider(provider_id, policy)
+
     def _enqueue_historical_backfill(
         self, provider: str, job_type: str = _HISTORICAL_BACKFILL
     ) -> None:

@@ -878,7 +878,11 @@ class IntervalsSyncService:
         With the ingest switch off nothing is read unless ``one_off`` asks for a
         manual one-off read.
         """
-        if not one_off and not self._ingest_enabled():
+        if (
+            self._config.intervals_api_key
+            and not one_off
+            and not self._ingest_enabled()
+        ):
             return ingest_off_result()
         with self._runtime.operation(reason, operation_id) as scope:
             result = self._sync_inner(
@@ -890,6 +894,7 @@ class IntervalsSyncService:
                 wait_for_performance,
                 cancel_event,
                 automatic,
+                one_off,
             )
             scope.result = result
             return result
@@ -904,13 +909,15 @@ class IntervalsSyncService:
         wait_for_performance: bool,
         cancel_event: threading.Event | None,
         automatic: bool = False,
+        one_off: bool = False,
     ) -> dict[str, Any]:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         if activity_days is None:
             activity_days = self._workflow.sync_period()
-        # An automatic refresh narrowed to the short window skips the follow-up.
-        follow_up = True
+        # An automatic refresh narrowed to the short window skips the follow-up,
+        # and so does a one-off read: the performance refresh stays dormant.
+        follow_up = not one_off
         if automatic and end_date is None:
             activity_days = self._workflow.automatic_days(activity_days)
             follow_up = self._workflow.full_window(activity_days)

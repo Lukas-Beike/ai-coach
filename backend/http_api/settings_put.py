@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.settings import SettingsService
+from backend.sync.intervals_ingest import INGEST_PROVIDER_ID
 
 
 class SettingsPutRoutes:
@@ -16,9 +17,11 @@ class SettingsPutRoutes:
         settings: SettingsService,
         *,
         intervals_ingest: Callable[[], Any] | None = None,
+        resume_provider_schedule: Callable[[str], None] | None = None,
     ) -> None:
         self._settings = settings
         self._intervals_ingest = intervals_ingest
+        self._resume_provider_schedule = resume_provider_schedule
 
     def handle(self, handler: Any, path: str) -> bool:
         if path == "/api/settings/model":
@@ -42,6 +45,9 @@ class SettingsPutRoutes:
             and self._intervals_ingest is not None
         ):
             result = self._intervals_ingest().save(handler.read_json())
+            if result.get("enabled") and self._resume_provider_schedule is not None:
+                # Turning the ingest on restores the startup refresh and backfill.
+                self._resume_provider_schedule(INGEST_PROVIDER_ID)
         else:
             return False
 

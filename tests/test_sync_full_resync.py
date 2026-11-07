@@ -256,7 +256,11 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             [
                 (
                     ("Vollständiger Resync",),
-                    {"activity_days": -1, "operation_id": "shared-operation"},
+                    {
+                        "activity_days": -1,
+                        "operation_id": "shared-operation",
+                        "one_off": True,
+                    },
                 )
             ],
         )

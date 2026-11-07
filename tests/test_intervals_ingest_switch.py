@@ -52,7 +52,9 @@ class IngestSwitchTests(unittest.TestCase):
 
 
 class IngestGateTests(unittest.TestCase):
-    def sync_service(self, enabled: bool) -> tuple[IntervalsSyncService, MagicMock]:
+    def sync_service(
+        self, enabled: bool
+    ) -> tuple[IntervalsSyncService, MagicMock, Mock]:
         workflow = Mock()
         workflow.synchronize.return_value = {"status": "ok"}
         runtime = MagicMock()
@@ -67,20 +69,39 @@ class IngestGateTests(unittest.TestCase):
             runtime,
             ingest_enabled=lambda: enabled,
         )
-        return service, runtime
+        return service, runtime, followup
 
     def test_sync_reads_nothing_while_off(self) -> None:
-        service, runtime = self.sync_service(False)
+        service, runtime, _followup = self.sync_service(False)
 
         self.assertEqual(service.sync("automatic"), OFF)
         runtime.operation.assert_not_called()
 
-    def test_one_off_sync_runs_while_off(self) -> None:
-        service, runtime = self.sync_service(False)
+    def test_one_off_sync_runs_while_off_without_a_performance_follow_up(
+        self,
+    ) -> None:
+        service, runtime, followup = self.sync_service(False)
 
         service.sync("manual", activity_days=42, one_off=True)
 
         runtime.operation.assert_called_once()
+        followup.enqueue_after_sync.assert_not_called()
+
+    def test_unconfigured_sync_still_reports_not_configured(self) -> None:
+        service = IntervalsSyncService(
+            SimpleNamespace(intervals_api_key=""),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            MagicMock(),
+            ingest_enabled=lambda: False,
+        )
+
+        with self.assertRaises(AppError) as raised:
+            service.sync("automatic")
+
+        self.assertEqual(raised.exception.status, 503)
 
     def test_duplicate_inspector_finds_nothing_while_off(self) -> None:
         manager = Mock()
@@ -113,14 +134,36 @@ class IngestGateTests(unittest.TestCase):
         switch.save.return_value = {"status": "ok", "enabled": True}
         handler = Mock()
         handler.read_json.return_value = {"enabled": True}
-        routes = SettingsPutRoutes(Mock(), intervals_ingest=lambda: switch)
+        resumed: list[str] = []
+        routes = SettingsPutRoutes(
+            Mock(),
+            intervals_ingest=lambda: switch,
+            resume_provider_schedule=resumed.append,
+        )
 
         self.assertTrue(routes.handle(handler, "/api/settings/intervals-ingest"))
 
         switch.save.assert_called_once_with({"enabled": True})
+        self.assertEqual(resumed, ["intervals"])
         handler.send_json.assert_called_once_with(
             200, {"status": "ok", "enabled": True}
         )
+
+    def test_turning_the_ingest_off_resumes_nothing(self) -> None:
+        switch = Mock()
+        switch.save.return_value = {"status": "ok", "enabled": False}
+        handler = Mock()
+        handler.read_json.return_value = {"enabled": False}
+        resumed: list[str] = []
+        routes = SettingsPutRoutes(
+            Mock(),
+            intervals_ingest=lambda: switch,
+            resume_provider_schedule=resumed.append,
+        )
+
+        routes.handle(handler, "/api/settings/intervals-ingest")
+
+        self.assertEqual(resumed, [])
 
     def test_one_off_is_an_intervals_refresh_flag_only(self) -> None:
         job = normalize_sync_job_request(

@@ -2340,6 +2340,9 @@ HTTP_API = HttpApiAssembly(
             garmin_login=lambda: GARMIN_LOGIN,
             connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
             intervals_ingest=INTERVALS_SYNC.ingest_switch,
+            resume_provider_schedule=lambda provider: (
+                SYNC_SCHEDULERS.startup_scheduler().resume_provider(provider)
+            ),
         ),
     ),
 )

@@ -14,11 +14,18 @@ from typing import Any, Final
 
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
+from backend.providers.descriptors import INTERVALS_ID
 
+INGEST_PROVIDER_ID: Final = INTERVALS_ID
 INGEST_ENABLED_KEY: Final = "intervals_ingest_enabled"
 # Days a manual one-off sync reads while the ingest is off.
 ONE_OFF_DAYS: Final = 42
 INGEST_OFF_REASON: Final = "intervals_ingest_off"
+
+
+def ingest_enabled_value(value: str | None) -> bool:
+    """Decode the stored switch value; a missing key is off."""
+    return value == "1"
 
 
 def ingest_off_result() -> dict[str, Any]:
@@ -34,8 +41,8 @@ class IntervalsIngestSwitch:
         self._key_values = key_values
 
     def enabled(self) -> bool:
-        with self._database_manager.unit_of_work() as db:
-            return self._key_values.get(db, INGEST_ENABLED_KEY) == "1"
+        with self._database_manager.reader() as db:
+            return ingest_enabled_value(self._key_values.get(db, INGEST_ENABLED_KEY))
 
     def save(self, values: Any) -> dict[str, Any]:
         """Store the switch from ``{"enabled": bool}``."""

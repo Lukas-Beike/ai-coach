@@ -55,7 +55,9 @@ def _db() -> sqlite3.Connection:
 
 
 def _values(values: dict[str, str]):
-    return lambda key: values.get(key)
+    # The Intervals.icu ingest is on unless a case says otherwise.
+    stored = {"intervals_ingest_enabled": "1", **values}
+    return lambda key: stored.get(key)
 
 
 def _item(result, provider: str, area: str) -> dict:
@@ -103,6 +105,10 @@ class ProviderFreshnessTests(unittest.TestCase):
         self.addCleanup(self.manager.close)
         with self.manager.unit_of_work() as db:
             _create_tables(db)
+            # These cases cover the Intervals.icu ingest switched on.
+            db.execute(
+                "INSERT INTO kv VALUES ('intervals_ingest_enabled', '1', 'test')"
+            )
         self.manager.connection_count = 0
         self.manager.unit_of_work_count = 0
         self.key_values = _TrackingKeyValueRepository()

@@ -104,10 +104,12 @@ class IntervalsFullResync:
                 "Das Einlesen von Intervals.icu ist ausgeschaltet.",
                 reason=INGEST_OFF_REASON,
             )
+        # Checked once above, so a toggle meanwhile cannot turn it into a no-op.
         result = self._intervals_service.sync(
             FULL_RESYNC_LABEL,
             activity_days=self._all_sync_days,
             operation_id=operation_id,
+            one_off=True,
         )
         with (
             observer.observe(

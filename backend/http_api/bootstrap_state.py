@@ -11,7 +11,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
-from backend.sync.intervals_ingest import INGEST_ENABLED_KEY
+from backend.sync.intervals_ingest import INGEST_ENABLED_KEY, ingest_enabled_value
 from backend.sync.intervals_state import latest_library_timestamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import connection_status
@@ -233,10 +233,9 @@ class PublicBootstrapService:
                         )
                         for provider_id in registry.sync_period_defaults()
                     },
-                    INGEST_ENABLED_KEY: deps.key_values.get_in_transaction(
-                        db, INGEST_ENABLED_KEY
-                    )
-                    == "1",
+                    INGEST_ENABLED_KEY: ingest_enabled_value(
+                        deps.key_values.get_in_transaction(db, INGEST_ENABLED_KEY)
+                    ),
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {
