@@ -1,4 +1,4 @@
-# Intervals Coach review instructions
+# Pacecraft review instructions
 
 Review pull requests for actionable regressions in this private, single-athlete
 PWA. Prioritize athlete-data integrity, authorization, privacy, and correct

@@ -55,5 +55,5 @@ $ErrorActionPreference = "Continue"
 $pythonExitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousErrorActionPreference
 if ($pythonExitCode -ne 0) {
-    throw "Intervals Coach stopped with exit code $pythonExitCode. See $logPath."
+    throw "Pacecraft stopped with exit code $pythonExitCode. See $logPath."
 }

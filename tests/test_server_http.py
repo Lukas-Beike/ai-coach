@@ -138,9 +138,9 @@ class ServerHttpTests(ServerTestCase):
         self.assertEqual(configuration.call_count, 2)
         self.assertIsNot(first, second)
         self.assertEqual(
-            first.server_version, f"IntervalsCoach/{initial.identity.app_version}"
+            first.server_version, f"Pacecraft/{initial.identity.app_version}"
         )
-        self.assertEqual(second.server_version, "IntervalsCoach/synthetic-next")
+        self.assertEqual(second.server_version, "Pacecraft/synthetic-next")
         self.assertIs(
             first.dependencies.route_dispatcher, server.HTTP_API.route_dispatcher
         )
@@ -1636,7 +1636,7 @@ class ServerHttpTests(ServerTestCase):
         }
         store_canonical_snapshot(server, snapshot)
         state = server.PUBLIC_STATE.state_service().read()
-        self.assertEqual(state["app"]["name"], "Intervals Coach")
+        self.assertEqual(state["app"]["name"], "Pacecraft · AI Coach")
         self.assertEqual(state["app"]["version"], server.APP_VERSION)
         self.assertEqual(state["activities"][0]["name"], "Morgenlauf")
         self.assertEqual(state["planned"][0]["name"], "Intervalle")

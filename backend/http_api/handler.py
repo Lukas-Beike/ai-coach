@@ -395,7 +395,7 @@ def create_request_handler(
         (RequestHandler,),
         {
             "dependencies": dependencies,
-            "server_version": f"IntervalsCoach/{dependencies.app_version}",
+            "server_version": f"Pacecraft/{dependencies.app_version}",
             "static_asset_service": dependencies.static_asset_service,
         },
     )

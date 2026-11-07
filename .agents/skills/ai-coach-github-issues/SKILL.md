@@ -1,9 +1,9 @@
 ---
 name: ai-coach-github-issues
-description: Manage Intervals Coach issues in the connected GitHub repository, including searching, triage, issue creation, labels, assignees, and status updates. Use when the user asks to manage or track GitHub issues or their ai-coach Project; do not use for implementation delivery or PR lifecycle.
+description: Manage Pacecraft issues in the connected GitHub repository, including searching, triage, issue creation, labels, assignees, and status updates. Use when the user asks to manage or track GitHub issues or their ai-coach Project; do not use for implementation delivery or PR lifecycle.
 ---
 
-# GitHub issue tracking for Intervals Coach
+# GitHub issue tracking for Pacecraft
 
 Use the connected GitHub tools for issue-management requests. Use the installed
 GitHub CLI (`gh project`) for GitHub Projects v2 when it is available and

@@ -474,7 +474,7 @@ test("fresh service worker keeps the current shell available offline", async ({ 
     await expect(page.locator("#loginPassword")).toBeEditable();
     expect(await page.evaluate(async () => {
       const names = await caches.keys();
-      const cacheName = names.find((name) => /^intervals-coach-v/.test(name));
+      const cacheName = names.find((name) => /^pacecraft-v/.test(name));
       const cache = await caches.open(cacheName);
       return (await cache.keys()).some((request) => new URL(request.url).pathname.startsWith("/api/"));
     })).toBe(false);

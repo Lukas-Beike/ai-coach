@@ -67,14 +67,14 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
       - name: Build shared CI image
-        run: docker build --tag ai-coach:ci .
+        run: docker build --tag pacecraft:ci .
       - name: Export shared CI image
-        run: docker save ai-coach:ci | gzip > ai-coach-ci-image.tar.gz
+        run: docker save pacecraft:ci | gzip > pacecraft-ci-image.tar.gz
       - name: Upload shared CI image
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ai-coach-ci-image
-          path: ai-coach-ci-image.tar.gz
+          name: pacecraft-ci-image
+          path: pacecraft-ci-image.tar.gz
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
@@ -143,9 +143,9 @@ jobs:
       - name: Download shared CI image
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ai-coach-ci-image
+          name: pacecraft-ci-image
       - name: Load shared CI image
-        run: gunzip -c ai-coach-ci-image.tar.gz | docker load
+        run: gunzip -c pacecraft-ci-image.tar.gz | docker load
       - name: Run unit tests in the container
         run: >-
           docker run --rm --read-only --security-opt no-new-privileges:true --cap-drop=ALL
@@ -168,7 +168,7 @@ jobs:
           --volume "${GITHUB_WORKSPACE}/e2e:/review/e2e:ro"
           --volume "${GITHUB_WORKSPACE}/.github:/review/.github:ro"
           --volume "${GITHUB_WORKSPACE}/scripts:/review/scripts:ro"
-          --env PYTHONPATH=/app:/review/tests --workdir /app ai-coach:ci
+          --env PYTHONPATH=/app:/review/tests --workdir /app pacecraft:ci
           python /review/tests/run_tests.py --suite container
 
   test:
@@ -252,21 +252,21 @@ jobs:
       - name: Download shared CI image
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ai-coach-ci-image
+          name: pacecraft-ci-image
       - name: Load shared CI image
-        run: gunzip -c ai-coach-ci-image.tar.gz | docker load
+        run: gunzip -c pacecraft-ci-image.tar.gz | docker load
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          image: ai-coach:ci
+          image: pacecraft:ci
           format: spdx-json
-          output-file: ai-coach-sbom.spdx.json
+          output-file: pacecraft-sbom.spdx.json
           upload-release-assets: false
       - name: Upload image SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ai-coach-sbom
-          path: ai-coach-sbom.spdx.json
+          name: pacecraft-sbom
+          path: pacecraft-sbom.spdx.json
           if-no-files-found: error
           retention-days: 30
   e2e:
@@ -314,9 +314,9 @@ jobs:
       - name: Download shared CI image
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ai-coach-ci-image
+          name: pacecraft-ci-image
       - name: Load shared CI image
-        run: gunzip -c ai-coach-ci-image.tar.gz | docker load
+        run: gunzip -c pacecraft-ci-image.tar.gz | docker load
       - name: Run browser smoke and accessibility checks
         env:
           BROWSER_PROJECT: ${{ matrix.project }}
@@ -328,7 +328,7 @@ jobs:
           browser_image="$(python -c "import json; print(json.load(open('scripts/browser_environment.json'))['image'])")"
           python scripts/run_browser_tests.py --project "$BROWSER_PROJECT" \
             --shard "$SPEC_SHARD" --total "$SPEC_SHARDS" --jobs 1 \
-            --image ai-coach:ci --browser-image "$browser_image" \
+            --image pacecraft:ci --browser-image "$browser_image" \
             --results-dir test-results/browser-runs --cache-state unknown
       - name: Upload browser run summaries
         if: always()

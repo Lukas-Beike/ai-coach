@@ -65,7 +65,7 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
             b'{"event":"safe"}\n',
             "application/x-ndjson; charset=utf-8",
             {
-                "Content-Disposition": 'attachment; filename="intervals-coach-server-logs.jsonl"'
+                "Content-Disposition": 'attachment; filename="pacecraft-server-logs.jsonl"'
             },
         )
 

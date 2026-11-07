@@ -10,7 +10,7 @@ from unittest.mock import Mock
 from server_test_support import ServerTestCase, server
 
 VERSIONED_ASSET_REF = re.compile(r'(?<=[="])(/[^"?\s]+)\?v=(\d+)(?=")')
-CACHE_NAME_PATTERN = r'const CACHE = "intervals-coach-v\d+";'
+CACHE_NAME_PATTERN = r'const CACHE = "pacecraft-v\d+";'
 
 
 def versioned_asset_refs(markup):

@@ -1,10 +1,10 @@
 ---
 name: ai-coach-debugging
-description: Diagnose an Intervals Coach bug, flaky test, or unexplained failure before changing code. Use for root-cause investigation; use ai-coach-pr-ci for GitHub check status and ai-coach-codex-security for requested security scans.
+description: Diagnose a Pacecraft bug, flaky test, or unexplained failure before changing code. Use for root-cause investigation; use ai-coach-pr-ci for GitHub check status and ai-coach-codex-security for requested security scans.
 license: MIT adaptation; see ../THIRD_PARTY.md.
 ---
 
-# Debugging Intervals Coach
+# Debugging Pacecraft
 
 Adapted from Superpowers systematic-debugging, root-cause-tracing, and
 condition-based-waiting, with the feedback-loop and ranked-hypothesis steps of

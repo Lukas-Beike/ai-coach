@@ -3,7 +3,7 @@ schema: spec-driven
 context: |
   Write artifacts in English.
   Keep OpenSpec structural headings and SHALL/MUST keywords in English.
-  Intervals Coach is an existing single-athlete, private-LAN/VPN PWA:
+  Pacecraft is an existing single-athlete, private-LAN/VPN PWA:
   Python http.server, SQLCipher, plain JavaScript, Intervals.icu, optional
   Garmin, and OpenAI Responses. server.py is the composition root; backend/
   owns business logic. Read AGENTS.md, applicable scoped instructions, and

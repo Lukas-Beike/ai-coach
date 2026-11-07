@@ -430,7 +430,7 @@ class BrowserRunnerTests(unittest.TestCase):
         code, value, _path = self.run_main(FakeProcesses(), current=False)
         self.assertEqual(code, 0)
         self.assertIs(False, value["images"]["application_matches_source"])
-        self.assertIn("docker build -t ai-coach:e2e .", self.stderr)
+        self.assertIn("docker build -t pacecraft:e2e .", self.stderr)
         for current in (True, None):
             self.run_main(FakeProcesses(), current=current)
             self.assertNotIn("Warning", self.stderr)

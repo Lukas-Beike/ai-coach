@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_MARKER = "AI_COACH_DISPOSABLE_FIXTURE"
 DEMO_SCRIPT = ROOT / "scripts" / "demo-container.ps1"
-DEMO_NAME = "ai-coach-demo"
+DEMO_NAME = "pacecraft-demo"
 
 # Stand-in for the docker CLI. It records each argv as one JSON line and fails the
 # subcommands named in FAKE_DOCKER_FAIL, so the PowerShell script runs without a
@@ -156,7 +156,7 @@ class DemoContainerScriptTests(unittest.TestCase):
         return result, self.calls()
 
     def test_refused_names_stop_before_any_docker_call(self):
-        for name in ("ai-coach", "AI-COACH", "ai-coach-prod", "production"):
+        for name in ("pacecraft", "PACECRAFT", "pacecraft-prod", "ai-coach", "AI-COACH", "ai-coach-prod", "production"):
             with self.subTest(name=name):
                 result, calls = self.run_script("-Name", name)
                 self.assertNotEqual(result.returncode, 0)
@@ -164,7 +164,7 @@ class DemoContainerScriptTests(unittest.TestCase):
                 self.assertEqual(calls, [])
 
     def test_demo_and_fixture_names_pass_the_guard_before_docker_runs(self):
-        for name in (DEMO_NAME, "fixture-check"):
+        for name in (DEMO_NAME, "ai-coach-demo", "fixture-check"):
             with self.subTest(name=name):
                 result, calls = self.run_script("-Name", name, "-SkipBuild", fail=("ps",))
                 self.assertNotEqual(result.returncode, 0)

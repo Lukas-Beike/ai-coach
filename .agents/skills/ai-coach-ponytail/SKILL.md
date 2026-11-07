@@ -1,10 +1,10 @@
 ---
 name: ai-coach-ponytail
-description: Apply Ponytail's smallest complete change approach to Intervals Coach coding, bug fixes, refactoring, code reviews, and dependency choices. Use alongside the relevant task workflow; skip non-coding requests.
+description: Apply Ponytail's smallest complete change approach to Pacecraft coding, bug fixes, refactoring, code reviews, and dependency choices. Use alongside the relevant task workflow; skip non-coding requests.
 license: MIT adaptation; see ../THIRD_PARTY.md.
 ---
 
-# Ponytail for Intervals Coach
+# Ponytail for Pacecraft
 
 Adapted from DietrichGebert's Ponytail; see [pinned source and license](../THIRD_PARTY.md).
 Modified for agent-neutral Markdown loading, repository ownership, and required

@@ -25,7 +25,7 @@ class DiagnosticsAssemblyTests(unittest.TestCase):
             "key_values": Mock(),
             "config": Mock(return_value=Mock()),
             "settings": Mock(),
-            "app_name": "Intervals Coach",
+            "app_name": "Pacecraft · AI Coach",
             "app_version": "test",
             "utc_now": Mock(),
             "sync_state": Mock(),

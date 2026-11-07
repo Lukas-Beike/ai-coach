@@ -1094,7 +1094,7 @@ def parser():
     result.add_argument("--total", type=int, default=1)
     result.add_argument("--jobs", type=int, choices=range(1, MAX_JOBS + 1), default=1)
     result.add_argument(
-        "--image", default="ai-coach:e2e", help="already-built current-source app image"
+        "--image", default="pacecraft:e2e", help="already-built current-source app image"
     )
     result.add_argument(
         "--browser-image",

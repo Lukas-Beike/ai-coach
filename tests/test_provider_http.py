@@ -765,7 +765,7 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertEqual(request.data, b'{"name": "synthetic"}')
         self.assertEqual(parsed_url.netloc, "example.test")
         self.assertEqual(headers["Accept"], "application/json")
-        self.assertEqual(headers["User-Agent"], "IntervalsCoach/1.2.3")
+        self.assertEqual(headers["User-Agent"], "Pacecraft/1.2.3")
         self.assertEqual(headers["Content-Type"], "application/custom+json")
         self.assertEqual(context["service"], "synthetic")
         self.assertEqual(context["method"], "POST")

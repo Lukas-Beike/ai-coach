@@ -215,7 +215,7 @@ class OpenFoodFactsClient:
             request = Request(
                 BASE_URL + path,
                 headers={
-                    "User-Agent": "IntervalsCoach/1.0 (private nutrition lookup; https://github.com/Lukas-Beike/ai-coach)",
+                    "User-Agent": "Pacecraft/1.0 (private nutrition lookup; https://github.com/Lukas-Beike/pacecraft)",
                     "Accept": "application/json",
                 },
             )
