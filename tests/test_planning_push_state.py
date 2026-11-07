@@ -7,6 +7,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import DatabaseManager, row_factory
@@ -153,7 +154,7 @@ class PushStateTests(unittest.TestCase):
 
     @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_a_confirmed_exercise_is_remembered_for_other_units(self) -> None:
-        confirmed = {
+        confirmed: dict[str, Any] = {
             **STRENGTH,
             "strength_structure": [
                 {
