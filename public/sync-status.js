@@ -417,6 +417,7 @@ function renderConnectionsSyncProgress(data) {
   root.replaceChildren();
   const entries = [];
   const activeProviders = new Set();
+  const sync = data.sync || {};
   const garminSync = data.garmin_sync || {};
   const garminRunning = Boolean(garminSync.running || state.localSync.garmin);
   if (garminRunning) {
