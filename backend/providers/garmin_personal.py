@@ -426,7 +426,12 @@ class GarminPersonalClient:
 
         The Personal API serves them under ``/v2``; the SDK path is not served.
         """
-        return self._get("/biometric-service/heartRateZones/v2")
+        value = self._get("/biometric-service/heartRateZones/v2")
+        if value is not None and not isinstance(value, list):
+            raise provider_http.ProviderInvalidResponse(
+                "Invalid Garmin heart-rate zones"
+            )
+        return value
 
     def get_body_battery(self, startdate: str, enddate: str | None = None) -> list[Any]:
         rows: list[Any] = []

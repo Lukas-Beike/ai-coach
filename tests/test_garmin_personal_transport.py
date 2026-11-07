@@ -14,12 +14,13 @@ import unittest
 import zipfile
 from datetime import UTC, date, datetime
 from email.message import Message
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
-from support import PROVIDER_FIXTURE_ROOT
+from support import load_provider_fixture
 
 from backend.canonical.section_items import merge_records, record_identity
 from backend.providers import http as provider_http
@@ -32,6 +33,7 @@ from backend.providers.garmin_activity_mapping import map_garmin_activities
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.garmin_personal import (
     PERSONAL_BASE_URL,
+    PERSONAL_METHODS,
     TOKEN_PATH,
     GarminPersonalClient,
     GarminTransportClient,
@@ -79,11 +81,7 @@ def _flat_sleep(day: str = DAY, sleep_id: int = 1) -> dict[str, Any]:
 
 
 def _personal_heart_rate_zones() -> Any:
-    return json.loads(
-        (PROVIDER_FIXTURE_ROOT / "garmin" / "heart_rate_zones_personal.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    return load_provider_fixture("garmin/personal/heart_rate_zones.json")
 
 
 def _zip(members: dict[str, bytes]) -> bytes:
@@ -206,6 +204,34 @@ def _client(
     return GarminPersonalClient(SYNTHETIC_KEY, opener=api, clock=lambda: now[0])
 
 
+# SDK methods the app calls that the Personal API does not serve (#1767 probe).
+SDK_ONLY_METHODS = frozenset(
+    {
+        "get_user_profile",
+        "get_gear",
+        "get_gear_stats",
+        "get_gear_activities",
+        "get_training_load_activities",
+        "get_endurance_score",
+        "get_race_predictions",
+        "get_running_tolerance",
+        "get_training_four_week_load_balance",
+        "get_weekly_training_status",
+        "get_daily_training_status",
+        "get_training_readiness",
+        "get_training_readiness_range",
+        "get_training_status",
+        "get_max_metrics_range",
+        "get_cycling_ftp",
+        "get_functional_threshold_power_range",
+        "get_lactate_threshold",
+        "get_activity_splits",
+        "get_activity_hr_in_timezones",
+        "get_activity_power_in_timezones",
+    }
+)
+
+
 class FakeSdk:
     """The unofficial SDK surface: records which methods were called."""
 
@@ -229,8 +255,9 @@ class FakeSdk:
         return [{"sport": "DEFAULT", "maxHeartRateUsed": 190}]
 
     def __getattr__(self, name: str) -> Any:
-        # Any other SDK family is a recorded no-op, so routing can be asserted.
-        if name.startswith("get_"):
+        # The other SDK families the app calls are recorded no-ops, so routing
+        # can be asserted; any other name stays absent like on the real SDK.
+        if name in SDK_ONLY_METHODS:
             method = lambda *_args, **_kwargs: self.calls.append(name)
             self.__dict__[name] = method
             return method
@@ -370,31 +397,19 @@ class TransportRoutingTests(unittest.TestCase):
         sdk = FakeSdk()
         client = GarminTransportClient(_client(FakePersonalApi()), sdk)
 
-        for name in (
-            "get_user_profile",
-            "get_gear",
-            "get_gear_stats",
-            "get_gear_activities",
-            "get_training_load_activities",
-            "get_endurance_score",
-            "get_race_predictions",
-            "get_running_tolerance",
-            "get_training_four_week_load_balance",
-            "get_weekly_training_status",
-            "get_daily_training_status",
-            "get_training_readiness",
-            "get_training_readiness_range",
-            "get_training_status",
-            "get_max_metrics_range",
-            "get_cycling_ftp",
-            "get_functional_threshold_power_range",
-            "get_lactate_threshold",
-            "get_activity_splits",
-            "get_activity_hr_in_timezones",
-            "get_activity_power_in_timezones",
-        ):
+        for name in sorted(SDK_ONLY_METHODS):
             with self.subTest(name=name):
                 self.assertEqual(getattr(client, name), getattr(sdk, name))
+
+    def test_sdk_only_names_are_the_collector_calls_and_not_personal(self) -> None:
+        collector = (
+            Path(__file__).resolve().parents[1] / "backend/providers/garmin.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertFalse(SDK_ONLY_METHODS & PERSONAL_METHODS)
+        for name in sorted(SDK_ONLY_METHODS | {"get_heart_rate_zones"}):
+            with self.subTest(name=name):
+                self.assertRegex(collector, rf"\b{name}\b")
 
     def test_without_the_sdk_its_families_are_absent(self) -> None:
         client = GarminTransportClient(_client(FakePersonalApi()), None)

@@ -1160,7 +1160,7 @@ class HeartRateZoneMaxHrTests(unittest.TestCase):
     def test_personal_api_zones_map_like_the_sdk_zones(self) -> None:
         # Personal ``/heartRateZones/v2`` adds resting HR, LTHR and the training
         # method to the SDK fields; only the maximum is read, without issues.
-        personal = _map({"heart_rate_zones": _fixture("heart_rate_zones_personal")})
+        personal = _map({"heart_rate_zones": _fixture("personal/heart_rate_zones")})
         sdk_shape = _map(
             {"heart_rate_zones": [{"sport": "DEFAULT", "maxHeartRateUsed": 189}]}
         )
