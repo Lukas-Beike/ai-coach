@@ -62,6 +62,7 @@ from backend.canonical.activity_detail import (
     ZoneBucket,
     ZoneDistribution,
     clean_series,
+    strength_set_accepts,
 )
 from backend.canonical.mapping import (
     IssueReason,
@@ -173,7 +174,16 @@ def map_garmin_activity_detail(
     )
     issues: list[MappingIssue] = []
     records: list[ActivityDetailSet] = []
-    fit_sets = _fit_sets(activity_id, provenance, collected.get("fit"), issues)
+    exercise_sets = _strength_set_set(
+        activity_id, provenance, collected.get(_EXERCISE_SETS_KEY), issues
+    )
+    fit_sets = _fit_sets(
+        activity_id,
+        provenance,
+        collected.get("fit"),
+        issues,
+        strength_sets=exercise_sets is None,
+    )
     stream_set = fit_sets.get(ActivityStreamSet) or _stream_set(
         activity_id, provenance, collected.get("details"), issues
     )
@@ -190,9 +200,7 @@ def map_garmin_activity_detail(
         )
         if distribution is not None:
             records.append(distribution)
-    strength_set = _strength_set_set(
-        activity_id, provenance, collected.get(_EXERCISE_SETS_KEY), issues
-    ) or fit_sets.get(ActivityStrengthSetSet)
+    strength_set = exercise_sets or fit_sets.get(ActivityStrengthSetSet)
     if strength_set is not None:
         records.append(strength_set)
     return MappingResult(records=tuple(records), issues=tuple(issues))
@@ -203,12 +211,17 @@ def _fit_sets(
     provenance: Provenance,
     data: object,
     issues: list[MappingIssue],
+    *,
+    strength_sets: bool,
 ) -> dict[type, ActivityDetailSet]:
     """Map the FIT part into its stream, lap and strength sets, keyed by set type."""
     if data is None:
         return {}
     mapped = map_fit_activity_detail(
-        data, provider_activity_id=ref, provenance=provenance
+        data,
+        provider_activity_id=ref,
+        provenance=provenance,
+        strength_sets=strength_sets,
     )
     issues.extend(mapped.issues)
     return {type(record): record for record in mapped.records}
@@ -686,13 +699,12 @@ def _strength_set_set(
         return None
     kept: list[ActivityStrengthSet] = []
     for row in rows:
-        item = _exercise_set(ref, len(kept), row, issues)
-        if item is None:
-            continue
         if len(kept) == MAX_STRENGTH_SETS:
             _add_set_issue(issues, ref, "exerciseSets", IssueReason.OUT_OF_RANGE)
             break
-        kept.append(item)
+        item = _exercise_set(ref, len(kept), row, issues)
+        if item is not None:
+            kept.append(item)
     if not kept:
         return None
     return ActivityStrengthSetSet(
@@ -731,7 +743,7 @@ def _exercise_set(
         "workout_step_index": _whole_number(row.get("wktStepIndex")),
     }
     for field, value in values.items():
-        if value is not None and not _strength_accepts(field, value):
+        if value is not None and not strength_set_accepts(field, value):
             _add_set_issue(issues, ref, field, IssueReason.OUT_OF_RANGE)
             values[field] = None
     category, name = _exercise(row.get("exercises"))
@@ -777,13 +789,3 @@ def _code(value: object) -> str | None:
         return None
     text = value.strip()
     return text if EXERCISE_NAME_PATTERN.fullmatch(text) else None
-
-
-def _strength_accepts(name: str, value: object) -> bool:
-    """Whether ActivityStrengthSet accepts one value, so its bounds stay in one place."""
-    metric: dict[str, Any] = {name: value}
-    try:
-        ActivityStrengthSet(index=0, set_type=StrengthSetType.ACTIVE, **metric)
-    except TypeError, ValueError:
-        return False
-    return True

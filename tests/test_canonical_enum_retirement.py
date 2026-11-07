@@ -148,7 +148,7 @@ SNAPSHOT: Final[Mapping[str, frozenset[str]]] = {
     ),
     "RemoteLinkState": frozenset({"pending", "synced"}),
     "ActivityDetailKind": frozenset(
-        {"streams", "laps", "heart_rate_zones", "power_zones"}
+        {"streams", "laps", "heart_rate_zones", "power_zones", "strength_sets"}
     ),
     "ActivityDetailOrigin": frozenset({"fetch", "legacy_backfill"}),
     "StreamChannel": frozenset(
@@ -170,6 +170,46 @@ SNAPSHOT: Final[Mapping[str, frozenset[str]]] = {
     "LapSource": frozenset({"provider_intervals", "device_laps", "splits"}),
     "ZoneMetric": frozenset({"heart_rate", "power"}),
     "ZoneBoundarySource": frozenset({"provider_reported", "profile", "unknown"}),
+    "StrengthSetType": frozenset({"active", "rest"}),
+    "StrengthSetSource": frozenset({"garmin_exercise_sets", "fit_set_messages"}),
+    "ExerciseCategory": frozenset(
+        {
+            "bench_press",
+            "calf_raise",
+            "cardio",
+            "carry",
+            "chop",
+            "core",
+            "crunch",
+            "curl",
+            "deadlift",
+            "flye",
+            "hip_raise",
+            "hip_stability",
+            "hip_swing",
+            "hyperextension",
+            "lateral_raise",
+            "leg_curl",
+            "leg_raise",
+            "lunge",
+            "olympic_lift",
+            "plank",
+            "plyo",
+            "pull_up",
+            "push_up",
+            "row",
+            "shoulder_press",
+            "shoulder_stability",
+            "shrug",
+            "sit_up",
+            "squat",
+            "total_body",
+            "triceps_extension",
+            "warm_up",
+            "run",
+            "other",
+        }
+    ),
 }
 
 # Enum name -> {retired value: current value that replaces it in stored rows}.

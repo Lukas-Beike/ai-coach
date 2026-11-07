@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from backend.canonical.activity_detail import (
+    ActivityLap,
     ActivityLapSet,
     ActivityStrengthSet,
     ActivityStrengthSetSet,
@@ -22,6 +23,8 @@ from backend.canonical.vocabulary import (
     ActivityDetailKind,
     ActivityDetailOrigin,
     ExerciseCategory,
+    LapKind,
+    LapSource,
     ProviderId,
     RecordingOrigin,
     SourceKind,
@@ -30,8 +33,11 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import row_factory
 from backend.db.activity_detail_store import (
+    _header,
     detail_sets_for,
     replace_detail_set,
+    restamp_detail_set,
+    stored_strength_source,
     strength_record_ids,
 )
 from backend.db.canonical_store import WriteOutcome
@@ -40,6 +46,7 @@ from backend.providers import fit_activity_detail_mapping as fit_mapper
 from backend.providers.fit_activity_detail_mapping import map_fit_activity_detail
 from backend.providers.garmin import collect_garmin_activity_detail
 from backend.providers.garmin_activity_detail_mapping import map_garmin_activity_detail
+from backend.sync.garmin_activity_details import _keeps_corrected_sets
 from tests import test_fit_file as fit_builder
 
 ENUM = fit_builder.ENUM
@@ -525,6 +532,90 @@ class ExerciseSetFetchTests(unittest.TestCase):
             _fit(SQUAT_SETS), provider_activity_id=ID, provenance=GARMIN_PROVENANCE
         )
         self.assertFalse(any(isinstance(r, ActivityLapSet) for r in result.records))
+
+
+class ReviewRegressionTests(StrengthSetStoreTests):
+    """Limits and precedence found in review of the first slice."""
+
+    def test_more_than_500_sets_are_capped_without_raising(self) -> None:
+        many = [_set(set_type=1, reps=3) for _ in range(502)]
+        result = map_fit_activity_detail(
+            _fit(many), provider_activity_id=ID, provenance=GARMIN_PROVENANCE
+        )
+        self.assertEqual(len(_strength(result).sets), 500)
+        self.assertIn(MappingIssue(ID, "set", IssueReason.OUT_OF_RANGE), result.issues)
+        payload = {"exerciseSets": [{"setType": "ACTIVE"}] * 501}
+        garmin = map_garmin_activity_detail(
+            {"activity_id": ID, "exercise_sets": payload},
+            recorded_by=RecordingOrigin.GARMIN,
+            retrieved_at=RETRIEVED,
+        )
+        self.assertEqual(len(_strength(garmin).sets), 500)
+        self.assertIn(
+            MappingIssue(ID, "exerciseSets", IssueReason.OUT_OF_RANGE), garmin.issues
+        )
+
+    def test_file_issues_are_dropped_when_exercise_sets_win(self) -> None:
+        broken_file = _fit([_set(reps=5), _set(set_type=1, reps=6)])
+        result = map_garmin_activity_detail(
+            {"activity_id": ID, "exercise_sets": _exercise_sets(), "fit": broken_file},
+            recorded_by=RecordingOrigin.GARMIN,
+            retrieved_at=RETRIEVED,
+        )
+        self.assertEqual(result.issues, ())
+        file_only = map_garmin_activity_detail(
+            {"activity_id": ID, "fit": broken_file},
+            recorded_by=RecordingOrigin.GARMIN,
+            retrieved_at=RETRIEVED,
+        )
+        self.assertIn(
+            MappingIssue(ID, "set_type", IssueReason.MISSING), file_only.issues
+        )
+
+    def test_stored_exercise_sets_are_kept_and_restamped_over_file_sets(self) -> None:
+        self.store(self.strength())
+        file_sets = ActivityStrengthSetSet(
+            provider_activity_id=ID,
+            provenance=GARMIN_PROVENANCE,
+            origin=ActivityDetailOrigin.FETCH,
+            source=StrengthSetSource.FIT_SET_MESSAGES,
+            sets=(
+                ActivityStrengthSet(index=0, set_type=StrengthSetType.ACTIVE, reps=4),
+            ),
+        )
+        self.assertTrue(_keeps_corrected_sets(self.db, ID, file_sets))
+        self.assertFalse(_keeps_corrected_sets(self.db, ID, self.strength()))
+        self.assertFalse(_keeps_corrected_sets(self.db, "222", file_sets))
+        restamp_detail_set(
+            self.db,
+            "garmin",
+            ID,
+            ActivityDetailKind.STRENGTH_SETS,
+            summary_sha256="e" * 64,
+            fetched_at=STAMP,
+        )
+        (stored,) = detail_sets_for(self.db, "garmin", ID)
+        assert isinstance(stored.detail, ActivityStrengthSetSet)
+        self.assertEqual(stored.detail.sets, self.strength().sets)
+        self.assertEqual(stored.summary_sha256, "e" * 64)
+        self.assertEqual(stored.fetched_at, STAMP)
+        self.assertEqual(
+            stored_strength_source(self.db, "garmin", ID),
+            StrengthSetSource.GARMIN_EXERCISE_SETS.value,
+        )
+
+    def test_other_kinds_keep_their_content_hash_header(self) -> None:
+        laps = ActivityLapSet(
+            provider_activity_id=ID,
+            provenance=GARMIN_PROVENANCE,
+            origin=ActivityDetailOrigin.FETCH,
+            lap_source=LapSource.DEVICE_LAPS,
+            laps=(ActivityLap(0, LapKind.LAP, 0.0, 60.0),),
+        )
+        self.assertNotIn("set_source", _header(laps, 4))
+        self.assertEqual(
+            _header(self.strength(), 4)["set_source"], "garmin_exercise_sets"
+        )
 
 
 if __name__ == "__main__":

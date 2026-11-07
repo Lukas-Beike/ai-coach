@@ -913,13 +913,12 @@ REMOTE_LINKS_DDL = """
 # Stream channels hold zlib-compressed little-endian float64 points (NaN = gap).
 # The analysis row caches values computed for one canonical session.
 # Schema version 22 adds the strength set kind, its ``set_source`` header and
-# the ``activity_strength_sets`` rows; its migration rebuilds the four set
-# tables from ACTIVITY_DETAIL_TABLES_DDL, because SQLite cannot alter a CHECK.
+# the ``activity_strength_sets`` rows (backend.db.strength_sets_migration).
 _DETAIL_KINDS = _sql_in_list(ActivityDetailKind)
 _DETAIL_ORIGINS = _sql_in_list(ActivityDetailOrigin)
 _ZONE_DETAIL_KINDS = _sql_in_list_of(ZONE_DETAIL_KINDS.values())
 
-ACTIVITY_DETAIL_TABLES_DDL = f"""
+ACTIVITY_DETAIL_DDL = f"""
     CREATE TABLE activity_detail_sets (
         provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
         provider_activity_id TEXT NOT NULL CHECK (length(provider_activity_id) BETWEEN 1 AND 256),
@@ -1018,8 +1017,6 @@ ACTIVITY_DETAIL_TABLES_DDL = f"""
             REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)
             ON DELETE CASCADE
     );
-"""
-ACTIVITY_DETAIL_ANALYSIS_DDL = """
     CREATE TABLE activity_detail_analysis (
         activity_id TEXT PRIMARY KEY REFERENCES activity_sessions(activity_id),
         analysis_version INTEGER NOT NULL CHECK (analysis_version >= 1),
@@ -1030,7 +1027,6 @@ ACTIVITY_DETAIL_ANALYSIS_DDL = """
         updated_at TEXT NOT NULL
     );
 """
-ACTIVITY_DETAIL_DDL = ACTIVITY_DETAIL_TABLES_DDL + ACTIVITY_DETAIL_ANALYSIS_DDL
 
 
 # Local mirror of external food database hits (schema version 11, Yazio ids

@@ -28,6 +28,7 @@ from backend.activities.stream_zones import with_stream_zones
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_detail import (
     ActivityDetailSet,
+    ActivityStrengthSetSet,
 )
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
@@ -186,6 +187,7 @@ class CanonicalDetailReader:
         self, db: Any, sets: Sequence[StoredDetailSet]
     ) -> dict[ProviderId, ProviderStatus]:
         """Compare each provider's stored sets with its current summary version."""
+        sets = _analysed_sets(sets)
         keys = [(item.provider, item.provider_activity_id) for item in sets]
         current = (
             {}
@@ -281,3 +283,14 @@ def stored_targets(
         if isinstance(targets, dict):
             return targets
     return None
+
+
+def _analysed_sets(sets: Sequence[StoredDetailSet]) -> list[StoredDetailSet]:
+    """The sets whose freshness decides the session analysis.
+
+    Strength sets feed no stream analysis; a fetch that cannot rewrite them must
+    not hold back the session's analysis.
+    """
+    return [
+        item for item in sets if not isinstance(item.detail, ActivityStrengthSetSet)
+    ]

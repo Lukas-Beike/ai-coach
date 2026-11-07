@@ -16,7 +16,6 @@ from typing import Any, Final
 from backend.db.planning_metrics_migration import rename_planning_metrics
 from backend.db.power_curve_migration import copy_power_curve_to_raw_record
 from backend.db.schema import (
-    ACTIVITY_DETAIL_TABLES_DDL,
     CURRENT_SCHEMA_VERSION,
     FEEDBACK_RATING_TIME_DDL,
     OBSERVATION_LIFECYCLE_DDL,
@@ -36,6 +35,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V21,
     released_shape,
 )
+from backend.db.strength_sets_migration import add_strength_sets
 
 _UNSUPPORTED_SCHEMA_MESSAGE = (
     "Die vorhandene Datenbank entspricht keinem unterstützten Schema. "
@@ -124,68 +124,9 @@ def _upgrade_v20_to_v21(db: Any) -> None:
     _assign_observation_owners(db)
 
 
-# Schema version 22 rebuilds the detail set tables so the parent's generated kind
-# CHECK accepts ``strength_sets``. Foreign keys stay enforced: the rows are
-# copied aside, the child tables are dropped before their parent so no cascade
-# fires, and the tables are recreated from the current DDL. Each copy names the
-# columns of schema version 21, frozen here; ``set_source`` stays NULL, as no
-# released set is a strength set. Strength sets start empty.
-_REBUILT_DETAIL_TABLES: Final = (
-    (
-        "activity_detail_sets",
-        (
-            "provider, provider_activity_id, detail_kind, mapper_version, origin, "
-            "source_kind, recorded_by, source_record_id, resolution, lap_source, "
-            "zone_boundary_source, summary_sha256, content_sha256, fetched_at, "
-            "created_at, updated_at"
-        ),
-    ),
-    (
-        "activity_stream_channels",
-        (
-            "provider, provider_activity_id, detail_kind, channel, point_count, "
-            "valid_count, data"
-        ),
-    ),
-    (
-        "activity_laps",
-        (
-            "provider, provider_activity_id, detail_kind, lap_index, kind, "
-            "start_offset_s, end_offset_s, name, moving_duration_s, distance_m, "
-            "avg_hr, max_hr, avg_power, max_power, normalized_power, avg_cadence, "
-            "avg_speed_mps, elevation_gain_m, load, intensity_pct, max_speed_mps"
-        ),
-    ),
-    (
-        "activity_zone_times",
-        (
-            "provider, provider_activity_id, detail_kind, zone_index, seconds, "
-            "lower_bound, upper_bound, label"
-        ),
-    ),
-)
-
-
 def _upgrade_v21_to_v22(db: Any) -> None:
-    for table, columns in _REBUILT_DETAIL_TABLES:
-        db.execute(
-            f"CREATE TEMP TABLE migration_{table} AS SELECT {columns} FROM main.{table}"
-        )
-    # Children first, so dropping the parent deletes no child row by cascade.
-    for table, _columns in reversed(_REBUILT_DETAIL_TABLES):
-        db.execute(f"DROP TABLE main.{table}")
-    execute_ddl(db, ACTIVITY_DETAIL_TABLES_DDL)
-    for table, columns in _REBUILT_DETAIL_TABLES:
-        db.execute(
-            f"INSERT INTO main.{table}({columns}) "
-            f"SELECT {columns} FROM temp.migration_{table}"
-        )
-        db.execute(f"DROP TABLE temp.migration_{table}")
-    # Enforced keys already reject an orphan on insert; this also covers a
-    # connection without enforcement. Other tables are not this step's concern.
-    for table, _columns in _REBUILT_DETAIL_TABLES:
-        if db.execute(f"PRAGMA main.foreign_key_check({table})").fetchall():
-            raise RuntimeError("Die Datenbankmigration konnte nicht validiert werden.")
+    # Adds the strength set detail kind; every detail row stays as it was.
+    add_strength_sets(db)
 
 
 # An owner is the source record id of the stored raw record whose projection

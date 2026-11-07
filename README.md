@@ -39,7 +39,7 @@ container, and do not replace or reset the data directory to resolve a
 rejected schema. A fresh database is only required when the athlete explicitly
 chooses to start over. Future schema changes add explicit, versioned and
 transactional migrations from version 16 with upgrade regression tests.
-The current schema is version 21. Version 10 adds canonical activity detail
+The current schema is version 22. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
 `garmin_snapshot` value, version 13 adds the maximum speed of each lap, and
@@ -52,8 +52,11 @@ workout-library entries, competitions, staged Coach plans and adaptive previews)
 `starts_at_local` and `planned_duration_s` instead of the Intervals.icu fields
 `start_date_local` and `moving_time`, and version 17 stores the Intervals.icu
 cycling power curve (best power per duration with its day and activity, plus the
-status and window of the latest fetch) as canonical rows. A version 16 to 20 database or backup is
-upgraded to it in place within one transaction, and a failed upgrade leaves it
+status and window of the latest fetch) as canonical rows, and version 22 stores
+executed strength sets (each set's type, exercise category and code,
+repetitions, weight, duration and planned workout step) as a detail kind. A
+version 16 to 21 database or backup is upgraded to it in place within one
+transaction, and a failed upgrade leaves it
 unchanged. The version 16 schema uses the neutral start and duration fields;
 the change history is not rewritten, so earlier changes stay undoable, and recorded Intervals.icu sync
 baselines still match. A sync confirmation that was prepared before the
@@ -634,11 +637,11 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`. The restore is refused with HTTP 507 when `/data` lacks the free space for this copy, and a partial copy is deleted.
-5. The replacement database must have the current schema (version 21) or a supported released schema from version 16 onward; a version 16 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must have the current schema (version 22) or a supported released schema from version 16 onward; a version 16 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Privacy Export & Data Purge
-- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 11 also includes the canonical provider tables (provider records, activity sessions with the survivor each deleted merged session keeps, activity records, observations), the canonical activity detail (detail sets, stream channels as decoded point lists with `null` gaps, laps, zone times and session analyses) and the canonical sleep periods, zone configurations with decoded limit lists, provider statuses, gear and gear-to-activity links, retired rows included, as JSON Lines, the owning provider and session of each activity note, when known, and the remote links that map local workouts, planned units and competitions to their provider counterparts (including the provider of each competition sync tombstone). Stored sports are exported in the canonical vocabulary (`sport`, `environment` and a lossless `sport_detail`), and planning records name their start and planned duration `starts_at_local` and `planned_duration_s` (since version 8); version 9 adds the canonical power curve, version 10 the session RPE rating time of each activity note, and version 11 the lifecycle (`state`, `owner_record_id`) of each observation; credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
+- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 12 also includes the canonical provider tables (provider records, activity sessions with the survivor each deleted merged session keeps, activity records, observations), the canonical activity detail (detail sets, stream channels as decoded point lists with `null` gaps, laps, zone times, strength sets and session analyses) and the canonical sleep periods, zone configurations with decoded limit lists, provider statuses, gear and gear-to-activity links, retired rows included, as JSON Lines, the owning provider and session of each activity note, when known, and the remote links that map local workouts, planned units and competitions to their provider counterparts (including the provider of each competition sync tombstone). Stored sports are exported in the canonical vocabulary (`sport`, `environment` and a lossless `sport_detail`), and planning records name their start and planned duration `starts_at_local` and `planned_duration_s` (since version 8); version 9 adds the canonical power curve, version 10 the session RPE rating time of each activity note, version 11 the lifecycle (`state`, `owner_record_id`) of each observation, and version 12 the executed strength sets with the source of each set list; credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
 - **Local Data Purge**: Completely wipes all local athlete records from the database, including canonical provider data. To prevent accidental loss, the action requires entering the exact confirmation phrase `LOKALE DATEN LÖSCHEN`. External accounts (Intervals.icu and Garmin) remain untouched.
 
 ### Operational Logging & Diagnostics

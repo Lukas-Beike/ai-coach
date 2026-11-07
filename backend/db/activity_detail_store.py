@@ -210,7 +210,7 @@ def replace_detail_set(
         header["resolution"],
         header["lap_source"],
         header["zone_boundary_source"],
-        header["set_source"],
+        header.get("set_source"),
         summary_sha256,
         content_sha256,
         fetched_at,
@@ -542,6 +542,35 @@ def remove_detail_sets(
     return removed
 
 
+def stored_strength_source(
+    db: Any, provider: str, provider_activity_id: str
+) -> str | None:
+    """Return the source of the stored strength set list of one provider activity."""
+    row = db.execute(
+        "SELECT set_source FROM activity_detail_sets WHERE provider = ? "
+        "AND provider_activity_id = ? AND detail_kind = ?",
+        (provider, provider_activity_id, ActivityDetailKind.STRENGTH_SETS.value),
+    ).fetchone()
+    return None if row is None else row["set_source"]
+
+
+def restamp_detail_set(
+    db: Any,
+    provider: str,
+    provider_activity_id: str,
+    kind: ActivityDetailKind,
+    *,
+    summary_sha256: str | None,
+    fetched_at: str,
+) -> None:
+    """Mark a kept set as current for a summary without changing its content."""
+    db.execute(
+        "UPDATE activity_detail_sets SET summary_sha256 = ?, fetched_at = ? "
+        "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
+        (summary_sha256, fetched_at, provider, provider_activity_id, kind.value),
+    )
+
+
 def refill_lap_metrics(
     db: Any,
     provider: str,
@@ -752,7 +781,7 @@ def analysis_export_rows(db: Any) -> Iterable[dict[str, Any]]:
 
 def _header(detail: ActivityDetailSet, mapper_version: int) -> dict[str, Any]:
     provenance = detail.provenance
-    return {
+    header: dict[str, Any] = {
         "detail_kind": detail.kind.value,
         "mapper_version": mapper_version,
         "origin": detail.origin.value,
@@ -770,10 +799,11 @@ def _header(detail: ActivityDetailSet, mapper_version: int) -> dict[str, Any]:
             if isinstance(detail, ZoneDistribution)
             else None
         ),
-        "set_source": (
-            detail.source.value if isinstance(detail, ActivityStrengthSetSet) else None
-        ),
     }
+    if isinstance(detail, ActivityStrengthSetSet):
+        # Only strength sets carry the key, so other kinds keep their content hash.
+        header["set_source"] = detail.source.value
+    return header
 
 
 def _child_rows(detail: ActivityDetailSet) -> list[tuple[object, ...]]:

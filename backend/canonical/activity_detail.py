@@ -404,6 +404,16 @@ class ActivityStrengthSet:
             )
 
 
+def strength_set_accepts(field: str, value: object) -> bool:
+    """Whether ActivityStrengthSet accepts one field value, so mappers share its bounds."""
+    values: dict[str, object] = {field: value}
+    try:
+        ActivityStrengthSet(index=0, set_type=StrengthSetType.ACTIVE, **values)  # type: ignore[arg-type]
+    except TypeError, ValueError:
+        return False
+    return True
+
+
 @dataclass(frozen=True, slots=True)
 class ActivityStrengthSetSet:
     """The strength sets of one provider activity, from one source only."""

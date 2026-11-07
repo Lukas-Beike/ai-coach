@@ -57,6 +57,7 @@ from backend.canonical.activity_detail import (
     ActivityStrengthSet,
     ActivityStrengthSetSet,
     clean_series,
+    strength_set_accepts,
 )
 from backend.canonical.mapping import IssueReason, MappingIssue, MappingResult
 from backend.canonical.records import Provenance
@@ -178,8 +179,13 @@ def map_fit_activity_detail(
     *,
     provider_activity_id: str,
     provenance: Provenance,
+    strength_sets: bool = True,
 ) -> MappingResult[ActivityDetailSet]:
-    """Map one FIT activity file into stream and lap sets (origin FETCH)."""
+    """Map one FIT activity file into stream, lap and strength sets (origin FETCH).
+
+    ``strength_sets=False`` skips the set messages, so a caller with a better
+    strength source gets neither their set nor their issues.
+    """
     ref = require_text(
         provider_activity_id,
         "provider_activity_id",
@@ -203,7 +209,9 @@ def map_fit_activity_detail(
     lap_set = _lap_set(ref, provenance, messages, issues)
     if lap_set is not None:
         records.append(lap_set)
-    strength_set = _strength_set_set(ref, provenance, messages, issues)
+    strength_set = (
+        _strength_set_set(ref, provenance, messages, issues) if strength_sets else None
+    )
     if strength_set is not None:
         records.append(strength_set)
     return MappingResult(records=tuple(records), issues=tuple(issues))
@@ -462,13 +470,12 @@ def _strength_set_set(
         zero = min(starts) if starts else None
     kept: list[ActivityStrengthSet] = []
     for fields in rows:
-        item = _strength_set(ref, len(kept), zero, fields, issues)
-        if item is None:
-            continue
         if len(kept) == MAX_STRENGTH_SETS:
             _add_issue(issues, ref, "set", IssueReason.OUT_OF_RANGE)
             break
-        kept.append(item)
+        item = _strength_set(ref, len(kept), zero, fields, issues)
+        if item is not None:
+            kept.append(item)
     if not kept:
         return None
     return ActivityStrengthSetSet(
@@ -505,7 +512,7 @@ def _strength_set(
     if start is not None and zero is not None and start >= zero:
         values["start_offset_s"] = start - zero
     for name, value in values.items():
-        if value is not None and not _set_accepts(name, value):
+        if value is not None and not strength_set_accepts(name, value):
             _add_issue(issues, ref, name, IssueReason.OUT_OF_RANGE)
             values[name] = None
     return ActivityStrengthSet(
@@ -536,13 +543,3 @@ def _category(value: object) -> ExerciseCategory | None:
             return _FIT_EXERCISE_CATEGORIES[number]
         return ExerciseCategory.OTHER
     return None
-
-
-def _set_accepts(name: str, value: object) -> bool:
-    """Whether ActivityStrengthSet accepts one value, so its bounds stay in one place."""
-    metric: dict[str, Any] = {name: value}
-    try:
-        ActivityStrengthSet(index=0, set_type=StrengthSetType.ACTIVE, **metric)
-    except TypeError, ValueError:
-        return False
-    return True

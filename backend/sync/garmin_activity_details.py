@@ -23,13 +23,20 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Final
 
+from backend.canonical.activity_detail import ActivityStrengthSetSet
 from backend.canonical.mapping import MappingResult
-from backend.canonical.vocabulary import ActivityRecordState, RecordingOrigin
+from backend.canonical.vocabulary import (
+    ActivityRecordState,
+    RecordingOrigin,
+    StrengthSetSource,
+)
 from backend.db.activity_detail_store import (
     activity_detail_backfill_candidates,
     activity_detail_backfill_universe,
     detail_sets_for,
     replace_detail_set,
+    restamp_detail_set,
+    stored_strength_source,
     strength_record_ids,
 )
 from backend.db.canonical_store import (
@@ -140,10 +147,8 @@ class GarminActivityDetailService:
             }
 
         with self._guard():
-            collected = (
-                self._reader.fetch_activity_detail(provider_activity_id, strength=True)
-                if strength
-                else self._reader.fetch_activity_detail(provider_activity_id)
+            collected = self._reader.fetch_activity_detail(
+                provider_activity_id, strength=strength
             )
             now = self._utc_now()
             mapped = _map_collected(collected, recorded_by=recorded_by, now=now)
@@ -379,6 +384,16 @@ class GarminActivityDetailService:
                 db, GARMIN_ID, ACTIVITY_RECORD_KIND, provider_activity_id
             )
             for item in mapped.records:
+                if _keeps_corrected_sets(db, provider_activity_id, item):
+                    restamp_detail_set(
+                        db,
+                        GARMIN_ID,
+                        provider_activity_id,
+                        item.kind,
+                        summary_sha256=summary_sha256,
+                        fetched_at=now,
+                    )
+                    continue
                 replace_detail_set(
                     db,
                     item,
@@ -464,6 +479,21 @@ def _map_collected(
             },
         )
     return mapped
+
+
+def _keeps_corrected_sets(db: Any, provider_activity_id: str, item: Any) -> bool:
+    """Whether stored exercise sets must stay instead of the file's set messages.
+
+    Garmin's exercise sets carry the athlete's Connect corrections, which the
+    original file lacks. A fetch without that part (paused, failed or no SDK)
+    falls back to the file, which must not overwrite the corrected sets.
+    """
+    return (
+        isinstance(item, ActivityStrengthSetSet)
+        and item.source is StrengthSetSource.FIT_SET_MESSAGES
+        and stored_strength_source(db, GARMIN_ID, provider_activity_id)
+        == StrengthSetSource.GARMIN_EXERCISE_SETS.value
+    )
 
 
 def _resolve_record(db: Any, activity_id: str) -> dict[str, Any] | None:
