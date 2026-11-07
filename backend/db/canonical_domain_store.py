@@ -281,6 +281,13 @@ def upsert_local_zone_configuration(
     row = _zone_row(configuration, None)
     key = row["config_key"]
     replaced = _active_local_zone_saved_at(db, str(key)) if renew else None
+    kept = local_zone_previous_saved_at(db, str(key)) if replaced else None
+    if kept is not None:
+        # The bookkeeping date takes no part in the comparison: unchanged values
+        # stay unchanged and keep the date of the value they once replaced.
+        details = json.loads(str(row["details"]))
+        details["previous_saved_at"] = kept
+        row["details"] = canonical_json(details)
     outcome = _upsert(db, _ZONES, row, now=now)
     if not renew:
         return outcome

@@ -440,6 +440,18 @@ class LocalZoneEditTests(unittest.TestCase):
         self._undo(service.save({**LOCAL_POWER, "threshold": 300})["change"])
         self.assertEqual(self._saved_day(key), date(2026, 11, 1))
 
+    def test_re_confirming_a_changed_value_keeps_the_replaced_date(self) -> None:
+        service, clock = self._clocked()
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        clock[0] = "2026-11-01T06:00:00+00:00"
+        change = service.save({**LOCAL_POWER, "threshold": 300})["change"]
+        for day in ("2026-11-02", "2026-11-03"):
+            clock[0] = f"{day}T06:00:00+00:00"
+            service.save({**LOCAL_POWER, "threshold": 300})
+        self.assertEqual(self._saved_day(key), date(2026, 11, 3))
+        self._undo(change)
+        self.assertEqual(self._saved_day(key), date(2026, 8, 1))
+
     def test_undoing_a_removal_restores_the_removed_save_date(self) -> None:
         service, clock = self._clocked()
         key = service.save(LOCAL_POWER)["configuration"]["key"]
