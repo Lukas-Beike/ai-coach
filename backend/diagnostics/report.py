@@ -86,6 +86,8 @@ class DiagnosticReportDependencies:
     canonical_read: CanonicalReadStatusReader | None = None
     activity_rows: ActivityRowAndSummaryReader | None = None
     observations: ObservationReader | None = None
+    # Whether the data directory holds the Intervals.icu purge marker file.
+    intervals_purge_marker: Callable[[], bool] = lambda: False
 
 
 class DiagnosticReportService:
@@ -232,7 +234,11 @@ class DiagnosticReportService:
                 "rating_backfill": summarize_rating_backfill(
                     deps.key_values, db, deps.config.sync_history_earliest_date
                 ),
-                "intervals_purge": summarize_intervals_purge(deps.key_values, db),
+                "intervals_purge": summarize_intervals_purge(
+                    deps.key_values,
+                    db,
+                    marker_exists=deps.intervals_purge_marker(),
+                ),
                 "session_metrics": summarize_session_metrics(deps.key_values, db),
                 "session_analysis": summarize_session_analysis(deps.key_values, db),
                 "logs": deps.recent_logs.list(),

@@ -2163,6 +2163,8 @@ INTERVALS_PURGE = IntervalsPurgeRunner(
         INTERVALS_PURGE_BACKUP
     ),
     clock=runtime_clock.utc_now,
+    data_dir=lambda: DATA_DIR,
+    sync_lock=INTERVALS_SYNC_LOCK,
 )
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
@@ -2216,6 +2218,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
             canonical_read=lambda: CANONICAL_READ,
             canonical_rows=lambda: CANONICAL_READ,
+            intervals_purge_marker=INTERVALS_PURGE.marker_exists,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,

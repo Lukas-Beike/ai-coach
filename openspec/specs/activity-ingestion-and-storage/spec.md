@@ -334,7 +334,7 @@ Evidence: `backend/activities/session_corrections.py:SessionCorrectionService`, 
 
 ### Requirement: One-time Intervals.icu ingest purge
 
-Once the Garmin rating backfill reports finished, the system SHALL remove the stored Intervals.icu ingest data once per purge version, in one transaction after a recovery copy: tombstone each Intervals.icu activity so a Garmin or Wahoo copy survives, move athlete notes, equipment assignments and target snapshots to that survivor (newest wins), delete the Intervals.icu rows and ingest state, keep output ids, and turn the ingest off.
+Once the Garmin rating backfill reports finished, the system SHALL remove the stored Intervals.icu ingest data once per purge version, in one transaction after a recovery copy: tombstone each Intervals.icu activity so a Garmin or Wahoo copy survives, move athlete notes, equipment assignments and target snapshots to that survivor (newest across its key family wins), delete the Intervals.icu rows and ingest state, keep output ids, and turn the ingest off.
 
 #### Scenario: Rating backfill not finished
 - **WHEN** the rating backfill has not finished
@@ -347,5 +347,13 @@ Once the Garmin rating backfill reports finished, the system SHALL remove the st
 #### Scenario: Failure or restart
 - **WHEN** the purge fails midway, runs again or the application restarts
 - **THEN** a failure leaves the database and the marker unchanged, and a completed purge is not repeated.
+
+#### Scenario: Ingest after the purge
+- **WHEN** the athlete turns the Intervals.icu ingest on or asks for a one-off read after the purge
+- **THEN** the switch refuses with 409 and the one-off read returns the ingest-off result without reading.
+
+#### Scenario: Restored pre-purge backup
+- **WHEN** the pre-purge recovery copy is restored while the purge marker file exists in the data directory
+- **THEN** it is not purged again automatically and diagnostics report `done_restored`.
 
 Evidence: `backend/sync/intervals_purge.py:run_purge`, `backend/sync/intervals_purge.py:IntervalsPurgeRunner`, `backend/db/canonical_store.py:tombstone_provider_activities`, `scripts/intervals_purge_dry_run.py`; `tests/test_intervals_purge.py`.

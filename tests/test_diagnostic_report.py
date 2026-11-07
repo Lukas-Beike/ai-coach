@@ -290,9 +290,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         ]
         # The provider composition adds five reads (sessions, observations and
         # three domain tables) to the same snapshot; the rating backfill counts
-        # add three more (Intervals.icu and Garmin records, live sessions), and the
-        # Intervals.icu purge state reads its rating backfill gate the same way.
-        self.assertEqual(len(self.db.queries), 26)
+        # add three more (Intervals.icu and Garmin records, live sessions).
+        self.assertEqual(len(self.db.queries), 23)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [

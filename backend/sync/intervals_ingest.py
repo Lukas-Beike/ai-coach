@@ -10,6 +10,8 @@ window once while the switch stays off.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from typing import Any, Final
 
 from backend.db.repositories import KeyValueRepository
@@ -21,11 +23,43 @@ INGEST_ENABLED_KEY: Final = "intervals_ingest_enabled"
 # Days a manual one-off sync reads while the ingest is off.
 ONE_OFF_DAYS: Final = 42
 INGEST_OFF_REASON: Final = "intervals_ingest_off"
+# The completion marker of the Intervals.icu ingest purge (#1728): once it is
+# done, the ingest stays off and no one-off read stores Intervals.icu data again.
+PURGE_STATE_KEY: Final = "intervals_purge_state"
+PURGE_VERSION: Final = 1
+PURGE_DONE: Final = "done"
+INGEST_PURGED_REASON: Final = "intervals_ingest_purged"
 
 
 def ingest_enabled_value(value: str | None) -> bool:
     """Decode the stored switch value; a missing key is off."""
     return value == "1"
+
+
+def purge_state_value(raw: object) -> dict[str, Any]:
+    """Decode a stored purge state; a missing or corrupt value reads as empty."""
+    if not isinstance(raw, str) or not raw:
+        return {}
+    try:
+        state = json.loads(raw)
+    except ValueError:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def purge_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
+    """Return the stored purge state; a missing or corrupt record reads as empty."""
+    return purge_state_value(key_values.get(db, PURGE_STATE_KEY))
+
+
+def purge_done(state: Mapping[str, Any]) -> bool:
+    """Whether a purge state records a completed purge of this version or later."""
+    version = state.get("version")
+    return (
+        state.get("status") == PURGE_DONE
+        and isinstance(version, int)
+        and version >= PURGE_VERSION
+    )
 
 
 def ingest_off_result() -> dict[str, Any]:
@@ -44,11 +78,22 @@ class IntervalsIngestSwitch:
         with self._database_manager.reader() as db:
             return ingest_enabled_value(self._key_values.get(db, INGEST_ENABLED_KEY))
 
+    def purged(self) -> bool:
+        """Whether the stored Intervals.icu ingest data was purged (#1728)."""
+        with self._database_manager.reader() as db:
+            return purge_done(purge_state(self._key_values, db))
+
     def save(self, values: Any) -> dict[str, Any]:
-        """Store the switch from ``{"enabled": bool}``."""
+        """Store the switch from ``{"enabled": bool}``; after the purge it stays off."""
         enabled = values.get("enabled") if isinstance(values, dict) else None
         if not isinstance(enabled, bool):
             raise AppError(400, "Der Schalter braucht den Wert an oder aus.")
         with self._database_manager.unit_of_work() as db:
+            if enabled and purge_done(purge_state(self._key_values, db)):
+                raise AppError(
+                    409,
+                    "Intervals.icu-Daten wurden bereinigt; das Einlesen bleibt aus.",
+                    reason=INGEST_PURGED_REASON,
+                )
             self._key_values.set(db, INGEST_ENABLED_KEY, "1" if enabled else "0")
         return {"status": "ok", "enabled": enabled}

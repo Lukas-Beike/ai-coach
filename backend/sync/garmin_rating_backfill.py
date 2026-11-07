@@ -490,6 +490,11 @@ def _read_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
     }
 
 
+def rating_backfill_finished(key_values: KeyValueRepository, db: Any) -> bool:
+    """Whether the stored backfill state says the chain finished for good."""
+    return bool(_read_state(key_values, db)["finished"])
+
+
 def rating_backfill_counts(
     db: Any, key_values: KeyValueRepository, earliest: date | None = None
 ) -> dict[str, Any]:

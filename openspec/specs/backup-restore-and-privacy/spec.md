@@ -160,7 +160,7 @@ Evidence: `backend/backup/restore_validation.py`; `tests/test_database_restore_v
 
 ### Requirement: Recovery copy before destructive maintenance
 
-Before a data maintenance step deletes stored records, the system SHALL write a consistent, encrypted copy of the database through the backup snapshot path to `<database>.<label>-<timestamp>-<id>` beside it. The startup cleanup of staging files SHALL keep it, and a failed copy SHALL stop the maintenance step before any change.
+Before a data maintenance step deletes stored records, the system SHALL write a consistent, encrypted copy of the database through the backup snapshot path to `<database>.<label>-<timestamp>-<id>` beside it. A later attempt of the same version SHALL reuse it, the startup cleanup of staging files SHALL keep it, and a failed copy SHALL stop the maintenance step before any change.
 
 #### Scenario: Intervals.icu purge
 - **WHEN** the Intervals.icu purge becomes due

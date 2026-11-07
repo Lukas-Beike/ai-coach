@@ -12,6 +12,7 @@ import hashlib
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from typing import Any, cast
@@ -19,6 +20,7 @@ from unittest import mock
 
 from backend import change_history
 from backend.activities.feedback import ActivityFeedbackService
+from backend.athlete.profile import normalize_profile
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.db import canonical_store, row_factory
 from backend.db.manager import DatabaseManager
@@ -32,6 +34,8 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import intervals_purge
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
+from backend.sync.intervals import IntervalsSyncService
+from backend.sync.intervals_ingest import IntervalsIngestSwitch, ingest_off_result
 from backend.sync.intervals_purge import (
     BACKUP_LABEL,
     IntervalsPurgeRunner,
@@ -53,11 +57,15 @@ TARGETS = {"steps": [{"watts": 250}]}
 RATING_STATE = "garmin_rating_backfill_state"
 FEEDBACK_HISTORY_ID = "11111111-1111-1111-1111-111111111111"
 PROFILE_HISTORY_ID = "22222222-2222-2222-2222-222222222222"
+BUNDLE_HISTORY_ID = "33333333-3333-3333-3333-333333333333"
+GARMIN_HISTORY_ID = "44444444-4444-4444-4444-444444444444"
+OLDEST = "2026-10-01T09:00:00+00:00"
 # Kept output state and settings (key -> value).
 KEPT_KEYS = {
     "last_library_sync_at": NOW,
     "activity_detail_prefetch_floor": "2026-01-01",
     "garmin_equipment_initialized": "1",
+    "planned_units_initial_import_at": NOW,
 }
 INGEST_KEYS = {
     "last_sync_at": NOW,
@@ -65,7 +73,6 @@ INGEST_KEYS = {
     "sync_running": "0",
     "sync_status": "ok",
     "intervals_full_window_read_on": "2026-11-06",
-    "planned_units_initial_import_at": NOW,
     "performance_refresh_running": "0",
     "last_performance_refresh_at": NOW,
     "intervals_full_resync_status": "",
@@ -190,6 +197,8 @@ def _athlete_data(db: Any) -> None:
     _feedback(db, "ivl-103", "lost", OLD_FEEDBACK, provider=ICU)
     _feedback(db, "ivl-999", "unresolved", OLD_FEEDBACK, provider=ICU)
     _feedback(db, "act_gar_x", "untouched", OLD_FEEDBACK, session="act_gar_x")
+    # Stored under the survivor's own provider id: in its key family, older.
+    _feedback(db, "gar-202", "oldest family row", OLDEST, provider="garmin")
     # Moved, lost on the Intervals.icu-only session, and a collision the newer
     # assignment of the Wahoo session wins.
     for key, observed in (
@@ -197,6 +206,7 @@ def _athlete_data(db: Any) -> None:
         ("act_ivl_only", OLD_FEEDBACK),
         ("ivl-104", OLD_FEEDBACK),
         ("act_wah_c", NEW_FEEDBACK),
+        ("gar-201", OLDEST),
     ):
         db.execute(
             "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
@@ -234,6 +244,8 @@ def _athlete_data(db: Any) -> None:
     for change_id, entity_type, entity_id in (
         (FEEDBACK_HISTORY_ID, "activity_feedback", "session:act_ivl_a"),
         (PROFILE_HISTORY_ID, "profile", "profile"),
+        (BUNDLE_HISTORY_ID, "activity_session", "act_gar_a,act_ivl_a"),
+        (GARMIN_HISTORY_ID, "activity_session", "act_gar_x"),
     ):
         db.execute(
             "INSERT INTO change_history(id, entity_type, entity_id, action, source, "
@@ -485,15 +497,15 @@ class IntervalsPurgeTests(unittest.TestCase):
                 "activities_tombstoned": 4,
                 "sessions_rebundled": 2,
                 "feedback_rekeyed": 2,
-                "feedback_collisions_dropped": 2,
+                "feedback_collisions_dropped": 3,
                 "feedback_lost_intervals_only": 1,
                 "feedback_unresolved_kept": 1,
                 "equipment_rekeyed": 1,
-                "equipment_collisions_dropped": 1,
+                "equipment_collisions_dropped": 2,
                 "equipment_lost_intervals_only": 1,
                 "target_snapshots_carried": 2,
                 "history_entries_not_undoable": 1,
-                "profile_preferences_cleared": 1,
+                "session_corrections_not_undoable": 1,
                 "sessions_deleted": 1,
                 "sessions_kept_as_tombstones": 3,
             },
@@ -576,6 +588,8 @@ class IntervalsPurgeTests(unittest.TestCase):
             }
             self.assertFalse(change_history.undoable(history[FEEDBACK_HISTORY_ID]))
             self.assertTrue(change_history.undoable(history[PROFILE_HISTORY_ID]))
+            self.assertFalse(change_history.undoable(history[BUNDLE_HISTORY_ID]))
+            self.assertTrue(change_history.undoable(history[GARMIN_HISTORY_ID]))
             self.assertIs(
                 change_history.public_view(history[FEEDBACK_HISTORY_ID])["undoable"],
                 False,
@@ -583,11 +597,11 @@ class IntervalsPurgeTests(unittest.TestCase):
             with self.assertRaises(AppError) as rejected:
                 HistoryUndoService._load_history(db, FEEDBACK_HISTORY_ID)
             self.assertEqual(rejected.exception.status, 400)
+        # No unattended profile write: normalization ignores the old source.
         profile = json.loads(kv(manager, "profile") or "{}")
-        self.assertEqual(
-            (profile["preferred_source_body"], profile["preferred_source_hrv"]),
-            ("", "garmin"),
-        )
+        self.assertEqual(profile["preferred_source_body"], ICU)
+        self.assertEqual(normalize_profile(profile)["preferred_source_body"], "")
+        self.assertIsNone(kv(manager, "equipment_assignment:gar-201"))
 
     def test_ingest_rows_go_and_output_ids_stay(self) -> None:
         manager = open_current(self)
@@ -710,13 +724,22 @@ class IntervalsPurgeTests(unittest.TestCase):
 
 
 class IntervalsPurgeRunnerTests(unittest.TestCase):
-    def runner(self, manager: DatabaseManager, backup: Any) -> IntervalsPurgeRunner:
+    def runner(
+        self,
+        manager: DatabaseManager,
+        backup: Any,
+        *,
+        gate: MaintenanceGate | None = None,
+        lock: Any = None,
+    ) -> IntervalsPurgeRunner:
         return IntervalsPurgeRunner(
             database=lambda: manager,
             key_values=key_values(),
-            maintenance_gate=MaintenanceGate(),
+            maintenance_gate=gate or MaintenanceGate(),
             backup=backup,
             clock=lambda: NOW,
+            data_dir=lambda: manager.path.parent,
+            sync_lock=lock or threading.Lock(),
             writer_wait_seconds=1,
         )
 
@@ -789,18 +812,132 @@ class IntervalsPurgeRunnerTests(unittest.TestCase):
         manager = open_current(self)
         gate = MaintenanceGate()
         backup = mock.Mock()
-        runner = IntervalsPurgeRunner(
-            database=lambda: manager,
-            key_values=key_values(),
-            maintenance_gate=gate,
-            backup=backup,
-            clock=lambda: NOW,
-        )
+        runner = self.runner(manager, backup, gate=gate)
         with gate.restore():
             runner.run()
         backup.assert_not_called()
         runner.run()
         backup.assert_called_once_with()
+
+
+class IntervalsPurgeSafetyTests(unittest.TestCase):
+    def runner(
+        self, manager: DatabaseManager, backup: Any, lock: Any
+    ) -> IntervalsPurgeRunner:
+        return IntervalsPurgeRunner(
+            database=lambda: manager,
+            key_values=key_values(),
+            maintenance_gate=MaintenanceGate(),
+            backup=backup,
+            clock=lambda: NOW,
+            data_dir=lambda: manager.path.parent,
+            sync_lock=lock,
+            writer_wait_seconds=1,
+        )
+
+    def copy_writer(self, manager: DatabaseManager) -> mock.Mock:
+        def write() -> str:
+            name = f"intervals-coach.db.{BACKUP_LABEL}-20261107090000-abc"
+            (manager.path.parent / name).write_bytes(b"copy")
+            return name
+
+        return mock.Mock(side_effect=write)
+
+    def test_a_held_sync_lock_postpones_and_the_copy_is_reused(self) -> None:
+        manager = open_current(self)
+        lock = threading.Lock()
+        backup = self.copy_writer(manager)
+        runner = self.runner(manager, backup, lock)
+
+        with lock:
+            runner.run()
+        self.assertIsNone(kv(manager, intervals_purge.STATE_KEY))
+        runner.run()
+
+        backup.assert_called_once_with()
+        self.assertEqual(
+            json.loads(kv(manager, intervals_purge.STATE_KEY) or "{}")["status"],
+            "done",
+        )
+        self.assertFalse(lock.locked())
+
+    def test_a_running_direct_sync_postpones_the_purge(self) -> None:
+        manager = open_current(self)
+        with manager.unit_of_work() as db:
+            key_values().set(db, "sync_running", "1")
+        with manager.reader() as db:
+            self.assertFalse(intervals_purge.purge_due(db, key_values()))
+            self.assertEqual(purge_status(db, key_values())["status"], "pending")
+
+    def test_a_restored_pre_purge_copy_is_not_purged_again(self) -> None:
+        manager = open_current(self)
+        backup = self.copy_writer(manager)
+        self.runner(manager, backup, threading.Lock()).run()
+        marker = manager.path.parent / intervals_purge.MARKER_FILE
+        self.assertTrue(marker.is_file())
+
+        # The restored copy has no database marker and every Intervals.icu row.
+        manager.close()
+        manager.path.unlink()
+        build_v21(manager.path)
+        restored = DatabaseManager(manager.path, sqlite3, row_factory=row_factory)
+        self.addCleanup(restored.close)
+        with restored.unit_of_work() as db:
+            migrate_schema(db)
+        before = dump(restored)
+        again = mock.Mock()
+        self.runner(restored, again, threading.Lock()).run()
+
+        again.assert_not_called()
+        self.assertEqual(dump(restored), before)
+        with restored.reader() as db:
+            self.assertEqual(
+                summarize_intervals_purge(key_values(), db, marker_exists=True),
+                {"status": "done_restored", "version": 1},
+            )
+
+    def test_purged_ingest_cannot_be_turned_on_or_read_once(self) -> None:
+        manager = open_current(self)
+        switch = IntervalsIngestSwitch(manager, key_values())
+        self.assertFalse(switch.purged())
+        self.assertEqual(switch.save({"enabled": True})["enabled"], True)
+        switch.save({"enabled": False})
+
+        purge(manager)
+
+        self.assertTrue(switch.purged())
+        with self.assertRaises(AppError) as refused:
+            switch.save({"enabled": True})
+        self.assertEqual(
+            (refused.exception.status, refused.exception.reason),
+            (409, "intervals_ingest_purged"),
+        )
+        self.assertEqual(switch.save({"enabled": False})["enabled"], False)
+        runtime = mock.Mock()
+        status = mock.Mock()
+        status.get.side_effect = lambda key: kv(manager, key)
+        service = IntervalsSyncService(
+            cast(Any, mock.Mock(intervals_api_key="key")),
+            cast(Any, mock.Mock()),
+            cast(Any, mock.Mock()),
+            cast(Any, status),
+            cast(Any, mock.Mock()),
+            cast(Any, runtime),
+            ingest_enabled=switch.enabled,
+        )
+        self.assertEqual(service.sync(one_off=True), ingest_off_result())
+        runtime.operation.assert_not_called()
+
+    def test_a_newer_family_item_stays_where_it_is(self) -> None:
+        moves = intervals_purge._plan(
+            [intervals_purge._Stored("ivl-1", "act_ivl", OLD_FEEDBACK)],
+            {"act_ivl": "act_gar"},
+            {"act_gar": [(OLDEST, "act_gar"), (NEW_FEEDBACK, "gar-1")]},
+        )
+        self.assertEqual(
+            (moves.moved, sorted(moves.dropped), moves.lost),
+            ({}, ["act_gar", "ivl-1"], ()),
+        )
 
 
 class _Stage:

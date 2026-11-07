@@ -11,19 +11,24 @@ database and then, in one transaction, runs ``run_purge``:
    equipment assignment whose session (``feedback_origin_sessions``) is an
    Intervals.icu session moves to the live session that survives it, keyed by
    that session id (feedback also gets ``session_id`` = that id and no
-   provider). On a key collision the newest ``updated_at`` (feedback) or
-   ``observed_at`` (assignment) wins; the others are dropped and counted. Data
+   provider). The newest ``updated_at`` (feedback) or ``observed_at``
+   (assignment) wins against every item stored under the survivor's key family
+   (its id, alias session ids and provider activity ids); the others are dropped
+   and counted. Data
    of a session without a surviving Garmin or Wahoo record is dropped and
    counted. A target snapshot of an Intervals.icu session's analysis moves to
    the survivor when the survivor has none.
-3. The recorded feedback changes become non-undoable, and a preferred source
-   naming Intervals.icu is cleared.
+3. The recorded feedback changes, and the session corrections that touched an
+   Intervals.icu session, become non-undoable.
 4. The Intervals.icu rows of the provider, activity, detail, observation and
    domain tables, every stored snapshot, the Intervals.icu sync cursors, ingest
    jobs, refresh history and ingest key-value state are deleted. A session
    without a survivor is deleted once nothing references it; the others stay
    as tombstones.
-5. The ingest switch is turned off and a versioned completion marker stored.
+5. The ingest switch is turned off and a versioned completion marker stored;
+   the switch then refuses to turn on and no one-off read runs. A marker file
+   in the data directory keeps a restored pre-purge database from being purged
+   again automatically.
 
 Output state is kept: remote links, competition and workout ids, the library,
 metric export and nutrition sync state, and the output job types. The local
@@ -38,11 +43,11 @@ import json
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final
 
 from backend import change_history
 from backend.activities.detail_store import LEGACY_KEY_PATTERNS
-from backend.athlete.profile import PREFERRED_SOURCE_FIELDS
 from backend.canonical.vocabulary import ActivitySessionState, ProviderId
 from backend.db import canonical_store
 from backend.db.repositories import ActivityFeedbackRepository, KeyValueRepository
@@ -53,16 +58,27 @@ from backend.sync import activity_detail_backfill, activity_detail_retirement
 from backend.sync.canonical_backfill import STATE_KEY as BACKFILL_STATE_KEY
 from backend.sync.canonical_coverage_store import COVERAGE_KEY_PREFIX
 from backend.sync.freshness_sources import INTERVALS_RUNNING_FLAG
-from backend.sync.garmin_rating_backfill import rating_backfill_counts
-from backend.sync.intervals_ingest import INGEST_ENABLED_KEY
+from backend.sync.garmin_rating_backfill import rating_backfill_finished
+from backend.sync.intervals_ingest import (
+    INGEST_ENABLED_KEY,
+    PURGE_DONE,
+    PURGE_STATE_KEY,
+    PURGE_VERSION,
+    purge_done,
+    purge_state,
+)
 
 _LOGGER = logging.getLogger("intervals_coach")
-PURGE_VERSION: Final = 1
-STATE_KEY: Final = "intervals_purge_state"
-BACKUP_LABEL: Final = "pre-intervals-purge"
+STATE_KEY: Final = PURGE_STATE_KEY
+# One recovery copy per purge version; a later attempt reuses it.
+BACKUP_LABEL: Final = f"pre-intervals-purge-v{PURGE_VERSION}"
+# Written beside the database after a purge, so a restored pre-purge copy is
+# not purged again automatically.
+MARKER_FILE: Final = f"intervals-purge-v{PURGE_VERSION}.done"
 # The purge waits this long for a running foreground write before it fails.
 WRITER_WAIT_SECONDS: Final = 600.0
-STATUS_DONE: Final = "done"
+STATUS_DONE: Final = PURGE_DONE
+STATUS_DONE_RESTORED: Final = "done_restored"
 STATUS_PENDING: Final = "pending"
 STATUS_WAITING: Final = "waiting_for_rating_backfill"
 
@@ -71,6 +87,8 @@ _DELETED: Final = ActivitySessionState.DELETED.value
 _NOT_SURVIVING: Final = frozenset({_DELETED, ActivitySessionState.DUPLICATE.value})
 _CHUNK: Final = 500
 _EQUIPMENT_PREFIX: Final = "equipment_assignment:"
+# The change-history entity of a session correction; its id lists the sessions.
+SESSION_CORRECTION_ENTITY: Final = "activity_session"
 # Job types and refresh areas that read Intervals.icu; output jobs stay.
 INGEST_JOB_TYPES: Final = (
     "activity_details",
@@ -103,7 +121,6 @@ INGEST_KEYS: Final = (
     INTERVALS_RUNNING_FLAG,
     "sync_status",
     "intervals_full_window_read_on",
-    "planned_units_initial_import_at",
     activity_detail_backfill.STATE_KEY,
     activity_detail_retirement.STATE_KEY,
     COVERAGE_KEY_PREFIX + _INTERVALS,
@@ -302,12 +319,38 @@ def _survivors(db: Any, sessions: Mapping[str, str]) -> dict[str, str]:
     }
 
 
+def _families(db: Any, targets: Mapping[str, str]) -> dict[str, set[str]]:
+    """Each survivor's key family: its id, alias session ids and the provider
+    activity ids of their records, as the feedback and equipment reads use."""
+    survivors = sorted(set(targets.values()))
+    legacy = canonical_store.session_legacy_keys(db, survivors)
+    return {target: {target, *legacy.get(target, ())} for target in survivors}
+
+
+def _residents(
+    families: Mapping[str, set[str]],
+    stored: Mapping[str, str],
+    moving: set[str],
+) -> dict[str, list[tuple[str, str]]]:
+    """Per survivor the (stamp, key) of the items already stored in its family."""
+    return {
+        target: [
+            (stored[key], key)
+            for key in sorted(family)
+            if key in stored and key not in moving
+        ]
+        for target, family in families.items()
+    }
+
+
 def _plan(
-    items: Sequence[_Stored], targets: Mapping[str, str], resident: Mapping[str, str]
+    items: Sequence[_Stored],
+    targets: Mapping[str, str],
+    residents: Mapping[str, Sequence[tuple[str, str]]],
 ) -> _Moves:
-    """Choose per target key the newest item; ``resident`` holds the stamps of
-    items already stored under a target key."""
+    """Choose per survivor the newest of the moving and the resident items."""
     lost = tuple(sorted(item.key for item in items if item.origin not in targets))
+    moving = {item.key for item in items}
     pools: dict[str, list[tuple[str, str]]] = {}
     for item in items:
         if item.origin in targets:
@@ -315,14 +358,17 @@ def _plan(
     moved: dict[str, str] = {}
     dropped: list[str] = []
     for target, pool in sorted(pools.items()):
-        if target in resident:
-            pool.append((resident[target], target))
-        # Newest first; a tie keeps the stored item, then the smaller key.
+        pool.extend(residents.get(target, ()))
+        # Newest first; a tie keeps the item under the survivor id, then another
+        # stored item, then the smaller key.
         ordered = sorted(pool, key=lambda entry: entry[1])
-        ordered.sort(key=lambda entry: (entry[0], entry[1] == target), reverse=True)
+        ordered.sort(
+            key=lambda entry: (entry[0], entry[1] == target, entry[1] not in moving),
+            reverse=True,
+        )
         (_, winner), *losers = ordered
         dropped.extend(key for _, key in losers)
-        if winner != target:
+        if winner in moving:
             moved[winner] = target
     return _Moves(moved, tuple(dropped), lost)
 
@@ -330,16 +376,18 @@ def _plan(
 def _rekey_feedback(
     db: Any, items: Sequence[_Stored], targets: Mapping[str, str], now: str
 ) -> dict[str, int]:
-    resident = {
+    families = _families(db, targets)
+    stored = {
         str(row["activity_id"]): str(row["updated_at"] or "")
-        for chunk in _chunks(targets.values())
+        for chunk in _chunks(key for family in families.values() for key in family)
         for row in db.execute(
             "SELECT activity_id, updated_at FROM activity_feedback "
             f"WHERE activity_id IN ({_placeholders(chunk)})",
             tuple(chunk),
         )
     }
-    moves = _plan(items, targets, resident)
+    moving = {item.key for item in items}
+    moves = _plan(items, targets, _residents(families, stored, moving))
     for key in (*moves.lost, *moves.dropped):
         db.execute("DELETE FROM activity_feedback WHERE activity_id = ?", (key,))
     repository = ActivityFeedbackRepository(lambda: now)
@@ -355,15 +403,17 @@ def _rekey_feedback(
 def _rekey_equipment(
     db: Any, items: Sequence[_Stored], targets: Mapping[str, str]
 ) -> dict[str, int]:
-    resident = {
+    families = _families(db, targets)
+    stored = {
         str(row["key"])[len(_EQUIPMENT_PREFIX) :]: _observed_at(row)
-        for chunk in _chunks(targets.values())
+        for chunk in _chunks(key for family in families.values() for key in family)
         for row in db.execute(
             f"SELECT key, value, updated_at FROM kv WHERE key IN ({_placeholders(chunk)})",
-            tuple(_EQUIPMENT_PREFIX + target for target in chunk),
+            tuple(_EQUIPMENT_PREFIX + key for key in chunk),
         )
     }
-    moves = _plan(items, targets, resident)
+    moving = {item.key for item in items}
+    moves = _plan(items, targets, _residents(families, stored, moving))
     for key in (*moves.lost, *moves.dropped):
         db.execute("DELETE FROM kv WHERE key = ?", (_EQUIPMENT_PREFIX + key,))
     for key, target in sorted(moves.moved.items()):
@@ -435,23 +485,6 @@ def _carry_targets(
             tuple(chunk),
         )
     return carried
-
-
-def _clear_profile_preferences(db: Any, key_values: KeyValueRepository) -> int:
-    raw = key_values.get(db, "profile")
-    try:
-        profile = json.loads(raw) if raw else None
-    except ValueError:
-        profile = None
-    if not isinstance(profile, dict):
-        return 0
-    cleared = [
-        field for field in PREFERRED_SOURCE_FIELDS if profile.get(field) == _INTERVALS
-    ]
-    if cleared:
-        profile.update(dict.fromkeys(cleared, ""))
-        key_values.set(db, "profile", json.dumps(profile, ensure_ascii=False))
-    return len(cleared)
 
 
 def _delete_rows(db: Any) -> dict[str, int]:
@@ -556,6 +589,23 @@ def _delete_sessions(
     return deleted
 
 
+def _mark_session_corrections(db: Any, sessions: Mapping[str, str]) -> int:
+    """Keep session corrections that touched an Intervals.icu session from being
+    undone, so an undo cannot bring a purged session back."""
+    touching = [
+        str(row["id"])
+        for row in db.execute(
+            "SELECT id, entity_id FROM change_history "
+            "WHERE entity_type = ? AND action <> 'undo'",
+            (SESSION_CORRECTION_ENTITY,),
+        )
+        if set(str(row["entity_id"]).split(",")) & sessions.keys()
+    ]
+    return change_history.mark_not_undoable(
+        db, SESSION_CORRECTION_ENTITY, change_ids=touching
+    )
+
+
 def _drop_backfill_counters(db: Any, key_values: KeyValueRepository) -> None:
     """Remove the Intervals.icu counters of the canonical backfill state."""
     raw = key_values.get(db, BACKFILL_STATE_KEY)
@@ -595,7 +645,7 @@ def purge_intervals_ingest(
         "history_entries_not_undoable": change_history.mark_not_undoable(
             db, "activity_feedback"
         ),
-        "profile_preferences_cleared": _clear_profile_preferences(db, key_values),
+        "session_corrections_not_undoable": _mark_session_corrections(db, sessions),
         "deleted": _delete_rows(db),
     }
     counts["sessions_deleted"] = _delete_sessions(db, sessions, targets)
@@ -609,24 +659,6 @@ def purge_intervals_ingest(
     return counts
 
 
-def _read_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
-    raw = key_values.get(db, STATE_KEY)
-    try:
-        state = json.loads(raw) if raw else {}
-    except ValueError:
-        state = {}
-    return state if isinstance(state, dict) else {}
-
-
-def _done(state: Mapping[str, Any]) -> bool:
-    version = state.get("version")
-    return (
-        state.get("status") == STATUS_DONE
-        and isinstance(version, int)
-        and version >= PURGE_VERSION
-    )
-
-
 def _ingest_job_running(db: Any) -> bool:
     return (
         db.execute(
@@ -638,15 +670,21 @@ def _ingest_job_running(db: Any) -> bool:
     )
 
 
-def purge_due(db: Any, key_values: KeyValueRepository) -> bool:
+def purge_due(
+    db: Any, key_values: KeyValueRepository, *, marker_exists: bool = False
+) -> bool:
     """Whether the purge of this version still has to run and may run now.
 
     It waits for the finished Garmin rating backfill and for a running
-    Intervals.icu ingest job, whose rows would otherwise return.
+    Intervals.icu sync, as a job or a direct sync, whose rows would otherwise
+    return. ``marker_exists`` (the marker file of a completed purge) means a
+    restored pre-purge database, which is not purged again automatically.
     """
     return (
-        not _done(_read_state(key_values, db))
-        and bool(rating_backfill_counts(db, key_values)["finished"])
+        not marker_exists
+        and not purge_done(purge_state(key_values, db))
+        and rating_backfill_finished(key_values, db)
+        and key_values.get(db, INTERVALS_RUNNING_FLAG) != "1"
         and not _ingest_job_running(db)
     )
 
@@ -678,16 +716,24 @@ def run_purge(
     return counts
 
 
-def purge_status(db: Any, key_values: KeyValueRepository) -> dict[str, Any]:
-    """The purge state for diagnostics: a state word, the version and counts."""
-    state = _read_state(key_values, db)
-    if _done(state):
+def purge_status(
+    db: Any, key_values: KeyValueRepository, *, marker_exists: bool = False
+) -> dict[str, Any]:
+    """The purge state for diagnostics: a state word, the version and counts.
+
+    ``done_restored``: the marker file exists but the database has no marker,
+    as after restoring the pre-purge copy; it is not purged again automatically.
+    """
+    state = purge_state(key_values, db)
+    if purge_done(state):
         return {
             "status": STATUS_DONE,
             "version": state["version"],
             "counts": state.get("counts") or {},
         }
-    finished = bool(rating_backfill_counts(db, key_values)["finished"])
+    if marker_exists:
+        return {"status": STATUS_DONE_RESTORED, "version": PURGE_VERSION}
+    finished = rating_backfill_finished(key_values, db)
     return {
         "status": STATUS_PENDING if finished else STATUS_WAITING,
         "version": PURGE_VERSION,
@@ -709,6 +755,8 @@ class IntervalsPurgeRunner:
         maintenance_gate: MaintenanceGate,
         backup: Callable[[], str],
         clock: Callable[[], str],
+        data_dir: Callable[[], Path],
+        sync_lock: Any,
         writer_wait_seconds: float = WRITER_WAIT_SECONDS,
     ) -> None:
         self._database = database
@@ -716,8 +764,35 @@ class IntervalsPurgeRunner:
         self._maintenance_gate = maintenance_gate
         self._backup = backup
         self._clock = clock
+        self._data_dir = data_dir
+        # The Intervals.icu sync lock: held while the purge writes, so no direct
+        # sync stores Intervals.icu rows meanwhile.
+        self._sync_lock = sync_lock
         self._writer_wait_seconds = writer_wait_seconds
         self._stopped = False
+
+    def marker_exists(self) -> bool:
+        """Whether this data directory holds the marker of a completed purge."""
+        return (self._data_dir() / MARKER_FILE).is_file()
+
+    def _recovery_copy(self) -> str:
+        """Reuse this version's recovery copy, else write it."""
+        existing = sorted(self._data_dir().glob(f"*.{BACKUP_LABEL}-*"))
+        return existing[0].name if existing else self._backup()
+
+    def _write_marker(self, completed_at: str) -> None:
+        try:
+            (self._data_dir() / MARKER_FILE).write_text(
+                completed_at + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            _LOGGER.warning(
+                "Intervals.icu purge marker file not written",
+                extra={
+                    "event": "intervals_purge_marker_failed",
+                    "error_class": type(exc).__name__,
+                },
+            )
 
     def run(self) -> None:
         """Purge when due; a restore in progress postpones it to a later pass."""
@@ -737,14 +812,26 @@ class IntervalsPurgeRunner:
             )
 
     def _run(self) -> dict[str, Any] | None:
+        marker = self.marker_exists()
         with self._database().reader() as db:
-            if not purge_due(db, self._key_values):
+            if not purge_due(db, self._key_values, marker_exists=marker):
                 return None
         try:
             # Outside the writer: copying the database must not block other writes.
-            self._backup()
-            with self._database().unit_of_work(timeout=self._writer_wait_seconds) as db:
-                return run_purge(db, self._key_values, now=self._clock())
+            self._recovery_copy()
+            if not self._sync_lock.acquire(blocking=False):
+                return None
+            try:
+                now = self._clock()
+                with self._database().unit_of_work(
+                    timeout=self._writer_wait_seconds
+                ) as db:
+                    counts = run_purge(db, self._key_values, now=now)
+            finally:
+                self._sync_lock.release()
+            if counts is not None:
+                self._write_marker(now)
+            return counts
         except Exception as exc:  # noqa: BLE001 - rolled back, logged, not retried
             self._stopped = True
             _LOGGER.error(
