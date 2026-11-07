@@ -51,8 +51,12 @@ import server
 from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
+from backend.providers.canonical_plans import (
+    INTERVALS_POWER_CURVE_KEY,
+    intervals_ingest_plan,
+)
 from backend.providers.snapshot_projection import stored_retrieved_at
-from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
+from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 FIXTURE_SOURCE = "synthetic fixture"
@@ -513,7 +517,15 @@ def _save_intervals_snapshot(db, snapshot):
     state an installation shows before its first completed backfill.
     """
     server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
-    ingest_intervals_partial_snapshot(db, snapshot, zone=UTC)
+    retrieved_at = stored_retrieved_at(snapshot, zone=UTC)
+    if retrieved_at is not None:
+        plan = intervals_ingest_plan(
+            snapshot.get("raw_provider_data"),
+            zone=UTC,
+            retrieved_at=retrieved_at,
+            power_curve=snapshot.get(INTERVALS_POWER_CURVE_KEY),
+        )
+        ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=UTC)
     if stored_retrieved_at(
         snapshot, zone=UTC
     ) is None or server.CANONICAL_READ.serves_tables(db):

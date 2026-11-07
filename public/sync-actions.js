@@ -1,48 +1,3 @@
-function intervalsIngestEnabled() {
-  return Boolean(state.data?.sync_settings?.intervals_ingest_enabled);
-}
-
-// Off: the button reads the recent window once (one_off) and the switch stays off.
-async function syncNow(event) {
-  const button = event?.currentTarget || $("#activitiesSyncButton");
-  const compactButton = button.id === "systemIntervalsSyncButton";
-  const oneOff = !intervalsIngestEnabled();
-  const defaultCaption = compactButton ? intervalsSyncCaption() : "Aktivitäten aktualisieren";
-  const configuredDays = $("#intervalsSyncDays")?.value || state.data?.sync_settings?.intervals_days || 84;
-  state.localSync.intervals = true;
-  button.disabled = true; button.classList.add("busy"); button.textContent = compactButton ? "Synchronisierung läuft…" : "Aktivitäten werden aktualisiert…";
-  try {
-    const body = oneOff ? { one_off: true } : { days: configuredDays };
-    const result = await api("/api/sync", { method: "POST", body: JSON.stringify(body) });
-    if (!result.id) throw new Error("Die Jobbestätigung fehlt.");
-    const completed = await waitForSyncJob(result.id);
-    if (completed.status !== "completed") throw new Error(providerJobErrorDetail(completed) || "Synchronisierung nicht vollständig abgeschlossen.");
-    toast("Aktualisierung abgeschlossen");
-    invalidateContextPreview();
-    await load();
-  } catch (error) { toast(error.message, true); await load(); }
-  finally { state.localSync.intervals = false; button.disabled = false; button.classList.remove("busy"); button.textContent = defaultCaption; }
-}
-
-function intervalsSyncCaption() {
-  return intervalsIngestEnabled() ? "Synchronisieren" : "Einmal abrufen";
-}
-
-async function toggleIntervalsIngest(button) {
-  const enabled = !intervalsIngestEnabled();
-  const message = enabled
-    ? "Aktivitäten, Wellness und Athletendaten wieder täglich von Intervals.icu einlesen?"
-    : "Nichts mehr von Intervals.icu einlesen? Workouts, Wettkämpfe, Ernährung und Schwellen werden weiter dorthin gesendet.";
-  if (!await requestConfirmation(message, { title: enabled ? "Einlesen einschalten?" : "Einlesen ausschalten?" })) return;
-  button.disabled = true;
-  try {
-    await api("/api/settings/intervals-ingest", { method: "PUT", body: JSON.stringify({ enabled }) });
-    toast(enabled ? "Intervals.icu wird wieder eingelesen" : "Intervals.icu wird nicht mehr eingelesen");
-    await load();
-  } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; }
-}
-
 async function syncGarmin() {
   const button = $("#garminSyncButton");
   if (!button) return;
@@ -118,9 +73,8 @@ async function syncWahoo() {
   finally { state.localSync.wahoo = false; renderSettings(state.data || {}); }
 }
 
-// Each full-resync control is found by provider id: Intervals.icu keeps its system-card button.
 function fullResyncButtonSelector(source) {
-  return source === providerIds().intervals ? "#systemIntervalsFullResyncButton" : `#${source}FullResyncButton`;
+  return `#${source}FullResyncButton`;
 }
 
 // Wahoo's full resync re-reads the last 90 days and deletes nothing; the wording must say so.

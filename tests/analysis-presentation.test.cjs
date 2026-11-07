@@ -69,7 +69,7 @@ test("race prediction rows exclude body weight and empty states give a reason", 
 
   assert.equal(
     racePredictionEmptyReason({ weight_kg: { value: 72.4 } }),
-    "Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Intervals.icu oder Garmin.",
+    "Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Garmin oder Wahoo.",
   );
   assert.match(racePredictionEmptyReason({ run_threshold_pace_seconds_per_km: { value: 290 } }), /^Noch keine Prognosen – Laufwerte sind vorhanden/);
 });

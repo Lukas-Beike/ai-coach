@@ -417,16 +417,6 @@ function renderConnectionsSyncProgress(data) {
   root.replaceChildren();
   const entries = [];
   const activeProviders = new Set();
-  const sync = data.sync || {};
-  const intervalRunning = Boolean(sync.running || state.localSync.intervals);
-  if (intervalRunning) {
-    entries.push(connectionProgressEntry(
-      "Intervals.icu",
-      sync.message || sync.status || "Intervals.icu-Synchronisierung wird gestartet…",
-      progressPercentage(sync.progress),
-    ));
-    activeProviders.add(providerIds().intervals);
-  }
   const garminSync = data.garmin_sync || {};
   const garminRunning = Boolean(garminSync.running || state.localSync.garmin);
   if (garminRunning) {
@@ -436,7 +426,6 @@ function renderConnectionsSyncProgress(data) {
   }
   const resyncs = data.provider_resync || {};
   [
-    [providerIds().intervals, state.localSync.intervalsFull],
     [providerIds().garmin, state.localSync.garminFull],
     [providerIds().wahoo, state.localSync.wahooFull],
   ].forEach(([provider, localRunning]) => {
@@ -550,8 +539,7 @@ function renderProviderFreshness(data) {
 async function retryProvider(provider, button) {
   if (button) button.disabled = true;
   try {
-    if (provider === providerIds().intervals) await syncNow({ currentTarget: $("#systemIntervalsSyncButton") });
-    else if (provider === providerIds().garmin) await syncGarmin();
+    if (provider === providerIds().garmin) await syncGarmin();
     else if (provider === "weather") await syncWeather();
     else if (provider === "calendar") await syncExternalCalendar();
   } finally {

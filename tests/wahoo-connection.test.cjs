@@ -23,7 +23,6 @@ function loadSyncActions(route) {
   const selectors = [];
   const toasts = [];
   const buttons = {
-    "#systemIntervalsFullResyncButton": fakeButton(),
     "#garminFullResyncButton": fakeButton(),
     "#wahooSyncButton": fakeButton(),
     "#wahooFullResyncButton": fakeButton(),
@@ -200,13 +199,10 @@ test("Wahoo full resync posts the confirmed request with CSRF and a confirmation
   assert.equal(harness.context.state.localSync.wahooFull, false);
 });
 
-test("Garmin and Intervals.icu full resync keep their routes, controls and deletion wording", async () => {
+test("Garmin full resync keeps its route, control and deletion wording", async () => {
   const harness = loadSyncActions(() => ({ body: { status: "ok" } }));
   await vm.runInContext("fullResync('garmin')", harness.context);
-  await vm.runInContext("fullResync('intervals')", harness.context);
-  assert.deepEqual(harness.calls.map((call) => call.path), ["/api/garmin/full-resync", "/api/intervals/full-resync"]);
+  assert.deepEqual(harness.calls.map((call) => call.path), ["/api/garmin/full-resync"]);
   assert.ok(harness.selectors.includes("#garminFullResyncButton"));
-  assert.ok(harness.selectors.includes("#systemIntervalsFullResyncButton"));
   assert.match(harness.confirmations[0].message, /löschen/);
-  assert.match(harness.confirmations[1].message, /löschen/);
 });
