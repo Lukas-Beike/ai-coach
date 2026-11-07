@@ -32,5 +32,9 @@ test("race results show time, distance, pace or power and their source", () => {
     context.competitionResult({ sport: "ride", duration_s: 3600, distance_m: 36000, avg_speed_mps: 10 }),
     "1:00:00 · 36,0 km · 36 km/h",
   );
+  assert.equal(
+    context.competitionResult({ sport: "swim", duration_s: 1500, distance_m: 1500, avg_speed_mps: 1 }),
+    "25:00 · 1,5 km · 1:40 /100 m",
+  );
   assert.equal(context.competitionResult({ sport: "run", source: "Garmin Connect" }), null);
 });

@@ -244,7 +244,7 @@ function competitionResult(result) {
     if (Number.isFinite(power) && power > 0) effort = `${Math.round(power)} W`;
     else if (hasSpeed) effort = `${AppFormat.number(speed * 3.6)} km/h`;
   } else if (hasSpeed) {
-    effort = `${AppFormat.clock(1000 / speed)} /km`;
+    effort = result.sport === "swim" ? `${AppFormat.clock(100 / speed)} /100 m` : `${AppFormat.clock(1000 / speed)} /km`;
   }
   const time = result.duration_s == null ? null : AppFormat.clock(result.duration_s);
   const value = [time, AppFormat.distance(result.distance_m), effort].filter(Boolean).join(" · ");
