@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import date
 from typing import Any
 
-from backend.errors import AppError
+from backend.errors import COACH_ABORTED_ERROR, AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.sync.garmin_service import (
     GARMIN_AUTOMATIC_SYNC_DAYS,
@@ -181,12 +181,20 @@ class GarminSynchronousRefresh:
         )
 
 
+# Days a waiting Coach refresh reads from Wahoo when it names no usable window.
+WAHOO_COACH_REFRESH_DAYS = 7
+
+
 class WahooSynchronousRefresh:
     """Runs the Wahoo workout refresh inline for a Coach request that waits.
 
     A scheduled or manual run that holds the Wahoo lock is awaited for up to
-    ``wait_seconds`` before this request reads; a partial read is reported as
-    ``partial`` and an unconnected Wahoo account fails the refresh.
+    ``wait_seconds`` before this request reads; a cancelled request never starts
+    a read. Like the Garmin refresh it reads a short catch-up window: no ``days``
+    or the whole-history sentinel use ``WAHOO_COACH_REFRESH_DAYS`` and an
+    explicit window is kept, both bounded by the stored Wahoo sync period
+    (``stored_days``). A partial read is reported as ``partial`` and an
+    unconnected Wahoo account fails the refresh.
     """
 
     def __init__(
@@ -197,7 +205,9 @@ class WahooSynchronousRefresh:
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
         wait_seconds: float = 120.0,
         poll_seconds: float = 0.5,
+        stored_days: Callable[[], int] | None = None,
     ) -> None:
+        self._stored_days = stored_days
         self._wahoo_sync_service = wahoo_sync_service
         self._all_sync_days = all_sync_days
         self._registry = registry
@@ -220,7 +230,9 @@ class WahooSynchronousRefresh:
         )
         label = self._registry.get(provider).label
         self._wait_for_running_sync(cancel_event)
-        result = self._wahoo_sync_service.sync(days, "Chat-Anfrage")
+        if cancel_event is not None and cancel_event.is_set():
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
+        result = self._wahoo_sync_service.sync(self._window(days), "Chat-Anfrage")
         _raise_if_busy(result, label)
         status = result.get("status")
         if status == "not_configured":
@@ -242,6 +254,17 @@ class WahooSynchronousRefresh:
             "partial": status == "partial",
             "synchronous_refresh": True,
         }
+
+    def _window(self, days: int | None) -> int:
+        """Return the short catch-up window, bounded by the stored sync period."""
+        if days is None or days == self._all_sync_days:
+            window = WAHOO_COACH_REFRESH_DAYS
+        else:
+            window = days
+        if self._stored_days is None:
+            return window
+        stored = self._stored_days()
+        return window if stored == self._all_sync_days else max(1, min(window, stored))
 
     def _wait_for_running_sync(self, cancel_event: threading.Event | None) -> None:
         deadline = time.monotonic() + self._wait_seconds

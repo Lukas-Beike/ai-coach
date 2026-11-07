@@ -185,7 +185,14 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
         )
 
     def synchronous_refresh() -> WahooSynchronousRefresh:
-        return WahooSynchronousRefresh(wahoo.sync_service(), all_sync_days)
+        state = deps.state.sync_state_repository()
+        return WahooSynchronousRefresh(
+            wahoo.sync_service(),
+            all_sync_days,
+            stored_days=lambda: state.sync_period(
+                WAHOO_ID, deps.historical.sync_period_defaults, all_sync_days
+            ),
+        )
 
     return ProviderRuntimeBinding(
         provider_id=WAHOO_ID,

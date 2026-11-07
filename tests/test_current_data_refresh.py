@@ -79,7 +79,7 @@ class CurrentDataRefreshTests(unittest.TestCase):
 
         self.assertEqual("completed", result["status"])
         self.assertEqual(3, wahoo_sync.running.call_count)
-        wahoo_sync.sync.assert_called_once_with(None, "Chat-Anfrage")
+        wahoo_sync.sync.assert_called_once_with(7, "Chat-Anfrage")
 
     def test_a_partial_or_busy_wahoo_read_is_reported_honestly(self) -> None:
         garmin_sync, wahoo_sync, intervals_client = Mock(), Mock(), Mock()
@@ -99,20 +99,48 @@ class CurrentDataRefreshTests(unittest.TestCase):
             service.start(WAHOO_ID, {"_wait_for_completion": True})
         self.assertEqual("not_configured", missing.exception.reason)
 
-    def test_a_cancelled_wait_stops_before_the_wahoo_read_is_blocked_forever(
-        self,
-    ) -> None:
-        garmin_sync, wahoo_sync, intervals_client = Mock(), Mock(), Mock()
-        service, _queue = _command_service(garmin_sync, wahoo_sync, intervals_client)
-        wahoo_sync.running.return_value = True
-        wahoo_sync.sync.return_value = {"status": "already_running"}
-        cancelled = threading.Event()
-        cancelled.set()
+    def test_a_cancelled_request_never_starts_a_wahoo_read(self) -> None:
+        for held in (False, True):
+            with self.subTest(lock_held=held):
+                garmin_sync, wahoo_sync, intervals_client = Mock(), Mock(), Mock()
+                service, _queue = _command_service(
+                    garmin_sync, wahoo_sync, intervals_client
+                )
+                wahoo_sync.running.return_value = held
+                cancelled = threading.Event()
+                cancelled.set()
 
-        with self.assertRaises(AppError):
-            service.start(
-                WAHOO_ID, {"_wait_for_completion": True}, cancel_event=cancelled
-            )
+                with self.assertRaises(AppError) as raised:
+                    service.start(
+                        WAHOO_ID, {"_wait_for_completion": True}, cancel_event=cancelled
+                    )
+
+                self.assertEqual("chat_cancelled", raised.exception.reason)
+                self.assertEqual(499, raised.exception.status)
+                wahoo_sync.sync.assert_not_called()
+
+    def test_the_wahoo_window_is_short_and_bounded_by_the_stored_period(self) -> None:
+        cases = (
+            (None, 84, 7),
+            (-1, 84, 7),
+            (30, 84, 30),
+            (30, 14, 14),
+            (None, 3, 3),
+            (-1, -1, 7),
+        )
+        for requested, stored, expected in cases:
+            with self.subTest(requested=requested, stored=stored):
+                wahoo_sync = Mock()
+                wahoo_sync.running.return_value = False
+                wahoo_sync.sync.return_value = {"status": "ok"}
+                refresh = WahooSynchronousRefresh(
+                    wahoo_sync, -1, poll_seconds=0.001, stored_days=lambda s=stored: s
+                )
+                arguments = {} if requested is None else {"days": requested}
+
+                refresh.refresh(WAHOO_ID, arguments, None)
+
+                wahoo_sync.sync.assert_called_once_with(expected, "Chat-Anfrage")
 
     def test_intervals_has_no_refresh_to_wait_for_or_queue(self) -> None:
         garmin_sync, wahoo_sync, intervals_client = Mock(), Mock(), Mock()
