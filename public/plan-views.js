@@ -25,6 +25,15 @@ function stopSummaryToggle(event) {
   event.stopPropagation();
 }
 
+function plannedCoachButton(label, prompt) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary-button planned-conflict-button";
+  button.textContent = label;
+  button.addEventListener("click", (event) => { stopSummaryToggle(event); void globalThis.askCoach?.(prompt); });
+  return button;
+}
+
 function plannedGarminBlockedText(entry) {
   const reason = entry?.push_blocked && Object.values(entry.push_blocked)[0];
   if (reason === "no_structure") return "Keine Kraftstruktur – nicht an Garmin gesendet";
@@ -1083,15 +1092,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const unmapped = Array.isArray(entry.push_unmapped) ? entry.push_unmapped : [];
     block.append(...unmapped.map((exercise) => plannedUnmappedExercise(entry, exercise, unit)));
     return block.childElementCount ? block : null;
-  }
-
-  function plannedCoachButton(label, prompt) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary-button planned-conflict-button";
-    button.textContent = label;
-    button.addEventListener("click", (event) => { stopSummaryToggle(event); void globalThis.askCoach?.(prompt); });
-    return button;
   }
 
   // One unmatched exercise: its catalogue suggestions, each a one-tap pick
