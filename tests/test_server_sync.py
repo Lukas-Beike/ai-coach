@@ -207,6 +207,60 @@ class ServerSyncTests(ServerTestCase):
         coach_stop.assert_called_once_with()
         coach_join.assert_called_once_with(timeout=5)
 
+    def test_persisted_intervals_ingest_jobs_are_retired_unrun(self):
+        now = "2026-11-07T10:00:00+00:00"
+        ids = []
+        with server.database_manager().unit_of_work() as db:
+            for index, job_type in enumerate(
+                (
+                    "refresh",
+                    "performance_refresh",
+                    "activity_details",
+                    "historical_backfill",
+                )
+            ):
+                job_id = f"legacy-{index}"
+                ids.append(job_id)
+                db.execute(
+                    "INSERT INTO sync_jobs(id, provider, type, status, payload, requested_by, "
+                    "attempts, progress_total, progress_completed, available_at, created_at, "
+                    "updated_at) VALUES (?, 'intervals', ?, ?, '{}', 'scheduler', 0, 1, 0, ?, ?, ?)",
+                    (
+                        job_id,
+                        job_type,
+                        "running" if index == 3 else "queued",
+                        now,
+                        now,
+                        now,
+                    ),
+                )
+                db.execute(
+                    "INSERT INTO sync_job_items(id, job_id, item_key, operation, payload_hash, "
+                    "status, attempts, created_at, updated_at) "
+                    "VALUES (?, ?, 'job', 'refresh', 'h', ?, 0, ?, ?)",
+                    (
+                        f"{job_id}-0",
+                        job_id,
+                        "running" if index == 3 else "queued",
+                        now,
+                        now,
+                    ),
+                )
+        # The interrupted one is requeued by the restart recovery, like any other.
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().resume_interrupted(), 1)
+        executor = server.SYNC_JOB_EXECUTION.executor()
+        with patch.object(
+            sync_executor.SyncJobExecutor, "execute", side_effect=AssertionError("ran")
+        ):
+            for _ in ids:
+                claimed = server.SYNC_JOB_QUEUE.store().claim()
+                self.assertIsNotNone(claimed)
+                executor.run(claimed)
+        for job_id in ids:
+            state = server.SYNC_JOB_QUEUE.service().state(job_id)
+            self.assertEqual(state["status"], "completed", job_id)
+            self.assertIsNone(state["error_class"])
+
     def test_persistent_sync_job_claim_resume_retry_and_completion(self):
         job = server.SYNC_JOB_QUEUE.service().enqueue(
             "garmin", "refresh", {"days": 7}, requested_by="user"
@@ -386,10 +440,6 @@ class ServerSyncTests(ServerTestCase):
 
         self.assertEqual(error.exception.reason, "intent_scope_denied")
         enqueue.assert_not_called()
-
-
-
-
 
     def test_apply_result_deduplicates_changed_ids_for_sync(self):
         planned = server.PLANNING_DATA.planned_unit().create(
@@ -577,8 +627,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(status["phase"], "fetching")
         self.assertEqual(status["state_versions"], {"activities": "v1"})
         self.assertNotIn("activities", json.dumps(status["message"]))
-
-
 
     def test_daily_sync_scheduler_uses_local_provider_markers(self):
         import inspect
@@ -806,7 +854,6 @@ class ServerSyncTests(ServerTestCase):
         # The Garmin FTP is compared with its own canonical history only, never
         # with the Intervals.icu 280 W.
         self.assertEqual(comparison["average"], 300)
-
 
     def test_synced_library_template_must_be_archived_instead_of_deleted(self):
         entry = remote_reconcilers.library_reconciler(server).reconcile(
@@ -1158,7 +1205,6 @@ class ServerSyncTests(ServerTestCase):
             client.get_paged_collection("/athlete/0/activities", {}, "activities")
         self.assertEqual(raised.exception.status, 502)
 
-
     def test_plan_push_job_requires_bounded_selected_hashed_entries(self):
         local_id = str(uuid.uuid4())
         entry = {"library_workout_id": local_id, "expected_payload_hash": "a" * 64}
@@ -1207,7 +1253,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertFalse(preview["snapshot_compacted"])
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])
-
 
     def test_sync_period_supports_all_available_data_marker(self):
         from backend.sync.windows import split_date_windows
@@ -1274,21 +1319,6 @@ class ServerSyncTests(ServerTestCase):
                 all_days=-1,
             )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def test_explicit_competition_sync_records_create_change_and_delete_contract(self):
         event_date = (
             _local_datetime.now().astimezone().date() + timedelta(days=30)
@@ -1315,7 +1345,7 @@ class ServerSyncTests(ServerTestCase):
             ),
         ):
             created = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "explicit approval", 
+                "explicit approval",
             )
             server.PLANNING_DATA.competition().save(
                 {
@@ -1327,16 +1357,13 @@ class ServerSyncTests(ServerTestCase):
             )
             server.ATHLETE_DATA.context().save({}, [])
             deleted = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "explicit approval", 
+                "explicit approval",
             )
         self.assertEqual(created["pushed"], 1)
         self.assertEqual(deleted["deleted_remote"], 1)
         self.assertEqual(
             [call["method"] for call in recorder.mutations], ["POST", "DELETE"]
         )
-
-
-
 
     def test_full_garmin_resync_keeps_last_snapshot_on_provider_failure(self):
         save_garmin({"old": True})
@@ -1451,10 +1478,10 @@ class ServerSyncTests(ServerTestCase):
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", 
+                "test",
             )
             second = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", 
+                "test",
             )
 
         self.assertEqual(result["pushed"], 1)
@@ -1467,8 +1494,6 @@ class ServerSyncTests(ServerTestCase):
         synced = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(synced["intervals_event_id"], "12345")
         self.assertEqual(synced["sync_dirty"], 0)
-
-
 
     def test_competition_sync_skips_unsupported_local_sports(self):
         event_date = (
@@ -1597,9 +1622,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("activity_eftp_watts", estimates)
         self.assertEqual(estimates["activity_configured_ftp_watts"], 300)
 
-
-
-
     def test_intervals_validation_error_includes_safe_provider_detail(self):
         error_body = json.dumps({"error": {"message": "Invalid workout type"}}).encode(
             "utf-8"
@@ -1628,8 +1650,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(raised.exception.status, 502)
         self.assertIn("422", raised.exception.message)
         self.assertIn("Invalid workout type", raised.exception.message)
-
-
 
     def test_selected_library_sync_is_exact_and_reports_per_object(self):
         first = server.PLANNING_DATA.workout_library().create_local_entry(

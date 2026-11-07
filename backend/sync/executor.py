@@ -608,6 +608,22 @@ def build_job_owners(
     }
 
 
+# Job types the Intervals.icu ingest queued before it was removed (#1728). A
+# persisted one is retired unrun: it is neither executed nor offered for retry.
+INTERVALS_INGEST_JOB_TYPES = frozenset(
+    {"refresh", "performance_refresh", "activity_details", "historical_backfill"}
+)
+INGEST_REMOVED_REASON = "intervals_ingest_removed"
+
+
+def is_retired_intervals_ingest_job(job: Mapping[str, Any]) -> bool:
+    """Return whether a persisted job is an obsolete Intervals.icu ingest job."""
+    return (
+        str(job.get("provider") or "") == INTERVALS_ID
+        and str(job.get("type") or "") in INTERVALS_INGEST_JOB_TYPES
+    )
+
+
 class SyncJobExecutor:
     """Run one claimed job and persist its outcome and any backfill follow-up."""
 
@@ -632,6 +648,11 @@ class SyncJobExecutor:
     def run(self, job: dict[str, Any]) -> None:
         """Execute a claimed job, recording failures through its outcome owner."""
         try:
+            if is_retired_intervals_ingest_job(job):
+                self._outcome_service.complete(
+                    job["id"], {"status": "skipped", "reason": INGEST_REMOVED_REASON}
+                )
+                return
             result = self.execute(job)
             fallback_status = self._outcome_service.complete(job["id"], result)
             self._historical_sync.queue_next(job, result, fallback_status)
