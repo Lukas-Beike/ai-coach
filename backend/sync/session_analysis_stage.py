@@ -259,7 +259,7 @@ class SessionAnalysisStage:
             },
         )
         thresholds = _thresholds(db, self._reader, self._preferences(db))
-        sessions = []
+        sessions: list[tuple[_Session, Mapping[str, Any] | None]] = []
         for summary in summaries:
             session_id = str(summary["id"])
             own = keys.get(session_id, ())
