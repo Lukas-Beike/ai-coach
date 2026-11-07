@@ -287,16 +287,26 @@ class IntervalsSyncJobOwner:
             return result
         if result.get("status") == "already_running":
             return result
-        if self._activity_detail_service is not None and not ingest_off:
-            try:
-                result["detail_prefetch"] = self._activity_detail_service.prefetch_new(
-                    self._intervals_resync_gate.operation
-                )
-            except Exception:  # noqa: BLE001 - prefetch is best effort; the window is synced
-                result["detail_prefetch"] = {"status": "error"}
+        if not ingest_off:
+            self._prefetch_details(result)
+        return self._reconcile_competitions(result, reason, job["id"])
+
+    def _prefetch_details(self, result: dict[str, Any]) -> None:
+        if self._activity_detail_service is None:
+            return
+        try:
+            result["detail_prefetch"] = self._activity_detail_service.prefetch_new(
+                self._intervals_resync_gate.operation
+            )
+        except Exception:  # noqa: BLE001 - prefetch is best effort; the window is synced
+            result["detail_prefetch"] = {"status": "error"}
+
+    def _reconcile_competitions(
+        self, result: dict[str, Any], reason: str, operation_id: str
+    ) -> dict[str, Any]:
         try:
             result["competitions"] = self._sync_competitions(
-                reason, push_local=False, operation_id=job["id"]
+                reason, push_local=False, operation_id=operation_id
             )
         except Exception:  # noqa: BLE001 - competition failure remains a partial refresh
             # The job stays partial so the competitions section can be retried;

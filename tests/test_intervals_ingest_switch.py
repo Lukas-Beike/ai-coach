@@ -7,6 +7,7 @@ import unittest
 from contextlib import nullcontext
 from datetime import UTC
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock, Mock
 
 from canonical_detail_support import open_manager
@@ -61,7 +62,7 @@ class IngestGateTests(unittest.TestCase):
         followup = Mock()
         followup.enqueue_after_sync.return_value = None
         service = IntervalsSyncService(
-            SimpleNamespace(intervals_api_key="configured"),
+            cast(Any, SimpleNamespace(intervals_api_key="configured")),
             workflow,
             followup,
             Mock(),
@@ -87,9 +88,16 @@ class IngestGateTests(unittest.TestCase):
         runtime.operation.assert_called_once()
         followup.enqueue_after_sync.assert_not_called()
 
+    def test_one_off_sync_keeps_the_follow_up_while_on(self) -> None:
+        service, _runtime, followup = self.sync_service(True)
+
+        service.sync("Vollständiger Resync", activity_days=-1, one_off=True)
+
+        followup.enqueue_after_sync.assert_called_once()
+
     def test_unconfigured_sync_still_reports_not_configured(self) -> None:
         service = IntervalsSyncService(
-            SimpleNamespace(intervals_api_key=""),
+            cast(Any, SimpleNamespace(intervals_api_key="")),
             Mock(),
             Mock(),
             Mock(),
@@ -115,10 +123,10 @@ class IngestGateTests(unittest.TestCase):
     def test_full_resync_is_refused_while_off(self) -> None:
         service = Mock()
         resync = IntervalsFullResync(
-            config=SimpleNamespace(intervals_api_key="configured"),
+            config=cast(Any, SimpleNamespace(intervals_api_key="configured")),
             intervals_service=service,
             competition_service=Mock(),
-            gate=SimpleNamespace(operation=nullcontext),
+            gate=cast(Any, SimpleNamespace(operation=nullcontext)),
             all_sync_days=-1,
             ingest_enabled=lambda: False,
         )

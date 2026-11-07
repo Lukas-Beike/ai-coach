@@ -182,7 +182,7 @@ async function waitForSyncJob(jobId) {
     const job = await api(`/api/sync/jobs/${encodeURIComponent(jobId)}`);
     // A non-retryable error (for example a missing provider configuration) will
     // not change while polling, so stop now and show the job's own message.
-    if ([job.error_class, job.error_code].some(providerErrorIsNonRetryable)) {
+    if ([job.error_class, job.error_code].some((value) => providerErrorIsNonRetryable(value))) {
       throw new Error(providerJobErrorDetail(job) || "Die Anbindung ist nicht vollständig konfiguriert. Bitte die Verbindungseinstellungen unter Mehr prüfen.");
     }
     if (["completed", "partial", "failed"].includes(job.status)) return job;
