@@ -270,30 +270,72 @@ def upsert_local_zone_configuration(
     """Write one zone configuration the athlete set locally, which has no provider.
 
     Saving unchanged values still dates the row, so a re-confirmed threshold
-    counts as current (``local_zone_saved_days``); ``renew=False`` (an undo)
-    keeps the stored date of unchanged values.
+    counts as current (``local_zone_saved_days``). A save that replaces the
+    active row keeps the replaced save date in the row's details, so an undo
+    can restore it (``local_zone_previous_saved_at``). ``renew=False`` (an
+    undo) writes the row dated ``now`` without keeping a replaced date.
     """
     require_instance(configuration, ZoneConfiguration, "configuration")
     if configuration.provenance.provider is not None:
         raise ValueError("a local zone configuration has no provider")
     row = _zone_row(configuration, None)
+    key = row["config_key"]
+    replaced = _active_local_zone_saved_at(db, str(key)) if renew else None
     outcome = _upsert(db, _ZONES, row, now=now)
-    if outcome is WriteOutcome.UNCHANGED and renew:
+    if not renew:
+        return outcome
+    if outcome is WriteOutcome.UNCHANGED:
         db.execute(
             f"UPDATE {_ZONES.name} SET updated_at = ? WHERE config_key = ?",
-            (now, row["config_key"]),
+            (now, key),
+        )
+    elif replaced is not None:
+        db.execute(
+            f"UPDATE {_ZONES.name} SET details = json_set(details, ?, ?) "
+            "WHERE config_key = ?",
+            (_PREVIOUS_SAVED_AT, replaced, key),
         )
     return outcome
 
 
+_PREVIOUS_SAVED_AT: Final = "$.previous_saved_at"
+
+
+def _active_local_zone_saved_at(db: Any, config_key: str) -> str | None:
+    rows = _fetch_all(
+        db,
+        f"SELECT updated_at FROM {_ZONES.name} "
+        "WHERE config_key = ? AND provider IS NULL AND state = ?",
+        (config_key, _ACTIVE),
+    )
+    return str(rows[0]["updated_at"]) if rows else None
+
+
+def local_zone_previous_saved_at(db: Any, config_key: str) -> str | None:
+    """The save date the last save or removal of a local row replaced, if kept."""
+    rows = _fetch_all(
+        db,
+        f"SELECT json_extract(details, ?) AS saved_at FROM {_ZONES.name} "
+        "WHERE config_key = ? AND provider IS NULL",
+        (_PREVIOUS_SAVED_AT, config_key),
+    )
+    value = rows[0]["saved_at"] if rows else None
+    return None if value is None else str(value)
+
+
 def retire_local_zone_configuration(db: Any, config_key: str, *, now: str) -> bool:
-    """Retire one active local zone configuration; False when none is active."""
+    """Retire one active local zone configuration; False when none is active.
+
+    The removed value's save date stays in the details for an undo.
+    """
     cursor = db.execute(
-        "UPDATE zone_configurations SET state = ?, updated_at = ? "
+        "UPDATE zone_configurations SET state = ?, updated_at = ?, "
+        "details = json_set(details, ?, updated_at) "
         "WHERE config_key = ? AND provider IS NULL AND state = ?",
         (
             _RETIRED,
             now,
+            _PREVIOUS_SAVED_AT,
             require_text(config_key, "config_key", max_length=512),
             _ACTIVE,
         ),

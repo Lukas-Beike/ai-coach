@@ -305,7 +305,8 @@ class ZoneConfigurationService:
         # The restored value keeps the age of its own save, so an undo never
         # makes an old threshold look freshly confirmed (#1768).
         saved_at = (
-            change_history.value_recorded_at(db, ENTITY_TYPE, key, restored or {})
+            canonical_domain_store.local_zone_previous_saved_at(db, key)
+            or change_history.value_recorded_at(db, ENTITY_TYPE, key, restored or {})
             or self._now()
         )
         canonical_domain_store.upsert_local_zone_configuration(
