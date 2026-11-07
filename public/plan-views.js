@@ -19,6 +19,12 @@ function plannedPushTargetLabel(provider, entry, ids = {}) {
   return provider;
 }
 
+// Controls sit in the card summary; a click must not toggle the card.
+function stopSummaryToggle(event) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 function plannedGarminBlockedText(entry) {
   const reason = entry?.push_blocked && Object.values(entry.push_blocked)[0];
   if (reason === "no_structure") return "Keine Kraftstruktur – nicht an Garmin gesendet";
@@ -1062,9 +1068,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   // Why a strength unit cannot reach the watch, with the action that fixes it:
   // the Coach structures a free-text unit; an unmatched exercise takes one of
   // the catalogue suggestions or goes to the Coach.
-  function plannedGarminBlocked(entry, dateKey) {
+  function plannedGarminBlocked(entry, dateKey, todayKey, actual) {
     const reason = entry.push_blocked?.[providerIds().garmin];
-    if (!reason || !entry.local_id || entry.is_completed_activity) return null;
+    if (!reason || actual || dateKey < todayKey || !entry.local_id || entry.is_completed_activity) return null;
     const block = document.createElement("span");
     block.className = "planned-conflict planned-garmin-blocked";
     const unit = `„${entry.name || "Krafteinheit"}“ am ${dateLabel(dateKey)}`;
@@ -1077,12 +1083,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const unmapped = Array.isArray(entry.push_unmapped) ? entry.push_unmapped : [];
     block.append(...unmapped.map((exercise) => plannedUnmappedExercise(entry, exercise, unit)));
     return block.childElementCount ? block : null;
-  }
-
-  // The button sits in the card summary; a click must not toggle the card.
-  function stopSummaryToggle(event) {
-    event.preventDefault();
-    event.stopPropagation();
   }
 
   function plannedCoachButton(label, prompt) {
@@ -1152,7 +1152,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (profile) cardSummary.append(profile);
     const conflict = plannedConflict(entry, dateKey);
     if (conflict) cardSummary.append(conflict);
-    const garminBlocked = !actual && dateKey >= todayKey ? plannedGarminBlocked(entry, dateKey) : null;
+    const garminBlocked = plannedGarminBlocked(entry, dateKey, todayKey, actual);
     if (garminBlocked) cardSummary.append(garminBlocked);
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
