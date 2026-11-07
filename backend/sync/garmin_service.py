@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, date, timedelta
 from pathlib import Path
@@ -276,9 +276,12 @@ class GarminRemoteReader:
         self,
         provider_activity_ids: Sequence[str],
         *,
+        strength_ids: Collection[str] = (),
         cancel_event: threading.Event | None = None,
     ) -> Generator[tuple[str, dict[str, Any]]]:
         """Collect the bounded detail sets of several Garmin activities.
+
+        Activities in ``strength_ids`` also get their exercise sets.
 
         One client is authenticated for the whole batch, and the Garmin tokens are
         persisted when the generator finishes or is closed early. A payload gets
@@ -315,6 +318,7 @@ class GarminRemoteReader:
                     capability_allowed=allowed,
                     capability_failure=record_failure,
                     capability_success=self._state_service.record_capability_success,
+                    exercise_sets=provider_activity_id in strength_ids,
                 )
                 if rate_limit_hits:
                     detail["rate_limited"] = True
@@ -327,11 +331,14 @@ class GarminRemoteReader:
         self,
         provider_activity_id: str,
         *,
+        strength: bool = False,
         cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         """Collect the bounded detail sets of one Garmin activity."""
         details = self.fetch_activity_details(
-            [provider_activity_id], cancel_event=cancel_event
+            [provider_activity_id],
+            strength_ids=(provider_activity_id,) if strength else (),
+            cancel_event=cancel_event,
         )
         try:
             item = next(details, None)

@@ -94,6 +94,8 @@ class FeedbackRatingTimeMigrationTests(unittest.TestCase):
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
         after = all_rows(db)
+        # Schema v22 adds the strength set table, empty after any upgrade.
+        self.assertEqual(after.pop("activity_strength_sets"), [])
         self.assertEqual(set(after), set(before))
         for table, rows in before.items():
             if table != "activity_feedback":

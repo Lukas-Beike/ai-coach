@@ -59,7 +59,9 @@ TimeoutErrorFactory = Callable[[], Exception]
 # Version 10 adds activity_feedback.session_rpe_rated_at (schema v18).
 # Version 11 adds observations.state and observations.owner_record_id; retired
 # observations are included (schema v21).
-PRIVACY_EXPORT_FORMAT_VERSION = 11
+# Version 12 adds activity_strength_sets and activity_detail_sets.set_source
+# (schema v22).
+PRIVACY_EXPORT_FORMAT_VERSION = 12
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -69,6 +71,7 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "activity_stream_channels.jsonl",
     "activity_laps.jsonl",
     "activity_zone_times.jsonl",
+    "activity_strength_sets.jsonl",
     "activity_detail_analysis.jsonl",
     "sleep_periods.jsonl",
     "zone_configurations.jsonl",
@@ -463,6 +466,10 @@ class PrivacyArchiveExportService:
                     (
                         "activity_zone_times",
                         "provider, provider_activity_id, detail_kind, zone_index",
+                    ),
+                    (
+                        "activity_strength_sets",
+                        "provider, provider_activity_id, set_index",
                     ),
                 ):
                     self._write_jsonl(

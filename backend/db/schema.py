@@ -421,6 +421,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "resolution",
         "lap_source",
         "zone_boundary_source",
+        "set_source",
         "summary_sha256",
         "content_sha256",
         "fetched_at",
@@ -468,6 +469,20 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "lower_bound",
         "upper_bound",
         "label",
+    },
+    "activity_strength_sets": {
+        "provider",
+        "provider_activity_id",
+        "detail_kind",
+        "set_index",
+        "set_type",
+        "exercise_category",
+        "exercise_name",
+        "reps",
+        "weight_kg",
+        "duration_s",
+        "start_offset_s",
+        "workout_step_index",
     },
     "activity_detail_analysis": {
         "activity_id",
@@ -658,7 +673,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 21
+CURRENT_SCHEMA_VERSION = 22
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -897,7 +912,8 @@ REMOTE_LINKS_DDL = """
 # channel and lap kind are validated by backend.canonical.activity_detail.
 # Stream channels hold zlib-compressed little-endian float64 points (NaN = gap).
 # The analysis row caches values computed for one canonical session.
-# The schema-version-10 migration executes this same text.
+# Schema version 22 adds the strength set kind, its ``set_source`` header and
+# the ``activity_strength_sets`` rows (backend.db.strength_sets_migration).
 _DETAIL_KINDS = _sql_in_list(ActivityDetailKind)
 _DETAIL_ORIGINS = _sql_in_list(ActivityDetailOrigin)
 _ZONE_DETAIL_KINDS = _sql_in_list_of(ZONE_DETAIL_KINDS.values())
@@ -915,6 +931,7 @@ ACTIVITY_DETAIL_DDL = f"""
         resolution TEXT CHECK (resolution IS NULL OR length(resolution) BETWEEN 1 AND 32),
         lap_source TEXT CHECK (lap_source IS NULL OR length(lap_source) BETWEEN 1 AND 32),
         zone_boundary_source TEXT CHECK (zone_boundary_source IS NULL OR length(zone_boundary_source) BETWEEN 1 AND 32),
+        set_source TEXT CHECK (set_source IS NULL OR length(set_source) BETWEEN 1 AND 32),
         summary_sha256 TEXT CHECK (summary_sha256 IS NULL OR length(summary_sha256) = 64),
         content_sha256 TEXT NOT NULL CHECK (length(content_sha256) = 64),
         fetched_at TEXT NOT NULL,
@@ -925,7 +942,8 @@ ACTIVITY_DETAIL_DDL = f"""
             REFERENCES activity_records(provider, provider_activity_id),
         CHECK ((detail_kind = 'streams') = (resolution IS NOT NULL)),
         CHECK ((detail_kind = 'laps') = (lap_source IS NOT NULL)),
-        CHECK ((detail_kind IN ({_ZONE_DETAIL_KINDS})) = (zone_boundary_source IS NOT NULL))
+        CHECK ((detail_kind IN ({_ZONE_DETAIL_KINDS})) = (zone_boundary_source IS NOT NULL)),
+        CHECK ((detail_kind = 'strength_sets') = (set_source IS NOT NULL))
     );
     CREATE TABLE activity_stream_channels (
         provider TEXT NOT NULL,
@@ -977,6 +995,24 @@ ACTIVITY_DETAIL_DDL = f"""
         upper_bound REAL,
         label TEXT CHECK (label IS NULL OR length(label) BETWEEN 1 AND 64),
         PRIMARY KEY (provider, provider_activity_id, detail_kind, zone_index),
+        FOREIGN KEY (provider, provider_activity_id, detail_kind)
+            REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)
+            ON DELETE CASCADE
+    );
+    CREATE TABLE activity_strength_sets (
+        provider TEXT NOT NULL,
+        provider_activity_id TEXT NOT NULL,
+        detail_kind TEXT NOT NULL DEFAULT 'strength_sets' CHECK (detail_kind = 'strength_sets'),
+        set_index INTEGER NOT NULL CHECK (set_index BETWEEN 0 AND 499),
+        set_type TEXT NOT NULL CHECK (length(set_type) BETWEEN 1 AND 16),
+        exercise_category TEXT CHECK (exercise_category IS NULL OR length(exercise_category) BETWEEN 1 AND 64),
+        exercise_name TEXT CHECK (exercise_name IS NULL OR length(exercise_name) BETWEEN 1 AND 64),
+        reps INTEGER CHECK (reps IS NULL OR reps BETWEEN 0 AND 1000),
+        weight_kg REAL CHECK (weight_kg IS NULL OR (weight_kg > 0 AND weight_kg <= 1000)),
+        duration_s REAL CHECK (duration_s IS NULL OR duration_s >= 0),
+        start_offset_s REAL CHECK (start_offset_s IS NULL OR start_offset_s >= 0),
+        workout_step_index INTEGER CHECK (workout_step_index IS NULL OR workout_step_index BETWEEN 0 AND 999),
+        PRIMARY KEY (provider, provider_activity_id, set_index),
         FOREIGN KEY (provider, provider_activity_id, detail_kind)
             REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)
             ON DELETE CASCADE

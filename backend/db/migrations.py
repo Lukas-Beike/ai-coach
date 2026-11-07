@@ -32,8 +32,10 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V17,
     SHAPE_SCHEMA_V18,
     SHAPE_SCHEMA_V20,
+    SHAPE_SCHEMA_V21,
     released_shape,
 )
+from backend.db.strength_sets_migration import add_strength_sets
 
 _UNSUPPORTED_SCHEMA_MESSAGE = (
     "Die vorhandene Datenbank entspricht keinem unterstützten Schema. "
@@ -122,6 +124,11 @@ def _upgrade_v20_to_v21(db: Any) -> None:
     _assign_observation_owners(db)
 
 
+def _upgrade_v21_to_v22(db: Any) -> None:
+    # Adds the strength set detail kind; every detail row stays as it was.
+    add_strength_sets(db)
+
+
 # An owner is the source record id of the stored raw record whose projection
 # emits the observation; a sync that maps that record again and no longer emits
 # the row retires it. Only exact ownership is assigned here:
@@ -171,5 +178,6 @@ UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V16: (SHAPE_SCHEMA_V17, _upgrade_v16_to_v17),
     SHAPE_SCHEMA_V17: (SHAPE_SCHEMA_V18, _upgrade_v17_to_v18),
     SHAPE_SCHEMA_V18: (SHAPE_SCHEMA_V20, _upgrade_v18_to_v20),
-    SHAPE_SCHEMA_V20: (SHAPE_CURRENT, _upgrade_v20_to_v21),
+    SHAPE_SCHEMA_V20: (SHAPE_SCHEMA_V21, _upgrade_v20_to_v21),
+    SHAPE_SCHEMA_V21: (SHAPE_CURRENT, _upgrade_v21_to_v22),
 }

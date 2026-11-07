@@ -2,8 +2,9 @@
 
 The input is the dict returned by ``backend.providers.garmin.collect_garmin_activity_detail``:
 ``details`` (get_activity_details), ``splits`` (get_activity_splits), ``hr_zones``
-and ``power_zones`` (get_activity_hr/power_in_timezones), and ``fit`` (the
-original FIT file from the Personal API). A part that is absent yields no set
+and ``power_zones`` (get_activity_hr/power_in_timezones), ``exercise_sets``
+(get_activity_exercise_sets, strength activities only) and ``fit`` (the original
+FIT file from the Personal API). A part that is absent yields no set
 and no issue; a part that is present but malformed yields one value-free issue
 and no set for that part.
 
@@ -12,6 +13,16 @@ streams (full resolution) replace the downsampled ``details`` charts and its
 device laps replace ``splits``. The FIT sets are mapped by
 ``fit_activity_detail_mapping`` under the Garmin provenance; ``details`` and
 ``splits`` remain the fallback for a kind the file does not yield.
+
+Strength sets go the other way: Garmin's ``exercise_sets`` include the athlete's
+corrections in Connect, which the original file lacks, so they win over the
+file's set messages, which stay the fallback. Each set takes the exercise with
+the highest ``probability``; its ``category`` maps to the FIT exercise category
+of the same name (else ``other``, keeping the code as the exercise name when no
+name is given) and ``name`` is kept only as an upper-case code. ``weight`` is
+read in grams (unverified on a live payload, like the FIT path) and 0 means no
+external load; ``duration`` is in seconds. ``startTime`` is not mapped, as the
+part carries no activity start to measure it from.
 
 The mapper is pure: it performs no I/O, logs nothing and never raises on
 malformed provider input. Issues name the activity, the provider field and a
@@ -38,15 +49,20 @@ from itertools import pairwise
 from typing import Any, Final, cast
 
 from backend.canonical.activity_detail import (
+    EXERCISE_NAME_PATTERN,
     MAX_LAPS,
+    MAX_STRENGTH_SETS,
     MAX_ZONES,
     ActivityDetailSet,
     ActivityLap,
     ActivityLapSet,
     ActivityStreamSet,
+    ActivityStrengthSet,
+    ActivityStrengthSetSet,
     ZoneBucket,
     ZoneDistribution,
     clean_series,
+    strength_set_accepts,
 )
 from backend.canonical.mapping import (
     IssueReason,
@@ -62,6 +78,7 @@ from backend.canonical.validation import (
 )
 from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
+    ExerciseCategory,
     LapKind,
     LapSource,
     ProviderId,
@@ -69,6 +86,8 @@ from backend.canonical.vocabulary import (
     SourceKind,
     StreamChannel,
     StreamResolution,
+    StrengthSetSource,
+    StrengthSetType,
     ZoneBoundarySource,
     ZoneMetric,
 )
@@ -78,7 +97,8 @@ from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 # Version 1: first mapping of Garmin activity detail sets (streams, laps, zones).
 # Version 2: maximum speed per lap.
 # Version 3: FIT record streams and device laps win over charts and splits.
-MAPPER_VERSION: Final = 3
+# Version 4: executed strength sets from exercise sets, else FIT set messages.
+MAPPER_VERSION: Final = 4
 
 # Same limit as the Intervals mapper; kept local so providers do not import each other.
 MAX_GARMIN_ACTIVITY_ID_LENGTH: Final = 200
@@ -121,6 +141,12 @@ _ZONE_KEYS: Final = (
     ("hr_zones", ZoneMetric.HEART_RATE),
     ("power_zones", ZoneMetric.POWER),
 )
+_EXERCISE_SETS_KEY: Final = "exercise_sets"
+_SET_TYPES: Final[Mapping[str, StrengthSetType]] = {
+    "ACTIVE": StrengthSetType.ACTIVE,
+    "REST": StrengthSetType.REST,
+}
+_GRAMS_PER_KG: Final = 1000.0
 
 
 def map_garmin_activity_detail(
@@ -148,7 +174,16 @@ def map_garmin_activity_detail(
     )
     issues: list[MappingIssue] = []
     records: list[ActivityDetailSet] = []
-    fit_sets = _fit_sets(activity_id, provenance, collected.get("fit"), issues)
+    exercise_sets = _strength_set_set(
+        activity_id, provenance, collected.get(_EXERCISE_SETS_KEY), issues
+    )
+    fit_sets = _fit_sets(
+        activity_id,
+        provenance,
+        collected.get("fit"),
+        issues,
+        strength_sets=exercise_sets is None,
+    )
     stream_set = fit_sets.get(ActivityStreamSet) or _stream_set(
         activity_id, provenance, collected.get("details"), issues
     )
@@ -165,6 +200,9 @@ def map_garmin_activity_detail(
         )
         if distribution is not None:
             records.append(distribution)
+    strength_set = exercise_sets or fit_sets.get(ActivityStrengthSetSet)
+    if strength_set is not None:
+        records.append(strength_set)
     return MappingResult(records=tuple(records), issues=tuple(issues))
 
 
@@ -173,12 +211,17 @@ def _fit_sets(
     provenance: Provenance,
     data: object,
     issues: list[MappingIssue],
+    *,
+    strength_sets: bool,
 ) -> dict[type, ActivityDetailSet]:
-    """Map the FIT part into its stream and lap sets, keyed by set type."""
+    """Map the FIT part into its stream, lap and strength sets, keyed by set type."""
     if data is None:
         return {}
     mapped = map_fit_activity_detail(
-        data, provider_activity_id=ref, provenance=provenance
+        data,
+        provider_activity_id=ref,
+        provenance=provenance,
+        strength_sets=strength_sets,
     )
     issues.extend(mapped.issues)
     return {type(record): record for record in mapped.records}
@@ -637,3 +680,112 @@ def _zone_entry(row: object) -> tuple[int, float, float | None] | IssueReason:
     if not 0.0 <= seconds <= MAX_ACTIVITY_DURATION_S:
         return IssueReason.OUT_OF_RANGE
     return number, seconds, coerce_number(row.get("zoneLowBoundary"))
+
+
+def _strength_set_set(
+    ref: str,
+    provenance: Provenance,
+    payload: object,
+    issues: list[MappingIssue],
+) -> ActivityStrengthSetSet | None:
+    """Map Garmin's exercise sets; None when the part is absent or holds no set."""
+    if payload is None:
+        return None
+    rows = payload.get("exerciseSets") if isinstance(payload, dict) else payload
+    if rows is None:
+        return None
+    if not isinstance(rows, list):
+        issues.append(MappingIssue(ref, _EXERCISE_SETS_KEY, IssueReason.INVALID_TYPE))
+        return None
+    kept: list[ActivityStrengthSet] = []
+    for row in rows:
+        if len(kept) == MAX_STRENGTH_SETS:
+            _add_set_issue(issues, ref, "exerciseSets", IssueReason.OUT_OF_RANGE)
+            break
+        item = _exercise_set(ref, len(kept), row, issues)
+        if item is not None:
+            kept.append(item)
+    if not kept:
+        return None
+    return ActivityStrengthSetSet(
+        provider_activity_id=ref,
+        provenance=provenance,
+        origin=ActivityDetailOrigin.FETCH,
+        source=StrengthSetSource.GARMIN_EXERCISE_SETS,
+        sets=tuple(kept),
+    )
+
+
+def _add_set_issue(
+    issues: list[MappingIssue], ref: str, field: str, reason: IssueReason
+) -> None:
+    issue = MappingIssue(ref, field, reason)
+    if issue not in issues:
+        issues.append(issue)
+
+
+def _exercise_set(
+    ref: str, index: int, row: object, issues: list[MappingIssue]
+) -> ActivityStrengthSet | None:
+    """Build one set, or return None with the issue that drops it."""
+    if not isinstance(row, dict):
+        _add_set_issue(issues, ref, "exerciseSets", IssueReason.INVALID_TYPE)
+        return None
+    set_type = _SET_TYPES.get(str(row.get("setType") or "").upper())
+    if set_type is None:
+        _add_set_issue(issues, ref, "setType", _shape_reason(row.get("setType")))
+        return None
+    weight_g = coerce_number(row.get("weight"))
+    values: dict[str, Any] = {
+        "reps": _whole_number(row.get("repetitionCount")),
+        "weight_kg": weight_g / _GRAMS_PER_KG if weight_g else None,
+        "duration_s": coerce_number(row.get("duration")),
+        "workout_step_index": _whole_number(row.get("wktStepIndex")),
+    }
+    for field, value in values.items():
+        if value is not None and not strength_set_accepts(field, value):
+            _add_set_issue(issues, ref, field, IssueReason.OUT_OF_RANGE)
+            values[field] = None
+    category, name = _exercise(row.get("exercises"))
+    return ActivityStrengthSet(
+        index=index,
+        set_type=set_type,
+        exercise_category=category,
+        exercise_name=name,
+        **values,
+    )
+
+
+def _whole_number(value: object) -> int | None:
+    number = coerce_number(value)
+    if number is None or number % 1:
+        return None
+    return int(number)
+
+
+def _exercise(value: object) -> tuple[ExerciseCategory | None, str | None]:
+    """Category and code of the most probable exercise of one set."""
+    if not isinstance(value, list):
+        return None, None
+    candidates = [item for item in value if isinstance(item, dict)]
+    if not candidates:
+        return None, None
+    best = max(
+        candidates, key=lambda item: coerce_number(item.get("probability")) or 0.0
+    )
+    category_code = _code(best.get("category"))
+    name = _code(best.get("name"))
+    if category_code is None:
+        return None, name
+    try:
+        return ExerciseCategory(category_code.lower()), name
+    except ValueError:
+        return ExerciseCategory.OTHER, name or category_code
+
+
+def _code(value: object) -> str | None:
+    """An upper-case provider code, or None for anything else (free text)."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text if EXERCISE_NAME_PATTERN.fullmatch(text) else None

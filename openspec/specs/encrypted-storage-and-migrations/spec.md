@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v21 and supports upgrades from v16; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v22 and supports upgrades from v16; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from schema v16 through released v20 and the current schema v21, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from schema v16 through released v21 and the current schema v22, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Skipped-release upgrade
 - **WHEN** a populated released v16 database is opened by this build
@@ -219,3 +219,13 @@ The v20 to v21 step SHALL add `observations.state` and `observations.owner_recor
 - **THEN** Intervals.icu wellness and Wahoo threshold rows are owned by their source record, other Intervals.icu rows by the stored athlete record, and Garmin rows or rows without a stored raw record keep no owner; a failure rolls back to the unchanged release.
 
 Evidence: `backend/db/migrations.py:_assign_observation_owners`; `tests/test_db_observation_lifecycle_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+
+### Requirement: Strength set storage upgrade
+
+The v21 to v22 step SHALL rebuild the detail set tables so the kind CHECK accepts `strength_sets`, add `activity_detail_sets.set_source` (NULL for every released set) and an empty `activity_strength_sets` table, keep every stream, lap, zone and analysis row unchanged with foreign keys enforced, and fail without changes when a detail row has no parent.
+
+#### Scenario: Populated release upgrade
+- **WHEN** a populated v20 or v21 database is opened by this build
+- **THEN** every detail row and its cascade survive, strength sets can be stored afterwards, and a failure rolls back to the unchanged release.
+
+Evidence: `backend/db/migrations.py:_upgrade_v21_to_v22`; `tests/test_db_strength_sets_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
