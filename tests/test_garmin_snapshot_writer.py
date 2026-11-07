@@ -14,11 +14,13 @@ from typing import Any
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
+from backend.canonical.vocabulary import ProviderId
 from backend.db import garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.performance.morning_battery_service import MorningBatteryStore
 from backend.providers.garmin import merge_weight_snapshots
+from backend.sync.canonical_coverage_store import CanonicalCoverageStore
 from backend.sync.canonical_ingest import CanonicalIngestCounters
 from backend.sync.garmin import activity_deletion_window
 from backend.sync.garmin_snapshot_writer import (
@@ -60,6 +62,49 @@ class WriterFixture(unittest.TestCase):
         self.key_values = KeyValueRepository(lambda: NOW)
         self.zone_provider = Mock(return_value=ZONE)
         self.writer = GarminSnapshotWriter(self.key_values, self.zone_provider)
+
+
+class ActivityFetchTimeTests(WriterFixture):
+    """Only a complete activity read that reaches today moves the fetch time."""
+
+    def coverage(self) -> Any:
+        return CanonicalCoverageStore(self.key_values).load(
+            self.db, ProviderId.GARMIN, zone=ZONE, allow_outdated=True
+        )
+
+    def write(self, synced_at: str, end: str, complete: bool = True) -> None:
+        self.writer.write(
+            self.db,
+            payload(
+                synced_at=synced_at,
+                provider_sync={
+                    "read_window": {"start": "2026-07-01", "end": end},
+                    "pagination": {"activities": {"complete": complete}},
+                },
+            ),
+        )
+
+    def test_a_current_complete_read_sets_the_activity_fetch_time(self) -> None:
+        self.write("2026-10-10T08:00:00", "2026-10-10")
+
+        fetched = self.coverage().activities_retrieved_at
+        self.assertEqual(fetched.isoformat(), "2026-10-10T08:00:00+02:00")
+
+    def test_a_historical_chunk_or_partial_read_keeps_the_last_time(self) -> None:
+        self.write("2026-10-10T08:00:00", "2026-10-10")
+        self.write("2026-10-11T08:00:00", "2026-08-01")
+        self.write("2026-10-12T08:00:00", "2026-10-12", complete=False)
+
+        coverage = self.coverage()
+        self.assertEqual(
+            coverage.activities_retrieved_at.isoformat(), "2026-10-10T08:00:00+02:00"
+        )
+        self.assertEqual(coverage.retrieved_at.isoformat(), "2026-10-12T08:00:00+02:00")
+
+    def test_without_a_current_read_the_fetch_time_stays_unknown(self) -> None:
+        self.write("2026-10-11T08:00:00", "2026-08-01")
+
+        self.assertIsNone(self.coverage().activities_retrieved_at)
 
 
 class WriteTests(WriterFixture):

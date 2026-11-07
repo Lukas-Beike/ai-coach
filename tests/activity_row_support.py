@@ -148,7 +148,7 @@ class NoObservations:
 
 
 class StoredCoverage:
-    """Canonical provider coverage with one Intervals.icu activity fetch time."""
+    """Canonical provider coverage with one activity fetch time."""
 
     def __init__(self, fetched_at: str | None) -> None:
         self._fetched_at = (
@@ -159,9 +159,11 @@ class StoredCoverage:
         return ()
 
     def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
-        return (
+        # Garmin's current activity read sets the activity sync time; the
+        # Intervals.icu row keeps the stored-data freshness of older readers.
+        return tuple(
             ProviderCoverage(
-                provider=ProviderId.INTERVALS,
+                provider=provider,
                 retrieved_at=self._fetched_at,
                 activity_count=0,
                 observation_count=0,
@@ -169,7 +171,8 @@ class StoredCoverage:
                 first_observed_on=None,
                 last_observed_on=None,
                 activities_retrieved_at=self._fetched_at,
-            ),
+            )
+            for provider in (ProviderId.INTERVALS, ProviderId.GARMIN)
         )
 
 

@@ -34,7 +34,10 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_payload_metrics import garmin_source_observed_at
 from backend.sync.garmin_performance_history import append_garmin_performance_history
 from backend.sync.garmin_personal_status import SDK_SKIPPED_KEY, sdk_skipped_view
-from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.garmin_snapshot_writer import (
+    GarminSnapshotWriter,
+    complete_activity_read_window,
+)
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.state import SyncStateRepository
 
@@ -130,17 +133,8 @@ def activity_deletion_window(payload: dict[str, Any]) -> DeletionWindow | None:
     Only a run whose activity list came back for every date window, without an
     error, rate limit, capability pause or cancel, vouches for its ``read_window``.
     """
-    provider_sync = payload.get("provider_sync") or {}
-    stats = (provider_sync.get("pagination") or {}).get("activities") or {}
-    read_window = provider_sync.get("read_window") or {}
-    if stats.get("complete") is not True:
-        return None
-    try:
-        start = date.fromisoformat(iso_date_prefix(str(read_window["start"])))
-        end = date.fromisoformat(iso_date_prefix(str(read_window["end"])))
-    except KeyError, TypeError, ValueError:
-        return None
-    return fetch_deletion_window(start, end)
+    window = complete_activity_read_window(payload)
+    return None if window is None else fetch_deletion_window(*window)
 
 
 def _source_deletion_window(

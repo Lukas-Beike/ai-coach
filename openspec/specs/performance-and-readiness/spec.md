@@ -81,7 +81,7 @@ The system SHALL build local period reports from the neutral activity summaries,
 - **WHEN** a session in the period has only a Garmin Connect record with a Garmin training load
 - **THEN** it counts as a session with its duration and distance but adds no training load.
 
-Detailed contract: The report `observed_at` SHALL be the Intervals.icu activity fetch time of the canonical provider coverage, or null when none is stored. Totals are named `moving_duration_s`, `distance_m` and `training_load`; `sports` and sport filters use canonical sports (`ride`, `run`, ...).
+Detailed contract: The report `observed_at` SHALL be the activity sync time defined in activity-ingestion-and-storage (Garmin and Wahoo coverage), or null when none is stored. Totals are named `moving_duration_s`, `distance_m` and `training_load`; `sports` and sport filters use canonical sports (`ride`, `run`, ...).
 
 Evidence: `backend/performance/training_report.py:training_report`; `tests/test_training_report.py`.
 

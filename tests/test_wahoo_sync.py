@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import unittest
 from typing import Any
@@ -177,6 +178,23 @@ class IngestTests(WahooSyncCase):
         )
 
         self.assertEqual("partial", self.service.sync()["status"])
+
+    def test_only_a_complete_listing_moves_the_activity_fetch_time(self) -> None:
+        self.source.fetch = WahooWorkoutFetch((workout(1, EARLIER_UTC),))
+        self.service.sync()
+        first = json.loads(self._value(coverage_key(ProviderId.WAHOO)))
+        self.advance(hours=1)
+        self.source.fetch = WahooWorkoutFetch(
+            (workout(1, EARLIER_UTC),), truncated=True
+        )
+
+        self.service.sync()
+
+        second = json.loads(self._value(coverage_key(ProviderId.WAHOO)))
+        self.assertEqual(
+            first["activities_retrieved_at"], second["activities_retrieved_at"]
+        )
+        self.assertNotEqual(first["retrieved_at"], second["retrieved_at"])
 
     def states(self) -> dict[str, str]:
         return {

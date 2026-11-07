@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date
 from typing import Any, TypeVar
 from unittest.mock import Mock
@@ -226,10 +227,11 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
         populate(self)
         # An ingest persists the coverage summary next to the records.
         with self.manager.unit_of_work() as db:
+            stored = intervals_snapshot_coverage(self.intervals, zone=self.zone)
+            assert stored is not None
+            # The activity sync time follows the active providers' coverage.
             CanonicalCoverageStore(self.key_values).persist(
-                db,
-                intervals_snapshot_coverage(self.intervals, zone=self.zone),
-                zone=self.zone,
+                db, replace(stored, provider=ProviderId.GARMIN), zone=self.zone
             )
         selector = make_selector(self)
         source = ActivitySummarySource(
@@ -241,7 +243,7 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
             (intervals,) = [
                 item
                 for item in selector.coverage(db)
-                if item.provider is ProviderId.INTERVALS
+                if item.provider is ProviderId.GARMIN
             ]
         # The snapshot's own sync marker is irrelevant once the coverage is stored.
         self.intervals = {**self.intervals, "synced_at": "2030-01-01T00:00:00Z"}

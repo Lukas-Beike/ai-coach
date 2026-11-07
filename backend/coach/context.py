@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.activities.zone_settings import effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
@@ -94,6 +94,43 @@ def _section_source(provider: ProviderId, synced_at: Any) -> dict[str, Any]:
         "label": _source_label(provider),
         "synced_at": synced_at,
     }
+
+
+def _activity_section_source(
+    activities: Sequence[Mapping[str, Any]], synced_at: Any
+) -> dict[str, Any]:
+    """Label the activity section with the providers its sessions came from.
+
+    Merged sessions mix providers, so the label lists every primary source and
+    every per-value source; ``synced_at`` is the newest current activity fetch.
+    """
+    found: set[ProviderId] = set()
+    for activity in activities:
+        sources = activity.get("sources")
+        labels = [
+            activity.get("source"),
+            *(sources.values() if isinstance(sources, Mapping) else ()),
+        ]
+        # Local labels such as competitions are no providers.
+        found.update(
+            _PROVIDER_BY_LABEL[label]
+            for label in labels
+            if isinstance(label, str) and label in _PROVIDER_BY_LABEL
+        )
+    providers = sorted(found, key=lambda provider: provider.value)
+    return {
+        "provider": providers[0].value if len(providers) == 1 else None,
+        "providers": [provider.value for provider in providers],
+        "label": ", ".join(_source_label(provider) for provider in providers) or None,
+        "synced_at": synced_at,
+    }
+
+
+_PROVIDER_BY_LABEL: Final[Mapping[str, ProviderId]] = {
+    provider_label(provider, view): provider
+    for provider in ProviderId
+    for view in SourceView
+}
 
 
 PLANNED_WORKOUTS_SOURCE = {
@@ -356,7 +393,7 @@ class CoachIntervalsContextService:
         planned = future_coach_planned_workouts(source_planned, today)
         return {
             "source": {
-                **_section_source(ProviderId.INTERVALS, synced_at),
+                **_activity_section_source(summaries, synced_at),
                 "applies_to": [
                     "recent_activities_by_sport",
                     "activity_rollups_by_sport",

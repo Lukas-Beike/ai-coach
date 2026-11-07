@@ -11,15 +11,18 @@ A write carries a delta: sections it does not mention stay as they are.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, date, datetime, tzinfo
 from typing import Any, Final
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.garmin_payload import (
     ACTIVITIES_SECTION,
     ITEM_SECTIONS,
     REPLACE_SECTIONS,
 )
 from backend.canonical.section_items import record_id, split_section
+from backend.canonical.vocabulary import ProviderId
 from backend.db import garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import garmin_payload_retrieved_at
@@ -90,9 +93,22 @@ class GarminSnapshotWriter:
             for section in REPLACE_SECTIONS:
                 self._replace(db, section, payload.get(section))
         self._patch_state(db, payload)
-        self._coverage.persist(
-            db, garmin_ingest_coverage(db, payload, zone=zone), zone=zone
-        )
+        coverage = garmin_ingest_coverage(db, payload, zone=zone)
+        if coverage is not None and not _current_activity_read(
+            payload, coverage.retrieved_at, zone
+        ):
+            # Only a complete activity read that reached today moves the activity
+            # fetch time; a historical chunk or a partial read keeps the last one.
+            previous = self._coverage.load(
+                db, ProviderId.GARMIN, zone=zone, allow_outdated=True
+            )
+            coverage = replace(
+                coverage,
+                activities_retrieved_at=None
+                if previous is None
+                else previous.activities_retrieved_at,
+            )
+        self._coverage.persist(db, coverage, zone=zone)
         return counters
 
     def write_refresh(
@@ -161,6 +177,37 @@ class GarminSnapshotWriter:
         state = garmin_store.read_state(db)
         state.update(garmin_store.split_state(payload))
         garmin_store.write_state(db, state, now=datetime.now(UTC).isoformat())
+
+
+def complete_activity_read_window(
+    payload: Mapping[str, Any],
+) -> tuple[date, date] | None:
+    """Return this run's activity read window, or None unless the read was complete.
+
+    Only a run whose activity list came back for every date window, without an
+    error, rate limit, capability pause or cancel, vouches for its ``read_window``.
+    """
+    provider_sync = payload.get("provider_sync") or {}
+    stats = (provider_sync.get("pagination") or {}).get("activities") or {}
+    window = provider_sync.get("read_window") or {}
+    if stats.get("complete") is not True:
+        return None
+    try:
+        start = date.fromisoformat(iso_date_prefix(str(window["start"])))
+        end = date.fromisoformat(iso_date_prefix(str(window["end"])))
+    except KeyError, TypeError, ValueError:
+        return None
+    return start, end
+
+
+def _current_activity_read(
+    payload: Mapping[str, Any], retrieved_at: datetime | None, zone: tzinfo
+) -> bool:
+    """Return True for a complete activity list read whose window reaches today."""
+    window = complete_activity_read_window(payload)
+    if window is None or retrieved_at is None:
+        return False
+    return window[1] >= retrieved_at.astimezone(zone).date()
 
 
 def _identifiers(section: str, value: Any) -> set[str]:

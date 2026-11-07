@@ -18,11 +18,12 @@ import logging
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any, Final, Protocol
 
 from backend.canonical.local_time import local_date
+from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -228,9 +229,19 @@ class WahooSyncService:
                 ),
                 zone=zone,
             )
-            self._coverage.persist(
-                db, wahoo_payload_coverage(payload, zone=zone), zone=zone
-            )
+            coverage = wahoo_payload_coverage(payload, zone=zone)
+            if coverage is not None and (fetch.truncated or fetch.skipped):
+                # Only a complete listing moves the activity fetch time.
+                previous = self._coverage.load(
+                    db, ProviderId.WAHOO, zone=zone, allow_outdated=True
+                )
+                coverage = replace(
+                    coverage,
+                    activities_retrieved_at=None
+                    if previous is None
+                    else previous.activities_retrieved_at,
+                )
+            self._coverage.persist(db, coverage, zone=zone)
             self._key_values.set(db, LAST_SYNC_KEY, synced_at.isoformat())
             self._key_values.set(db, LAST_ERROR_KEY, "")
             self._daily_markers().mark_in_transaction(db, WAHOO_ID)

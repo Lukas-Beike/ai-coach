@@ -121,16 +121,31 @@ class CoachDomainSectionAliasTests(unittest.TestCase):
 
 
 class CoachDomainSectionSourceTests(unittest.TestCase):
-    def test_activities_source_block_comes_first_and_uses_provider_label(self):
+    def test_activities_source_block_comes_first_and_names_the_session_sources(self):
         projection = CoachIntervalsContextService().project(
-            [], TODAY, synced_at=SYNCED_AT
+            [],
+            TODAY,
+            [
+                {"id": "g1", "sport": "Ride", "source": _label(ProviderId.GARMIN)},
+                {
+                    "id": "w1",
+                    "sport": "Ride",
+                    "source": _label(ProviderId.WAHOO),
+                    "sources": {
+                        "average_hr": _label(ProviderId.GARMIN),
+                        "purpose": "Lokale Wettkämpfe",
+                    },
+                },
+            ],
+            synced_at=SYNCED_AT,
         )
         self.assertEqual(next(iter(projection)), "source")
         self.assertEqual(
             projection["source"],
             {
-                "provider": ProviderId.INTERVALS.value,
-                "label": _label(ProviderId.INTERVALS),
+                "provider": None,
+                "providers": ["garmin", "wahoo"],
+                "label": f"{_label(ProviderId.GARMIN)}, {_label(ProviderId.WAHOO)}",
                 "synced_at": SYNCED_AT,
                 "applies_to": [
                     "recent_activities_by_sport",
@@ -138,7 +153,6 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
                 ],
             },
         )
-        self.assertEqual(projection["source"]["label"], "Intervals.icu")
         self.assertEqual(projection["synced_at"], SYNCED_AT)
 
     def test_recovery_source_block_wraps_unchanged_garmin_projection(self):
@@ -223,8 +237,10 @@ class CoachDomainSectionFullContextTests(unittest.TestCase):
         self.assertEqual(
             activities["source"],
             {
-                "provider": ProviderId.INTERVALS.value,
-                "label": _label(ProviderId.INTERVALS),
+                # The fixture rows carry no per-session source label.
+                "provider": None,
+                "providers": [],
+                "label": None,
                 "synced_at": context_tests.COVERAGE_SYNCED_AT,
                 "applies_to": [
                     "recent_activities_by_sport",
