@@ -8,7 +8,7 @@ Only fake data is used; providers stay blocked. Password: e2e-fixture-password-1
   .\scripts\demo-container.ps1 -SkipBuild -Port 8091
 #>
 param(
-    [string]$Name = "ai-coach-demo",
+    [string]$Name = "pacecraft-demo",
     [int]$Port = 8091,
     [switch]$Persist,
     [switch]$SkipBuild
@@ -17,15 +17,15 @@ $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
 # Only disposable demo/fixture containers may be replaced. The production container
-# (ai-coach) and every other name are refused before anything is built, stopped or removed.
-if ($Name -eq "ai-coach" -or $Name -notmatch '^(ai-coach-)?(demo|fixture)') {
-    throw "Refusing container name '$Name': use a demo or fixture name such as ai-coach-demo."
+# (pacecraft, formerly ai-coach) and every other name are refused before anything is built, stopped or removed.
+if ($Name -in @("pacecraft", "ai-coach") -or $Name -notmatch '^(pacecraft-|ai-coach-)?(demo|fixture)') {
+    throw "Refusing container name '$Name': use a demo or fixture name such as pacecraft-demo."
 }
 
 # $ErrorActionPreference does not stop on native exit codes in Windows PowerShell 5.1,
 # so every native call is followed by an explicit $LASTEXITCODE check.
 if (-not $SkipBuild) {
-    docker build -q -t ai-coach:local . | Out-Null
+    docker build -q -t pacecraft:local . | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Image build failed (exit $LASTEXITCODE)." }
 }
 $existingContainer = docker ps -aq --filter "name=^$Name$"
@@ -39,7 +39,7 @@ if ($existingContainer) {
 $dockerArguments = @("run", "-d", "--name", $Name, "-p", "127.0.0.1:${Port}:8090",
     "-e", "FIXTURE_AUTO_SEED=1", "-e", "AI_COACH_DISPOSABLE_FIXTURE=1", "-v", "${PWD}\e2e:/app/e2e:ro")
 if ($Persist) { $dockerArguments += @("-v", "${Name}-data:/data") }
-$dockerArguments += @("ai-coach:local", "python", "/app/e2e/fixture_runtime.py")
+$dockerArguments += @("pacecraft:local", "python", "/app/e2e/fixture_runtime.py")
 docker @dockerArguments | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Starting container '$Name' failed (exit $LASTEXITCODE)." }
 

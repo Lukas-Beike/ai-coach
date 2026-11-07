@@ -442,7 +442,7 @@ class ServerDatabaseTests(ServerTestCase):
             ),
             database_manager=manager_factory,
             key_values=owner(get=""),
-            app_name="Intervals Coach",
+            app_name="Pacecraft · AI Coach",
             app_version="test",
             config=SimpleNamespace(
                 garmin_tokenstore=str(Path("missing-garmin-tokenstore")),

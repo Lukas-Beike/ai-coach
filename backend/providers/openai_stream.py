@@ -601,7 +601,7 @@ class OpenAIStreamClient:
                 "Accept": "text/event-stream",
                 "Content-Type": config.media_type,
                 "Authorization": f"Bearer {config.api_key}",
-                "User-Agent": f"IntervalsCoach/{config.app_version}",
+                "User-Agent": f"Pacecraft/{config.app_version}",
             },
             method="POST",
         )

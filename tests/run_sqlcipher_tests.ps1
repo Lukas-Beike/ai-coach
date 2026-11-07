@@ -1,5 +1,5 @@
 param(
-    [string]$ImageTag = "ai-coach:local",
+    [string]$ImageTag = "pacecraft:local",
     [string]$RecordDurationsDirectory = "",
     [ValidateRange(1, 4)][int]$Workers = 1,
     [string]$ResultsDirectory = "",

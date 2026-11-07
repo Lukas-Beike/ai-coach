@@ -1,10 +1,10 @@
-# Intervals Coach
+# Pacecraft · AI Coach
 
-Intervals Coach is a private, mobile-first Progressive Web App (PWA) designed for a single athlete. Built on Python's standard-library HTTP server and an encrypted SQLCipher SQLite database, it bridges athlete training history and daily health metrics from Intervals.icu and Garmin Connect with OpenAI Responses-compatible conversational AI APIs.
+Pacecraft is a private, mobile-first Progressive Web App (PWA) designed for a single athlete. Built on Python's standard-library HTTP server and an encrypted SQLCipher SQLite database, it bridges athlete training history and daily health metrics from Intervals.icu and Garmin Connect with OpenAI Responses-compatible conversational AI APIs.
 
 The application serves as an autonomous, conversational training companion. It understands athlete fatigue, manages a structured workout library, schedules future training sessions, analyzes past workouts, tracks environmental weather constraints, and interprets read-only calendar events—all while keeping sensitive biometric data, credentials, and workout plans strictly local and under the athlete's direct control.
 
-Intervals Coach is intentionally standalone and designed for operation on a trusted local network (LAN) or private VPN (such as WireGuard or Tailscale). It must never be exposed directly to the public internet without a trusted, authenticated reverse proxy.
+Pacecraft is intentionally standalone and designed for operation on a trusted local network (LAN) or private VPN (such as WireGuard or Tailscale). It must never be exposed directly to the public internet without a trusted, authenticated reverse proxy.
 
 ---
 
@@ -127,7 +127,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Dormant Intervals.icu ingest**: Intervals.icu is an output target by default. Reading its activities, wellness, athlete settings and activity details is off until the athlete presses "Einlesen einschalten" in the Intervals.icu card (More → Anbindungen); while off, the daily run only reconciles competitions, and "Einmal abrufen" reads the last 42 days once without turning the ingest on. Library and planned workouts, competitions, nutrition and sport settings are still written as before, and stored Intervals.icu records are kept.
 - **Duplicate-Safe Pagination**: Resilient pagination fetching large activity histories in bounded chunks while verifying page boundaries to prevent duplicate entries.
 - **Compact Snapshot Storage**: Each sync ingests its full payload into the canonical tables first. Once the tables serve reads (after the first completed backfill), the stored Intervals.icu snapshot omits `recent_activities` and `raw_provider_data.activities` and carries `"canonical_sections": "tables"`; wellness, athlete, calendar and sync-status sections stay. The next incremental or historical sync rebuilds its merge base from the stored activity rows. Existing snapshot rows are never rewritten, and until the first backfill completes snapshots are stored in full.
-- **Initial Template Import**: One-time read-only import of existing remote workout templates into a dedicated, private 'Intervals Coach' folder upon initial setup.
+- **Initial Template Import**: One-time read-only import of existing remote workout templates into a dedicated, private 'Pacecraft' folder upon initial setup (an existing 'Intervals Coach' folder from before the rename keeps being used).
 - **Session Focus**: Every planned unit and library template can carry a local "Art der Einheit": run and ride recovery, easy, endurance, long, tempo, threshold, vo2max, anaerobic, race or test (ride also sweet_spot), strength legs, upper, full_body, core, plyometrics or mobility with an optional light, moderate or heavy intensity. The Coach sets it for every new unit, and the athlete changes it in the opened calendar entry; a derived value is offered next to its empty field as "≈ … übernehmen" and becomes set with one tap. A unit without focus shows a dashed, derived chip taken from its parsed steps, then from keywords such as Squats, Beintag or Schwelle. For strength an explicit term in the name (Oberkörper, Unterkörper/Beine, Ganzkörper, Core, Mobility) beats exercise keywords, negated mentions ("Beine schonen", "ohne Beine", "kein Beintraining", "nicht schwer") never count, and without a structure the intensity is derived from the text (schwer, moderat/mittel, leicht). The focus stays local: the Intervals.icu export is unchanged, and it is covered by change history, undo and backup.
 - **Structured Strength**: A strength unit or template can carry a local `strength_structure` (up to 12 exercises with working sets, reps, optional kg (0 = bodyweight, no added weight), %1RM, RPE or RIR, rest, up to 5 warm-up sets with their own reps and kg, and a short note such as "nicht bis zum Muskelversagen"). The readable description is generated from it, free text stays the fallback, and a manual description edit drops the structure. Without a set intensity, `strength_intensity` is derived from it (heavy from 80 % 1RM, RPE 8 or 2 RIR) and leg involvement from the exercise names, both labelled derived. The Coach uses it for progression across weeks; plan checks still count only leg sessions and their intensity, no tonnage. Executed sets from Garmin (exercise sets, else the FIT file) are compared with it: a matched unit's compliance counts the planned sets done at the planned reps (exercises matched by their Garmin exercise category, unknown ones never count as missed), a completed session with a leg exercise counts as leg strength, and the planning brief lists the recent top sets per exercise for the next progression step. The activity detail shows every executed set (exercise, reps, kg, rest), and the calendar entry lists the executed sets per exercise next to the planned structure. The Intervals.icu export sends the description only, and only on an explicit sync; strength units go there as calendar notes (category `NOTE`), because Intervals.icu forwards workout events to Garmin as one unnamed step.
 - **Explicit Plan Synchronization**: Unidirectional push transferring locally approved planned units to the Intervals.icu calendar with stable upsert identifiers.
@@ -232,7 +232,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
                                               | HTTP (Port 8090)
                                               v
 +-------------------------------------------------------------------------------------------+
-| Intervals Coach Container (/app)                                                          |
+| Pacecraft Container (/app)                                                          |
 |                                                                                           |
 |  +-------------------------------------------------------------------------------------+  |
 |  | server.py (Composition Root & HTTP Server)                                          |  |
@@ -344,10 +344,10 @@ Run the published container image with a persistent data volume and read-only co
 mkdir -p /mnt/user/appdata/ai-coach/data
 chown -R 100:101 /mnt/user/appdata/ai-coach/data
 
-docker pull ghcr.io/lukas-beike/ai-coach:latest
+docker pull ghcr.io/lukas-beike/pacecraft:latest
 
 docker run -d \
-  --name ai-coach \
+  --name pacecraft \
   --restart unless-stopped \
   --read-only \
   --security-opt no-new-privileges:true \
@@ -356,7 +356,7 @@ docker run -d \
   -v /mnt/user/appdata/ai-coach/data:/data \
   --env-file /mnt/user/appdata/ai-coach/.env \
   -e TZ=Europe/Berlin \
-  ghcr.io/lukas-beike/ai-coach:latest
+  ghcr.io/lukas-beike/pacecraft:latest
 ```
 
 *Note: Never run `docker rm -v`, as the `/data` volume contains your encrypted database and any legacy plaintext Garmin token file.*
@@ -369,9 +369,9 @@ Create a `docker-compose.yml` file:
 
 ```yaml
 services:
-  ai-coach:
-    image: ghcr.io/lukas-beike/ai-coach:latest
-    container_name: ai-coach
+  pacecraft:
+    image: ghcr.io/lukas-beike/pacecraft:latest
+    container_name: pacecraft
     restart: unless-stopped
     read_only: true
     security_opt:
@@ -406,13 +406,14 @@ docker compose up -d
    chmod -R 770 /mnt/user/appdata/ai-coach/data
    ```
 2. **Container Template Setup**:
-   - **Repository**: `ghcr.io/lukas-beike/ai-coach:latest`
+   - **Repository**: `ghcr.io/lukas-beike/pacecraft:latest`
    - **Network Type**: `Bridge`
    - **Container Port**: `8090` -> **Host Port**: `8090`
    - **Container Path `/data`**: `/mnt/user/appdata/ai-coach/data` (Read/Write)
+   - Upgrading from the former `ai-coach` image keeps this data path unchanged; only the repository and container name change to `pacecraft`.
    - **Environment Variables**: Add `APP_PASSWORD`, `OPENAI_API_KEY`, `INTERVALS_API_KEY`, `TZ`, etc.
-   - **Icon URL**: `https://raw.githubusercontent.com/Lukas-Beike/ai-coach/main/public/logo.png`
-3. **Save and Start**: Start the container and check `docker logs -f ai-coach`.
+   - **Icon URL**: `https://raw.githubusercontent.com/Lukas-Beike/pacecraft/main/public/logo.png`
+3. **Save and Start**: Start the container and check `docker logs -f pacecraft`.
 
 ### HTTPS Reverse Proxy Setup
 
@@ -421,7 +422,7 @@ Modern mobile browsers require a **Secure Context (HTTPS)** to register Service 
 #### Caddy Example
 ```caddy
 coach.internal.domain {
-    reverse_proxy ai-coach:8090 {
+    reverse_proxy pacecraft:8090 {
         header_up X-Forwarded-Proto https
     }
 }
@@ -499,7 +500,7 @@ The bundled `garmin-login.py` helper is still available as an alternative for he
 docker run --rm -it \
   --env-file /mnt/user/appdata/ai-coach/.env \
   -v /mnt/user/appdata/ai-coach/data:/data \
-  ghcr.io/lukas-beike/ai-coach:latest \
+  ghcr.io/lukas-beike/pacecraft:latest \
   python /app/garmin-login.py
 ```
 
@@ -553,7 +554,7 @@ Conversational turns are persisted in `coach_commands`; provider synchronization
 ## Coach Intelligence & Execution Boundaries
 
 ### Prompt Projection & Context Budgeting
-To optimize API token consumption and response latency, Intervals Coach uses a strictly bounded context projection rather than dumping entire databases into prompts:
+To optimize API token consumption and response latency, Pacecraft uses a strictly bounded context projection rather than dumping entire databases into prompts:
 - **Request Profiles**: General coaching, today's training, activity analysis, weekly planning, plan edits, competition preparation, profile/check-in, provider sync and attachments select different projections. Selection is not an authorization decision.
 - **Activity Projection**: Routine turns include the newest completed activity per sport; planning and analysis retain up to five. Exact activity details remain available through the existing read tools.
 - **Planning Projection**: Routine turns include a three-day outlook and two recent days; weekly planning includes a 14-day outlook. The day-by-day planning view (recovery, illness/check-ins, weather, calendar markers) rides only on planning, morning check-in and today-training turns and carries calendar events once, in the external calendar section. Review kinds (progress, block) have no future horizon, a session analysis at most two days ahead, and a progress review no training-plan list. A typed planning request ("Plane meine nächste Woche", "Plane die nächsten 4 Wochen", "Passe die Woche an") gets the same planning brief and playbook as the matching quick action. A typed review of one session ("Wie lief mein Intervalltraining?"), of progress ("Zeig mir meinen Fortschritt", "Werde ich fitter?") or of a block ("Bewerte meinen letzten Block") gets that review's playbook and keeps the sections the message itself asked for; questions about a period, recovery after a session, or advice keep their own selection. Confirmed profile constraints, competitions and labeled current performance remain available; every omitted section stays loadable with `read_coach_context`. The request-size diagnostics log the selection name, request kind and per-section characters.
@@ -654,7 +655,7 @@ When a database restore is initiated:
 - **Canonical Provider Composition**: The diagnostic report includes a `canonical_provider_composition` section (`status` `available`, or `unavailable` without details when a count fails). `sessions.total` counts the surviving canonical sessions and `sessions.by_providers` counts them by the providers of their active records (for example `garmin+intervals`). `sessions.intervals_only` counts the sessions backed only by Intervals.icu records (`total`, `by_year`, `by_source`, `by_year_and_source`); the source is the Intervals.icu `source` value such as `ZWIFT` or `MANUAL`, `unknown` when the raw record has none, and `other` for text outside that enum. `observations.by_kind` counts per metric (and sport) the days with active Intervals.icu observations, the days no other source holds (`intervals_only_days`, also by year) and the days other providers or local values hold (`other_days`); `observations.only_from_intervals` lists the kinds no other source holds at all, and `observations.unrecognized_kinds` only counts stored kinds outside the vocabulary. `domain_rows` counts active sleep period, zone configuration and power curve rows per provider (`local` for rows without one). The section carries counts, years and vocabulary identifiers only, never ids, names, dates or values.
 - **Garmin Snapshot Size**: The diagnostic report includes `database.garmin_snapshot_bytes`, the UTF-8 byte size of the stored `garmin_snapshot` value (`0` when absent). SQL measures this without loading or parsing the payload in Python; the report adds only the byte count. This is a stored-payload measurement, not the process's RAM usage.
 - **Runtime Memory Diagnostics**: The diagnostic export adds `runtime.process_memory`: available Linux RSS, peak RSS, locked/anonymous/file memory and virtual bytes, thread count, mapping count and kernel mapping limit. Only numeric counters are exported; process memory, mapping addresses and file paths are never captured. Unavailable OS counters are omitted. Sync start, completion and failure log events include the same counters for before/after comparisons; the snapshot byte count is measured only for the diagnostic report.
-- **Stalled Server Stack Dump**: `docker kill -s USR1 AI-Coach` writes the stack of every Python thread to the container log (`docker logs`) without stopping the process. The dump contains file names, line numbers and function names only, no variable values. Capture it before restarting a container whose health check times out.
+- **Stalled Server Stack Dump**: `docker kill -s USR1 pacecraft` writes the stack of every Python thread to the container log (`docker logs`) without stopping the process. The dump contains file names, line numbers and function names only, no variable values. Capture it before restarting a container whose health check times out.
 - **Database Memory Budget**: Each pooled SQLCipher connection targets a 16 MiB decrypted-page cache. SQLite's cache target is not a hard process RAM limit: Python objects, query results and other native allocations use additional memory. The database file stays encrypted; `cipher_memory_security` is OFF because locking every SQLCipher allocation in memory fragmented the process into tens of thousands of mappings until allocations failed near the kernel's `vm.max_map_count`. A larger host `vm.max_map_count` can provide temporary mapping headroom but does not correct memory growth.
 - **Garmin Metadata Reads**: Automatic sync-window selection, current Morning Body Battery, daily planning and the nutrition day and week energy summaries extract only their required snapshot fields in SQL. Unrelated Garmin collections are not decoded into Python objects for these reads; full sync/merge reads and the stored history remain intact. **Analyse**, `/api/performance` and the Coach performance and recovery sections read Garmin values only from the canonical tables and take only the small stored sync status (freshness, fetch times, read windows) from `garmin_state`.
 - **Canonical Read Source**: The diagnostic report includes a `canonical_read` section that names the source serving reads (`tables`, or `pending` while nothing is served yet), the `reason`, and whether the stored check matches the current digest. Reads come from the canonical tables once the backfill has completed at least once; a content-free marker in the backfill state records that, and an existing `complete` state counts as completed. Until then, for example right after an upgrade, reads return no values and **Analyse → Leistung** and the Coach report that data is being prepared instead of partial values. A failed first backfill is reported and retried automatically after a delay from its last committed cursor. After the first completion a mapper-version or time-zone change re-projects the stored records in the background while reads stay on the tables, and a sync inside the running process is written to the tables as it happens. Coverage is served from the summaries persisted at ingest; before the first completion only current summaries are reported. An Intervals.icu snapshot stored by a release before raw provider data lists its activities only in compact form; those activities cannot be backfilled, so **Analyse → Leistung** shows "Aktivitäten: Intervals.icu neu abrufen" until **Lokale Daten neu laden** on the Intervals.icu card (`POST /api/intervals/full-resync`) loads them again as raw rows. A normal sync keeps the older compact rows and the mark. The section reports `serving`, `reason` and `digest_current` (false while a re-projection is pending), and reports `unavailable` if its state cannot be read.
@@ -929,27 +930,27 @@ Because native Windows environments often lack compatible pre-compiled wheels fo
 
 1. **Clone and Prepare**:
    ```powershell
-   git clone https://github.com/Lukas-Beike/ai-coach.git
-   cd ai-coach
+   git clone https://github.com/Lukas-Beike/pacecraft.git
+   cd pacecraft
    Copy-Item .env.example .env
    New-Item -ItemType Directory -Force .\data
    ```
 2. **Build Local Image**:
    ```powershell
-   docker build -t ai-coach:local .
+   docker build -t pacecraft:local .
    ```
 3. **Run Local Container**:
    ```powershell
-   docker run -d --name ai-coach `
+   docker run -d --name pacecraft `
      --restart unless-stopped `
      --read-only `
      --security-opt no-new-privileges:true `
      -p 8090:8090 `
      -v "${PWD}\data:/data" `
      --env-file .env `
-     ai-coach:local
+     pacecraft:local
    ```
-4. Access `http://localhost:8090` in your browser. Inspect logs using `docker logs -f ai-coach`.
+4. Access `http://localhost:8090` in your browser. Inspect logs using `docker logs -f pacecraft`.
 
 ### Testing & Quality Assurance
 
@@ -1064,7 +1065,7 @@ current application source before running locally:
 ```powershell
 npm ci --ignore-scripts
 node node_modules/@playwright/test/cli.js install chromium
-docker build -t ai-coach:e2e .
+docker build -t pacecraft:e2e .
 python scripts/run_browser_tests.py --project all --list
 python scripts/run_browser_tests.py --project mobile-small --spec e2e/css-cascade.spec.js
 python scripts/run_browser_tests.py --project all --jobs 1 --cache-state warm
@@ -1222,7 +1223,7 @@ it. Run it with
 `powershell -ExecutionPolicy Bypass -File scripts/demo-container.ps1`; add
 `-Persist` to keep the data in a named volume and `-Port`/`-Name` to adjust the
 container. `-Name` must start with `demo` or `fixture` (optionally after an
-`ai-coach-` prefix); the production container `ai-coach` and every other name are
+`pacecraft-` or `ai-coach-` prefix); the production container `pacecraft` (formerly `ai-coach`) and every other name are
 refused before anything is built, stopped or removed. The fixture refuses to
 start unless `AI_COACH_DISPOSABLE_FIXTURE=1` is set; only the demo script and the
 CI fixture container set it. The login password is the fixture password
@@ -1351,7 +1352,7 @@ fail the check until the code is fixed or the baseline is regenerated on purpose
 
 ## Security Boundaries & Medical Disclaimer
 
-Intervals Coach is a personal athletic planning assistant, not a certified medical device. Training recommendations, adaptive replanning suggestions, and performance analytics are generated by artificial intelligence models and heuristic algorithms. 
+Pacecraft is a personal athletic planning assistant, not a certified medical device. Training recommendations, adaptive replanning suggestions, and performance analytics are generated by artificial intelligence models and heuristic algorithms. 
 
 Always listen to your body. Do not follow workout intensity or duration recommendations that cause sharp pain, dizziness, or symptoms of overtraining. Consult a certified medical professional or sports physician before undertaking high-intensity endurance training or if recovering from illness or injury.
 
@@ -1359,7 +1360,7 @@ Always listen to your body. Do not follow workout intensity or duration recommen
 
 ## License
 
-Intervals Coach is open-source software licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [`LICENSE`](LICENSE) for the complete license terms.
+Pacecraft is open-source software licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [`LICENSE`](LICENSE) for the complete license terms.
 
 ### Ernährung und gespeicherte Mahlzeiten
 

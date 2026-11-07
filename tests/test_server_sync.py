@@ -1101,6 +1101,25 @@ class ServerSyncTests(ServerTestCase):
             },
         )
 
+    def test_pacecraft_folder_wins_over_the_legacy_folder(self):
+        client = server.PROVIDER_TRANSPORT.intervals_client(
+            replace(
+                server.CONFIG,
+                intervals_api_key="test-key",
+                intervals_athlete_id="athlete-1",
+            )
+        )
+        folders = [
+            {"id": 77, "name": "Intervals Coach", "type": "FOLDER"},
+            {"id": 9, "name": "Plans", "children": [{"id": 88, "name": "Pacecraft"}]},
+        ]
+        with (
+            patch.object(client, "get", return_value=folders),
+            patch.object(client, "post") as post,
+        ):
+            self.assertEqual(client.get_or_create_workout_folder(), 88)
+        post.assert_not_called()
+
     def test_library_sync_reconciles_remote_template_before_creating(self):
         entry = server.PLANNING_DATA.workout_library().create_local_entry(
             {

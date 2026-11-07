@@ -12,7 +12,7 @@ Use after changes or when validating a suspected regression.
 - Layout-affecting changes: when a change touches analysis, performance, nutrition, plan or any other data-driven layout, including backend or fixture data that widens content, run `e2e/text-reflow.spec.js` on every project CI runs (`--project all --spec e2e/text-reflow.spec.js`) before pushing; specs for the changed feature alone miss 200 % text overflow.
 - JavaScript: run affected `tests/*.cjs` with `node --test` and syntax-check changed scripts with `node --check`.
 - PWA assets: when `public/index.html`, any asset listed in `service-worker.js`, or `service-worker.js` changes, verify matching asset query and cache versions.
-- Docker or startup changes: run `docker build -t ai-coach:local .`.
+- Docker or startup changes: run `docker build -t pacecraft:local .`.
 - Dependency upgrades: follow [dependency maintenance](references/dependency-maintenance.md) for upstream changes, actual call sites, hash locks, and compatibility evidence.
 - Use temporary data and mocked providers. Never use real `.env`, `/data`, credentials, or athlete data.
 - Optional real-model checks: agents may use the existing local CLIProxyAPI for bounded synthetic manual probes under the [README runbook](../../../README.md#optional-local-cliproxyapi-probes). Use confirmed OAuth/subscription routing with paid API-key fallbacks disabled; check availability/models first, keep probes out of ordinary tests/CI, and report subscription quota use and compatibility limits. Fixtures remain the default; proxy success does not validate remote conversations, background jobs, or production behavior.

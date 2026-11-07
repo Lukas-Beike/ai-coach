@@ -1,4 +1,4 @@
-# Intervals Coach application review checklist
+# Pacecraft application review checklist
 
 Use this as a coverage map, not as a request to manufacture one finding per section. Read the current code and instructions because filenames and behavior can evolve.
 

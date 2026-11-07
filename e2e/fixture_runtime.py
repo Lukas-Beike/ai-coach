@@ -1375,7 +1375,7 @@ def _fixture_calendar_payload(today):
         [
             "BEGIN:VCALENDAR",
             "VERSION:2.0",
-            "PRODID:-//Intervals Coach Fixture//EN",
+            "PRODID:-//Pacecraft Fixture//EN",
             f"BEGIN:VEVENT\nUID:fixture-no-training\nDTSTART:{stamp(start)}\nDTEND:{stamp(start, '100000')}\nSUMMARY:Fixture [NO_TRAINING] recovery marker\nDESCRIPTION:Fixture rest marker from the event title\nEND:VEVENT",
             f"BEGIN:VEVENT\nUID:fixture-no-intensity\nDTSTART:{stamp(start + timedelta(days=1))}\nDTEND:{stamp(start + timedelta(days=1), '103000')}\nSUMMARY:Fixture easy ride\nDESCRIPTION:[NO_INTENSITY]\nEND:VEVENT",
             f"BEGIN:VEVENT\nUID:fixture-title-description\nDTSTART:{stamp(start + timedelta(days=2))}\nDTEND:{stamp(start + timedelta(days=2), '110000')}\nSUMMARY:Fixture title example\nDESCRIPTION:Description from synthetic calendar\nEND:VEVENT",

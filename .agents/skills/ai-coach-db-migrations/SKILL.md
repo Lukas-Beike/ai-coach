@@ -1,6 +1,6 @@
 ---
 name: ai-coach-db-migrations
-description: Plan, implement, or review SQLCipher schema migrations and released-schema compatibility in Intervals Coach. Use for schema, migration, or restore-compatibility changes; not ordinary queries or a request to reset a database.
+description: Plan, implement, or review SQLCipher schema migrations and released-schema compatibility in Pacecraft. Use for schema, migration, or restore-compatibility changes; not ordinary queries or a request to reset a database.
 ---
 
 # Data-preserving schema changes

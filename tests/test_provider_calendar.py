@@ -307,7 +307,7 @@ class CalendarProviderTests(unittest.TestCase):
             raw_socket, server_hostname="calendar.example"
         )
         self.assertIn(
-            b"User-Agent: IntervalsCoach/1.2.3", tls_socket.sendall.call_args.args[0]
+            b"User-Agent: Pacecraft/1.2.3", tls_socket.sendall.call_args.args[0]
         )
         tls_socket.close.assert_called_once_with()
 

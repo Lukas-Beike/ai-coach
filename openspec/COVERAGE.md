@@ -2,7 +2,7 @@
 
 ## Snapshot and meaning
 
-The baseline describes the implemented Intervals Coach application at
+The baseline describes the implemented Pacecraft application at
 `b8c911c9dda83a7920171916ace32681c0c38ba0` (APP_VERSION 1.13.22, database schema
 v13). OpenSpec CLI/skill setup is the separate documentation/tooling checkpoint
 `6f942515a`. The backfill changes documentation only. Subsequent application

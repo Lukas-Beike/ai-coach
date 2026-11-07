@@ -178,7 +178,7 @@ class GarminPersonalClient:
         base_url: str = PERSONAL_BASE_URL,
         opener: Opener | None = None,
         clock: Callable[[], float] = time.time,
-        user_agent: str = "IntervalsCoach",
+        user_agent: str = "Pacecraft",
         key_result: Callable[[bool], None] | None = None,
     ) -> None:
         if not api_key.strip():

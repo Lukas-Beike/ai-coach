@@ -29,7 +29,7 @@ WAHOO_FIT_REASONS: Final = frozenset(
 )
 _UNAVAILABLE_MESSAGE: Final = "The Wahoo FIT file could not be downloaded."
 _ACCEPT: Final = "application/octet-stream"
-_USER_AGENT: Final = "IntervalsCoach"
+_USER_AGENT: Final = "Pacecraft"
 
 
 class WahooFitUnavailable(Exception):

@@ -1228,7 +1228,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             post.call_args_list[0].args,
             (
                 "/athlete/athlete-1/folders",
-                {"name": "Intervals Coach"},
+                {"name": "Pacecraft"},
             ),
         )
         self.assertEqual(

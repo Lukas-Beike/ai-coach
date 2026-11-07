@@ -1,8 +1,8 @@
-# Development instructions for Intervals Coach
+# Development instructions for Pacecraft
 
 ## Project scope
 
-Intervals Coach is a private, mobile-first PWA for one athlete, using Python
+Pacecraft is a private, mobile-first PWA for one athlete, using Python
 `http.server`, SQLCipher, Intervals.icu, optional Garmin, and OpenAI Responses.
 Keep it standalone on a trusted LAN/private VPN, never directly on the internet.
 Use [README.md](README.md) for setup and operational commands.
@@ -155,7 +155,7 @@ node --test tests/*.cjs
 
 Tests use temporary data and mocked services, never real `.env`, `/data`, or
 OpenAI/Intervals.icu/Garmin accounts. For Dockerfile, dependency, startup, or
-deployment changes also run `docker build -t ai-coach:local .`. Browser changes
+deployment changes also run `docker build -t pacecraft:local .`. Browser changes
 run the affected Playwright project (`npm run test:e2e`; projects mobile-small,
 mobile, tablet, tablet-landscape, desktop) and, when a browser is available,
 check login, fresh PWA install/offline assets, safe Markdown, Enter versus

@@ -15,7 +15,9 @@ from backend.providers.intervals import IntervalsApiClient
 from backend.runtime.clock import local_now
 from backend.runtime.ports import ProviderOperation
 
-APP_NAME = "Intervals Coach"
+APP_NAME = "Pacecraft"
+# Folder name used before the rename; an existing folder keeps holding the library.
+LEGACY_APP_NAME = "Intervals Coach"
 
 
 class IntervalsClient:
@@ -146,16 +148,17 @@ class IntervalsClient:
             raise AppError(
                 502, "Intervals.icu hat keine gültige Ordnerliste zurückgegeben."
             )
-        matching: list[dict[str, Any]] = []
+        matching: dict[str, list[dict[str, Any]]] = {APP_NAME: [], LEGACY_APP_NAME: []}
         pending = [item for item in folders if isinstance(item, dict)]
         while pending:
             folder = pending.pop(0)
-            if str(folder.get("name") or "").strip() == APP_NAME:
-                matching.append(folder)
+            name = str(folder.get("name") or "").strip()
+            if name in matching:
+                matching[name].append(folder)
             children = folder.get("children")
             if isinstance(children, list):
                 pending.extend(item for item in children if isinstance(item, dict))
-        for folder in matching:
+        for folder in [*matching[APP_NAME], *matching[LEGACY_APP_NAME]]:
             folder_id = self._folder_id(folder.get("id"))
             if folder_id is not None:
                 self._workout_folder_id = folder_id

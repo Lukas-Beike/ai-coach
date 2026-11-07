@@ -171,7 +171,7 @@
     },
     {
       "id": "release-positive", "skill": "ai-coach-release-unraid", "kind": "positive", "activate": true,
-      "prompt": "Release Intervals Coach and update its Unraid container.",
+      "prompt": "Release Pacecraft and update its Unraid container.",
       "setup": "Stubbed release chain, matching release/latest digests, and a single synthetic ai-coach container; all tools are recording stubs.",
       "expected": ["Track the exact release chain and verify image digests before a proposed update", "Require matching running image and health before success"],
       "prohibited": ["Call real GitHub or Unraid tools", "Update unrelated containers"]
