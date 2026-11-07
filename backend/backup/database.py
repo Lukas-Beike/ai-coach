@@ -7,9 +7,11 @@ import os
 import shutil
 import tempfile
 import time
+import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -179,6 +181,22 @@ class DatabaseBackupService:
                 raise AppError(
                     500, "Die Datenbank konnte nicht als Backup gelesen werden."
                 ) from exc
+
+    def write_recovery_copy(self, label: str) -> str:
+        """Keep a consistent, encrypted copy of the database beside it; return its name.
+
+        The copy is the snapshot of a backup download, renamed to
+        ``<database>.<label>-<timestamp>-<id>`` in the data directory, which the
+        startup sweep of staging files never removes. The size and free-space
+        limits of a download apply.
+        """
+        with self.stream_file() as (snapshot, _deadline):
+            name = (
+                f"{self._config.database_path.name}.{label}-"
+                f"{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex}"
+            )
+            os.replace(snapshot, self._config.data_dir / name)
+        return name
 
     @contextmanager
     def stream_file(self) -> Iterator[tuple[Path, float]]:
