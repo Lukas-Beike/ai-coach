@@ -90,7 +90,7 @@ CALIBRATION_RPE_BANDS: Final = (1, 2)
 CALIBRATION_TABLE_RPES: Final = tuple(range(1, 11))
 _RATING_SOURCES: Final = {
     LOCAL_SESSION_RPE_SCALE.scale_id: "local",
-    GARMIN_RPE_SCALE.scale_id: "garmin",
+    GARMIN_RPE_SCALE.scale_id: ProviderId.GARMIN.value,
 }
 _POWER_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
 _RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.WAHOO)
