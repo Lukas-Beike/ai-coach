@@ -132,12 +132,13 @@ jobs:
               --base develop \
               --state open \
               --limit 1000 \
-              --json number,headRefName,isCrossRepository,autoMergeRequest \
+              --json number,headRefName,isCrossRepository,autoMergeRequest,mergeable \
               --jq '
                 .[]
                 | select(.isCrossRepository == false)
                 | select(.autoMergeRequest != null)
                 | select(.autoMergeRequest.mergeMethod == "SQUASH")
+                | select(.mergeable != "CONFLICTING")
                 | [.number, .headRefName]
                 | @tsv
               '
@@ -156,11 +157,16 @@ jobs:
           for pull_request in "${pull_requests[@]}"; do
             IFS=$'\t' read -r pull_request_number head_ref <<< "$pull_request"
             echo "Rebasing PR #$pull_request_number ($head_ref) onto develop."
-            if ! gh pr update-branch "$pull_request_number" \
+            rebase_output=""
+            if ! rebase_output="$(gh pr update-branch "$pull_request_number" \
               --repo "$REPOSITORY" \
-              --rebase; then
-              echo "::warning::Could not rebase PR #$pull_request_number ($head_ref)."
-              failed=$((failed + 1))
+              --rebase 2>&1)"; then
+              if [[ "$rebase_output" =~ (RebaseConflictError|[Cc]onflict) ]]; then
+                echo "::notice::Could not rebase PR #$pull_request_number ($head_ref) due to merge conflicts; skipping automatic rebase."
+              else
+                echo "::warning::Could not rebase PR #$pull_request_number ($head_ref): $rebase_output"
+                failed=$((failed + 1))
+              fi
             fi
           done
 
