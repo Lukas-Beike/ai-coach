@@ -43,6 +43,7 @@ import json
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Final
 
@@ -364,19 +365,19 @@ def _plan(
         # Newest first; a tie keeps the item under the survivor id, then another
         # stored item, then the smaller key.
         ordered = sorted(pool, key=lambda entry: entry[1])
-        ordered.sort(
-            key=lambda entry, survivor=target: (
-                entry[0],
-                entry[1] == survivor,
-                entry[1] not in moving,
-            ),
-            reverse=True,
-        )
+        ordered.sort(key=partial(_collision_rank, target, moving), reverse=True)
         (_, winner), *losers = ordered
         dropped.extend(key for _, key in losers)
         if winner in moving:
             moved[winner] = target
     return _Moves(moved, tuple(dropped), lost)
+
+
+def _collision_rank(
+    survivor: str, moving: set[str], entry: tuple[str, str]
+) -> tuple[str, bool, bool]:
+    """Newest first; a tie keeps the item under the survivor id, then a stored one."""
+    return (entry[0], entry[1] == survivor, entry[1] not in moving)
 
 
 def _rekey_feedback(
