@@ -95,6 +95,9 @@ def persist_sync_operation_state(
     }
     if error is not None:
         values["last_sync_error"] = redact(error)[:1000]
+    elif status == "completed":
+        # A successful sync ends the error an earlier failed one left behind.
+        values["last_sync_error"] = ""
     set_values(values)
 
 
