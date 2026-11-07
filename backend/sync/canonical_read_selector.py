@@ -43,6 +43,10 @@ from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.activities.session_purpose import with_competitions
+from backend.activities.strength_sets import (
+    strength_summaries,
+    with_strength_summaries,
+)
 from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.domain_records import (
@@ -261,6 +265,7 @@ class CanonicalReadSelector(
         stored competitions mark and link their races (``with_competitions``).
         EF, VI, work and decoupling are the stored local session metrics (card M8).
         Zone times are the stored local ones where a session has them (#1743).
+        ``strength_sets`` summarizes the executed strength sets of the session.
         """
         source = self._source(db)
         summaries = activity_summaries(
@@ -269,12 +274,18 @@ class CanonicalReadSelector(
             limit=limit,
         )
         ids = [summary["id"] for summary in summaries]
-        loaded = with_zone_times(
-            with_session_metrics(
-                with_local_loads(summaries, stored_local_loads(db, ids)),
-                stored_session_metrics(db, ids),
+        loaded = with_strength_summaries(
+            with_zone_times(
+                with_session_metrics(
+                    with_local_loads(summaries, stored_local_loads(db, ids)),
+                    stored_session_metrics(db, ids),
+                ),
+                read_zone_times(db, ids),
             ),
-            read_zone_times(db, ids),
+            strength_summaries(
+                db,
+                [row["id"] for row in summaries if row.get("sport") == Sport.STRENGTH],
+            ),
         )
         days = sorted(filter(None, (summary_local_date(row) for row in loaded)))
         if not days:

@@ -19,8 +19,14 @@ The system SHALL assemble an `activity_detail.v1` document for a canonical sessi
 
 #### Scenario: One served contract
 - **WHEN** an authenticated client reads `GET /api/activities/<id>` or the Coach calls `get_activity_details` for a known session
-- **THEN** the body is the `activity_detail.v1` document with `contract`, `session`, `metrics`, `streams`, `laps`, `zones`, `analysis`, `detail_data` and the envelope keys `activity_feedback` and `equipment`. The legacy keys `activity`, `session_analysis` and `local_activity_id`, and the flat legacy `detail_data` fields, are absent.
+- **THEN** the body is the `activity_detail.v1` document with `contract`, `session`, `metrics`, `streams`, `laps`, `zones`, `strength_sets` (the executed strength sets per exercise with reps, kg and rest, or null), `analysis`, `detail_data` and the envelope keys `activity_feedback` and `equipment`. The legacy keys `activity`, `session_analysis` and `local_activity_id`, and the flat legacy `detail_data` fields, are absent.
 - **AND** the HTTP body omits `activity_validation`, while the Coach tool result keeps it.
+
+#### Scenario: Executed strength sets in plan compliance
+- **WHEN** a completed strength session with executed sets is matched to a planned unit with a `strength_structure`
+- **THEN** its compliance uses basis `strength_sets`: per planned exercise, matched by the exercise category of its Garmin catalogue exercise, the sets done at or above the planned reps against the planned sets; exercises without a known category are `unknown`, never a miss, and without a matched exercise or executed sets the duration or load basis stays.
+
+Evidence: `backend/activities/strength_sets.py:plan_comparison`, `backend/activities/calendar_projection.py:workout_compliance`; `tests/test_strength_consumers.py`.
 
 #### Scenario: Garmin-only or Wahoo-only session
 - **WHEN** the athlete opens the local `act_` id of a session whose only active records come from Garmin or Wahoo

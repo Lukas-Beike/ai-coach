@@ -29,6 +29,7 @@ from backend.planning import (
 from backend.planning.load_checks import LoadThresholds, load_thresholds
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
+from backend.planning.strength_progress import strength_progress
 
 PLAN_FINDINGS_ARGUMENT = "accept_plan_findings"
 BRIEF_WEEKS = 6
@@ -300,6 +301,7 @@ def build_planning_brief(
                 training_model, planned_weeks, BRIEF_WEEKS
             ),
             "strength": leg_strength.brief_strength(planned_strength, BRIEF_WEEKS),
+            "strength_progress": strength_progress(completed),
             "planned_sessions": list(planned_sessions),
             "calendar_busy_minutes": dict(calendar_busy or {}),
             "free_time_minutes": dict(free_time_minutes or {}),

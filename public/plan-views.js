@@ -284,7 +284,7 @@ function calendarRpeLabel(value) {
 function appendPlannedExecution(cardSummary, entry, status) {
   if (status === "skipped") return;
   const percentage = calendarMetricNumber(entry.compliance?.percentage);
-  const measurable = percentage != null && ["training_load", "duration"].includes(entry.compliance?.basis);
+  const measurable = percentage != null && ["training_load", "duration", "strength_sets"].includes(entry.compliance?.basis);
   if (status !== "missed" && !measurable) return;
   const execution = document.createElement("span");
   const value = status === "missed" ? 0 : Number(entry.compliance.percentage);
@@ -293,7 +293,7 @@ function appendPlannedExecution(cardSummary, entry, status) {
   if (value === 0) executionState = "is-zero";
   execution.className = `planned-execution ${executionState}`;
   execution.textContent = `${value === 0 ? "✕" : "✓"} ${status === "missed" ? "0" : percentage} %`;
-  const basis = { training_load: "Belastung", duration: "Dauer" }[entry.compliance?.basis];
+  const basis = { training_load: "Belastung", duration: "Dauer", strength_sets: "Sätze" }[entry.compliance?.basis];
   execution.title = basis ? `Ausführung gegenüber Plan (${basis})` : "Ausführung gegenüber Plan";
   execution.setAttribute("aria-label", [`${value} Prozent des Plans`, basis].filter(Boolean).join(" · "));
   cardSummary.append(execution);
@@ -361,7 +361,8 @@ function appendPlannedCalendarComparison(details, entry, actual) {
   comparison.append(planLine, actualLine);
   if (entry.compliance?.percentage != null) {
     const ratio = document.createElement("p");
-    ratio.textContent = `${entry.compliance.basis === "training_load" ? "Load" : "Umfang"} Plan/Ist: ${entry.compliance.percentage} %`;
+    const ratioLabel = { training_load: "Load", strength_sets: "Sätze" }[entry.compliance.basis] || "Umfang";
+    ratio.textContent = `${ratioLabel} Plan/Ist: ${entry.compliance.percentage} %`;
     comparison.append(ratio);
   }
   details.append(comparison);
