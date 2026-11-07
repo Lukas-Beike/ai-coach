@@ -322,6 +322,29 @@ def daily_local_loads(db: Any) -> dict[str, float]:
     )
 
 
+def _calibration_fields(
+    calibration: Mapping[str, Any], inputs: Mapping[str, Any]
+) -> dict[str, Any]:
+    """The served strength calibration: factor, its RPE band and pairs (M6 v4)."""
+    fields: dict[str, Any] = {
+        "tss_per_au": calibration.get("tss_per_au"),
+        "pairs": calibration.get("pairs"),
+        "session_rpe_au": inputs.get("session_rpe_au"),
+    }
+    if band := calibration.get("rpe_band"):
+        fields["rpe_band"] = band
+        fields["pairs_by_rating_source"] = calibration.get("pairs_by_source")
+        fields["tss_per_au_by_rpe"] = [
+            {**row, "tss_per_au": _rounded(row.get("tss_per_au"))}
+            for row in calibration.get("by_rpe") or ()
+        ]
+    return fields
+
+
+def _rounded(value: Any) -> Any:
+    return round(value, 3) if isinstance(value, float) else value
+
+
 def _load_fields(load: Mapping[str, Any]) -> dict[str, Any]:
     """The served fields of one stored local load row and its derivation."""
     derivation = load["derivation"]
@@ -337,11 +360,7 @@ def _load_fields(load: Mapping[str, Any]) -> dict[str, Any]:
     if inputs.get("sex_assumed"):
         fields["load_assumption"] = SEX_ASSUMED_LABEL
     if calibration := derivation.get("calibration"):
-        fields["load_calibration"] = {
-            "tss_per_au": calibration.get("tss_per_au"),
-            "pairs": calibration.get("pairs"),
-            "session_rpe_au": inputs.get("session_rpe_au"),
-        }
+        fields["load_calibration"] = _calibration_fields(calibration, inputs)
     return fields
 
 

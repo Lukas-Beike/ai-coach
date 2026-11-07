@@ -11,9 +11,11 @@ the thresholds in effect on its local day, with the first complete branch of:
   threshold HR is 100, with the constants of the athlete's profile sex (male
   when not set, marked ``sex_assumed``; method v3, #1774);
 * session RPE (strength only): the session-RPE load (card M1, elapsed minutes x
-  RPE) times the athlete's own TSS per AU, the median of ``TSS / AU`` over the
-  rated ride and run sessions with a local load of the 365 days up to the
-  session day, rated locally or on the Garmin device, at least 20 of them.
+  RPE) times the athlete's own TSS per AU at a similar RPE (method v4, #1771):
+  the median of ``TSS / (TSS duration minutes x RPE)`` over the rated ride and
+  run sessions with a local load of the 365 days up to the session day, rated
+  locally or on the Garmin device, whose RPE lies within 1 of the strength
+  session's (else within 2), at least 20 of them.
 
 Only the power branch gives an intensity factor (percent of FTP). A provider
 load or intensity is never an input. ``DatedThresholds`` resolves the thresholds
@@ -59,7 +61,7 @@ from backend.performance.session_rpe_load import session_load
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 
 METHOD_ID: Final = "local-tss-load"
-METHOD_VERSION: Final = 3
+METHOD_VERSION: Final = 4
 CARD: Final = "M6"
 
 POWER_BRANCH: Final = "power"
@@ -78,13 +80,18 @@ RESTING_HR_LOOKBACK_DAYS: Final = 7
 # walking the heart-rate branch (athlete decisions 2026-11-06, method v2).
 NO_TSS_SPORTS: Final = frozenset({Sport.YOGA, Sport.ALPINE_SKI})
 SESSION_RPE_SPORTS: Final = frozenset({Sport.STRENGTH})
-# The sessions that calibrate TSS per AU, their ratings, window and minimum.
+# The sessions that calibrate TSS per AU, their window and minimum pairs.
 CALIBRATION_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
-CALIBRATION_RPE_SCALES: Final = frozenset(
-    {LOCAL_SESSION_RPE_SCALE.scale_id, GARMIN_RPE_SCALE.scale_id}
-)
 CALIBRATION_WINDOW_DAYS: Final = 365
 CALIBRATION_MIN_PAIRS: Final = 20
+# The RPE distances of the calibration bands, tried in order (card M6 v4).
+CALIBRATION_RPE_BANDS: Final = (1, 2)
+# The RPE values of the detail table (factor per RPE of its +-1 band).
+CALIBRATION_TABLE_RPES: Final = tuple(range(1, 11))
+_RATING_SOURCES: Final = {
+    LOCAL_SESSION_RPE_SCALE.scale_id: "local",
+    GARMIN_RPE_SCALE.scale_id: ProviderId.GARMIN.value,
+}
 _POWER_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
 _RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.WAHOO)
 THRESHOLD_KINDS: Final = (
@@ -144,13 +151,34 @@ class LocalLoad:
 
 
 @dataclass(frozen=True, slots=True)
+class CalibrationPair:
+    """One rated ride or run: its day, RPE, ``TSS / AU`` and rating source.
+
+    The AU uses the duration of the TSS, so both sides share one duration.
+    """
+
+    day: date
+    rpe: float
+    ratio: float
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
 class RpeCalibration:
-    """The athlete's TSS per session-RPE AU on one day and the pairs behind it."""
+    """The athlete's TSS per session-RPE AU at one RPE on one day.
+
+    ``rpe_band`` is the RPE range of the pairs behind ``factor``;
+    ``pairs_by_source`` splits them by rating source; ``by_rpe`` holds the
+    factor (from enough pairs) and pair count of each RPE's +-1 band.
+    """
 
     factor: float
     pairs: int
     window_start: date
     window_end: date
+    rpe_band: tuple[float, float]
+    pairs_by_source: Mapping[str, int]
+    by_rpe: tuple[Mapping[str, Any], ...] = ()
 
     def fingerprint_part(self) -> dict[str, Any]:
         return {
@@ -158,6 +186,9 @@ class RpeCalibration:
             "pairs": self.pairs,
             "window_start": self.window_start.isoformat(),
             "window_end": self.window_end.isoformat(),
+            "rpe_band": list(self.rpe_band),
+            "pairs_by_source": dict(self.pairs_by_source),
+            "by_rpe": [dict(item) for item in self.by_rpe],
         }
 
 
@@ -170,28 +201,74 @@ class SessionRating:
     rpe_scale: str | None
 
 
+def _band(
+    pairs: Sequence[CalibrationPair], rpe: float, distance: float
+) -> list[CalibrationPair]:
+    return [pair for pair in pairs if abs(pair.rpe - rpe) <= distance]
+
+
+def _rpe_table(pairs: Sequence[CalibrationPair]) -> tuple[dict[str, Any], ...]:
+    """Each table RPE's +-1 band: pair count and, from enough pairs, the factor."""
+    table = []
+    for rpe in CALIBRATION_TABLE_RPES:
+        band = _band(pairs, rpe, CALIBRATION_RPE_BANDS[0])
+        if not band:
+            continue
+        factor = (
+            statistics.median(pair.ratio for pair in band)
+            if len(band) >= CALIBRATION_MIN_PAIRS
+            else None
+        )
+        table.append({"rpe": rpe, "tss_per_au": factor, "pairs": len(band)})
+    return tuple(table)
+
+
+def _calibration(
+    band: Sequence[CalibrationPair],
+    window: Sequence[CalibrationPair],
+    rpe: float,
+    distance: float,
+    start: date,
+    day: date,
+) -> RpeCalibration:
+    sources: dict[str, int] = {}
+    for pair in band:
+        sources[pair.source] = sources.get(pair.source, 0) + 1
+    return RpeCalibration(
+        factor=statistics.median(pair.ratio for pair in band),
+        pairs=len(band),
+        window_start=start,
+        window_end=day,
+        rpe_band=(max(rpe - distance, 0.0), min(rpe + distance, 10.0)),
+        pairs_by_source=dict(sorted(sources.items())),
+        by_rpe=_rpe_table(window),
+    )
+
+
 class RpeCalibrations:
-    """TSS per AU by day from dated ``(day, TSS / AU)`` pairs (see the module doc)."""
+    """TSS per AU by day and RPE from dated calibration pairs (see the module doc)."""
 
-    def __init__(self, pairs: Iterable[tuple[date, float]]) -> None:
-        ordered = sorted(pairs)
-        self._days = [day for day, _ratio in ordered]
-        self._ratios = [ratio for _day, ratio in ordered]
-        self._by_day: dict[date, RpeCalibration | None] = {}
+    def __init__(self, pairs: Iterable[CalibrationPair]) -> None:
+        self._pairs = sorted(pairs, key=lambda pair: pair.day)
+        self._days = [pair.day for pair in self._pairs]
+        self._by_key: dict[tuple[date, float], RpeCalibration | None] = {}
 
-    def on(self, day: date) -> RpeCalibration | None:
-        if day not in self._by_day:
-            self._by_day[day] = self._calibrate(day)
-        return self._by_day[day]
+    def on(self, day: date, rpe: float) -> RpeCalibration | None:
+        key = (day, rpe)
+        if key not in self._by_key:
+            self._by_key[key] = self._calibrate(day, rpe)
+        return self._by_key[key]
 
-    def _calibrate(self, day: date) -> RpeCalibration | None:
+    def _calibrate(self, day: date, rpe: float) -> RpeCalibration | None:
         start = day - timedelta(days=CALIBRATION_WINDOW_DAYS - 1)
         low = bisect.bisect_left(self._days, start)
         high = bisect.bisect_right(self._days, day)
-        ratios = self._ratios[low:high]
-        if len(ratios) < CALIBRATION_MIN_PAIRS:
-            return None
-        return RpeCalibration(statistics.median(ratios), len(ratios), start, day)
+        window = self._pairs[low:high]
+        for distance in CALIBRATION_RPE_BANDS:
+            band = _band(window, rpe, distance)
+            if len(band) >= CALIBRATION_MIN_PAIRS:
+                return _calibration(band, window, rpe, distance, start, day)
+        return None
 
 
 def _positive(value: Any) -> float | None:
@@ -379,11 +456,12 @@ def _session_rpe(
         return "no_rating"
     if isinstance(rating, str):
         return rating
-    if calibration is None:
+    if calibration is None and rating.au > 0:
         return "not_calibrated"
+    # An RPE of 0 gives 0 AU and so 0 TSS without a factor.
     return _result(
         SESSION_RPE_BRANCH,
-        rating.au * calibration.factor,
+        0.0 if calibration is None else rating.au * calibration.factor,
         None,
         {
             "sport": sport.value,
@@ -655,15 +733,33 @@ def rated_sessions(
     return [summary for summary in summaries if _sport(summary) in sports]
 
 
+def _calibration_pair(
+    summary: Mapping[str, Any],
+    load: LocalLoad,
+    day: date,
+    feedback: Mapping[str, Any] | None,
+) -> CalibrationPair | None:
+    rating = _rating(summary, feedback)
+    if isinstance(rating, str) or rating.rpe <= 0:
+        return None
+    source = _RATING_SOURCES.get(rating.rpe_scale or "")
+    seconds = _positive(summary_duration_s(summary))
+    if source is None or seconds is None:
+        return None
+    au = seconds / 60 * rating.rpe
+    return CalibrationPair(day, rating.rpe, load.load / au, source)
+
+
 def calibration_pairs(
     summaries: Sequence[Mapping[str, Any]],
     loads: Mapping[str, LocalLoad | str],
     feedback: Mapping[str, Mapping[str, Any]],
-) -> list[tuple[date, float]]:
-    """Dated ``TSS / AU`` of rated ride and run sessions with a local load.
+) -> list[CalibrationPair]:
+    """The calibration pairs of rated ride and run sessions with a local load.
 
     Only a local or Garmin rating counts; a rating relayed by Intervals.icu does
-    not (athlete decision 2026-11-06).
+    not (athlete decision 2026-11-06). The AU uses the TSS duration (moving,
+    else elapsed; card M6 v4).
     """
     pairs = []
     for summary in summaries:
@@ -675,14 +771,11 @@ def calibration_pairs(
         # calibrates (``invalid_value`` in the stage).
         if _sport(summary) not in CALIBRATION_SPORTS or load.load > MAX_ACTIVITY_LOAD:
             continue
-        rating = _rating(summary, feedback.get(stored_activity_key(summary)))
-        if (
-            isinstance(rating, str)
-            or rating.au <= 0
-            or rating.rpe_scale not in CALIBRATION_RPE_SCALES
-        ):
-            continue
-        pairs.append((day, load.load / rating.au))
+        pair = _calibration_pair(
+            summary, load, day, feedback.get(stored_activity_key(summary))
+        )
+        if pair is not None:
+            pairs.append(pair)
     return pairs
 
 
@@ -725,10 +818,13 @@ def session_loads(
         )
     calibrations = RpeCalibrations(calibration_pairs(summaries, result, ratings))
     for session_id, summary, day in strength:
+        rating = _rating(summary, ratings.get(stored_activity_key(summary)))
         result[session_id] = session_local_load(
             summary,
             SessionThresholds(),
-            rating=_rating(summary, ratings.get(stored_activity_key(summary))),
-            calibration=calibrations.on(day),
+            rating=rating,
+            calibration=None
+            if isinstance(rating, str)
+            else calibrations.on(day, rating.rpe),
         )
     return result
