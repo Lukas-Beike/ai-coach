@@ -62,9 +62,11 @@ from backend.sync.garmin_rating_backfill import rating_backfill_finished
 from backend.sync.intervals_ingest import (
     INGEST_ENABLED_KEY,
     PURGE_DONE,
+    PURGE_MARKER_FILE,
     PURGE_STATE_KEY,
     PURGE_VERSION,
     purge_done,
+    purge_marker_exists,
     purge_state,
 )
 
@@ -73,8 +75,8 @@ STATE_KEY: Final = PURGE_STATE_KEY
 # One recovery copy per purge version; a later attempt reuses it.
 BACKUP_LABEL: Final = f"pre-intervals-purge-v{PURGE_VERSION}"
 # Written beside the database after a purge, so a restored pre-purge copy is
-# not purged again automatically.
-MARKER_FILE: Final = f"intervals-purge-v{PURGE_VERSION}.done"
+# not purged again automatically and its ingest stays off.
+MARKER_FILE: Final = PURGE_MARKER_FILE
 # The purge waits this long for a running foreground write before it fails.
 WRITER_WAIT_SECONDS: Final = 600.0
 STATUS_DONE: Final = PURGE_DONE
@@ -676,15 +678,16 @@ def purge_due(
     """Whether the purge of this version still has to run and may run now.
 
     It waits for the finished Garmin rating backfill and for a running
-    Intervals.icu sync, as a job or a direct sync, whose rows would otherwise
-    return. ``marker_exists`` (the marker file of a completed purge) means a
-    restored pre-purge database, which is not purged again automatically.
+    Intervals.icu ingest job. A direct sync is caught by the runner, which holds
+    the Intervals.icu sync lock while it writes; the stored ``sync_running``
+    flag is not read, as a crash can leave it set (the purge deletes it).
+    ``marker_exists`` (the marker file of a completed purge) means a restored
+    pre-purge database, which is not purged again automatically.
     """
     return (
         not marker_exists
         and not purge_done(purge_state(key_values, db))
         and rating_backfill_finished(key_values, db)
-        and key_values.get(db, INTERVALS_RUNNING_FLAG) != "1"
         and not _ingest_job_running(db)
     )
 
@@ -773,7 +776,7 @@ class IntervalsPurgeRunner:
 
     def marker_exists(self) -> bool:
         """Whether this data directory holds the marker of a completed purge."""
-        return (self._data_dir() / MARKER_FILE).is_file()
+        return purge_marker_exists(self._data_dir())
 
     def _recovery_copy(self) -> str:
         """Reuse this version's recovery copy, else write it."""

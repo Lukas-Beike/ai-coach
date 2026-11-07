@@ -1172,6 +1172,7 @@ INTERVALS_SYNC = IntervalsSyncAssembly(
             logger=LOGGER,
             activity_rows=lambda: CANONICAL_READ,
             table_serving=lambda: CANONICAL_READ,
+            data_dir=lambda: DATA_DIR,
         ),
         operations=IntervalsOperationDependencies(
             operation_observer=PROVIDER_SYNC.operation_observer,

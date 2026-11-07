@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
@@ -30,7 +31,10 @@ from backend.sync.intervals import (
     IntervalsSyncStatus,
     IntervalsSyncWorkflow,
 )
-from backend.sync.intervals_ingest import IntervalsIngestSwitch
+from backend.sync.intervals_ingest import (
+    IntervalsIngestSwitch,
+    purge_marker_exists,
+)
 from backend.sync.performance import (
     PerformanceRefreshFollowupService,
     PerformanceRefreshService,
@@ -61,6 +65,8 @@ class IntervalsPersistenceDependencies:
     # Decides per write whether the snapshot is stored without the activity
     # sections the canonical tables serve. None stores every snapshot in full.
     table_serving: Callable[[], CanonicalTableServing] | None = None
+    # The data directory: its purge marker file keeps the ingest off (#1728).
+    data_dir: Callable[[], Path] | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +133,7 @@ class IntervalsSyncAssembly:
         self._logger = persistence.logger
         self._activity_rows = persistence.activity_rows
         self._table_serving = persistence.table_serving
+        self._data_dir = persistence.data_dir
         self._operation_observer = operations.operation_observer
         self._intervals_resync_gate = operations.resync_gate
         self._intervals_sync_lock = operations.sync_lock
@@ -146,7 +153,14 @@ class IntervalsSyncAssembly:
 
     def ingest_switch(self) -> IntervalsIngestSwitch:
         """Create the athlete's switch for reading Intervals.icu data."""
-        return IntervalsIngestSwitch(self._database_manager(), self._key_values)
+        data_dir = self._data_dir
+        return IntervalsIngestSwitch(
+            self._database_manager(),
+            self._key_values,
+            purge_marker=(lambda: False)
+            if data_dir is None
+            else lambda: purge_marker_exists(data_dir()),
+        )
 
     def activity_detail_service(self) -> ActivityDetailRefreshService:
         config = self._config()
@@ -299,5 +313,5 @@ class IntervalsSyncAssembly:
                 self._intervals_resync_gate,
                 wait_seconds=self._performance_wait_seconds,
             ),
-            ingest_enabled=self.ingest_switch().enabled,
+            ingest=self.ingest_switch(),
         )

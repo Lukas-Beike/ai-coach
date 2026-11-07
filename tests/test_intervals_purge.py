@@ -8,6 +8,7 @@ schema as the application does, and runs the purge. Synthetic rows only.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import sqlite3
@@ -35,7 +36,11 @@ from backend.sync import intervals_purge
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.intervals import IntervalsSyncService
-from backend.sync.intervals_ingest import IntervalsIngestSwitch, ingest_off_result
+from backend.sync.intervals_ingest import (
+    IntervalsIngestSwitch,
+    ingest_off_result,
+    purge_marker_exists,
+)
 from backend.sync.intervals_purge import (
     BACKUP_LABEL,
     IntervalsPurgeRunner,
@@ -861,13 +866,19 @@ class IntervalsPurgeSafetyTests(unittest.TestCase):
         )
         self.assertFalse(lock.locked())
 
-    def test_a_running_direct_sync_postpones_the_purge(self) -> None:
+    def test_a_stale_running_flag_with_a_free_lock_does_not_block(self) -> None:
         manager = open_current(self)
         with manager.unit_of_work() as db:
             key_values().set(db, "sync_running", "1")
-        with manager.reader() as db:
-            self.assertFalse(intervals_purge.purge_due(db, key_values()))
-            self.assertEqual(purge_status(db, key_values())["status"], "pending")
+        lock = threading.Lock()
+
+        self.runner(manager, self.copy_writer(manager), lock).run()
+
+        self.assertEqual(
+            json.loads(kv(manager, intervals_purge.STATE_KEY) or "{}")["status"],
+            "done",
+        )
+        self.assertIsNone(kv(manager, "sync_running"))
 
     def test_a_restored_pre_purge_copy_is_not_purged_again(self) -> None:
         manager = open_current(self)
@@ -890,6 +901,15 @@ class IntervalsPurgeSafetyTests(unittest.TestCase):
 
         again.assert_not_called()
         self.assertEqual(dump(restored), before)
+        # The restored copy keeps its ingest off: the file counts as the marker.
+        switch = IntervalsIngestSwitch(
+            restored,
+            key_values(),
+            purge_marker=lambda: purge_marker_exists(restored.path.parent),
+        )
+        self.assertTrue(switch.purged())
+        with self.assertRaises(AppError):
+            switch.save({"enabled": True})
         with restored.reader() as db:
             self.assertEqual(
                 summarize_intervals_purge(key_values(), db, marker_exists=True),
@@ -914,16 +934,39 @@ class IntervalsPurgeSafetyTests(unittest.TestCase):
         )
         self.assertEqual(switch.save({"enabled": False})["enabled"], False)
         runtime = mock.Mock()
-        status = mock.Mock()
-        status.get.side_effect = lambda key: kv(manager, key)
         service = IntervalsSyncService(
             cast(Any, mock.Mock(intervals_api_key="key")),
             cast(Any, mock.Mock()),
             cast(Any, mock.Mock()),
-            cast(Any, status),
+            cast(Any, mock.Mock()),
             cast(Any, mock.Mock()),
             cast(Any, runtime),
-            ingest_enabled=switch.enabled,
+            ingest=switch,
+        )
+        self.assertEqual(service.sync(one_off=True), ingest_off_result())
+        runtime.operation.assert_not_called()
+
+    def test_the_marker_file_alone_refuses_ingest_and_one_off_reads(self) -> None:
+        manager = open_current(self)
+        (manager.path.parent / intervals_purge.MARKER_FILE).write_text("x")
+        switch = IntervalsIngestSwitch(
+            manager,
+            key_values(),
+            purge_marker=lambda: purge_marker_exists(manager.path.parent),
+        )
+
+        with self.assertRaises(AppError) as refused:
+            switch.save({"enabled": True})
+        self.assertEqual(refused.exception.status, 409)
+        runtime = mock.Mock()
+        service = IntervalsSyncService(
+            cast(Any, mock.Mock(intervals_api_key="key")),
+            cast(Any, mock.Mock()),
+            cast(Any, mock.Mock()),
+            cast(Any, mock.Mock()),
+            cast(Any, mock.Mock()),
+            cast(Any, runtime),
+            ingest=switch,
         )
         self.assertEqual(service.sync(one_off=True), ingest_off_result())
         runtime.operation.assert_not_called()
@@ -1020,6 +1063,71 @@ class DryRunTests(unittest.TestCase):
             mock.patch("sys.stderr"),
         ):
             self.assertEqual(intervals_purge_dry_run.main(["copy.db"]), 2)
+
+
+class RecoveryCopySizeTests(unittest.TestCase):
+    def test_a_database_above_the_download_limit_is_still_copied(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        manager = DatabaseManager(
+            root / "intervals-coach.db", sqlite3, row_factory=row_factory
+        )
+        self.addCleanup(manager.close)
+        with manager.unit_of_work() as db:
+            db.execute("CREATE TABLE records (value TEXT)")
+            db.execute("INSERT INTO records VALUES ('kept')")
+        page_size = 4096
+        # The stubbed source reports more than the 1 GB download limit.
+        pages = 2_000_000_000 // page_size
+        service = DatabaseBackupService(
+            manager,
+            mock.MagicMock(),
+            DatabaseBackupConfig(
+                database_path=root / "intervals-coach.db",
+                data_dir=root,
+                maximum_bytes=1_000_000_000,
+                minimum_free_bytes=0,
+                time_limit_seconds=120,
+                disk_usage=lambda _path: mock.Mock(free=10_000_000_000_000),
+            ),
+            mock.Mock(),
+        )
+        counts = {"PRAGMA page_count": pages, "PRAGMA page_size": page_size}
+        original = sqlite3.Connection.execute
+
+        class Source:
+            def __init__(self, connection: Any) -> None:
+                self._connection = connection
+
+            def execute(self, sql: str, *args: Any) -> Any:
+                if sql in counts:
+                    return mock.Mock(fetchone=lambda: {"value": counts[sql]})
+                return original(self._connection, sql, *args)
+
+            def backup(self, *args: Any, **kwargs: Any) -> None:
+                self._connection.backup(*args, **kwargs)
+
+        reader = manager.reader
+
+        @contextlib.contextmanager
+        def oversized() -> Any:
+            with reader() as connection:
+                yield Source(connection)
+
+        with mock.patch.object(manager, "reader", oversized):
+            with self.assertRaises(AppError) as refused:
+                service.read_bytes()
+            self.assertEqual(refused.exception.status, 413)
+            name = service.write_recovery_copy(BACKUP_LABEL)
+
+        copy = sqlite3.connect(root / name)
+        try:
+            self.assertEqual(
+                copy.execute("SELECT value FROM records").fetchone()[0], "kept"
+            )
+        finally:
+            copy.close()
 
 
 class RecoveryCopyNameTests(unittest.TestCase):

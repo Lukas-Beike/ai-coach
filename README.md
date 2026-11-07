@@ -641,14 +641,14 @@ When a database restore is initiated:
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Intervals.icu Ingest Purge
-Once the Garmin rating backfill reports `finished` and no Intervals.icu sync runs, the canonical backfill worker removes the stored Intervals.icu ingest data once (purge version 1). It first saves one encrypted recovery copy beside the database (`intervals-coach.db.pre-intervals-purge-v1-<timestamp>-<id>`, reused by a later attempt and kept by the startup cleanup), then in one transaction:
+Once the Garmin rating backfill reports `finished` and no Intervals.icu sync holds its lock, the canonical backfill worker removes the stored Intervals.icu ingest data once (purge version 1). It first saves one encrypted recovery copy beside the database (`intervals-coach.db.pre-intervals-purge-v1-<timestamp>-<id>`, without the backup-download size limit, reused by a later attempt and kept by the startup cleanup), then in one transaction:
 
 - tombstones every Intervals.icu activity, so the Garmin or Wahoo copy becomes the session and old session ids still resolve;
 - moves activity notes, equipment assignments and frozen target snapshots to that session (the newest wins against everything stored under the session's ids); data of a session without a Garmin or Wahoo copy is dropped and counted;
 - marks earlier activity-note changes, and session corrections that touched an Intervals.icu session, as not undoable;
 - deletes the Intervals.icu provider and activity records, detail sets, observations, sleep, zone and power-curve rows, stored snapshots, sync cursors, ingest jobs, refresh history and ingest state, and turns the ingest switch off.
 
-Remote links, competition and workout ids, library, metric export and nutrition sync state stay. A failure rolls back and is retried after the next start; the local load and session analyses are recomputed in the same pass. Afterwards the ingest switch refuses to turn on (HTTP 409) and "Einmal abrufen" reads nothing. The marker file `intervals-purge-v1.done` in `/data` keeps a restored pre-purge backup from being purged again automatically. The diagnostic report shows `intervals_purge` (`waiting_for_rating_backfill`, `pending`, `done` with counts, or `done_restored`).
+Remote links, competition and workout ids, library, metric export and nutrition sync state stay. A failure rolls back and is retried after the next start; the local load and session analyses are recomputed in the same pass. Afterwards the ingest switch refuses to turn on (HTTP 409) and "Einmal abrufen" reads nothing. The marker file `intervals-purge-v1.done` in `/data` keeps a restored pre-purge backup from being purged again automatically and keeps its ingest off as well. The diagnostic report shows `intervals_purge` (`waiting_for_rating_backfill`, `pending`, `done` with counts, or `done_restored`).
 
 A counts-only dry run on a disposable copy rolls back and leaves the file unchanged:
 

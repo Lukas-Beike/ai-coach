@@ -18,6 +18,10 @@ from typing import Any
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 
+# A recovery copy is a local file copy of the whole database: generous enough for
+# a large database on slow storage.
+RECOVERY_TIME_LIMIT_SECONDS = 3600
+
 
 @dataclass(frozen=True)
 class DatabaseBackupConfig:
@@ -63,12 +67,14 @@ class DatabaseBackupService:
     def _first_row_value(row: Any) -> Any:
         return next(iter(row.values())) if isinstance(row, Mapping) else row[0]
 
-    def _snapshot(self, deadline: float) -> Path:
+    def _snapshot(self, deadline: float, *, capped: bool = True) -> Path:
+        """Copy the database; an uncapped copy (a recovery copy) has no size limit."""
+        maximum_bytes = self._config.maximum_bytes if capped else None
         if not self._config.database_path.is_file():
             raise AppError(503, "Der Backup-Speicher ist nicht verfügbar.")
         snapshot = None
         try:
-            snapshot = self._create_snapshot(deadline)
+            snapshot = self._create_snapshot(deadline, maximum_bytes)
             return snapshot
         except AppError:
             self._discard_snapshot(snapshot)
@@ -87,11 +93,12 @@ class DatabaseBackupService:
                 "Die Datenbank konnte nicht konsistent als Backup vorbereitet werden.",
             ) from exc
 
-    def _create_snapshot(self, deadline: float) -> Path:
+    def _create_snapshot(self, deadline: float, maximum_bytes: int | None) -> Path:
+        """Copy the database; ``maximum_bytes`` None copies it at any size."""
         snapshot: Path | None = None
         try:
             with self._manager.reader() as source:
-                self._check_source_capacity(source)
+                self._check_source_capacity(source, maximum_bytes)
                 descriptor, temporary_name = tempfile.mkstemp(
                     prefix=".database-backup-",
                     suffix=".tmp",
@@ -108,7 +115,7 @@ class DatabaseBackupService:
             if snapshot is None:
                 raise RuntimeError("database backup snapshot path is missing")
             size = snapshot.stat().st_size
-            if size > self._config.maximum_bytes:
+            if maximum_bytes is not None and size > maximum_bytes:
                 raise AppError(
                     413, "Das Datenbank-Backup überschreitet das Größenlimit."
                 )
@@ -118,7 +125,7 @@ class DatabaseBackupService:
             self._discard_snapshot(snapshot)
             raise
 
-    def _check_source_capacity(self, source: Any) -> None:
+    def _check_source_capacity(self, source: Any, maximum_bytes: int | None) -> None:
         page_count = int(
             self._first_row_value(source.execute("PRAGMA page_count").fetchone())
         )
@@ -126,7 +133,7 @@ class DatabaseBackupService:
             self._first_row_value(source.execute("PRAGMA page_size").fetchone())
         )
         expected_size = page_count * page_size
-        if expected_size > self._config.maximum_bytes:
+        if maximum_bytes is not None and expected_size > maximum_bytes:
             raise AppError(413, "Das Datenbank-Backup überschreitet das Größenlimit.")
         self._check_free_space(expected_size + self._config.minimum_free_bytes)
 
@@ -182,20 +189,27 @@ class DatabaseBackupService:
                     500, "Die Datenbank konnte nicht als Backup gelesen werden."
                 ) from exc
 
-    def write_recovery_copy(self, label: str) -> str:
+    def write_recovery_copy(
+        self, label: str, *, time_limit_seconds: int = RECOVERY_TIME_LIMIT_SECONDS
+    ) -> str:
         """Keep a consistent, encrypted copy of the database beside it; return its name.
 
-        The copy is the snapshot of a backup download, renamed to
-        ``<database>.<label>-<timestamp>-<id>`` in the data directory, which the
-        startup sweep of staging files never removes. The size and free-space
-        limits of a download apply.
+        The copy is taken like a backup download snapshot (same key, integrity
+        check), renamed to ``<database>.<label>-<timestamp>-<id>`` in the data
+        directory, which the startup sweep of staging files never removes. A
+        recovery copy has no size cap and a local-copy time limit, so a large
+        database is never skipped; the free-space reserve still applies.
         """
-        with self.stream_file() as (snapshot, _deadline):
+        deadline = self._config.monotonic() + time_limit_seconds
+        snapshot = self._snapshot(deadline, capped=False)
+        try:
             name = (
                 f"{self._config.database_path.name}.{label}-"
                 f"{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex}"
             )
             os.replace(snapshot, self._config.data_dir / name)
+        finally:
+            snapshot.unlink(missing_ok=True)
         return name
 
     @contextmanager

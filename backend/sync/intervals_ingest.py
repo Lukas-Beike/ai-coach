@@ -11,8 +11,9 @@ window once while the switch stays off.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from typing import Any, Final
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import Any, Final, Protocol
 
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -29,6 +30,14 @@ PURGE_STATE_KEY: Final = "intervals_purge_state"
 PURGE_VERSION: Final = 1
 PURGE_DONE: Final = "done"
 INGEST_PURGED_REASON: Final = "intervals_ingest_purged"
+# Written beside the database after the purge: a restored pre-purge database
+# has no marker of its own, so the file keeps the ingest off there too.
+PURGE_MARKER_FILE: Final = f"intervals-purge-v{PURGE_VERSION}.done"
+
+
+def purge_marker_exists(data_dir: Path) -> bool:
+    """Whether the data directory holds the marker file of a completed purge."""
+    return (data_dir / PURGE_MARKER_FILE).is_file()
 
 
 def ingest_enabled_value(value: str | None) -> bool:
@@ -67,12 +76,43 @@ def ingest_off_result() -> dict[str, Any]:
     return {"status": "skipped", "reason": INGEST_OFF_REASON}
 
 
-class IntervalsIngestSwitch:
-    """Read and store whether Intervals.icu data is read in."""
+class IngestGate(Protocol):
+    """Whether Intervals.icu data is read in, and whether it was purged."""
 
-    def __init__(self, database_manager: Any, key_values: KeyValueRepository) -> None:
+    def enabled(self) -> bool: ...
+
+    def purged(self) -> bool: ...
+
+
+class _IngestOn:
+    """The gate of a caller without a switch: reading on, nothing purged."""
+
+    def enabled(self) -> bool:
+        return True
+
+    def purged(self) -> bool:
+        return False
+
+
+INGEST_ON: Final = _IngestOn()
+
+
+class IntervalsIngestSwitch:
+    """Read and store whether Intervals.icu data is read in.
+
+    ``purge_marker`` tells whether the data directory holds the purge marker
+    file; with it or the database marker the purge counts as done.
+    """
+
+    def __init__(
+        self,
+        database_manager: Any,
+        key_values: KeyValueRepository,
+        purge_marker: Callable[[], bool] = lambda: False,
+    ) -> None:
         self._database_manager = database_manager
         self._key_values = key_values
+        self._purge_marker = purge_marker
 
     def enabled(self) -> bool:
         with self._database_manager.reader() as db:
@@ -80,6 +120,8 @@ class IntervalsIngestSwitch:
 
     def purged(self) -> bool:
         """Whether the stored Intervals.icu ingest data was purged (#1728)."""
+        if self._purge_marker():
+            return True
         with self._database_manager.reader() as db:
             return purge_done(purge_state(self._key_values, db))
 
@@ -89,7 +131,9 @@ class IntervalsIngestSwitch:
         if not isinstance(enabled, bool):
             raise AppError(400, "Der Schalter braucht den Wert an oder aus.")
         with self._database_manager.unit_of_work() as db:
-            if enabled and purge_done(purge_state(self._key_values, db)):
+            if enabled and (
+                self._purge_marker() or purge_done(purge_state(self._key_values, db))
+            ):
                 raise AppError(
                     409,
                     "Intervals.icu-Daten wurden bereinigt; das Einlesen bleibt aus.",
