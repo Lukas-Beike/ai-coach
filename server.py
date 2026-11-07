@@ -688,6 +688,8 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
 
 PROFILE_MUTATION_COORDINATOR = threading.RLock()
 
+# Declared ahead of its first lambda reference; assigned after METRIC_EXPORT below.
+METRIC_EXPORT_RUNNER: MetricExportRunner
 ATHLETE_DATA = AthleteDataAssembly(
     dependencies=AthleteDataAssembly.Inputs(
         database_manager=database_manager,
