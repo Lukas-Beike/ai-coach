@@ -49,6 +49,8 @@ class AthleteRuntime:
     # Called when an input of the local session load (card M6) changes: a local
     # zone configuration, a session correction or a preferred threshold source.
     load_inputs_changed: Callable[[], None] = lambda: None
+    # A local zone change can change the thresholds exported to Intervals.icu.
+    thresholds_changed: Callable[[], None] = lambda: None
 
 
 class AthleteDataAssembly:
@@ -85,6 +87,7 @@ class AthleteDataAssembly:
         self._uuid_factory = runtime.uuid_factory
         self._read_planned_units = runtime.read_planned_units
         self._load_inputs_changed = runtime.load_inputs_changed
+        self._thresholds_changed = runtime.thresholds_changed
 
     def activity_summaries(self) -> tuple[ActivitySummary, ...]:
         with self._database_manager().unit_of_work() as db:
@@ -114,8 +117,12 @@ class AthleteDataAssembly:
             self._database_manager(),
             CanonicalTableReader(),
             self._utc_now,
-            on_change=self._load_inputs_changed,
+            on_change=self._zones_changed,
         )
+
+    def _zones_changed(self) -> None:
+        self._load_inputs_changed()
+        self._thresholds_changed()
 
     def activity_feedback(self) -> ActivityFeedbackService:
         return ActivityFeedbackService(

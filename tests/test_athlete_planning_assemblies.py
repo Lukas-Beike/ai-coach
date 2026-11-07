@@ -52,10 +52,12 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                     normalize_competition=Mock(name="normalize_competition"),
                     uuid_factory=Mock(name="uuid_factory"),
                     load_inputs_changed=lambda: load_input_changes.append(True),
+                    thresholds_changed=lambda: threshold_changes.append(True),
                 ),
             )
         )
         load_input_changes: list[bool] = []
+        threshold_changes: list[bool] = []
 
         feedback = assembly.activity_feedback()
         checkin = assembly.checkin()
@@ -84,6 +86,10 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                 {"timezone": "Europe/Berlin"}, {"timezone": "UTC"}, db=None
             )
             self.assertEqual(load_input_changes, [True, True])
+            self.assertEqual(threshold_changes, [])
+        # A local zone change requests a load pass and a threshold export (#1729).
+        assembly.zones()._on_change()
+        self.assertEqual((load_input_changes[-1], threshold_changes), (True, [True]))
         self.assertIs(duplicate._database_manager, manager)
         self.assertIs(duplicate._event_buffer, event_buffer)
         self.assertFalse(hasattr(assembly, "activity_read"))

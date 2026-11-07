@@ -88,7 +88,7 @@ provider-keyed.
 | POST | `/api/wahoo/connect`, `/api/wahoo/disconnect` | Start the Wahoo OAuth connection or disconnect Wahoo | CSRF |
 | POST | `/api/metric-export/preview` | Preview metric values for export without writing | CSRF |
 | POST | `/api/metric-export/execute` | Intervals.icu write: send the confirmed metric selection | CSRF |
-| POST | `/api/metric-export/automatic` | Intervals.icu write: switch the automatic Garmin metric export; needs `confirmed: true` and the `intervals` target | CSRF |
+| POST | `/api/metric-export/automatic` | Intervals.icu write: switch the automatic metric export (consent per field); needs `confirmed: true`, `source: "garmin"` and the `intervals` target | CSRF |
 | POST | `/api/transcribe` | Transcribe short-lived voice input | CSRF |
 
 ## PUT routes

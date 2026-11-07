@@ -10,12 +10,12 @@ test("@responsive Garmin metric export sits in Anbindungen and shows its receipt
   await page.evaluate(() => {
     state.data.credentials = { ...(state.data.credentials || {}), garmin_connection: { connected: true, source: "db" } };
     state.data.garmin.metric_export_enabled = false;
-    state.data.garmin.metric_export_status = "Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.";
+    state.data.garmin.metric_export_status = "Intervals.icu: 2 Werte gesendet, 1 Konflikte, 0 fehlgeschlagen.";
     renderProviderCredentials(state.data);
   });
-  await expect(panel.getByText(/automatisch an Intervals\.icu senden/)).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Garmin → Intervals.icu automatisch abgleichen" })).toBeVisible();
-  await expect(panel.getByText("Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.")).toBeVisible();
+  await expect(panel.getByText(/Schwellenwerte aus deinen lokalen Zonen/)).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Werte automatisch an Intervals.icu senden" })).toBeVisible();
+  await expect(panel.getByText("Intervals.icu: 2 Werte gesendet, 1 Konflikte, 0 fehlgeschlagen.")).toBeVisible();
   await expect(panel.getByRole("button", { name: "Werte an Anbieter senden" })).toHaveCount(0);
   await expect(panel.getByRole("checkbox")).toHaveCount(0);
   await page.evaluate(() => {
@@ -26,7 +26,7 @@ test("@responsive Garmin metric export sits in Anbindungen and shows its receipt
     ];
     renderProviderCredentials(state.data);
   });
-  const fields = panel.getByRole("group", { name: "Automatisch gesendete Garmin-Werte" });
+  const fields = panel.getByRole("group", { name: "Automatisch an Intervals.icu gesendete Werte" });
   await expect(fields.getByRole("checkbox", { name: "Gewicht" })).toBeChecked();
   await expect(fields.getByRole("checkbox", { name: "Rad-FTP" })).not.toBeChecked();
 });

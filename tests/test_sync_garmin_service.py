@@ -239,7 +239,7 @@ class GarminSyncServiceTests(unittest.TestCase):
         export.assert_called_once_with()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["metric_export"]["exported"], 2)
-        self.assertIn("2 Messwerte gesendet", self.writer.calls[-1][4])
+        self.assertIn("2 Werte gesendet", self.writer.calls[-1][4])
         self.assertIn("1 Konflikte", self.writer.calls[-1][4])
         self.assertFalse(self.lock.locked())
 

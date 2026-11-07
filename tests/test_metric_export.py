@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 
 from server_test_support import ServerTestCase, create_test_session, server
 
+from backend import change_history
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
     MetricKind,
@@ -30,11 +31,16 @@ from backend.db.canonical_store import observation_natural_key
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.history.undo_service import HistoryUndoService
 from backend.http_api import server as http_server_module
 from backend.providers.intervals_client import IntervalsClient
 from backend.sync.intervals_metric_export import IntervalsMetricExport
 from backend.sync.metric_export import MetricExportService
-from backend.sync.metric_export_consent import DEFAULT_FIELDS, LEGACY_FLAG_KEY
+from backend.sync.metric_export_consent import (
+    DEFAULT_FIELDS,
+    EXPORT_FIELDS,
+    LEGACY_FLAG_KEY,
+)
 from backend.sync.metric_export_port import (
     MetricExportField,
     MetricExportPort,
@@ -103,6 +109,37 @@ class FakeReader:
             and (end is None or item.observed_on <= end)
             and (sport is None or item.sport is sport)
         ]
+
+
+_THRESHOLD_KINDS = frozenset(
+    {
+        MetricKind.FTP,
+        MetricKind.THRESHOLD_HR,
+        MetricKind.MAX_HR,
+        MetricKind.THRESHOLD_PACE,
+    }
+)
+
+
+def newest_thresholds(reader: FakeReader):
+    """A threshold source: the newest non-Intervals value per key.
+
+    The resolver's precedence is tested in test_current_thresholds; the service
+    sends whatever the source resolves (AI estimates are left to its own guard).
+    """
+
+    def thresholds(_db):
+        result: dict[tuple[MetricKind, Sport], Observation] = {}
+        for item in sorted(reader.items, key=lambda item: item.observed_on):
+            if (
+                item.kind in _THRESHOLD_KINDS
+                and item.provenance.provider is not ProviderId.INTERVALS
+                and item.observed_on <= TODAY
+            ):
+                result[(item.kind, item.sport or Sport.RIDE)] = item
+        return result
+
+    return thresholds
 
 
 class FakeDatabase:
@@ -258,6 +295,7 @@ class MetricExportServiceTests(unittest.TestCase):
             lambda: self.database,
             lambda: self.reader,
             {ProviderId.INTERVALS: lambda: IntervalsMetricExport(self.client_factory)},
+            thresholds=newest_thresholds(self.reader),
             database_lock=threading.Lock(),
             today=lambda: TODAY,
             utc_now=lambda: NOW,
@@ -304,7 +342,7 @@ class MetricExportServiceTests(unittest.TestCase):
         self.database.db.execute(
             "DELETE FROM kv WHERE key='garmin_metric_export_enabled'"
         )
-        self.assertIsNone(self.service.sync_garmin())
+        self.assertIsNone(self.service.sync_automatic())
         self.service.configure_automatic(
             {
                 "enabled": False,
@@ -314,7 +352,7 @@ class MetricExportServiceTests(unittest.TestCase):
             }
         )
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
-        self.assertIsNone(self.service.sync_garmin())
+        self.assertIsNone(self.service.sync_automatic())
         self.client_factory.assert_not_called()
         for payload in (
             {"enabled": True},
@@ -327,7 +365,7 @@ class MetricExportServiceTests(unittest.TestCase):
         ):
             with self.assertRaises(AppError):
                 self.service.configure_automatic(payload)
-        self.assertIsNone(self.service.sync_garmin())
+        self.assertIsNone(self.service.sync_automatic())
 
     def configure(self, **payload):
         return self.service.configure_automatic(
@@ -336,7 +374,7 @@ class MetricExportServiceTests(unittest.TestCase):
 
     def test_legacy_consent_keeps_all_fields_until_saved_per_field(self):
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
-        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
 
         receipt = self.configure(enabled=True, fields=["weight", "resting_hr"])
 
@@ -346,18 +384,18 @@ class MetricExportServiceTests(unittest.TestCase):
         self.assertNotIn("weight", changed)
         self.add(obs(MetricKind.FTP, 255, TODAY, ProviderId.GARMIN))
         self.add(obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.GARMIN))
-        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
         self.assertEqual(self.client.update_wellness.call_count, 1)
 
-    def test_new_consent_starts_without_ftp(self):
+    def test_new_consent_starts_with_heart_rate_and_pace_thresholds_only(self):
         self.configure(enabled=False)
         receipt = self.configure(enabled=True)
 
         enabled = {item["key"] for item in receipt["fields"] if item["enabled"]}
         self.assertEqual(enabled, set(DEFAULT_FIELDS))
-        self.assertNotIn("ftp", enabled)
+        self.assertEqual(enabled, {"threshold_hr", "max_hr", "threshold_pace"})
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
-        self.assertEqual(self.service.sync_garmin()["exported"], 0)
+        self.assertEqual(self.service.sync_automatic()["exported"], 0)
         self.client_factory.return_value.update_sport_settings.assert_not_called()
 
     def test_revoking_keeps_the_legacy_flag_in_step(self):
@@ -367,7 +405,7 @@ class MetricExportServiceTests(unittest.TestCase):
             "SELECT value FROM kv WHERE key=?", (LEGACY_FLAG_KEY,)
         ).fetchone()
         self.assertEqual(row[0], "false")
-        self.assertIsNone(self.service.sync_garmin())
+        self.assertIsNone(self.service.sync_automatic())
 
     def test_a_single_field_change_applies_to_the_stored_consent(self):
         self.configure(enabled=True, fields=["weight", "resting_hr"])
@@ -396,7 +434,7 @@ class MetricExportServiceTests(unittest.TestCase):
                 self.database.db.execute(
                     "UPDATE kv SET value=? WHERE key=?", (value, key)
                 )
-                self.assertIsNone(self.service.sync_garmin())
+                self.assertIsNone(self.service.sync_automatic())
         self.client.update_wellness.assert_not_called()
 
     def test_unknown_or_empty_fields_are_rejected(self):
@@ -413,31 +451,35 @@ class MetricExportServiceTests(unittest.TestCase):
 
     def test_new_wellness_day_preserves_existing_target_value(self):
         self.add(obs(MetricKind.WEIGHT, 70, date(2026, 10, 10), ProviderId.GARMIN))
-        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
         self.add(obs(MetricKind.WEIGHT, 71, TODAY, ProviderId.GARMIN))
         self.wellness[TODAY.isoformat()] = {"weight": 72}
-        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
+        self.assertEqual(self.service.sync_automatic()["conflicts"], 1)
         self.assertEqual(self.client.update_wellness.call_count, 1)
 
     def test_normalized_body_fat_does_not_conflict_and_accepts_updates(self):
         self.add(obs(MetricKind.BODY_FAT, 15.06, TODAY, ProviderId.GARMIN))
-        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
         self.wellness[TODAY.isoformat()] = {"bodyFat": 15.1}
         self.assertEqual(
-            self.service.sync_garmin(), {"exported": 0, "failed": 0, "conflicts": 0}
+            self.service.sync_automatic(), {"exported": 0, "failed": 0, "conflicts": 0}
         )
         self.reader.items = [obs(MetricKind.BODY_FAT, 15.26, TODAY, ProviderId.GARMIN)]
-        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
         self.assertEqual(
             self.client.update_wellness.call_args.args,
             (TODAY.isoformat(), {"bodyFat": 15.3}),
         )
 
-    def test_initial_existing_setting_requires_an_accepted_baseline(self):
+    def test_the_resolved_threshold_overwrites_a_different_target_value(self):
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
         self.settings["Ride"] = {"ftp": 240}
-        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
-        self.client.update_sport_settings.assert_not_called()
+        self.assertEqual(
+            self.service.sync_automatic(), {"exported": 1, "failed": 0, "conflicts": 0}
+        )
+        self.client.update_sport_settings.assert_called_once_with(
+            "Ride", {"ftp": 250}, recalc_hr_zones=False
+        )
 
     def test_a_late_read_failure_preserves_prior_success_and_other_groups(self):
         self.add(
@@ -454,81 +496,80 @@ class MetricExportServiceTests(unittest.TestCase):
         ]
         with self.assertLogs("backend.sync.metric_export", "WARNING"):
             self.assertEqual(
-                self.service.sync_garmin(), {"exported": 1, "failed": 1, "conflicts": 0}
+                self.service.sync_automatic(),
+                {"exported": 1, "failed": 1, "conflicts": 0},
             )
         self.client.update_sport_settings.assert_called_once_with(
             "Ride", {"ftp": 250}, recalc_hr_zones=False
         )
 
-    def test_automatic_garmin_export_is_idempotent_and_preserves_zones(self):
+    def test_automatic_threshold_export_is_idempotent(self):
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
-        receipt = self.service.sync_garmin()
+        receipt = self.service.sync_automatic()
         self.assertEqual(receipt, {"exported": 1, "failed": 0, "conflicts": 0})
         self.client.update_sport_settings.assert_called_once_with(
             "Ride", {"ftp": 250}, recalc_hr_zones=False
         )
         self.settings["Ride"] = {"ftp": 250}
-        self.assertEqual(self.service.sync_garmin()["exported"], 0)
+        self.assertEqual(self.service.sync_automatic()["exported"], 0)
         self.assertEqual(self.client.update_sport_settings.call_count, 1)
 
-    def test_new_garmin_value_after_restart_preserves_a_manual_target_change(self):
+    def test_a_target_side_threshold_change_is_overwritten_after_restart(self):
         self.add(obs(MetricKind.FTP, 250, date(2026, 10, 10), ProviderId.GARMIN))
-        self.service.sync_garmin()
+        self.service.sync_automatic()
         self.settings["Ride"] = {"ftp": 260}
-        self.add(obs(MetricKind.FTP, 255, TODAY, ProviderId.GARMIN))
         restarted = MetricExportService(
             lambda: self.database,
             lambda: self.reader,
             {ProviderId.INTERVALS: lambda: IntervalsMetricExport(self.client_factory)},
+            thresholds=newest_thresholds(self.reader),
             database_lock=threading.Lock(),
             today=lambda: TODAY,
             utc_now=lambda: NOW,
         )
         self.assertEqual(
-            restarted.sync_garmin(), {"exported": 0, "failed": 0, "conflicts": 1}
+            restarted.sync_automatic(), {"exported": 1, "failed": 0, "conflicts": 0}
         )
-        self.assertEqual(self.client.update_sport_settings.call_count, 1)
-        # Restoring the accepted target value resumes this field.
-        self.settings["Ride"]["ftp"] = 250
-        self.assertEqual(restarted.sync_garmin()["exported"], 1)
         self.assertEqual(
-            self.client.update_sport_settings.call_args.args, ("Ride", {"ftp": 255})
+            self.client.update_sport_settings.call_args.args, ("Ride", {"ftp": 250})
         )
 
-    def test_matching_initial_value_establishes_a_conflict_baseline(self):
-        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
-        self.settings["Ride"] = {"ftp": 250}
-        self.assertEqual(self.service.sync_garmin()["exported"], 0)
-        self.settings["Ride"]["ftp"] = 260
-        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
-        self.client.update_sport_settings.assert_not_called()
+    def test_matching_initial_wellness_value_establishes_a_conflict_baseline(self):
+        self.configure(enabled=True, fields=["weight"])
+        self.add(obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.GARMIN))
+        self.wellness[TODAY.isoformat()] = {"weight": 70}
+        self.assertEqual(self.service.sync_automatic()["exported"], 0)
+        self.wellness[TODAY.isoformat()]["weight"] = 72
+        self.assertEqual(self.service.sync_automatic()["conflicts"], 1)
+        self.client.update_wellness.assert_not_called()
 
-    def test_automatic_export_uses_only_garmin_provider_measurements(self):
+    def test_body_metrics_use_only_garmin_measurements(self):
         self.add(
             obs(MetricKind.FTP, 250, date(2026, 10, 10), ProviderId.GARMIN),
             obs(MetricKind.FTP, 270, TODAY, ProviderId.WAHOO),
             obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.INTERVALS),
+            obs(MetricKind.WEIGHT, 71, TODAY, ProviderId.WAHOO),
             provider_less(MetricKind.THRESHOLD_PACE, 4, TODAY),
             obs(MetricKind.RESTING_HR, 50, date(2026, 10, 13), ProviderId.GARMIN),
             obs(MetricKind.BODY_FAT, 15, date(2026, 1, 1), ProviderId.GARMIN),
         )
-        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
+        # The resolved threshold is sent; an AI estimate never is.
         self.client.update_sport_settings.assert_called_once_with(
-            "Ride", {"ftp": 250}, recalc_hr_zones=False
+            "Ride", {"ftp": 270}, recalc_hr_zones=False
         )
         self.client.update_wellness.assert_not_called()
 
-    def test_conflict_does_not_block_other_fields(self):
-        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
-        self.service.sync_garmin()
-        self.settings["Ride"] = {"ftp": 260}
+    def test_a_wellness_conflict_does_not_block_thresholds(self):
+        self.add(obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.GARMIN))
+        self.wellness[TODAY.isoformat()] = {"weight": 72}
         self.add(
             obs(
                 MetricKind.THRESHOLD_HR, 160, TODAY, ProviderId.GARMIN, sport=Sport.RIDE
             )
         )
         self.assertEqual(
-            self.service.sync_garmin(), {"exported": 1, "failed": 0, "conflicts": 1}
+            self.service.sync_automatic(), {"exported": 1, "failed": 0, "conflicts": 1}
         )
         self.assertEqual(
             self.client.update_sport_settings.call_args.args, ("Ride", {"lthr": 160})
@@ -538,26 +579,124 @@ class MetricExportServiceTests(unittest.TestCase):
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
         self.client.update_sport_settings.side_effect = RuntimeError(RAW)
         with self.assertLogs("backend.sync.metric_export", "WARNING") as logs:
-            self.assertEqual(self.service.sync_garmin()["failed"], 1)
+            self.assertEqual(self.service.sync_automatic()["failed"], 1)
         self.assertNotIn(RAW, str(logs.output))
         self.client.update_sport_settings.side_effect = None
-        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
 
     def test_target_change_during_automatic_export_is_not_overwritten(self):
+        self.add(obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.GARMIN))
+        self.client.get_wellness.side_effect = [{}, {"weight": 72}]
+        self.assertEqual(self.service.sync_automatic()["conflicts"], 1)
+        self.client.update_wellness.assert_not_called()
+
+    def test_threshold_written_with_the_value_read_just_before(self):
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
         self.client.get_sport_settings.side_effect = [{}, {"ftp": 260}]
-        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
-        self.client.update_sport_settings.assert_not_called()
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
+        (row,) = self.history()
+        self.assertEqual(
+            json.loads(row["diff"])["fields"]["ftp"], {"before": 260, "after": 250}
+        )
 
     def test_manual_export_resolves_an_automatic_conflict(self):
-        self.add(obs(MetricKind.FTP, 250, date(2026, 10, 10), ProviderId.GARMIN))
-        self.service.sync_garmin()
-        self.settings["Ride"] = {"ftp": 260}
-        self.add(obs(MetricKind.FTP, 255, TODAY, ProviderId.GARMIN))
-        self.assertEqual(self.service.sync_garmin()["conflicts"], 1)
+        self.add(obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.GARMIN))
+        self.service.sync_automatic()
+        self.wellness[TODAY.isoformat()] = {"weight": 72}
+        self.reader.items = [obs(MetricKind.WEIGHT, 71, TODAY, ProviderId.GARMIN)]
+        self.assertEqual(self.service.sync_automatic()["conflicts"], 1)
         self.confirm(list(self.items().values()))
-        self.settings["Ride"]["ftp"] = 255
-        self.assertEqual(self.service.sync_garmin()["conflicts"], 0)
+        self.wellness[TODAY.isoformat()]["weight"] = 71
+        self.assertEqual(self.service.sync_automatic()["conflicts"], 0)
+
+    def history(self):
+        return [
+            dict(row)
+            for row in self.database.db.execute(
+                "SELECT * FROM change_history ORDER BY created_at, rowid"
+            )
+        ]
+
+    def test_heart_rate_thresholds_recalculate_target_zones(self):
+        self.add(
+            obs(
+                MetricKind.THRESHOLD_HR, 170, TODAY, ProviderId.GARMIN, sport=Sport.RUN
+            ),
+            obs(
+                MetricKind.THRESHOLD_PACE,
+                4.2,
+                TODAY,
+                ProviderId.GARMIN,
+                sport=Sport.RUN,
+            ),
+        )
+        self.service.sync_automatic()
+        self.client.update_sport_settings.assert_called_once_with(
+            "Run", {"lthr": 170, "threshold_pace": 4.2}, recalc_hr_zones=True
+        )
+
+    def test_a_local_threshold_is_exported(self):
+        local = Observation(
+            kind=MetricKind.FTP,
+            value=MetricValue(300, "W"),
+            observed_on=TODAY,
+            observed_at=None,
+            provenance=Provenance(
+                provider=None,
+                source_kind=SourceKind.ATHLETE_ENTERED,
+                source_record_id=None,
+                recorded_by=RecordingOrigin.MANUAL,
+                retrieved_at=None,
+                label=None,
+            ),
+            sport=Sport.RIDE,
+        )
+        self.add(local)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
+        self.client.update_sport_settings.assert_called_once_with(
+            "Ride", {"ftp": 300}, recalc_hr_zones=False
+        )
+        self.assertEqual(self.items()["ftp|ride"]["source_provider"], None)
+
+    def test_running_ftp_needs_its_own_consent(self):
+        self.add(obs(MetricKind.FTP, 310, TODAY, ProviderId.GARMIN, sport=Sport.RUN))
+        # The legacy flag covers the fields of its time, not running FTP.
+        self.assertEqual(self.service.sync_automatic()["exported"], 0)
+        self.configure(enabled=True, field="run_ftp", field_enabled=True)
+        self.assertEqual(self.service.sync_automatic()["exported"], 1)
+        self.client.update_sport_settings.assert_called_once_with(
+            "Run", {"ftp": 310}, recalc_hr_zones=False
+        )
+
+    def test_history_fields_match_the_consent_keys(self):
+        self.assertEqual(set(change_history.METRIC_EXPORT_FIELDS), set(EXPORT_FIELDS))
+
+    def test_writes_are_in_the_change_history_without_undo(self):
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.service.sync_automatic()
+        self.settings["Ride"] = {"ftp": 250}
+        self.service.sync_automatic()
+        (row,) = self.history()
+        self.assertEqual(
+            (row["entity_type"], row["entity_id"], row["action"], row["source"]),
+            ("metric_export", "intervals:sport-settings/Ride", "update", "automatic"),
+        )
+        self.assertEqual(
+            change_history.public_view(row)["diff"]["fields"],
+            {"ftp": {"changed": True}},
+        )
+        self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
+        self.confirm([self.items()["weight|"]])
+        self.assertEqual(
+            [(item["entity_id"], item["source"]) for item in self.history()][1],
+            ("intervals:wellness/2026-10-10", "manual"),
+        )
+        undo = HistoryUndoService(
+            self.database, *([Mock()] * 7), profile_mutation_coordinator=Mock()
+        )
+        with self.assertRaises(AppError) as caught:
+            undo.preview(row["id"])
+        self.assertEqual(caught.exception.status, 400)
 
     def test_preview_lists_source_target_and_live_remote_value(self) -> None:
         # The cached target value is stale; the preview shows the live one.

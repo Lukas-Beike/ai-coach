@@ -44,6 +44,7 @@ from backend.sync.garmin_snapshot_writer import (
     GarminSnapshotWriter,
 )
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.metric_export import automatic_export_message
 from backend.sync.observation import SyncOperationObserver, operation_context
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.status import SyncOperationStateWriter
@@ -1364,16 +1365,13 @@ class GarminSyncService:
                 operation_id,
                 "metric-export",
                 90,
-                "Garmin-Messwerte werden mit Intervals.icu abgeglichen…",
+                "Werte werden mit Intervals.icu abgeglichen…",
             )
             try:
                 receipt = self._metric_export()
                 if receipt is not None:
                     result["metric_export"] = receipt
-                    export_message = (
-                        f"Intervals.icu: {receipt['exported']} Messwerte gesendet, "
-                        f"{receipt['conflicts']} Konflikte, {receipt['failed']} fehlgeschlagen."
-                    )
+                    export_message = automatic_export_message(receipt)
                     self._lifecycle_state.record_metric_export_status(export_message)
                     message += f" {export_message}"
             except Exception as error:  # noqa: BLE001 - import remains successful; never expose provider errors

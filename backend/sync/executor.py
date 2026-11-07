@@ -732,3 +732,15 @@ class SyncJobExecutor:
         except JobValidationError as exc:
             raise AppError(400, str(exc), reason="invalid_job_request") from exc
         return dispatch_provider_job(self._job_owners, job, envelope)
+
+
+def chained_after_job(
+    *hooks: Callable[[Mapping[str, Any]], None],
+) -> Callable[[Mapping[str, Any]], None]:
+    """Return one completion hook that runs each hook in order."""
+
+    def after_job(job: Mapping[str, Any]) -> None:
+        for hook in hooks:
+            hook(job)
+
+    return after_job

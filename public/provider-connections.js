@@ -157,13 +157,13 @@ function renderGarminCard(data) {
   }
 }
 
-// Pure: consent text, toggle label and last sync receipt of the Garmin → Intervals.icu export.
+// Pure: consent text, toggle label and last sync receipt of the automatic Intervals.icu export.
 function metricExportView(enabled, status) {
   return {
     text: enabled
-      ? "Die ausgewählten neuen Garmin-Messwerte werden automatisch an Intervals.icu gesendet. Herzfrequenzzonen bleiben unverändert. Bestehende abweichende Werte ohne bestätigten Vergleichsstand und spätere Änderungen bei Intervals.icu werden geschützt."
-      : "Einmal aktivieren: Neue Garmin-Messwerte nach erfolgreichem Sync automatisch an Intervals.icu senden. Herzfrequenzzonen und bestehende abweichende Zielwerte bleiben geschützt.",
-    button: enabled ? "Automatischen Abgleich deaktivieren" : "Garmin → Intervals.icu automatisch abgleichen",
+      ? "Die ausgewählten Werte gehen automatisch an Intervals.icu. Schwellenwerte kommen aus deinen lokalen Zonen, sonst Garmin, sonst Wahoo, und überschreiben abweichende Werte; Intervals.icu berechnet die HF-Zonen neu. Körperwerte kommen von Garmin; abweichende Werte bei Intervals.icu bleiben geschützt."
+      : "Einmal aktivieren: Schwellenwerte aus deinen lokalen Zonen, sonst Garmin, sonst Wahoo, automatisch an Intervals.icu senden, damit relative Workouts auf Garmin und Zwift stimmen.",
+    button: enabled ? "Automatischen Abgleich deaktivieren" : "Werte automatisch an Intervals.icu senden",
     status: status || "",
   };
 }
@@ -185,7 +185,7 @@ function metricExportFieldsView(enabled, fields) {
 // Pure: the receipt of a consent change, one entry per changed field.
 function metricExportReceipt(receipt) {
   const changes = (receipt?.changes || []).map((item) => item.label + (item.enabled ? " an" : " aus"));
-  return "Garmin → Intervals.icu: " + (changes.length ? changes.join(", ") : "keine Änderung");
+  return "Intervals.icu-Abgleich: " + (changes.length ? changes.join(", ") : "keine Änderung");
 }
 
 // Rebuilds the checkboxes only when the field list changes; otherwise it updates
@@ -225,20 +225,20 @@ function setMetricExportFieldsBusy(busy) {
   for (const input of metricExportInputs.values()) input.disabled = busy;
 }
 
-// Each field change names the field, the source and the target, and is confirmed first.
+// Each field change names the field and the target, and is confirmed first.
 // The server applies the one change to the stored consent; all boxes wait for the reload.
 async function changeMetricExportField(item, input) {
   const enabled = input.checked;
   const remaining = (state.data?.garmin?.metric_export_fields || [])
     .filter((field) => field.enabled && field.key !== item.key).length;
-  let message = `${item.label} künftig automatisch von Garmin an Intervals.icu senden?`;
+  let message = `${item.label} künftig automatisch an Intervals.icu senden?`;
   if (!enabled) {
-    message = `${item.label} nicht mehr automatisch von Garmin an Intervals.icu senden?`;
+    message = `${item.label} nicht mehr automatisch an Intervals.icu senden?`;
     if (!remaining) message += " Damit endet der automatische Abgleich.";
   }
   setMetricExportFieldsBusy(true);
   try {
-    if (!await requestConfirmation(message, { title: "Garmin → Intervals.icu" })) {
+    if (!await requestConfirmation(message, { title: "Intervals.icu-Abgleich" })) {
       input.checked = !enabled;
       return;
     }
@@ -258,8 +258,8 @@ function toggleMetricExport(button) {
 
 async function configureAutomaticMetricExport(enabled, button) {
   const message = enabled
-    ? "Garmin-Messwerte (ohne Rad-FTP) künftig nach erfolgreichen Garmin-Syncs automatisch an Intervals.icu senden? Herzfrequenzzonen bleiben unverändert; abweichende Zielwerte ohne Vergleichsstand werden nicht überschrieben."
-    : "Den automatischen Garmin-Abgleich mit Intervals.icu deaktivieren?";
+    ? "Schwellen-HF, maximale HF und Lauf-Schwellenpace künftig automatisch an Intervals.icu senden (lokale Zonen, sonst Garmin, sonst Wahoo)? Abweichende Werte dort werden überschrieben, die HF-Zonen neu berechnet."
+    : "Den automatischen Abgleich mit Intervals.icu deaktivieren?";
   if (!await requestConfirmation(message, { title: enabled ? "Automatischen Abgleich aktivieren?" : "Automatischen Abgleich deaktivieren?" })) return;
   button.disabled = true;
   try {

@@ -349,6 +349,7 @@ from backend.sync.execution_assembly import (
     SyncJobExecutionAssembly,
     SyncJobStateDependencies,
 )
+from backend.sync.executor import chained_after_job
 from backend.sync.external_calendar_assembly import (
     ExternalCalendarAssembly,
     ExternalCalendarSyncOwners,
@@ -398,6 +399,7 @@ from backend.sync.library_assembly import (
 from backend.sync.local_load import refresh_after_job
 from backend.sync.metric_export import MetricExportService
 from backend.sync.metric_export_assembly import build_metric_export_service
+from backend.sync.metric_export_runner import MetricExportRunner
 from backend.sync.persistence_assembly import SyncPersistenceAssembly
 from backend.sync.planned_calendar_assembly import (
     PlannedCalendarLocalState,
@@ -708,6 +710,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             uuid_factory=uuid.uuid4,
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
             load_inputs_changed=lambda: start_canonical_backfill(),
+            thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
         ),
     )
 )
@@ -1065,8 +1068,8 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
             lock_wait_seconds=GARMIN_MORNING_BODY_BATTERY_LOCK_WAIT_SECONDS,
             morning_body_battery_service=morning_body_battery_service,
             metric_export=lambda: (
-                METRIC_EXPORT.sync_garmin()
-                if CONFIG.intervals_api_key and CONFIG.intervals_athlete_id
+                METRIC_EXPORT.sync_automatic()
+                if _intervals_export_configured()
                 else None
             ),
         ),
@@ -1636,7 +1639,10 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     dependencies=SYNC_JOB_DEPENDENCIES,
     provider_runtime=provider_runtime,
-    after_job=refresh_after_job(lambda: start_canonical_backfill()),
+    after_job=chained_after_job(
+        refresh_after_job(lambda: start_canonical_backfill()),
+        lambda job: METRIC_EXPORT_RUNNER.after_job(job),
+    ),
 )
 
 
@@ -2093,9 +2099,24 @@ METRIC_EXPORT: MetricExportService = build_metric_export_service(
     lambda: CANONICAL_READ,
     database_lock=DB_LOCK,
     intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
+    source_preferences=lambda db: preferences_from_profile(
+        ATHLETE_DATA.profile().get_from_db(db)
+    ),
     today=lambda: ATHLETE_CLOCK.now().date(),
     utc_now=lambda: datetime.now(UTC),
 )
+
+
+def _intervals_export_configured() -> bool:
+    return bool(CONFIG.intervals_api_key and CONFIG.intervals_athlete_id)
+
+
+METRIC_EXPORT_RUNNER = MetricExportRunner(
+    lambda: METRIC_EXPORT,
+    enabled=_intervals_export_configured,
+    maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+)
+
 
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,

@@ -42,9 +42,11 @@ from typing import Any, Final
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.current_thresholds import (
+    ThresholdKey,
     ZoneConfigurationSource,
     local_thresholds,
     provider_zone_thresholds,
+    resolve_current_thresholds,
 )
 from backend.performance.garmin_canonical import read_garmin_thresholds
 from backend.performance.source_policy import (
@@ -304,6 +306,39 @@ def read_zone_thresholds(
         as_of=as_of,
         preferences=preferences,
     )
+
+
+def read_export_thresholds(
+    reader: ObservationReader,
+    db: Any,
+    *,
+    as_of: date,
+    preferences: SourcePreferences = NO_PREFERENCES,
+) -> dict[ThresholdKey, Observation]:
+    """Return the thresholds an outbound export sends, current on ``as_of``.
+
+    The local zone configuration in effect wins, then Garmin, then Wahoo, under
+    the source policy and the athlete's preferences. Intervals.icu values are left
+    out, so a value Intervals reported is never sent back to it (#1729).
+    """
+    wahoo_ftp = _wahoo_ftp(reader, db, as_of=as_of)
+    providers = (
+        *((wahoo_ftp,) if wahoo_ftp is not None else ()),
+        *read_garmin_thresholds(reader, db),
+    )
+    local = (
+        local_thresholds(reader.zone_configurations(db), as_of)
+        if isinstance(reader, ZoneConfigurationSource)
+        else ()
+    )
+    return {
+        key: winner
+        for key, result in resolve_current_thresholds(
+            providers, local, as_of=as_of, preferences=preferences
+        ).items()
+        if (winner := result.winner.observation) is not None
+        and winner.provenance.provider is not ProviderId.INTERVALS
+    }
 
 
 def _wahoo_current(
