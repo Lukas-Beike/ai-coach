@@ -201,16 +201,16 @@ The system SHALL link each stored competition to the completed sessions of its l
 
 #### Scenario: Provider races are linked
 - **WHEN** a session with purpose race starts on a competition's local date in its sport
-- **THEN** its summary carries that `competition_id`; other sessions of the day stay unlinked.
+- **THEN** the race nearest the competition's start carries that `competition_id`; other sessions of the day stay unlinked, and a day with a provider race never gets a hint.
 
 #### Scenario: A competition marks its best candidate as a race hint
 - **WHEN** no session of the competition's date and sport has purpose race
-- **THEN** the session that starts nearest the competition's local start time, else the longest, else the earliest, gets purpose race with source "Lokale Wettkämpfe" and the `competition_id`.
+- **THEN** the session that starts nearest the competition's local start time (a stored midnight counts as unknown), else the longest, else the earliest, gets purpose race with source "Lokale Wettkämpfe" and the `competition_id`; with a planned duration it must last at least half of it.
 
 #### Scenario: No link across sports or for commutes
-- **WHEN** a session has another sport, another local date, or purpose commute, warm-up or cool-down, or the competition's sport is unsupported
+- **WHEN** a session has another sport, another local date, the other side of indoor (indoor, virtual) versus outdoor when both are known, or purpose commute, warm-up or cool-down, or the competition's sport is unsupported
 - **THEN** the session is not linked and keeps its own purpose.
 
-Detailed contract: a session links to at most one competition (competitions in date then id order); unlinking by athlete marking is not yet implemented.
+Detailed contract: a session links to at most one competition (competitions in date then id order). A limited read links over every session of its oldest day, so the hint never depends on the page size. Unlinking by athlete marking is not yet implemented (#1759).
 
 Evidence: `backend/activities/session_purpose.py:with_competitions`, `backend/sync/canonical_read_selector.py:activity_summaries`, `backend/db/repositories.py:CompetitionRepository.between`; `tests/test_session_purpose.py`.
