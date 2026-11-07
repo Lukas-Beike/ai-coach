@@ -17,6 +17,7 @@ from backend.sync.commands import (
 )
 from backend.sync.jobs import JobValidationError, normalize_sync_job_request
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
+from backend.sync.provider_runtime import SynchronousRefresh
 
 
 def _command_service(
@@ -28,7 +29,7 @@ def _command_service(
     garmin_sync.awaited_run_status.return_value = None
     wahoo_sync.running.return_value = False
     wahoo_sync.sync.return_value = {"status": "ok"}
-    refreshes = {
+    refreshes: dict[str, SynchronousRefresh] = {
         GARMIN_ID: GarminSynchronousRefresh(garmin_sync, MagicMock(), -1),
         WAHOO_ID: WahooSynchronousRefresh(wahoo_sync, -1, poll_seconds=0.001),
     }
@@ -127,14 +128,13 @@ class CurrentDataRefreshTests(unittest.TestCase):
             "activity_details",
             "historical_backfill",
         ):
-            with self.subTest(job_type=job_type):
-                with self.assertRaises(JobValidationError):
-                    normalize_sync_job_request(
-                        INTERVALS_ID,
-                        job_type,
-                        {"activity_id": "i1"},
-                        all_sync_days=-1,
-                    )
+            with self.subTest(job_type=job_type), self.assertRaises(JobValidationError):
+                normalize_sync_job_request(
+                    INTERVALS_ID,
+                    job_type,
+                    {"activity_id": "i1"},
+                    all_sync_days=-1,
+                )
         queue.enqueue.assert_not_called()
         self.assertEqual([], intervals_client.method_calls)
 

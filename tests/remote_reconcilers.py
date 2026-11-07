@@ -232,35 +232,6 @@ class WorkoutLibraryRemoteReconciler:
 
 
 _DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
-_ROW_COLUMNS = (
-    "id",
-    "local_id",
-    "external_id",
-    "payload",
-    "sync_dirty",
-    "sync_state",
-    "sync_error",
-    "sync_conflict",
-    "baseline_hash",
-    "last_synced_at",
-    "plan_id",
-    "revision",
-    "tombstone",
-    "command_id",
-    "created_at",
-    "updated_at",
-)
-
-
-def _update_if_unchanged(db: Any, row: Any, sql: str, params: tuple[Any, ...]) -> bool:
-    """Use a single compare-and-swap update so a concurrent edit wins."""
-    values = dict(row)
-    predicates = " AND ".join(f"{column} IS ?" for column in _ROW_COLUMNS)
-    result = db.execute(
-        f"{sql} AND " + predicates,
-        (*params, *(values.get(column) for column in _ROW_COLUMNS)),
-    )
-    return result.rowcount == 1
 
 
 class RemotePlannedUnitReconciler:

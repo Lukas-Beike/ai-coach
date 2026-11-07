@@ -152,7 +152,7 @@ class PublicStateAssemblyTests(unittest.TestCase):
         deps["planning_data"].assert_called_once_with()
 
     def test_sync_projection_uses_current_maintenance_and_shared_interval_lock(self):
-        assembly, deps, owners = self.make_assembly()
+        assembly, _deps, owners = self.make_assembly()
 
         service = assembly.sync_public_state_service()
 
