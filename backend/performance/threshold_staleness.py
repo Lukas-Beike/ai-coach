@@ -66,6 +66,8 @@ CHECKED_THRESHOLDS: Final[tuple[tuple[ThresholdKey, str], ...]] = (
     ((MetricKind.THRESHOLD_PACE, Sport.RUN), "Schwellenpace"),
 )
 INDOOR_LABEL: Final = "Indoor-FTP"
+# The item key of the local indoor FTP; no provider indoor FTP is read here.
+INDOOR_METRIC: Final = "indoor_ftp"
 RIDE_FTP: Final[ThresholdKey] = (MetricKind.FTP, Sport.RIDE)
 _METRIC: Final = {
     MetricKind.FTP: ZoneConfigurationMetric.POWER,
@@ -161,9 +163,9 @@ def _indoor_item(
         item = _item(
             MetricKind.FTP, Sport.RIDE, INDOOR_LABEL, indoor_local, REASON_STALE, today
         )
-        return {**item, "metric": MetricKind.INDOOR_FTP.value}
+        return {**item, "metric": INDOOR_METRIC}
     return {
-        "metric": MetricKind.INDOOR_FTP.value,
+        "metric": INDOOR_METRIC,
         "sport": Sport.RIDE.value,
         "label": INDOOR_LABEL,
         "value": None if outdoor is None else outdoor.value,
