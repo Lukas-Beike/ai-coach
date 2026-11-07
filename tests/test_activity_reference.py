@@ -13,6 +13,7 @@ import unittest
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import (
@@ -238,6 +239,31 @@ class ActivityReferenceResolverTests(_Fixture):
         with self.manager.reader() as db:
             block = envelope(db, garmin)
         self.assertEqual(6, block["activity_feedback"]["session_rpe"])
+
+    def test_envelope_reads_equipment_of_the_live_session_for_a_merged_copy(
+        self,
+    ) -> None:
+        intervals = self.seed("ride-merged")
+        garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
+        self.merge(intervals, garmin)
+        feedback = Mock()
+        feedback.for_activity_ids.return_value = []
+        read: list[str] = []
+
+        def read_equipment(reference: str) -> dict[str, Any]:
+            read.append(reference)
+            return {}
+
+        envelope = DetailEnvelopeReader(
+            feedback_service=feedback,
+            read_equipment=read_equipment,
+            references=ActivityReferences(self.manager),
+            performance=dict,
+            summary=lambda: None,
+        )
+        with self.manager.reader() as db:
+            envelope(db, "ride-merged")
+        self.assertEqual([garmin], read)
 
     def test_garmin_primary_session_passes_through_unchanged(self) -> None:
         local = self.seed("garmin-1", provider=ProviderId.GARMIN)
