@@ -1,5 +1,6 @@
 """Completed-activity analysis combining activity reads and performance context."""
 
+import functools
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from typing import Any
@@ -164,6 +165,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 return None
             return summary_reader.intervals_summary_row(db, provider_activity_id)
 
+        @functools.cache
         def requested_summary() -> ActivitySummary | None:
             return _find_summary(load_inputs(normalized_id), normalized_id)
 
@@ -205,7 +207,21 @@ class ActivityAnalysisReadService(ActivityReadService):
                     reason="activity_details_not_found",
                 )
             records = self._session_records(db, document["session"]["activity_id"])
+        _add_purpose(document["session"], requested_summary())
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
+
+
+def _add_purpose(session: dict[str, Any], summary: ActivitySummary | None) -> None:
+    """Copy the session's purpose and competition link from its summary."""
+    if summary is None:
+        return
+    if "purpose" in summary:
+        session["purpose"] = summary["purpose"]
+    if "competition_id" in summary:
+        session["competition_id"] = summary["competition_id"]
+    source = summary.get("sources", {}).get("purpose")
+    if source:
+        session["purpose_source"] = source
 
 
 def _session_zone_settings(

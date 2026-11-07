@@ -13,6 +13,7 @@ from backend.activities.activity_summary import summary_duration_s
 from backend.activities.identity import activity_datetime as _activity_datetime
 from backend.activities.identity import activity_sport as _activity_sport
 from backend.activities.identity import summary_sport as _summary_sport
+from backend.activities.session_purpose import summary_is_not_training
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
@@ -238,7 +239,11 @@ def _unpaired_activity_match(
 def match_planned_workouts(
     planned: list[Any], activities: Sequence[Any]
 ) -> dict[int, dict[str, Any]]:
-    """Match completed activities to planned workouts without reusing one activity."""
+    """Match completed activities to planned workouts without reusing one activity.
+
+    A commute, warm-up or cool-down never completes a planned workout; a workout
+    the provider paired with one stays open instead of matching by date.
+    """
     activity_rows = [item for item in activities if isinstance(item, dict)]
     unused = set(range(len(activity_rows)))
     matches: dict[int, dict[str, Any]] = {}
@@ -251,16 +256,29 @@ def match_planned_workouts(
     )
 
     # planned_event_id is the reliable provider association.
+    not_training = {
+        index for index, row in enumerate(activity_rows) if summary_is_not_training(row)
+    }
+    blocked: set[int] = set()
     for event_index, event in workout_rows:
+        # A paired training session wins over a paired commute of the same event.
         selected_index = _paired_activity_match(
-            event, activity_rows, by_paired_id, unused
+            event, activity_rows, by_paired_id, unused - not_training
         )
         if selected_index is not None:
             matches[event_index] = activity_rows[selected_index]
             unused.remove(selected_index)
+        elif (
+            _paired_activity_match(event, activity_rows, by_paired_id, unused)
+            is not None
+        ):
+            blocked.add(event_index)
+    unused -= not_training
 
     unmatched = [
-        (index, event) for index, event in workout_rows if index not in matches
+        (index, event)
+        for index, event in workout_rows
+        if index not in matches and index not in blocked
     ]
     timed_units = [
         (index, event)

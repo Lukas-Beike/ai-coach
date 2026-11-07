@@ -18,6 +18,7 @@ from backend.activities.activity_summary import (
     stored_activity_key,
     summary_local_date,
 )
+from backend.activities.session_purpose import summary_is_commute
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.performance.comparable_sessions import equal_effort_trend
@@ -157,7 +158,7 @@ def _bucket(
     sport: str,
     timezone: str,
 ) -> dict[str, Any]:
-    return {
+    bucket = {
         "sessions": len(sessions),
         "duration_s": metric_sum(sessions, "moving_duration_s"),
         "training_load": _load(sessions),
@@ -165,6 +166,12 @@ def _bucket(
         "intensity_3zone": intensity_3zone(sessions),
         "plan": _plan(plan, week[0], week[1], sport),
     }
+    # Commutes count in the volume above and are named separately.
+    commutes = [row for row in sessions if summary_is_commute(row)]
+    if commutes:
+        bucket["commute_sessions"] = len(commutes)
+        bucket["commute_duration_s"] = metric_sum(commutes, "moving_duration_s")
+    return bucket
 
 
 def _first_last(values: Mapping[Any, float]) -> dict[str, Any]:

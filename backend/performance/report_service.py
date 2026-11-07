@@ -16,6 +16,7 @@ from backend.activities.activity_summary import (
     summary_local_date,
 )
 from backend.activities.detail_analysis_reads import analysis_summaries
+from backend.activities.session_purpose import summary_is_not_training, summary_is_race
 from backend.canonical.stored_sports import resolve_workout_sport
 from backend.canonical.vocabulary import ProviderId
 from backend.db import activity_detail_store
@@ -167,7 +168,9 @@ class TrainingProfileSelectionService:
     def curve_records(self) -> list[dict[str, Any]]:
         """Ride and run sessions of the longest window with their session curves.
 
-        E-bike sessions (``summary_is_electric``) are left out.
+        E-bike sessions (``summary_is_electric``) and commutes, warm-ups and
+        cool-downs (``summary_is_not_training``) are left out; races carry
+        ``effort_context`` "race".
         Sessions without full-resolution streams stay in the list with empty
         profiles, so the coverage counts them as unknown.
         """
@@ -188,6 +191,8 @@ class TrainingProfileSelectionService:
                 # Motor assistance inflates speed and power: e-bike rides stay
                 # out of the best values, CP/CS fits and curve trends.
                 and not summary_is_electric(summary)
+                # A commute, warm-up or cool-down is never a maximal effort.
+                and not summary_is_not_training(summary)
                 and start.isoformat()
                 <= summary_local_date(summary)
                 <= today.isoformat()
@@ -754,7 +759,7 @@ def _curve_record(
     profile = None
     if curve is not None:
         profile = curve.power if fields["sport"] == "ride" else curve.running
-    return {
+    record = {
         **fields,
         "terrain": summary.get("terrain"),
         "activity_id": stored_activity_key(summary),
@@ -768,6 +773,9 @@ def _curve_record(
         "avg_temp_c": summary.get("avg_temp_c"),
         "fingerprint": None if curve is None else curve.fingerprint,
     }
+    if summary_is_race(summary):
+        record["effort_context"] = "race"
+    return record
 
 
 def _records_fingerprint(records: list[dict[str, Any]]) -> str:
@@ -779,6 +787,7 @@ def _records_fingerprint(records: list[dict[str, Any]]) -> str:
             row.get("sport"),
             row.get("environment"),
             row.get("fingerprint"),
+            row.get("effort_context"),
         ]
         for row in records
     )

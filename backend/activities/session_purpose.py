@@ -30,13 +30,29 @@ COMPETITION_SOURCE_LABEL: Final = "Lokale Wettkämpfe"
 # A hint needs at least this share of the competition's planned duration.
 MIN_HINT_SHARE_OF_PLANNED: Final = 0.5
 _INDOOR: Final = frozenset({Environment.INDOOR.value, Environment.VIRTUAL.value})
-_NOT_RACE_CANDIDATES: Final = frozenset(
+# Sessions of these purposes are never maximal efforts or planned training.
+NOT_TRAINING_PURPOSES: Final = frozenset(
     {
         ActivityPurpose.COMMUTE.value,
         ActivityPurpose.WARMUP.value,
         ActivityPurpose.COOLDOWN.value,
     }
 )
+
+
+def summary_is_race(summary: Mapping[str, Any]) -> bool:
+    """Return True for a session whose purpose is race."""
+    return summary.get("purpose") == ActivityPurpose.RACE.value
+
+
+def summary_is_commute(summary: Mapping[str, Any]) -> bool:
+    """Return True for a commute session."""
+    return summary.get("purpose") == ActivityPurpose.COMMUTE.value
+
+
+def summary_is_not_training(summary: Mapping[str, Any]) -> bool:
+    """Return True for a commute, warm-up or cool-down session."""
+    return summary.get("purpose") in NOT_TRAINING_PURPOSES
 
 
 def session_purpose(
@@ -98,7 +114,7 @@ def _match(
     candidates = [
         index
         for index in days.get((day, stored.sport.value), ())
-        if summaries[index].get("purpose") not in _NOT_RACE_CANDIDATES
+        if summaries[index].get("purpose") not in NOT_TRAINING_PURPOSES
         and (
             indoor is None
             or _indoor(summaries[index].get("environment")) in {None, indoor}

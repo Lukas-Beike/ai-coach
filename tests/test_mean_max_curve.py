@@ -459,6 +459,42 @@ class ProfileSelectionTests(unittest.TestCase):
         self.assertTrue(bests)
         self.assertLessEqual(max(bests), 300.0)
 
+    def test_commutes_stay_out_and_races_are_flagged(self):
+        summaries = []
+        for activity_id, peak, purpose in (
+            ("act_1", 300.0, "race"),
+            ("act_2", 900.0, "commute"),
+            ("act_3", 950.0, "warmup"),
+        ):
+            add_session(self.db, activity_id)
+            add_record(self.db, INTERVALS, f"i-{activity_id}", activity_id)
+            store_streams(
+                self.db,
+                INTERVALS,
+                f"i-{activity_id}",
+                ride_power(peak),
+                StreamResolution.FULL,
+            )
+            summaries.append(
+                {
+                    "id": activity_id,
+                    "sport": "ride",
+                    "environment": "outdoor",
+                    "started_at": "2026-10-10T08:00:00+00:00",
+                    "started_at_local": "2026-10-10T10:00:00",
+                    "record_ids": {"intervals": f"i-{activity_id}"},
+                    "source": "Intervals.icu",
+                    "purpose": purpose,
+                }
+            )
+
+        records = self.service(summaries).curve_records()
+
+        self.assertEqual(
+            [("i-act_1", "race")],
+            [(row["activity_id"], row["effort_context"]) for row in records],
+        )
+
     def test_overlapping_bests_of_one_effort_share_an_effort_group(self):
         def ride(activity_id, curve):
             return {
