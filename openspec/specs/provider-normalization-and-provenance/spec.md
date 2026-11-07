@@ -379,7 +379,7 @@ The system SHALL give activity consumers one provider-neutral summary per live c
 
 #### Scenario: Recording relayed through Garmin Connect
 - **WHEN** a Garmin Connect activity names a Wahoo or Zwift manufacturer
-- **THEN** its origin is that manufacturer (another non-Garmin manufacturer is unknown), so the Wahoo recording, not the Garmin copy, wins the measured values; Wahoo rides outside a virtual world, including such relayed copies, carry the bike computer device type, and Garmin's own recordings name none.
+- **THEN** its origin is that manufacturer (any other manufacturer stays a Garmin recording), so the Wahoo recording, not the Garmin copy, wins the measured values; Wahoo rides that are not indoor or virtual, including such relayed copies, carry the bike computer device type, and Garmin's own recordings name none.
 
 #### Scenario: Load on different scales
 - **WHEN** a session has only a Garmin training load
