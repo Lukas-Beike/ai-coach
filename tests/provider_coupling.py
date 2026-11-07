@@ -133,9 +133,11 @@ SNAPSHOT_READ_NAME = "latest_snapshot"
 # ``legacy_read`` flags, in the Epic A consumer packages (#1407), a reference to a
 # raw provider view: the snapshot sections ``recent_wellness`` and
 # ``raw_provider_data`` and the raw Garmin views ``read_view``, ``recent_view`` and
-# ``recent_view_in`` and the Garmin state reader ``read_state`` (#1686), as a
-# name, attribute, import alias or a word in a string, and a string holding a kv
-# ``activity_detail:`` record key. Docstrings do not count.
+# ``recent_view_in``, as a name, attribute, import alias or a word in a string, and
+# a string holding a kv ``activity_detail:`` record key. Docstrings do not count.
+# It also flags the Garmin state reader (#1686): ``garmin_store.read_state`` and a
+# ``read_state`` imported from ``backend.db.garmin_store``; other ``read_state``
+# names, such as the canonical backfill gate, are not flagged.
 # ``latest_snapshot`` is the ``snapshot_key`` rule, which covers these packages too.
 # Consumers read canonical records instead.
 LEGACY_READ_SCOPES = (
@@ -150,16 +152,15 @@ LEGACY_READ_SCOPES = (
 LEGACY_READ_NAMES = frozenset(
     {
         "raw_provider_data",
-        "read_state",
         "read_view",
         "recent_view",
         "recent_view_in",
         "recent_wellness",
     }
 )
+GARMIN_STATE_READ = "read_state"
 LEGACY_READ_PATTERN = re.compile(
-    r"\b(raw_provider_data|read_state|read_view|recent_view_in|recent_view"
-    r"|recent_wellness)\b"
+    r"\b(raw_provider_data|read_view|recent_view_in|recent_view|recent_wellness)\b"
     r"|activity_detail:"
 )
 # ``source_label`` flags a quoted string that is exactly a provider display name.
@@ -468,6 +469,21 @@ def _snapshot_key_tokens(text: str) -> list[str]:
     return tokens
 
 
+def _is_garmin_state_read(node: ast.AST) -> bool:
+    """``garmin_store.read_state`` or ``read_state`` imported from the Garmin store."""
+    if isinstance(node, ast.Attribute):
+        return (
+            node.attr == GARMIN_STATE_READ
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "garmin_store"
+        )
+    if isinstance(node, ast.ImportFrom):
+        return (node.module or "").endswith("garmin_store") and any(
+            alias.name == GARMIN_STATE_READ for alias in node.names
+        )
+    return False
+
+
 def _legacy_read_tokens(text: str) -> list[str]:
     """Raw provider view references: names, attributes, aliases and strings."""
     tree = ast.parse(text)
@@ -480,6 +496,8 @@ def _legacy_read_tokens(text: str) -> list[str]:
             tokens.append(node.id)
         elif isinstance(node, ast.alias) and node.name in LEGACY_READ_NAMES:
             tokens.append(node.name)
+        elif _is_garmin_state_read(node):
+            tokens.append(GARMIN_STATE_READ)
         elif (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)

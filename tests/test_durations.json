@@ -561,7 +561,6 @@
  "test_performance_intervals_hrv_path.IntervalsHrvPathTests": 0.02,
  "test_performance_load.PerformanceLoadTests": 0.002,
  "test_performance_load_context.PerformanceLoadContextTests": 0.001,
- "test_performance_max_hr.MaxHrTests": 0.001,
  "test_performance_planning_recovery.PlanningRecoveryTests": 0.0,
  "test_performance_provider_ids.ProviderIdPayloadTests": 0.015,
  "test_performance_recovery.GarminRecoveryTests": 0.018,

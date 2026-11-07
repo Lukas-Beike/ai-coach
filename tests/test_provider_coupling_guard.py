@@ -629,6 +629,11 @@ class OwnerReadGuardTests(unittest.TestCase):
                 ),
                 "backend/sync/garmin.py": read,
                 "backend/db/garmin_store.py": read,
+                # The canonical backfill gate shares the name and is not flagged.
+                "backend/coach/consumer.py": (
+                    "from backend.sync.canonical_backfill import read_state\n"
+                    "state = canonical_backfill.read_state(db)\n"
+                ),
             }
         )
         self.assertEqual(

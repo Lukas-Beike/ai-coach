@@ -35,8 +35,8 @@ not current. Its row stays stored and readable, so history keeps it.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
@@ -50,7 +50,11 @@ from backend.performance.current_thresholds import (
     provider_zone_thresholds,
     resolve_current_thresholds,
 )
-from backend.performance.garmin_canonical import read_garmin_thresholds
+from backend.performance.garmin_canonical import (
+    ActivityMaxHr,
+    provider_activity_max_hr,
+    read_garmin_thresholds,
+)
 from backend.performance.source_policy import (
     NO_PREFERENCES,
     SourcePreferences,
@@ -121,6 +125,9 @@ class CanonicalCurrentInputs:
     # Current metrics resolve them with the Garmin thresholds of the same read.
     threshold_candidates: tuple[Observation, ...] = ()
     local_thresholds: tuple[Observation, ...] = ()
+    # The highest stored Wahoo activity max heart rate per category (cycling,
+    # running), over the whole history: the activity fallback beside Garmin's.
+    wahoo_activity_max_hr: Mapping[str, ActivityMaxHr] = field(default_factory=dict)
     # The athlete's preferred sources, applied to the thresholds and body values.
     preferences: SourcePreferences = NO_PREFERENCES
 
@@ -190,6 +197,7 @@ def read_current_inputs(
         threshold_candidates=candidates,
         local_thresholds=local,
         preferences=preferences,
+        wahoo_activity_max_hr=provider_activity_max_hr(reader, db, ProviderId.WAHOO),
     )
 
 

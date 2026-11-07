@@ -416,11 +416,12 @@ def _garmin_payload_max_hr_samples(
     (``garmin_canonical``), so the ingest-only history keeps no copy of it.
     """
     profile_max_hr = garmin_profile_max_hr(snapshot)
-    values: dict[str, list[float | int]] = {"cycling": [], "running": []}
-    for kind, samples in values.items():
-        profile_value = profile_max_hr_for(profile_max_hr, kind)
-        if profile_value is not None:
-            samples.append(profile_value)
+    values = {
+        kind: [value]
+        if (value := profile_max_hr_for(profile_max_hr, kind)) is not None
+        else []
+        for kind in ("cycling", "running")
+    }
     return profile_max_hr, values, dict.fromkeys(values)
 
 

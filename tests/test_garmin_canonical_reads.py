@@ -210,7 +210,19 @@ class GarminStateEqualityTests(GarminReadFixture):
             ("readiness", state.has_readiness),
         ):
             self.assertEqual(bool(self.garmin.get(section)), flag, section)
-        self.assertEqual(overlay, legacy)
+        # Only the canonical read derives the activity max HR (#1686); the payload
+        # parser keeps the profile value alone.
+        activity_keys = {
+            key
+            for key in ("cycling_max_hr_bpm", "running_max_hr_bpm")
+            if legacy[key]["value"] is None
+        }
+        self.assertEqual(
+            {key: value for key, value in overlay.items() if key not in activity_keys},
+            {key: value for key, value in legacy.items() if key not in activity_keys},
+        )
+        for key in activity_keys:
+            self.assertIsNotNone(overlay[key]["observed_at"], key)
 
     def test_activity_max_hr_skips_deleted_sessions(self) -> None:
         populate(self)

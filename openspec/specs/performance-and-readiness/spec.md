@@ -412,7 +412,7 @@ The current Garmin performance metrics (weight, thresholds, VO2max, maximum hear
 
 #### Scenario: Activity maximum across providers
 - **WHEN** a sport's current maximum heart rate has no resolved threshold
-- **THEN** the highest activity maximum of every provider's session summaries, Garmin's canonical activity maximum included, is used with the provider its summary names; Garmin's value wins a tie.
+- **THEN** the highest stored Garmin or Wahoo activity maximum over the whole history is used, dated on its newest start day, with Garmin winning a tie; only without either, the highest Garmin or Wahoo session summary value is used, and Intervals.icu summaries never are. The overall maximum heart rate ranks every activity maximum after the thresholds.
 
 #### Scenario: No canonical Garmin data
 - **WHEN** the stored Garmin view has performance sections but no canonical Garmin observation or activity record exists

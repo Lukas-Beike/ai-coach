@@ -19,6 +19,7 @@ from backend.performance.current_thresholds import (
     ThresholdKey,
     resolve_current_thresholds,
 )
+from backend.performance.garmin_canonical import ActivityMaxHr
 from backend.performance.source_policy import (
     NO_PREFERENCES,
     Candidate,
@@ -40,10 +41,12 @@ PROVIDER_INTERVALS_NAME = provider_label(
 # provider_label has no view for this wellness label, so it stays a literal.
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.CURRENT_METRIC)
-# Activity summaries name each value's source by the provider's activity label.
+# Activity summaries name each value's source by the provider's activity label;
+# only Garmin and Wahoo summaries serve the max HR fallback (Intervals.icu is an
+# output target, #1732).
 _ACTIVITY_LABEL_PROVIDERS = {
     provider_label(provider, SourceView.ACTIVITY_DETAIL): provider
-    for provider in ProviderId
+    for provider in (ProviderId.GARMIN, ProviderId.WAHOO)
 }
 VO2MAX_UNIT = "ml/kg/min"
 # The label of a locally confirmed zone configuration's value.
@@ -160,31 +163,36 @@ def _activity_max_hr(activity: Any) -> tuple[float, ProviderId] | None:
 
 
 def _overall_max_hr(
-    sports: tuple[dict[str, Any], ...],
+    sports: tuple[tuple[dict[str, Any], bool], ...],
     preferences: SourcePreferences = NO_PREFERENCES,
 ) -> dict[str, Any]:
     """The highest sport max HR among those of the best-ranked source.
 
+    ``sports`` pairs each sport's metric with whether it is an activity maximum.
     Sources rank as the max HR rule orders them (local, Garmin, Intervals), and
-    activity maxima last, so a Garmin value wins before sports are compared.
+    every activity maximum last, whichever provider it came from, so a threshold
+    wins before sports are compared and activity maxima compare by value.
     """
     order = [
         None if source is None else source.value
         for source in source_order(MetricKind.MAX_HR, None, preferences)
     ]
 
-    def rank(item: dict[str, Any]) -> int:
+    def rank(item: dict[str, Any], from_activity: bool) -> int:
+        if from_activity:
+            return len(order)
         if item.get("source") == LOCAL_SOURCE_LABEL:
             return order.index(None)
         provider = item.get("source_provider")
         return order.index(provider) if provider in order else len(order)
 
-    present = [item for item in sports if item["value"] is not None]
+    present = [(item, flag) for item, flag in sports if item["value"] is not None]
     if not present:
         return metric(None, "bpm", None)
-    best = min(rank(item) for item in present)
+    best = min(rank(item, flag) for item, flag in present)
     return max(
-        (item for item in present if rank(item) == best), key=lambda item: item["value"]
+        (item for item, flag in present if rank(item, flag) == best),
+        key=lambda item: item["value"],
     )
 
 
@@ -194,19 +202,40 @@ def _max_hr_metric(
     activities: list[Any],
     thresholds: Mapping[ThresholdKey, Resolved],
     garmin_metrics: dict[str, dict[str, Any]],
+    wahoo_activity_max_hr: Mapping[str, ActivityMaxHr] | None = None,
 ) -> dict[str, Any]:
     """Return sport max HR: the source-policy winner, else the activity maximum.
 
     The winner is the local zone configuration, Garmin's profile value, then the
-    Intervals setting or athlete record. Without any, the highest activity
-    maximum of every provider (Garmin's stored activity maximum included) wins and
-    keeps the provider its summary names; Garmin's value wins a tie.
+    Intervals setting or athlete record. Without any, the highest stored activity
+    maximum of Garmin and Wahoo over the whole history wins, dated on its newest
+    start day; Garmin wins a tie (#1686). Only when neither provider stores one,
+    the highest Garmin or Wahoo session summary value is used.
     """
     key = f"{category}_max_hr_bpm"
     resolved = thresholds.get((MetricKind.MAX_HR, sport))
     if resolved is not None:
         return _resolved_metric(garmin_metrics, key, resolved)
     garmin = garmin_metrics[key]
+    # Only Garmin's activity maximum (it carries ``observed_at``) is a fallback;
+    # its profile max HR is a threshold the resolver has already aged.
+    garmin_value = (
+        float(garmin["value"])
+        if garmin["value"] is not None and garmin.get("observed_at")
+        else None
+    )
+    wahoo = (wahoo_activity_max_hr or {}).get(category)
+    if wahoo is not None and (garmin_value is None or wahoo.value > garmin_value):
+        entry = metric(
+            wahoo.value,
+            "bpm",
+            provider_label(ProviderId.WAHOO, SourceView.CURRENT_METRIC),
+            provider=ProviderId.WAHOO,
+        )
+        entry["observed_at"] = wahoo.observed_on.isoformat()
+        return entry
+    if garmin_value is not None:
+        return garmin
     activity_values = [
         found
         for activity in activities
@@ -214,14 +243,6 @@ def _max_hr_metric(
         and (found := _activity_max_hr(activity)) is not None
     ]
     best = max(activity_values, default=None, key=lambda item: item[0])
-    # Only Garmin's activity maximum (it carries ``observed_at``) is a fallback;
-    # its profile max HR is a threshold the resolver has already aged.
-    if (
-        garmin["value"] is not None
-        and garmin.get("observed_at")
-        and (best is None or float(garmin["value"]) >= best[0])
-    ):
-        return garmin
     if best is None:
         return metric(None, "bpm", None)
     number, provider = best
@@ -568,13 +589,20 @@ def current_performance_metrics(
         as_of=as_of,
         preferences=canonical.preferences,
     )
+    wahoo = canonical.wahoo_activity_max_hr
     cycling_max_hr = _max_hr_metric(
-        "cycling", Sport.RIDE, activities, thresholds, garmin_metrics
+        "cycling", Sport.RIDE, activities, thresholds, garmin_metrics, wahoo
     )
     running_max_hr = _max_hr_metric(
-        "running", Sport.RUN, activities, thresholds, garmin_metrics
+        "running", Sport.RUN, activities, thresholds, garmin_metrics, wahoo
     )
-    max_hr = _overall_max_hr((cycling_max_hr, running_max_hr), canonical.preferences)
+    max_hr = _overall_max_hr(
+        (
+            (cycling_max_hr, thresholds.get((MetricKind.MAX_HR, Sport.RIDE)) is None),
+            (running_max_hr, thresholds.get((MetricKind.MAX_HR, Sport.RUN)) is None),
+        ),
+        canonical.preferences,
+    )
     return {
         **_performance_body_metrics(
             latest_wellness,

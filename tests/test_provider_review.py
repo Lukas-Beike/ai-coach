@@ -598,7 +598,7 @@ class ProviderReviewTests(unittest.TestCase):
         self.assertEqual(metric["fetched_at"], payload["synced_at"])
         self.assertEqual(payload["performance_history"], [])
 
-    def test_backfill_does_not_redate_retained_activity_maximum(self):
+    def test_backfill_writes_no_activity_maximum_history(self):
         first = {
             "synced_at": "2026-09-01T09:00:00+00:00",
             "errors": [],
@@ -628,11 +628,8 @@ class ProviderReviewTests(unittest.TestCase):
         }
         payloads.prepare_remote(second)
         save_garmin(second, replace=False)
-        metric = garmin_payload_metrics.garmin_payload_performance_metrics(
-            read_garmin(), server.ATHLETE_CLOCK.now().date()
-        )["cycling_max_hr_bpm"]
-        self.assertEqual(metric["value"], 180)
-        self.assertEqual(metric["observed_at"], "2026-08-31")
+        # The activity maximum is derived at read time from canonical records
+        # (#1686), so the backfill writes no dated history entry for it.
         self.assertEqual(second["performance_history"], first["performance_history"])
 
     def test_fresh_password_length_boundary_counts_unicode_characters(self):
