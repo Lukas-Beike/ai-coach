@@ -286,7 +286,7 @@ class CanonicalReadSelector(
             for row in with_competitions(
                 [
                     *loaded,
-                    *(row for row in whole_day if str(row["id"]) not in page),
+                    *(dict(row) for row in whole_day if str(row["id"]) not in page),
                 ],
                 competitions,
             )

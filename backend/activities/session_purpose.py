@@ -66,10 +66,10 @@ def with_competitions(
         days.setdefault(key, []).append(index)
     linked: set[int] = set()
     for competition in sorted(competitions, key=_competition_order):
-        index = _match(result, days, competition, linked)
-        if index is None:
+        match = _match(result, days, competition, linked)
+        if match is None:
             continue
-        summary = dict(result[index])
+        summary = dict(result[match])
         summary["competition_id"] = str(competition["id"])
         if summary.get("purpose") != ActivityPurpose.RACE.value:
             summary["purpose"] = ActivityPurpose.RACE.value
@@ -77,8 +77,8 @@ def with_competitions(
                 **summary.get("sources", {}),
                 "purpose": COMPETITION_SOURCE_LABEL,
             }
-        result[index] = summary
-        linked.add(index)
+        result[match] = summary
+        linked.add(match)
     return result
 
 
