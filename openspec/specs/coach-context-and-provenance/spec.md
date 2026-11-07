@@ -253,9 +253,9 @@ The system SHALL give every subjective rating that reaches the Coach (Intervals.
 - **THEN** Coach rule 8h names 1–4 (higher is worse, Intervals.icu, athlete-entered) for the first and 0–10 (higher is worse, local check-in) for the second and forbids comparing or averaging them.
 
 #### Scenario: Activity detail ratings
-- **WHEN** `get_activity_details` returns Intervals.icu RPE or feel
-- **THEN** the metric source kind is `athlete_entered`, not `measured`, and the metric carries its scale text, a named value's `rating_label` (feel 1 stark … 5 schwach) and `normalized_0_1` (0 best or lowest strain, 1 worst or highest).
+- **WHEN** `get_activity_details` serves a session
+- **THEN** it carries no Intervals.icu RPE or feel from the provider summary row (#1685); the athlete's own rating stays in `activity_feedback` with its local scale.
 
 Detailed contract: ratings keep the entered number; each field's scale is fixed by where it was entered and resolved at read time from `backend/canonical/rating_scales.py`, so stored rows need no replay. The legend is constant, so it is rule 8h of the fixed Coach prompt instead of per-turn context; tests check the rule against those scales. Session-RPE load entries name their `rpe_scale` (local 0–10 or Intervals.icu 1–10) and keep their values.
 
-Evidence: `backend/canonical/rating_scales.py:RatingScale`, `backend/activities/detail_summary_metrics.py:intervals_summary_metrics`, `backend/performance/session_rpe_load.py:session_load`, `backend/coach/prompt.py:COACH_PROMPT`; `tests/test_subjective_rating_scales.py`.
+Evidence: `backend/canonical/rating_scales.py:RatingScale`, `backend/performance/session_rpe_load.py:session_load`, `backend/coach/prompt.py:COACH_PROMPT`; `tests/test_subjective_rating_scales.py`.

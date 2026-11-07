@@ -613,31 +613,41 @@ def _save_activity_detail(activity_id, record):
         )
 
 
-def _save_garmin_copy(activity_id, streams):
+def _save_garmin_copy(activity_id, streams, hr_zone_seconds=None):
     """Bundle a Garmin copy with full streams into an Intervals activity's session.
 
-    The canonical session analysis (#1685) reads Garmin, Wahoo and local detail
-    only, so the fixture's recorded profiles and analyses come from this copy.
+    The detail document and the canonical session analysis (#1685) read Garmin,
+    Wahoo and local detail only, so the fixture's charts, zones, recorded
+    profiles and analyses come from this copy. ``streams`` uses legacy keys.
     """
     from datetime import datetime
 
-    from backend.canonical.activity_detail import ActivityStreamSet
+    from backend.canonical.activity_detail import (
+        ActivityStreamSet,
+        ZoneBucket,
+        ZoneDistribution,
+    )
     from backend.canonical.records import Provenance
     from backend.canonical.vocabulary import (
         ActivityDetailOrigin,
         ProviderId,
         RecordingOrigin,
         SourceKind,
-        StreamChannel,
         StreamResolution,
+        ZoneBoundarySource,
+        ZoneMetric,
     )
     from backend.db.activity_detail_store import replace_detail_set
+    from backend.providers.intervals_activity_detail_mapping import (
+        STREAM_KEY_CHANNELS,
+    )
 
     now = server.runtime_clock.utc_now()
     garmin_id = f"garmin-{activity_id}"
     with server.database_manager().unit_of_work() as db:
         row = db.execute(
-            "SELECT activity_id, sport, environment, started_at FROM activity_records "
+            "SELECT activity_id, sport, environment, started_at, name "
+            "FROM activity_records "
             "WHERE provider = 'intervals' AND provider_activity_id = ?",
             (activity_id,),
         ).fetchone()
@@ -653,38 +663,54 @@ def _save_garmin_copy(activity_id, streams):
                 row["sport"],
                 row["environment"],
                 row["started_at"],
-                "Fixture Garmin copy",
+                row["name"],
                 now,
                 now,
                 now,
             ),
         )
+        provenance = Provenance(
+            provider=ProviderId.GARMIN,
+            source_kind=SourceKind.PROVIDER_REPORTED,
+            source_record_id=None,
+            recorded_by=RecordingOrigin.GARMIN,
+            retrieved_at=datetime.fromisoformat(now),
+            label="Garmin Connect",
+        )
         replace_detail_set(
             db,
             ActivityStreamSet(
                 provider_activity_id=garmin_id,
-                provenance=Provenance(
-                    provider=ProviderId.GARMIN,
-                    source_kind=SourceKind.PROVIDER_REPORTED,
-                    source_record_id=None,
-                    recorded_by=RecordingOrigin.GARMIN,
-                    retrieved_at=datetime.fromisoformat(now),
-                    label="Garmin Connect",
-                ),
+                provenance=provenance,
                 origin=ActivityDetailOrigin.FETCH,
                 resolution=StreamResolution.FULL,
                 channels={
-                    StreamChannel.TIME_S: tuple(float(v) for v in streams["time"]),
-                    StreamChannel.POWER_W: tuple(float(v) for v in streams["watts"]),
-                    StreamChannel.HEART_RATE_BPM: tuple(
-                        float(v) for v in streams["heartrate"]
-                    ),
+                    STREAM_KEY_CHANNELS[key]: tuple(float(v) for v in values)
+                    for key, values in streams.items()
                 },
             ),
             mapper_version=1,
             summary_sha256=None,
             now=now,
         )
+        if hr_zone_seconds:
+            replace_detail_set(
+                db,
+                ZoneDistribution(
+                    provider_activity_id=garmin_id,
+                    provenance=provenance,
+                    origin=ActivityDetailOrigin.FETCH,
+                    metric=ZoneMetric.HEART_RATE,
+                    boundary_source=ZoneBoundarySource.UNKNOWN,
+                    buckets=tuple(
+                        ZoneBucket(index=index, seconds=float(seconds))
+                        for index, seconds in enumerate(hr_zone_seconds, start=1)
+                    ),
+                ),
+                mapper_version=1,
+                summary_sha256=None,
+                now=now,
+            )
 
 
 def _run_session_analysis():
@@ -2309,6 +2335,11 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                         for name, values in detailed["streams"].items()
                     },
                 },
+            )
+            _save_garmin_copy(
+                activity["id"],
+                detailed["streams"],
+                hr_zone_seconds=activity["icu_hr_zone_times"],
             )
             self.send_json(200, {"activity_id": activity["id"]})
             return

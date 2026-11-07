@@ -10,7 +10,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import SnapshotActivityRows, canonical_source
-from canonical_detail_support import NOW, open_manager, seed_intervals_activity
+from canonical_detail_support import (
+    add_garmin_copy,
+    open_manager,
+    seed_intervals_activity,
+)
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.canonical.vocabulary import MetricKind
@@ -26,7 +30,6 @@ from backend.providers.intervals_activity_detail_projection import (
 )
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.runtime.ports import ObservationSourceSelector
-from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 LEGACY_KEYS = {
@@ -224,7 +227,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         self.assertEqual([200, 250], result["streams"]["channels"]["power_w"]["values"])
         self.assertEqual(
             "bounded sanitized activity_detail.v1 document of exactly one local "
-            "session; providers: Intervals.icu; recorded by: unknown",
+            "session; providers: Intervals.icu, Garmin Connect; recorded by: garmin",
             result["data_scope"],
         )
         self.assertTrue(result["activity_validation"]["available"])
@@ -412,18 +415,8 @@ def _sessions(case: unittest.TestCase, *activities: dict):
 
 
 def _store_streams(manager, activity_id: str, streams: dict, laps=None) -> None:
-    activity = {"streams": streams, **({} if laps is None else {"laps": laps})}
-    with manager.unit_of_work() as db:
-        CanonicalDetailWriter().write_legacy(
-            db,
-            record={
-                "activity_id": activity_id,
-                "activity": activity,
-                "observed_at": NOW,
-                "full_resolution": True,
-            },
-            now=NOW,
-        )
+    """Store the streams on a Garmin copy: Intervals.icu detail is never read."""
+    add_garmin_copy(manager, activity_id, streams, laps)
 
 
 def _detail_tool(manager, activities: list[dict], garmin, profile, planned=None):

@@ -3,7 +3,6 @@
 import unittest
 from typing import Any, ClassVar
 
-from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.athlete.checkins import CHECKIN_SCORE_FIELDS
 from backend.canonical.rating_scales import (
     INTERVALS_FEEL_SCALE,
@@ -13,7 +12,7 @@ from backend.canonical.rating_scales import (
     LOCAL_SESSION_RPE_SCALE,
     RatingScale,
 )
-from backend.canonical.vocabulary import MetricKind, RecordingOrigin
+from backend.canonical.vocabulary import MetricKind
 from backend.coach.context import COACH_ACTIVITY_FIELDS
 from backend.coach.prompt import COACH_PROMPT
 from backend.performance.session_rpe_load import session_load
@@ -107,33 +106,6 @@ class CoachRuleTests(unittest.TestCase):
             self.assertIn(field, self.RULE)
         self.assertIn("athlete-entered, not measured", self.RULE)
         self.assertIn("Never compare ratings of different scales", self.RULE)
-
-
-class DetailMetricTests(unittest.TestCase):
-    def test_rpe_and_feel_are_athlete_entered_with_their_scale(self) -> None:
-        metrics = intervals_summary_metrics(
-            {"icu_rpe": 7, "feel": 1, "calories": 500},
-            recorded_by=RecordingOrigin.GARMIN,
-        )
-        self.assertEqual("athlete_entered", metrics["rpe"]["source"]["kind"])
-        self.assertEqual("athlete_entered", metrics["feel"]["source"]["kind"])
-        self.assertEqual("measured", metrics["calories_kcal"]["source"]["kind"])
-        self.assertEqual(
-            "1–5, höher = schlechter (1 stark … 5 schwach)", metrics["feel"]["scale"]
-        )
-        self.assertEqual("stark", metrics["feel"]["rating_label"])
-        self.assertEqual(0.0, metrics["feel"]["normalized_0_1"])
-        self.assertIn("höher = härter", metrics["rpe"]["scale"])
-        self.assertNotIn("scale", metrics["calories_kcal"])
-        self.assertNotIn("rating_label", metrics["rpe"])
-
-    def test_off_scale_rating_keeps_value_and_scale_without_label(self) -> None:
-        metrics = intervals_summary_metrics(
-            {"feel": 0}, recorded_by=RecordingOrigin.GARMIN
-        )
-        self.assertEqual(0, metrics["feel"]["value"])
-        self.assertIn("scale", metrics["feel"])
-        self.assertNotIn("normalized_0_1", metrics["feel"])
 
 
 class SessionRpeScaleTests(unittest.TestCase):

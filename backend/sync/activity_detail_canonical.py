@@ -93,9 +93,13 @@ class CanonicalDetailWriter:
             recorded_by=recording_origin(link["recorded_by"]),
             retrieved_at=_aware_time(record.get("observed_at")),
         )
-        if not result.records and not _has_analysis_payload(record):
-            # Nothing usable arrived: keep the stored sets instead of erasing them.
-            return DetailWriteResult(DetailWriteOutcome.INVALID, len(result.issues))
+        marker = _write_fetch_marker(db, link, record, now)
+        if not result.records:
+            # Nothing usable arrived (a session without streams, laps or zone
+            # times): keep the stored sets; the marker settles this summary.
+            if marker is None:
+                return DetailWriteResult(DetailWriteOutcome.INVALID, len(result.issues))
+            return _result([marker], len(result.issues))
         outcomes = _write_sets(
             db, result.records, _sha256_or_none(record.get("summary_sha256")), now
         )
@@ -106,9 +110,9 @@ class CanonicalDetailWriter:
             activity_id,
             keep={item.kind for item in result.records},
         )
-        analysis = _write_analysis(db, link, record, now)
-        if analysis is not None:
-            outcomes.append(analysis)
+        # Details only: the session analysis is stored canonically (#1685).
+        if marker is not None:
+            outcomes.append(marker)
         return _result(outcomes, len(result.issues))
 
     def write_legacy(self, db: Any, *, record: object, now: str) -> DetailWriteResult:
@@ -134,7 +138,7 @@ class CanonicalDetailWriter:
             db, result.records, _sha256_or_none(record.get("summary_sha256")), now
         )
         normalized_record = normalize_legacy_detail_targets(record)
-        analysis = _write_analysis(db, link, normalized_record, now, carry_targets=True)
+        analysis = _write_analysis(db, link, normalized_record, now)
         if analysis is not None:
             outcomes.append(analysis)
         return _result(outcomes, len(result.issues))
@@ -194,22 +198,18 @@ def _write_analysis(
     link: Mapping[str, Any],
     record: Mapping[str, Any],
     now: str,
-    *,
-    carry_targets: bool = False,
 ) -> WriteOutcome | None:
-    """Store the session analysis; only sessions with a local id have one.
+    """Store a legacy kv record's analysis; only sessions with a local id have one.
 
-    A canonical row (#1685) is never replaced: it carries the snapshot over
-    and holds the one analysis every consumer reads. Only the legacy kv copy
-    (``carry_targets``) hands its frozen targets to such a row without one.
+    A canonical row (#1685) is never replaced: it holds the one analysis every
+    consumer reads, and only receives the record's frozen targets when it has
+    none.
     """
     activity_id = link["activity_id"]
     if activity_id is None or not _has_analysis_payload(record):
         return None
     existing = analysis_rows_for(db, [activity_id]).get(activity_id)
     if existing is not None and existing["analysis_version"] >= CANONICAL_VERSION:
-        if not carry_targets:
-            return WriteOutcome.UNCHANGED
         return _carry_targets(db, activity_id, existing, record, now)
     payload = {key: record.get(key) for key in _ANALYSIS_KEYS}
     payload["summary_sha256"] = record.get("summary_sha256")
@@ -220,6 +220,50 @@ def _write_analysis(
         analysis_version=ACTIVITY_DETAIL_ANALYSIS_VERSION,
         input_sha256=_analysis_input_hash(record),
         payload=payload,
+        now=now,
+    )
+
+
+def _write_fetch_marker(
+    db: Any, link: Mapping[str, Any], record: Mapping[str, Any], now: str
+) -> WriteOutcome | None:
+    """Record which summary version a fetch loaded, so prefetch settles it.
+
+    The fetch computes no analysis any more (#1685), so this keeps the summary
+    hash in the session's analysis row that the prefetch reads; existing
+    values, such as a frozen target snapshot, stay, and a canonical row keeps
+    its analysis and fingerprint. Sessions without a local id get no marker.
+    """
+    activity_id = link["activity_id"]
+    summary_sha256 = _sha256_or_none(record.get("summary_sha256"))
+    if activity_id is None or summary_sha256 is None:
+        return None
+    existing = analysis_rows_for(db, [activity_id]).get(activity_id)
+    stored = existing["payload"] if existing is not None else {}
+    stored = stored if isinstance(stored, dict) else {}
+    if existing is not None and existing["analysis_version"] >= CANONICAL_VERSION:
+        # The canonical row keeps its version and fingerprint, so the analysis
+        # is not recomputed; it only gains the loaded summary hash.
+        if stored.get("summary_sha256") == summary_sha256:
+            return WriteOutcome.UNCHANGED
+        return save_analysis(
+            db,
+            activity_id,
+            analysis_version=existing["analysis_version"],
+            input_sha256=existing["input_sha256"],
+            payload={**stored, "summary_sha256": summary_sha256},
+            now=now,
+        )
+    return save_analysis(
+        db,
+        activity_id,
+        analysis_version=ACTIVITY_DETAIL_ANALYSIS_VERSION,
+        input_sha256=hashlib.sha256(summary_sha256.encode()).hexdigest(),
+        payload={
+            **stored,
+            "summary_sha256": summary_sha256,
+            "observed_at": record.get("observed_at"),
+        },
         now=now,
     )
 

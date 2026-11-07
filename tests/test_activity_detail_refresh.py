@@ -1,6 +1,5 @@
 """Read-only provider refresh, canonical storage and failure atomicity contracts."""
 
-import json
 import sqlite3
 import tempfile
 import unittest
@@ -21,7 +20,11 @@ from backend.canonical.vocabulary import (
     StreamResolution,
 )
 from backend.db import DatabaseManager, row_factory
-from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
+from backend.db.activity_detail_store import (
+    analysis_row_for_record,
+    detail_sets_for,
+    save_analysis,
+)
 from backend.errors import AppError, ProviderErrorClassifier, provider_error
 from backend.performance.session_analysis_reads import calendar_profiles
 from backend.providers.intervals_activity_detail_projection import (
@@ -155,9 +158,10 @@ class ActivityDetailRefreshTests(unittest.TestCase):
         self.assertIs(ProviderId.INTERVALS, streams.detail.provenance.provider)
         self.assertEqual(ActivityDetailOrigin.FETCH, streams.detail.origin)
         self.assertEqual("2026-10-02T08:00:00+00:00", streams.fetched_at)
+        # Details only (#1685): no analysis, only the loaded summary hash.
         payload = analysis_payload(self.manager, "CaseSensitive-1")
         self.assertEqual("2026-10-02T08:00:00Z", payload["observed_at"])
-        self.assertNotIn("private_field", json.dumps(payload))
+        self.assertNotIn("session_analysis", payload)
         # The refresh writes canonical rows only, never a kv detail record.
         self.assertEqual([], kv_detail_keys(self.manager))
         self.assertEqual(
@@ -395,7 +399,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
     def test_analysis_only_row_with_matching_hash_is_not_loaded_again(self):
         self.prefetched_service()
         self.canonical_update("DELETE FROM activity_detail_sets")
-        # Payloads written before analysis version 2 carry no summary hash.
+        # Rows written before analysis version 2 carry no summary hash.
         self.canonical_update(
             "UPDATE activity_detail_analysis "
             "SET payload = json_remove(payload, '$.summary_sha256')"
@@ -650,7 +654,6 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
         self.store = ActivityDetailStore(self.manager)
         self.api = Mock()
         self.api.get.side_effect = self.provider
-        self.planned_units = Mock(return_value=[])
 
     def provider(self, path, params):
         if path.endswith("/streams.json"):
@@ -668,7 +671,6 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
             store=self.store,
             utc_now=lambda: "2026-10-02T08:00:00Z",
             configured=True,
-            read_planned_units=self.planned_units,
             canonical=canonical,
         )
 
@@ -690,7 +692,11 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
         result = self.service(CanonicalDetailWriter()).refresh("9001")
         self.assertEqual("completed", result["status"])
         self.assertGreater(self.canonical_rows(), 0)
-        self.assertIsNotNone(analysis_payload(self.manager, "9001"))
+        # Details only (#1685): the row keeps just the loaded summary hash.
+        self.assertEqual(
+            {"observed_at", "summary_sha256"},
+            set(analysis_payload(self.manager, "9001")),
+        )
         self.assertEqual([], kv_detail_keys(self.manager))
 
     def test_prefetch_stores_new_activity_in_the_canonical_tables(self):
@@ -740,21 +746,26 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
         self.assertEqual({"fetched": 0, "failed": 0}, service.prefetch_new())
         self.api.get.assert_not_called()
 
-    def test_frozen_targets_are_reused_from_the_canonical_analysis(self):
+    def test_refresh_leaves_a_stored_analysis_untouched(self):
         self.service(CanonicalDetailWriter()).refresh("9001")
-        self.planned_units.assert_called_once_with()
-        frozen = {"frozen_at": "2026-10-01T08:00:00Z", "basis": "synthetic"}
         with self.manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE activity_detail_analysis "
-                "SET payload = json_set(payload, '$.target_snapshot', json(?))",
-                (json.dumps(frozen),),
+            activity_id = db.execute(
+                "SELECT activity_id FROM activity_records WHERE provider_activity_id = ?",
+                ("9001",),
+            ).fetchone()["activity_id"]
+            save_analysis(
+                db,
+                activity_id,
+                analysis_version=2,
+                input_sha256="0" * 64,
+                payload={"target_snapshot": {"basis": "synthetic"}},
+                now="2026-10-01T08:00:00Z",
             )
-        self.planned_units.reset_mock()
         self.service(CanonicalDetailWriter()).refresh("9001")
         payload = analysis_payload(self.manager, "9001")
-        self.assertEqual(frozen, payload["target_snapshot"])
-        self.planned_units.assert_not_called()
+        # The frozen snapshot stays; the refresh only updates the summary hash.
+        self.assertEqual({"basis": "synthetic"}, payload["target_snapshot"])
+        self.assertNotIn("session_analysis", payload)
 
 
 if __name__ == "__main__":

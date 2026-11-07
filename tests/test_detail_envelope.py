@@ -161,7 +161,8 @@ class DetailEnvelopeTests(unittest.TestCase):
                 for entry in self.detail(activity_id)["detail_data"]["providers"]
             }
 
-        self.assertEqual({"intervals": True}, refreshable("act_i"))
+        # Intervals.icu details are never served, so never offered (#1685).
+        self.assertEqual({"intervals": False}, refreshable("act_i"))
         self.assertEqual({"garmin": True}, refreshable("act_g"))
         self.assertEqual({"wahoo": False}, refreshable("act_w"))
         self.configured = ["intervals", "wahoo"]

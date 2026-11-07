@@ -377,8 +377,6 @@
     const aerobic = payload.analysis?.aerobic;
     if (aerobic) {
       content.append(node("h3", "Aerobe Effizienz"));
-      const decoupling = aerobic.provider_decoupling;
-      if (decoupling?.value != null) content.append(node("p", `${decoupling.source} Decoupling: ${decoupling.value}% (Anbieterberechnung)`));
       let description = aerobic.reason;
       if (aerobic.status === "ok") {
         const longSession = aerobic.long_session ? " · lange Einheit" : "";

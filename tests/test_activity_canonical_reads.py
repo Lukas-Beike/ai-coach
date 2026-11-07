@@ -116,7 +116,9 @@ class DuplicateRemovalTests(_ActivityCase):
     def test_removal_is_recorded_in_the_tables_and_leaves_the_snapshot(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.assertIn(GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads)))
+        self.assertIn(
+            GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads))
+        )
         snapshot = self.intervals["synced_at"]
 
         remote = Mock()
@@ -246,7 +248,7 @@ class PendingAndTableReadTests(_ActivityCase):
         ]
         for key in ("id", "started_at", "started_at_local", "sport", "record_ids"):
             self.assertIn(key, row)
-        self.assertIn("detail_error", row)
+        self.assertNotIn("detail_error", row)
         self.assertFalse(
             [
                 key
@@ -353,7 +355,9 @@ class SnapshotWithoutCanonicalSectionsTests(_ActivityCase):
 
         service.delete(payload, Mock())
 
-        self.assertNotIn(GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads)))
+        self.assertNotIn(
+            GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads))
+        )
 
     def _payload(self, selector: Any) -> dict[str, Any]:
         pair = self.inspector(selector).latest() or {}

@@ -10,7 +10,7 @@ from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from canonical_detail_support import NOW, seed_intervals_activity
+from canonical_detail_support import add_garmin_copy, seed_intervals_activity
 from garmin_support import read_garmin, save_garmin
 from server_test_support import ServerTestCase, server
 from support import complete_canonical_backfill, store_canonical_snapshot
@@ -30,7 +30,6 @@ from backend.planning import competitions as planning_competitions
 from backend.providers import openai as openai_provider
 from backend.runtime import clock as runtime_clock
 from backend.sync import queue as sync_queue
-from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.authority import competition_push_manifest
 
 
@@ -266,22 +265,10 @@ class ServerCoachTests(ServerTestCase):
             start_date_local="2026-09-11T07:00:00",
         )
         complete_canonical_backfill(server)
-        with server.DB_LOCK, manager.unit_of_work() as db:
-            CanonicalDetailWriter().write_legacy(
-                db,
-                record={
-                    "activity_id": "activity-1",
-                    "activity": {
-                        "streams": {
-                            "time": [0, 1, 2],
-                            "watts": [200, 250, 280],
-                            "latlng": [[1, 2], [3, 4], [5, 6]],
-                        }
-                    },
-                    "observed_at": NOW,
-                    "full_resolution": True,
-                },
-                now=NOW,
+        # Intervals.icu detail is never read (#1685): the streams sit on a Garmin copy.
+        with server.DB_LOCK:
+            add_garmin_copy(
+                manager, "activity-1", {"time": [0, 1, 2], "watts": [200, 250, 280]}
             )
         intent = {
             "intent": "local_action",
@@ -316,7 +303,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(
             result["data_scope"],
             "bounded sanitized activity_detail.v1 document of exactly one local "
-            "session; providers: Intervals.icu; recorded by: unknown",
+            "session; providers: Intervals.icu, Garmin Connect; recorded by: garmin",
         )
         self.assertNotIn("activity-2", json.dumps(result))
         self.assertNotIn("Recovery", json.dumps(result))

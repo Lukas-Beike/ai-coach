@@ -12,6 +12,7 @@ from canonical_detail_support import (
 )
 
 from backend.canonical.vocabulary import ActivityDetailOrigin, RecordingOrigin
+from backend.db.activity_detail_fingerprints import intervals_detail_fingerprints
 from backend.db.activity_detail_store import detail_origins, save_analysis
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
@@ -100,10 +101,12 @@ class CanonicalDetailWriterTests(unittest.TestCase):
         with self.manager.reader() as db:
             return detail_origins(db, INTERVALS, "9001")
 
-    def test_fresh_load_writes_stream_set_and_analysis(self):
+    def test_fresh_load_writes_detail_sets_only(self):
         self.assertEqual(DetailWriteOutcome.WRITTEN, self.fetch().outcome)
         self.assertIn("streams", self.kinds())
         self.assertEqual({ActivityDetailOrigin.FETCH.value}, self.origins())
+        # The session analysis is stored canonically (#1685); the fetch keeps
+        # only the summary hash it loaded, for the prefetch.
         self.assertEqual(1, self.count("activity_detail_analysis"))
 
     def test_fresh_load_without_active_record_writes_nothing(self):
@@ -112,14 +115,23 @@ class CanonicalDetailWriterTests(unittest.TestCase):
         self.assertEqual(0, self.count("activity_detail_sets"))
         self.assertEqual(0, self.count("activity_detail_analysis"))
 
-    def test_fresh_load_without_any_payload_is_invalid(self):
+    def test_fresh_load_without_detail_settles_its_summary(self):
+        # A session without streams, laps or zone times stores no set, but the
+        # summary hash it was loaded for, so the prefetch does not load it again.
         result = self.fetch(
             detail={"id": "9001"},
             streams={},
             record={"observed_at": NOW, "summary_sha256": SHA},
         )
-        self.assertEqual(DetailWriteOutcome.INVALID, result.outcome)
+        self.assertEqual(DetailWriteOutcome.WRITTEN, result.outcome)
         self.assertEqual(0, self.count("activity_detail_sets"))
+        self.assertEqual(1, self.count("activity_detail_analysis"))
+
+    def test_fresh_load_without_detail_or_summary_hash_is_invalid(self):
+        result = self.fetch(
+            detail={"id": "9001"}, streams={}, record={"observed_at": NOW}
+        )
+        self.assertEqual(DetailWriteOutcome.INVALID, result.outcome)
         self.assertEqual(0, self.count("activity_detail_analysis"))
 
     def test_legacy_record_is_written_with_legacy_origin(self):
@@ -171,13 +183,21 @@ class CanonicalDetailWriterTests(unittest.TestCase):
 
     def test_fetch_never_replaces_a_canonical_analysis_row(self):
         # The one canonical session analysis (#1685) is written by its stage only.
-        self.fetch()
         with self.manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE activity_detail_analysis SET analysis_version = 3, "
-                "payload = '{\"canonical\":true}'"
+            activity_id = db.execute(
+                "SELECT activity_id FROM activity_records WHERE provider_activity_id = ?",
+                ("9001",),
+            ).fetchone()["activity_id"]
+            save_analysis(
+                db,
+                activity_id,
+                analysis_version=3,
+                input_sha256="0" * 64,
+                payload={"canonical": True},
+                now=NOW,
             )
-        # Even a fetch with Intervals-frozen targets leaves the row alone.
+        # Even a fetch with Intervals-frozen targets leaves the analysis alone;
+        # the row only gains the summary hash that settles the prefetch.
         self.fetch(
             record={
                 **fresh_record(),
@@ -188,11 +208,42 @@ class CanonicalDetailWriterTests(unittest.TestCase):
         self.legacy()
         with self.manager.reader() as db:
             row = db.execute(
-                "SELECT analysis_version, payload FROM activity_detail_analysis"
+                "SELECT analysis_version, input_sha256, payload "
+                "FROM activity_detail_analysis"
             ).fetchone()
         self.assertEqual(
-            (3, '{"canonical":true}'), (row["analysis_version"], row["payload"])
+            (3, "0" * 64, {"canonical": True, "summary_sha256": SHA}),
+            (
+                row["analysis_version"],
+                row["input_sha256"],
+                json.loads(row["payload"]),
+            ),
         )
+
+    def test_detail_less_fetch_settles_a_canonical_session(self):
+        with self.manager.unit_of_work() as db:
+            activity_id = db.execute(
+                "SELECT activity_id FROM activity_records WHERE provider_activity_id = ?",
+                ("9001",),
+            ).fetchone()["activity_id"]
+            save_analysis(
+                db,
+                activity_id,
+                analysis_version=3,
+                input_sha256="0" * 64,
+                payload={"canonical": True},
+                now=NOW,
+            )
+        empty = {
+            "detail": {"id": "9001"},
+            "streams": {},
+            "record": {"observed_at": NOW, "summary_sha256": SHA},
+        }
+        self.assertEqual(DetailWriteOutcome.WRITTEN, self.fetch(**empty).outcome)
+        self.assertEqual(DetailWriteOutcome.UNCHANGED, self.fetch(**empty).outcome)
+        with self.manager.reader() as db:
+            settled = intervals_detail_fingerprints(db, ["9001"], batch_size=10)
+        self.assertEqual({"9001": {SHA}}, settled)
 
     def test_legacy_targets_reach_a_canonical_row_without_a_snapshot(self):
         targets = {"steps": [], "basis": {"ftp": 250}}
@@ -240,7 +291,7 @@ class CanonicalDetailWriterTests(unittest.TestCase):
             streams={},
             record={"observed_at": NOW, "summary_sha256": SHA},
         )
-        self.assertEqual(DetailWriteOutcome.INVALID, result.outcome)
+        self.assertEqual(DetailWriteOutcome.UNCHANGED, result.outcome)
         self.assertEqual(before, self.kinds())
 
     def test_session_without_local_id_writes_sets_but_no_analysis(self):

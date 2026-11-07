@@ -79,6 +79,8 @@ class _Session:
     stale: bool
     targets: Mapping[str, Any] | None
     thresholds: dict[str, Any]
+    # The Intervals.icu summary hash a detail fetch settled; kept, not an input.
+    fetched_summary: str | None = None
 
     @property
     def session_id(self) -> str:
@@ -153,6 +155,12 @@ def _stored_targets(row: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
     payload = None if row is None else row.get("payload")
     targets = payload.get("target_snapshot") if isinstance(payload, dict) else None
     return targets if isinstance(targets, dict) else None
+
+
+def _fetched_summary(row: Mapping[str, Any] | None) -> str | None:
+    payload = None if row is None else row.get("payload")
+    value = payload.get("summary_sha256") if isinstance(payload, dict) else None
+    return value if isinstance(value, str) else None
 
 
 def _value(threshold: Mapping[str, Any] | None) -> float | None:
@@ -277,6 +285,7 @@ class SessionAnalysisStage:
                 stale=_is_stale(own, current),
                 targets=_stored_targets(row),
                 thresholds=_threshold_parts(summary, thresholds) if own else {},
+                fetched_summary=_fetched_summary(row),
             )
             sessions.append((session, row))
         return summaries, sessions
@@ -329,6 +338,8 @@ class SessionAnalysisStage:
             or None,
             "observed_at": max((key.fetched_at for key in session.keys), default=None),
         }
+        if session.fetched_summary is not None:
+            payload["summary_sha256"] = session.fetched_summary
         if not session.keys or session.stale:
             return payload
         stored = activity_detail_store.detail_sets_for_session(db, session.session_id)

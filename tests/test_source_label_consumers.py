@@ -5,9 +5,7 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.activities.duplicates import duplicate_delete_action
-from backend.canonical.vocabulary import RecordingOrigin
 from backend.performance import (
     body,
     current_metrics,
@@ -58,12 +56,6 @@ class EmittedSourceOutputTests(unittest.TestCase):
         diff = duplicate_delete_action(pair)["diff"][0]
         self.assertEqual("Garmin", diff["source"])
         self.assertEqual("Wahoo", diff["kept_source"])
-
-    def test_activity_detail_summary_metrics_name_intervals_source(self):
-        metrics = intervals_summary_metrics(
-            {"average_speed": 8.5}, recorded_by=RecordingOrigin.UNKNOWN
-        )
-        self.assertEqual("Intervals.icu", metrics["avg_speed_mps"]["source"]["label"])
 
     def test_season_preparation_basis_names_the_local_curve(self):
         # Since #1726 the basis is yesterday's local fitness (M7), never
