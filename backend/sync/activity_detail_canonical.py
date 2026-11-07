@@ -25,6 +25,7 @@ from backend.canonical.vocabulary import (
     RecordingOrigin,
 )
 from backend.db.activity_detail_store import (
+    analysis_rows_for,
     detail_origins,
     remove_detail_sets,
     replace_detail_set,
@@ -34,6 +35,9 @@ from backend.db.canonical_store import (
     WriteOutcome,
     activity_record_link,
     canonical_json,
+)
+from backend.performance.canonical_session_analysis import (
+    ANALYSIS_VERSION as CANONICAL_VERSION,
 )
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
@@ -191,10 +195,17 @@ def _write_analysis(
     record: Mapping[str, Any],
     now: str,
 ) -> WriteOutcome | None:
-    """Store the session analysis; only sessions with a local id have one."""
+    """Store the session analysis; only sessions with a local id have one.
+
+    A canonical row (#1685) is never replaced: it carries the snapshot over
+    and holds the one analysis every consumer reads.
+    """
     activity_id = link["activity_id"]
     if activity_id is None or not _has_analysis_payload(record):
         return None
+    existing = analysis_rows_for(db, [activity_id]).get(activity_id)
+    if existing is not None and existing["analysis_version"] >= CANONICAL_VERSION:
+        return WriteOutcome.UNCHANGED
     payload = {key: record.get(key) for key in _ANALYSIS_KEYS}
     payload["summary_sha256"] = record.get("summary_sha256")
     payload["observed_at"] = record.get("observed_at")

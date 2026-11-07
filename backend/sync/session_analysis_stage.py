@@ -23,7 +23,7 @@ import logging
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, timedelta, tzinfo
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any, Final
 
 from backend.activities.activity_summary import activity_summaries
@@ -38,7 +38,7 @@ from backend.canonical.vocabulary import ProviderId, Sport
 from backend.db import activity_detail_store
 from backend.db.activity_detail_store import FullStreamKey
 from backend.db.repositories import KeyValueRepository
-from backend.performance.canonical_detail import detail_candidates
+from backend.performance.canonical_detail import detail_candidates, stored_targets
 from backend.performance.canonical_session_analysis import (
     ANALYSIS_VERSION,
     METHOD_VERSION,
@@ -48,6 +48,7 @@ from backend.performance.canonical_session_analysis import (
     session_analysis,
 )
 from backend.performance.local_tss import THRESHOLD_KINDS, DatedThresholds
+from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.target_snapshot import freeze_targets
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -60,6 +61,10 @@ DEFAULT_BATCH_SIZE: Final = 100
 _INTERVALS: Final = ProviderId.INTERVALS.value
 
 PlannedUnits = Callable[[], list[dict[str, Any]]]
+Preferences = Callable[[Any], SourcePreferences]
+# Targets freeze only for sessions this recent, as the first detail load did;
+# older sessions would be matched against plans edited since.
+FREEZE_WINDOW_DAYS: Final = 7
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +102,9 @@ class _Tally:
     outcomes: Counter[str] = field(default_factory=Counter)
 
 
-def _thresholds(db: Any, reader: CanonicalTableReader) -> DatedThresholds:
+def _thresholds(
+    db: Any, reader: CanonicalTableReader, preferences: SourcePreferences
+) -> DatedThresholds:
     """Local, Garmin and Wahoo thresholds by day; Intervals.icu values are skipped."""
     return DatedThresholds(
         [
@@ -111,6 +118,7 @@ def _thresholds(db: Any, reader: CanonicalTableReader) -> DatedThresholds:
             for item in reader.zone_configurations(db)
             if item.provenance.provider is not ProviderId.INTERVALS
         ],
+        preferences=preferences,
     )
 
 
@@ -162,6 +170,7 @@ class SessionAnalysisStage:
         zone_provider: Callable[[], tzinfo | None],
         clock: Callable[[], str],
         planned_units: PlannedUnits = list,
+        preferences: Preferences = lambda _db: NO_PREFERENCES,
         reader: CanonicalTableReader | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
     ) -> None:
@@ -171,6 +180,7 @@ class SessionAnalysisStage:
         self._zone_provider = zone_provider
         self._clock = clock
         self._planned_units = planned_units
+        self._preferences = preferences
         self._reader = reader or CanonicalTableReader()
         self._batch_size = batch_size
 
@@ -190,11 +200,9 @@ class SessionAnalysisStage:
         ]
         batch = changed[: self._batch_size]
         tally = _Tally()
-        planned: list[dict[str, Any]] | None = None
+        context = _FreezeContext(summaries, self._planned_units, now)
         for session, fingerprint in batch:
-            if session.targets is None and session.keys:
-                planned = self._planned_units() if planned is None else planned
-            self._write(db, session, fingerprint, summaries, planned or [], now, tally)
+            self._write(db, session, fingerprint, context, now, tally)
         done = len(changed) <= self._batch_size
         counts = {
             "sessions": len(sessions),
@@ -250,7 +258,7 @@ class SessionAnalysisStage:
                 for key in values
             },
         )
-        thresholds = _thresholds(db, self._reader)
+        thresholds = _thresholds(db, self._reader, self._preferences(db))
         sessions = []
         for summary in summaries:
             session_id = str(summary["id"])
@@ -278,16 +286,15 @@ class SessionAnalysisStage:
         db: Any,
         session: _Session,
         fingerprint: str,
-        summaries: Sequence[Mapping[str, Any]],
-        planned: list[dict[str, Any]],
+        context: _FreezeContext,
         now: str,
         tally: _Tally,
     ) -> None:
         targets = session.targets
         if targets is None and session.keys:
-            targets = _merged_targets(db, session.all_records)
+            targets = stored_targets(db, session.session_id, session.all_records)
             if targets is None:
-                targets = _freeze(session, summaries, planned, now)
+                targets = context.freeze(session)
                 tally.outcomes["targets_frozen"] += targets is not None
             if targets is not None:
                 fingerprint = session.fingerprint(targets)
@@ -325,14 +332,22 @@ class SessionAnalysisStage:
         if not session.keys or session.stale:
             return payload
         stored = activity_detail_store.detail_sets_for_session(db, session.session_id)
-        merged = merge_details(detail_candidates(session.records, stored))
-        payload["session_analysis"] = session_analysis(session.records, merged, targets)
-        payload["calendar_profile"] = calendar_profile(
-            session.records,
-            merged,
-            ftp_w=_value(session.thresholds.get("ftp")),
-            threshold_hr_bpm=_value(session.thresholds.get("threshold_hr")),
-        )
+        try:
+            merged = merge_details(detail_candidates(session.records, stored))
+            analysis = session_analysis(session.records, merged, targets)
+            profile = calendar_profile(
+                session.records,
+                merged,
+                ftp_w=_value(session.thresholds.get("ftp")),
+                threshold_hr_bpm=_value(session.thresholds.get("threshold_hr")),
+            )
+        except ArithmeticError, TypeError, ValueError:
+            # One unreadable session must not stop the pass; it stays without
+            # an analysis until one of its inputs changes.
+            payload["failed"] = True
+            return payload
+        payload["session_analysis"] = analysis
+        payload["calendar_profile"] = profile
         return payload
 
     def mark_failed(self, db: Any) -> None:
@@ -369,49 +384,57 @@ def _outcome(session: _Session, payload: Mapping[str, Any]) -> str:
         return "no_details"
     if session.stale:
         return "stale"
+    if payload.get("failed"):
+        return "failed"
     return "profile" if payload.get("calendar_profile") else "analysis"
 
 
-def _freeze(
-    session: _Session,
-    summaries: Sequence[Mapping[str, Any]],
-    planned: list[dict[str, Any]],
-    now: str,
-) -> dict[str, Any] | None:
-    """Freeze the matched planned targets; matching compares a day either side."""
-    if not planned:
-        return None
-    try:
-        day = date.fromisoformat(summary_local_date(session.summary))
-    except ValueError:
-        return None
-    window = {(day + timedelta(days=offset)).isoformat() for offset in (-1, 0, 1)}
-    around = [item for item in summaries if summary_local_date(item) in window]
-    return freeze_targets(
-        planned,
-        around,
-        stored_activity_key(session.summary),
-        {"ftp": _value(session.thresholds.get("ftp"))},
-        now,
-    )
+class _FreezeContext:
+    """Planned units and sessions by local day, read once per batch when needed."""
 
+    def __init__(
+        self,
+        summaries: Sequence[Mapping[str, Any]],
+        planned_units: PlannedUnits,
+        now: str,
+    ) -> None:
+        self._summaries = summaries
+        self._planned_units = planned_units
+        self._planned: list[dict[str, Any]] | None = None
+        self._by_day: dict[str, list[Mapping[str, Any]]] | None = None
+        self._first_day = datetime.fromisoformat(now).astimezone(
+            UTC
+        ).date() - timedelta(days=FREEZE_WINDOW_DAYS)
+        self._now = now
 
-def _merged_targets(
-    db: Any, records: Sequence[ActivityRecord]
-) -> Mapping[str, Any] | None:
-    """A snapshot kept under a session merged into this one, by any record."""
-    for record in records:
-        provider = record.provenance.provider
-        if provider is None:
-            continue
-        found = _stored_targets(
-            activity_detail_store.analysis_row_for_record(
-                db, provider.value, record.activity_id
-            )
+    def freeze(self, session: _Session) -> dict[str, Any] | None:
+        """Freeze a recent session's matched planned targets, a day either side."""
+        try:
+            day = date.fromisoformat(summary_local_date(session.summary))
+        except ValueError:
+            return None
+        if day < self._first_day:
+            return None
+        if self._planned is None:
+            self._planned = self._planned_units()
+        if not self._planned:
+            return None
+        if self._by_day is None:
+            self._by_day = {}
+            for item in self._summaries:
+                self._by_day.setdefault(summary_local_date(item), []).append(item)
+        around = [
+            item
+            for offset in (-1, 0, 1)
+            for item in self._by_day.get((day + timedelta(days=offset)).isoformat(), [])
+        ]
+        return freeze_targets(
+            self._planned,
+            around,
+            stored_activity_key(session.summary),
+            {"ftp": _value(session.thresholds.get("ftp"))},
+            self._now,
         )
-        if found is not None:
-            return found
-    return None
 
 
 def _load_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:

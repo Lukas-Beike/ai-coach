@@ -183,7 +183,13 @@ class CanonicalDetailReader:
                 merged, lambda: zone_settings(db, analysis_record)
             )
         status = self._status(db, sets, intervals_id, summary)
-        stale = any(state.stale for state in status.values())
+        # Intervals.icu detail is no analysis input (#1685), so its staleness
+        # withholds nothing.
+        stale = any(
+            state.stale
+            for provider, state in status.items()
+            if provider is not ProviderId.INTERVALS
+        )
         analysis = None if stale else self._analysis(db, activity_id, stored, records)
         envelope = (
             None
@@ -226,7 +232,7 @@ class CanonicalDetailReader:
         if not own:
             return None
         merged = merge_details(detail_candidates(own, stored))
-        targets = _stored_targets(db, activity_id, records)
+        targets = stored_targets(db, activity_id, records)
         return session_analysis(
             own, merged, targets if isinstance(targets, dict) else None
         )
@@ -417,7 +423,7 @@ def _summary_metrics(
     return metrics
 
 
-def _stored_targets(
+def stored_targets(
     db: Any, activity_id: str, records: Sequence[ActivityRecord]
 ) -> dict[str, Any] | None:
     """The frozen target snapshot of the session, else of a session merged into it.

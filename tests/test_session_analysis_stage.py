@@ -355,6 +355,49 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertIsNone(row["payload"]["session_analysis"])
         self.assertEqual({}, calendar_profiles(self.manager))
 
+    def test_recent_session_freezes_its_matched_targets_once(self) -> None:
+        planned = [
+            {
+                "id": "local-1",
+                "date": "2026-09-10",
+                "sport": "ride",
+                "description": "- 2m 200w",
+                "target": "POWER",
+            }
+        ]
+        calls: list[int] = []
+
+        def planned_units() -> list[dict[str, Any]]:
+            calls.append(1)
+            return planned
+
+        def stage(clock: str) -> SessionAnalysisStage:
+            return SessionAnalysisStage(
+                key_values=self.key_values,
+                zone_provider=lambda: ZONE,
+                clock=lambda: clock,
+                planned_units=planned_units,
+            )
+
+        self._write(lambda db: _streams(db, GARMIN, "g1"))
+        # The session lies more than a week back: nothing is frozen.
+        self._run(stage(NOW))
+        row = self._row("act_g1")
+        assert row is not None
+        self.assertIsNone(row["payload"]["target_snapshot"])
+
+        self._write(lambda db: _ftp(db, GARMIN, 250.0))
+        recent = self._run(stage("2026-09-11T08:00:00+00:00"))
+
+        self.assertEqual(1, recent["counts"]["outcomes"]["targets_frozen"])
+        row = self._row("act_g1")
+        assert row is not None
+        targets = row["payload"]["target_snapshot"]
+        self.assertEqual(120, targets["steps"][0]["duration"])
+        self.assertEqual({"ftp": 250.0}, targets["basis"])
+        # The frozen targets are part of the stored fingerprint.
+        self.assertEqual(0, self._run(stage(NOW))["counts"]["computed"])
+
     def test_batches_resume_until_complete(self) -> None:
         add_session_record(self.manager, GARMIN, "g2", "act_g2")
         self._write(

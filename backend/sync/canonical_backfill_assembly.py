@@ -77,6 +77,7 @@ def build_canonical_backfill(
         zone_provider=zone_provider,
         clock=clock,
         planned_units=planned_units,
+        preferences=source_preferences,
     )
     worker = CanonicalBackfillWorker(
         backfill=backfill,

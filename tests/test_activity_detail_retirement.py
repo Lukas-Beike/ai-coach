@@ -397,6 +397,30 @@ class KeptRecordTests(RetirementTestCase):
         self.changed("9311", change)
         self.assert_kept("analysis_mismatch", "9311")
 
+    def canonical_row(self, targets):
+        """Replace the stored analysis by a canonical (version 3) row (#1685)."""
+        self.execute(
+            "UPDATE activity_detail_analysis SET analysis_version = 3, payload = ?",
+            (json.dumps({"target_snapshot": targets, "session_analysis": None}),),
+        )
+
+    def test_canonical_row_with_the_same_targets_proves_the_record(self):
+        targets = {"steps": [], "basis": {"ftp": 250}}
+        self.changed("9314", lambda record: record.update(target_snapshot=targets))
+        self.canonical_row(targets)
+        self.assertEqual(1, self.run_to_completion()["retired"])
+        self.assertIsNone(self.kv_record("9314"))
+
+    def test_canonical_row_with_other_targets_keeps_the_record(self):
+        self.changed(
+            "9315",
+            lambda record: record.update(
+                target_snapshot={"steps": [], "basis": {"ftp": 250}}
+            ),
+        )
+        self.canonical_row({"steps": [], "basis": {"ftp": 1}})
+        self.assert_kept("analysis_mismatch", "9315")
+
     def test_analysis_missing_from_the_canonical_tables(self):
         self.load("9312")
         self.execute("DELETE FROM activity_detail_analysis")

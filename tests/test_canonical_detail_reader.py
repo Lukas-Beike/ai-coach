@@ -596,6 +596,19 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
         self.assertFalse(self.provider(doc, "intervals")["stale"])
         self.assertIsNone(doc["analysis"])
 
+    def test_stale_intervals_detail_withholds_no_analysis(self) -> None:
+        self.ride_session()
+        self.db.execute(
+            "UPDATE activity_detail_sets SET summary_sha256 = ? WHERE provider = ?",
+            ("a" * 64, "intervals"),
+        )
+
+        doc = self.reader.read(self.db, "act_1")
+        assert doc is not None
+
+        self.assertTrue(self.provider(doc, "intervals")["stale"])
+        self.assertEqual(ANALYSIS_KEYS, set(doc["analysis"]))
+
     def test_set_without_a_fingerprint_is_never_stale(self) -> None:
         self.store(None)
 

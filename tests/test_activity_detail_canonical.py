@@ -169,6 +169,24 @@ class CanonicalDetailWriterTests(unittest.TestCase):
         self.assertEqual(DetailWriteOutcome.UNCHANGED, self.fetch().outcome)
         self.assertEqual(1, self.count("activity_detail_analysis"))
 
+    def test_fetch_never_replaces_a_canonical_analysis_row(self):
+        # The one canonical session analysis (#1685) is written by its stage only.
+        self.fetch()
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_detail_analysis SET analysis_version = 3, "
+                "payload = '{\"canonical\":true}'"
+            )
+        self.fetch(record={**fresh_record(), "observed_at": "2026-10-19T08:00:00Z"})
+        self.legacy()
+        with self.manager.reader() as db:
+            row = db.execute(
+                "SELECT analysis_version, payload FROM activity_detail_analysis"
+            ).fetchone()
+        self.assertEqual(
+            (3, '{"canonical":true}'), (row["analysis_version"], row["payload"])
+        )
+
     def test_refetch_without_laps_removes_the_stale_lap_set(self):
         self.fetch(
             detail={
