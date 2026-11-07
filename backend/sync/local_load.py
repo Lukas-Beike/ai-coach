@@ -322,6 +322,29 @@ def daily_local_loads(db: Any) -> dict[str, float]:
     )
 
 
+def _load_fields(load: Mapping[str, Any]) -> dict[str, Any]:
+    """The served fields of one stored local load row and its derivation."""
+    derivation = load["derivation"]
+    inputs = derivation.get("inputs") or {}
+    fields: dict[str, Any] = {
+        "training_load": load["value"],
+        "load_method": METHOD_ID,
+        "load_method_version": load.get("method_version"),
+        "load_branch": derivation.get("branch"),
+    }
+    if derivation.get("threshold_after_session"):
+        fields["load_threshold_after_session"] = True
+    if inputs.get("sex_assumed"):
+        fields["load_assumption"] = SEX_ASSUMED_LABEL
+    if calibration := derivation.get("calibration"):
+        fields["load_calibration"] = {
+            "tss_per_au": calibration.get("tss_per_au"),
+            "pairs": calibration.get("pairs"),
+            "session_rpe_au": inputs.get("session_rpe_au"),
+        }
+    return fields
+
+
 def with_local_loads(
     summaries: Iterable[Mapping[str, Any]],
     stored: Mapping[str, Mapping[str, Any]],
@@ -334,24 +357,8 @@ def with_local_loads(
         rows = stored.get(str(item.get("id")), {})
         load = rows.get(MetricKind.SESSION_LOAD.value)
         if load is not None:
-            derivation = load["derivation"]
-            item["training_load"] = load["value"]
-            item["load_method"] = METHOD_ID
-            item["load_method_version"] = load.get("method_version")
-            item["load_branch"] = derivation.get("branch")
-            if derivation.get("threshold_after_session"):
-                item["load_threshold_after_session"] = True
-            if (derivation.get("inputs") or {}).get("sex_assumed"):
-                item["load_assumption"] = SEX_ASSUMED_LABEL
+            item.update(_load_fields(load))
             sources["training_load"] = DERIVED_LABEL
-            if calibration := derivation.get("calibration"):
-                item["load_calibration"] = {
-                    "tss_per_au": calibration.get("tss_per_au"),
-                    "pairs": calibration.get("pairs"),
-                    "session_rpe_au": (derivation.get("inputs") or {}).get(
-                        "session_rpe_au"
-                    ),
-                }
         intensity = rows.get(MetricKind.INTENSITY_FACTOR.value)
         if intensity is not None:
             item["intensity"] = intensity["value"]

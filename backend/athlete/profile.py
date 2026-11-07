@@ -87,6 +87,15 @@ def _normalize_preferred_sources(result: dict[str, str], *, strict: bool) -> Non
         result[field_name] = ""
 
 
+def _normalize_sex(result: dict[str, str], *, strict: bool) -> None:
+    """Reject (strict) or clear an unknown sex."""
+    if result["sex"] in SEXES:
+        return
+    if strict:
+        raise AppError(400, "Unbekanntes Geschlecht; erlaubt: male, female oder leer.")
+    result["sex"] = ""
+
+
 def normalize_profile(
     value: dict[str, Any], *, validate_timezone: bool = False
 ) -> dict[str, str]:
@@ -107,12 +116,7 @@ def normalize_profile(
             )
         result["training_model"] = TRAINING_MODELS[0]
     _normalize_preferred_sources(result, strict=validate_timezone)
-    if result["sex"] not in SEXES:
-        if validate_timezone:
-            raise AppError(
-                400, "Unbekanntes Geschlecht; erlaubt: male, female oder leer."
-            )
-        result["sex"] = ""
+    _normalize_sex(result, strict=validate_timezone)
     if result["sleep_target_hours"]:
         try:
             target = float(result["sleep_target_hours"])
