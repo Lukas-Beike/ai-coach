@@ -94,7 +94,13 @@ def session_analysis(
         "aerobic": aerobic_analysis(
             activity,
             source_label=adapted.label_for(
-                "watts", "heartrate", "velocity_smooth", "moving"
+                "watts",
+                "heartrate",
+                "velocity_smooth",
+                "moving",
+                "grade_smooth",
+                "altitude",
+                "distance",
             ),
         ),
         "power_profile": {
