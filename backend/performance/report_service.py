@@ -759,10 +759,9 @@ def _curve_record(
     profile = None
     if curve is not None:
         profile = curve.power if fields["sport"] == "ride" else curve.running
-    return {
+    record = {
         **fields,
         "terrain": summary.get("terrain"),
-        "effort_context": "race" if summary_is_race(summary) else None,
         "activity_id": stored_activity_key(summary),
         "observed_at": summary.get("started_at"),
         # Best values are credited to the providers of the streams they read.
@@ -774,6 +773,9 @@ def _curve_record(
         "avg_temp_c": summary.get("avg_temp_c"),
         "fingerprint": None if curve is None else curve.fingerprint,
     }
+    if summary_is_race(summary):
+        record["effort_context"] = "race"
+    return record
 
 
 def _records_fingerprint(records: list[dict[str, Any]]) -> str:

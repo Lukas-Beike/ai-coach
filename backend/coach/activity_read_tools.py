@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 
+from backend.activities.session_purpose import summary_is_not_training
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
@@ -253,6 +254,12 @@ class CoachActivityReadToolService:
             checks["comparable_sessions"] = {
                 "status": "not_covered",
                 "reason": "E-Bike-Einheiten werden nicht verglichen (Motorunterstützung).",
+            }
+        elif summary_is_not_training(own):
+            # Curve records leave commutes, warm-ups and cool-downs out.
+            checks["comparable_sessions"] = {
+                "status": "not_covered",
+                "reason": "Pendeln, Einfahren und Ausfahren werden nicht verglichen.",
             }
         elif records is None:
             checks["comparable_sessions"] = {

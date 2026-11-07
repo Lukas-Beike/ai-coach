@@ -241,13 +241,10 @@ def match_planned_workouts(
 ) -> dict[int, dict[str, Any]]:
     """Match completed activities to planned workouts without reusing one activity.
 
-    A commute, warm-up or cool-down never completes a planned workout.
+    A commute, warm-up or cool-down completes a planned workout only through the
+    provider's own pairing, never by date or sport.
     """
-    activity_rows = [
-        item
-        for item in activities
-        if isinstance(item, dict) and not summary_is_not_training(item)
-    ]
+    activity_rows = [item for item in activities if isinstance(item, dict)]
     unused = set(range(len(activity_rows)))
     matches: dict[int, dict[str, Any]] = {}
     workout_rows = _planned_workout_rows(planned)
@@ -266,6 +263,9 @@ def match_planned_workouts(
         if selected_index is not None:
             matches[event_index] = activity_rows[selected_index]
             unused.remove(selected_index)
+    unused -= {
+        index for index in unused if summary_is_not_training(activity_rows[index])
+    }
 
     unmatched = [
         (index, event) for index, event in workout_rows if index not in matches

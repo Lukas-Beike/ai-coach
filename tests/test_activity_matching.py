@@ -52,6 +52,14 @@ class ActivityMatchingTests(unittest.TestCase):
             "purpose": "race",
         }
         self.assertEqual(match_planned_workouts(planned, [race]), {0: race})
+        paired = {
+            "id": "a-3",
+            "sport": "ride",
+            "started_at_local": "2026-09-20T08:00:00",
+            "purpose": "commute",
+            "planned_event_id": "event-1",
+        }
+        self.assertEqual(match_planned_workouts(planned, [paired]), {0: paired})
 
     def test_workout_rows_keep_original_indices_and_ignore_malformed_rows(self):
         planned = [
