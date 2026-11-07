@@ -123,7 +123,7 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
         self.assertEqual(method, "GET")
         self.assertTrue(url.endswith("/athlete/athlete%2F1/events/event-1"))
 
-    def test_list_window_keeps_planned_workouts_and_this_apps_notes(self):
+    def test_list_window_reads_every_category_unfiltered(self):
         own_note = {
             "id": "note-1",
             "category": "NOTE",
@@ -138,7 +138,7 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
 
         events = self.export.list_window(oldest="2026-09-20", newest="2026-09-26")
 
-        self.assertEqual(events, [{"id": "event-1", "category": "WORKOUT"}, own_note])
+        self.assertEqual(events, self.request.return_value)
         method, url = self.request.call_args.args[:2]
         self.assertEqual(method, "GET")
         self.assertIn("/athlete/athlete%2F1/events?", url)

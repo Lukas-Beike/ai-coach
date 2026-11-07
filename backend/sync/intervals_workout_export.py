@@ -55,19 +55,16 @@ class IntervalsWorkoutExport:
         return self._client_factory().get_event(remote_id)
 
     def list_window(self, *, oldest: str, newest: str) -> list[dict[str, Any]]:
-        # Planned workouts plus the strength notes this app sent; one unfiltered
-        # read, so no category-list syntax of the remote API is assumed.
-        events = self._client_factory().list_events_window(
+        # Unfiltered, because strength units are notes: the repair checks
+        # match events by identity and treat only planned ones (workouts and
+        # this app's notes) as namesakes, so races and other notes stay apart,
+        # and an identified event of another category is a conflict.
+        return self._client_factory().list_events_window(
             oldest=oldest,
             newest=newest,
             category=None,
             collection=PLANNED_WINDOW_COLLECTION,
         )
-        return [
-            event
-            for event in events
-            if isinstance(event, dict) and intervals_event_is_planned(event)
-        ]
 
     def verify_readback(self, workout: dict[str, Any], remote: dict[str, Any]) -> None:
         planning_workouts.validate_intervals_workout_result(workout, remote)
