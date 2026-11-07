@@ -68,7 +68,7 @@ class _Coverage:
     def coverage(self, db):
         return (
             ProviderCoverage(
-                provider=ProviderId.INTERVALS,
+                provider=ProviderId.GARMIN,
                 retrieved_at=self._fetched_at,
                 activity_count=0,
                 observation_count=0,
