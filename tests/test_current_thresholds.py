@@ -21,7 +21,10 @@ from backend.canonical.vocabulary import (
     Sport,
     ZoneConfigurationMetric,
 )
-from backend.performance.canonical_current import read_current_inputs
+from backend.performance.canonical_current import (
+    read_current_inputs,
+    read_export_thresholds,
+)
 from backend.performance.current_metrics import (
     coach_thresholds,
     current_performance_metrics,
@@ -390,6 +393,56 @@ class LocalThresholdTests(unittest.TestCase):
         )
         (ftp,) = garmin_threshold_observations(garmin)
         self.assertEqual((ftp.kind, ftp.value.value), (MetricKind.FTP, 280.0))
+
+
+class ExportThresholdTests(unittest.TestCase):
+    """The thresholds sent to Intervals.icu: local, then Garmin, then Wahoo (#1729)."""
+
+    def _export(self, observations, configurations=()):
+        return read_export_thresholds(
+            ZoneSource(observations, configurations), None, as_of=AS_OF
+        )
+
+    def _ride_ftp(self, observations, configurations=()):
+        winner = self._export(observations, configurations).get(
+            (MetricKind.FTP, Sport.RIDE)
+        )
+        return (
+            None if winner is None else (winner.provenance.provider, winner.value.value)
+        )
+
+    def test_local_then_garmin_then_wahoo_and_never_intervals(self) -> None:
+        intervals = _obs(MetricKind.FTP, 265.0, INTERVALS, Sport.RIDE)
+        garmin = _obs(MetricKind.FTP, 280.0, GARMIN, Sport.RIDE)
+        wahoo = _obs(MetricKind.FTP, 250.0, ProviderId.WAHOO, Sport.RIDE)
+        everything = (intervals, garmin, wahoo)
+        self.assertEqual(
+            self._ride_ftp(everything, [_local_power(300.0)]), (None, 300.0)
+        )
+        self.assertEqual(self._ride_ftp(everything), (GARMIN, 280.0))
+        self.assertEqual(self._ride_ftp((intervals, wahoo)), (ProviderId.WAHOO, 250.0))
+        self.assertIsNone(self._ride_ftp((intervals,)))
+
+    def test_given_configurations_count_for_a_reader_without_them(self) -> None:
+        # A pending canonical reader serves no zones; the tables' zones still count.
+        exported = read_export_thresholds(
+            StubReader(()), None, as_of=AS_OF, configurations=[_local_power(300.0)]
+        )
+        self.assertEqual(exported[(MetricKind.FTP, Sport.RIDE)].value.value, 300.0)
+
+    def test_heart_rate_and_pace_come_from_garmin_not_intervals(self) -> None:
+        exported = self._export(
+            (
+                _obs(MetricKind.THRESHOLD_HR, 165.0, INTERVALS, Sport.RUN),
+                _obs(MetricKind.THRESHOLD_HR, 160.0, INTERVALS, None),
+                _obs(MetricKind.THRESHOLD_HR, 172.0, GARMIN, Sport.RUN),
+            )
+        )
+        winner = exported[(MetricKind.THRESHOLD_HR, Sport.RUN)]
+        self.assertEqual(
+            (winner.provenance.provider, winner.value.value), (GARMIN, 172.0)
+        )
+        self.assertNotIn((MetricKind.THRESHOLD_HR, Sport.RIDE), exported)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,13 @@
-"""Per-field consent for the automatic Garmin to Intervals.icu metric export.
+"""Per-field consent for the automatic metric export to Intervals.icu.
 
 The athlete consents per exported field. Consent is stored as a JSON list of field
-keys under ``FIELDS_KEY``. The earlier single flag ``LEGACY_FLAG_KEY`` means "all
-fields, as before" until the athlete saves per-field consent; it is kept in step
+keys under ``FIELDS_KEY``; the key names keep their first source, Garmin (#1705).
+The earlier single flag ``LEGACY_FLAG_KEY`` means "the fields of that time"
+(``LEGACY_FIELDS``) until the athlete saves per-field consent; it is kept in step
 (true while any field is enabled) so an older build still honours a revocation.
-A new consent starts with ``DEFAULT_FIELDS``: every field except cycling FTP,
-which the athlete maintains at Intervals.icu (#1668).
+A new consent starts with ``DEFAULT_FIELDS``: the heart-rate and pace thresholds.
+Cycling FTP, which the athlete maintains at Intervals.icu (#1668), running FTP and
+the wellness fields, which only feed Intervals.icu's own pages (#1729), are opt-in.
 """
 
 from __future__ import annotations
@@ -14,12 +16,13 @@ import json
 from collections.abc import Callable, Iterable
 from typing import Any, Final
 
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.vocabulary import MetricKind, Sport
 
 FIELDS_KEY: Final = "garmin_metric_export_fields"
 LEGACY_FLAG_KEY: Final = "garmin_metric_export_enabled"
 
-# Field key (the metric kind) -> label, in display order.
+RUN_FTP_KEY: Final = "run_ftp"
+# Field key (the metric kind, see ``consent_key``) -> label, in display order.
 EXPORT_FIELDS: Final[dict[str, str]] = {
     MetricKind.WEIGHT.value: "Gewicht",
     MetricKind.BODY_FAT.value: "Körperfett",
@@ -28,12 +31,27 @@ EXPORT_FIELDS: Final[dict[str, str]] = {
     MetricKind.THRESHOLD_HR.value: "Schwellen-Herzfrequenz",
     MetricKind.MAX_HR.value: "Maximale Herzfrequenz",
     MetricKind.FTP.value: "Rad-FTP",
+    RUN_FTP_KEY: "Lauf-FTP",
 }
-DEFAULT_FIELDS: Final = frozenset(EXPORT_FIELDS) - {MetricKind.FTP.value}
+LEGACY_FIELDS: Final = frozenset(EXPORT_FIELDS) - {RUN_FTP_KEY}
+DEFAULT_FIELDS: Final = frozenset(
+    {
+        MetricKind.THRESHOLD_PACE.value,
+        MetricKind.THRESHOLD_HR.value,
+        MetricKind.MAX_HR.value,
+    }
+)
+
+
+def consent_key(kind: MetricKind, sport: Sport | None) -> str:
+    """Return the consent key of an exported metric; running FTP has its own."""
+    if kind is MetricKind.FTP and sport is Sport.RUN:
+        return RUN_FTP_KEY
+    return kind.value
 
 
 def enabled_fields(get: Callable[[str], str | None]) -> frozenset[str]:
-    """Return the consented field keys; the legacy flag alone means all fields.
+    """Return the consented field keys; the legacy flag alone means ``LEGACY_FIELDS``.
 
     A legacy flag other than "true" is no consent even with a stored field list,
     so a revocation by an older build holds after an upgrade. An unreadable list
@@ -43,7 +61,7 @@ def enabled_fields(get: Callable[[str], str | None]) -> frozenset[str]:
         return frozenset()
     raw = get(FIELDS_KEY)
     if raw is None:
-        return frozenset(EXPORT_FIELDS)
+        return LEGACY_FIELDS
     try:
         stored = json.loads(raw)
     except ValueError:

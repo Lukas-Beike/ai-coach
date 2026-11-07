@@ -28,9 +28,11 @@ _WELLNESS_FIELDS: Final = {
     MetricKind.BODY_FAT: "bodyFat",
     MetricKind.RESTING_HR: "restingHR",
 }
-# Sport-setting fields per sport; threshold_pace is a Run setting in m/s.
+# Sport-setting fields per sport; threshold_pace is a Run setting in m/s and the
+# Run ftp is running power.
 _SPORT_SETTING_FIELDS: Final = {
     (MetricKind.FTP, Sport.RIDE): "ftp",
+    (MetricKind.FTP, Sport.RUN): "ftp",
     (MetricKind.THRESHOLD_HR, Sport.RIDE): "lthr",
     (MetricKind.THRESHOLD_HR, Sport.RUN): "lthr",
     (MetricKind.MAX_HR, Sport.RIDE): "max_hr",

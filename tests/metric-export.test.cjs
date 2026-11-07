@@ -18,18 +18,17 @@ function loadFunctions(context, names) {
 
 test("the export card explains consent in both states", () => {
   const off = loadFunctions({}, ["metricExportView"]).metricExportView(false);
-  assert.match(off.text, /^Einmal aktivieren/);
-  assert.equal(off.button, "Garmin → Intervals.icu automatisch abgleichen");
+  assert.match(off.text, /lokalen Zonen, sonst Garmin, sonst Wahoo/);
+  assert.equal(off.button, "Werte automatisch an Intervals.icu senden");
 
   const on = loadFunctions({}, ["metricExportView"]).metricExportView(true);
-  assert.match(on.text, /automatisch an Intervals\.icu/);
-  assert.match(on.text, /Herzfrequenzzonen bleiben/);
-  assert.match(on.text, /geschützt/);
+  assert.match(on.text, /Körperwerte von Garmin/);
+  assert.match(on.text, /überschreiben Intervals\.icu/);
   assert.equal(on.button, "Automatischen Abgleich deaktivieren");
 });
 
 test("the last sync receipt is shown as text and empty when absent", () => {
-  const status = "Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.";
+  const status = "Intervals.icu: 2 Werte gesendet, 1 Konflikte, 0 fehlgeschlagen.";
   const view = loadFunctions({}, ["metricExportView"]);
   assert.equal(view.metricExportView(true, status).status, status);
   assert.equal(view.metricExportView(true).status, "");
@@ -42,7 +41,7 @@ test("declining consent never saves an automatic export setting", async () => {
   assert.equal(calls, 0);
 });
 
-test("confirmed automatic consent names Garmin and Intervals.icu and reloads state", async () => {
+test("confirmed automatic consent names Intervals.icu and reloads state", async () => {
   const calls = [];
   const toasts = [];
   let loads = 0;
@@ -58,7 +57,7 @@ test("confirmed automatic consent names Garmin and Intervals.icu and reloads sta
   assert.deepEqual(calls, [{ route: "/api/metric-export/automatic", body: { enabled: true, confirmed: true, source: "garmin", provider: "intervals" } }]);
   assert.equal(loads, 1);
   assert.equal(button.disabled, false);
-  assert.deepEqual(toasts, ["Garmin → Intervals.icu: Gewicht an"]);
+  assert.deepEqual(toasts, ["Intervals.icu-Abgleich: Gewicht an"]);
 });
 
 test("the field checkboxes show only while the export is enabled", () => {
@@ -73,8 +72,8 @@ test("the field checkboxes show only while the export is enabled", () => {
 
 test("the receipt names each changed field", () => {
   const { metricExportReceipt } = loadFunctions({}, ["metricExportReceipt"]);
-  assert.equal(metricExportReceipt({ changes: [{ label: "Rad-FTP", enabled: true }, { label: "Gewicht", enabled: false }] }), "Garmin → Intervals.icu: Rad-FTP an, Gewicht aus");
-  assert.equal(metricExportReceipt({ changes: [] }), "Garmin → Intervals.icu: keine Änderung");
+  assert.equal(metricExportReceipt({ changes: [{ label: "Rad-FTP", enabled: true }, { label: "Gewicht", enabled: false }] }), "Intervals.icu-Abgleich: Rad-FTP an, Gewicht aus");
+  assert.equal(metricExportReceipt({ changes: [] }), "Intervals.icu-Abgleich: keine Änderung");
 });
 
 function fieldContext(confirmed, calls, toasts) {
@@ -95,9 +94,9 @@ test("a confirmed field change sends the full field list and shows the receipt",
   const toasts = [];
   const input = { checked: true, disabled: false };
   await fieldContext(true, calls, toasts).changeMetricExportField({ key: "ftp", label: "Rad-FTP" }, input);
-  assert.match(calls[0].message, /Rad-FTP künftig automatisch von Garmin an Intervals\.icu senden/);
+  assert.match(calls[0].message, /Rad-FTP künftig automatisch an Intervals\.icu senden/);
   assert.deepEqual(calls[1].body, { enabled: true, field: "ftp", field_enabled: true, confirmed: true, source: "garmin", provider: "intervals" });
-  assert.deepEqual(toasts, [{ message: "Garmin → Intervals.icu: Rad-FTP an", error: false }]);
+  assert.deepEqual(toasts, [{ message: "Intervals.icu-Abgleich: Rad-FTP an", error: false }]);
   assert.equal(input.checked, true);
 });
 

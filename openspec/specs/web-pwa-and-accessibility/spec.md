@@ -171,7 +171,7 @@ The client SHALL show safe configured/connected/source/freshness states, accept 
 - **THEN** the card shows the appropriate form/connected state, clears submitted password/code values, and asks before disconnecting.
 
 #### Scenario: Wahoo or export consent
-- **WHEN** the athlete starts Wahoo connection or enables Garmin-to-Intervals metric export
+- **WHEN** the athlete starts Wahoo connection or enables the automatic metric export to Intervals.icu
 - **THEN** the UI follows only an HTTPS authorization URL or explicit consent action and renders the returned connection/export receipt without browser token exposure.
 
 Evidence: `public/provider-connections.js::saveProviderCredentials`, `public/provider-connections.js::renderGarminCard`, `public/provider-connections.js::toggleMetricExport`, `public/wahoo-connection.js::connectWahoo`, `public/sync-actions.js::fullResync`; `tests/provider-connections.test.cjs::saving sends only non-blank values and leaves no secret in the DOM`, `tests/provider-connections.test.cjs::re-rendering from polling never writes input values`, `tests/wahoo-connection.test.cjs::only https authorize URLs are followed`, `tests/metric-export.test.cjs::declining consent never saves an automatic export setting`. Provider durable authorization and conflict rules remain in their domain contracts.
