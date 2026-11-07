@@ -148,6 +148,7 @@ class PushStateTests(unittest.TestCase):
             [{"local_id": "s5", "payload": unmapped, "sync_state": "synced"}]
         )
         self.assertEqual({"intervals": False}, projected[0]["push_pending"])
+        self.assertEqual({"garmin": "unmapped"}, projected[0]["push_blocked"])
 
     def test_an_invalid_structure_offers_no_garmin_push(self) -> None:
         invalid = json.dumps({**STRENGTH, "strength_structure": [{"name": ""}]})
@@ -155,6 +156,25 @@ class PushStateTests(unittest.TestCase):
             [{"local_id": "s3", "payload": invalid, "sync_state": "synced"}]
         )
         self.assertEqual({"intervals": False}, projected[0]["push_pending"])
+        self.assertEqual({"garmin": "no_structure"}, projected[0]["push_blocked"])
+
+    def test_free_text_strength_says_why_garmin_is_blocked(self) -> None:
+        free_text = json.dumps(
+            {
+                "sport": "WeightTraining",
+                "date": "2026-11-09",
+                "description": "Face Pulls: 4 Sätze",
+            }
+        )
+        projected = self.project(
+            [
+                {"local_id": "s6", "payload": free_text, "sync_state": "local"},
+                {"local_id": "r1", "payload": json.dumps(RIDE), "sync_state": "local"},
+            ]
+        )
+        self.assertEqual({"intervals": True}, projected[0]["push_pending"])
+        self.assertEqual({"garmin": "no_structure"}, projected[0]["push_blocked"])
+        self.assertEqual({}, projected[1]["push_blocked"])
 
     def test_conflicts_and_strength_without_structure_offer_nothing_extra(self) -> None:
         bare = json.dumps({**STRENGTH, "strength_structure": None})

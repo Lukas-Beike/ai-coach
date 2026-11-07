@@ -379,6 +379,16 @@ class RemotePlannedUnitPayloadTests(unittest.TestCase):
         self.assertEqual(payload["duration_minutes"], 30)
         self.assertEqual(payload["remote_event_external_id"], "")
 
+    def test_only_a_strength_note_this_app_sent_is_imported(self):
+        note = {"id": "event-19", "category": "NOTE", "date": "2026-09-21"}
+        self.assertIsNone(remote_planned_unit_payload(note, today=TODAY))
+        payload, remote_id, _identity = remote_planned_unit_payload(
+            {**note, "external_id": "intervals-coach-local-19"}, today=TODAY
+        )
+        self.assertEqual(remote_id, "event-19")
+        # A note without a type stays strength instead of the Ride default.
+        self.assertEqual(payload["sport"], "strength")
+
     def test_remote_duration_has_five_minute_floor(self):
         payload, _, _ = remote_planned_unit_payload(
             {"id": "event-short", "date": "2026-09-21", "planned_duration_s": 30},

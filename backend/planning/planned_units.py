@@ -24,6 +24,8 @@ from backend.planning.sport import apply_sport_update
 from backend.providers.intervals_workouts import (
     DERIVED_WORKOUT_KEYS,
     INTERVALS_DEFAULT_WORKOUT_TYPE,
+    INTERVALS_STRENGTH_TYPE,
+    intervals_event_is_coach_note,
     intervals_fields_from_planning,
     intervals_record_type,
 )
@@ -367,7 +369,8 @@ def _remote_planned_unit_duration(event: dict[str, Any]) -> int:
 def remote_planned_unit_payload(
     event: dict[str, Any], *, today: date
 ) -> tuple[dict[str, Any], str, str] | None:
-    if str(event.get("category") or "WORKOUT").upper() != "WORKOUT":
+    coach_note = intervals_event_is_coach_note(event)
+    if str(event.get("category") or "WORKOUT").upper() != "WORKOUT" and not coach_note:
         return None
     remote_id = _remote_planned_unit_id(event)
     event_date = _remote_planned_unit_date(event, today=today)
@@ -377,7 +380,10 @@ def remote_planned_unit_payload(
     identity = remote_external_id or f"intervals-event-{remote_id}"
     planned_duration_s = event.get("planned_duration_s")
     sport_type = (
-        event.get("type") or event.get("sport") or INTERVALS_DEFAULT_WORKOUT_TYPE
+        event.get("type")
+        or event.get("sport")
+        # A strength note that lost its type stays strength.
+        or (INTERVALS_STRENGTH_TYPE if coach_note else INTERVALS_DEFAULT_WORKOUT_TYPE)
     )
     payload = {
         "date": event_date,

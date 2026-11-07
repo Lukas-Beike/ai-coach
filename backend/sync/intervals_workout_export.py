@@ -19,7 +19,6 @@ from backend.canonical.planned_workout import PlannedWorkoutExport
 from backend.planning import workouts as planning_workouts
 from backend.providers.intervals_client import IntervalsClient
 from backend.providers.intervals_workouts import (
-    INTERVALS_EVENT_CATEGORY,
     intervals_event_confirms_schedule,
     intervals_event_external_id,
     intervals_event_identity,
@@ -56,12 +55,19 @@ class IntervalsWorkoutExport:
         return self._client_factory().get_event(remote_id)
 
     def list_window(self, *, oldest: str, newest: str) -> list[dict[str, Any]]:
-        return self._client_factory().list_events_window(
+        # Planned workouts plus the strength notes this app sent; one unfiltered
+        # read, so no category-list syntax of the remote API is assumed.
+        events = self._client_factory().list_events_window(
             oldest=oldest,
             newest=newest,
-            category=INTERVALS_EVENT_CATEGORY,
+            category=None,
             collection=PLANNED_WINDOW_COLLECTION,
         )
+        return [
+            event
+            for event in events
+            if isinstance(event, dict) and intervals_event_is_planned(event)
+        ]
 
     def verify_readback(self, workout: dict[str, Any], remote: dict[str, Any]) -> None:
         planning_workouts.validate_intervals_workout_result(workout, remote)

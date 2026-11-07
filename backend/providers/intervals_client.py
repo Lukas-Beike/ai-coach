@@ -281,13 +281,14 @@ class IntervalsClient:
         return self.get(f"/athlete/{athlete}/events/{quote(event_id, safe='')}")
 
     def list_events_window(
-        self, *, oldest: str, newest: str, category: str, collection: str
+        self, *, oldest: str, newest: str, category: str | None, collection: str
     ) -> list[dict[str, Any]]:
         athlete = quote(self.config.intervals_athlete_id, safe="")
+        params = {"oldest": oldest, "newest": newest}
+        if category is not None:
+            params["category"] = category
         return self.get_paged_collection(
-            f"/athlete/{athlete}/events",
-            {"oldest": oldest, "newest": newest, "category": category},
-            collection,
+            f"/athlete/{athlete}/events", params, collection
         )
 
     def delete_event(self, event_id: str) -> Any:
