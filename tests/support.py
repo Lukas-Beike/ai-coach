@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import snapshot_seed
 from intervals_compaction import compact_snapshot
 
 from backend.coach import streams as coach_streams
@@ -197,7 +198,7 @@ def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -
         intervals_snapshot_coverage,
     )
 
-    server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot, **options)
+    snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), snapshot, **options)
     zone = ZoneInfo(timezone_name(server.ATHLETE_DATA.profile().get().get("timezone")))
     raw = dict(snapshot.get("raw_provider_data") or {})
     if not isinstance(raw.get("activities"), list):

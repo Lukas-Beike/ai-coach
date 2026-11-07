@@ -166,7 +166,6 @@ class DiagnosticReportService:
                         self._get_value(db, "last_sync_error") or ""
                     )
                     or None,
-                    "running": self._get_value(db, "sync_running") == "1",
                     "snapshot_counts": {
                         "activities": activity_count(deps.activity_rows, db),
                         "wellness": wellness_day_count(
@@ -178,15 +177,6 @@ class DiagnosticReportService:
                         if snapshot
                         else 0,
                     },
-                },
-                "performance_refresh": {
-                    "last_refresh": self._get_value(db, "last_performance_refresh_at"),
-                    "last_error": deps.redactor.redact_text(
-                        self._get_value(db, "last_performance_error") or ""
-                    )
-                    or None,
-                    "running": self._get_value(db, "performance_refresh_running")
-                    == "1",
                 },
                 ProviderId.GARMIN.value: garmin_status,
                 "provider_freshness": deps.provider_freshness.current(

@@ -8,7 +8,7 @@ from typing import Any
 
 from backend.sync.cursors import read_cursor, write_cursor
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.snapshots import latest_snapshot, save_snapshot
+from backend.sync.snapshots import latest_snapshot
 
 
 class SyncStateRepository:
@@ -105,30 +105,3 @@ class SyncStateRepository:
             return self._snapshot_repository.latest_metadata(db)
         with self._database_manager.reader() as connection:
             return self._snapshot_repository.latest_metadata(connection)
-
-    def save_snapshot(
-        self,
-        snapshot: dict[str, Any],
-        update_full_sync: bool | None = True,
-        activity_days: int | None = None,
-        activity_count: int | None = None,
-    ) -> None:
-        with self._database_manager.unit_of_work() as db:
-            save_snapshot(
-                db,
-                snapshot,
-                self._snapshot_repository,
-                update_full_sync=update_full_sync,
-                activity_days=activity_days,
-                activity_count=activity_count,
-                set_value=lambda key, value, connection: self._key_value_repository.set(
-                    connection, key, value
-                ),
-            )
-
-    def save_view(self, snapshot: dict[str, Any]) -> None:
-        """Persist a local snapshot view without changing sync status markers."""
-        with self._database_manager.unit_of_work() as db:
-            self._snapshot_repository.save(
-                db, snapshot, snapshot.get("synced_at") or self._now()
-            )

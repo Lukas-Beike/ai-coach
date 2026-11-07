@@ -70,10 +70,6 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.values = {
             "last_sync_at": "sync-time",
             "last_sync_error": "fake-api-key-secret",
-            "sync_running": "1",
-            "last_performance_refresh_at": "refresh-time",
-            "last_performance_error": "",
-            "performance_refresh_running": "0",
             "last_external_calendar_sync_at": "calendar-time",
             "last_external_calendar_sync_error": "",
         }
@@ -184,7 +180,6 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "openai",
                 "coach_commands",
                 "sync",
-                "performance_refresh",
                 "garmin",
                 "provider_freshness",
                 "external_calendar",
@@ -308,7 +303,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # the disconnect marker inside the same snapshot (see transactions above).
         # One more reads the local load state (card M6), one the rating backfill state.
         # The Intervals.icu purge reads its marker and the rating backfill state.
-        self.assertEqual(self.key_values.get.call_count, 16)
+        self.assertEqual(self.key_values.get.call_count, 12)
 
     def test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:

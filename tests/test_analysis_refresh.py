@@ -88,7 +88,7 @@ class AnalysisRefreshTests(unittest.TestCase):
         return service, garmin, wahoo
 
     def test_garmin_only_ignores_an_unconfigured_wahoo(self):
-        service, garmin, wahoo = self.make_both(wahoo_configured=False)
+        service, _garmin, wahoo = self.make_both(wahoo_configured=False)
 
         result = service.refresh("sessions")
 
@@ -98,7 +98,7 @@ class AnalysisRefreshTests(unittest.TestCase):
         self.assertEqual([], result["not_refreshed_sources"])
 
     def test_wahoo_only_is_ok_without_a_configured_garmin(self):
-        service, garmin, wahoo = self.make_both(garmin_configured=False)
+        service, _garmin, wahoo = self.make_both(garmin_configured=False)
 
         result = service.refresh("performance")
 
@@ -108,7 +108,7 @@ class AnalysisRefreshTests(unittest.TestCase):
         self.assertEqual([], result["not_refreshed_sources"])
 
     def test_both_sources_refresh_and_a_failed_wahoo_read_is_partial(self):
-        service, garmin, wahoo = self.make_both()
+        service, _garmin, wahoo = self.make_both()
 
         result = service.refresh("sessions")
 
@@ -124,7 +124,7 @@ class AnalysisRefreshTests(unittest.TestCase):
         self.assertEqual(["Wahoo-Aktivitätsübersicht"], result["not_refreshed_sources"])
 
     def test_areas_without_wahoo_data_skip_the_wahoo_read(self):
-        service, garmin, wahoo = self.make_both()
+        service, _garmin, wahoo = self.make_both()
 
         service.refresh("recovery")
 

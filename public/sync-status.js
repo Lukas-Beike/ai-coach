@@ -188,7 +188,6 @@ function handleSyncStatus(status, broadcast = false) {
   if (broadcast) broadcastSyncMessage({ type: "status", status });
   if (status.operation_id && status.running) {
     state.syncPoll.operationId = status.operation_id;
-    state.localSync.intervals = true;
   }
   renderSyncStatus(status);
   const changedAreas = changedSyncAreas(status.state_versions);
@@ -201,7 +200,6 @@ function handleSyncStatus(status, broadcast = false) {
     state.data.state_versions = { ...state.data.state_versions, ...settled };
   }
   if (!status.running && status.operation_id && status.operation_id === state.syncPoll.operationId) {
-    state.localSync.intervals = false;
     state.syncPoll.operationId = null;
   }
 }

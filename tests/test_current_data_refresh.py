@@ -134,7 +134,10 @@ class CurrentDataRefreshTests(unittest.TestCase):
                 wahoo_sync.running.return_value = False
                 wahoo_sync.sync.return_value = {"status": "ok"}
                 refresh = WahooSynchronousRefresh(
-                    wahoo_sync, -1, poll_seconds=0.001, stored_days=lambda s=stored: s
+                    wahoo_sync,
+                    -1,
+                    poll_seconds=0.001,
+                    stored_days=Mock(return_value=stored),
                 )
                 arguments = {} if requested is None else {"days": requested}
 

@@ -481,28 +481,16 @@ function intervalsConnectionState(data, configured) {
   };
 }
 
-function intervalsPaginationDetail(intervals) {
-  return Object.entries(intervals.pagination || {})
-    .filter(([, value]) => value && (Number(value.pages) > 1 || value.complete === false))
-    .map(([name, value]) => {
-      const completeness = value.complete === false ? " · unvollständig" : "";
-      return name + ": " + (value.records || 0) + " Datensätze auf " + (value.pages || 0) + " Seiten" + completeness;
-    })
-    .join(" · ");
-}
-
 function intervalsConnectionDetail(intervals) {
   const librarySync = intervals.library_sync || {};
   if (!intervals.configured) return "API-Schlüssel nicht konfiguriert";
-  if (intervals.state === "syncing") return intervals.status || "Intervals.icu wird synchronisiert.";
+  if (intervals.state === "syncing") return "Intervals.icu wird synchronisiert.";
   if (intervals.last_error) return intervals.last_error;
-  if (!(intervals.last_sync_at || librarySync.last_sync_at)) return "Noch keine Synchronisierung durchgeführt";
-  const updated = formatTime(intervals.last_sync_at || librarySync.last_sync_at);
+  if (!librarySync.last_sync_at) return "Noch keine Synchronisierung durchgeführt";
+  const updated = formatTime(librarySync.last_sync_at);
   const libraryCount = Number(librarySync.state?.synced || 0);
   const counts = libraryCount ? " · " + libraryCount + " Bibliothekseinheiten" : "";
-  const pagination = intervalsPaginationDetail(intervals);
-  const paginationSuffix = pagination ? " · " + pagination : "";
-  return "Letzte Aktualisierung: " + updated + counts + paginationSuffix;
+  return "Letzte Aktualisierung: " + updated + counts;
 }
 
 function renderIntervalsConnection(data, configured) {

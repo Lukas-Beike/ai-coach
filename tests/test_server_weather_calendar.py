@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import remote_reconcilers
+import snapshot_seed
 from garmin_support import save_garmin
 from server_test_support import ServerTestCase, server
 from support import (
@@ -1103,7 +1104,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         tomorrow = (
             _local_datetime.now().astimezone().date() + timedelta(days=1)
         ).isoformat()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "synced_at": "now",
                 "athlete": {},

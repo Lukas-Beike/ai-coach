@@ -13,7 +13,7 @@ from canonical_detail_support import (
     open_manager,
     seed_intervals_activity,
 )
-from intervals_detail_refresh import ActivityDetailRefreshService
+from intervals_detail_refresh import ActivityDetailRefreshService, save_prefetch_floor
 
 from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.vocabulary import LapKind
@@ -224,7 +224,7 @@ class RetiredRecordTests(RetirementTestCase):
     def test_proven_record_is_deleted_and_other_keys_are_kept(self):
         record = self.load("9201")
         self.store.save_failure("9299", "0" * 64, "Synthetic note", NOW)
-        self.store.save_prefetch_floor("2026-10-01T00:00:00", NOW)
+        save_prefetch_floor(self.store, "2026-10-01T00:00:00", NOW)
         canonical = canonical_snapshot(self.manager)
         kept = [
             row

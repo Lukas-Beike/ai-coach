@@ -276,7 +276,6 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         resync_keys=(),
         # Accepted job types; backend/sync/jobs.py checks them via supports_job.
         job_types=_ALL_INTERVALS_JOB_TYPES,
-        refresh_fields=frozenset({"reason"}),
         not_configured_message=_INTERVALS_NOT_CONFIGURED_MESSAGE,
         # Body metrics go to the wellness day, thresholds to the Ride or Run sport
         # settings; backend/sync/intervals_metric_export.py maps the fields.

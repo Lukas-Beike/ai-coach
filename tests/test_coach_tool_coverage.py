@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import snapshot_seed
 from canonical_detail_support import seed_intervals_activity
 from support import mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
@@ -248,7 +249,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "moving_time": 1800,
             "distance": 5000,
         }
-        server.SYNC_PERSISTENCE.state_repository().save_view(
+        snapshot_seed.save_view(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "recent_activities": [activity],
                 "recent_wellness": [],
@@ -1725,7 +1726,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 }
             ]
         )[0]
-        server.SYNC_PERSISTENCE.state_repository().save_view(
+        snapshot_seed.save_view(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "recent_activities": [
                     {

@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
+import snapshot_seed
 from canonical_recovery_support import recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
 from support import store_canonical_snapshot
@@ -94,7 +95,7 @@ class ProviderReviewTests(unittest.TestCase):
                 entered.set()
                 release.wait(5)
                 with runtime_maintenance.MAINTENANCE_GATE.operation():
-                    server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+                    snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
                         {
                             "synced_at": "synthetic",
                             "recent_activities": [{"id": "private"}],
@@ -262,7 +263,7 @@ class ProviderReviewTests(unittest.TestCase):
             }
             payloads.prepare_remote(second)
             save_garmin(second, replace=False)
-            server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+            snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
                 {
                     "synced_at": second["synced_at"],
                     "athlete": {},
