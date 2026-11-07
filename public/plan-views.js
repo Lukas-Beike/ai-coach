@@ -168,7 +168,11 @@ function calendarWeekDistance(activities) {
   const total = measured.length
     ? AppFormat.distance(measured.reduce((sum, entry) => sum + Number(entry.distance_m), 0))
     : "–";
-  return { value: total, note: missing ? `${missing} ${missing === 1 ? "Aktivität" : "Aktivitäten"} ohne Distanz` : null };
+  return { value: total, note: missing ? `${countLabel(missing, "Aktivität", "Aktivitäten")} ohne Distanz` : null };
+}
+
+function countLabel(count, one, many) {
+  return `${count} ${count === 1 ? one : many}`;
 }
 
 // Load sums only the sessions that carry a value and names the rest; no value at all hides the cell.
@@ -178,7 +182,7 @@ function calendarWeekLoad(items) {
   const missing = items.length - known.length;
   return {
     value: calendarMetricNumber(known.reduce((sum, item) => sum + Math.max(0, Number(item.training_load)), 0)),
-    note: missing ? `${missing} ${missing === 1 ? "Einheit" : "Einheiten"} ohne Belastung` : null,
+    note: missing ? `${countLabel(missing, "Einheit", "Einheiten")} ohne Belastung` : null,
   };
 }
 
@@ -531,6 +535,73 @@ function focusSelect(label, name, options, selected) {
   return { field, select };
 }
 
+function plannedSessionMetrics(entry, actual) {
+  const displayed = actual || entry;
+  const metrics = document.createElement("span");
+  metrics.className = "planned-session-metrics";
+  metrics.textContent = [
+    actual ? calendarMetricNumber(actual.avg_hr, " bpm") : null,
+    actual ? calendarMetricNumber(actual.avg_power, " W") : null,
+    calendarMetricNumber(displayed.training_load) != null ? `Belastung ${calendarMetricNumber(displayed.training_load)}` : null,
+  ].filter(Boolean).join(" · ");
+  return metrics.textContent ? metrics : null;
+}
+
+// Extra activities that look the same (title, sport, duration, distance, no profile) collapse into one row.
+function plannedEntryGroups(dayEntries) {
+  const groups = [];
+  for (const entry of dayEntries) {
+    const key = entry.is_completed_activity && !entry.workout_profile
+      ? JSON.stringify([entry.name || "", entry.type || entry.sport || "", entry.environment || "", entry.moving_duration_s ?? entry.elapsed_duration_s ?? null, Number(entry.distance_m) > 0 ? Number(entry.distance_m) : null])
+      : null;
+    const previous = groups.at(-1);
+    if (key && previous?.key === key) previous.entries.push(entry);
+    else groups.push({ key, entries: [entry] });
+  }
+  return groups;
+}
+
+function plannedDayOverview(dayEntries) {
+  const actual = dayEntries.map(calendarActualActivity).filter(Boolean);
+  const seconds = actual.reduce((total, item) => total + Math.max(0, Number(item.moving_duration_s ?? item.elapsed_duration_s) || 0), 0);
+  const overview = document.createElement("span");
+  overview.className = "planned-day-overview";
+  overview.textContent = [
+    `${dayEntries.length} ${dayEntries.length === 1 ? "Einheit" : "Einheiten"}`,
+    seconds > 0 ? calendarHours(seconds) : null,
+  ].filter(Boolean).join(" · ");
+  return overview;
+}
+
+function appendWeekMetricCell(grid, cell) {
+  const value = document.createElement("strong");
+  value.textContent = cell?.value ?? "–";
+  if (cell?.note) {
+    const note = document.createElement("small");
+    note.textContent = cell.note;
+    value.append(note);
+  }
+  grid.append(value);
+}
+
+function plannedZoneLegend(days) {
+  const zones = [...new Set([...days.querySelectorAll(".calendar-workout-profile [data-zone]")].map((node) => node.dataset.zone))]
+    .filter((zone) => zone !== "unknown")
+    .sort((left, right) => Number(left) - Number(right));
+  if (!zones.length) return null;
+  const legend = document.createElement("p");
+  legend.className = "planned-zone-legend";
+  for (const zone of zones) {
+    const item = document.createElement("span");
+    const swatch = document.createElement("i");
+    swatch.dataset.zone = zone;
+    swatch.setAttribute("aria-hidden", "true");
+    item.append(swatch, document.createTextNode(`Z${zone}`));
+    legend.append(item);
+  }
+  return legend;
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
@@ -785,18 +856,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return header;
   }
 
-  function plannedSessionMetrics(entry, actual) {
-    const displayed = actual || entry;
-    const metrics = document.createElement("span");
-    metrics.className = "planned-session-metrics";
-    metrics.textContent = [
-      actual ? calendarMetricNumber(actual.avg_hr, " bpm") : null,
-      actual ? calendarMetricNumber(actual.avg_power, " W") : null,
-      calendarMetricNumber(displayed.training_load) != null ? `Belastung ${calendarMetricNumber(displayed.training_load)}` : null,
-    ].filter(Boolean).join(" · ");
-    return metrics.textContent ? metrics : null;
-  }
-
   function calendarWorkoutProfile(profile) {
     const segments = profile?.segments;
     if (!Array.isArray(segments) || !segments.length || segments.length > 1000) return null;
@@ -1036,20 +1095,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return heading;
   }
 
-  // Extra activities that look the same (title, sport, duration, distance, no profile) collapse into one row.
-  function plannedEntryGroups(dayEntries) {
-    const groups = [];
-    for (const entry of dayEntries) {
-      const key = entry.is_completed_activity && !entry.workout_profile
-        ? JSON.stringify([entry.name || "", entry.type || entry.sport || "", entry.environment || "", entry.moving_duration_s ?? entry.elapsed_duration_s ?? null, Number(entry.distance_m) > 0 ? Number(entry.distance_m) : null])
-        : null;
-      const previous = groups.at(-1);
-      if (key && previous?.key === key) previous.entries.push(entry);
-      else groups.push({ key, entries: [entry] });
-    }
-    return groups;
-  }
-
   function renderPlannedGroup(entries, dateKey, todayKey, dayContext, weekHasPlan) {
     const group = document.createElement("details");
     group.className = "planned-group";
@@ -1062,18 +1107,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     items.append(...entries.map((entry) => renderPlannedEntry(entry, dateKey, todayKey, dayContext, weekHasPlan)));
     group.append(summary, items);
     return group;
-  }
-
-  function plannedDayOverview(dayEntries) {
-    const actual = dayEntries.map(calendarActualActivity).filter(Boolean);
-    const seconds = actual.reduce((total, item) => total + Math.max(0, Number(item.moving_duration_s ?? item.elapsed_duration_s) || 0), 0);
-    const overview = document.createElement("span");
-    overview.className = "planned-day-overview";
-    overview.textContent = [
-      `${dayEntries.length} ${dayEntries.length === 1 ? "Einheit" : "Einheiten"}`,
-      seconds > 0 ? calendarHours(seconds) : null,
-    ].filter(Boolean).join(" · ");
-    return overview;
   }
 
   function renderPlannedDay(view, dateKey, weekHasPlan) {
@@ -1117,17 +1150,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return day;
   }
 
-  function appendWeekMetricCell(grid, cell) {
-    const value = document.createElement("strong");
-    value.textContent = cell?.value ?? "–";
-    if (cell?.note) {
-      const note = document.createElement("small");
-      note.textContent = cell.note;
-      value.append(note);
-    }
-    grid.append(value);
-  }
-
   // Fixed grid with one column each for planned and completed values; a row appears only when it has a value.
   function plannedWeekMetrics(planned, actual) {
     const columns = [planned.length ? "planned" : null, actual.length ? "actual" : null].filter(Boolean);
@@ -1158,24 +1180,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       for (const column of columns) appendWeekMetricCell(totals, cells[column]);
     }
     return totals.childElementCount > columns.length + 1 ? totals : null;
-  }
-
-  function plannedZoneLegend(days) {
-    const zones = [...new Set([...days.querySelectorAll(".calendar-workout-profile [data-zone]")].map((node) => node.dataset.zone))]
-      .filter((zone) => zone !== "unknown")
-      .sort((left, right) => Number(left) - Number(right));
-    if (!zones.length) return null;
-    const legend = document.createElement("p");
-    legend.className = "planned-zone-legend";
-    for (const zone of zones) {
-      const item = document.createElement("span");
-      const swatch = document.createElement("i");
-      swatch.dataset.zone = zone;
-      swatch.setAttribute("aria-hidden", "true");
-      item.append(swatch, document.createTextNode(`Z${zone}`));
-      legend.append(item);
-    }
-    return legend;
   }
 
   function renderPlannedWeek(view, weekIndex) {
