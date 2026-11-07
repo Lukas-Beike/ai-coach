@@ -57,7 +57,7 @@ class _Snapshots:
 
 class _Feedback:
     def __init__(self):
-        self.rows = [{"activity_id": "new", "notes": "good"}]
+        self.rows = [{"activity_id": "act_new", "notes": "good"}]
 
     def list(self, _limit=100):
         return self.rows
@@ -329,7 +329,7 @@ class ActivityReadServiceTests(unittest.TestCase):
         self.assertIsNone(service.page(today=date(2026, 9, 20))["snapshot_synced_at"])
         self.assertIsNone(service.recent(today=date(2026, 9, 20))["snapshot_synced_at"])
 
-    def test_detail_finds_the_summary_row_without_snapshot_activities(self):
+    def test_detail_reads_no_provider_summary_row_without_snapshot_activities(self):
         snapshot = {"synced_at": "2026-09-20T08:00:00+00:00", "athlete": {}}
         rows = _DatedRows(
             [

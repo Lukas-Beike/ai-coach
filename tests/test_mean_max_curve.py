@@ -408,7 +408,7 @@ class ProfileSelectionTests(unittest.TestCase):
         )
         self.assertEqual("Intervals.icu original watts stream", best["source"])
         self.assertEqual(
-            (350.0, "i-act_1", 300.0),
+            (350.0, "act_1", 300.0),
             (best["watts"], best["activity_id"], best["start_seconds"]),
         )
         self.assertEqual(
@@ -447,7 +447,7 @@ class ProfileSelectionTests(unittest.TestCase):
         result = self.service(summaries).power_profiles()
 
         self.assertEqual(
-            ["i-act_1"], [row["activity_id"] for row in result["activities"]]
+            ["act_1"], [row["activity_id"] for row in result["activities"]]
         )
         bests = {
             point["watts"]
@@ -489,7 +489,7 @@ class ProfileSelectionTests(unittest.TestCase):
         records = self.service(summaries).curve_records()
 
         self.assertEqual(
-            [("i-act_1", "race")],
+            [("act_1", "race")],
             [(row["activity_id"], row["effort_context"]) for row in records],
         )
 

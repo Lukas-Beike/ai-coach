@@ -108,7 +108,7 @@ class ActivityDetailRefreshService:
 
     def refresh(self, activity_id: str) -> dict[str, Any]:
         activity_id = normalize_activity_id(
-            self._references.resolve_reference(
+            self._references.provider_reference(
                 normalize_activity_id(activity_id)
             ).activity_id
         )

@@ -321,9 +321,11 @@ class DiagnosticFollowupTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(server.ATHLETE_DATA.activity_feedback().list()), 1)
-        self.assertEqual(
-            server.ATHLETE_DATA.activity_feedback().list()[0]["activity_id"],
-            "synthetic-ride",
+        # The Coach names the provider id; the feedback is stored under the session.
+        self.assertTrue(
+            server.ATHLETE_DATA.activity_feedback()
+            .list()[0]["activity_id"]
+            .startswith("act_")
         )
 
     def test_duplicate_inspection_returns_facts_without_proposal_or_remote_deletion(

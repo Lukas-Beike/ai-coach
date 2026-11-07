@@ -562,8 +562,13 @@ class AliasResolutionTests(LinkingCase):
         wahoo_alias = self._sessions()[WAHOO_ID]["activity_id"]
         garmin_alias = self._sessions()[GARMIN_ID]["activity_id"]
         reference = self._references().resolve_reference(wahoo_alias)
+        # Athlete data is stored under the session it was written for.
         self.assertEqual(
-            (reference.activity_id, reference.provider),
+            (reference.activity_id, reference.provider), (wahoo_alias, None)
+        )
+        provider = self._references().provider_reference(wahoo_alias)
+        self.assertEqual(
+            (provider.activity_id, provider.provider),
             (INTERVALS_ID, ProviderId.INTERVALS.value),
         )
         self.assertEqual(self._references().resolve(garmin_alias), INTERVALS_ID)

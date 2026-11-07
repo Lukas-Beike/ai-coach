@@ -51,8 +51,12 @@ Wahoo-provider records (direct Wahoo ingest) join the same bundling:
   tolerances apply).
 * a Garmin-provider cycling ride that matched no Intervals.icu record duplicates a
   Wahoo-provider cycling ride under the Wahoo/Garmin-copy rule above. A Wahoo
-  record that is itself a duplicate passes its own primary on to the Garmin record,
-  so Intervals.icu stays primary over Wahoo and Wahoo over Garmin.
+  record that is itself a duplicate passes its own anchor on to the Garmin record.
+
+Intervals.icu is output only and ranks last: the primary of each session is its
+Wahoo-provider record, else its Garmin-provider record, else the Intervals.icu
+record (a Wahoo-recorded copy before a Garmin-recorded one). The pairing passes
+above only decide which records belong together.
 
 Each duplicate carries the kind of link that joined it to its session.
 
@@ -73,6 +77,7 @@ from typing import Final
 from backend.canonical.records import ActivityRecord
 from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import (
+    PROVIDER_PRECEDENCE,
     ActivityLinkKind,
     ProviderId,
     RecordingOrigin,
@@ -502,16 +507,50 @@ def _sessions(
     for index in range(len(entries)):
         if index in duplicate_of:
             members[duplicate_of[index]].append(index)
-    return tuple(
-        ActivitySession(
-            entries[primary].record,
-            tuple(entries[index].record for index in duplicates),
-            tuple(
-                ActivityLinkKind.EXACT if index in exact else ActivityLinkKind.HEURISTIC
-                for index in duplicates
-            ),
+    sessions = []
+    for anchor, duplicates in members.items():
+        lead = min((anchor, *duplicates), key=lambda index: _lead_key(entries, index))
+        # The record that joined the lead to the group sets the old anchor's kind.
+        lead_kind = (
+            ActivityLinkKind.EXACT if lead in exact else ActivityLinkKind.HEURISTIC
         )
-        for primary, duplicates in members.items()
+        others = [index for index in sorted((anchor, *duplicates)) if index != lead]
+        sessions.append(
+            ActivitySession(
+                entries[lead].record,
+                tuple(entries[index].record for index in others),
+                tuple(
+                    lead_kind
+                    if index == anchor and lead != anchor
+                    else (
+                        ActivityLinkKind.EXACT
+                        if index in exact
+                        else ActivityLinkKind.HEURISTIC
+                    )
+                    for index in others
+                ),
+            )
+        )
+    return tuple(sessions)
+
+
+_LEAD_PROVIDER_RANK: Final = {
+    provider: rank for rank, provider in enumerate(PROVIDER_PRECEDENCE)
+}
+
+
+def _lead_key(entries: tuple[_Entry, ...], index: int) -> tuple[int, int, int]:
+    """Order a session's records for its primary: Wahoo, Garmin, Intervals.icu last.
+
+    Among one provider's copies the recording origin decides (Wahoo before
+    Garmin); the input order breaks the rest.
+    """
+    provenance = entries[index].record.provenance
+    provider = provenance.provider
+    return (
+        len(_LEAD_PROVIDER_RANK) if provider is None else _LEAD_PROVIDER_RANK[provider],
+        0 if provenance.recorded_by is RecordingOrigin.WAHOO else 1,
+        index,
     )
 
 

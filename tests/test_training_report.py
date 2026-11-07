@@ -326,13 +326,13 @@ class TrainingReportTests(unittest.TestCase):
             ],
             activity_feedback=[
                 {
-                    "activity_id": "i-one",
+                    "activity_id": "act_1",
                     "notes": "Easy",
                     "session_rpe": 0,
                     "deviation_reason": "shortened",
                 },
-                {"activity_id": "act_1", "notes": "Not the stored key"},
                 {"activity_id": "act_2", "notes": "Session id key"},
+                {"activity_id": "i-one", "notes": "Not the stored key"},
                 {"activity_id": "outside", "notes": "Excluded"},
             ],
         )
@@ -485,7 +485,7 @@ class TrainingReportTests(unittest.TestCase):
             read_synced_at=lambda _db: None,
             read_plan=dict,
             read_checkins=list,
-            read_feedback=list,
+            read_feedback=lambda keys: [],
             today=lambda: date(2026, 10, 2),
             load_scenarios=load_scenarios,
             season_source=_empty_season_source(),
@@ -526,7 +526,7 @@ class TrainingReportTests(unittest.TestCase):
             read_synced_at=lambda _db: None,
             read_plan=dict,
             read_checkins=list,
-            read_feedback=list,
+            read_feedback=lambda keys: [],
             today=lambda: date(2026, 10, 2),
             load_scenarios=load_scenarios,
             season_source=_empty_season_source(),
@@ -597,7 +597,7 @@ class TrainingReportTests(unittest.TestCase):
             records = service.observations()
 
         # Garmin-only sessions take part; a gone session is skipped.
-        self.assertEqual(["i-1", "act_3"], [row["activity_id"] for row in records])
+        self.assertEqual(["act_1", "act_3"], [row["activity_id"] for row in records])
         record = records[0]
         self.assertEqual("Wahoo", record["source"])
         self.assertNotIn("session_id", record)

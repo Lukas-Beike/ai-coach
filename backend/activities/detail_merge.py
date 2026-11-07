@@ -25,9 +25,9 @@ from backend.canonical.activity_detail import (
     ZoneDistribution,
 )
 from backend.canonical.vocabulary import (
+    PROVIDER_PRECEDENCE,
     DeviceType,
     LapSource,
-    ProviderId,
     StreamChannel,
     StreamResolution,
     ZoneBoundarySource,
@@ -39,10 +39,7 @@ MIN_ALIGNMENT_OVERLAP: Final = 0.8
 ALIGNMENT_TOLERANCE_INTERVALS: Final = 2.0
 
 _PROVIDER_RANK: Final[Mapping[str, int]] = {
-    provider.value: rank
-    for rank, provider in enumerate(
-        (ProviderId.INTERVALS, ProviderId.GARMIN, ProviderId.WAHOO)
-    )
+    provider.value: rank for rank, provider in enumerate(PROVIDER_PRECEDENCE)
 }
 _UNKNOWN_PROVIDER_RANK: Final = len(_PROVIDER_RANK)
 _RESOLUTION_RANK: Final[Mapping[StreamResolution, int]] = {
@@ -50,8 +47,8 @@ _RESOLUTION_RANK: Final[Mapping[StreamResolution, int]] = {
     StreamResolution.DOWNSAMPLED: 1,
 }
 _LAP_SOURCE_RANK: Final[Mapping[LapSource, int]] = {
-    LapSource.PROVIDER_INTERVALS: 0,
-    LapSource.DEVICE_LAPS: 1,
+    LapSource.DEVICE_LAPS: 0,
+    LapSource.PROVIDER_INTERVALS: 1,
     LapSource.SPLITS: 2,
 }
 # Lower rank is better; channels missing here have no device ranking.

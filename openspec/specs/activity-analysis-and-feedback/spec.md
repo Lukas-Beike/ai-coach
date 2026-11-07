@@ -45,7 +45,7 @@ Detailed contract: Derived metrics SHALL identify source and load model. Every `
 Evidence: `backend/activities/detail_contract.py:activity_detail_contract`, `backend/performance/canonical_detail.py:CanonicalDetailReader`; `tests/test_activity_detail_contract.py:test_document_has_the_contract_sections`, `tests/test_activity_detail_contract.py:test_recorders_own_copy_provides_the_measured_value_and_others_are_alternatives`, `tests/test_activity_detail_contract.py:test_status_adds_stale_load_error_and_coverage_per_provider`. Served contract: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `backend/http_api/activity_assembly.py`; `tests/test_activity_detail_parity.py:test_old_projection_values_appear_in_the_v1_fields`, `tests/test_activity_detail_parity.py:test_data_scope_names_the_provider_and_the_recorder`, `tests/test_detail_envelope.py:test_envelope_is_filled_for_intervals_garmin_and_wahoo_sessions`, `tests/test_http_sync_get_routes.py:test_garmin_only_session_is_served`, `tests/test_http_sync_get_routes.py:test_unknown_session_is_not_found`, and `e2e/activity-details.spec.js` on all five Playwright projects.
 
 ### Requirement: Sample provenance and clock-aware detail merging
-The system SHALL merge alternative detail sets deterministically without mutating them, prefer full-resolution streams over downsampled streams, choose channels by eligible device/source quality, and place them on a common clock only when alignment is supported. Laps SHALL prefer provider intervals before device laps and splits; zones SHALL retain sensor and boundary-source identity. Presentation downsampling SHALL retain aligned equal-length channels and identify that sampling occurred.
+The system SHALL merge alternative detail sets deterministically without mutating them, prefer full-resolution over downsampled streams, choose channels by device and source quality, and align them to a common clock only when supported. Provider ties follow Wahoo, Garmin, Intervals.icu; laps prefer device laps, then provider intervals, then splits; zones keep sensor and boundary-source identity. Downsampling keeps aligned equal-length channels and is flagged.
 
 #### Scenario: Complementary sensors
 - **WHEN** a chest-strap heart-rate stream and a power-meter power stream can align to the selected axis
@@ -213,7 +213,7 @@ The power profile SHALL carry `critical-power-speed` version 1 (card M4) as an e
 Evidence: `backend/performance/critical_power.py:critical_power_speed`; `tests/test_critical_power.py`, `tests/test_performance_coach_ui_parity.py:test_mean_max_curve_is_the_analysis_route_payload`, `e2e/performance-values.spec.js`.
 
 ### Requirement: Durable athlete feedback separate from provider values
-The system SHALL normalize and persist local notes, session RPE from 0 through 10, and deviation reason against the resolved activity reference. Omitted fields SHALL preserve existing values; explicit clearing of all meaningful fields SHALL delete the local feedback. Coach saves SHALL require a currently known local activity and nonempty feedback.
+The system SHALL normalize and persist local notes, session RPE from 0 through 10, and deviation reason under the local session the activity reference names. Omitted fields SHALL preserve existing values; explicit clearing of all meaningful fields SHALL delete the local feedback. Coach saves SHALL require a currently known local activity and nonempty feedback.
 
 #### Scenario: RPE-only correction
 - **WHEN** the athlete submits only a valid RPE, including zero
@@ -257,11 +257,19 @@ Detailed contract: Detail loading SHALL happen only through the explicit authent
 Evidence: `backend/http_api/analysis.py:AnalysisRoutes`, `backend/http_api/sync_get.py:SyncGetRoutes`, `backend/http_api/feedback_post.py:FeedbackPostRoutes`, `backend/sync/analysis_refresh.py:AnalysisRefreshService.refresh`; `tests/test_training_report.py:test_get_authentication_precedes_analysis_reads`, `tests/test_training_report.py:test_analysis_refresh_rejects_unknown_area`, `tests/test_analysis_refresh.py:test_failed_provider_does_not_discard_other_fresh_results`. `tests/test_http_sync_get_routes.py:test_authentication_precedes_every_detail_read`, `tests/test_detail_envelope.py:test_refresh_is_offered_for_configured_detail_providers_only`, and `e2e/activity-details.spec.js` ("Garmin-only session shows per-provider notes and its own refresh").
 
 ### Requirement: Session-owned effective feedback
-Feedback SHALL resolve to canonical session identity across provider imports. Each session SHALL expose one effective feedback and one effective sRPE contribution. Legacy conflicting feedback SHALL remain recoverable with deterministic selection; heuristic similarity alone SHALL not combine athlete feedback.
+Feedback and equipment assignments SHALL be stored under the local session they were written for, stay with it when a bundle is split, and be read through the live session across provider imports. Each session SHALL expose one effective feedback and one effective sRPE contribution. Rows stored under a provider record id of the session SHALL still be found; the session-id row wins, conflicting legacy feedback stays recoverable, and heuristic similarity alone SHALL not combine athlete feedback.
 
 #### Scenario: Same session through two providers
 - **WHEN** two provider activities are confirmed copies of one session and feedback is saved through either supported reference
 - **THEN** reads expose the same effective feedback and session-RPE is counted once.
+
+#### Scenario: Feedback stored under a provider record id
+- **WHEN** feedback or an equipment assignment was stored under an Intervals.icu record id of a session
+- **THEN** every reader (detail, load rollups, block review, training report, equipment usage) finds it for the session, and a row under the session id wins over it.
+
+#### Scenario: Legacy row without a session
+- **WHEN** a feedback row has no stored session and its id names exactly one record (of its provider, when set)
+- **THEN** it joins that session's group for reads, edits and clearing; an id that names records of several sessions stays standalone, and an edit moves the effective row to the session id instead of adding one.
 
 #### Scenario: Existing conflicting feedback
 - **WHEN** an upgrade or confirmed merge encounters different feedback on two provider copies

@@ -239,7 +239,7 @@ class SurvivorDeletedAliasTests(DuplicateCase):
         reference = ActivityReferences(self.manager).resolve_reference(
             self.wahoo_session
         )
-        self.assertEqual(reference.activity_id, WAHOO_ID)
+        self.assertEqual(reference.activity_id, self.wahoo_session)
 
     def test_the_wahoo_ride_detail_reference_is_its_own_session(self) -> None:
         # read_reference must not follow the alias to the deleted survivor.

@@ -242,7 +242,7 @@ class PrimaryStreamChoiceTests(unittest.TestCase):
             )
             merged = merge_details([wahoo, intervals])
             assert merged.streams is not None
-            self.assertIs(merged.streams.primary, intervals)
+            self.assertIs(merged.streams.primary, wahoo)
         with self.subTest("newest fetch wins within one provider"):
             older = candidate(
                 streams(
@@ -340,8 +340,8 @@ class PerChannelChoiceTests(unittest.TestCase):
         time = (0.0, 1.0, 2.0)
         wahoo = candidate(
             streams(
-                ProviderId.WAHOO,
-                RecordingOrigin.WAHOO,
+                ProviderId.GARMIN,
+                RecordingOrigin.GARMIN,
                 {POWER: (250.0, 260.0, 270.0), HR: (130.0, 131.0, 132.0)},
                 time=time,
             ),
@@ -349,8 +349,8 @@ class PerChannelChoiceTests(unittest.TestCase):
         )
         garmin = candidate(
             streams(
-                ProviderId.GARMIN,
-                RecordingOrigin.GARMIN,
+                ProviderId.WAHOO,
+                RecordingOrigin.WAHOO,
                 {POWER: (200.0, 210.0, 220.0), HR: (140.0, 141.0, 142.0)},
                 time=time,
             ),
@@ -396,8 +396,8 @@ class AlignmentTests(unittest.TestCase):
     def test_start_offset_with_coarser_sampling_uses_nearest_points(self) -> None:
         primary = candidate(
             streams(
-                ProviderId.GARMIN,
-                RecordingOrigin.GARMIN,
+                ProviderId.WAHOO,
+                RecordingOrigin.WAHOO,
                 {HR: tuple(140.0 + index for index in range(61))},
                 time=tuple(float(index) for index in range(61)),
             ),
@@ -406,8 +406,8 @@ class AlignmentTests(unittest.TestCase):
         # Starts 10 s later and samples every 2 s: sample i lies at 10 + 2 i.
         wahoo = candidate(
             streams(
-                ProviderId.WAHOO,
-                RecordingOrigin.WAHOO,
+                ProviderId.GARMIN,
+                RecordingOrigin.GARMIN,
                 {POWER: tuple(100.0 + index for index in range(26))},
                 time=tuple(2.0 * index for index in range(26)),
             ),
@@ -485,16 +485,16 @@ class AlignmentTests(unittest.TestCase):
         with self.subTest("primary has a start, candidate does not"):
             primary = candidate(
                 streams(
-                    ProviderId.GARMIN,
-                    RecordingOrigin.GARMIN,
+                    ProviderId.WAHOO,
+                    RecordingOrigin.WAHOO,
                     {HR: (140.0, 141.0, 142.0)},
                     time=time,
                 ),
             )
             wahoo = candidate(
                 streams(
-                    ProviderId.WAHOO,
-                    RecordingOrigin.WAHOO,
+                    ProviderId.GARMIN,
+                    RecordingOrigin.GARMIN,
                     {POWER: (250.0, 260.0, 270.0)},
                     time=time,
                 ),
@@ -506,8 +506,8 @@ class AlignmentTests(unittest.TestCase):
         with self.subTest("candidate has a start, primary does not"):
             primary = candidate(
                 streams(
-                    ProviderId.GARMIN,
-                    RecordingOrigin.GARMIN,
+                    ProviderId.WAHOO,
+                    RecordingOrigin.WAHOO,
                     {HR: (140.0, 141.0, 142.0)},
                     time=time,
                 ),
@@ -515,8 +515,8 @@ class AlignmentTests(unittest.TestCase):
             )
             wahoo = candidate(
                 streams(
-                    ProviderId.WAHOO,
-                    RecordingOrigin.WAHOO,
+                    ProviderId.GARMIN,
+                    RecordingOrigin.GARMIN,
                     {POWER: (250.0, 260.0, 270.0)},
                     time=time,
                 ),
@@ -527,8 +527,8 @@ class AlignmentTests(unittest.TestCase):
         with self.subTest("identical axes without starts are placeable"):
             primary = candidate(
                 streams(
-                    ProviderId.GARMIN,
-                    RecordingOrigin.GARMIN,
+                    ProviderId.WAHOO,
+                    RecordingOrigin.WAHOO,
                     {HR: (140.0, 141.0, 142.0)},
                     time=time,
                 ),
@@ -536,8 +536,8 @@ class AlignmentTests(unittest.TestCase):
             )
             wahoo = candidate(
                 streams(
-                    ProviderId.WAHOO,
-                    RecordingOrigin.WAHOO,
+                    ProviderId.GARMIN,
+                    RecordingOrigin.GARMIN,
                     {POWER: (250.0, 260.0, 270.0)},
                     time=time,
                 ),
@@ -553,8 +553,8 @@ class AlignmentTests(unittest.TestCase):
     def test_channel_all_none_after_alignment_is_skipped(self) -> None:
         primary = candidate(
             streams(
-                ProviderId.GARMIN,
-                RecordingOrigin.GARMIN,
+                ProviderId.WAHOO,
+                RecordingOrigin.WAHOO,
                 {HR: tuple(140.0 for _ in range(61))},
                 time=tuple(float(index) for index in range(61)),
             ),
@@ -564,8 +564,8 @@ class AlignmentTests(unittest.TestCase):
         # which lie before the primary start, so no primary second gets a value.
         wahoo = candidate(
             streams(
-                ProviderId.WAHOO,
-                RecordingOrigin.WAHOO,
+                ProviderId.GARMIN,
+                RecordingOrigin.GARMIN,
                 {POWER: tuple(150.0 if index <= 10 else None for index in range(101))},
                 time=tuple(float(index) for index in range(101)),
             ),
@@ -579,7 +579,7 @@ class AlignmentTests(unittest.TestCase):
 
 
 class LapAndZoneChoiceTests(unittest.TestCase):
-    def test_laps_prefer_provider_intervals_then_device_laps_then_splits(self) -> None:
+    def test_laps_prefer_device_laps_then_provider_intervals_then_splits(self) -> None:
         intervals = candidate(
             laps(
                 ProviderId.INTERVALS,
@@ -593,11 +593,11 @@ class LapAndZoneChoiceTests(unittest.TestCase):
         wahoo = candidate(
             laps(ProviderId.WAHOO, RecordingOrigin.WAHOO, LapSource.SPLITS)
         )
-        merged = merge_details([wahoo, garmin, intervals])
+        merged = merge_details([wahoo, intervals, garmin])
         assert merged.laps is not None
-        self.assertIs(merged.laps.chosen, intervals)
+        self.assertIs(merged.laps.chosen, garmin)
         self.assertEqual(len(merged.laps.alternatives), 2)
-        self.assertIs(merged.laps.alternatives[0], garmin)
+        self.assertIs(merged.laps.alternatives[0], intervals)
         self.assertIs(merged.laps.alternatives[1], wahoo)
 
     def test_own_copy_breaks_lap_source_ties(self) -> None:
@@ -657,7 +657,7 @@ class LapAndZoneChoiceTests(unittest.TestCase):
         self.assertIs(power.chosen, power_bounded)
         self.assertIs(power.alternatives[0], power_unbounded)
 
-    def test_zone_tie_break_prefers_intervals_and_absent_metrics_are_omitted(
+    def test_zone_tie_break_ranks_intervals_last_and_absent_metrics_are_omitted(
         self,
     ) -> None:
         relay = candidate(
@@ -679,8 +679,63 @@ class LapAndZoneChoiceTests(unittest.TestCase):
             )
         )
         merged = merge_details([reported, relay])
-        self.assertIs(merged.zones[ZoneMetric.HEART_RATE].chosen, relay)
+        self.assertIs(merged.zones[ZoneMetric.HEART_RATE].chosen, reported)
         self.assertNotIn(ZoneMetric.POWER, merged.zones)
+
+
+class SharedProviderPrecedenceTests(unittest.TestCase):
+    """One provider precedence ranks sessions, measured values, streams and laps."""
+
+    def test_every_ranking_follows_the_shared_precedence(self) -> None:
+        from backend.activities import (
+            activity_summary,
+            canonical_sessions,
+            detail_contract,
+            detail_merge,
+        )
+        from backend.canonical.vocabulary import PROVIDER_PRECEDENCE
+
+        self.assertEqual(
+            (ProviderId.WAHOO, ProviderId.GARMIN, ProviderId.INTERVALS),
+            PROVIDER_PRECEDENCE,
+        )
+        self.assertEqual(
+            list(PROVIDER_PRECEDENCE), list(detail_contract._PROVIDER_ORDER)
+        )
+        for ranks in (
+            activity_summary._PROVIDER_RANK,
+            canonical_sessions._LEAD_PROVIDER_RANK,
+        ):
+            self.assertEqual(
+                list(PROVIDER_PRECEDENCE), sorted(ranks, key=ranks.__getitem__)
+            )
+        self.assertEqual(
+            [provider.value for provider in PROVIDER_PRECEDENCE],
+            sorted(
+                detail_merge._PROVIDER_RANK, key=detail_merge._PROVIDER_RANK.__getitem__
+            ),
+        )
+
+    def test_wahoo_streams_lead_garmin_and_intervals_streams(self) -> None:
+        values = {POWER: (200.0, 200.0, 200.0, 200.0, 200.0)}
+        sets = {
+            provider: candidate(
+                streams(
+                    provider,
+                    RecordingOrigin.GARMIN
+                    if provider is ProviderId.INTERVALS
+                    else RecordingOrigin(provider.value),
+                    values,
+                )
+            )
+            for provider in (ProviderId.INTERVALS, ProviderId.GARMIN, ProviderId.WAHOO)
+        }
+
+        merged = merge_details(list(sets.values()))
+
+        assert merged.streams is not None
+        self.assertIs(merged.streams.primary, sets[ProviderId.WAHOO])
+        self.assertIs(merged.streams.alternatives[0], sets[ProviderId.GARMIN])
 
 
 class StreamAverageTests(unittest.TestCase):
@@ -778,8 +833,8 @@ class MergeContractTests(unittest.TestCase):
     def test_mixed_kinds_are_partitioned_and_inputs_are_not_mutated(self) -> None:
         primary = candidate(
             streams(
-                ProviderId.GARMIN,
-                RecordingOrigin.GARMIN,
+                ProviderId.WAHOO,
+                RecordingOrigin.WAHOO,
                 {HR: (140.0, 141.0, 142.0)},
                 time=(0.0, 1.0, 2.0),
             ),
@@ -787,20 +842,20 @@ class MergeContractTests(unittest.TestCase):
         )
         wahoo = candidate(
             streams(
-                ProviderId.WAHOO,
-                RecordingOrigin.WAHOO,
+                ProviderId.GARMIN,
+                RecordingOrigin.GARMIN,
                 {POWER: (250.0, 260.0, 270.0)},
                 time=(0.0, 1.0, 2.0),
             ),
             device=DeviceType.BIKE_COMPUTER,
         )
         lap_set = candidate(
-            laps(ProviderId.GARMIN, RecordingOrigin.GARMIN, LapSource.DEVICE_LAPS)
+            laps(ProviderId.WAHOO, RecordingOrigin.WAHOO, LapSource.DEVICE_LAPS)
         )
         zone_set = candidate(
             zones(
-                ProviderId.GARMIN,
-                RecordingOrigin.GARMIN,
+                ProviderId.WAHOO,
+                RecordingOrigin.WAHOO,
                 ZoneMetric.HEART_RATE,
                 ZoneBoundarySource.PROVIDER_REPORTED,
                 bounded=True,

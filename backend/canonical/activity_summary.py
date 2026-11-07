@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Final, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from backend.canonical.vocabulary import Assist, LoadModel, ProviderId, Terrain
+from backend.canonical.vocabulary import Assist, LoadModel, Terrain
 
 # Load models on the TSS scale: one hour at threshold is about 100.
 TSS_LIKE_LOAD_MODELS: Final = frozenset(
@@ -125,17 +125,21 @@ def summary_local_date(summary: Mapping[str, Any], timezone: str | None = None) 
 
 
 def stored_activity_key(summary: Mapping[str, Any]) -> str:
-    """Return the key feedback, workout profiles and analyses are stored under.
+    """Return the key feedback, equipment assignments and analyses are stored under.
 
-    As ``ActivityReferences.resolve_reference`` resolves it: the session's
-    Intervals.icu activity id when it holds one, else the local session id.
+    The live local session id; ``ActivityReferences.resolve_reference`` resolves
+    any other reference to it. Rows stored before this rule sit under a provider
+    record id of the session and are found through ``record_ids``.
     """
-    record_ids = summary.get("record_ids")
-    if isinstance(record_ids, Mapping):
-        intervals_id = record_ids.get(ProviderId.INTERVALS.value)
-        if intervals_id:
-            return str(intervals_id)
     return str(summary.get("id") or "")
+
+
+def legacy_activity_keys(summary: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return the provider record ids older rows of the session may be stored under."""
+    record_ids = summary.get("record_ids")
+    if not isinstance(record_ids, Mapping):
+        return ()
+    return tuple(str(value) for value in record_ids.values() if value)
 
 
 def summary_duration_s(summary: Mapping[str, Any]) -> float | None:

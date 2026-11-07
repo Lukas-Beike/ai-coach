@@ -41,7 +41,7 @@ class WeeklyProgressTests(unittest.TestCase):
             read_synced_at=lambda _db: None,
             read_plan=lambda: plan,
             read_checkins=list,
-            read_feedback=list,
+            read_feedback=lambda keys: [],
             today=lambda: self.TODAY,
             load_scenarios=load_scenarios,
             season_source=_empty_season_source(),

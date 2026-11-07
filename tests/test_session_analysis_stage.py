@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from datetime import UTC, date, datetime
 from typing import Any
+from unittest.mock import patch
 
 from backend.canonical.activity_detail import (
     ActivityLap,
@@ -29,6 +30,7 @@ from backend.canonical.vocabulary import (
 from backend.db import activity_detail_store, canonical_store
 from backend.db.activity_detail_store import replace_detail_set, save_analysis
 from backend.db.repositories import KeyValueRepository
+from backend.performance import canonical_session_analysis
 from backend.performance.canonical_detail import CanonicalDetailReader
 from backend.performance.canonical_session_analysis import ANALYSIS_VERSION
 from backend.performance.session_analysis_reads import (
@@ -202,6 +204,21 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertEqual(
             (1, 1), (changed["counts"]["computed"], changed["counts"]["written"])
         )
+
+    def test_a_new_method_version_recomputes_the_stored_analysis(self) -> None:
+        self._write(lambda db: _streams(db, GARMIN, "g1"))
+        self._run()
+        # The provider ranking changed with method version 2 (#1728).
+        self.assertGreaterEqual(canonical_session_analysis.METHOD_VERSION, 2)
+
+        with patch.object(
+            canonical_session_analysis,
+            "METHOD_VERSION",
+            canonical_session_analysis.METHOD_VERSION + 1,
+        ):
+            changed = self._run()
+
+        self.assertEqual(1, changed["counts"]["computed"])
 
     def test_detail_document_and_stored_analysis_agree(self) -> None:
         self._write(

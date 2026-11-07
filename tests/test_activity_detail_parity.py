@@ -319,13 +319,13 @@ class ActivityDetailParityTests(unittest.TestCase):
             "garmin",
         )
         self.assertEqual(
-            ["garmin", "wahoo"],
+            ["wahoo", "garmin"],
             [entry["provider"] for entry in document["detail_data"]["providers"]],
         )
         # The recorder is the one of the record whose measured values lead.
         self.assertTrue(
             document["data_scope"].endswith(
-                "; providers: Garmin Connect, Wahoo; recorded by: garmin"
+                "; providers: Wahoo, Garmin Connect; recorded by: wahoo"
             )
         )
 

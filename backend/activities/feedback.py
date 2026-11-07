@@ -2,11 +2,16 @@
 
 Feedback belongs to the canonical session it was written for. Rows whose
 sessions lead to one effective session through confirmed merges form a group;
-the group exposes one effective row, the newest by ``updated_at`` with the
-smaller original id first on a tie, so session RPE counts once. Hidden rows stay
+the group exposes one effective row, so session RPE counts once: a row keyed by
+a local session id before one keyed by a provider record id, then the newest by
+``updated_at`` with the smaller original id first on a tie. Hidden rows stay
 stored, and differing ones are listed as ``conflicting_feedback``. Rows without
 a session (unknown or ambiguous references) stand alone; proximity never groups
 feedback.
+
+New feedback is stored under the live local session id. Rows stored under a
+provider record id of the session are still found, by the group of their
+session or, without one, by the record ids of the session (``for_activity_ids``).
 """
 
 from __future__ import annotations
@@ -110,8 +115,15 @@ def _feedback_key(activity: Any) -> Any:
     return stored_activity_key(activity) or _activity_id(activity)
 
 
-def _group_key(row: dict[str, Any], effective: dict[str, str]) -> tuple[str, str]:
-    session = row.get("session_id")
+def _group_key(
+    row: dict[str, Any], effective: dict[str, str], attached: dict[str, str]
+) -> tuple[str, str]:
+    """The group of a row: its stored session, else the one session its id names.
+
+    ``attached`` maps the ids of rows without a stored session to the session of
+    the only record carrying that id (of the row's provider when it names one).
+    """
+    session = row.get("session_id") or attached.get(str(row["activity_id"]))
     if session:
         return ("session", effective.get(str(session), str(session)))
     return ("activity", str(row["activity_id"]))
@@ -142,10 +154,15 @@ def _audit_row(row: dict[str, Any]) -> dict[str, Any]:
     return recorded
 
 
-def _ordered(group: Iterable[dict[str, Any]]) -> builtins.list[dict[str, Any]]:
-    """Group rows, effective first: newest update, then the smaller original id."""
+def _ordered(
+    group: Iterable[dict[str, Any]], key: tuple[str, str] | None = None
+) -> builtins.list[dict[str, Any]]:
+    """Group rows, effective first: the row keyed by the group's session id, then the
+    newest update, then the smaller original id."""
     rows = sorted(group, key=lambda row: str(row["activity_id"]))
     rows.sort(key=lambda row: str(row["updated_at"]), reverse=True)
+    if key is not None and key[0] == "session":
+        rows.sort(key=lambda row: row["activity_id"] != key[1])
     return rows
 
 
@@ -198,8 +215,10 @@ def _group_containing(
     )
 
 
-def _effective_view(group: builtins.list[dict[str, Any]]) -> dict[str, Any]:
-    chosen, *hidden = _ordered(group)
+def _effective_view(
+    group: builtins.list[dict[str, Any]], key: tuple[str, str] | None = None
+) -> dict[str, Any]:
+    chosen, *hidden = _ordered(group, key)
     view = {field: chosen.get(field) for field in _PUBLIC_FIELDS}
     conflicts = [
         {"activity_id": row["activity_id"], "updated_at": row["updated_at"]}
@@ -242,7 +261,9 @@ class ActivityFeedbackService:
         """The effective feedback of each session, newest first."""
         bounded_limit = max(1, min(int(limit), 500))
         with self._database_manager.reader() as db:
-            views = [_effective_view(group) for group in self._groups(db).values()]
+            views = [
+                _effective_view(group, key) for key, group in self._groups(db).items()
+            ]
         views.sort(key=lambda view: str(view["updated_at"]), reverse=True)
         return views[:bounded_limit]
 
@@ -293,18 +314,33 @@ class ActivityFeedbackService:
                 continue
             if key is not None and key in groups:
                 found.append(
-                    {**_effective_view(groups[key]), "activity_id": activity_id}
+                    {**_effective_view(groups[key], key), "activity_id": activity_id}
                 )
         return found
 
     def _groups(self, db: Any) -> dict[tuple[str, str], builtins.list[dict[str, Any]]]:
         rows = self._feedback_repository.all(db)
+        # Rows saved before sessions were stored sit under a record id: the id
+        # joins its session only when exactly one record carries it.
+        attached = canonical_store.feedback_origin_sessions(
+            db,
+            [
+                (str(row["activity_id"]), row.get("provider"))
+                for row in rows
+                if not row.get("session_id")
+            ],
+        )
         effective = canonical_store.effective_session_ids(
-            db, [str(row["session_id"]) for row in rows if row.get("session_id")]
+            db,
+            [
+                str(row.get("session_id") or attached.get(str(row["activity_id"])))
+                for row in rows
+                if row.get("session_id") or str(row["activity_id"]) in attached
+            ],
         )
         groups: dict[tuple[str, str], builtins.list[dict[str, Any]]] = {}
         for row in rows:
-            groups.setdefault(_group_key(row, effective), []).append(row)
+            groups.setdefault(_group_key(row, effective, attached), []).append(row)
         return groups
 
     def save(self, activity_id: Any, value: Any) -> dict[str, Any]:
@@ -330,8 +366,15 @@ class ActivityFeedbackService:
                     409,
                     "Zu viele Rückmeldungen für diese Einheit, um sie mit Undo zu ändern.",
                 )
-            existing = _ordered(group)[0] if group else {}
-            if existing:
+            existing = _ordered(group, group_key)[0] if group else {}
+            rekey = (
+                bool(existing)
+                and origin == key
+                and existing["activity_id"] != key
+                and self._feedback_repository.get(db, key) is None
+            )
+            if existing and not rekey and existing["activity_id"] != key:
+                # Another row of the group is the one shown: edit it in place.
                 feedback["activity_id"] = existing["activity_id"]
             own_row = feedback["activity_id"] == key
             _keep_omitted_fields(feedback, value, existing)
@@ -344,6 +387,10 @@ class ActivityFeedbackService:
                     self._feedback_repository.delete(db, row["activity_id"])
                 change = self._record(db, group_key, group, None)
                 return {"status": "ok", "activity_feedback": None, "change": change}
+            if rekey:
+                # An ordinary edit moves the effective row to the session it was
+                # written for instead of adding a second row to the group.
+                self._feedback_repository.rekey(db, existing["activity_id"], key)
             self._feedback_repository.upsert(
                 db,
                 feedback,
@@ -358,7 +405,7 @@ class ActivityFeedbackService:
         # The committed save stands even if this read fails.
         with self._database_manager.reader() as db:
             saved_group = self._groups(db).get(saved_key)
-        saved = _effective_view(saved_group) if saved_group else feedback
+        saved = _effective_view(saved_group, saved_key) if saved_group else feedback
         return {"status": "ok", "activity_feedback": saved, "change": change}
 
     @staticmethod
@@ -387,7 +434,8 @@ class ActivityFeedbackService:
         self, db: Any, entity_id: str
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """The stored rows of one feedback group for change history."""
-        value = _audit_value(self._groups(db).get(self._current_key(db, entity_id)))
+        groups = self._groups(db)
+        value = _audit_value(groups.get(self._current_key(db, entity_id, groups)))
         return value, change_history.audit_projection(ENTITY_TYPE, value)
 
     def restore_in_transaction(
@@ -418,15 +466,32 @@ class ActivityFeedbackService:
                     409, "Die Rückmeldung kann nicht wiederhergestellt werden."
                 )
             self._feedback_repository.restore(db, row)
-        return _audit_value(self._groups(db).get(self._current_key(db, entity_id)))
+        groups = self._groups(db)
+        return _audit_value(groups.get(self._current_key(db, entity_id, groups)))
 
     @staticmethod
-    def _current_key(db: Any, entity_id: str) -> tuple[str, str]:
-        """The group key of a recorded entity, through later session merges."""
+    def _current_key(
+        db: Any,
+        entity_id: str,
+        groups: dict[tuple[str, str], builtins.list[dict[str, Any]]],
+    ) -> tuple[str, str]:
+        """The group key of a recorded entity, through later session merges.
+
+        A row recorded on its own that has since joined its session is found there.
+        """
         kind, value = _group_of(entity_id)
         if kind == "session":
             effective = canonical_store.effective_session_ids(db, [value])
             value = effective.get(value, value)
+        elif (kind, value) not in groups:
+            return next(
+                (
+                    key
+                    for key, rows in groups.items()
+                    if any(row["activity_id"] == value for row in rows)
+                ),
+                (kind, value),
+            )
         return (kind, value)
 
     def save_coach(self, activity_id: Any, value: Any) -> dict[str, Any]:

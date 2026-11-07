@@ -303,7 +303,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(
             result["data_scope"],
             "bounded sanitized activity_detail.v1 document of exactly one local "
-            "session; providers: Intervals.icu, Garmin Connect; recorded by: garmin",
+            "session; providers: Garmin Connect, Intervals.icu; recorded by: garmin",
         )
         self.assertNotIn("activity-2", json.dumps(result))
         self.assertNotIn("Recovery", json.dumps(result))
@@ -671,7 +671,8 @@ class ServerCoachTests(ServerTestCase):
         activity = server.PUBLIC_STATE.state_service().read(local_only=True)[
             "activities"
         ][0]
-        self.assertEqual(activity["activity_feedback"]["activity_id"], "activity-1")
+        self.assertEqual(activity["activity_feedback"]["activity_id"], activity["id"])
+        self.assertTrue(activity["id"].startswith("act_"))
         self.assertEqual(
             activity["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich"
         )
@@ -717,7 +718,8 @@ class ServerCoachTests(ServerTestCase):
                 "notes": "Locker, aber am Ende müde",
             },
         )
-        self.assertEqual(result["activity_feedback"]["activity_id"], "activity-2")
+        # Stored under the live session id, not the id the Coach named.
+        self.assertTrue(result["activity_feedback"]["activity_id"].startswith("act_"))
 
     def test_activity_feedback_remains_coach_managed_without_history_tab(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
