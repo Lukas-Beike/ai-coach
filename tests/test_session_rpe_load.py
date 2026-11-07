@@ -196,11 +196,12 @@ class LongInterruptionTests(unittest.TestCase):
         self.assertIsNone(entry["moving_duration_min"])
 
     def test_strength_yoga_and_missing_moving_time_are_never_marked(self) -> None:
-        for fields in (
+        cases: tuple[dict[str, Any], ...] = (
             {"sport": "strength", "moving_duration_s": 20 * 60},
             {"sport": "yoga", "moving_duration_s": 10 * 60},
             {},
-        ):
+        )
+        for fields in cases:
             with self.subTest(fields=fields):
                 entry, value = session_load(
                     summary("a", 60, **fields), {"session_rpe": 5}
