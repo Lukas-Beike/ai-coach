@@ -644,12 +644,12 @@ class DiagnosticsTests(BackfillCase):
     def test_the_section_carries_counts_only(self) -> None:
         self.seed(1, date(2026, 11, 3), intervals={"rpe": 6.0, "feel": 1.0})
         self.seed(2, date(2026, 11, 4), intervals={"rpe": 6.0}, garmin=False)
-        before = summarize_rating_backfill(self.key_values, self.db, FLOOR)
+        before = summarize_rating_backfill(self.key_values, self.db)
         self.assertEqual("not_started", before["cursor"])
         service, _reader = self.service(_Client({"1": (60, 100)}))
         service.backfill(None)
 
-        counts = summarize_rating_backfill(self.key_values, self.db, FLOOR)
+        counts = summarize_rating_backfill(self.key_values, self.db)
 
         self.assertEqual(
             {

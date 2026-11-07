@@ -419,6 +419,7 @@ PREVIOUS_JOB_SUPPORT: dict[str, frozenset[str]] = {
             "refresh",
             "historical_backfill",
             "wellness_backfill",
+            "rating_backfill",
             "activity_details",
             "plan_push",
         }

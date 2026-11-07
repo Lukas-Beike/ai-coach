@@ -334,9 +334,7 @@ def _read_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
     }
 
 
-def rating_backfill_counts(
-    db: Any, key_values: KeyValueRepository, earliest_date: date
-) -> dict[str, Any]:
+def rating_backfill_counts(db: Any, key_values: KeyValueRepository) -> dict[str, Any]:
     """Content-free counts of the rating backfill, for diagnostics and the later
     Intervals.icu data migration's dry run.
 
@@ -347,7 +345,7 @@ def rating_backfill_counts(
     selection = select_rating_candidates(db)
     state = _read_state(key_values, db)
     cursor = read_cursor(db, GARMIN_ID, RATING_HISTORY_CURSOR).get("cursor")
-    if state["finished"] or (cursor and str(cursor) <= earliest_date.isoformat()):
+    if state["finished"]:
         phase = "finished"
     else:
         phase = "in_progress" if cursor else "not_started"

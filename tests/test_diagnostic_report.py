@@ -195,6 +195,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "canonical_session_conflicts",
                 "canonical_provider_composition",
                 "local_load",
+                "rating_backfill",
                 "session_metrics",
                 "session_analysis",
                 "logs",
@@ -285,8 +286,9 @@ class DiagnosticReportServiceTests(unittest.TestCase):
             )
         ]
         # The provider composition adds five reads (sessions, observations and
-        # three domain tables) to the same snapshot.
-        self.assertEqual(len(self.db.queries), 20)
+        # three domain tables) to the same snapshot; the rating backfill counts
+        # add three more (Intervals.icu and Garmin records, live sessions).
+        self.assertEqual(len(self.db.queries), 23)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
