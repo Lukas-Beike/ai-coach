@@ -56,6 +56,7 @@ MAX_INTENSITY_PCT: Final = 1_000.0
 MAX_LAP_NAME_LENGTH: Final = 200
 MAX_ZONE_LABEL_LENGTH: Final = 64
 MAX_STRENGTH_SETS: Final = 500
+_INDEX_TYPE_ERROR: Final = "index must be an integer"
 MAX_STRENGTH_REPS: Final = 1_000
 MAX_STRENGTH_WEIGHT_KG: Final = 1_000.0
 MAX_WORKOUT_STEP_INDEX: Final = 999
@@ -213,7 +214,7 @@ class ActivityLap:
 
     def __post_init__(self) -> None:
         if isinstance(self.index, bool) or not isinstance(self.index, int):
-            raise TypeError("index must be an integer")
+            raise TypeError(_INDEX_TYPE_ERROR)
         if not 0 <= self.index < MAX_LAPS:
             raise ValueError(f"index must be between 0 and {MAX_LAPS - 1}")
         require_instance(self.kind, LapKind, "kind")
@@ -294,7 +295,7 @@ class ZoneBucket:
 
     def __post_init__(self) -> None:
         if isinstance(self.index, bool) or not isinstance(self.index, int):
-            raise TypeError("index must be an integer")
+            raise TypeError(_INDEX_TYPE_ERROR)
         if not 1 <= self.index <= MAX_ZONES:
             raise ValueError(f"index must be between 1 and {MAX_ZONES}")
         object.__setattr__(
@@ -371,7 +372,7 @@ class ActivityStrengthSet:
 
     def __post_init__(self) -> None:
         if isinstance(self.index, bool) or not isinstance(self.index, int):
-            raise TypeError("index must be an integer")
+            raise TypeError(_INDEX_TYPE_ERROR)
         if not 0 <= self.index < MAX_STRENGTH_SETS:
             raise ValueError(f"index must be between 0 and {MAX_STRENGTH_SETS - 1}")
         require_instance(self.set_type, StrengthSetType, "set_type")

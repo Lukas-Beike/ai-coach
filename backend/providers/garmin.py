@@ -1348,6 +1348,38 @@ def collect_garmin_activity_detail(
     """
     payload: dict[str, Any] = {"activity_id": activity_id, "errors": []}
     skipped: list[str] = []
+    parts = _activity_detail_parts(activity_id, exercise_sets=exercise_sets)
+    for capability, key, method_name, invoke in parts:
+        method = getattr(client, method_name, None)
+        if not callable(method):
+            # The Personal API serves no splits or zone times and the SDK no FIT
+            # file; a part no transport serves is absent, not incomplete.
+            continue
+        fetch = partial(invoke, method)
+        if capability_allowed is not None and not capability_allowed(capability):
+            skipped.append(capability)
+            continue
+        try:
+            payload[key] = external_call(
+                "garmin", capability, fetch, {"activity_id": activity_id}
+            )
+            if capability_success is not None:
+                capability_success(capability)
+        except Exception as exc:  # noqa: BLE001 - SDK errors vary; keep other parts and redact.
+            if capability_failure is not None:
+                capability_failure(capability, exc)
+            _add_error(payload, capability, exc, redact, warn)
+    if not payload["errors"]:
+        del payload["errors"]
+    if skipped:
+        payload["skipped"] = skipped
+    return payload
+
+
+def _activity_detail_parts(
+    activity_id: str, *, exercise_sets: bool
+) -> tuple[tuple[str, str, str, Callable[[Any], Any]], ...]:
+    """The detail parts to collect for one activity, in call order."""
     # (capability key, payload key, fetch). The capability key also names the
     # external call, matching ``_fetch_range``.
     parts: tuple[tuple[str, str, str, Callable[[Any], Any]], ...] = (
@@ -1395,31 +1427,7 @@ def collect_garmin_activity_detail(
                 lambda method: method(activity_id),
             ),
         )
-    for capability, key, method_name, invoke in parts:
-        method = getattr(client, method_name, None)
-        if not callable(method):
-            # The Personal API serves no splits or zone times and the SDK no FIT
-            # file; a part no transport serves is absent, not incomplete.
-            continue
-        fetch = partial(invoke, method)
-        if capability_allowed is not None and not capability_allowed(capability):
-            skipped.append(capability)
-            continue
-        try:
-            payload[key] = external_call(
-                "garmin", capability, fetch, {"activity_id": activity_id}
-            )
-            if capability_success is not None:
-                capability_success(capability)
-        except Exception as exc:  # noqa: BLE001 - SDK errors vary; keep other parts and redact.
-            if capability_failure is not None:
-                capability_failure(capability, exc)
-            _add_error(payload, capability, exc, redact, warn)
-    if not payload["errors"]:
-        del payload["errors"]
-    if skipped:
-        payload["skipped"] = skipped
-    return payload
+    return parts
 
 
 def _validate_current_metrics(
