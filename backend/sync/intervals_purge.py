@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from backend import change_history
+from backend.activities.detail_store import LEGACY_KEY_PATTERNS
 from backend.athlete.profile import PREFERRED_SOURCE_FIELDS
 from backend.canonical.vocabulary import ActivitySessionState, ProviderId
 from backend.db import canonical_store
@@ -112,8 +113,7 @@ INGEST_KEY_PATTERNS: Final = (
     "performance_refresh_*",
     "last_performance_*",
     "intervals_full_resync_*",
-    "activity_detail_failure:*",
-    "activity_detail:*",
+    *LEGACY_KEY_PATTERNS,
 )
 
 

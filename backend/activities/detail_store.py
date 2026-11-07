@@ -18,6 +18,9 @@ from backend.providers.intervals_performance_fields import (
 _FAILURE = "activity_detail_failure"
 _RECORD_PREFIX = "activity_detail:"
 PREFETCH_FLOOR_KEY = "activity_detail_prefetch_floor"
+# kv GLOB patterns of the Intervals.icu detail records and their failure notes,
+# which the Intervals.icu ingest purge deletes (#1728).
+LEGACY_KEY_PATTERNS = (f"{_RECORD_PREFIX}*", f"{_FAILURE}:*")
 
 
 def _json_or_none(raw: str) -> Any:
