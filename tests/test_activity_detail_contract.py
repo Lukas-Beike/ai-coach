@@ -391,6 +391,21 @@ class MetricTests(unittest.TestCase):
             [item.activity_id for item in measured_order([intervals, wahoo])],
         )
 
+    def test_measured_order_breaks_provider_ties_by_the_recording_origin(self) -> None:
+        # Neither copy is its provider's own recording and their ids sort the
+        # other way round, so only the origin step puts the Wahoo recording first.
+        garmin_relay = record(
+            INTERVALS, "i-a", recorded_by=RecordingOrigin.GARMIN, label="Intervals.icu"
+        )
+        wahoo_relay = record(
+            INTERVALS, "i-b", recorded_by=RecordingOrigin.WAHOO, label="Intervals.icu"
+        )
+
+        self.assertEqual(
+            ["i-b", "i-a"],
+            [item.activity_id for item in measured_order([garmin_relay, wahoo_relay])],
+        )
+
     def test_every_source_names_the_recorder_and_unknown_is_explicit(self) -> None:
         intervals = record(
             INTERVALS,

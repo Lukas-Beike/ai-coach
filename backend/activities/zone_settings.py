@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
+from typing import Final
 
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation
@@ -174,12 +175,17 @@ def _valid_on(configuration: ZoneConfiguration, day: date | None) -> bool:
     )
 
 
+# Threshold sources after the confirmed local values: Garmin is curated by the
+# athlete, Wahoo follows, and output-only Intervals.icu ranks last.
+_PROVIDER_ORDER: Final = (ProviderId.GARMIN, ProviderId.WAHOO, ProviderId.INTERVALS)
+
+
 def _source_rank(configuration: ZoneConfiguration) -> int:
     """Confirmed local values first, then the provider order."""
     provider = configuration.provenance.provider
     if provider is None:
         return 0
-    return 1 + list(ProviderId).index(provider)
+    return 1 + _PROVIDER_ORDER.index(provider)
 
 
 def effective_zone_configuration(

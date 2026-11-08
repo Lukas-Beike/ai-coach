@@ -549,7 +549,7 @@ Every `ActivityRecord` field is set by at least one of the three mappers. Fields
 ### `garmin_activity_mapping.py`
 
 Status: Live. Called for every Garmin activity sync through `garmin_ingest_plan` (`canonical_plans.py`, via `_garmin_activity_mapper`), for replay of stored rows through `reprojection_plan`, and by `project_garmin_snapshot`.
-Mapper version: **19**
+Mapper version: **20**
 Inputs: Garmin activity list rows (`get_activities_by_date`, SDK and Personal API share the key names), merged by `merge_training_load_rows` with the dedicated per-activity rows `training_load_activities` and `activity_ratings` (single-activity `summaryDTO`). Entry point `map_garmin_activities(rows, zone, retrieved_at)`.
 Evidence: observed in `garmin_activity_list_entry_run_2026-11-03` (SDK) and `garmin_personal_activity_list_2026-11-03` (Personal API) for all keys not named under "documented" below; `directWorkoutRpe`, `directWorkoutFeel`, `minHR` observed under `summaryDTO` in `garmin_activity_detail_run_2026-11-03` and `garmin_personal_activity_detail_run_2026-11-03`. Documented only (code, no payload): `movingTime`, `averagePower`, `maxHeartRate`, `trainingEffect`, `averageBikingCadenceInRevPerMinute` (the sample is a run), `id` (alias of `activityId` in `merge_training_load_rows`), and zones above 5 (`hrTimeInZone_6`..`_20`, `powerTimeInZone_6`..`_20`). All sample values observed are from a run; ride and strength shapes are unverified against a payload.
 
@@ -594,7 +594,7 @@ General rules: first alias that carries a value wins (`_present`: not `None`, no
 | `water_estimated_ml` | `waterEstimated` | ml, Garmin's sweat-loss estimate | |
 | `lap_count` | `lapCount` | count | |
 | `energy_kcal` | `calories` | kcal, whole-session estimate including the resting share; `calories or None` | Zero means not estimated. |
-| `avg_cadence` | `averageBikingCadenceInRevPerMinute` else `averageRunningCadenceInStepsPerMinute` | bike: rpm as sent (used when truthy); run: steps/min divided by 2 (one leg) | `_cadence`. A bike value of 0 with no run key stays 0.0. Run key observed; bike key documented. |
+| `avg_cadence` | `averageBikingCadenceInRevPerMinute` else `averageRunningCadenceInStepsPerMinute` | bike: rpm as sent (used when truthy); run: steps/min divided by 2 (one leg) | `_cadence`. A bike value of 0 with no run key is no cadence (`None`), as for the other providers. Run key observed; bike key documented. |
 | `hr_zone_times_s`, `power_zone_times_s` | `hrTimeInZone_1`..`_20`, `powerTimeInZone_1`..`_20` | s per zone, id `Z<n>` (`n` = key number); Garmin's own zone boundaries | `_zone_times`. Absent zones are skipped; one invalid zone drops the whole distribution with one issue. `_1`..`_5` observed. |
 | `purpose` | `eventType.typeKey` (dict) or `eventType` (text) | stripped, case-folded: `race` -> `race`, `transportation` -> `commute`; everything else `None` | `_purpose`; non-text key -> `INVALID_TYPE`. Observed: `eventType.typeKey` (value was a plain category, so `None`). `training`, `warmup`, `cooldown` are never emitted. |
 | `device_type` | - | `wahoo_device_type(sport, environment)` only when `provenance.recorded_by` is `wahoo`, else `None` | Garmin devices get no device type. |
@@ -869,13 +869,13 @@ One "session" bundles the active records of every provider that reported the sam
 
 | Order | Function | Sort key | Used for |
 |---|---|---|---|
-| measured | `measured_order` (`detail_contract.py`), then `_session_order` (`activity_summary.py`) | (1) own copy first, (2) provider rank, (3) newest `provenance.retrieved_at` first (a record without one last), (4) `activity_id` ascending; `_session_order` then re-sorts stably by (own copy, provider rank, recording-origin rank `wahoo` 0, `garmin` 1, others 2) | the primary record, header fields, all measured values, `terrain`, `assist`, `local_offset_minutes` |
+| measured | `measured_order` (`detail_contract.py`) | (1) own copy first, (2) provider rank, (3) recording-origin rank (`wahoo` 0, `garmin` 1, others 2), (4) newest `provenance.retrieved_at` first (a record without one last), (5) `activity_id` ascending | the primary record, header fields, all measured values, `terrain`, `assist`, `local_offset_minutes` |
 | derived | `derived_order` | (2), (3), (4) of the above: provider rank, newest retrieval, id | derived values, zone times, provider load, training effect, `purpose`, `planned_event_id` |
 | rating | `rating_order` | `derived_order`, stably re-sorted by provider: `garmin` 0, `intervals` 1, everything else 2 | `rpe`, `feel`, `rpe_conflict` |
 
 `PROVIDER_PRECEDENCE` (`vocabulary.py`) = `wahoo`, `garmin`, `intervals` (Intervals.icu is output only and ranks last). The own-copy rule: a record is the recording platform's own copy when `provenance.provider.value == provenance.recorded_by.value`. A Garmin Connect row of a Wahoo-recorded ride (`provenance.provider` `garmin`, `provenance.recorded_by` `wahoo`) is therefore not own and ranks behind the Wahoo cloud record; a Zwift-recorded row is own for no provider; an Intervals.icu record is never own (its provider value `intervals` matches no recording origin). The session's primary record (`measured[0]`) is persisted by `bundle_sessions` with the same preference (`_lead_key`: provider rank, then Wahoo-recorded before others, then input order).
 
-Tie-break note: `detail_contract.measured_order` has no origin-rank step, so the `activity_detail.v1` document's `session` block uses the (own, provider, retrieval, id) order alone; the extra step in `_session_order` only separates records of the same provider rank that are both non-own (in practice stored Intervals.icu copies).
+Tie-break note: the summary and the `activity_detail.v1` document's `session` block share this one order; the origin step only separates records of the same provider rank that are both non-own (in practice stored Intervals.icu copies).
 
 ### Value choice per summary key
 
@@ -1519,7 +1519,7 @@ Status: Live. Hardened stdlib FIT decoder used by `fit_activity_detail_mapping.p
 Inputs: raw FIT bytes. Returns `(global message number, {field number: value})` per data message.
 Evidence: documented only (FIT SDK profile; `tests/test_fit_file.py`).
 
-Decoder rules: header signature `.FIT` at bytes 8 to 12; header CRC checked when the header is longer than 12 bytes; file CRC checked when present (trailer must be 0 or 2 bytes); at most 100,000 data messages (`MAX_FIT_MESSAGES`, more gives `ValueError` and the mapper reports a `fit` issue and no sets); little- or big-endian per definition; compressed-timestamp headers rebuild field 253; developer fields are skipped; a field whose width does not divide by its base type size is kept as raw bytes. Values are `raw / divisor + offset` for the entries of `_FIT_FIELD_SCALES`, otherwise raw. The enhanced field of a pair (`_FIT_FIELD_PREFERENCES`) wins per message when it holds a usable value.
+Decoder rules: header signature `.FIT` at bytes 8 to 12; header CRC checked when the header is longer than 12 bytes; file CRC checked when present (trailer must be 0 or 2 bytes); at most 200,000 data messages (`MAX_FIT_MESSAGES`, more than the 172,800 record messages a stream may hold; more gives `ValueError` and the mapper reports a `fit` issue and no sets); little- or big-endian per definition; compressed-timestamp headers rebuild field 253; developer fields are skipped; a field whose width does not divide by its base type size is kept as raw bytes. Values are `raw / divisor + offset` for the entries of `_FIT_FIELD_SCALES`, otherwise raw. The enhanced field of a pair (`_FIT_FIELD_PREFERENCES`) wins per message when it holds a usable value.
 
 Invalid sentinels (`_FIT_INVALID_VALUES`, decoded to `None`; for arrays per element):
 
@@ -1585,7 +1585,7 @@ Selection is a read-time decision; stored sets are never merged on write. Kinds 
 | Device rank (`_DEVICE_PREFERENCE`, from the record's `device_type`) | `heart_rate_bpm`: `chest_strap`, `watch`, `bike_computer`; `power_w` and `cadence_rpm`: `power_meter`, `bike_computer`, `watch`; `speed_mps`, `distance_m`, `altitude_m`, `grade_pct`: `bike_computer`, `watch`; other channels have no device ranking. | |
 | Lap set (`_choose_laps`) | `lap_source` (`device_laps`, then `provider_intervals`, then `splits`), own copy, provider rank, newest fetch, id | One set; the others are listed as alternatives. Lap offsets are shifted onto the stream clock when the start difference is known (`on_stream_clock`). |
 | Zone distribution per metric (`_choose_zones`) | bounded first (`boundary_source` not `unknown`, or every bucket has a `lower` or an `upper`), provider rank, newest fetch, id | Then `with_stream_zones` (`stream_zones.py`) puts a derived distribution first for each metric whose stream and threshold exist; the provider distribution becomes an alternative. |
-| Strength sets (`select_strength_sets`, `strength_rank`) | `garmin_exercise_sets` before file sets, then `provider` text, then `provider_activity_id` | One list per session, never merged set by set. File sets (`fit_set_messages`) order by provider name text, so `garmin` precedes `wahoo`; this is not the `PROVIDER_PRECEDENCE` order. |
+| Strength sets (`select_strength_sets`, `strength_rank`) | `garmin_exercise_sets` before file sets, then provider (`garmin`, `wahoo`, `intervals`), then `provider_activity_id` | One list per session, never merged set by set. File sets (`fit_set_messages`) rank Garmin first because strength is recorded on the Garmin watch; this is not the `PROVIDER_PRECEDENCE` order of streams, laps and zones. |
 
 The merged averages `avg_hr` and `avg_power` fall back to the merged stream mean (restricted to `moving` points when that channel is present) only when no record has the value (`_gap_fill`, labelled derived).
 
@@ -1641,7 +1641,7 @@ Conventions used in the tables of this part:
 
 Status: Live. `map_garmin_health` is called per stored element by `canonical_plans.py` (ingest and re-projection,
 one-element list per list section, the record itself for single-record sections) and by `snapshot_projection.py`.
-Mapper version: **18** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
+Mapper version: **19** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
 training sections and the endurance `groupMap`, see "Training sections" below), which is replayed by this module.
 Inputs: the Garmin snapshot as a mapping section name → record or list of records (`GARMIN_HEALTH_SECTION_NAMES`);
 `zone` = athlete zone (`ZoneInfo`), `retrieved_at` = fetch time of that section (`garmin_section_retrieved_at`: the
@@ -1827,13 +1827,13 @@ and `""` are dropped; a nested `calories` mapping is removed): `calories.burnedT
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
-| `body_battery_charged` | `charged` | score units 0 to 500, 0 kept | Src `provider_reported`; agg `total`. Day = `calendarDate` only. Documented, fixture `body_battery`. |
+| `body_battery_charged` | `charged` | score units 0 to 500, 0 kept | Src `provider_reported`; agg `total`. Day = `calendarDate` else `date` (the SDK's `BodyBatteryEntry` names it `date`). Documented, fixture `body_battery`. |
 | `body_battery_drained` | `drained` | score units 0 to 500, 0 kept | Same. |
 | `body_battery` | each `[timestamp, level]` of `bodyBatteryValuesArray` → `body_battery_values_array` (level = element 1) | level rounded to integer, bounds 0 to 100, 0 kept | Src `provider_reported`; agg `sample`; `observed_at` = `utc_timestamp(sample[0])` (epoch s or ms, ISO); `observed_on` = that instant's date in the athlete zone; id `body_battery:<sample day>:<idx>:level`. One `INVALID_NUMBER` issue per record when any sample is unreadable; a non-list array is `INVALID_TYPE`. Documented. |
 
-Quirk (unverified): the transport tests (`test_garmin_personal_transport.py`) and SDK rows key the day as `date`, but
-the grouped mapping reads `calendarDate` only and reports `MISSING` otherwise; nothing in `backend/sync` adds
-`calendarDate` to Body Battery rows. Samples are dated by their own instant and do not need it.
+The SDK's own `BodyBatteryEntry` response model (module `garminconnect.typed`) and the transport tests key the day as `date`; the
+grouped mapping reads `calendarDate` else `date` (`_SECTION_DATE_KEYS`). Samples are dated by their own instant and do
+not need either.
 
 #### Race predictions (`race_predictions`)
 
@@ -1939,7 +1939,7 @@ One sleep period with its bounds as one provider reported it (`backend/canonical
 
 Status: Live for Garmin; the Intervals.icu branch only replays stored wellness rows (Intervals.icu is an output target
 and is not read; the stored ingest store is removed by the #1728 purge).
-Mapper version: none. Garmin periods are replayed by `garmin_health_mapping.py` v 18 (`GARMIN_HEALTH_VERSION`), the
+Mapper version: none. Garmin periods are replayed by `garmin_health_mapping.py` v 19 (`GARMIN_HEALTH_VERSION`), the
 Intervals.icu branch by the Intervals wellness mapper version (`INTERVALS_WELLNESS_VERSION`) in `canonical_plans.py`.
 Inputs: `map_sleep_periods(payload, provider, source_record_id, retrieved_at, zone)`. Consumers: `canonical_plans.py`
 `_garmin_batch` (Garmin `sleep` section element, `provider` = `garmin`, `source_record_id` = raw record id
@@ -2020,8 +2020,7 @@ Status: Live. Provider key constants and alias tuples (no mapping logic besides 
 | resting HR family | `GARMIN_RESTING_HR_ALIASES` = `restingHeartRate`, `restingHR`, `resting_heart_rate` | | |
 | readiness family | `GARMIN_READINESS_ALIASES` = `score`, `trainingReadinessScore`, `overallReadinessScore`, `readinessScore` | | |
 | VO2max / FTP | `GARMIN_VO2MAX_ALIASES` = `vo2MaxPreciseValue`, `vo2MaxValue`; `GARMIN_FTP_ALIASES` = `functionalThresholdPower`, `ftp`; `GARMIN_FTP_RANGE_DAY` = `from`; `GARMIN_FTP_RANGE_VALUE` = `value` | | |
-| weight family | `GARMIN_BODY_FAT_ALIASES` = `bodyFat`, `body_fat`, `bodyFatPercent`, `bodyFatPercentage`, `fatPercent`; `GARMIN_WEIGHT_ALIASES` = `weight`, `weightKg`, `weight_kg`, `value`; `GARMIN_WEIGHT_UNIT_ALIASES` = `unitKey`, `unit`, `weightUnit` | | The mapper uses its own `_WEIGHT_KEYS` / `_WEIGHT_VALUE_KEYS`; `GARMIN_WEIGHT_ALIASES` is not read by it. |
-| thresholds | `GARMIN_RUNNING_THRESHOLD_ALIASES` = `speed`, `speedInMetersPerSecond`, `thresholdPace` | | Not used by the health mapper (it reads `speed` only). |
+| weight family | `GARMIN_BODY_FAT_ALIASES` = `bodyFat`, `body_fat`, `bodyFatPercent`, `bodyFatPercentage`, `fatPercent`; `GARMIN_WEIGHT_UNIT_ALIASES` = `unitKey`, `unit`, `weightUnit` | | The mapper uses its own `_WEIGHT_KEYS` / `_WEIGHT_VALUE_KEYS`. |
 | daily stats | `GARMIN_STEPS_ALIASES`, `GARMIN_FLOORS_ALIASES`, `GARMIN_TOTAL_KCAL_ALIASES`, `GARMIN_ACTIVE_KCAL_ALIASES`, `GARMIN_RESTING_KCAL_ALIASES` (lists in the daily summary table); nested map `_NESTED_DAILY_FIELDS` | | |
 | endurance | `GARMIN_ENDURANCE_SCORE_ALIASES` = `overallScore`; `GARMIN_ENDURANCE_WRAPPER_KEYS` = `enduranceScoreDTO`, `enduranceScoreDTOList` | | |
 | race predictions | `GARMIN_RACE_TIME_ALIASES` = `raceTime`, `racePredictionTime`, `predictedTime`, `time`, `seconds`, `value`; `GARMIN_RACE_DISTANCE_ALIASES` = `raceDistance`, `distanceName`, `raceType`, `distance` | | `colon_time_parts` parses `mm:ss` / `h:mm:ss` (1 to 6 ASCII digits per part). |
@@ -2039,7 +2038,6 @@ Status: Live. Wire key names for the performance package and the sync (no mappin
 | HRV family | `WEEKLY_HRV_AVERAGE` = `hrvWeeklyAvg`, `WEEKLY_AVERAGE` = `weeklyAvg`, `HRV_NIGHT_AVERAGE` = `lastNightAvg`, `HRV_WITH_WEEKLY_ALIASES` = last-night + weekly aliases | | |
 | resting HR | `RESTING_HEART_RATE` = `restingHeartRate` | | |
 | readiness | `READINESS_SCORE` = `trainingReadinessScore`; `PLANNING_READINESS_ALIASES` = `trainingReadinessScore`, `overallReadinessScore`, `readinessScore`, `score`, `trainingReadiness` | | Differs from the health mapper's `GARMIN_READINESS_ALIASES` (order and the extra `trainingReadiness`); `training_readiness_history` uses this list. |
-| VO2max | `VO2_MAX_VALUE` = `vO2MaxValue` | | Different capitalisation from the health mapper's `vo2MaxValue`; no reference to this constant was found in `backend`. |
 | weight family | `WEIGHT_KG` = `weightKg`; `WEIGHT_VALUE_ALIASES` = `weightKg`, `weight_kg`, `weight`, `value`; `WEIGHT_READING_ALIASES` = `weightKg`, `weight_kg`, `weight`; `WEIGHT_TIMESTAMP_ALIASES` = `timestampGMT`, `timestamp`, `measurementDate`, `date` | | Same order as the health mapper's `_WEIGHT_VALUE_KEYS` and `_WALK_TIMESTAMP_KEYS`. |
 | sleep | `SLEEP_SECONDS` = `sleepTimeSeconds`; `SLEEP_DURATION_ALIASES` = `GARMIN_SLEEP_DURATION_ALIASES` | | |
 | FTP | `FTP_VALUE` = `functionalThresholdPower`; `ACTIVITY_FTP_ALIASES` = `ftp`, `functionalThresholdPower`; `FTP_RANGE_DAY` = `from`; `FTP_RANGE_VALUE` = `value` | | Activity FTP alias order is the reverse of `GARMIN_FTP_ALIASES`. |
@@ -2075,7 +2073,7 @@ Defined in `backend/canonical/domain_records.py`. A provider status code on one 
 ### `garmin_training_mapping.py`
 
 Status: Live. Pure reader module, no own mapper version and it builds no canonical record itself: it returns `TrainingValue` rows (`day`, `kind`, `raw`, `field`, `key`, `sport`) that `garmin_health_mapping.py` validates and emits as `Observation`s (`_HealthMapping._emit_training`). Called through `map_garmin_health` from `canonical_plans.py` (`_garmin_section_observations`, ingest and re-projection). Its helpers `history_rows` and `morning_readiness_records` are also used by `garmin_status_mapping.py` and by the stored-history readers `backend/sync/garmin_metric_history.py` and `backend/sync/garmin_performance_history.py`.
-Mapper version: none of its own. Replayed by `garmin_health_mapping.py` v 18.
+Mapper version: none of its own. Replayed by `garmin_health_mapping.py` v 19.
 Inputs: Garmin sections of the stored collection payload (one raw record per element, `backend/canonical/garmin_payload.py`):
 `daily_training_status` (SDK `get_daily_training_status(day)`), `training_load_balance` (SDK `get_training_four_week_load_balance(day)`), `training_status` (SDK `get_training_status(day)`, read per day), `weekly_training_status` (SDK `get_weekly_training_status`), `running_tolerance` (SDK `get_running_tolerance`, daily aggregation), `training_readiness_history` (SDK `get_training_readiness_range`) and `endurance_score` (SDK `get_endurance_score`, daily aggregation; only the `groupMap` part is read here). The Personal API does not serve any of them (`PERSONAL_METHODS` in `garmin_personal.py` lists them as SDK-only), so they exist only when the SDK client is connected. `garmin.py` reads `daily_training_status` and `training_load_balance` on every current-metrics read, the other history sections (`running_tolerance`, `training_readiness_history`, `weekly_training_status`, `endurance_score`) once per local day (`GARMIN_DAILY_METRIC_SOURCES`). The provider descriptor for Garmin declares the capabilities `activities`, `activity_details`, `daily_health`, `body`, `thresholds`, `gear`; no code maps an individual section to one of them (which one covers these sections: unverified). Range reads of a source are paused after repeated failures per source name (`garmin_capability_<source>`, `capability_allowed`).
 Evidence: documented only. No file in the sanitized payload directory contains any of these keys (`acuteTrainingLoad`, `dailyTrainingLoadAcute`, `monthlyLoad*`, `toleranceScore`, `groupMap`, `trainingReadinessScore`, `latestTrainingStatusData`). Exercised by the synthetic wire fixtures `tests/fixtures/providers/garmin/daily_training_status.json`, `training_load_balance.json`, `training_status.json`, `running_tolerance.json`, `endurance_score.json`, `readiness.json` and by `tests/test_garmin_training_mapping.py`, `tests/test_garmin_health_mapping.py`, `tests/test_garmin_health_parity.py`, `tests/test_provider_wire_fixtures.py`.
@@ -2113,14 +2111,14 @@ Not mapped (the code reads no other key; real extra keys are unverified because 
 ### `garmin_status_mapping.py`
 
 Status: Live. `map_garmin_status_codes(section, element, *, source_record_id, retrieved_at)` is called from `canonical_plans.py` (`_garmin_batch`) for the sections in `STATUS_SECTIONS` (`hrv`, `readiness`, `training_readiness_history`, `daily_training_status`), at ingest (`garmin_ingest_plan` via `_stored_garmin_batch`) and when stored rows are re-projected (`reprojection_plan`). The result travels as `DomainBatch.categorical` under the raw record's own `source_record_id`; any other section gives an empty tuple.
-Mapper version: none of its own. Replayed by `garmin_health_mapping.py` v 18 (`GARMIN_HEALTH_VERSION` in `canonical_plans.py`).
+Mapper version: none of its own. Replayed by `garmin_health_mapping.py` v 19 (`GARMIN_HEALTH_VERSION` in `canonical_plans.py`).
 Inputs: one stored element of the section (the exact mapper input, `wrapped` / `unwrapped` in `backend/canonical/section_items.py`). Feeds: `hrv` from SDK or Personal API `get_hrv_data_range` (Personal route `/hrv-service/hrv/daily/{start}/{end}`, unwrapped from `hrvSummaries` by `normalize_range_records`; it is the only family of this scope that `PERSONAL_METHODS` serves); `readiness` from SDK `get_training_readiness` (today) and `get_training_readiness_range` (recovery window); `training_readiness_history` from SDK `get_training_readiness_range` (daily metrics); `daily_training_status` from SDK `get_daily_training_status`. The element is a mapping or, for the list shaped sections, one row.
-Evidence: documented only for the keys the mapper reads on the hrv rows. `hrvStatus` exists in the sanitized sleep response `garmin_sleep_daily_2026-11-03` as a top-level key, but the `sleep` section is not a status section and is not read here. `garmin_personal_hrv_2026-11-03` is the single-night shape: it carries `hrvSummary.status` and `hrvSummary.calendarDate` (nested), which this mapper does not read (it reads `hrvStatus` and `calendarDate` on the element itself). Shapes: `tests/fixtures/providers/garmin/hrv.json`, `readiness.json`, `daily_training_status.json` (synthetic) and `tests/test_garmin_training_mapping.py` (`StatusCodeTests`, `PlanTests`). `level` and `trainingStatus` are not in any payload file.
+Evidence: documented only for the keys the mapper reads on the hrv rows. `hrvStatus` exists in the sanitized sleep response `garmin_sleep_daily_2026-11-03` as a top-level key, but the `sleep` section is not a status section and is not read here. `garmin_personal_hrv_2026-11-03` is the single-night shape: it carries `hrvSummary.status` and `hrvSummary.calendarDate` (nested), which this mapper does not read: it reads `hrvStatus` else `status`, and `calendarDate`, on the element itself, which is the shape of a range row (`hrvSummaries[]`; same field names as the observed summary). Shapes: `tests/fixtures/providers/garmin/hrv.json`, `readiness.json`, `daily_training_status.json` (synthetic) and `tests/test_garmin_training_mapping.py` (`StatusCodeTests`, `PlanTests`). `level` and `trainingStatus` are not in any payload file.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
 | `domain` = `hrv_status` | section `hrv` | - | `CategoricalDomain.HRV_STATUS`. Rows: the element if it is a mapping, or at most 1,000 mapping rows of a list. |
-| `code` (`hrv_status`) | `hrvStatus` | text, verbatim (for example `BALANCED`) | Must be text matching the code regex `[A-Za-z][A-Za-z0-9_.-]{0,63}`; free text with spaces, numbers or `None` give nothing, silently. No issue list is produced by this mapper. |
+| `code` (`hrv_status`) | `hrvStatus` else `status` | text, verbatim (for example `BALANCED`) | Must be text matching the code regex `[A-Za-z][A-Za-z0-9_.-]{0,63}`; free text with spaces, numbers or `None` give nothing, silently. No issue list is produced by this mapper. |
 | `domain` = `readiness_level` | sections `readiness`, `training_readiness_history` | - | `CategoricalDomain.READINESS_LEVEL`. |
 | `code` (`readiness_level`) | `level` | text, verbatim | Rows pass `morning_readiness_records` first (see `garmin_training_mapping.py`): re-score readings are dropped, one reading per day is kept, the same one the numeric `readiness` value is taken from. `training_readiness_history` rows come from `history_rows` (wrappers `data`, `weeklyTrainingStatusDTO`, ... are unwrapped). |
 | `domain` = `training_status` | section `daily_training_status` | - | `CategoricalDomain.TRAINING_STATUS`. |
@@ -2132,7 +2130,7 @@ Evidence: documented only for the keys the mapper reads on the hrv rows. `hrvSta
 
 The constructor keywords used are `domain`, `code`, `observed_on`, `observed_at`, `provenance`.
 
-Not mapped: the numeric hrv values of a row (`weeklyAvg`, `lastNightAvg`, ... are mapped by `garmin_health_mapping.py` as `Observation`s); the Personal API single-night spelling `hrvSummary.status` / `hrvSummary.calendarDate` (observed in `garmin_personal_hrv_2026-11-03`; if a stored element had only that shape no code would be produced); readiness `score` and its aliases (numeric, mapped in `garmin_training_mapping.py` / `garmin_health_mapping.py`), `inputContext`, `timestamp`, `timestampLocal` (used only to choose the reading); a numeric `trainingStatus`; every other key of the device record; the `sleep` section (`hrvStatus` in the sleep response is not read); any Garmin status outside the four sections.
+Not mapped: the numeric hrv values of a row (`weeklyAvg`, `lastNightAvg`, ... are mapped by `garmin_health_mapping.py` as `Observation`s); the Personal API single-night wrapper `hrvSummary` (observed in `garmin_personal_hrv_2026-11-03`; if a stored element had only that nested shape no code would be produced, and no HRV value either, since the collector stores range rows); readiness `score` and its aliases (numeric, mapped in `garmin_training_mapping.py` / `garmin_health_mapping.py`), `inputContext`, `timestamp`, `timestampLocal` (used only to choose the reading); a numeric `trainingStatus`; every other key of the device record; the `sleep` section (`hrvStatus` in the sleep response is not read); any Garmin status outside the four sections.
 
 ## Canonical record `GearItem`
 
@@ -2164,7 +2162,7 @@ Defined in `backend/canonical/domain_records.py`. A provider's statement that on
 ### `garmin_gear_mapping.py`
 
 Status: Live. `map_garmin_gear(element, *, source_record_id, retrieved_at)` is called from `canonical_plans.py` (`_garmin_batch`, section `gear`) at ingest and at re-projection; the result is `DomainBatch.gear_items` and `DomainBatch.gear_links` under the raw record `gear/<gearUUID>` (one raw record per gear element).
-Mapper version: none of its own. Replayed by `garmin_health_mapping.py` v 18 (`GARMIN_HEALTH_VERSION`).
+Mapper version: none of its own. Replayed by `garmin_health_mapping.py` v 19 (`GARMIN_HEALTH_VERSION`).
 Inputs: the `gear` section of the Garmin payload, built by `garmin.py` (`_collect_profile_metrics`, `_gear_inventory`) from SDK calls only (`get_user_profile` for the profile id, `get_gear(profile_number)` for the inventory, `get_gear_stats(uuid)` for totals, `get_gear_activities(uuid, 1000)` for the links; fallback `connectapi` read of the same activities URL when the list is an ambiguous empty result). The Personal API returns 404 for all gear calls (`PERSONAL_METHODS` comment), so gear needs the SDK client. An inventory of more than 100 items is rejected as invalid (the whole section is then an error); read at most once per local day (`GARMIN_DAILY_METRIC_SOURCES`) or after a new activity. The descriptor capability is `gear`. The stored element is the SDK gear row plus: `gearUUID` (from `gearUUID` or `uuid`), `gearName` (from `gearName`, else `displayName`, else `customMakeModel`, else `gearMakeName` + space + `gearModelName`), `stats` (the stats response or `{}`), `activity_ids` (list of strings: the `activityId` of each linked activity, order kept, duplicates removed), `activity_ids_truncated` (`True` when 1,000 or more were returned). `backend/sync/garmin.py` (`_keep_gear_activity_ids`) copies the previous `activity_ids` into an item whose link read failed and marks it `activity_ids_stale` `True` (plus the previous `activity_ids_truncated`).
 Evidence: documented only (no gear key in any sanitized payload file). Shapes: `tests/fixtures/providers/garmin/gear.json`, `gear_stats.json` (synthetic SDK wire fixtures), `tests/test_garmin_gear_mapping.py`, `tests/test_sync_garmin_payload.py`, `tests/test_equipment_canonical_sessions.py`, `tests/test_provider_wire_fixtures.py`.
 
@@ -2448,7 +2446,7 @@ Defined in `backend/canonical/domain_records.py`. Zone limits of one metric for 
 
 Local producer. `local_configuration(payload)` validates one API request or a restored history row: `sport` and `metric` enum values, `environment` null/absent or `indoor` (an empty string is rejected), exactly one of `limits` (3 to 7 numbers, absolute) and `percent_limits` (3 to 7 numbers), `threshold` (required for `heart_rate` and `power`), `maximum` (kept for `heart_rate`), optional `valid_from`. `valid_until` and `resting` are always `None`. `ZoneConfigurationService.save` writes it with `upsert_local_zone_configuration`: the same key replaces the active row, and saving unchanged values still re-dates the row so a re-confirmed threshold counts as current. It records a change-history entry (create or update) with a receipt and undo (`restore_in_transaction`, which keeps the replaced save date). `remove` needs `confirmed: true`, retires the row (`state` retired, the row stays) and records a delete entry. A provider refresh replaces only rows of its own source record and never touches local rows. Only active rows are read back.
 
-`effective_zone_configuration(configurations, metric, sport, indoor, day)` (`backend/activities/zone_settings.py`) picks the one configuration that applies: it keeps those with the same `metric` and `sport`, whose `environment` is `None` (or also `indoor`, when the session is indoor or virtual) and that are valid on `day` (`valid_from` <= `day` <= `valid_until`, an open end counts as valid; `day` `None` skips the test). Order of preference: local before providers (provider rank follows the `ProviderId` order: `intervals`, `garmin`, `wahoo`), then an `indoor` configuration before an environment-free one, then the latest `valid_from` (a missing one is the oldest). It returns `None` when nothing applies.
+`effective_zone_configuration(configurations, metric, sport, indoor, day)` (`backend/activities/zone_settings.py`) picks the one configuration that applies: it keeps those with the same `metric` and `sport`, whose `environment` is `None` (or also `indoor`, when the session is indoor or virtual) and that are valid on `day` (`valid_from` <= `day` <= `valid_until`, an open end counts as valid; `day` `None` skips the test). Order of preference: local before providers (providers rank Garmin, Wahoo, Intervals.icu), then an `indoor` configuration before an environment-free one, then the latest `valid_from` (a missing one is the oldest). It returns `None` when nothing applies.
 
 ## Canonical record `PowerCurvePoint`
 
@@ -2503,7 +2501,7 @@ Stored extras: row column `mapper_version` = the module's method version, column
 
 ### `local_load.py`
 
-Status: Live. `LocalLoadStage` is a follow-up stage of the canonical backfill worker (`build_canonical_backfill` in `canonical_backfill_assembly.py`), run first after the backfill on every pass; `refresh_after_job` requests a pass after a completed sync job of provider `intervals`, `garmin` or `wahoo` (`LOAD_INPUT_PROVIDERS`), and a zone-configuration save, removal or undo requests one too.
+Status: Live. `LocalLoadStage` is a follow-up stage of the canonical backfill worker (`build_canonical_backfill` in `canonical_backfill_assembly.py`), run first after the backfill on every pass; `refresh_after_job` requests a pass after a completed sync job of provider `garmin` or `wahoo` (`LOAD_INPUT_PROVIDERS`), and a zone-configuration save, removal or undo requests one too.
 Method: `METHOD_ID` = `local-tss-load`, `METHOD_VERSION` = **5** (`local_tss.py`; `CARD` = `M6`; card `docs/performance-methods/m6-local-tss-load.md`). The numbers below are the code's.
 Inputs: per session the merged summary (`normalized_power`, `avg_hr`, `grade_adjusted_speed_mps`, `avg_speed_mps`, `moving_duration_s` else `elapsed_duration_s` via `summary_duration_s`, `sport`, `environment`, `id`, `started_at`, `recorded_by`); thresholds at the session day (`DatedThresholds`); resting heart rate observations; the profile sex (`athlete_sex`); the stored per-session heart-rate histogram (`stored_heart_rate_histogram`, analysis row `hr_histogram`, read only for sessions that reach the heart-rate branch); local session feedback and the Garmin RPE for strength (`feedback_by_session`, `session_load` of `session_rpe_load.py`). A provider load or intensity (Garmin `activityTrainingLoad`, Wahoo TSS, Intervals.icu) is never an input.
 
@@ -2615,7 +2613,7 @@ Not mapped: `ZoneBoundarySource` is not set here (it belongs to zone distributio
 
 ### `zone_settings.py`
 
-Status: Live. Resolves and reads zone configurations; it constructs no `ZoneConfiguration` and no `Observation`. Local confirmed rows win over provider rows (`_source_rank`: local 0, then `ProviderId` order).
+Status: Live. Resolves and reads zone configurations; it constructs no `ZoneConfiguration` and no `Observation`. Local confirmed rows win over provider rows (`_source_rank`: local 0, then Garmin, Wahoo, Intervals.icu).
 Inputs: stored `ZoneConfiguration` rows (`CanonicalTableReader.zone_configurations`) and the source-policy threshold winners.
 
 | Result (`ZoneSettings` field) | Source | Notes |
@@ -2661,19 +2659,11 @@ State of the code when this map was written. The defects below are tracked in [#
 
 `intervals_activity_mapping.py`, `intervals_activity_detail_mapping.py`, `intervals_activity_detail_projection.py`, `intervals_wellness_mapping.py`, `intervals_zone_mapping.py` and `intervals_power_curve_mapping.py` are kept only to read rows stored before the ingest was removed (#1728). They are removed after the purge has run in production. Their sections remain so that stored rows can still be explained.
 
-### Defects found while writing the map
+### Findings still open
 
-1. **HRV status from the Personal API is not mapped.** `garmin_status_mapping.py` reads `hrvStatus`; the Personal HRV summary names the status `hrvSummary.status` (observed in `garmin_personal_hrv_2026-11-03`). The mapper returns no code for that shape. The SDK sleep payload carries `hrvStatus` only at its top level, which is not a status section.
-2. **Zone configuration provider rank.** `effective_zone_configuration` ranks providers in `ProviderId` declaration order (Intervals.icu, Garmin, Wahoo), so a stored Intervals.icu configuration outranks Garmin and Wahoo ones after the local one, while `PROVIDER_PRECEDENCE` ranks Intervals.icu last. The effect is limited because threshold resolution ignores Intervals.icu thresholds.
-3. **Strength-set selection order.** `select_strength_sets` ranks file sets by provider name (`garmin` before `wahoo`), while stream, lap and zone selection follow `PROVIDER_PRECEDENCE` (Wahoo first).
-4. **FIT message limit.** `fit_file.MAX_FIT_MESSAGES` (100,000) rejects a file before `MAX_STREAM_POINTS` (172,800) can apply.
-5. **Gear key spelling.** `garmin_gear_mapping.py` reads `maximumMeters`; the SDK-shaped fixture `tests/fixtures/providers/garmin/gear.json` spells `maximumMeter`. If the live key is `maximumMeter`, `maximum_distance_m` is always empty. Unverified against a live payload.
-6. **Body Battery day key.** The mapper reads `calendarDate` only; some transport tests key the day as `date`. Without `calendarDate` the charged and drained totals are dropped with a `MISSING` issue. Unverified against a live payload.
-7. **Endurance score group values** are read only when the stored section is a mapping; a list-shaped section (the shape of the `endurance_score.json` fixture) gives none.
-8. **Readiness alias order** differs between the history rows (`trainingReadinessScore` first) and the `readiness` section (`score` first).
-9. **Intervals.icu retired mappers:** `ctLoad` is read as the CTL fallback but the real key is `ctlLoad` (ignored; harmless while `ctl` is present); a zero `icu_w_prime` is stored as 0 J while other thresholds treat zero as unset; a heart-rate zone list with an open top marker above 250 drops the configuration silently.
-10. **Docstrings that disagree with the code:** `garmin_health_mapping.py` says kilograms are rounded to two decimals (only body fat is) and that race-prediction nesting is not searched (it is, to depth 8); `intervals_power_curve_mapping.py` names `intervals_power.cycling_power_points` and `IntervalsReader`, which no longer exist; `wahoo_activity_details.py` says FIT detail includes zone sets (the FIT mapper emits streams, laps and strength sets).
-11. **Dead constants:** `VO2_MAX_VALUE` (`vO2MaxValue`, spelling differs from the health mapper's `vo2MaxValue`) (in `garmin_performance_fields.py`) and `GARMIN_WEIGHT_ALIASES` / `GARMIN_RUNNING_THRESHOLD_ALIASES` (in `garmin_fields.py`) are not read by the health mapper; ten `*_ALIASES` tuples in `intervals_performance_fields.py` have no importer.
-12. **Summary ordering.** `detail_contract.measured_order` has no recording-origin step while `_session_order` in `activity_summary.py` has one; they differ only for non-own records of the same provider rank.
-13. **Garmin cadence zero.** A bike cadence of 0 without a run key returns 0.0 rather than none.
-14. **Stale load-pass trigger.** `LOAD_INPUT_PROVIDERS` in `local_load.py` still lists `intervals`; a completed Intervals.icu job triggers a harmless load pass.
+Found while writing the map and tracked in [#1826](https://github.com/Lukas-Beike/pacecraft/issues/1826); the Garmin defects that could be verified were fixed there (mapper versions 19 and 20).
+
+1. **Gear key spelling.** `garmin_gear_mapping.py` reads `maximumMeters`; the SDK-shaped fixture `tests/fixtures/providers/garmin/gear.json` spells `maximumMeter`, and the installed SDK has no gear response model to decide. If the live key is `maximumMeter`, `maximum_distance_m` is always empty. Unverified against a live payload.
+2. **Endurance score group values** are read only when the stored section is a mapping; a list-shaped section (the shape of the `endurance_score.json` fixture, which holds daily `overallScore` rows) gives none. Whether Garmin ever sends `groupMap` inside a list is unverified.
+3. **Readiness alias order** differs between the history rows (`trainingReadinessScore` first) and the `readiness` section (`score` first). Which spelling Garmin sends first is unverified.
+4. **Intervals.icu retired mappers** (removed with the retirement): `ctLoad` is read as the CTL fallback but the real key is `ctlLoad` (ignored; harmless while `ctl` is present); a zero `icu_w_prime` is stored as 0 J while other thresholds treat zero as unset; a heart-rate zone list with an open top marker above 250 drops the configuration silently; `intervals_power_curve_mapping.py` names `intervals_power.cycling_power_points` and `IntervalsReader`, which no longer exist; ten `*_ALIASES` tuples in `intervals_performance_fields.py` have no importer.

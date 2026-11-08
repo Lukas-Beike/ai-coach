@@ -64,7 +64,7 @@ Mapped sections and their canonical kinds:
   distance (``raceDistance``, ``distanceName``, ``raceType`` or ``distance``) with
   a time. A time is a number, ``mm:ss`` or ``h:mm:ss`` text, or an object with a
   time alias; numbers above 100000 are milliseconds, as the legacy reader reads
-  them. Unlike the legacy reader, deeper nesting is not searched.
+  them. Containers are searched to a bounded depth (8) and list length (100).
 * ``endurance_score``: ENDURANCE_SCORE from ``overallScore``, after unwrapping the
   ``enduranceScoreDTO`` or ``enduranceScoreDTOList`` wrappers. The per-sport
   ``groupMap`` has no score of its own and is not read.
@@ -103,7 +103,7 @@ unknown or non-text unit is reported as UNKNOWN_VALUE. Weight must lie in 30 to
 300 kg and body fat in 2 to 70 percent, the legacy bounds. Body fat units follow
 the legacy reader: ``fraction`` and ``ratio`` are multiplied by 100, ``percent``,
 ``%`` or no unit are used as they are, and any other unit is UNKNOWN_VALUE.
-Kilograms and percent are rounded to two decimals, as the legacy reader rounds.
+Body fat percent is rounded to two decimals, as the legacy reader rounds; kilograms are kept as converted.
 
 * ``daily_training_status``, ``training_load_balance``, ``training_status``,
   ``weekly_training_status``, ``running_tolerance``, ``training_readiness_history``
@@ -223,7 +223,9 @@ from backend.providers.garmin_weight_walk import (
 # Version 17: running threshold power is FTP for running, manual weigh-ins and the
 # history weight are provider-reported, and readiness keeps the morning reading.
 # Version 18: night SpO2, lowest SpO2, respiration rate and sleeping heart rate.
-MAPPER_VERSION: Final = 18
+# Version 19: the Personal API's HRV ``status`` is a status code, and a Body
+# Battery day keyed ``date`` (the SDK's own name) keeps its totals.
+MAPPER_VERSION: Final = 19
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -348,7 +350,8 @@ _HISTORY_KINDS: Final[Mapping[str, tuple[MetricKind, Sport | None, SourceKind]]]
 }
 # Sections dated by the collector's own fallback chain rather than calendarDate only.
 _SECTION_DATE_KEYS: Final[Mapping[str, tuple[str, ...]]] = {
-    _DAILY_STATS: GARMIN_DATE_ALIASES
+    _DAILY_STATS: GARMIN_DATE_ALIASES,
+    _BODY_BATTERY: (_DATE_FIELD, "date"),
 }
 # Counts that are real measurements at zero, such as a rest day without steps.
 _ZERO_ALLOWED: Final = frozenset(

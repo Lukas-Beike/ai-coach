@@ -36,6 +36,7 @@ from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     PROVIDER_PRECEDENCE,
     ProviderId,
+    RecordingOrigin,
     SourceKind,
     StreamChannel,
     ZoneMetric,
@@ -113,9 +114,19 @@ def measured_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
     """Order records by how much their measured values win.
 
     The recording platform's own copy comes first, then the provider rank, then the
-    newest retrieval, then the provider activity id.
+    recording origin (the Wahoo recording leads its Garmin copy, as session bundling
+    decides), then the newest retrieval, then the provider activity id.
     """
-    return sorted(records, key=lambda record: (_own_rank(record), *_tie_break(record)))
+    return sorted(records, key=_measured_key)
+
+
+_ORIGIN_RANK: Final = {RecordingOrigin.WAHOO: 0, RecordingOrigin.GARMIN: 1}
+
+
+def _measured_key(record: ActivityRecord) -> tuple[int, int, int, float, str]:
+    rank, retrieved, activity_id = _tie_break(record)
+    origin = _ORIGIN_RANK.get(record.provenance.recorded_by, len(_ORIGIN_RANK))
+    return _own_rank(record), rank, origin, retrieved, activity_id
 
 
 # The provider where the athlete rates a session first; Intervals.icu copies it.
