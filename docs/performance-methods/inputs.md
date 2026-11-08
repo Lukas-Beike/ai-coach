@@ -25,9 +25,9 @@ Provenance has three separate parts. Fixtures check them separately:
 
 | Input | Canonical storage today | Evidence |
 | --- | --- | --- |
-| Elapsed duration | `elapsed_duration_s` in the record details JSON for every provider (Garmin `elapsedDuration`, then `duration`; Wahoo `duration_total_accum`; Intervals elapsed time for rows stored earlier; since #1445); `duration_s` stays the provider summary duration and `moving_duration_s` separate. | `backend/providers/garmin_activity_mapping.py`, `backend/providers/wahoo_activity_mapping.py`, `backend/providers/intervals_activity_mapping.py`, `backend/db/canonical_store.py` (`_ELAPSED_DURATION_KEY`) |
+| Elapsed duration | `elapsed_duration_s` in the record details JSON for every provider (Garmin `elapsedDuration`, then `duration`; Wahoo `duration_total_accum`; since #1445); `duration_s` stays the provider summary duration and `moving_duration_s` separate. | `backend/providers/garmin_activity_mapping.py`, `backend/providers/wahoo_activity_mapping.py`, `backend/db/canonical_store.py` (`_ELAPSED_DURATION_KEY`) |
 | Local session RPE | `activity_feedback.session_rpe` (0–10) with `session_id` (#1423) and, since schema v18, `session_rpe_rated_at` | `backend/db/schema.py`, `backend/activities/feedback.py` |
-| Provider RPE (Garmin Connect, Intervals `icu_rpe` stored earlier) | `ActivityRecord.rpe`, stored in the activity record details with provider provenance (#1510, closes #1446); the summary marks disagreeing records with `rpe_conflict` | `backend/providers/intervals_activity_mapping.py`, `backend/db/canonical_store.py`, `backend/activities/activity_summary.py` |
+| Provider RPE (Garmin Connect) | `ActivityRecord.rpe`, stored in the activity record details with provider provenance (#1510, closes #1446); the summary marks disagreeing records with `rpe_conflict` | `backend/providers/garmin_activity_mapping.py`, `backend/db/canonical_store.py`, `backend/activities/activity_summary.py` |
 | One session per ride | `bundle_sessions` groups records; `link_activity_sessions` marks the younger session `duplicate` with `merged_into` | `backend/activities/canonical_sessions.py` (`bundle_sessions`), `backend/activities/session_linking.py` (`link_activity_sessions`) |
 
 Consumer trace (method `session-rpe-load` v2, `backend/performance/session_rpe_load.py`, #1427):
@@ -100,7 +100,7 @@ Consumer trace:
 | Input | Canonical storage today | Evidence |
 | --- | --- | --- |
 | Power, speed, distance, time streams | `activity_detail_sets` (with `resolution`) and `activity_stream_channels` | `backend/db/activity_detail_store.py` |
-| Resolution | Garmin Connect `details` charts `downsampled`; FIT files (Wahoo, and Garmin's original file) `full`; Intervals streams stored earlier `full`, legacy cache `full` only when marked | `backend/providers/garmin_activity_detail_mapping.py`, `backend/providers/fit_activity_detail_mapping.py`, `backend/providers/intervals_activity_detail_mapping.py` (`StreamResolution`) |
+| Resolution | Garmin Connect `details` charts `downsampled`; FIT files (Wahoo, and Garmin's original file) `full` | `backend/providers/garmin_activity_detail_mapping.py`, `backend/providers/fit_activity_detail_mapping.py` (`StreamResolution`) |
 | Effort windows | 5–3600 s for cycling including 180, 420 and 720 s; running 60–1200 s including 180, 420 and 720 s | `backend/performance/power_profile.py:POWER_DURATIONS`, `RUNNING_DURATIONS` |
 
 Consumer trace (method `mean-max-curve` version 2, fit `critical-power-speed` version 2):

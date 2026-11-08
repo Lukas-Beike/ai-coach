@@ -176,7 +176,7 @@ The system SHALL read activity rows and sync metadata from one local read snapsh
 
 #### Scenario: Guarded kv detail access
 - **WHEN** the repository test suite runs
-- **THEN** a guard test fails if any production module outside its allowlist (the detail store, the backfill, retirement and canonical modules and the legacy mapper) references the `activity_detail:` kv record prefix or the legacy detail record reader.
+- **THEN** a guard test fails if any production module references the `activity_detail:` kv record prefix or the legacy detail record reader.
 
 #### Scenario: Activity list freshness from canonical coverage
 - **WHEN** the activity list is read and canonical coverage stores a current Garmin or Wahoo activity fetch time
@@ -186,48 +186,9 @@ The system SHALL read activity rows and sync metadata from one local read snapsh
 - **WHEN** no current Garmin or Wahoo activity fetch is stored
 - **THEN** `snapshot_synced_at` is null, the list still renders, and no snapshot timestamp is substituted.
 
-Detailed contract: The sync time reported with the activity list (`snapshot_synced_at`) SHALL be the activity sync time (the oldest current activity fetch of Garmin and Wahoo in the canonical provider coverage; a provider fetched more than 14 days before the newest one is left out; Intervals.icu never counts) and SHALL be null when none is stored. A Garmin write moves its activity fetch time only for a complete activity list read that reaches today; a truncated or row-skipping Wahoo listing keeps the last one. Activity freshness SHALL remain independent of unrelated performance refresh timestamps. Production activity, detail, report and calendar reads SHALL NOT read `activity_detail:<sha>` kv records; only the allowlisted maintenance modules may read them. The key `snapshot_synced_at` keeps its name.
+Detailed contract: The sync time reported with the activity list (`snapshot_synced_at`) SHALL be the activity sync time (the oldest current activity fetch of Garmin and Wahoo in the canonical provider coverage; a provider fetched more than 14 days before the newest one is left out; Intervals.icu never counts) and SHALL be null when none is stored. A Garmin write moves its activity fetch time only for a complete activity list read that reaches today; a truncated or row-skipping Wahoo listing keeps the last one. Activity freshness SHALL remain independent of unrelated performance refresh timestamps. Production activity, detail, report and calendar reads SHALL NOT read `activity_detail:<sha>` kv records, and no production module does. The key `snapshot_synced_at` keeps its name.
 
-Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService.recent`, `backend/activities/sync_time.py:activities_synced_at`; `tests/test_activity_read_service.py:test_page_filters_orders_attaches_feedback_and_uses_cursor`, `tests/test_activity_read_service.py:test_page_names_no_intervals_detail_failure`, `tests/test_activity_read_service.py:test_activity_sync_time_comes_from_canonical_coverage`, `tests/test_activity_read_service.py:test_activity_sync_time_is_unknown_without_stored_coverage`, `tests/test_activity_detail_kv_guard.py:test_production_code_does_not_touch_kv_detail_records`.
-
-### Requirement: Verified kv detail retirement
-The canonical backfill runner SHALL run a retirement stage after the activity detail backfill. Per kv detail record it SHALL map the record with the legacy mapper, refill canonical lap metrics that are missing, compare the defined fields with the canonical rows, and delete the kv record in the same transaction only when every comparison passes. It SHALL NOT request provider data, and unverifiable records SHALL stay unchanged and be counted.
-
-#### Scenario: Verified record retired
-- **WHEN** a kv record maps to canonical sets and an analysis payload that match on every compared field
-- **THEN** the kv record is deleted in the batch transaction and the stage state counts it as retired.
-
-#### Scenario: Missing lap metric refilled
-- **WHEN** a canonical stored Intervals.icu lap set written before schema v13 has a NULL `max_speed_mps` or another NULL lap metric that the matching kv lap carries
-- **THEN** that NULL is filled from the kv lap before the comparison, and non-NULL canonical values are never overwritten.
-
-#### Scenario: Unverifiable record kept
-- **WHEN** a record has no active stored Intervals.icu activity record, has no canonical set, fails a compared field, or holds downsampled streams that cannot be proven against the canonical streams
-- **THEN** the kv record and its canonical rows are unchanged and the stage state counts it under its reason.
-
-#### Scenario: Interrupted batch
-- **WHEN** a retirement batch fails after some refills or deletions
-- **THEN** the whole batch transaction rolls back, the stage is marked failed in its own transaction, and no kv record is lost without its verified canonical copy.
-
-#### Scenario: Same-build restart
-- **WHEN** the application restarts after a completed or interrupted retirement
-- **THEN** the stage resumes from its stored cursor or reports completion, and repeating it changes no further rows.
-
-#### Scenario: Upgrade from supported released schemas
-- **WHEN** populated databases built from the frozen schema v21 fixture with seeded kv detail records are upgraded and the backfill and retirement stages run
-- **THEN** every seeded detail remains readable as `activity_detail.v1`, verified kv records are retired, and unverifiable ones remain stored.
-
-#### Scenario: Legacy target basis
-- **WHEN** a preserved kv detail record uses the former FTP key in its frozen target basis
-- **THEN** canonical backfill stores the equivalent neutral basis, and retirement compares normalized values without discarding conflicting data.
-
-#### Scenario: Backup, restore and privacy export
-- **WHEN** a database is backed up, restored or privacy-exported after retirement
-- **THEN** the canonical detail sets, stream channels, laps, zone times and analysis payloads are present, and retired kv records are absent from the exported application state.
-
-Evidence: `backend/sync/activity_detail_retirement.py:ActivityDetailRetirement`, `backend/db/activity_detail_store.py:refill_lap_metrics`, `backend/sync/canonical_backfill_assembly.py`; `tests/test_activity_detail_retirement.py:test_proven_record_is_deleted_and_other_keys_are_kept`, `tests/test_activity_detail_retirement.py:test_missing_lap_speed_is_refilled_before_the_record_is_retired`, `tests/test_activity_detail_retirement.py:test_lap_metric_that_differs`, `tests/test_activity_detail_retirement.py:test_failed_batch_rolls_back_refills_and_deletions`, `tests/test_activity_detail_retirement.py:test_restart_resumes_from_the_cursor_and_repeats_nothing`, `tests/test_activity_detail_retirement_upgrade.py:test_released_schemas_upgrade_and_retire_proven_records` (the SQLCipher variant is skipped without SQLCipher), `tests/test_activity_detail_retirement_backup.py:test_restored_backup_serves_the_same_document`, `tests/test_activity_detail_retirement_backup.py:test_privacy_export_holds_the_retired_detail_in_the_canonical_files`. Related existing behavior: `backend/sync/activity_detail_backfill.py:ActivityDetailBackfill`, `backend/sync/canonical_backfill_worker.py`. The Intervals.icu purge deletes the remaining kv detail records and the stage state with the rest of the ingest store.
-
-Additional evidence: `tests/test_activity_detail_canonical.py::test_legacy_target_basis_is_normalized_without_changing_source`; `tests/test_activity_detail_retirement.py::test_legacy_target_basis_is_compared_after_normalization`; `tests/test_activity_detail_retirement.py::test_conflicting_legacy_target_basis_is_not_retired`.
+Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService.recent`, `backend/activities/sync_time.py:activities_synced_at`; `tests/test_activity_read_service.py:test_page_filters_orders_attaches_feedback_and_uses_cursor`, `tests/test_activity_read_service.py:test_activity_sync_time_comes_from_canonical_coverage`, `tests/test_activity_read_service.py:test_activity_sync_time_is_unknown_without_stored_coverage`, `tests/test_activity_detail_kv_guard.py:test_production_code_does_not_touch_kv_detail_records`.
 
 ### Requirement: Garmin status compares against canonical sessions
 The system SHALL compute the Garmin status counts `activities` and `duplicate_activities_skipped` from the canonical sessions of the recent window only: a session with a Garmin Connect record counts as an activity, or as a skipped duplicate when a stored Intervals.icu record shares the session; a Garmin copy beside a Wahoo record alone stays an activity.
