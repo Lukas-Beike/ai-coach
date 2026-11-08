@@ -29,9 +29,7 @@ from backend.performance.training_focus import training_focus
 # The reason an unavailable context gives while the canonical source serves nothing yet.
 REASON_CANONICAL_PENDING: Final = "canonical_pending"
 PENDING_STATUS: Final = "Daten werden vorbereitet"
-# The status while stored compact-only Intervals.icu activities are missing.
-# The source of a context with a canonical Intervals.icu sync.
-# The source of a context without an Intervals.icu sync, e.g. a Garmin-only setup.
+# The source of a context built from the stored provider values.
 STORED_PROVIDERS_SOURCE: Final = "Gespeicherte Provider-Daten"
 
 # Recovery sources whose freshness comes from the Garmin view, including the
@@ -145,8 +143,8 @@ def current_performance_context(
     ``session_feedback`` reads the local session feedback, so load rollups can
     report the session-RPE load of sessions without a TSS-scale load.
 
-    The canonical inputs supply activities, wellness, load, body, Garmin and
-    athlete-setting values and the Intervals.icu sync time;
+    The canonical inputs supply activities, load, body, Garmin and
+    athlete-setting values and the activity sync time;
     ``EMPTY_PERFORMANCE_INPUTS`` stands for none. ``garmin`` is the Garmin sync
     status and supplies only freshness. The context is unavailable without any
     provider value in the canonical inputs, also when only the athlete's own

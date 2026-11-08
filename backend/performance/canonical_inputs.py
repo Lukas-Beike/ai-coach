@@ -186,8 +186,8 @@ def activity_summaries_with_sync_time(
 ) -> tuple[tuple[ActivitySummary, ...], str | None]:
     """Read the activity summaries and their sync time in a read of their own.
 
-    The sync time is the canonical coverage fetch time of the Intervals.icu
-    activities, None when none is stored. The read never waits for the writer.
+    The sync time is the canonical coverage fetch time of the activities, None
+    when none is stored. The read never waits for the writer.
     """
     summaries, synced_at, _loads = _read_summaries(source, load_days=False)
     return summaries, synced_at
@@ -263,7 +263,7 @@ def resolve_reader(reader: ObservationReader, db: Any) -> ObservationReader:
 class ReadOnceObservationReader:
     """Serve the reads of one snapshot unit from one unbounded read per kind.
 
-    The wellness days, the current metrics and the recovery inputs all ask for
+    The current metrics and the recovery inputs all ask for
     overlapping observations, so each kind reaches the
     database once per call and the bounds are applied in memory.
     """

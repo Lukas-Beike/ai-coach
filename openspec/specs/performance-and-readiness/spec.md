@@ -160,8 +160,8 @@ The system SHALL compose sleep, resting HR, HRV, readiness, averages and plannin
 - **WHEN** Garmin night HRV, sleep or resting HR exists and Intervals.icu holds values of the same kind, equal to Garmin's or not
 - **THEN** neither the current value nor any planning day takes the Intervals.icu value, and with only Intervals.icu values the metric is unknown.
 
-#### Scenario: Garmin-only recovery without a wellness day
-- **WHEN** no wellness day exists but Garmin recovery observations do
+#### Scenario: Garmin-only recovery
+- **WHEN** only Garmin recovery observations exist
 - **THEN** the Garmin values are still selected for the current recovery context and personal baselines.
 
 Evidence: `backend/performance/source_policy.py:select_daily`, `backend/performance/recovery_context.py:performance_recovery_context`, `backend/performance/planning_recovery.py:planning_recovery_view`, `backend/performance/freshness.py:garmin_source_freshness`; `tests/test_source_policy.py:CurrentSelectionTests`, `tests/test_planning_canonical_recovery.py:CanonicalPlanningRecoveryTests.test_an_intervals_series_fills_no_garmin_gap`, `tests/test_performance_planning_recovery.py:test_saved_and_current_morning_body_battery`, `tests/test_performance_freshness.py:test_current_stale_partial_unknown_and_notes`, `tests/test_performance_recovery_context.py`, `tests/test_characterization_recovery.py`.

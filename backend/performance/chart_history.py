@@ -118,7 +118,7 @@ def analysis_history(
 ) -> dict[str, Any]:
     """Use dated provider history, never backfill today's settings into the past.
 
-    ``canonical`` supplies the activity summaries, wellness days and Garmin
+    ``canonical`` supplies the activity summaries and Garmin
     history read through the canonical ports; ``garmin`` is the Garmin sync
     status.
     """
