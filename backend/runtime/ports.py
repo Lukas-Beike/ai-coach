@@ -87,31 +87,6 @@ class ActivitySummaryReader(Protocol):
     ) -> tuple[ActivitySummary, ...]: ...
 
 
-class ActivityRowReader(Protocol):
-    """Reads the raw Intervals.icu activity payloads behind the canonical records.
-
-    Sync owner only (detail fetch, snapshot restore); a guard rejects calls
-    outside ``backend/sync/``. Consumers read session summaries instead.
-
-    Rows are provider dictionaries (device source, ``icu_*`` fields, laps, gear),
-    untrusted data, before any de-duplication. ``start`` and ``end`` are inclusive
-    bounds on the athlete-local date of each activity, as in ``ActivityReader``.
-    Deleted or tombstoned activities are never returned. The legacy source keeps
-    the snapshot order (newest first); the table source orders newest first by
-    activity start, then id. ``limit`` keeps only the newest rows; the table
-    source applies it before reading the payloads.
-    """
-
-    def intervals_activity_payloads(
-        self,
-        db: Any,
-        *,
-        start: date | None = None,
-        end: date | None = None,
-        limit: int | None = None,
-    ) -> tuple[dict[str, Any], ...]: ...
-
-
 # One provider activity: its provider id value and its provider activity id.
 type ProviderActivityKey = tuple[str, str]
 
@@ -131,27 +106,12 @@ class ActivityFingerprintReader(Protocol):
     ) -> dict[ProviderActivityKey, str]: ...
 
 
-class IntervalsSummaryRowReader(Protocol):
-    """Reads the stored Intervals.icu summary payload of one activity.
-
-    Untrusted provider data, already ingest-sanitized; the activity detail
-    document reads its summary metrics and live zone times from it. None when
-    the activity has no active raw record.
-    """
-
-    def intervals_summary_row(
-        self, db: Any, provider_activity_id: str
-    ) -> dict[str, Any] | None: ...
-
-
 class ActivityRowAndSummaryReader(
-    ActivityRowReader,
     ActivitySummaryReader,
     ActivityFingerprintReader,
-    IntervalsSummaryRowReader,
     Protocol,
 ):
-    """Raw activity rows for provider-side reads and summaries for consumers."""
+    """Activity summaries and summary fingerprints for consumers."""
 
 
 class ObservationReader(Protocol):
@@ -245,13 +205,11 @@ class CanonicalReader(
     ActivityReader,
     ActivityFingerprintReader,
     ActivityMaxHrReader,
-    ActivityRowReader,
-    IntervalsSummaryRowReader,
     ActivitySessionReader,
     ObservationReader,
     Protocol,
 ):
-    """The reads a canonical source serves: activities, raw rows and observations.
+    """The reads a canonical source serves: activities and observations.
 
     Every source also reports its per-metric windows, so the selector can delegate
     ``metric_windows`` to whichever source serves the current read.

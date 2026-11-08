@@ -149,7 +149,6 @@ class GarminReadFixture(CanonicalReadFixture):
             redactor=Redactor(lambda: config),
             local_now=lambda: LOCAL_NOW,
             canonical=GarminCanonicalSources(
-                activity_rows=lambda: selector,
                 observations=lambda: selector,
                 activity_summaries=lambda: selector,
             ),

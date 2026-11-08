@@ -158,7 +158,6 @@ def analysis_history(
             garmin,
             today,
             canonical=canonical.body,
-            wellness_days=canonical.history_wellness_days or (),
             garmin_ftp=garmin_canonical.performance_history.get(
                 "cycling_ftp_watts", {}
             ),

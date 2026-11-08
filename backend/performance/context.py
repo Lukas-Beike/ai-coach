@@ -73,7 +73,6 @@ def _has_provider_values(canonical: CanonicalPerformanceInputs) -> bool:
     recovery = canonical.recovery
     return bool(
         canonical.activities
-        or canonical.history_wellness_days
         or canonical.daily_health
         or canonical.current != NO_CURRENT_INPUTS
         or (recovery is not None and any(recovery.observations.values()))

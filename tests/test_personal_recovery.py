@@ -48,7 +48,7 @@ class PersonalRecoveryTests(unittest.TestCase):
                 {row["metric"]: row["measurement"] for row in result["baselines"]},
             )
 
-    def test_future_stale_and_separate_hrv_methods_are_not_classified(self):
+    def test_future_stale_and_sdnn_nights_are_not_classified(self):
         rows = self.rows(30)
         for row in rows:
             row["hrvSDNN"] = 30
@@ -63,7 +63,7 @@ class PersonalRecoveryTests(unittest.TestCase):
         )
         result = mapped_personal_recovery(rows, {}, {}, self.today)
         self.assertEqual(
-            {"RMSSD", "SDNN"},
+            {"RMSSD"},
             {
                 row["measurement"]
                 for row in result["baselines"]

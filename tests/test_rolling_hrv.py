@@ -5,10 +5,10 @@ import unittest
 from dataclasses import replace
 from datetime import date, timedelta
 
-from canonical_recovery_support import mapped_personal_recovery, mapped_recovery_inputs
+from canonical_recovery_support import mapped_recovery_inputs
 
 from backend.canonical.records import MeasurementContext
-from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.canonical.vocabulary import MetricKind
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.rolling_hrv import rolling_lnrmssd
 
@@ -196,15 +196,15 @@ class PersonalRecoveryRollingTests(unittest.TestCase):
         self.assertEqual((5, 4), (rolling["window_nights"], rolling["baseline_nights"]))
         self.assertEqual("insufficient_data", rolling["status"])
 
-    def test_intervals_series_has_no_rolling_comparison(self):
+    def test_intervals_rows_give_no_baseline(self):
         rows = [
             {"id": day(age), "sleepSecs": 7 * 3600, "restingHR": 50, "hrv": 40}
             for age in range(31)
         ]
-        result = mapped_personal_recovery(rows, {}, {}, TODAY)
-        for row in result["baselines"]:
-            self.assertEqual(ProviderId.INTERVALS.value, row["source_provider"])
-            self.assertNotIn("rolling", row)
+        inputs = mapped_recovery_inputs({}, rows)
+        self.assertEqual(
+            [], personal_recovery({}, TODAY, canonical=inputs)["baselines"]
+        )
 
 
 if __name__ == "__main__":

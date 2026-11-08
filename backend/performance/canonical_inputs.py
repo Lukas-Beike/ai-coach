@@ -1,9 +1,7 @@
 """Read performance inputs through canonical observation and activity ports.
 
-Wellness values come only from provider-neutral ``WellnessDay`` observations.
-The current window covers 90 days ending on its latest day; history keeps every
-stored day. Snapshot wellness sections do not affect these inputs. Activities
-cover the year before ``as_of``, extended to the current window's first day.
+Activities cover the year before ``as_of``, extended to the current window's
+first day. Provider snapshot sections do not affect these inputs.
 """
 
 from __future__ import annotations
@@ -14,13 +12,12 @@ from datetime import date, timedelta
 from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary
-from backend.activities.sync_time import activities_synced_at, intervals_synced_at
+from backend.activities.sync_time import activities_synced_at
 from backend.canonical.domain_records import (
     ZoneConfiguration,
 )
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
-from backend.performance import wellness_days
 from backend.performance.canonical_body import (
     EMPTY_BODY_INPUTS,
     CanonicalBodyInputs,
@@ -45,7 +42,6 @@ from backend.performance.source_policy import (
     NO_PREFERENCES,
     SourcePreferences,
 )
-from backend.performance.wellness_days import WellnessDay
 from backend.runtime.ports import (
     ActivityMaxHrReader,
     ActivityRowAndSummaryReader,
@@ -68,8 +64,6 @@ class CanonicalPerformanceInputs:
     the personal baselines, or None when they were not read.
 
     ``activities`` are the neutral activity summaries, one per session.
-    ``history_wellness_days`` keeps all stored body-history days and their
-    provenance.
 
     ``garmin`` holds the Garmin performance values and ``daily_health`` the daily
     totals of the last ``DAILY_HEALTH_DAYS`` days by ISO date; both are None when
@@ -79,9 +73,6 @@ class CanonicalPerformanceInputs:
     ``local_load_days`` is the stored local session load (card M6) per local ISO
     day of the whole history, None when the reader does not store it.
 
-    ``intervals_synced_at`` is the newest Intervals.icu fetch time of the
-    canonical provider coverage (ISO text), None without an Intervals.icu sync; it
-    is the one Intervals.icu sync time of the performance and Coach reads.
     ``activities_synced_at`` is the fetch time of the activities alone: wellness
     or profile refreshes do not advance it.
 
@@ -92,14 +83,12 @@ class CanonicalPerformanceInputs:
     current: CanonicalCurrentInputs = NO_CURRENT_INPUTS
     recovery: CanonicalRecoveryInputs | None = None
     activities: tuple[ActivitySummary, ...] | None = None
-    history_wellness_days: tuple[WellnessDay, ...] | None = None
     garmin: GarminCanonicalMetrics | None = None
     daily_health: Mapping[str, Mapping[str, Any]] | None = None
     local_load_days: Mapping[str, float] | None = None
     body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
     pending: bool = False
     backfill_failed: bool = False
-    intervals_synced_at: str | None = None
     activities_synced_at: str | None = None
     # The athlete's preferred source per metric group, read with these inputs.
     preferences: SourcePreferences = NO_PREFERENCES
@@ -156,19 +145,18 @@ def with_read_status(
     """Mark the inputs with the canonical read state of ``source``, if it reports one.
 
     Before the first completed backfill the reads are empty and the inputs are
-    ``PENDING_PERFORMANCE_INPUTS``; afterwards they are served unchanged. With a coverage reader the inputs
-    carry the stored Intervals.icu sync time (``intervals_synced_at``) and the
-    activity sync time of the active providers (``activities_synced_at``).
+    ``PENDING_PERFORMANCE_INPUTS``; afterwards they are served unchanged. With a
+    coverage reader the inputs carry the activity sync time of the active
+    providers (``activities_synced_at``).
     """
     marked = _read_state(source, db, inputs)
     if marked is None or marked.pending or source.coverage is None:
         return marked
     coverage = source.coverage()
-    synced = intervals_synced_at(coverage, db)
     activities = activities_synced_at(coverage, db)
-    if synced is None and activities is None:
+    if activities is None:
         return marked
-    return _changed(marked, intervals_synced_at=synced, activities_synced_at=activities)
+    return _changed(marked, activities_synced_at=activities)
 
 
 def _changed(
@@ -343,7 +331,6 @@ class _CarriedRows:
     """The day views, activity rows and Garmin values carried by an input."""
 
     activities: tuple[ActivitySummary, ...] | None
-    history_wellness_days: tuple[WellnessDay, ...]
     garmin: GarminCanonicalMetrics
     daily_health: Mapping[str, Mapping[str, Any]]
     body: CanonicalBodyInputs
@@ -360,7 +347,6 @@ class _CarriedRows:
             current=current,
             recovery=self.recovery,
             activities=self.activities,
-            history_wellness_days=self.history_wellness_days,
             garmin=self.garmin,
             daily_health=self.daily_health,
             body=self.body,
@@ -378,20 +364,19 @@ def read_performance_inputs(
     include_local_load: bool = False,
     preferences: SourcePreferences = NO_PREFERENCES,
 ) -> CanonicalPerformanceInputs | None:
-    """Read canonical activity summaries and wellness days in one selected unit.
+    """Read canonical activity summaries and provider values in one selected unit.
 
     ``preferences`` (the athlete's preferred sources) is applied by every
     selection over these inputs and carried with them.
 
-    No snapshot section is read. None means no activity reader, no observed
-    wellness day. ``as_of`` is the athlete-local day. ``include_local_load``
+    No snapshot section is read. None means no activity reader.
+    ``as_of`` is the athlete-local day. ``include_local_load``
     also reads the whole-history local load per day (``local_load_days``);
     otherwise it stays None.
     """
     reader = resolve_reader(reader, db)
     if not isinstance(reader, ReadOnceObservationReader):
         reader = read_once(reader)
-    history = wellness_days.read_wellness_days(reader, db)
     activities = (
         None
         if activity_reader is None
@@ -399,11 +384,10 @@ def read_performance_inputs(
             db, start=as_of - timedelta(days=ACTIVITY_HISTORY_DAYS - 1)
         )
     )
-    if activities is None and not history:
+    if activities is None:
         return None
     carried = _CarriedRows(
         activities=activities,
-        history_wellness_days=history,
         garmin=read_garmin_state(reader, db).metrics,
         daily_health=read_daily_health_by_date(
             reader, db, start=as_of - timedelta(days=DAILY_HEALTH_DAYS), end=as_of

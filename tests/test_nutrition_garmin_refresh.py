@@ -115,18 +115,17 @@ class GarminNutritionRefreshTests(unittest.TestCase):
             GarminSyncStatus.from_state(garmin),
             today,
             canonical=garmin_body_from_payload(garmin, today),
-            wellness_days=(),
             garmin_ftp={},
         )
         metrics = projection["windows"]["14d"]["metrics"]
         weight_point = next(
             row
-            for row in metrics["weight_kg"][1]["points"]
+            for row in metrics["weight_kg"][0]["points"]
             if row["date"] == today.isoformat()
         )
         body_fat_point = next(
             row
-            for row in metrics["body_fat_pct"][1]["points"]
+            for row in metrics["body_fat_pct"][0]["points"]
             if row["date"] == today.isoformat()
         )
 

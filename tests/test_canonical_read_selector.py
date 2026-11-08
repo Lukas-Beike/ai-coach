@@ -126,7 +126,6 @@ class SelectorTests(CanonicalReadFixture):
         self.assertFalse(self.read(selector.serves_tables))
         self.assertIs(self.read(selector.reader_for), PENDING_READER)
         self.assertEqual(self.read(selector.activities), ())
-        self.assertEqual(self.read(selector.intervals_activity_payloads), ())
         self.assertEqual(self.read(selector.activity_summaries), ())
         self.assertEqual(
             self.read(selector.activity_max_hr, ProviderId.INTERVALS, low=0, high=1000),
@@ -522,11 +521,6 @@ class SelectorTests(CanonicalReadFixture):
                     self.read(selector.observations, kind),
                     self.read(self.table.observations, kind),
                 )
-
-    def test_raw_snapshot_serves_its_activity_payloads_after_completion(self) -> None:
-        selector = make_selector(self)
-        populate(self)
-        self.assertTrue(self.read(selector.intervals_activity_payloads))
 
     def test_metric_windows_are_empty_before_the_first_backfill(self) -> None:
         self.assertEqual(self.read(make_selector(self).metric_windows), ())

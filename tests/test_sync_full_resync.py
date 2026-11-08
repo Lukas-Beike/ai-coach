@@ -14,7 +14,7 @@ from provider_runtime_fakes import ACME_ID, acme_descriptor, fake_binding
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
+from backend.providers.descriptors import GARMIN_ID
 from backend.sync.full_resync import (
     PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
@@ -90,33 +90,22 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             persist_connections=False,
         )
         self.key_values = KeyValueRepository(lambda: NOW)
-        self.intervals_gate = RecordingResyncGate("Intervals.icu")
         self.garmin_gate = RecordingResyncGate("Garmin")
-        self.intervals_service = SimpleNamespace(sync=self._intervals_sync)
         self.garmin_service = SimpleNamespace(
             configured=lambda: True, sync=self._garmin_sync
         )
         self.competition_service = SimpleNamespace(sync=self._competition_sync)
         self.observer = RecordingObserver()
         self.logger = RecordingLogger()
-        self.intervals_calls = []
         self.garmin_calls = []
         self.competition_calls = []
-        self.intervals_result = {"status": "ok", "activities": 12}
         self.competition_result = {"status": "ok", "imported": 2}
         self.garmin_result = {"status": "ok", "records": 20}
-        self.intervals_error = None
         self.service = self._service()
 
     def tearDown(self):
         self.database.close()
         self.temporary_directory.cleanup()
-
-    def _intervals_sync(self, *args, **kwargs):
-        self.intervals_calls.append((args, kwargs))
-        if self.intervals_error:
-            raise self.intervals_error
-        return self.intervals_result
 
     def _garmin_sync(self, **kwargs):
         self.garmin_calls.append(kwargs)
@@ -135,7 +124,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             lambda: 10.0,
             operation_id_factory or (lambda: "generated-operation"),
         )
-        gates = {INTERVALS_ID: self.intervals_gate, GARMIN_ID: self.garmin_gate}
+        gates = {GARMIN_ID: self.garmin_gate}
         handlers = full_resync_handlers(
             garmin_service=self.garmin_service,
             all_sync_days=-1,
@@ -207,7 +196,6 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.status, 400)
         self.assertEqual(caught.exception.message, "Unbekannte Anbindung.")
 
-
     def test_garmin_without_configuration_uses_existing_message(self):
         self.garmin_service.configured = lambda: False
         with self.assertRaises(AppError) as caught:
@@ -218,8 +206,6 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             "Garmin ist nicht konfiguriert oder nicht verfügbar.",
         )
         self.assertFalse(self.garmin_gate.is_resetting())
-
-
 
     def test_garmin_receives_full_days_reason_and_operation_id(self):
         result = self.service.resync("garmin", "garmin-operation")
@@ -239,8 +225,6 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(self._get_value("garmin", "status"), "")
         self.assertEqual(self._get_value("garmin", "last_at"), NOW)
         self.assertFalse(self.garmin_gate.is_resetting())
-
-
 
     def test_gate_and_context_are_restored_when_status_cleanup_fails(self):
         class FailingStatusCleanupRepository:
@@ -264,10 +248,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
 
         self.assertEqual(self._get_value("garmin", "running"), "0")
         self.assertEqual(restored, {"operation_id": "outer", "trigger": "chat"})
-        self.assertFalse(self.intervals_gate.is_resetting())
-
-
-
+        self.assertFalse(self.garmin_gate.is_resetting())
 
 
 ACME_KEYS = (

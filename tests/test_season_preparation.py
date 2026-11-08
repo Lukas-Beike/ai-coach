@@ -12,7 +12,6 @@ from backend.planning.season_preparation import (
 
 TODAY = date(2026, 10, 2)
 BASIS_DAY = date(2026, 10, 1)
-SNAPSHOT = {"synced_at": "2026-10-02T06:00:00Z"}
 
 
 def _inputs(ctl=50, atl=60, completed=()):
@@ -25,10 +24,9 @@ def _inputs(ctl=50, atl=60, completed=()):
     )
 
 
-def _season(rows, events, today, observations=None, snapshot=None):
+def _season(rows, events, today, observations=None):
     """Run season_preparation over fixed activity rows."""
     return season_preparation(
-        (SNAPSHOT if snapshot is None else snapshot).get("synced_at"),
         events,
         today,
         "UTC",
@@ -37,9 +35,8 @@ def _season(rows, events, today, observations=None, snapshot=None):
     )
 
 
-def _scenarios(plan, values, inputs=None, snapshot=None):
+def _scenarios(plan, values, inputs=None):
     return load_scenarios(
-        (SNAPSHOT if snapshot is None else snapshot).get("synced_at"),
         plan,
         TODAY,
         values,
@@ -136,14 +133,13 @@ class SeasonPreparationTests(unittest.TestCase):
             ]
         }
         values = {"end": "2026-10-04", "load_scale": 0.8, "taper_days": 2}
-        snapshot = dict(SNAPSHOT)
-        original = deepcopy((snapshot, plan, values))
-        result = _scenarios(plan, values, snapshot=snapshot)
-        self.assertEqual(result, _scenarios(plan, values, snapshot=snapshot))
-        self.assertEqual(original, (snapshot, plan, values))
+        original = deepcopy((plan, values))
+        result = _scenarios(plan, values)
+        self.assertEqual(result, _scenarios(plan, values))
+        self.assertEqual(original, (plan, values))
         self.assertEqual(100, result["curves"][0]["points"][1]["load"])
         self.assertEqual(40, result["curves"][1]["points"][1]["load"])
-        changed = _scenarios({"training_calendar": []}, values, snapshot=snapshot)
+        changed = _scenarios({"training_calendar": []}, values)
         self.assertNotEqual(result["input_sha256"], changed["input_sha256"])
 
     def test_basis_comes_from_the_inputs_and_names_its_source(self):
@@ -156,20 +152,6 @@ class SeasonPreparationTests(unittest.TestCase):
                 "source": "Lokal berechnet (M7)",
             },
             result["basis"],
-        )
-
-    def test_scenarios_ignore_snapshot_wellness_and_activities(self):
-        snapshot = {
-            **SNAPSHOT,
-            "recent_wellness": [{"id": "2026-10-01", "ctl": 1, "atl": 2}],
-            "recent_activities": [
-                {"id": "x", "started_at_local": "2026-10-02T08:00:00"}
-            ],
-            "raw_provider_data": {"activities": [{"id": "y"}]},
-        }
-        values = {"end": "2026-10-04"}
-        self.assertEqual(
-            _scenarios({}, values), _scenarios({}, values, snapshot=snapshot)
         )
 
     def test_missing_basis_or_planned_load_is_not_zero_filled(self):

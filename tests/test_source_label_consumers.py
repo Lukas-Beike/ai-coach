@@ -51,6 +51,6 @@ class EmittedSourceOutputTests(unittest.TestCase):
             basis_day=date(2026, 10, 1), ctl=50.0, atl=60.0, completed_today=()
         )
         result = season_preparation.load_scenarios(
-            None, {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
+            {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
         )
         self.assertEqual("Lokal berechnet (M7)", result["basis"]["source"])

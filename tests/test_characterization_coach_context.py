@@ -16,7 +16,6 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
-from activity_row_support import FixedActivityRows
 from canonical_recovery_support import NoActivityRows, recovery_only_inputs
 from intervals_compaction import compact_snapshot
 from performance_day_support import (
@@ -269,7 +268,6 @@ def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionServ
         redactor=redactor,
         local_now=lambda: datetime(2026, 5, 4, 8, tzinfo=UTC),
         canonical=GarminCanonicalSources(
-            activity_rows=lambda: FixedActivityRows(),
             observations=lambda: StubReader(
                 tuple(
                     map_garmin_health(
@@ -498,7 +496,7 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
 
         self.assertNotIn(VENDOR_SENTINEL, json.dumps(result, ensure_ascii=False))
 
-    def test_garmin_context_requests_performance_only_without_intervals_snapshot(
+    def test_garmin_context_always_requests_the_performance_values(
         self,
     ) -> None:
         reader, garmin_projection = _performance_reader(
@@ -507,10 +505,7 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
 
         inputs = reader.read_inputs()
         performance = reader.current_performance(inputs)
-        garmin_context = reader.recovery(inputs)
-        # Canonical reads (#1416): an Intervals.icu sync in the canonical inputs,
-        # not a stored snapshot, turns the Garmin performance fallback off.
-        reader.recovery(canonical_from_snapshot(_intervals_snapshot(), TODAY))
+        garmin_context = reader.recovery()
 
         # Canonical Garmin observations make the context available without a
         # snapshot.
@@ -523,15 +518,9 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
             {key: value for key, value in garmin_context.items() if key != "source"},
             {"recovery": {}},
         )
-        # The Garmin fallback performance block is only requested when no
-        # Intervals.icu snapshot exists.
         self.assertEqual(
             garmin_projection.coach_context.call_args_list[0].kwargs,
             {"include_performance": True},
-        )
-        self.assertEqual(
-            garmin_projection.coach_context.call_args_list[1].kwargs,
-            {"include_performance": False},
         )
 
 
@@ -846,7 +835,7 @@ class CoachPerformanceBudgetTests(unittest.TestCase):
         self.assertEqual(set(kept), set(performance))
         self.assertIn("metrics", kept)
         self.assertIn("training_focus", kept)
-        self.assertEqual(len(kept["personal_recovery"]["baselines"]), 7)
+        self.assertEqual(len(kept["personal_recovery"]["baselines"]), 3)
 
     def test_coach_projection_drops_history_arrays_but_ui_source_keeps_them(
         self,

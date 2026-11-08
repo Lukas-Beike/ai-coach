@@ -11,11 +11,9 @@ from typing import Any
 
 from performance_day_support import (
     SYNCED_AT,
-    days_from_rows,
     garmin_body_from_payload,
     garmin_metrics_from_payload,
     intervals_activity_summaries,
-    snapshot_coverage_time,
 )
 
 from backend.performance import body as _body
@@ -77,15 +75,9 @@ def _activity_summaries(snapshot: Any) -> tuple[Any, ...]:
 def body_history(
     snapshot: Any, garmin: Any, today: date, *, retrieved_at: datetime = SYNCED_AT
 ) -> dict[str, Any]:
-    rows: list[dict[str, Any]] = []
-    if isinstance(snapshot, dict):
-        raw = snapshot.get("raw_provider_data")
-        rows += raw.get("wellness", []) if isinstance(raw, dict) else []
-        rows += snapshot.get("recent_wellness", [])
     return _body.body_history(
         GarminSyncStatus.from_state(garmin),
         today,
-        wellness_days=days_from_rows(rows),
         canonical=garmin_body_from_payload(
             _payload(garmin), today, retrieved_at=retrieved_at
         ),
@@ -96,15 +88,7 @@ def body_history(
 
 
 def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
-    rows: list[dict[str, Any]] = []
-    if isinstance(snapshot, dict):
-        raw = snapshot.get("raw_provider_data")
-        rows += raw.get("wellness", []) if isinstance(raw, dict) else []
-        rows += snapshot.get("recent_wellness", [])
     canonical = CanonicalPerformanceInputs(
-        # The Intervals.icu coverage time the snapshot's sync stored.
-        intervals_synced_at=snapshot_coverage_time(snapshot),
-        history_wellness_days=days_from_rows(rows),
         activities=_activity_summaries(snapshot),
         garmin=garmin_metrics_from_payload(_payload(garmin)),
         body=garmin_body_from_payload(_payload(garmin), today),
