@@ -901,7 +901,8 @@ function appendLocalFitnessChart(report, loadRoot, loadMissing, start, end) {
   });
   const unloaded = days.reduce((sum, day) => sum + (day.sessions_without_load || 0), 0);
   const unloadedNote = unloaded === 1 ? "1 Einheit ohne TSS" : `${unloaded} Einheiten ohne TSS`;
-  const incompletePercent = Math.round((Number(report.incomplete_share) || 0) * 100);
+  // Share of the visible days, so the note matches the shown period like the session count.
+  const incompletePercent = Math.round(100 * days.filter((day) => day.state === "incomplete").length / days.length);
   const notes = [];
   if (unloaded) notes.push(unloadedNote);
   if (incompletePercent > 0) notes.push(`${incompletePercent} % der Tage unvollständig`);

@@ -321,7 +321,11 @@ def sleep_timing_variability(
         zone = UTC
     groups: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
     for source, item in _period_items(periods or (), zone, today):
-        groups.setdefault((source, item["method"]), {})[item["date"]] = item
+        dated = groups.setdefault((source, item["method"]), {})
+        kept = dated.get(item["date"])
+        # v3: a night read in another zone never displaces one read in the profile zone.
+        if kept is None or kept["other_timezone"] or not item["other_timezone"]:
+            dated[item["date"]] = item
     series = []
     for (source, method), records in sorted(groups.items()):
         series.append(_sleep_series(source, method, records, today))

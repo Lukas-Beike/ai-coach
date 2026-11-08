@@ -89,7 +89,8 @@ declares lighting-industry funding.
   v1 read from provider rows (`backend/canonical/sleep_bounds.py`), with the
   same field precedence; providers and field pairs stay apart, each interval
   is dated by its end in the profile zone and the latest interval of a day is
-  kept; parity is pinned in
+  kept, except that an `other_timezone` night never replaces one read in the
+  profile zone (v3); parity is pinned in
   `tests/test_sleep_timing_variability_canonical_parity.py`.
 - Coverage limits: only intervals with both a start and an end field are read;
   Garmin's main daily sleep is stored as NIGHT and every other interval as

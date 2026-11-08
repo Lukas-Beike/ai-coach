@@ -98,6 +98,8 @@ def run_streams() -> list[dict[str, Any]]:
             "data": [3.0 + (index % 5) / 100 for index in range(2701)],
         },
         {"type": "distance", "data": [index * 3.0 for index in range(2701)]},
+        # Outdoor running bests need altitude since card M4 v4 (#1773).
+        {"type": "altitude", "data": [120.0] * 2701},
         # Outdoor run decoupling needs a grade since card M8 v2 (#1770).
         {"type": "grade_smooth", "data": [(index % 3) - 1.0 for index in range(2701)]},
         {"type": "heartrate", "data": [140 + index / 200 for index in range(2701)]},
