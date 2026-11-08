@@ -778,18 +778,20 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .training-focus-details[open] > summary svg { transform: rotate(180deg); }
 .training-focus-details > summary:hover { border-color: var(--accent); }
 .training-focus-distribution h4 { display: flex; align-items: center; gap: 8px; }
-.training-focus-row { display: grid; grid-template-columns: 88px minmax(40px, 1fr) auto; align-items: center; gap: 8px; margin: 10px 0; font-size: .8rem; }
+.training-focus-row { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) min(7.5rem, 40%); align-items: center; gap: 8px; margin: 10px 0; font-size: .8rem; }
+.training-focus-row > span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .training-focus-row progress { width: 100%; height: 14px; accent-color: var(--zone-color, var(--training-zone-7)); border: 0; border-radius: 7px; overflow: hidden; }
 .training-focus-row progress::-webkit-progress-bar { background: var(--surface-raised); border-radius: 7px; }
 .training-focus-row progress::-webkit-progress-value { background: var(--zone-color, var(--training-zone-7)); border-radius: 7px; }
 .training-focus-row progress::-moz-progress-bar { background: var(--zone-color, var(--training-zone-7)); border-radius: 7px; }
-.training-focus-row[data-zone="Z1"] { --zone-color: var(--training-zone-1); }
-.training-focus-row[data-zone="Z2"] { --zone-color: var(--training-zone-2); }
-.training-focus-row[data-zone="Z3"] { --zone-color: var(--training-zone-3); }
-.training-focus-row[data-zone="Z4"] { --zone-color: var(--training-zone-4); }
-.training-focus-row[data-zone="Z5"] { --zone-color: var(--training-zone-5); }
-.training-focus-row[data-zone="Z6"] { --zone-color: var(--training-zone-6); }
-.training-focus-row[data-zone="Z7"] { --zone-color: var(--training-zone-7); }
+/* One zone palette for the report overview and the session detail (#1782). */
+.training-focus-row[data-zone="Z1"], .activity-analysis-zones li[data-zone="Z1"] { --zone-color: var(--training-zone-1); }
+.training-focus-row[data-zone="Z2"], .activity-analysis-zones li[data-zone="Z2"] { --zone-color: var(--training-zone-2); }
+.training-focus-row[data-zone="Z3"], .activity-analysis-zones li[data-zone="Z3"] { --zone-color: var(--training-zone-3); }
+.training-focus-row[data-zone="Z4"], .activity-analysis-zones li[data-zone="Z4"] { --zone-color: var(--training-zone-4); }
+.training-focus-row[data-zone="Z5"], .activity-analysis-zones li[data-zone="Z5"] { --zone-color: var(--training-zone-5); }
+.training-focus-row[data-zone="Z6"], .activity-analysis-zones li[data-zone="Z6"] { --zone-color: var(--training-zone-6); }
+.training-focus-row[data-zone="Z7"], .activity-analysis-zones li[data-zone="Z7"] { --zone-color: var(--training-zone-7); }
 .calendar-workout-profile { color: var(--calendar-profile-ink); display: block; width: 100%; height: 48px; margin: 5px 0 2px; overflow: hidden; }
 .calendar-profile-baseline { stroke: var(--line-strong); stroke-width: 1; }
 .calendar-workout-profile polygon { fill: currentColor; stroke: none; }
@@ -1650,8 +1652,11 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .race-predictions-table tbody tr:last-child > * { border-bottom: 0; }
 #cyclingPowerProfile .race-predictions-table td { text-align: right; font-variant-numeric: tabular-nums; }
 #cyclingPowerProfile .race-predictions-table thead th:not(:first-child) { text-align: right; }
-.analysis-chart-card svg .analysis-series-bar { fill: var(--accent-bright); stroke: none; opacity: .25; }
-.analysis-chart-card svg .analysis-series-bar[data-color="1"] { fill: var(--chart-series-1); stroke: none; }
+.analysis-chart-card svg .analysis-series-bar { fill: var(--accent-bright); stroke: none; opacity: .8; }
+.analysis-chart-card svg .analysis-series-bar[data-color="1"] { fill: var(--chart-series-1); }
+.analysis-chart-card svg .analysis-series-bar[data-color="2"] { fill: var(--chart-series-2); }
+.analysis-chart-card svg .analysis-series-bar[data-color="3"] { fill: var(--chart-series-3); }
+.analysis-chart-card svg .analysis-series-bar[data-color="4"] { fill: var(--chart-series-4); }
 
 .current-performance-groups { display: grid; gap: 24px; margin-top: 0; }
 .current-performance-table { width: 100%; border-collapse: collapse; }
@@ -1724,13 +1729,9 @@ summary > .activity-analysis-error { flex: 0 0 auto; font-size: .72rem; font-wei
 .activity-analysis-dot { fill: var(--series); stroke: var(--surface); stroke-width: 1.5; }
 .activity-analysis-zones { display: grid; gap: 8px; }
 .activity-analysis-zones ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.activity-analysis-zones li { --zone: var(--subtle); display: grid; grid-template-columns: 2.4rem 1fr 6.5rem; align-items: center; gap: 8px; font-size: .72rem; font-variant-numeric: tabular-nums; }
-.activity-analysis-zones li[data-zone="Z2"] { --zone: var(--blue); }
-.activity-analysis-zones li[data-zone="Z3"] { --zone: var(--accent-bright); }
-.activity-analysis-zones li[data-zone="Z4"] { --zone: var(--orange); }
-.activity-analysis-zones li[data-zone^="Z5"], .activity-analysis-zones li[data-zone^="Z6"], .activity-analysis-zones li[data-zone^="Z7"] { --zone: var(--danger); }
+.activity-analysis-zones li { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) min(7.5rem, 40%); align-items: center; gap: 8px; font-size: .72rem; font-variant-numeric: tabular-nums; }
 .activity-analysis-zone-label { color: var(--ink); font-weight: 700; }
-.activity-analysis-zone-bar { height: 14px; border-radius: 3px; background: linear-gradient(90deg, var(--zone) var(--zone-share), var(--line) var(--zone-share)); }
+.activity-analysis-zone-bar { height: 14px; border-radius: 7px; background: linear-gradient(90deg, var(--zone-color, var(--training-zone-7)) var(--zone-share), var(--surface-raised) var(--zone-share)); }
 .activity-analysis-zone-value { color: var(--muted); text-align: right; }
 .activity-analysis-zones > p { margin: 0; font-size: .68rem; }
 .activity-analysis-laps { display: grid; gap: 8px; }
