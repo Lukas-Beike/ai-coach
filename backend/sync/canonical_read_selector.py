@@ -297,9 +297,12 @@ class CanonicalReadSelector(
                 tuple[ActivitySummary, ...],
                 tuple(
                     with_marked_purposes(
-                        activity_summaries(
-                            source.activity_sessions(db, start=oldest, end=oldest),
-                            self._zone(db),
+                        cast(
+                            Iterable[dict[str, Any]],
+                            activity_summaries(
+                                source.activity_sessions(db, start=oldest, end=oldest),
+                                self._zone(db),
+                            ),
                         ),
                         marks,
                     )
