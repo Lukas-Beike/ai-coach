@@ -64,7 +64,7 @@ class SessionFocusBackfill:
         history_undo: Callable[[], HistoryUndoService],
         database_lock: threading.RLock,
         maintenance_gate: MaintenanceGate,
-        publish_change: Callable[[], None],
+        publish_change: Callable[[], object],
     ) -> None:
         self._key_values = key_values
         self._clock = clock

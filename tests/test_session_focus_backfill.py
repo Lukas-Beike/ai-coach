@@ -141,7 +141,7 @@ class SessionFocusBackfillTests(unittest.TestCase):
 
     def state(self) -> dict:
         with self.manager.reader() as db:
-            return json.loads(self.key_values.get(db, STATE_KEY))
+            return json.loads(self.key_values.get(db, STATE_KEY) or "{}")
 
     def test_unambiguous_values_are_stored_and_the_rest_is_left_alone(self) -> None:
         easy = self.create()
