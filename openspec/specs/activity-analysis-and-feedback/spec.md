@@ -396,6 +396,6 @@ Freshness checks outside the sync owner SHALL read current summary fingerprints 
 - **WHEN** the port reads fingerprints for every stored Intervals.icu activity of a populated fixture and for a Garmin record
 - **THEN** each Intervals.icu value equals `summary_fingerprint` of its stored row and the Garmin value equals its record's payload hash, so no stored detail, analysis or profile becomes stale.
 
-Intervals.icu activities are tombstoned and their rows deleted by the #1728 purge; the Intervals.icu branch of the port remains until the purge has run in production.
+Intervals.icu activities were tombstoned and their rows deleted by the #1728 purge of release 2.0.0; the Intervals.icu branch of the port stays for rows of a database restored from an earlier release.
 
 Evidence: `backend/sync/canonical_table_reader.py:CanonicalTableReader.summary_fingerprints`; `tests/test_activity_canonical_reads.py:test_fingerprints_keep_the_stored_values`, `tests/test_canonical_detail_reader.py:CanonicalDetailStatusTests`.

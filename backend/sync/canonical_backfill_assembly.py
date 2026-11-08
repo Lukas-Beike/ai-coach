@@ -93,8 +93,6 @@ def build_canonical_backfill(
             session_analysis,
             detail_retirement,
         ),
-        # Between the canonical backfill and the follow-ups, so the local load and
-        # session analysis of the same pass follow the Intervals.icu purge (#1728).
     )
     return CanonicalBackfillAssembly(
         worker=worker,

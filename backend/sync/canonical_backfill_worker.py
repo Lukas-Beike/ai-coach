@@ -9,9 +9,7 @@ for example) is served between two batches instead of queuing behind the loop.
 
 Follow-up stages run one after another once the canonical backfill is complete. Each
 keeps its own state, so a failed follow-up is recorded on its own and leaves the
-canonical backfill complete. Maintenance steps run between the two: each owns its
-transactions (the Intervals.icu purge, #1728), so the follow-ups of the same pass
-see its result; a failing step is logged and the follow-ups still run.
+canonical backfill complete.
 
 A start() while the thread runs a pass requests one more pass instead of a second
 thread, so a restore that lands mid-pass is backfilled from the restored state.

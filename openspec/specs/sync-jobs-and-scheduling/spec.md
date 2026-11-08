@@ -84,7 +84,7 @@ The system SHALL NOT read Intervals.icu activities, wellness history, athlete re
 - **WHEN** the athlete explicitly asks the Coach for current data
 - **THEN** the Coach waits for the Garmin and Wahoo refreshes where configured and calls no Intervals.icu ingest endpoint.
 
-Detailed contract: The explicit connection check requests the athlete endpoint once and stores nothing. Stored Intervals.icu records from earlier releases stay until the one-time Intervals.icu data purge removes them; the purge waits for the finished Garmin rating backfill (see activity-ingestion-and-storage). The competition push reconciles linked events and never imports new competitions from Intervals.icu.
+Detailed contract: The explicit connection check requests the athlete endpoint once and stores nothing. Stored Intervals.icu records of a database restored from a release before 2.0.0 are not read. The competition push reconciles linked events and never imports new competitions from Intervals.icu.
 
 Evidence: `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/sync/commands.py:WahooSynchronousRefresh`, `backend/sync/executor.py:IntervalsSyncJobOwner`; `tests/test_current_data_refresh.py`.
 
