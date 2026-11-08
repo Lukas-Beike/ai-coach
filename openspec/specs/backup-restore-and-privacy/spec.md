@@ -78,7 +78,7 @@ Restore SHALL stage bounded input to a unique temporary file, migrate supported 
 - **WHEN** backup chunks are still arriving
 - **THEN** staging proceeds before taking the maintenance gate
 
-Evidence: `backend/backup/restore_validation.py::DatabaseRestoreValidationService.stage`; `backend/backup/restore_validation.py::DatabaseRestoreValidationService.validate`; `backend/backup/restore.py::DatabaseRestoreService.restore`. Tests: `tests/test_database_restore_validation.py::test_stage_streams_chunks_and_enforces_the_limit_while_writing`; `tests/test_database_restore_validation.py::test_validate_upgrades_a_populated_release_v9_backup`; `tests/test_database_restore_validation.py::test_validate_rejects_foreign_key_violations`; `tests/test_database_restore_service.py::test_invalid_backup_never_changes_live_database_and_cleans_stage`.
+Evidence: `backend/backup/restore_validation.py::DatabaseRestoreValidationService.stage`; `backend/backup/restore_validation.py::DatabaseRestoreValidationService.validate`; `backend/backup/restore.py::DatabaseRestoreService.restore`. Tests: `tests/test_database_restore_validation.py::test_stage_streams_chunks_and_enforces_the_limit_while_writing`; `tests/test_database_restore_validation.py::test_validate_upgrades_a_populated_release_v21_backup`; `tests/test_database_restore_validation.py::test_validate_rejects_foreign_key_violations`; `tests/test_database_restore_service.py::test_invalid_backup_never_changes_live_database_and_cleans_stage`.
 
 ### Requirement: Authenticated session-scrubbing restore
 
@@ -150,13 +150,13 @@ Evidence: `backend/privacy.py::PrivacyDeleteService.delete`; `backend/privacy.py
 
 ### Requirement: Retired backup schema rejection
 
-Restore SHALL reject backups with schema versions older than v16 without changing the active database.
+Restore SHALL reject backups with schema versions older than v21 (releases before 1.13.41) without changing the backup or the active database, with a message that names that release.
 
 #### Scenario: Older backup is selected
-- **WHEN** a backup with schema v15 or older is staged for restore
-- **THEN** validation fails and the active database remains unchanged.
+- **WHEN** a backup with schema v20 or older is staged for restore
+- **THEN** validation fails with the release hint, the staged backup keeps its rows and version, and the active database remains unchanged.
 
-Evidence: `backend/backup/restore_validation.py`; `tests/test_database_restore_validation.py::test_validate_rejects_v9_backup_without_modifying_it` and `tests/test_database_restore_v13_upgrade.py`.
+Evidence: `backend/backup/restore_validation.py`; `tests/test_database_restore_validation.py::test_validate_rejects_a_pre_v21_backup_by_release_without_modifying_it`.
 
 ### Requirement: Recovery copy before destructive maintenance
 

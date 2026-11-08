@@ -43,7 +43,7 @@ except ImportError:
     cipher_backend = None
 
 FIXTURES = Path(__file__).with_name("fixtures")
-RELEASED_VERSIONS = (16, 17, 18)
+RELEASED_VERSIONS = (21,)
 PASSWORD = "synthetic-retirement-upgrade-key"
 FULL = "9501"
 DOWNSAMPLED = "9502"
@@ -159,13 +159,6 @@ class RetirementUpgradeTestCase(unittest.TestCase):
             fixture = FIXTURES / f"schema_v{version}.sql.txt"
             db.executescript(fixture.read_text(encoding="utf-8"))
             self.source.copy_into(db)
-            if version == 13:
-                # A lap set stored before v13 gained the column but no value.
-                db.execute(
-                    "UPDATE activity_laps SET max_speed_mps = NULL "
-                    "WHERE provider_activity_id = ?",
-                    (PRE_V13_LAPS,),
-                )
             db.commit()
         return path
 
@@ -247,7 +240,7 @@ class RetirementUpgradeTestCase(unittest.TestCase):
             ("failed", "", 0), (state["status"], state["cursor"], state["batches"])
         )
 
-    def assert_retired(self, manager, version):
+    def assert_retired(self, manager):
         keys = {legacy_detail_kv.key(item) for item in (UNVERIFIABLE, UNLINKED)}
         self.assertEqual(keys, self.detail_keys(manager))
         state = self.counters(manager)
@@ -289,14 +282,8 @@ class RetirementUpgradeTestCase(unittest.TestCase):
                 )
             }
         self.assertEqual([11.5, 7.25], [lap.max_speed_mps for lap in laps])
-        if version == 9:
-            # The schema had no detail tables, so the detail backfill copied kv.
-            self.assertEqual({"legacy_backfill"}, origins)
-        else:
-            self.assertEqual(
-                [LapKind.WORK, LapKind.RECOVERY], [lap.kind for lap in laps]
-            )
-            self.assertEqual({"fetch"}, origins)
+        self.assertEqual([LapKind.WORK, LapKind.RECOVERY], [lap.kind for lap in laps])
+        self.assertEqual({"fetch"}, origins)
 
     def run_upgrade(self, version):
         path = self.released_database(version)
@@ -304,7 +291,7 @@ class RetirementUpgradeTestCase(unittest.TestCase):
         try:
             self.interrupt_retirement(manager)
             self.assembly(manager).worker.run_loop()
-            self.assert_retired(manager, version)
+            self.assert_retired(manager)
             after = self.dump(manager)
         finally:
             manager.close()
@@ -313,7 +300,7 @@ class RetirementUpgradeTestCase(unittest.TestCase):
         try:
             self.assembly(manager).worker.run_loop()
             self.assertEqual(after, self.dump(manager))
-            self.assert_retired(manager, version)
+            self.assert_retired(manager)
         finally:
             manager.close()
         return path

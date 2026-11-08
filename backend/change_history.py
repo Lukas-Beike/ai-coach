@@ -313,33 +313,6 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
     "workout_library": (FOCUS_KEYS,),
 }
 
-# Planning fields renamed by schema version 16: current name -> the name rows
-# recorded before it carry in their diff and hashes. History rows are never
-# rewritten; they are translated on read and their hashes stay matchable.
-_PLANNING_FIELD_RENAMES = {
-    "starts_at_local": "start_date_local",
-    "planned_duration_s": "moving_time",
-}
-_FIELDS_RENAMED_IN_AUDIT: dict[str, dict[str, str]] = {
-    "workout_library": {"planned_duration_s": "moving_time"},
-    "planned_unit": _PLANNING_FIELD_RENAMES,
-    "competition": _PLANNING_FIELD_RENAMES,
-}
-
-
-def _renamed_keys(value: dict[str, Any], renames: dict[str, str]) -> dict[str, Any]:
-    return {renames.get(key, key): item for key, item in value.items()}
-
-
-def current_audit_fields(entity_type: str, value: dict[str, Any]) -> dict[str, Any]:
-    """Return recorded projection fields under their current names."""
-    renames = _FIELDS_RENAMED_IN_AUDIT.get(entity_type, {})
-    current_by_legacy = {old: new for new, old in renames.items()}
-    result: dict[str, Any] = {}
-    for key, item in value.items():
-        result.setdefault(current_by_legacy.get(key, key), item)
-    return result
-
 
 def accepted_audit_hashes(entity_type: str, value: dict[str, Any] | None) -> set[str]:
     """Return the hashes a current projection may match for a recorded row."""
@@ -352,10 +325,8 @@ def accepted_audit_hashes(entity_type: str, value: dict[str, Any] | None) -> set
         if any(field in legacy for field in added):
             legacy = {key: item for key, item in legacy.items() if key not in added}
             generations.append(legacy)
-    renames = _FIELDS_RENAMED_IN_AUDIT.get(entity_type, {})
     for generation in generations:
         accepted.add(audit_hash(generation))
-        accepted.add(audit_hash(_renamed_keys(generation, renames)))
     return accepted
 
 
@@ -496,10 +467,7 @@ def public_view(row: dict[str, Any]) -> dict[str, Any]:
     fields = diff.get("fields")
     safe_fields = {
         field: {"changed": True}
-        for field in current_audit_fields(
-            str(row.get("entity_type") or ""),
-            fields if isinstance(fields, dict) else {},
-        )
+        for field in (fields if isinstance(fields, dict) else {})
         if isinstance(field, str) and re.fullmatch(r"[a-z_]+", field)
     }
     return {

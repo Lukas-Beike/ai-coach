@@ -1,7 +1,7 @@
-"""Schema version 22: executed strength sets, upgraded in place from v20 and v21.
+"""Schema version 22: executed strength sets, upgraded in place from v21.
 
-The only production database runs schema v20 (release 1.13.40); releases
-1.13.41 to 1.13.44 wrote v21. The upgrade rebuilds the four detail set tables so
+Releases 1.13.41 to 1.13.44 wrote v21, the oldest supported schema; the only
+production database runs release 1.13.44. The upgrade rebuilds the four detail set tables so
 the kind CHECK accepts ``strength_sets``. With foreign keys enforced, as the
 application connects, every stream, lap, zone and analysis row stays exactly as
 it was; a failure rolls back to the unchanged release and a restart changes
@@ -32,7 +32,7 @@ from backend.db.schema_history import (
 )
 
 FIXTURES = Path(__file__).with_name("fixtures")
-RELEASES = (20, 21)
+RELEASES = (21,)
 STAMP = "2026-11-07T08:00:00+00:00"
 DIGEST = "d" * 64
 TABLES = (
@@ -42,7 +42,7 @@ TABLES = (
     "activity_zone_times",
     "activity_detail_analysis",
 )
-# The columns every supported release has; the upgrade adds set_source only.
+# The columns of the v21 release; the upgrade adds set_source only.
 V21_SET_COLUMNS = (
     "provider, provider_activity_id, detail_kind, mapper_version, origin, "
     "source_kind, recorded_by, source_record_id, resolution, lap_source, "
@@ -236,7 +236,7 @@ class StrengthSetMigrationTests(unittest.TestCase):
                 db.rollback()
 
     def test_upgraded_database_accepts_strength_sets(self) -> None:
-        db = self.released(20)
+        db = self.released(21)
         migrate_schema(db)
         db.execute(
             "INSERT INTO activity_detail_sets(provider, provider_activity_id, detail_kind, "

@@ -342,7 +342,7 @@ Local planning records SHALL use provider-neutral names for planned load, intens
 - **WHEN** an activity detail freezes a local workout target
 - **THEN** the stored FTP basis uses a provider-neutral name and retains its value.
 
-Evidence: `backend/planning/library.py`, `backend/planning/target_snapshot.py`, `backend/providers/intervals_workouts.py`; `tests/test_workout_export_intervals.py`, `tests/test_target_snapshot_summaries.py`, `tests/test_db_planning_metrics_migration.py`.
+Evidence: `backend/planning/library.py`, `backend/planning/target_snapshot.py`, `backend/providers/intervals_workouts.py`; `tests/test_workout_export_intervals.py`, `tests/test_target_snapshot_summaries.py`.
 
 ### Requirement: Session focus of planned units and templates
 Planned units and library templates SHALL carry an optional local session focus, validated per sport, that no provider export writes.

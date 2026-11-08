@@ -15,7 +15,7 @@ from backend.db.migrations import migrate_schema
 from backend.db.schema import CURRENT_SCHEMA_VERSION, database_schema_is_current
 from backend.errors import AppError
 
-V9_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v9.sql.txt"
+V21_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v21.sql.txt"
 
 
 def service(data_dir: Path, **overrides: object) -> DatabaseRestoreValidationService:
@@ -133,12 +133,11 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0
                 )
 
-    def test_validate_upgrades_a_populated_release_v16_backup(self) -> None:
+    def test_validate_upgrades_a_populated_release_v21_backup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "backup.db"
             with closing(sqlite3.connect(path)) as connection:
-                fixture = V9_FIXTURE.with_name("schema_v16.sql.txt")
-                connection.executescript(fixture.read_text(encoding="utf-8"))
+                connection.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
                 connection.execute(
                     "INSERT INTO messages(role, content, created_at) "
                     "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
@@ -162,35 +161,18 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     "Hallo",
                 )
 
-    def test_validate_rejects_v9_backup_without_modifying_it(self) -> None:
+    def test_validate_rejects_a_pre_v21_backup_by_release_without_modifying_it(
+        self,
+    ) -> None:
+        # Releases before 1.13.41 wrote schemas below 21; their backups are refused.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "backup.db"
             with closing(sqlite3.connect(path)) as connection:
-                connection.executescript(V9_FIXTURE.read_text(encoding="utf-8"))
+                connection.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
                 connection.execute(
                     "INSERT INTO messages(role, content, created_at) VALUES ('user', 'Hallo', 'now')"
                 )
-                connection.commit()
-                before = list(connection.iterdump())
-            with self.assertRaises(AppError):
-                service(
-                    Path(directory),
-                    schema_is_current=database_schema_is_current,
-                    migrate_schema=migrate_schema,
-                ).validate(path)
-            with closing(sqlite3.connect(path)) as connection:
-                self.assertEqual(list(connection.iterdump()), before)
-
-    def test_validate_rejects_conflicting_planning_values_unchanged(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "backup.db"
-            with closing(sqlite3.connect(path)) as connection:
-                fixture = V9_FIXTURE.with_name("schema_v18.sql.txt")
-                connection.executescript(fixture.read_text(encoding="utf-8"))
-                connection.execute(
-                    "INSERT INTO workout_library(id, local_id, payload, updated_at) VALUES ('x', 'x', ?, 'now')",
-                    ('{"icu_training_load": 42, "planned_load": 99}',),
-                )
+                connection.execute("PRAGMA user_version = 20")
                 connection.commit()
                 before = list(connection.iterdump())
             with self.assertRaises(AppError) as raised:
@@ -200,8 +182,13 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     migrate_schema=migrate_schema,
                 ).validate(path)
             self.assertEqual(raised.exception.status, 400)
+            self.assertIn("vor 1.13.41", str(raised.exception))
+            self.assertIn("Release 1.13.44", str(raised.exception))
             with closing(sqlite3.connect(path)) as connection:
                 self.assertEqual(list(connection.iterdump()), before)
+                self.assertEqual(
+                    connection.execute("PRAGMA user_version").fetchone()[0], 20
+                )
 
     def test_validate_rejects_unexpected_schema_without_scrubbing_backup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
