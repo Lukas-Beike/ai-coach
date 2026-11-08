@@ -1,7 +1,7 @@
 """SQLCipher upgrade, rollback, restart and backup/restore from every released schema.
 
-Each supported released schema (v21, releases 1.13.41 to 1.13.44) is populated in
-an encrypted temporary database with the rows of the native migration tests. The upgrade keeps every original
+Each supported released schema (v21, releases 1.13.41 to 1.13.44, and v22, the
+2.0.0 candidate) is populated in an encrypted temporary database with the rows of the native migration tests. The upgrade keeps every original
 value, the file stays encrypted, a failing upgrade leaves the database exactly as
 it was, a restart with the same build changes nothing, a wrong key reads nothing,
 and an encrypted backup of the upgraded database restores the same rows. Runs in
@@ -38,7 +38,7 @@ from backend.db.schema import (
     configure_cipher,
     database_schema_is_current,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V21
+from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V22
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -53,9 +53,9 @@ STAMP = "2026-10-31T08:00:00+00:00"
 SESSION = "act_feedback"
 
 
-def populated_v21_database(db: Any) -> None:
-    """A v21 database with a message, a snapshot and rated, linked feedback."""
-    db.executescript(gate.V21_FIXTURE.read_text(encoding="utf-8"))
+def populated_release_database(db: Any, fixture: Any) -> None:
+    """A released database with a message, a snapshot and rated, linked feedback."""
+    db.executescript(fixture.read_text(encoding="utf-8"))
     db.execute(
         "INSERT INTO messages(role, content, created_at) VALUES ('user', 'Hallo', ?)",
         (STAMP,),
@@ -85,7 +85,10 @@ def populated_v21_database(db: Any) -> None:
 
 def builders() -> dict[int, Callable[[Any], None]]:
     """The populated released databases of the native migration tests."""
-    base = {21: populated_v21_database}
+    base = {
+        21: partial(populated_release_database, fixture=gate.V21_FIXTURE),
+        22: partial(populated_release_database, fixture=gate.V22_FIXTURE),
+    }
 
     def populated(db: Any, build: Callable[[Any], Any]) -> None:
         build(db)
@@ -223,7 +226,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
 
     def test_a_failing_upgrade_leaves_every_released_schema_unchanged(self) -> None:
         def failing_last_step(connection: Any) -> None:
-            migrations._upgrade_v21_to_v22(connection)
+            migrations._upgrade_v22_to_v23(connection)
             raise RuntimeError("injected migration failure")
 
         for version in builders():
@@ -234,7 +237,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                     with (
                         mock.patch.dict(
                             migrations.UPGRADE_STEPS,
-                            {SHAPE_SCHEMA_V21: (SHAPE_CURRENT, failing_last_step)},
+                            {SHAPE_SCHEMA_V22: (SHAPE_CURRENT, failing_last_step)},
                         ),
                         self.assertRaisesRegex(RuntimeError, "injected"),
                     ):

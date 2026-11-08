@@ -366,7 +366,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
     def test_format_version_lists_provider_detail_domain_and_link_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 12)
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 13)
         expected = {
             *PROVIDER_FILES,
             *DETAIL_FILES,
@@ -376,7 +376,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 12)
+            self.assertEqual(manifest["format_version"], 13)
             self.assertLessEqual(expected, set(manifest["jsonl_files"]))
             self.assertLessEqual(expected, set(archive.namelist()))
 
@@ -553,9 +553,11 @@ class PrivacyExportProviderTests(ProviderDataFixture):
                 "provider",
                 "session_id",
                 "session_rpe_rated_at",
+                "purpose",
             },
         )
         self.assertEqual(rows[0]["notes"], "felt good")
+        self.assertIsNone(rows[0]["purpose"])
         self.assertEqual(rows[0]["provider"], "intervals")
         self.assertIsNone(rows[0]["session_id"])
         self.assertIsNone(rows[0]["session_rpe_rated_at"])

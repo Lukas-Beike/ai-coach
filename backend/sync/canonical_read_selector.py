@@ -40,7 +40,11 @@ from datetime import date, tzinfo
 from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
-from backend.activities.session_purpose import with_competitions
+from backend.activities.feedback import session_purpose_marks
+from backend.activities.session_purpose import (
+    with_competitions,
+    with_marked_purposes,
+)
 from backend.activities.strength_sets import (
     strength_summaries,
     with_strength_summaries,
@@ -253,6 +257,8 @@ class CanonicalReadSelector(
         EF, VI, work and decoupling are the stored local session metrics (card M8).
         Zone times are the stored local ones where a session has them (#1743).
         ``strength_sets`` summarizes the executed strength sets of the session.
+        The athlete's marking of a session's purpose wins over Garmin and over the
+        competition hint (``with_marked_purposes``).
         """
         source = self._source(db)
         summaries = activity_summaries(
@@ -274,6 +280,8 @@ class CanonicalReadSelector(
                 [row["id"] for row in summaries if row.get("sport") == Sport.STRENGTH],
             ),
         )
+        marks = session_purpose_marks(db)
+        loaded = tuple(with_marked_purposes(loaded, marks))
         days = sorted(filter(None, (summary_local_date(row) for row in loaded)))
         if not days:
             return cast(tuple[ActivitySummary, ...], loaded)
@@ -285,9 +293,20 @@ class CanonicalReadSelector(
         whole_day: tuple[ActivitySummary, ...] = ()
         if limit is not None:
             oldest = date.fromisoformat(days[0])
-            whole_day = activity_summaries(
-                source.activity_sessions(db, start=oldest, end=oldest),
-                self._zone(db),
+            whole_day = cast(
+                tuple[ActivitySummary, ...],
+                tuple(
+                    with_marked_purposes(
+                        cast(
+                            Iterable[dict[str, Any]],
+                            activity_summaries(
+                                source.activity_sessions(db, start=oldest, end=oldest),
+                                self._zone(db),
+                            ),
+                        ),
+                        marks,
+                    )
+                ),
             )
         page = {str(row["id"]) for row in loaded}
         linked = {

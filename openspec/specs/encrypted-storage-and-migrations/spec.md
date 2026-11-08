@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v22 and supports upgrades from v21 (releases 1.13.41 to 1.13.44); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v23 and supports upgrades from v21 (releases 1.13.41 to 1.13.44) and v22 (the 2.0.0 candidate); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from released schema v21 and the current schema v22, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from released schemas v21 and v22 and the current schema v23, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Released baseline upgrade
 - **WHEN** a populated released v21 database is opened by this build
@@ -148,6 +148,16 @@ The v21 to v22 step SHALL rebuild the detail set tables so the kind CHECK accept
 - **THEN** every detail row and its cascade survive, strength sets can be stored afterwards, and a failure rolls back to the unchanged release.
 
 Evidence: `backend/db/migrations.py:_upgrade_v21_to_v22`; `tests/test_db_strength_sets_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+
+### Requirement: Session purpose marking upgrade
+
+The v22 to v23 step SHALL add `activity_feedback.purpose` (NULL for every existing row, checked to the five purposes training, race, commute, warmup and cooldown) and keep every other row unchanged. A v21 database SHALL reach v23 through the v22 shape in the same transaction.
+
+#### Scenario: Populated release upgrade
+- **WHEN** a populated v21 or v22 database is opened by this build
+- **THEN** every feedback row and every other table survive with no marking, a marking can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
+
+Evidence: `backend/db/migrations.py:_upgrade_v22_to_v23`; `tests/test_db_feedback_purpose_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
 
 ### Requirement: Versioned data maintenance after an upgrade
 

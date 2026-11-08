@@ -96,6 +96,7 @@ class CoachAthleteRecordToolService:
                             "notes",
                             "session_rpe",
                             "deviation_reason",
+                            "purpose",
                         )
                         if key in payload
                     },

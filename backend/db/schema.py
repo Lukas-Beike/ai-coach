@@ -201,6 +201,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "provider",
         "session_id",
         "session_rpe_rated_at",
+        "purpose",
     },
     "plan_adjustments": {"id", "payload", "status", "created_at", "applied_at"},
     "coach_action_proposals": {
@@ -673,7 +674,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 22
+CURRENT_SCHEMA_VERSION = 23
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -1232,6 +1233,14 @@ PRODUCT_FAVORITE_DDL = """
 """
 
 
+# Schema version 23: the athlete's own marking of what a session was (training,
+# race, commute, warm-up or cool-down). NULL is no marking: the provider's event
+# type and the competition hint decide. A marking wins over both.
+FEEDBACK_PURPOSE_DDL = """
+    ALTER TABLE activity_feedback ADD COLUMN purpose TEXT CHECK (purpose IS NULL OR purpose IN ('training', 'race', 'commute', 'warmup', 'cooldown'))
+"""
+
+
 # Schema version 21: the lifecycle of an observation. A sync that maps its owning
 # raw record again (``owner_record_id``, the provider's source record id) and no
 # longer emits it retires the row instead of deleting it; readers serve active
@@ -1584,6 +1593,7 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, FEEDBACK_RATING_TIME_DDL)
     execute_ddl(db, PRODUCT_FAVORITE_DDL)
     execute_ddl(db, OBSERVATION_LIFECYCLE_DDL)
+    execute_ddl(db, FEEDBACK_PURPOSE_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

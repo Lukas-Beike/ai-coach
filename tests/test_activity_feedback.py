@@ -328,7 +328,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(self.service.context()["recent"], self.service.list())
         self.assertEqual(
             self.service.context()["scope"],
-            "Only athlete-entered notes, session RPE and deviation reasons about completed activities; this feedback is separate from daily check-ins and provider values.",
+            "Only athlete-entered notes, session RPE, deviation reasons and the session purpose marking about completed activities; a marking wins over the provider event type and the race hint; this feedback is separate from daily check-ins and provider values.",
         )
 
     def test_attach_projects_only_dict_activities_without_mutating_input(self) -> None:
