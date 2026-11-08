@@ -328,6 +328,9 @@ async function loadZones() {
     zoneConfigurations = result.configurations || [];
     renderZoneEditor();
     renderZoneWarnings(result.threshold_warnings);
+    // The strip follows a save or removal at once, not only the next bootstrap.
+    if (state.data) state.data.threshold_warnings = result.threshold_warnings ?? null;
+    updateStatusSources({ thresholds: thresholdStatusItem(result.threshold_warnings) });
   } catch (error) {
     renderZoneWarnings(null);
     toast(error.message, true);
@@ -356,6 +359,18 @@ function zoneWarningLine(item) {
 function zoneWarningTitle(warnings) {
   const sdk = warnings.sdk_failure ? `${SDK_FAILURE_TEXT[warnings.sdk_failure.reason] || "Garmin-SDK ausgefallen"} · ` : "";
   return `${sdk}Schwellen prüfen und neue Werte hier lokal speichern`;
+}
+
+// Pure: the status strip notice for stale or missing thresholds (#1768), or null.
+function thresholdStatusItem(warnings) {
+  const items = Array.isArray(warnings?.items) ? warnings.items : [];
+  if (!items.length) return null;
+  return {
+    level: "warning",
+    title: "Schwellenwerte prüfen",
+    detail: items.length === 1 ? zoneWarningLine(items[0]) : `${items.length} Werte sind veraltet oder fehlen.`,
+    action: { href: "#more/profile", label: "Prüfen" },
+  };
 }
 
 function renderZoneWarnings(warnings) {

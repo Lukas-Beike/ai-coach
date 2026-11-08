@@ -56,7 +56,8 @@ function frontend({ eventSource = false } = {}) {
   const sources = [];
   const bootstrap = { state_versions: {} };
   const shell = { classList: { contains: () => false, add() {}, remove() {} } };
-  const statusElements = Object.fromEntries(["#statusCard", "#statusTitle", "#statusDetail"].map((selector) => [selector, { hidden: true, textContent: "", classList: { add() {}, remove() {} } }]));
+  const statusElements = {};
+  const statusUpdates = [];
   const bodies = {
     [BOOTSTRAP]: () => ({ ...bootstrap }),
     "/api/plan?local=1": () => ({}),
@@ -97,6 +98,7 @@ function frontend({ eventSource = false } = {}) {
     renderPerformance() {},
     renderSettings() {},
     renderQuickMessageTemplates() {},
+    updateStatusSources(changes) { statusUpdates.push(changes); },
     updateChatControls() {},
     reloadForUpdateWhenSafe() {},
     renderMessages() {},
@@ -125,7 +127,7 @@ function frontend({ eventSource = false } = {}) {
     }
   };
   const count = (requestPath) => calls.filter((call) => call === requestPath).length;
-  return { context, state, clock, calls, pending, auto, sources, bootstrap, statusElements, respondOnce, settle, count };
+  return { context, state, clock, calls, pending, auto, sources, bootstrap, statusElements, statusUpdates, respondOnce, settle, count };
 }
 
 const event = (type, payload = {}, lastEventId = "") => ({ type, data: JSON.stringify(payload), lastEventId });
@@ -201,7 +203,9 @@ test("a live load records the version it was started for, not one that arrived w
   await app.state.loadPromise?.catch(() => {});
   await tick();
   assert.equal(app.state.data.state_versions.chat, 2);
-  assert.equal(app.statusElements["#statusDetail"].textContent, "chat: timeout");
+  assert.equal(app.statusUpdates.at(-1).load_failure.detail, "chat: timeout");
+  // A failed first load must not leave the loading notice in front of the error.
+  assert.equal(app.statusUpdates.at(-1).loading, null);
   app.context.handleSyncStatus({ running: false, state_versions: { chat: 3 } });
   await tick();
   assert.equal(app.count(CHAT), 3, "the next poll retries the unread version");

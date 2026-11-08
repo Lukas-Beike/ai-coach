@@ -32,7 +32,7 @@ The client SHALL use semantic labels, focusable controls and scroll regions, cur
 
 #### Scenario: Large text size
 - **WHEN** the text size grows up to 200 %
-- **THEN** navigation labels that no longer fit collapse to named icons and banners wrap, so neither clips text nor leaves the viewport.
+- **THEN** navigation labels that no longer fit collapse to named icons and the status strip wraps, so neither clips text nor leaves the viewport.
 
 #### Scenario: Dialog opens and closes
 - **WHEN** an accessible application dialog opens and later closes
@@ -94,6 +94,23 @@ The client SHALL keep the application behind the required login dialog until suc
 - **THEN** the client clears/locks according to the session contract or shows the maintenance pause; a failed logout leaves the session available for retry.
 
 Evidence: `public/auth.js::installLoginDialogGuards`, `public/auth.js::loginErrorMessage`, `public/auth.js::logout`, `public/auth.js::showLogin`, `public/sync-status.js::renderMaintenanceStatus`; `e2e/login-dialog.spec.js::Escape keeps the login dialog open and logout shows it again @responsive`, `tests/login-errors.test.cjs::a rate-limited login names the wait from Retry-After`, `tests/login-errors.test.cjs::a lasting server error keeps its own message instead of asking to retry`.
+
+### Requirement: One status strip ranks the notices above every screen
+The client SHALL show at most one status strip above every screen: the most severe notice as text, the others behind a count button. Severity SHALL rank maintenance, offline, OpenAI key, Coach error, provider attention, Garmin hint, thresholds, and last the dismissible Intervals.icu key hint, which appears only when nothing else does.
+
+#### Scenario: Age of device data
+- **WHEN** the offline or load-failure notice shows data from the device
+- **THEN** it states the age of that data, for example "Stand vor 12 min".
+
+#### Scenario: Several notices at once
+- **WHEN** the browser is offline, the Coach reports an error and an optional provider key is missing
+- **THEN** one strip shows the offline notice with a "+N Hinweise" button, and the button lists the Coach error.
+
+#### Scenario: Low screen
+- **WHEN** the viewport is lower than 500 px
+- **THEN** the strip is one line, non-critical notices appear only as a count button, and the composer is one row.
+
+Evidence: `public/status-strip.js::statusStripItems`, `public/status-strip.js::renderStatusStrip`, `public/shared.js::renderStatus`, `public/sync-status.js::renderProviderAttention`, `public/settings.js::thresholdStatusItem`; `e2e/status-strip.spec.js::offline, a Coach error and the missing Intervals.icu key show one strip @responsive`, `tests/status-strip.test.cjs::the strip ranks notices by the athlete's order and shows only one as text`.
 
 ### Requirement: Composer follows desktop and touch input conventions
 The client SHALL support editable multiline Coach drafts, sending with the explicit send control, desktop Enter-to-send, and touch-first Enter-for-newline. IME composition SHALL never submit a turn.

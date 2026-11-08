@@ -118,7 +118,7 @@ function saveStateSnapshot() {
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
   if (!(state.initialStateLoaded || stateSnapshotReady) || !state.data || state.replaceDataOnLoad) return;
-  writeStateSnapshot(JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, contract: STATE_SNAPSHOT_CONTRACT, data: stateSnapshotData() }));
+  writeStateSnapshot(JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, contract: STATE_SNAPSHOT_CONTRACT, saved_at: state.dataStandAt ?? null, data: stateSnapshotData() }));
 }
 
 function writeStateSnapshot(snapshot) {
@@ -187,7 +187,7 @@ function readStateSnapshot() {
     if (!snapshot?.data || typeof snapshot.data !== "object" || !snapshotContractFits(snapshot)) return null;
     const chat = readChatCache();
     const data = chat ? { ...snapshot.data, messages: chat.messages, messages_next_cursor: chat.next_cursor, messages_generation: chat.generation } : snapshot.data;
-    return { data, updated: snapshot.asset !== STATE_SNAPSHOT_ASSET };
+    return { data, updated: snapshot.asset !== STATE_SNAPSHOT_ASSET, savedAt: Number(snapshot.saved_at) || null };
   } catch { return null; }
 }
 
@@ -195,6 +195,7 @@ function clearStateSnapshot() {
   viewCacheEpoch += 1;
   stateSnapshotReady = false;
   stateSnapshotShown = false;
+  state.dataStandAt = null;
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
   chatCacheValue = null;
@@ -324,6 +325,8 @@ function withShownSnapshotAreas(payload, pendingAreas) {
 
 // Renders the merged areas and stores them; failed areas keep their stored values.
 function renderCompletedState(payload, liveAreasOnly, failedAreas, options) {
+  // The shown data is as old as its oldest area: a failed area keeps the earlier time.
+  if (!failedAreas.length && !liveAreasOnly) state.dataStandAt = Date.now();
   renderLoadedState(withShownSnapshotAreas(payload, failedAreas), liveAreasOnly, options);
   if (!liveAreasOnly) {
     stateSnapshotFailedAreas = failedAreas;
@@ -336,11 +339,7 @@ function renderCompletedState(payload, liveAreasOnly, failedAreas, options) {
 // A failed sign-in is handled by the login flow, not the status card.
 function showStateLoadFailure(error, requestedAreas = [], bootstrapRead = true) {
   if (error?.status === 401 || /Authentication/.test(error.message)) return;
-  const statusCard = $("#statusCard");
-  statusCard.hidden = false;
-  statusCard.classList.add("warning");
-  $("#statusTitle").textContent = "Trainingsdaten konnten nicht geladen werden";
-  $("#statusDetail").textContent = error.message;
+  updateStatusSources({ loading: null, load_failure: { level: "critical", title: "Trainingsdaten konnten nicht geladen werden", detail: error.message, stand: true } });
   if (!bootstrapRead && (!requestedAreas || requestedAreas.includes("profile"))) renderCompetitionReadStatus("error");
 }
 

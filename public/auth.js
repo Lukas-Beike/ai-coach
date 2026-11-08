@@ -195,7 +195,6 @@ async function runConfirmationSecondaryAction(onClick) {
 // After an app update the loading screen says that the update is processed.
 function showAppShellLoading({ updated = false } = {}) {
   const shell = $("#appShell");
-  const statusCard = $("#statusCard");
   const loader = $("#authLoading");
   const title = updated ? "Update wird verarbeitet…" : "Trainingsbereich wird geladen…";
   loader.hidden = false;
@@ -203,11 +202,13 @@ function showAppShellLoading({ updated = false } = {}) {
   shell.hidden = true;
   shell.classList.add("is-loading");
   shell.setAttribute("aria-busy", "true");
-  statusCard.hidden = false;
-  statusCard.classList.remove("warning");
-  statusCard.classList.add("working");
-  $("#statusTitle").textContent = title;
-  $("#statusDetail").textContent = updated ? "Die App wurde aktualisiert. Deine Trainingsdaten werden neu geladen." : "Deine Trainingsdaten werden im Hintergrund geladen";
+  updateStatusSources({
+    loading: {
+      level: "working",
+      title,
+      detail: updated ? "Die App wurde aktualisiert. Deine Trainingsdaten werden neu geladen." : "Deine Trainingsdaten werden im Hintergrund geladen",
+    },
+  });
 }
 
 // Shows the device snapshot before the session check, so a start does not wait
@@ -217,6 +218,7 @@ function showStateSnapshot(snapshot, { syncing = true } = {}) {
   if (!snapshot) return false;
   state.replaceDataOnLoad = true;
   state.chatCacheSyncing = syncing && Boolean(snapshot.data?.messages?.length);
+  state.dataStandAt = snapshot.savedAt ?? null;
   try {
     render(snapshot.data);
     markStateSnapshotShown(true);

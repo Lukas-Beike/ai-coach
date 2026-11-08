@@ -7,15 +7,21 @@ async function openCoach(page) {
   await expect(page.locator("#messageInput")).toBeVisible();
 }
 
-test("composer puts the textarea on a full-width row with controls below @responsive", async ({ page }) => {
+test("composer puts the textarea on a full-width row with controls below, or on one row on a low screen @responsive", async ({ page }) => {
   await openCoach(page);
   const form = await page.locator("#chatForm").boundingBox();
   const textarea = await page.locator("#messageInput").boundingBox();
   const attachment = await page.locator("#attachmentButton").boundingBox();
   const voice = await page.locator("#voiceButton").boundingBox();
   const send = await page.locator("#sendButton").boundingBox();
-  expect(textarea.width).toBeGreaterThanOrEqual(form.width * 0.85);
-  expect(attachment.y).toBeGreaterThanOrEqual(textarea.y + textarea.height - 1);
+  if (page.viewportSize().height < 500) {
+    // Phone landscape: input and controls share one row (#1784).
+    expect(attachment.x).toBeGreaterThanOrEqual(textarea.x + textarea.width - 1);
+    expect(attachment.y).toBeLessThan(textarea.y + textarea.height);
+  } else {
+    expect(textarea.width).toBeGreaterThanOrEqual(form.width * 0.85);
+    expect(attachment.y).toBeGreaterThanOrEqual(textarea.y + textarea.height - 1);
+  }
   expect(attachment.x + attachment.width).toBeLessThanOrEqual(send.x);
   expect(voice.x + voice.width).toBeLessThanOrEqual(send.x);
 });

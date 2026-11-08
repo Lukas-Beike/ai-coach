@@ -369,6 +369,9 @@ class LocalZoneEditTests(unittest.TestCase):
             threshold_warnings=lambda: warning,
         )
         self.assertEqual(service.read()["threshold_warnings"], warning)
+        # The status strip reads the same warning on every screen, and none when fresh.
+        self.assertEqual(service.threshold_warnings(), warning)
+        self.assertIsNone(self.service.threshold_warnings())
 
     def test_committed_save_and_removal_notify_the_change_hook(self) -> None:
         calls: list[bool] = []

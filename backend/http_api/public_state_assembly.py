@@ -336,6 +336,7 @@ class PublicStateAssembly:
                 coach_quick_actions_service=self._coach_quick_actions_service,
                 provider_state_service=self._provider_state_service,
                 provider_credentials=self._provider_credentials,
+                threshold_warnings=lambda: athlete.zones().threshold_warnings(),
             )
         )
 

@@ -53,6 +53,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     currentPlanLoadAreas: () => ["chat"],
     applyChatResult() {},
     renderCompetitionReadStatus() {},
+    updateStatusSources() {},
     finishAppShellLoading() {},
     reloadForUpdateWhenSafe() { updateChecks.push(state.loadPromise); },
     api(requestPath) {
@@ -113,9 +114,15 @@ test("the state snapshot is saved only after a full load and marks an update acr
   first.context.saveStateSnapshot();
   assert.equal(first.storage.size, 0);
   first.state.initialStateLoaded = true;
+  first.state.dataStandAt = 1_700_000_000_000;
   first.context.saveStateSnapshot();
-  assert.deepEqual(plain(loader({ storage: first.storage }).context.readStateSnapshot()), { data: { messages: [{ id: 1 }] }, updated: false });
-  assert.deepEqual(plain(loader({ storage: first.storage, asset: "/state-loader.js?v=2" }).context.readStateSnapshot()), { data: { messages: [{ id: 1 }] }, updated: true });
+  // The snapshot keeps when its data was loaded, for "Stand vor X min".
+  const { savedAt, ...same } = plain(loader({ storage: first.storage }).context.readStateSnapshot());
+  assert.deepEqual(same, { data: { messages: [{ id: 1 }] }, updated: false });
+  assert.equal(savedAt, 1_700_000_000_000);
+  const { savedAt: laterSavedAt, ...updated } = plain(loader({ storage: first.storage, asset: "/state-loader.js?v=2" }).context.readStateSnapshot());
+  assert.deepEqual(updated, { data: { messages: [{ id: 1 }] }, updated: true });
+  assert.equal(laterSavedAt, savedAt);
   first.context.clearStateSnapshot();
   assert.equal(first.context.readStateSnapshot(), null);
 });
@@ -141,7 +148,10 @@ test("a snapshot of an older key shape is neither shown nor reused for a failed 
   current.state.initialStateLoaded = true;
   current.context.saveStateSnapshot();
   assert.equal(JSON.parse(storage.get("coach-state-snapshot")).contract, vm.runInContext("STATE_SNAPSHOT_CONTRACT", current.context));
-  assert.deepEqual(plain(loader({ storage }).context.readStateSnapshot()), { data: { training_calendar: [] }, updated: false });
+  const { savedAt, ...snapshot } = plain(loader({ storage }).context.readStateSnapshot());
+  assert.deepEqual(snapshot, { data: { training_calendar: [] }, updated: false });
+  // Data of unknown age is saved without a time, so no wrong age is shown later.
+  assert.equal(savedAt, null);
 });
 
 test("the view cache keeps recent reads for the same assets and is cleared with the snapshot", () => {

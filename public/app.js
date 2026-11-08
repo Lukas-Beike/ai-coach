@@ -47,7 +47,6 @@ $("#appearanceSelect").addEventListener("change", (event) => {
   const appearance = applyAppearance(event.currentTarget.value);
   try { localStorage.setItem(APPEARANCE_KEY, appearance); } catch { }
 });
-$("#setupBannerDismiss").addEventListener("click", dismissSetupBanner);
 // Setup links lead to the collapsed Anbindungen section; open it so the hints are visible.
 document.addEventListener("click", (event) => {
   if (!event.target.closest?.('a[href="#more/connections"]')) return;
