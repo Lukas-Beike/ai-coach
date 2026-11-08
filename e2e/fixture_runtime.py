@@ -594,11 +594,14 @@ def _fixture_zone_seconds(value, *, positional):
     return tuple(zones) or None
 
 
-def _fixture_number(row, key, low=0.0):
-    value = row.get(key)
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value) if value >= low else None
+def _fixture_number(row, *keys, low=0.0):
+    """The first numeric value among ``keys`` at or above ``low``."""
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        return float(value) if value >= low else None
+    return None
 
 
 def _fixture_activity_record(row, retrieved_at):
@@ -611,8 +614,8 @@ def _fixture_activity_record(row, retrieved_at):
     sport, environment = _FIXTURE_SPORTS.get(
         type_name, (Sport.OTHER, Environment.UNKNOWN)
     )
-    moving = _fixture_number(row, "moving_time", 1.0)
-    elapsed = _fixture_number(row, "elapsed_time", 1.0)
+    moving = _fixture_number(row, "moving_time", low=1.0)
+    elapsed = _fixture_number(row, "elapsed_time", low=1.0)
     load = _fixture_number(row, "icu_training_load")
     device = row.get("device_name")
     return ActivityRecord(
@@ -637,11 +640,27 @@ def _fixture_activity_record(row, retrieved_at):
             LoadModel.INTERVALS_TRAINING_LOAD if load is not None else LoadModel.UNKNOWN
         ),
         avg_hr=_fixture_number(row, "average_heartrate"),
-        avg_power=_fixture_number(row, "average_watts"),
+        avg_power=_fixture_number(row, "average_watts", "average_power"),
+        max_hr=_fixture_number(row, "max_heartrate", "maxHR"),
+        max_speed_mps=_fixture_number(row, "max_speed"),
+        max_power_w=_fixture_number(row, "max_watts"),
+        elevation_gain_m=_fixture_number(row, "total_elevation_gain"),
+        normalized_power=_fixture_number(
+            row, "icu_weighted_avg_watts", "weighted_average_watts", "normalized_power"
+        ),
+        avg_cadence=_fixture_number(row, "average_cadence"),
+        intensity=_fixture_number(row, "icu_intensity"),
+        feel=_fixture_number(row, "feel"),
+        avg_speed_mps=_fixture_number(row, "average_speed"),
+        weighted_avg_speed_mps=_fixture_number(row, "icu_weighted_avg_speed"),
+        pace_mps=_fixture_number(row, "icu_pace"),
+        ftp_w=_fixture_number(row, "icu_ftp"),
+        eftp_w=_fixture_number(row, "icu_eftp", "eftp", "eFTP"),
+        avg_temp_c=_fixture_number(row, "average_temp", low=-60.0),
         name=str(row["name"])[:200] if row.get("name") else None,
         elapsed_duration_s=elapsed,
         moving_duration_s=moving,
-        rpe=_fixture_number(row, "icu_rpe"),
+        rpe=_fixture_number(row, "icu_rpe", "rpe"),
         power_zone_times_s=_fixture_zone_seconds(
             row.get("icu_zone_times"), positional=False
         ),
