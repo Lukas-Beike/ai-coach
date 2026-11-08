@@ -26,6 +26,7 @@ from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 from backend.sync.wahoo_connection import WahooConnectionService
+from backend.sync.wahoo_library_state import WahooLibraryState
 from backend.sync.wahoo_plan_push import WahooPlanPushService
 from backend.sync.wahoo_sync import (
     WahooSyncClock,
@@ -131,6 +132,14 @@ class WahooSyncAssembly:
 
         return WahooWorkoutExport(
             self.client, now=self._inputs.now, references=references
+        )
+
+    def library_state(self) -> WahooLibraryState:
+        """Read-only Wahoo state of library workouts, for the library view."""
+        return WahooLibraryState(
+            configured=self.sync_service().configured,
+            database_manager=self._inputs.database_manager,
+            export=self.workout_export,
         )
 
     def plan_push_service(self) -> WahooPlanPushService:

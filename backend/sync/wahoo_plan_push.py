@@ -7,9 +7,9 @@ Wahoo that is not connected, or a request that is stale, writes nothing. The
 Wahoo plan id lives in ``remote_links`` (provider ``wahoo``); the Intervals.icu
 slots of the library row are never touched. A second run updates the plan it
 created instead of uploading a duplicate. The link's baseline also covers the
-header references the plan was sent with (#1686), so a later threshold change
-leaves a trace a status view can compare against; a re-run sends the current
-values.
+references the relative steps use (#1686), so a later threshold change or text
+edit leaves a trace the library state compares against (#1769); a re-run sends
+the current values.
 """
 
 from __future__ import annotations
@@ -29,12 +29,11 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.providers.descriptors import WAHOO_ID, WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.providers.wahoo_client import WahooReconnectRequiredError
+from backend.providers.wahoo_plan_mapping import comparable_plan
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.wahoo_workout_export import WahooWorkoutExport
 
 _RETRY_SCOPE = "Nur fehlgeschlagene Objekte erneut auswählen."
-# Plan header fields that carry the athlete references of relative steps.
-_REFERENCE_KEYS = ("ftp", "max_hr", "threshold_hr", "threshold_speed")
 _REMOTE_LINKS = RemoteLinkRepository()
 
 
@@ -113,7 +112,7 @@ class WahooPlanPushService:
                 if remote_plans is None and self._needs_lookup(local_id):
                     remote_plans = export.library_list()
                 results[local_id] = self._write(
-                    export, local_id, item, workout, envelope, remote_plans or []
+                    export, local_id, workout, envelope, remote_plans or []
                 )
             except WahooReconnectRequiredError:
                 raise
@@ -163,7 +162,6 @@ class WahooPlanPushService:
         self,
         export: WahooWorkoutExport,
         local_id: str,
-        item: dict[str, Any],
         workout: dict[str, Any],
         envelope: dict[str, Any],
         remote_plans: list[dict[str, Any]],
@@ -197,9 +195,7 @@ class WahooPlanPushService:
                     sync_state=RemoteLinkState.SYNCED,
                     remote_id=stored_id,
                     remote_external_id=envelope["external_id"],
-                    baseline_hash=sent_baseline(
-                        item["expected_payload_hash"], envelope["plan"]
-                    ),
+                    baseline_hash=plan_baseline(envelope["plan"]),
                     last_synced_at=self._now().astimezone(UTC).isoformat(),
                 ),
             )
@@ -217,20 +213,14 @@ class WahooPlanPushService:
         }
 
 
-def sent_baseline(payload_hash: str, plan: dict[str, Any]) -> str:
-    """Return the link baseline: the payload hash, plus the sent references.
+def plan_baseline(plan: dict[str, Any]) -> str:
+    """Return the link baseline: a hash of what Wahoo receives.
 
-    A plan without header references keeps the bare payload hash; one with
-    references hashes both, so a changed FTP or threshold gives a new baseline.
+    Local bookkeeping such as another provider's sync state is not part of the
+    plan and never changes the hash.
     """
-    header = plan.get("header") or {}
-    references = {key: header[key] for key in _REFERENCE_KEYS if key in header}
-    if not references:
-        return payload_hash
-    content = json.dumps(
-        {"payload": payload_hash, "references": references}, sort_keys=True
-    )
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    serialized = json.dumps(comparable_plan(plan), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _earlier_upload(plans: list[dict[str, Any]], external_id: str) -> str | None:

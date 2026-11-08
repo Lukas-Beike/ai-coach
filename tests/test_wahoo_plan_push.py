@@ -19,7 +19,7 @@ from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.providers.wahoo_client import WahooReconnectRequiredError
 from backend.providers.wahoo_plan_mapping import WahooPlanReferences
-from backend.sync.wahoo_plan_push import WahooPlanPushService
+from backend.sync.wahoo_plan_push import WahooPlanPushService, plan_baseline
 from backend.sync.wahoo_workout_export import WahooWorkoutExport, wahoo_external_id
 
 W1 = "11111111-1111-4111-8111-111111111111"
@@ -144,7 +144,9 @@ class PushTests(PushCase):
         link = self.link(W1)
         self.assertEqual("101", link.remote_id)
         self.assertEqual(wahoo_external_id(W1), link.remote_external_id)
-        self.assertEqual(digest, link.baseline_hash)
+        self.assertEqual(
+            plan_baseline(self.wahoo.plans[101]["plan"]), link.baseline_hash
+        )
 
     def test_second_push_updates_the_same_plan_without_duplicating(self) -> None:
         digest = self.insert(W1, RIDE)
@@ -179,10 +181,26 @@ class PushTests(PushCase):
         self.assertEqual("synced", result["results"][0]["status"])
         self.assertEqual(280, self.wahoo.plans[101]["plan"]["header"]["ftp"])
         second = self.link(W1).baseline_hash
-        self.assertNotIn(digest, (first, second))
         self.assertNotEqual(first, second)
         self.push((W1, digest))
         self.assertEqual(second, self.link(W1).baseline_hash)
+
+    def test_the_baseline_ignores_references_no_step_resolves(self) -> None:
+        references = {"ftp": 250}
+        self.export = WahooWorkoutExport(
+            lambda: self.wahoo,
+            now=lambda: NOW,
+            references=lambda sport: WahooPlanReferences(**references),
+        )
+        digest = self.insert(W1, RIDE)
+        self.push((W1, digest))
+        first = self.link(W1).baseline_hash
+        references["ftp"] = 280
+
+        self.push((W1, digest))
+
+        self.assertEqual(280, self.wahoo.plans[101]["plan"]["header"]["ftp"])
+        self.assertEqual(first, self.link(W1).baseline_hash)
 
     def test_a_plan_deleted_at_wahoo_is_created_again(self) -> None:
         digest = self.insert(W1, RIDE)

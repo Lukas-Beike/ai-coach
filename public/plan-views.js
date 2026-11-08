@@ -1396,6 +1396,48 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
   }
 
+  // Wahoo state of an exported library workout. A changed one offers the
+  // explicit send; the job carries the payload hash the server returned, so a
+  // workout edited meanwhile is refused instead of pushed.
+  function libraryWahooRow(workout) {
+    const wahoo = workout.wahoo_state;
+    if (!wahoo?.state || !workout.id) return null;
+    const changed = wahoo.state === "changed";
+    const row = document.createElement("div");
+    row.className = "library-wahoo";
+    const label = document.createElement("span");
+    label.className = `library-wahoo-state is-${changed ? "changed" : "synced"}`;
+    label.textContent = changed ? "Wahoo: geändert" : "Wahoo: synchron";
+    row.append(label);
+    if (!changed || !wahoo.payload_hash) return row;
+    state.librarySyncInFlight ||= new Set();
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button library-wahoo-send";
+    button.textContent = "Erneut senden";
+    button.setAttribute("aria-label", `${workout.name || "Einheit"} an Wahoo senden`);
+    button.disabled = state.librarySyncInFlight.has(workout.id);
+    button.addEventListener("click", async () => {
+      if (state.librarySyncInFlight.has(workout.id)) return;
+      state.librarySyncInFlight.add(workout.id);
+      button.disabled = true;
+      let failure = "";
+      try {
+        const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider: providerIds().wahoo, type: "plan_push", payload: { entries: [{ library_workout_id: workout.id, expected_payload_hash: wahoo.payload_hash }] } }) });
+        const done = await globalThis.waitForSyncJob(job.id);
+        if (done.status !== "completed") failure = globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen";
+      } catch (error) {
+        failure = error.message;
+      }
+      state.librarySyncInFlight.delete(workout.id);
+      globalThis.toast?.(failure || "An Wahoo gesendet", Boolean(failure));
+      button.disabled = false;
+      await globalThis.load?.();
+    });
+    row.append(button);
+    return row;
+  }
+
   function renderLibrary(workouts) {
     const root = $("#library");
     if (!root) return;
@@ -1443,6 +1485,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
           const description = document.createElement("p");
           description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
           card.append(heading, description);
+          const wahoo = libraryWahooRow(workout);
+          if (wahoo) card.append(wahoo);
           cards.append(card);
         });
         section.append(cards);

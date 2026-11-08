@@ -277,6 +277,8 @@ class HttpReadRouteServices:
     diagnostics: HttpDiagnosticsServices
     workout_library: Callable[[], Any]
     planned_unit: Callable[[], Any]
+    # Read-only Wahoo state of exported library workouts; absent without Wahoo.
+    wahoo_library_state: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -344,6 +346,7 @@ class HttpApiAssembly:
         history = dependencies.reads.history
         diagnostics = dependencies.reads.diagnostics
         workout_library = dependencies.reads.workout_library
+        self._wahoo_library_state = dependencies.reads.wahoo_library_state
         planned_unit_service = dependencies.reads.planned_unit
         privacy = dependencies.domains.privacy
         sync = dependencies.domains.sync
@@ -779,7 +782,12 @@ class HttpApiAssembly:
         )
 
     def library_page_service(self) -> LibraryPageService:
-        return LibraryPageService(self._database_manager(), self._workout_library())
+        wahoo = self._wahoo_library_state
+        return LibraryPageService(
+            self._database_manager(),
+            self._workout_library(),
+            wahoo_states=(lambda rows: wahoo().states(rows)) if wahoo else None,
+        )
 
     def chat_history_page_service(self) -> ChatHistoryPageService:
         return ChatHistoryPageService(
