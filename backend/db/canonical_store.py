@@ -2202,34 +2202,6 @@ def live_session_id(db: Any, any_id: str) -> str | None:
     )
 
 
-def external_ref_sessions(
-    db: Any, upstream: str, upstream_ids: Sequence[str]
-) -> dict[str, str]:
-    """Map upstream activity ids to the session of an active record that names them.
-
-    A record names an upstream activity through its stored ``external_ref``, as an
-    Intervals.icu copy of a Garmin activity does. Merges are followed; unknown
-    ids are absent.
-    """
-    reference = (
-        "json_extract(CASE WHEN json_valid(details) THEN details END, "
-        f"'$.{_EXTERNAL_REF_KEY}[{{}}]')"
-    )
-    sessions: dict[str, str] = {}
-    for chunk in _chunked(list(dict.fromkeys(upstream_ids))):
-        for row in _fetch_all(
-            db,
-            f"SELECT {reference.format(1)} AS upstream_id, activity_id "
-            f"FROM activity_records WHERE state = ? AND {reference.format(0)} = ? "
-            f"AND CAST({reference.format(1)} AS TEXT) IN ({_placeholders(chunk)}) "
-            "ORDER BY provider, provider_activity_id",
-            (ActivityRecordState.ACTIVE.value, upstream, *chunk),
-        ):
-            sessions.setdefault(str(row["upstream_id"]), str(row["activity_id"]))
-    effective = effective_session_ids(db, list(sessions.values()))
-    return {key: effective.get(value, value) for key, value in sessions.items()}
-
-
 def effective_session_ids(db: Any, activity_ids: Sequence[str]) -> dict[str, str]:
     """Map stored session ids to the session their merges lead to; unknown ids are absent.
 

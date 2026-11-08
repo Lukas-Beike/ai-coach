@@ -19,7 +19,6 @@ merge persisted earlier may pair a record differently from today's bundling. The
 
 from __future__ import annotations
 
-from bisect import bisect_left, bisect_right
 from collections.abc import Collection, Iterable, Sequence
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any, Final
@@ -27,7 +26,6 @@ from typing import Any, Final
 from backend.activities.canonical_sessions import (
     ActivitySession,
     bundle_sessions,
-    garmin_duplicates_intervals,
 )
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
@@ -43,14 +41,12 @@ from backend.canonical.vocabulary import (
 from backend.db import canonical_store
 
 __all__ = [
-    "garmin_activity_matches",
     "link_activity_sessions",
     "session_age",
     "split_unmatched_sessions",
 ]
 
 LINK_MARGIN: Final = timedelta(days=1)
-_MATCH_SEARCH: Final = timedelta(days=1)
 _LINK_STRENGTH: Final = {
     ActivityLinkKind.SINGLE.value: 0,
     ActivityLinkKind.HEURISTIC.value: 1,
@@ -177,45 +173,6 @@ def _still_bundled(db: Any, survivor_id: str) -> bool:
         )
         > 1
     )
-
-
-def garmin_activity_matches(
-    db: Any,
-    garmin_ids: Sequence[str],
-    intervals_ids: Sequence[str],
-    *,
-    zone: tzinfo,
-) -> dict[str, set[str]]:
-    """Pair each Garmin activity with every Intervals.icu activity it duplicates.
-
-    The canonical records of both are compared with the pairwise duplicate rule,
-    so a pair counts even when session bundling kept the records apart.
-    """
-    garmin = _linkable_records(
-        canonical_store.provider_activity_record_rows(
-            db, ProviderId.GARMIN.value, garmin_ids
-        )
-    )
-    if not garmin:
-        return {}
-    intervals = sorted(
-        _linkable_records(
-            canonical_store.provider_activity_record_rows(
-                db, ProviderId.INTERVALS.value, intervals_ids
-            )
-        ),
-        key=lambda record: record.started_at,
-    )
-    starts = [record.started_at for record in intervals]
-    matches: dict[str, set[str]] = {}
-    for record in garmin:
-        # Wall clocks differ from instants by at most a day; the rule decides.
-        low = bisect_left(starts, record.started_at - _MATCH_SEARCH)
-        high = bisect_right(starts, record.started_at + _MATCH_SEARCH)
-        for candidate in intervals[low:high]:
-            if garmin_duplicates_intervals(record, candidate, zone=zone):
-                matches.setdefault(record.activity_id, set()).add(candidate.activity_id)
-    return matches
 
 
 def _upstream_rows(

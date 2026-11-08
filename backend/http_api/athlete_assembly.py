@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, tzinfo
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.session_corrections import SessionCorrectionService
-from backend.activities.session_linking import garmin_activity_matches
 from backend.athlete.checkins import CheckinService
-from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
@@ -100,17 +97,7 @@ class AthleteDataAssembly:
             self.activity_summaries,
             self._local_date,
             self._utc_now,
-            resolve_activity=ActivityReferences(self._database_manager()).resolve,
             gear_reader=CanonicalTableReader(),
-            match_activities=self._garmin_activity_matches,
-        )
-
-    def _garmin_activity_matches(
-        self, db: Any, garmin_ids: Sequence[str], intervals_ids: Sequence[str]
-    ) -> dict[str, set[str]]:
-        """Pair Garmin and Intervals.icu activities on the athlete's wall clock."""
-        return garmin_activity_matches(
-            db, garmin_ids, intervals_ids, zone=self._athlete_zone()
         )
 
     def zones(self) -> ZoneConfigurationService:
@@ -133,10 +120,6 @@ class AthleteDataAssembly:
             references=ActivityReferences(self._database_manager()),
             on_change=self._load_inputs_changed,
         )
-
-    def _athlete_zone(self) -> tzinfo:
-        """The athlete's wall-clock zone from the saved profile."""
-        return AthleteLocalClock(self.profile()).now().tzinfo or UTC
 
     def session_corrections(self) -> SessionCorrectionService:
         return SessionCorrectionService(

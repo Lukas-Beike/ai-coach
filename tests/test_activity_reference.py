@@ -123,33 +123,6 @@ class _Fixture(unittest.TestCase):
 
 
 class ActivityReferenceResolverTests(_Fixture):
-    def test_local_id_resolves_to_its_provider_id(self) -> None:
-        local = self.seed("ride-1")
-        self.assertTrue(local.startswith(canonical_store.ACTIVITY_ID_PREFIX))
-        self.assertEqual("ride-1", ActivityReferences(self.manager).resolve(local))
-
-    def test_duplicate_session_resolves_to_its_own_provider_id(self) -> None:
-        duplicate = self.seed("ride-a")
-        primary = self.seed("ride-b")
-        self.merge(duplicate, primary)
-        self.assertEqual("ride-a", ActivityReferences(self.manager).resolve(duplicate))
-
-    def test_garmin_survivor_resolves_its_merged_intervals_record(self) -> None:
-        intervals = self.seed("ride-merged")
-        garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
-        self.merge(intervals, garmin)
-        references = ActivityReferences(self.manager)
-        self.assertEqual(
-            ActivityReference("ride-merged", ProviderId.INTERVALS.value),
-            references.provider_reference(garmin),
-        )
-        # Duplicate deletion keeps the strict resolution of the survivor.
-        self.assertEqual(garmin, references.resolve(garmin))
-        # Every other reference leads to the session id, never to a provider id.
-        self.assertEqual(
-            ActivityReference(garmin), references.resolve_reference(garmin)
-        )
-
     def test_a_reference_resolves_to_the_session_it_names_not_the_survivor(
         self,
     ) -> None:
@@ -183,26 +156,8 @@ class ActivityReferenceResolverTests(_Fixture):
             ActivityReference(garmin), references.resolve_reference(intervals)
         )
         self.assertEqual(
-            ActivityReference("garmin-survivor"),
-            references.provider_reference("garmin-survivor"),
+            ActivityReference(garmin), references.resolve_reference("garmin-survivor")
         )
-
-    def test_a_deleted_alias_resolves_to_the_intervals_record_it_retained(self) -> None:
-        survivor = self.seed("ride-survivor")
-        alias = self.seed("garmin-alias", provider=ProviderId.GARMIN)
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE activity_sessions SET state = 'deleted', "
-                "merged_into_retained = ? WHERE activity_id = ?",
-                (survivor, alias),
-            )
-        references = ActivityReferences(self.manager)
-        self.assertEqual(
-            ActivityReference("ride-survivor", ProviderId.INTERVALS.value),
-            references.provider_reference(alias),
-        )
-        # The strict resolution keeps a deleted session unchanged.
-        self.assertEqual(alias, references.resolve(alias))
 
     def test_unresolvable_references_pass_through(self) -> None:
         local = self.seed("ride-1")
@@ -214,6 +169,12 @@ class ActivityReferenceResolverTests(_Fixture):
                     ActivityReference(reference),
                     references.resolve_reference(reference),
                 )
+
+    def test_null_object_keeps_the_reference(self) -> None:
+        self.assertEqual(
+            ActivityReference("act_x"),
+            NoActivityReferences().resolve_reference("act_x"),
+        )
 
     def test_envelope_reads_feedback_keyed_by_the_session_id(self) -> None:
         intervals = self.seed("ride-merged")
@@ -258,41 +219,6 @@ class ActivityReferenceResolverTests(_Fixture):
         with self.manager.reader() as db:
             envelope(db, "ride-merged")
         self.assertEqual([garmin], read)
-
-    def test_garmin_primary_session_passes_through_unchanged(self) -> None:
-        local = self.seed("garmin-1", provider=ProviderId.GARMIN)
-        self.assertEqual(local, ActivityReferences(self.manager).resolve(local))
-
-    def test_deleted_session_passes_through_unchanged(self) -> None:
-        local = self.seed("ride-deleted")
-        self.set_state(local, "deleted")
-        self.assertEqual(local, ActivityReferences(self.manager).resolve(local))
-
-    def test_unknown_local_id_passes_through_unchanged(self) -> None:
-        self.assertEqual(
-            "act_missing", ActivityReferences(self.manager).resolve("act_missing")
-        )
-
-    def test_provider_ids_and_non_text_values_pass_through_unchanged(self) -> None:
-        references = ActivityReferences(self.manager)
-        self.assertEqual("ride-1", references.resolve("ride-1"))
-        self.assertEqual(42, references.resolve(42))
-        self.assertIsNone(references.resolve(None))
-
-    def test_local_ids_map_provider_ids_that_have_canonical_records(self) -> None:
-        local = self.seed("ride-1")
-        references = ActivityReferences(self.manager)
-        self.assertEqual({"ride-1": local}, references.local_ids(["ride-1", "ride-2"]))
-
-    def test_local_ids_are_empty_for_empty_or_blank_input(self) -> None:
-        references = ActivityReferences(self.manager)
-        self.assertEqual({}, references.local_ids([]))
-        self.assertEqual({}, references.local_ids([""]))
-
-    def test_null_object_is_identity_and_has_no_local_ids(self) -> None:
-        references = NoActivityReferences()
-        self.assertEqual("act_x", references.resolve("act_x"))
-        self.assertEqual({}, references.local_ids(["ride-1"]))
 
 
 class ActivityCallerResolutionTests(_Fixture):
@@ -374,20 +300,6 @@ class ActivityCallerResolutionTests(_Fixture):
             routes.handle(handler, "/api/activities/act_missing/feedback")
         handler.send_json.assert_not_called()
 
-    def test_equipment_assignment_resolves_the_reference_at_the_boundary(self) -> None:
-        local = self.seed("ride-1")
-        resolver = Mock(return_value="ride-1")
-        service = EquipmentService(
-            self.manager,
-            read_summaries=tuple,
-            today=lambda: TODAY,
-            utc_now=lambda: STAMP,
-            resolve_activity=resolver,
-        )
-        with self.assertRaises(AppError):
-            service.assign({"activity_id": local, "equipment_id": "bike-1"})
-        resolver.assert_called_once_with(local)
-
     def test_equipment_without_resolver_keeps_the_reference_unchanged(self) -> None:
         service = EquipmentService(
             self.manager,
@@ -397,9 +309,6 @@ class ActivityCallerResolutionTests(_Fixture):
         )
         with self.assertRaises(AppError):
             service.assign({"activity_id": "act_missing", "equipment_id": "bike-1"})
-
-
-
 
 
 class ActivityFeedbackKeyTests(_Fixture):

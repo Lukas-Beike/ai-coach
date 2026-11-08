@@ -368,7 +368,7 @@ class PlannedUnitService:
         return {
             "local": local,
             ProviderId.INTERVALS.value: [],
-            "canonical": canonical_planned_workouts([], local, limit),
+            "canonical": canonical_planned_workouts(local, limit),
             "source": "local",
         }
 
