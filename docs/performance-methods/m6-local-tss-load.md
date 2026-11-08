@@ -1,12 +1,12 @@
 # M6 — Local TSS-scale session load and intensity
 
 - **Card:** M6
-- **Card version:** 4
-- **Method ID:** local-tss-load v4 (#1725, v2 #1726, v3 #1774, v4 #1771)
+- **Card version:** 5
+- **Method ID:** local-tss-load v5 (#1725, v2 #1726, v3 #1774, v4 #1771, v5 #1773)
 - **Status:** implemented (`backend/performance/local_tss.py`, `backend/sync/local_load.py`)
 - **Classification:** model estimate
-- **Literature checked:** 2026-11-06
-- **Review:** released 2026-11-07 (athlete)
+- **Literature checked:** 2026-11-08
+- **Review:** released 2026-11-08 (athlete)
 
 ## Target construct
 
@@ -70,6 +70,19 @@ Athlete decisions for v4 (2026-11-07, #1771, after the science review of
   source (local feedback, Garmin watch) are kept with each strength value and
   served to the Coach; the app view is unchanged.
 
+Athlete decisions for v5 (2026-11-08, #1773, after the science review of
+2026-11-07):
+
+- The heart-rate branch sums the TRIMP over the session's heart-rate
+  distribution instead of taking the TRIMP of the average HR (R52, Manzi's
+  per-second idea): the exponential weight makes the average understate
+  sessions with a high-intensity part.
+- A session whose heart-rate samples cover less than 80 % of its TSS duration
+  keeps the average-HR TRIMP, and so does a session without a stored
+  distribution.
+- A threshold observed more than 90 days after the session no longer stands in
+  for it; the session is treated as having no threshold.
+
 ## Formula and units
 
 One versioned method with four branches. Endurance sessions try the first
@@ -104,15 +117,27 @@ uses only the fourth. The value records which branch gave it
    - The sex comes from the profile. Without a saved value the male
      constants apply and the value is marked `sex_assumed`.
    - `HRr = (HR − HR_rest) / (HR_max − HR_rest)`.
-   - `TRIMP_session` uses the session's average HR. `TRIMP_threshold_hour`
-     is 60 minutes at the threshold HR.
+   - `TRIMP_session` (v5) sums over the session's heart-rate distribution,
+     the seconds `t_b` at each whole bpm `b` (moving samples only, gaps over
+     5 s left out, readings of 30-240 bpm; stored by the session analysis):
+     `TRIMP_session = Σ_b (t_b / 60) × HRr_b × a × e^(b × HRr_b) × D / C`,
+     with `HRr_b = (b − HR_rest) / (HR_max − HR_rest)` clamped to 0-1,
+     `C = Σ t_b` the covered seconds and `D` the TSS duration. The scale
+     `D / C` carries the counted time to the whole session.
+   - Coverage rule: with `C < 0.8 × D`, or without a stored distribution,
+     `TRIMP_session` is the TRIMP of the session's average HR for `D`, as in
+     v4. The value records `hr_basis` (`distribution` or `average`) and,
+     when a distribution exists, `hr_coverage = C / D` and a hash of the
+     distribution.
+   - `TRIMP_threshold_hour` is 60 minutes at the threshold HR.
    - `HR_max` and the threshold HR are the resolver's values for the sport on
      the day. Ride uses ride values; run and every other HR sport use run
      values.
    - `HR_rest` is the resting HR of the session day, or of the nearest
      earlier day within 7 days, from the recovery family (Garmin first).
      Without one, the earliest later resting HR stands in, flagged
-     `threshold_after_session` (athlete decision 2026-11-06).
+     `threshold_after_session` (athlete decision 2026-11-06), when that
+     value was observed at most 90 days after the session day (v5).
 4. **Session RPE** (strength only, v2; k matched by RPE since v4):
    `TSS = AU × k(RPE)`.
    - `AU`: the session-RPE load of card M1, elapsed minutes × RPE, from the
@@ -135,6 +160,14 @@ uses only the fourth. The value records which branch gave it
    - Detail table: for every RPE 1-10 the median `q` and pair count of its
      ±1 band (factor only from 20 pairs), so the slope is visible.
 
+Worked example for the heart-rate branch (v5, synthetic; rest 50, threshold
+165, max 190, male, 60 min): 40 min at 100 bpm and 20 min at 160 bpm have an
+average HR of 120. The average-HR TRIMP is `60 × 0.5 × 0.64 × e^(0.96) = 50.1`
+against `60 × 0.8214 × 0.64 × e^(1.577) = 152.7` for the threshold hour, so
+32.8. The distribution gives `40 × 0.357 × 0.64 × e^(0.686) = 18.1` plus
+`20 × 0.786 × 0.64 × e^(1.509) = 45.5`, 63.6, so 41.7. A constant 120 bpm gives
+32.8 both ways.
+
 General rules:
 
 - `duration_s` is the canonical session duration: moving, else elapsed.
@@ -152,7 +185,7 @@ General rules:
   - `observed_on`: the session's local day.
   - `sport`: the session's sport.
   - `source_kind`: `derived`.
-  - `method`: `local-tss-load`, `method_version`: 4.
+  - `method`: `local-tss-load`, `method_version`: 5.
   - The owner is the canonical session.
   - `details` hold the branch, the pace basis, and the thresholds used with
     their sources and dates; a heart-rate value also holds the sex the
@@ -161,7 +194,8 @@ General rules:
     rating source (local feedback, Garmin) and the factor per RPE (v4).
 - **Fingerprint.** `input_fingerprint` is the SHA-256 over the method
   version, branch, session inputs (for heart rate including the sex and
-  whether it was assumed), thresholds and, for strength, the calibration.
+  whether it was assumed, the `hr_basis`, coverage and a hash of the
+  distribution), thresholds and, for strength, the calibration.
 - **Recompute.** A method version bump or a changed input gives a new
   fingerprint. A local, idempotent backfill then recomputes the affected
   sessions, so a corrected or backfilled threshold changes past values.
@@ -171,6 +205,10 @@ General rules:
   observations.
 - **Rating changes.** A saved, changed or undone session RPE requests a pass,
   so strength values and the calibration follow it.
+- **Distribution changes.** The distribution is stored with the canonical
+  session analysis, which runs after the load pass. A newly stored or changed
+  distribution changes the fingerprint, so the next pass recomputes the
+  value.
 - **Sex changes.** A saved or undone profile sex requests a pass; the
   heart-rate values get a new fingerprint and are recomputed, and M7 follows.
 
@@ -181,7 +219,9 @@ General rules:
     interest, and its formula is confirmed only in the vendor text V1.
   - R20 relates TSS to fitness change.
   - R27-R29 cover the error and meaning of FTP.
-- **Heart-rate branch:** R19 (Banister TRIMP; male and female constants not
+- **Heart-rate branch:** R52 (TRIMP summed over the heart-rate distribution
+  of the session, with individual weights; the card uses the Banister weights
+  of R19, not the individual ones); R19 (Banister TRIMP; male and female constants not
   verified from the chapter; R25 prints 0.84 instead of 0.86 for the female
   prefactor, which cancels in the normalisation). V2 shows that the "one hour = 100" normalisation is a vendor
   convention without a peer-reviewed source.
@@ -211,6 +251,8 @@ General rules:
 - R27: 15 cyclists, FTP against MLSS.
 - R28: 25 cyclists, 20-min test reliability.
 - R29: 13 cyclists, time to failure at FTP.
+- R52: 8 recreational runners over 8 weeks, against changes in speed at 2 and
+  4 mmol/L lactate and race times.
 
 No study covers wrist-device running power, HR TRIMP normalised to a threshold
 hour, or a mix of branches on one scale.
@@ -266,9 +308,10 @@ hour, or a mix of branches on one scale.
 
 - NP comes from the device or provider summary, not from the app's own
   30-s/4th-power calculation over streams.
-- HR TRIMP uses the session's average HR, not zone or per-second HR. The
-  threshold-hour normalisation follows the vendor convention (V2), not a
-  published method.
+- HR TRIMP sums over the heart-rate distribution (v5), but with the fixed
+  Banister weights of the profile sex, not the individual lactate and
+  heart-rate weights of R52. The threshold-hour normalisation follows the
+  vendor convention (V2), not a published method.
 - Pace uses Garmin's grade-adjusted average speed, not normalized graded pace
   from streams, and the flat average speed when that is missing.
 - Yoga and alpine ski get no TSS. Their sRPE AU stays beside the sum.
@@ -286,7 +329,9 @@ hour, or a mix of branches on one scale.
 - Power: `NP > 0` and an `FTP > 0` for the sport on the day.
 - Pace: `v > 0` and `v_threshold > 0`.
 - Heart rate: average HR, HR_rest, HR_max and the threshold HR all known,
-  with `HR_rest < threshold HR < HR_max` and `0 < HRr ≤ 1`.
+  with `HR_rest < threshold HR < HR_max`. The distribution needs covered
+  seconds of at least 80 % of the TSS duration and a positive TRIMP; else
+  `0 < HRr ≤ 1` for the average HR.
 - Session RPE (strength): a rated session with a positive elapsed duration
   (`no_rating` otherwise) and at least 20 calibration pairs within 2 RPE of
   its rating in the window (`not_calibrated` otherwise). An RPE of 0 gives
@@ -296,7 +341,9 @@ hour, or a mix of branches on one scale.
 - A session without a valid threshold on its day uses the earliest later
   threshold under the same source policy and is flagged
   `threshold_after_session` with that threshold's date (athlete decision
-  2026-11-06). Without any later threshold it has no value.
+  2026-11-06), when that threshold was observed at most 90 days after the
+  session day (v5). Otherwise that threshold counts as missing and the branch
+  falls through as with no threshold.
 
 ## Numeric rules
 
@@ -307,9 +354,12 @@ hour, or a mix of branches on one scale.
 | Pace TSS | hours × (v/v_threshold)² × 100 | product assumption | rTSS convention (V1), formula unverified; R25 does not support it. |
 | TRIMP prefactor and coefficient | male 0.64 and 1.92, female 0.86 and 1.67 | product assumption | Banister constants as cited for R19, not verified from the chapter; male coefficient chosen by the athlete 2026-11-06, constants by profile sex 2026-11-07 (v3). |
 | Unset sex | male constants, marked `sex_assumed` | product assumption | Athlete decision 2026-11-07 (#1774); keeps existing values for the male athlete. |
+| HR distribution | TRIMP summed per bpm over the moving samples, scaled by TSS duration / covered seconds | source | R52 weights the impulse by the heart-rate distribution of the session; the Banister weights of R19 replace its individual ones (product assumption). Athlete decision 2026-11-08 (v5). |
+| HR coverage minimum | 80 % of the TSS duration, else the average-HR TRIMP | product assumption | Keeps a mostly missing stream from scaling up a short part; not a published value. Athlete decision 2026-11-08 (v5). |
+| HR distribution samples | moving samples, gaps over 5 s excluded, 30-240 bpm | product assumption | Same sample rules as the stream analyses (M8); readings outside the range are sensor faults. |
 | HR normalisation | 60 min at threshold HR = 100 | product assumption | Vendor convention (V2); no peer-reviewed source. |
 | HR guards | HR_rest < threshold HR < HR_max, 0 < HRr ≤ 1 | product assumption | Keeps HRr defined and the normalisation positive; not a published rule. |
-| Resting HR look-back | 7 days, else the earliest later value, flagged | product assumption | Keeps HRr on a recent resting HR; the later stand-in follows the athlete decision of 2026-11-06 after the count on the 2026-10-24 copy (2,334 sessions had none within 7 days); not a published value. |
+| Resting HR look-back | 7 days, else the earliest later value within 90 days, flagged | product assumption | Keeps HRr on a recent resting HR; the later stand-in follows the athlete decision of 2026-11-06 after the count on the 2026-10-24 copy (2,334 sessions had none within 7 days); not a published value. |
 | Resting HR source | recovery family, Garmin first | product assumption | Same family rule as `backend/performance/source_policy.py`. |
 | Implausible IF | above 2.0 | product assumption | Guard against a wrong FTP or unit; not a physiological rule. |
 | Stored intensity | intensity_pct = IF × 100, power branch only | product assumption | Issue #1725 scope (NP/FTP); pace IF is not comparable. |
@@ -325,6 +375,7 @@ hour, or a mix of branches on one scale.
 | HR thresholds of other sports | run values | product assumption | The resolver keeps HR thresholds for ride and run only. |
 | Indoor ride FTP | local indoor power zone of the day, else the ride FTP | product assumption | Athlete decision 2026-11-06 after review; plans also apply local indoor zones. |
 | Threshold after the session | earliest later threshold, flagged | product assumption | Athlete decision 2026-11-06; fills history before the first stored threshold. |
+| Later threshold cap | observed at most 90 days after the session day, else missing | product assumption | A threshold from much later may not describe the athlete at the session; athlete decision 2026-11-08 (v5). |
 | Duration | moving, else elapsed | product assumption | `summary_duration_s` in `backend/canonical/activity_summary.py:117`. |
 
 ## Allowed statements

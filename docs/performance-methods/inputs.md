@@ -82,7 +82,7 @@ Consumer trace:
 Consumer trace:
 
 - Method: `personal_recovery` → `_sleep_deficits` on canonical sleep duration
-  observations, and `sleep_timing_variability` (`sleep-timing-variability-v2`)
+  observations, and `sleep_timing_variability` (`sleep-timing-variability-v3`)
   on canonical sleep periods only (#1429).
 - Report/context, HTTP, UI and Coach as for M2; in addition the Coach tool
   `get_training_report(sections=["sleep_timing_variability"])`

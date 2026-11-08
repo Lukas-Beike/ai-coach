@@ -23,13 +23,19 @@ from backend.canonical.vocabulary import ProviderId, StreamChannel, StreamResolu
 from backend.performance import power_profile as power_profile_module
 from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
-from backend.performance.session_analysis import aerobic_analysis, interval_quality
+from backend.performance.session_analysis import (
+    HEART_RATE_HISTOGRAM_VERSION,
+    aerobic_analysis,
+    heart_rate_histogram,
+    interval_quality,
+)
 from backend.performance.session_execution import session_execution
 
 # Stored ``activity_detail_analysis.analysis_version`` of canonical analyses.
 ANALYSIS_VERSION: Final = 3
 # Bump when the computation below changes, so the stage recomputes every row.
 # v3: grade-adjusted Pa:HR of outdoor runs (#1770).
+# The stored heart-rate histogram has its own version in the fingerprint.
 METHOD_VERSION: Final = 3
 
 
@@ -145,6 +151,15 @@ def calendar_profile(
     )
 
 
+def session_heart_rate_histogram(
+    records: Sequence[ActivityRecord], merged: MergedDetail
+) -> dict[str, Any] | None:
+    """The seconds per bpm of the merged full-resolution heart-rate stream (M6 v5)."""
+    ordered = measured_order(records)
+    adapted = analysis_input(ordered[0], merged.streams, None, members=ordered)
+    return heart_rate_histogram(adapted.activity)
+
+
 def record_part(record: ActivityRecord) -> list[object]:
     """The record fields the analysis reads, for the input fingerprint."""
     provider = record.provenance.provider
@@ -182,6 +197,7 @@ def analysis_fingerprint(
                 METHOD_VERSION,
                 power_profile_module.METHOD_VERSION,
                 stream_zones.ZONE_TIMES_VERSION,
+                HEART_RATE_HISTOGRAM_VERSION,
             ],
             "records": [record_part(record) for record in measured_order(records)],
             "sets": sorted(set_hashes),

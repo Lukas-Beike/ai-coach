@@ -412,7 +412,7 @@ class ProfileSelectionTests(unittest.TestCase):
             (best["watts"], best["activity_id"], best["start_seconds"]),
         )
         self.assertEqual(
-            ("mean-max-curve", 1), (result["method"], result["method_version"])
+            ("mean-max-curve", 2), (result["method"], result["method_version"])
         )
         self.assertRegex(window["input_fingerprint"], r"^[0-9a-f]{64}$")
 

@@ -536,7 +536,7 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
     personal_recovery: {
       as_of: "2026-10-01", sleep_target_hours: null, baselines: [], sleep_deficits: [],
       regularity: {
-        method: "sleep-timing-variability-v2", timezone: "Europe/Berlin", status: "provisional", series: [{
+        method: "sleep-timing-variability-v3", timezone: "Europe/Berlin", status: "provisional", series: [{
           source: "Garmin Connect", method: "sleepStartTimestampGMT/sleepEndTimestampGMT", status: "provisional",
           coverage: { baseline_nights: 14, required_nights: 14 },
           points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5, onset_deviation_minutes: 15, wake_deviation_minutes: 10 }, { date: "2026-09-30" }],
@@ -673,11 +673,12 @@ test("@responsive load tab draws the local fitness, fatigue and form chart", asy
       return { date: date.toISOString().slice(0, 10), state: "loaded", load: 60, fitness: 50 + index / 10, fatigue: 55, form: index / 10 - 5 };
     });
     days[20] = { ...days[20], state: "incomplete", sessions_without_load: 1, session_rpe_au_without_load: 270 };
-    return { history: { ...performance.history, local_fitness_fatigue: { status: "estimate", days } } };
+    return { history: { ...performance.history, local_fitness_fatigue: { status: "estimate", incomplete_days: 1, incomplete_share: 0.036, days } } };
   }, "load");
   const chart = page.locator("#analysisLoadCharts .analysis-chart-card").filter({ has: page.getByRole("heading", { name: /^Fitness, Ermüdung, Form/ }) });
   await expect(chart).toBeVisible();
   await expect(chart).toContainText("1 Einheit ohne TSS");
+  await expect(chart).toContainText("4 % der Tage unvollständig");
   await expect(chart).toContainText("Lokal berechnet");
   await expect(chart).not.toContainText("Intervals");
 });

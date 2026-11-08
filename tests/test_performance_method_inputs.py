@@ -535,7 +535,7 @@ class M3SleepInputs(unittest.TestCase):
             sleep_storage,
             ["sleep_periods.sleep_periods"],
             msg="#1419: canonical sleep periods are stored (schema v15); "
-            "sleep-timing-variability-v2 reads them",
+            "sleep-timing-variability-v3 reads them",
         )
         series = mapped_personal_recovery(
             [], {"sleep": [_night(0)]}, self.profile, TODAY

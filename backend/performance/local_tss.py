@@ -7,9 +7,11 @@ the thresholds in effect on its local day, with the first complete branch of:
 * pace (run without power): ``IF = v / v_threshold`` with the grade-adjusted
   speed, else the average speed, ``TSS = hours × IF² × 100``;
 * heart rate (other sports too, walking included; not strength, yoga or
-  alpine ski): Banister TRIMP of the average HR, normalised so 60 minutes at the
-  threshold HR is 100, with the constants of the athlete's profile sex (male
-  when not set, marked ``sex_assumed``; method v3, #1774);
+  alpine ski): Banister TRIMP, normalised so 60 minutes at the threshold HR is
+  100, with the constants of the athlete's profile sex (male when not set,
+  marked ``sex_assumed``; method v3, #1774). It sums the TRIMP over the stored
+  per-second HR histogram of the session when that covers at least 80 % of the
+  TSS duration, else it uses the average HR (``hr_basis``, method v5, #1773);
 * session RPE (strength only): the session-RPE load (card M1, elapsed minutes x
   RPE) times the athlete's own TSS per AU at a similar RPE (method v4, #1771):
   the median of ``TSS / (TSS duration minutes x RPE)`` over the rated ride and
@@ -20,7 +22,8 @@ the thresholds in effect on its local day, with the first complete branch of:
 Only the power branch gives an intensity factor (percent of FTP). A provider
 load or intensity is never an input. ``DatedThresholds`` resolves the thresholds
 of a session day under the source policy of the current thresholds; a key with
-no value on the day takes the earliest later value, flagged ``after_session``.
+no value on the day takes the earliest later value observed within 90 days after
+the session, flagged ``after_session`` (v5), else it is missing.
 
 This module is pure: no database, no provider and no ``server.py`` access.
 """
@@ -30,7 +33,7 @@ from __future__ import annotations
 import bisect
 import math
 import statistics
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final
@@ -61,7 +64,7 @@ from backend.performance.session_rpe_load import session_load
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 
 METHOD_ID: Final = "local-tss-load"
-METHOD_VERSION: Final = 4
+METHOD_VERSION: Final = 5
 CARD: Final = "M6"
 
 POWER_BRANCH: Final = "power"
@@ -75,6 +78,13 @@ MALE: Final = "male"
 FEMALE: Final = "female"
 TRIMP_CONSTANTS: Final = {MALE: (0.64, 1.92), FEMALE: (0.86, 1.67)}
 MAX_INTENSITY_FACTOR: Final = 2.0
+# The histogram must cover this share of the TSS duration (card M6 v5).
+HR_COVERAGE_MIN: Final = 0.8
+HR_BASIS_DISTRIBUTION: Final = "distribution"
+HR_BASIS_AVERAGE: Final = "average"
+# A later threshold stands in only when observed within this many days after
+# the session day (card M6 v5).
+LATER_STAND_IN_MAX_DAYS: Final = 90
 RESTING_HR_LOOKBACK_DAYS: Final = 7
 # Yoga and alpine ski get no value; strength only the session-RPE branch and
 # walking the heart-rate branch (athlete decisions 2026-11-06, method v2).
@@ -137,6 +147,39 @@ class SessionThresholds:
     threshold_hr: Threshold | None = None
     max_hr: Threshold | None = None
     resting_hr: Threshold | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HeartRateHistogram:
+    """Seconds per integer bpm of one session's moving heart-rate samples."""
+
+    seconds: Mapping[int, float]
+
+    @property
+    def covered_s(self) -> float:
+        return sum(self.seconds.values())
+
+    def content_hash(self) -> str:
+        return fingerprint_inputs(
+            {"seconds": [[bpm, self.seconds[bpm]] for bpm in sorted(self.seconds)]}
+        )
+
+
+# The stored histogram of a session id, read only for sessions on the HR branch.
+HistogramLookup = Callable[[str], HeartRateHistogram | None]
+
+
+def parse_heart_rate_histogram(raw: Any) -> HeartRateHistogram | None:
+    """The histogram of a stored ``hr_histogram`` payload, or None if unusable."""
+    stored = raw.get("seconds") if isinstance(raw, Mapping) else None
+    if not isinstance(stored, Mapping):
+        return None
+    seconds: dict[int, float] = {}
+    for key, value in stored.items():
+        number = _positive(value)
+        if number is not None and str(key).isdecimal():
+            seconds[int(key)] = number
+    return HeartRateHistogram(seconds) if seconds else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -396,16 +439,28 @@ def trimp_sex(sex: str | None) -> tuple[str, bool]:
     return MALE, True
 
 
-def _heart_rate(
-    summary: Mapping[str, Any],
-    sport: Sport,
+def _distribution_trimp(
+    histogram: HeartRateHistogram,
     seconds: float,
-    thresholds: SessionThresholds,
-    sex: str | None,
-) -> LocalLoad | str | None:
-    heart_rate = _positive(summary.get("avg_hr"))
-    if heart_rate is None:
+    rest: float,
+    span: float,
+    sex: str,
+) -> float | None:
+    """TRIMP of the histogram scaled to ``seconds``, or None below 80 % coverage."""
+    covered = histogram.covered_s
+    if covered < HR_COVERAGE_MIN * seconds:
         return None
+    total = sum(
+        _trimp(time / 60, min(max((bpm - rest) / span, 0.0), 1.0), sex)
+        for bpm, time in histogram.seconds.items()
+    )
+    return total * seconds / covered if total > 0 else None
+
+
+def _heart_rate_thresholds(
+    thresholds: SessionThresholds,
+) -> tuple[Threshold, Threshold, Threshold] | str:
+    """The resting, threshold and maximum HR, or the reason one is unusable."""
     rest, threshold, maximum = (
         thresholds.resting_hr,
         thresholds.threshold_hr,
@@ -419,28 +474,68 @@ def _heart_rate(
         return "no_max_hr"
     if not rest.value < threshold.value < maximum.value:
         return "inconsistent_heart_rate_thresholds"
-    span = maximum.value - rest.value
-    reserve = (heart_rate - rest.value) / span
+    return rest, threshold, maximum
+
+
+def _session_trimp(
+    heart_rate: float,
+    histogram: HeartRateHistogram | None,
+    seconds: float,
+    rest: float,
+    span: float,
+    sex: str,
+) -> tuple[float, dict[str, Any]] | str:
+    """The session's TRIMP with its basis inputs, or the reason it has none."""
+    basis: dict[str, Any] = {}
+    if histogram is not None:
+        basis = {
+            "hr_coverage": round(histogram.covered_s / seconds, 4),
+            "hr_histogram_sha256": histogram.content_hash(),
+        }
+        trimp = _distribution_trimp(histogram, seconds, rest, span, sex)
+        if trimp is not None:
+            return trimp, {"hr_basis": HR_BASIS_DISTRIBUTION, **basis}
+    reserve = (heart_rate - rest) / span
     if not 0 < reserve <= 1:
         return "heart_rate_outside_reserve"
-    threshold_reserve = (threshold.value - rest.value) / span
+    return _trimp(seconds / 60, reserve, sex), {"hr_basis": HR_BASIS_AVERAGE, **basis}
+
+
+def _heart_rate(
+    summary: Mapping[str, Any],
+    sport: Sport,
+    seconds: float,
+    thresholds: SessionThresholds,
+    sex: str | None,
+    histograms: HistogramLookup | None = None,
+) -> LocalLoad | str | None:
+    heart_rate = _positive(summary.get("avg_hr"))
+    if heart_rate is None:
+        return None
+    used = _heart_rate_thresholds(thresholds)
+    if isinstance(used, str):
+        return used
+    rest, threshold, maximum = used
+    span = maximum.value - rest.value
     used_sex, assumed = trimp_sex(sex)
-    load = (
-        _trimp(seconds / 60, reserve, used_sex)
-        / _trimp(60, threshold_reserve, used_sex)
-        * 100
-    )
+    histogram = None if histograms is None else histograms(str(summary.get("id")))
+    session = _session_trimp(heart_rate, histogram, seconds, rest.value, span, used_sex)
+    if isinstance(session, str):
+        return session
+    trimp, basis = session
+    threshold_reserve = (threshold.value - rest.value) / span
     inputs: dict[str, Any] = {
         "sport": sport.value,
         "duration_s": seconds,
         "avg_hr": heart_rate,
         "sex": used_sex,
+        **basis,
     }
     if assumed:
         inputs["sex_assumed"] = True
     return _result(
         HEART_RATE_BRANCH,
-        load,
+        trimp / _trimp(60, threshold_reserve, used_sex) * 100,
         None,
         inputs,
         {"resting_hr": rest, "threshold_hr": threshold, "max_hr": maximum},
@@ -481,6 +576,7 @@ def session_local_load(
     rating: SessionRating | str | None = None,
     calibration: RpeCalibration | None = None,
     sex: str | None = None,
+    histograms: HistogramLookup | None = None,
 ) -> LocalLoad | str:
     """Return the session's local load, or the reason it has none.
 
@@ -489,7 +585,9 @@ def session_local_load(
     through to the next one and its reason is kept if none succeeds. A strength
     session reads only the session-RPE branch with its ``rating`` and the
     ``calibration`` of its day. ``sex`` (profile value, None or empty when not
-    set) chooses the heart-rate branch's TRIMP constants.
+    set) chooses the heart-rate branch's TRIMP constants; ``histograms`` gives
+    the stored heart-rate histogram of a session id and is called only when the
+    session reaches the heart-rate branch.
     """
     sport = _sport(summary)
     if sport is None or sport in NO_TSS_SPORTS:
@@ -500,11 +598,12 @@ def session_local_load(
     if seconds is None:
         return "no_duration"
     reason = "no_inputs"
-    for outcome in (
-        _power(summary, sport, seconds, thresholds.ftp),
-        _pace(summary, sport, seconds, thresholds.threshold_pace),
-        _heart_rate(summary, sport, seconds, thresholds, sex),
+    for branch in (
+        lambda: _power(summary, sport, seconds, thresholds.ftp),
+        lambda: _pace(summary, sport, seconds, thresholds.threshold_pace),
+        lambda: _heart_rate(summary, sport, seconds, thresholds, sex, histograms),
     ):
+        outcome = branch()
         if isinstance(outcome, LocalLoad):
             return outcome
         if isinstance(outcome, str) and reason == "no_inputs":
@@ -536,7 +635,8 @@ class DatedThresholds:
     each provider's newest value observed on or before it competes under the
     source policy, with age limits counted from that day. Local confirmed zone
     configurations in effect on the day win. A key without a value on the day
-    takes the earliest later value, flagged ``after_session``.
+    takes the earliest later value observed at most 90 days after the day,
+    flagged ``after_session``; a later one does not stand in (v5).
     """
 
     def __init__(
@@ -618,10 +718,12 @@ class DatedThresholds:
         found = self._resolve(day).get((kind, sport))
         if found is not None:
             return found
+        last = day + timedelta(days=LATER_STAND_IN_MAX_DAYS)
         start = bisect.bisect_right(self._later_days, day)
-        for later in self._later_days[start:]:
+        end = bisect.bisect_right(self._later_days, last)
+        for later in self._later_days[start:end]:
             found = self._resolve(later).get((kind, sport))
-            if found is not None:
+            if found is not None and (found.observed_on or later) <= last:
                 return Threshold(
                     found.value, found.source, found.observed_on, after_session=True
                 )
@@ -632,7 +734,8 @@ class DatedThresholds:
 
         Garmin's value wins over another provider's value of the same window.
         Without one, the earliest later value stands in, flagged ``after_session``
-        (athlete decision 2026-11-06), Garmin first on that day.
+        (athlete decision 2026-11-06), Garmin first on that day, when observed
+        within 90 days after ``day`` (v5).
         """
         start = bisect.bisect_left(
             self._rest_days, day - timedelta(days=RESTING_HR_LOOKBACK_DAYS)
@@ -645,6 +748,8 @@ class DatedThresholds:
         if not later:
             return None
         first_day = later[0].observed_on
+        if first_day > day + timedelta(days=LATER_STAND_IN_MAX_DAYS):
+            return None
         stand_in = _first_by_provider(
             [item for item in later if item.observed_on == first_day], latest=False
         )
@@ -785,13 +890,15 @@ def session_loads(
     feedback: Mapping[str, Mapping[str, Any]] | None = None,
     *,
     sex: str | None = None,
+    histograms: HistogramLookup | None = None,
 ) -> dict[str, LocalLoad | str]:
     """Each summary's local load or no-load reason, by session id.
 
     ``feedback`` maps a summary's stored key to its session's effective local
     feedback (``feedback_by_session``). Strength sessions come last, with the
     calibration from the other sessions' loads. ``sex`` is the profile sex the
-    heart-rate branch reads.
+    heart-rate branch reads; ``histograms`` looks up a session's stored heart-rate
+    histogram.
     """
     ratings = feedback or {}
     result: dict[str, LocalLoad | str] = {}
@@ -815,6 +922,7 @@ def session_loads(
             summary,
             thresholds.for_session(sport, day, indoor=summary_is_indoor(summary)),
             sex=sex,
+            histograms=histograms,
         )
     calibrations = RpeCalibrations(calibration_pairs(summaries, result, ratings))
     for session_id, summary, day in strength:

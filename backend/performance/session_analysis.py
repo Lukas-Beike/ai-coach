@@ -45,6 +45,34 @@ def _samples(
     return samples
 
 
+# Bump when ``heart_rate_histogram`` counts differently, so stored rows recompute.
+HEART_RATE_HISTOGRAM_VERSION = 1
+HISTOGRAM_MIN_BPM = 30
+HISTOGRAM_MAX_BPM = 240
+
+
+def heart_rate_histogram(activity: dict[str, Any]) -> dict[str, Any] | None:
+    """Seconds per integer bpm of the moving heart-rate samples, or None.
+
+    Counts the samples ``_samples`` keeps (moving, gaps over 5 s left out)
+    with a reading of 30-240 bpm. ``covered_s`` is the counted time.
+    """
+    seconds: dict[int, float] = {}
+    for _timestamp, weight, value in _samples(
+        activity, "heartrate", -math.inf, math.inf
+    ):
+        if HISTOGRAM_MIN_BPM <= value <= HISTOGRAM_MAX_BPM:
+            bpm = round(value)
+            seconds[bpm] = seconds.get(bpm, 0.0) + weight
+    if not seconds:
+        return None
+    return {
+        "version": HEART_RATE_HISTOGRAM_VERSION,
+        "covered_s": round(sum(seconds.values()), 3),
+        "seconds": {str(bpm): round(seconds[bpm], 3) for bpm in sorted(seconds)},
+    }
+
+
 def _target(
     step: dict[str, Any], basis: dict[str, Any]
 ) -> tuple[str, float, float, str] | None:

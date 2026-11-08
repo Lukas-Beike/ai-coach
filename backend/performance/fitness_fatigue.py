@@ -11,7 +11,9 @@ without any session is a rest day (load 0). A day with a session that has no
 local load (yoga, alpine ski, unrated or uncalibrated strength, missing
 inputs) adds nothing
 for that session and is marked incomplete with the session count and its
-session-RPE AU beside, never converted. Days from the last provider sync on
+session-RPE AU beside, never converted; ``incomplete_days`` and
+``incomplete_share`` (0 to 1, three decimals) give those days over the served
+window. Days from the last provider sync on
 without a session are open: no value, state unchanged. Values are withheld
 during a warm-up of two tau from the first load day and rounded only for
 output. Computed on read, never stored.
@@ -218,6 +220,7 @@ def local_fitness_fatigue(
     valued = [
         day for day in days if day["fitness"] is not None or day["fatigue"] is not None
     ]
+    incomplete_days = sum(day["state"] == STATE_INCOMPLETE for day in days)
     return {
         "metric_id": METRIC_ID,
         "method_id": METHOD_ID,
@@ -246,6 +249,8 @@ def local_fitness_fatigue(
         "coverage": {
             name: sum(day["state"] == name for day in days) for name in STATES
         },
+        "incomplete_days": incomplete_days,
+        "incomplete_share": round(incomplete_days / len(days), 3) if days else 0.0,
         "sessions_without_load": sum(
             day.get("sessions_without_load", 0) for day in days
         ),

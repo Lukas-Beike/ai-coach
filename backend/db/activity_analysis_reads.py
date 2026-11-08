@@ -56,6 +56,22 @@ def stored_zone_times(
     return result
 
 
+def stored_heart_rate_histogram(
+    db: Any, analysis_version: int, session_id: str
+) -> dict[str, Any] | None:
+    """The stored heart-rate histogram of one ``analysis_version`` row, if it has one."""
+    row = db.execute(
+        "SELECT json_extract(payload, '$.hr_histogram') AS histogram "
+        "FROM activity_detail_analysis WHERE analysis_version = ? "
+        "AND json_type(payload, '$.hr_histogram') = 'object' AND activity_id = ?",
+        (analysis_version, session_id),
+    ).fetchone()
+    if row is None:
+        return None
+    histogram = json.loads(row["histogram"])
+    return histogram if isinstance(histogram, dict) else None
+
+
 def recent_session_analyses(
     db: Any, analysis_version: int, limit: int = 100
 ) -> list[dict[str, Any]]:

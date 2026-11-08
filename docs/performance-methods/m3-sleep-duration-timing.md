@@ -1,12 +1,12 @@
 # M3 — Sleep duration, goal shortfall and timing
 
 - **Card:** M3
-- **Card version:** 3
-- **Method ID:** personal-quartiles-v1 (duration and goal shortfall), sleep-timing-variability-v2 (timing)
+- **Card version:** 4
+- **Method ID:** personal-quartiles-v1 (duration and goal shortfall), sleep-timing-variability-v3 (timing)
 - **Status:** implemented on canonical sleep observations and periods (#1429)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-10-24
-- **Review:** released 2026-11-01 (athlete)
+- **Review:** released 2026-11-08 (athlete)
 
 ## Target construct
 
@@ -22,12 +22,16 @@ debt, sleep quality or a sleep diagnosis.
 - Goal shortfall (`backend/performance/personal_recovery.py:_sleep_deficits`): with a
   goal of 4 to 12 h, `sum(max(0, goal_h − duration_h))` over known nights from
   today − 6 to today, in hours, rounded to 0.01 h after summing.
-- Timing (`sleep-timing-variability-v2`, `personal_recovery.py:sleep_timing_variability`):
+- Timing (`sleep-timing-variability-v3`, `personal_recovery.py:sleep_timing_variability`):
   local onset and wake clock times in minutes after midnight. Circular median
   over 1,440 minutes of the earlier intervals in the 42-day window; per night
   the absolute circular deviation from that median, rounded to 0.1 min. With
   fewer than 14 earlier intervals there is no median and no deviation (v2;
-  v1 computed both from any number).
+  v1 computed both from any number). Since v3, a night whose canonical
+  period has no timezone (read outside the profile zone, so its provider day
+  differs from the local end date) is marked `other_timezone`, shows no
+  deviation, and is left out of the median, the deviation medians, the
+  earlier-interval count and the status; sleep duration is unaffected.
 - This timing deviation is not the Sleep Regularity Index (SRI). SRI (R13) is
   the probability that two time points 24 h apart have the same sleep/wake
   state, from 1-min epochs including naps, rescaled to −100..100. The two keep
@@ -85,7 +89,8 @@ declares lighting-industry funding.
   v1 read from provider rows (`backend/canonical/sleep_bounds.py`), with the
   same field precedence; providers and field pairs stay apart, each interval
   is dated by its end in the profile zone and the latest interval of a day is
-  kept; parity is pinned in
+  kept, except that an `other_timezone` night never replaces one read in the
+  profile zone (v3); parity is pinned in
   `tests/test_sleep_timing_variability_canonical_parity.py`.
 - Coverage limits: only intervals with both a start and an end field are read;
   Garmin's main daily sleep is stored as NIGHT and every other interval as
@@ -102,6 +107,7 @@ declares lighting-industry funding.
   before the latest night gives status `insufficient_data` with no median and
   no deviation for any night of the series; 14 to 27 is `provisional`; 28 or more is
   `ok`.
+- Nights marked `other_timezone` do not count as earlier intervals.
 - Durations above 24 h and non-positive values are excluded.
 - SRI enters scope only with a sufficiently complete sleep/wake series
   including daytime segments, and with the exact calculator named.

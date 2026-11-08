@@ -1841,6 +1841,8 @@ def _fixture_wave2_details(by_id):
                 "heartrate": heart_rate,
                 "velocity_smooth": speed,
                 "distance": distance,
+                # Flat course: outdoor running bests need altitude (M4 card 4).
+                "altitude": [120.0] * n,
                 "moving": [1] * n,
             }
         else:

@@ -33,12 +33,14 @@ from backend.performance.local_tss import (
     POWER_BRANCH,
     CalibrationPair,
     DatedThresholds,
+    HeartRateHistogram,
     LocalLoad,
     RpeCalibration,
     RpeCalibrations,
     SessionRating,
     SessionThresholds,
     Threshold,
+    parse_heart_rate_histogram,
     rated_sessions,
     session_loads,
     session_local_load,
@@ -396,7 +398,7 @@ class DatedThresholdTests(unittest.TestCase):
             thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2026, 6, 1))
         )
         early = _found(
-            thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2025, 1, 1))
+            thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2026, 1, 15))
         )
         self.assertEqual((june.value, june.source), (240.0, "garmin"))
         self.assertEqual((early.value, early.after_session), (240.0, True))
@@ -412,7 +414,7 @@ class DatedThresholdTests(unittest.TestCase):
             ]
         )
         found = _found(
-            thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2025, 1, 1))
+            thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2026, 1, 15))
         )
         self.assertEqual(
             (found.value, found.observed_on, found.after_session),
@@ -507,6 +509,152 @@ class DatedThresholdTests(unittest.TestCase):
         assert isinstance(load, LocalLoad)
         self.assertAlmostEqual(load.load, 100.0, places=9)
         self.assertNotIn("threshold_after_session", load.details)
+
+
+class HeartRateDistributionTests(unittest.TestCase):
+    """Card M6 v5: rest 50, threshold 165, max 190, male, 60 min, avg HR 120."""
+
+    thresholds = SessionThresholds(
+        resting_hr=_threshold(50.0),
+        threshold_hr=_threshold(165.0),
+        max_hr=_threshold(190.0),
+    )
+    summary = _summary(moving_duration_s=3600.0, avg_hr=120.0)
+
+    def _load(
+        self, bins: dict[int, float] | None, summary: dict[str, Any] | None = None
+    ) -> LocalLoad:
+        histogram = None if bins is None else HeartRateHistogram(bins)
+        result = session_local_load(
+            summary or self.summary,
+            self.thresholds,
+            histograms=lambda _session_id: histogram,
+        )
+        assert isinstance(result, LocalLoad), result
+        return result
+
+    def test_constant_heart_rate_gives_the_average_value(self) -> None:
+        load = self._load({120: 3600.0})
+        average = self._load(None)
+        self.assertAlmostEqual(load.load, 32.84, places=2)
+        self.assertAlmostEqual(average.load, 32.84, places=2)
+        self.assertEqual(load.details["inputs"]["hr_basis"], "distribution")
+        self.assertEqual(average.details["inputs"]["hr_basis"], "average")
+        self.assertNotIn("hr_coverage", average.details["inputs"])
+
+    def test_two_blocks_weigh_the_high_heart_rate_more(self) -> None:
+        # 40 min at 100 bpm and 20 min at 160 bpm: average 120, distribution 41.7.
+        load = self._load({100: 2400.0, 160: 1200.0})
+        self.assertAlmostEqual(load.load, 41.7, places=1)
+        self.assertEqual(load.details["inputs"]["hr_coverage"], 1.0)
+        self.assertAlmostEqual(self._load(None).load, 32.84, places=2)
+
+    def test_covered_time_is_scaled_to_the_tss_duration(self) -> None:
+        # 90 % of the hour covered: the same mix scales up to the full hour.
+        load = self._load({100: 2160.0, 160: 1080.0})
+        self.assertAlmostEqual(load.load, 41.7, places=1)
+        self.assertEqual(load.details["inputs"]["hr_coverage"], 0.9)
+
+    def test_coverage_below_eighty_percent_falls_back_to_the_average(self) -> None:
+        load = self._load({100: 1600.0, 160: 800.0})
+        inputs = load.details["inputs"]
+        self.assertAlmostEqual(load.load, 32.84, places=2)
+        self.assertEqual(inputs["hr_basis"], "average")
+        self.assertAlmostEqual(inputs["hr_coverage"], 0.6667, places=4)
+
+    def test_reserve_is_clamped_to_zero_and_one(self) -> None:
+        # Below rest counts nothing; above max counts as full reserve.
+        low = self._load({40: 1800.0, 120: 1800.0})
+        self.assertAlmostEqual(low.load, 32.84 / 2, places=2)
+        high = self._load({210: 3600.0})
+        full = self._load({190: 3600.0})
+        self.assertAlmostEqual(high.load, full.load, places=9)
+
+    def test_histogram_content_changes_the_fingerprint(self) -> None:
+        first = self._load({100: 2400.0, 160: 1200.0})
+        same = self._load({160: 1200.0, 100: 2400.0})
+        other = self._load({100: 2400.0, 161: 1200.0})
+        none = self._load(None)
+        self.assertEqual(first.fingerprint, same.fingerprint)
+        self.assertEqual(
+            len({first.fingerprint, other.fingerprint, none.fingerprint}), 3
+        )
+
+    def test_lookup_is_only_called_for_sessions_on_the_heart_rate_branch(self) -> None:
+        asked: list[str] = []
+
+        def lookup(session_id: str) -> HeartRateHistogram | None:
+            asked.append(session_id)
+            return None
+
+        powered = _summary(
+            normalized_power=230.0, moving_duration_s=4200.0, avg_hr=120.0
+        )
+        result = session_local_load(
+            powered,
+            SessionThresholds(ftp=_threshold(250.0)),
+            histograms=lookup,
+        )
+        self.assertIsInstance(result, LocalLoad)
+        self.assertEqual(asked, [])
+        session_local_load(self.summary, self.thresholds, histograms=lookup)
+        self.assertEqual(asked, ["act_1"])
+
+    def test_parse_reads_the_stored_payload(self) -> None:
+        histogram = parse_heart_rate_histogram(
+            {
+                "version": 1,
+                "covered_s": 70.0,
+                "seconds": {"120": 60.0, "x": 5, "130": 10},
+            }
+        )
+        assert histogram is not None
+        self.assertEqual(dict(histogram.seconds), {120: 60.0, 130: 10.0})
+        self.assertIsNone(parse_heart_rate_histogram({"seconds": {}}))
+        self.assertIsNone(parse_heart_rate_histogram(None))
+
+
+class LaterThresholdCapTests(unittest.TestCase):
+    def test_later_threshold_within_ninety_days_stands_in(self) -> None:
+        thresholds = DatedThresholds(
+            [_observation(MetricKind.FTP, 240.0, date(2026, 3, 1))]
+        )
+        found = _found(
+            thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2025, 12, 1))
+        )
+        self.assertEqual((found.value, found.after_session), (240.0, True))
+
+    def test_later_threshold_after_ninety_days_counts_as_missing(self) -> None:
+        thresholds = DatedThresholds(
+            [_observation(MetricKind.FTP, 240.0, date(2026, 3, 1))]
+        )
+        # 2025-12-01 + 90 days = 2026-03-01 (the last day); one day earlier is 91.
+        self.assertIsNotNone(
+            thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2025, 12, 1))
+        )
+        self.assertIsNone(
+            thresholds.threshold(MetricKind.FTP, Sport.RIDE, date(2025, 11, 30))
+        )
+
+    def test_session_without_a_capped_threshold_falls_through(self) -> None:
+        # The session is 2026-06-01; the only FTP is observed 122 days later.
+        thresholds = DatedThresholds(
+            [_observation(MetricKind.FTP, 240.0, date(2026, 10, 1))]
+        )
+        loads = session_loads(
+            [_summary(normalized_power=230.0, moving_duration_s=4200.0)], thresholds
+        )
+        self.assertEqual(loads["act_1"], "no_ftp")
+
+    def test_resting_hr_stand_in_is_capped_too(self) -> None:
+        thresholds = DatedThresholds(
+            [],
+            resting_hr=[
+                _observation(MetricKind.RESTING_HR, 48.0, date(2026, 6, 1), sport=None)
+            ],
+        )
+        self.assertIsNotNone(thresholds.resting_hr(date(2026, 3, 3)))
+        self.assertIsNone(thresholds.resting_hr(date(2026, 3, 1)))
 
 
 def _pair(day: date, rpe: float, ratio: float) -> CalibrationPair:

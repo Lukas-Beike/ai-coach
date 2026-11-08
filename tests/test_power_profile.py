@@ -87,7 +87,7 @@ class PowerProfileTests(unittest.TestCase):
             {duration: best[duration]["start_seconds"] for duration in (180, 420, 720)},
         )
         self.assertEqual(
-            ("mean-max-curve", 1), (result["method"], result["method_version"])
+            ("mean-max-curve", 2), (result["method"], result["method_version"])
         )
 
         speed = [3.0] * len(times)
@@ -107,6 +107,7 @@ class PowerProfileTests(unittest.TestCase):
                     "time": times,
                     "velocity_smooth": speed,
                     "distance": distance,
+                    "altitude": [100.0] * len(times),
                 },
             }
         )
@@ -115,7 +116,7 @@ class PowerProfileTests(unittest.TestCase):
             {180: 5.0, 420: 4.5, 720: 4.2}, {d: fastest[d] for d in (180, 420, 720)}
         )
         self.assertEqual(
-            ("mean-max-curve", 1), (running["method"], running["method_version"])
+            ("mean-max-curve", 2), (running["method"], running["method_version"])
         )
 
     def test_source_label_names_the_stream_provider(self):
@@ -132,6 +133,67 @@ class PowerProfileTests(unittest.TestCase):
             "Garmin original speed/distance streams",
             running_profile(run, source_label="Garmin")["source"],
         )
+
+
+def _hill_run(environment="outdoor", *, altitude=True):
+    """A 40-min run: a fast downhill 3-min stretch and a slower flat one."""
+    times = list(range(2401))
+    speed = [3.0] * len(times)
+    speed[100:280] = [5.0] * 180
+    speed[1000:1180] = [4.0] * 180
+    distance = [0.0]
+    for value in speed[:-1]:
+        distance.append(distance[-1] + value)
+    # 900 m at 5 m/s lose 30 m (3.3 %); 720 m at 4 m/s stay flat.
+    heights = [200.0] * len(times)
+    for index in range(100, len(times)):
+        heights[index] = 200.0 - 30.0 * min(index - 100, 180) / 180
+    streams = {"time": times, "velocity_smooth": speed, "distance": distance}
+    if altitude:
+        streams["altitude"] = heights
+    return {"sport": "run", "environment": environment, "streams": streams}
+
+
+class RunningElevationGuardTests(unittest.TestCase):
+    """Card M4 v4: outdoor windows count only within 1 % net altitude change."""
+
+    def _best(self, activity, duration=180):
+        points = running_profile(activity)["speed"]
+        return next(p for p in points if p["duration_seconds"] == duration)
+
+    def test_downhill_best_is_skipped_for_the_best_flat_window(self):
+        best = self._best(_hill_run())
+        self.assertEqual((4.0, 1000), (best["speed_mps"], best["start_seconds"]))
+
+    def test_one_percent_net_change_still_counts(self):
+        # 720 m at 4 m/s may change 7.2 m; 7 m passes, while with 8 m only a
+        # partly slower, flatter window counts.
+        for drop, passes in ((7.0, True), (8.0, False)):
+            activity = _hill_run()
+            heights = [200.0] * 2401
+            for index in range(1000, 2401):
+                heights[index] = 200.0 - drop * min(index - 1000, 180) / 180
+            heights[100:280] = [200.0 - 40.0] * 180
+            activity["streams"]["altitude"] = heights
+            self.assertEqual(passes, self._best(activity)["speed_mps"] == 4.0, drop)
+
+    def test_outdoor_run_without_altitude_has_no_bests(self):
+        result = running_profile(_hill_run(altitude=False))
+        self.assertTrue(all(p["speed_mps"] is None for p in result["speed"]))
+        self.assertTrue(all(p["seconds"] is None for p in result["distance"]))
+
+    def test_treadmill_run_keeps_bests_without_altitude(self):
+        best = self._best(_hill_run("indoor", altitude=False))
+        self.assertEqual(5.0, best["speed_mps"])
+
+    def test_distance_best_skips_a_downhill_kilometre(self):
+        result = running_profile(_hill_run())
+        kilometre = next(p for p in result["distance"] if p["distance_meters"] == 1000)
+        flat = running_profile(_hill_run("indoor"))
+        flat_kilometre = next(
+            p for p in flat["distance"] if p["distance_meters"] == 1000
+        )
+        self.assertGreater(kilometre["seconds"], flat_kilometre["seconds"])
 
 
 if __name__ == "__main__":

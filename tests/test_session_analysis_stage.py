@@ -40,6 +40,7 @@ from backend.performance.session_analysis_reads import (
 from backend.performance.zone_time_reads import read_zone_times, with_zone_times
 from backend.providers.garmin_health_mapping import MAPPER_VERSION
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync import session_analysis_stage
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.session_analysis_stage import (
@@ -302,6 +303,26 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertEqual({"power_zone_times": "local"}, summary["zone_models"])
         self.assertEqual("Zoneneinstellungen", summary["sources"]["power_zone_times"])
 
+    def test_the_row_stores_the_heart_rate_histogram(self) -> None:
+        self._write(lambda db: _streams(db, GARMIN, "g1"))
+        self._run()
+        row = self._row("act_g1")
+        assert row is not None
+        histogram = row["payload"]["hr_histogram"]
+        # 140 bpm for every second but the last, which counts nothing.
+        self.assertEqual({"140": float(SECONDS)}, histogram["seconds"])
+        self.assertEqual(float(SECONDS), histogram["covered_s"])
+
+    def test_a_new_histogram_version_recomputes_every_row(self) -> None:
+        self._write(lambda db: _streams(db, GARMIN, "g1"))
+        self._run()
+        self.assertEqual(0, self._run()["counts"]["computed"])
+
+        with patch.object(
+            canonical_session_analysis, "HEART_RATE_HISTOGRAM_VERSION", 2
+        ):
+            self.assertEqual(1, self._run()["counts"]["computed"])
+
     def test_a_new_threshold_recomputes_the_zone_times(self) -> None:
         self._write(
             lambda db: _streams(db, GARMIN, "g1"),
@@ -319,6 +340,25 @@ class SessionAnalysisStageTests(unittest.TestCase):
         }
         # 200 W is 50 % of 400 W: Z1.
         self.assertEqual(float(SECONDS), power["Z1"])
+
+    def test_new_default_heart_rate_limits_recompute_the_zone_times(self) -> None:
+        # #1773: a row stored under the former seven-zone default limits is stale.
+        self._write(
+            lambda db: _streams(db, GARMIN, "g1"),
+            lambda db: _ftp(db, GARMIN, 200.0),
+        )
+
+        def seven_zones(zones: Any) -> Any:
+            part = real_part(zones)
+            if part is not None:
+                part["hr_limits"] = [68, 83, 94, 105, 120, 150]
+            return part
+
+        real_part = session_analysis_stage.zone_settings_part
+        with patch.object(session_analysis_stage, "zone_settings_part", seven_zones):
+            self._run()
+        self.assertEqual(1, self._run()["counts"]["computed"])
+        self.assertEqual(0, self._run()["counts"]["computed"])
 
     def test_older_target_snapshots_carry_over_unchanged(self) -> None:
         self._write(

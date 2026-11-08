@@ -1,12 +1,12 @@
 # M7 — Local fitness, fatigue and form
 
 - **Card:** M7
-- **Card version:** 1
+- **Card version:** 2
 - **Method ID:** local-fitness-fatigue v1 (#1726)
 - **Status:** implemented (`backend/performance/fitness_fatigue.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-06
-- **Review:** released 2026-11-07 (athlete)
+- **Review:** released 2026-11-08 (athlete)
 
 ## Target construct
 
@@ -46,6 +46,13 @@ Athlete decisions (2026-11-06, #1726):
 - Values appear after a warm-up of 2τ days from the first load day (84 days
   for fitness, 14 for fatigue; form needs both). Each day is computed in full
   precision and rounded to 0.1 only for output.
+- The result carries `incomplete_days` (days in the served window with state
+  `incomplete`) and `incomplete_share` (that count over all days of the
+  window, 0 to 1, rounded to 3 decimals). The load-tab chart shows it as
+  "N % der Tage unvollständig" only above 0.
+- TrainingPeaks conventions differ: its gain is 1/τ, this app uses
+  1 − e^(−1/τ), so the values differ slightly; form is computed here with
+  the same day's fitness and fatigue.
 - Reference case for tests: 80 TSS every second day for 120 days gives the
   recursion values computed independently in `tests/test_fitness_fatigue.py`.
 

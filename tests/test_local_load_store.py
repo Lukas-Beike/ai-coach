@@ -22,7 +22,9 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.db import canonical_store
+from backend.db.activity_detail_store import save_analysis
 from backend.db.repositories import KeyValueRepository
+from backend.performance.canonical_session_analysis import ANALYSIS_VERSION
 from backend.performance.load import activity_rollup
 from backend.providers.garmin_health_mapping import MAPPER_VERSION
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -290,6 +292,124 @@ class LocalLoadStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _heart_threshold(
+    db: Any, kind: MetricKind, value: float, sport: Sport | None, day: date
+) -> None:
+    canonical_store.upsert_observation(
+        db,
+        Observation(
+            kind=kind,
+            value=MetricValue(value, kind.unit),
+            observed_on=day,
+            observed_at=None,
+            provenance=Provenance(
+                provider=ProviderId.GARMIN,
+                source_kind=SourceKind.PROVIDER_REPORTED,
+                source_record_id=f"garmin-{kind.value}",
+                recorded_by=RecordingOrigin.GARMIN,
+                retrieved_at=datetime(2026, 9, 1, tzinfo=UTC),
+                label=None,
+            ),
+            sport=sport,
+        ),
+        mapper_version=MAPPER_VERSION,
+        now=NOW,
+    )
+
+
+class LocalLoadHeartRateHistogramTests(unittest.TestCase):
+    """Card M6 v5: rest 50, threshold 165, max 190, 60 min, average HR 120."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.manager = open_manager(directory.name)
+        self.addCleanup(self.manager.close)
+        self.stage = LocalLoadStage(
+            key_values=KeyValueRepository(lambda: NOW),
+            zone_provider=lambda: ZONE,
+            clock=lambda: NOW,
+        )
+        add_session_record(
+            self.manager,
+            ProviderId.GARMIN,
+            "g1",
+            "act_g1",
+            avg_hr=120.0,
+            moving_duration_s=3600.0,
+        )
+        with self.manager.unit_of_work() as db:
+            _heart_threshold(db, MetricKind.RESTING_HR, 50.0, None, date(2026, 9, 9))
+            _heart_threshold(
+                db, MetricKind.THRESHOLD_HR, 165.0, Sport.RIDE, date(2026, 9, 1)
+            )
+            _heart_threshold(db, MetricKind.MAX_HR, 190.0, Sport.RIDE, date(2026, 9, 1))
+
+    def _run(self) -> dict[str, Any]:
+        with self.manager.unit_of_work() as db:
+            self.stage.run_batch(db)
+            return self.stage.summary(db)["counts"]
+
+    def _load(self) -> tuple[float, dict[str, Any]]:
+        with self.manager.reader() as db:
+            row = stored_local_loads(db)["act_g1"]["session_load"]
+        return row["value"], row["derivation"]["inputs"]
+
+    def _store_histogram(self, histogram: dict[str, Any] | None) -> None:
+        with self.manager.unit_of_work() as db:
+            save_analysis(
+                db,
+                "act_g1",
+                analysis_version=ANALYSIS_VERSION,
+                input_sha256="a" * 64,
+                payload={"hr_histogram": histogram},
+                now=NOW,
+            )
+
+    def test_without_a_stored_histogram_the_average_heart_rate_counts(self) -> None:
+        self._run()
+        value, inputs = self._load()
+        self.assertAlmostEqual(value, 32.84, places=2)
+        self.assertEqual(inputs["hr_basis"], "average")
+
+    def test_a_newly_stored_histogram_recomputes_on_the_next_pass(self) -> None:
+        self._run()
+        self._store_histogram(
+            {
+                "version": 1,
+                "covered_s": 3600.0,
+                "seconds": {"100": 2400.0, "160": 1200.0},
+            }
+        )
+        self.assertEqual(self._run()["written"], 1)
+        value, inputs = self._load()
+        self.assertAlmostEqual(value, 41.7, places=1)
+        self.assertEqual(inputs["hr_basis"], "distribution")
+        self.assertEqual(inputs["hr_coverage"], 1.0)
+        self.assertEqual(self._run()["written"], 0)
+        self._store_histogram(
+            {
+                "version": 1,
+                "covered_s": 3600.0,
+                "seconds": {"100": 2400.0, "161": 1200.0},
+            }
+        )
+        self.assertEqual(self._run()["written"], 1)
+
+    def test_a_histogram_under_eighty_percent_keeps_the_average(self) -> None:
+        self._store_histogram(
+            {
+                "version": 1,
+                "covered_s": 1800.0,
+                "seconds": {"100": 1200.0, "160": 600.0},
+            }
+        )
+        self._run()
+        value, inputs = self._load()
+        self.assertAlmostEqual(value, 32.84, places=2)
+        self.assertEqual((inputs["hr_basis"], inputs["hr_coverage"]), ("average", 0.5))
 
 
 class LocalLoadReviewRegressionTests(unittest.TestCase):
