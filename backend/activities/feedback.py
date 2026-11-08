@@ -106,14 +106,16 @@ def normalize_activity_feedback(activity_id: Any, value: Any) -> dict[str, Any]:
             value.get("deviation_reason") or ""
         ).strip()[:500]
     if "purpose" in value:
-        purpose = value["purpose"]
-        if purpose in (None, ""):
-            normalized["purpose"] = None
-        elif isinstance(purpose, str) and purpose in PURPOSES:
-            normalized["purpose"] = purpose
-        else:
-            raise AppError(400, "Die Art der Einheit ist unbekannt.")
+        normalized["purpose"] = _normalize_purpose(value["purpose"])
     return normalized
+
+
+def _normalize_purpose(purpose: Any) -> str | None:
+    if purpose in (None, ""):
+        return None
+    if isinstance(purpose, str) and purpose in PURPOSES:
+        return purpose
+    raise AppError(400, "Die Art der Einheit ist unbekannt.")
 
 
 def _activity_id(activity: Any) -> Any:
@@ -273,6 +275,16 @@ def _keep_omitted_fields(
             feedback[field] = existing[field]
 
 
+def _require_session_for_marking(value: Any, group_key: tuple[str, str]) -> None:
+    """A marking needs the one session the activity leads to."""
+    if value.get("purpose") not in (None, "") and group_key[0] != "session":
+        raise AppError(
+            409,
+            "Die Aktivität lässt sich keiner Einheit eindeutig zuordnen; "
+            "die Art der Einheit kann nicht markiert werden.",
+        )
+
+
 def _is_cleared(feedback: dict[str, Any]) -> bool:
     return (
         not feedback["notes"]
@@ -404,6 +416,22 @@ class ActivityFeedbackService:
     def _groups(self, db: Any) -> dict[tuple[str, str], builtins.list[dict[str, Any]]]:
         return _feedback_groups(db, self._feedback_repository.all(db))
 
+    def _apply_marking_to_group(
+        self,
+        db: Any,
+        group: builtins.list[dict[str, Any]],
+        written: set[Any],
+        feedback: dict[str, Any],
+    ) -> None:
+        """One marking applies to the whole group, not to the shown row only."""
+        for row in group:
+            if row["activity_id"] not in written and row.get("purpose") != feedback.get(
+                "purpose"
+            ):
+                self._feedback_repository.set_purpose(
+                    db, row["activity_id"], feedback.get("purpose")
+                )
+
     def save(self, activity_id: Any, value: Any) -> dict[str, Any]:
         return self._save(self._references.resolve_reference(activity_id), value)
 
@@ -421,12 +449,7 @@ class ActivityFeedbackService:
             ).get(key)
             groups = self._groups(db)
             group_key = _save_group_key(db, key, origin, groups)
-            if value.get("purpose") not in (None, "") and group_key[0] != "session":
-                raise AppError(
-                    409,
-                    "Die Aktivität lässt sich keiner Einheit eindeutig zuordnen; "
-                    "die Art der Einheit kann nicht markiert werden.",
-                )
+            _require_session_for_marking(value, group_key)
             group = groups.get(group_key) or []
             if len(group) >= change_history.MAX_FEEDBACK_GROUP_ROWS:
                 raise AppError(
@@ -464,15 +487,12 @@ class ActivityFeedbackService:
                 provider=reference.provider if own_row else None,
                 session_id=origin if own_row else None,
             )
-            # One marking applies to the whole group, not to the shown row only.
-            for row in group:
-                if row["activity_id"] not in {
-                    feedback["activity_id"],
-                    existing["activity_id"],
-                } and row.get("purpose") != feedback.get("purpose"):
-                    self._feedback_repository.set_purpose(
-                        db, row["activity_id"], feedback.get("purpose")
-                    )
+            self._apply_marking_to_group(
+                db,
+                group,
+                {feedback["activity_id"], existing.get("activity_id")},
+                feedback,
+            )
             after_groups = self._groups(db)
             saved_key = _group_containing(
                 after_groups, feedback["activity_id"], group_key
