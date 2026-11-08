@@ -23,6 +23,7 @@ from dataclasses import fields, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 try:
@@ -199,7 +200,7 @@ class SecretFixture(unittest.TestCase):
 
         ProviderCredentialService(
             env_config=env,
-            database_manager=lambda: _Manager(self.db),
+            database_manager=lambda: cast(Any, _Manager(self.db)),
             database_lock=lambda: _Lock(),
             key_values=self.key_values,
             apply_config=apply,
@@ -328,11 +329,11 @@ class PrivacyExportSecretTests(SecretFixture):
             disk_usage=lambda _path: SimpleNamespace(free=10**12),
         )
         service = PrivacyArchiveExportService(
-            _Manager(self.db),
+            cast(Any, _Manager(self.db)),
             self.key_values,
-            _Profile(),
-            _Competitions(),
-            _Adaptive(),
+            cast(Any, _Profile()),
+            cast(Any, _Competitions()),
+            cast(Any, _Adaptive()),
             config,
         )
         with patch(

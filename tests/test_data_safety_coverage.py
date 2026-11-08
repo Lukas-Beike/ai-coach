@@ -21,6 +21,7 @@ from contextlib import closing, contextmanager, nullcontext
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from backend.athlete.profile import ProfileService
@@ -283,7 +284,7 @@ def provenance(provider: ProviderId | None, **overrides) -> Provenance:
         "label": None,
     }
     values.update(overrides)
-    return Provenance(**values)
+    return Provenance(**cast(Any, values))
 
 
 class DataKindFixture(unittest.TestCase):
@@ -386,7 +387,7 @@ class DataKindFixture(unittest.TestCase):
         }
         details = (
             ActivityStreamSet(
-                **header,
+                **cast(Any, header),
                 resolution=StreamResolution.FULL,
                 channels={
                     StreamChannel.TIME_S: (0.0, 1.0),
@@ -394,18 +395,18 @@ class DataKindFixture(unittest.TestCase):
                 },
             ),
             ActivityLapSet(
-                **header,
+                **cast(Any, header),
                 lap_source=LapSource.DEVICE_LAPS,
                 laps=(ActivityLap(0, LapKind.LAP, 0.0, 1.0, avg_hr=120.0),),
             ),
             ZoneDistribution(
-                **header,
+                **cast(Any, header),
                 metric=ZoneMetric.HEART_RATE,
                 boundary_source=ZoneBoundarySource.UNKNOWN,
                 buckets=(ZoneBucket(1, 1.0),),
             ),
             ActivityStrengthSetSet(
-                **header,
+                **cast(Any, header),
                 source=StrengthSetSource.FIT_SET_MESSAGES,
                 sets=(
                     ActivityStrengthSet(
@@ -506,11 +507,11 @@ class DataKindFixture(unittest.TestCase):
             disk_usage=lambda _path: SimpleNamespace(free=10**12),
         )
         service = PrivacyArchiveExportService(
-            _Manager(self.db),
+            cast(Any, _Manager(self.db)),
             self.key_values,
             self.profile_service(),
-            _Competitions(),
-            _Adaptive(),
+            cast(Any, _Competitions()),
+            cast(Any, _Adaptive()),
             config,
         )
         with patch(
@@ -525,13 +526,13 @@ class DataKindFixture(unittest.TestCase):
     def _delete_service(self) -> PrivacyDeleteService:
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
-                database_manager=_Manager(self.db),
+                database_manager=cast(Any, _Manager(self.db)),
                 database_lock=_Lock(),
                 key_value_repository=self.key_values,
-                maintenance_gate=_Gate(),
+                maintenance_gate=cast(Any, _Gate()),
                 profile_mutation_coordinator=threading.RLock(),
-                planning_revision_service=_PlanningRevision(),
-                openai_client=_OpenAI(),
+                planning_revision_service=cast(Any, _PlanningRevision()),
+                openai_client=cast(Any, _OpenAI()),
                 logger=Mock(),
                 diagnostics_suspended=nullcontext,
             )
