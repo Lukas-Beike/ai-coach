@@ -37,6 +37,7 @@ def frontend_source():
         for name in (
             "shared.js",
             "auth.js",
+            "status-strip.js",
             "sync-status.js",
             "notifications.js",
             "performance-view.js",
@@ -506,7 +507,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(f'"{asset_ref("/views.js")}"', service_worker)
         self.assertIn(f'"{asset_ref("/forms.js")}"', service_worker)
         self.assertIn(f'"{asset_ref("/components.js")}"', service_worker)
-        self.assertIn('id="connectivityNotice"', index)
+        self.assertIn('id="statusStrip"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="logsDownloadButton"', index)
         self.assertIn('id="logsDeleteButton"', index)
@@ -1301,7 +1302,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('provider === "weather"', app)
         self.assertIn(asset_ref("/icon.svg"), index)
         self.assertIn('id="connectionsSyncProgress"', index)
-        self.assertIn('id="providerAttentionBanner"', index)
+        self.assertNotIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
         self.assertIn("function providerRequiresManualAttention(entry)", app)
         self.assertIn("function coachProviderLabel(provider)", app)

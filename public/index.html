@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=371">
+  <link rel="stylesheet" href="/styles.css?v=372">
   <title>Pacecraft · AI Coach</title>
   <meta name="apple-mobile-web-app-title" content="Pacecraft">
 </head>
@@ -43,19 +43,7 @@
     </header>
 
     <main>
-      <output id="statusCard" class="status-card" aria-live="polite">
-        <span class="status-card-row"><span class="pulse"></span><strong id="statusTitle">Verbindung wird hergestellt…</strong></span>
-        <span id="statusDetail">Trainingsbereich wird geprüft</span>
-      </output>
-      <section id="connectivityNotice" class="connectivity-notice" aria-live="polite" hidden></section>
-      <section id="providerAttentionBanner" class="provider-attention-banner" aria-live="polite" hidden>
-        <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
-        <a href="#more/connections">Anbindungen öffnen</a>
-      </section>
-      <section id="setupBanner" class="provider-attention-banner setup-banner" aria-labelledby="setupBannerDetail" aria-live="polite" hidden>
-        <strong id="setupBannerDetail"></strong>
-        <div class="setup-banner-actions"><a href="#more/connections">Jetzt einrichten</a><button type="button" id="setupBannerDismiss" class="secondary-button" aria-label="Für diese Sitzung ausblenden" title="Für diese Sitzung ausblenden">✕</button></div>
-      </section>
+      <section id="statusStrip" class="status-strip" aria-label="Hinweise" hidden></section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
         <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden aria-live="polite">
@@ -624,15 +612,16 @@
   <script src="/format.js?v=2" defer></script>
   <script src="/api.js?v=224" defer></script>
   <script src="/navigation.js?v=236" defer></script>
-  <script src="/state.js?v=227" defer></script>
+  <script src="/state.js?v=228" defer></script>
   <script src="/views.js?v=238" defer></script>
   <script src="/plan-views.js?v=31" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=218" defer></script>
+  <script src="/status-strip.js?v=1" defer></script>
   <script src="/coach.js?v=53" defer></script>
-  <script src="/shared.js?v=23" defer></script>
-  <script src="/auth.js?v=13" defer></script>
-  <script src="/sync-status.js?v=20" defer></script>
+  <script src="/shared.js?v=24" defer></script>
+  <script src="/auth.js?v=14" defer></script>
+  <script src="/sync-status.js?v=21" defer></script>
   <script src="/view-refresh.js?v=3" defer></script>
   <script src="/notifications.js?v=7" defer></script>
   <script src="/nutrition.js?v=50" defer></script>
@@ -641,13 +630,13 @@
   <script src="/activity-analysis.js?v=12" defer></script>
   <script src="/performance-view.js?v=34" defer></script>
   <script src="/diagnostics.js?v=5" defer></script>
-  <script src="/state-loader.js?v=25" defer></script>
+  <script src="/state-loader.js?v=27" defer></script>
   <script src="/sync-actions.js?v=7" defer></script>
   <script src="/wahoo-connection.js?v=5" defer></script>
   <script src="/provider-connections.js?v=12" defer></script>
   <script src="/provider-checks.js?v=4" defer></script>
   <script src="/weekly-plan.js?v=4" defer></script>
-  <script src="/settings.js?v=19" defer></script>
-  <script src="/app.js?v=301" defer></script>
+  <script src="/settings.js?v=20" defer></script>
+  <script src="/app.js?v=302" defer></script>
 </body>
 </html>

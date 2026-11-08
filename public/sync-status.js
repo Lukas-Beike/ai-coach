@@ -168,18 +168,13 @@ function renderSyncStatus(status) {
 }
 
 function renderMaintenanceStatus(maintenance) {
-  const active = Boolean(maintenance?.active);
-  const statusCard = $("#statusCard");
-  if (!statusCard) return;
-  if (!active) {
-    if ($("#statusTitle").textContent === "Wartungsmodus aktiv") statusCard.hidden = true;
-    return;
-  }
-  statusCard.hidden = false;
-  statusCard.classList.remove("working");
-  statusCard.classList.add("warning");
-  $("#statusTitle").textContent = "Wartungsmodus aktiv";
-  $("#statusDetail").textContent = "Die Datenbank wird wiederhergestellt; Änderungen sind vorübergehend pausiert.";
+  updateStatusSources({
+    maintenance: maintenance?.active ? {
+      level: "critical",
+      title: "Wartungsmodus aktiv",
+      detail: "Die Datenbank wird wiederhergestellt; Änderungen sind vorübergehend pausiert.",
+    } : null,
+  });
 }
 
 function handleSyncStatus(status, broadcast = false) {
@@ -257,10 +252,14 @@ function handleSyncVisibility() {
 }
 
 function renderConnectivityStatus(online = navigator.onLine) {
-  const notice = $("#connectivityNotice");
-  if (!notice) return;
-  notice.hidden = online;
-  notice.textContent = online ? "" : "Offline – Änderungen können gerade nicht gespeichert werden. Bereits geladene Daten bleiben sichtbar.";
+  updateStatusSources({
+    offline: online ? null : {
+      level: "warning",
+      title: "Offline",
+      detail: "Änderungen können gerade nicht gespeichert werden. Bereits geladene Daten bleiben sichtbar.",
+      stand: true,
+    },
+  });
 }
 
 
@@ -362,29 +361,35 @@ function garminKeyHint(garmin) {
 }
 
 function renderProviderAttention(data) {
-  const banner = $("#providerAttentionBanner");
-  const detail = $("#providerAttentionDetail");
-  if (!banner || !detail) return;
   const providers = (Array.isArray(data.provider_freshness) ? data.provider_freshness : [])
     .filter(providerRequiresManualAttention);
   const garminId = providerIds().garmin;
-  if (garminKeyHint(data.garmin).urgent && !providers.some((entry) => entry.provider === garminId)) {
-    providers.push({ provider: garminId, label: providerShortLabel(garminId), state: "error" });
+  const keyHint = garminKeyHint(data.garmin);
+  // A rejected or expired key has its own, more specific line.
+  const others = keyHint.urgent ? providers.filter((entry) => entry.provider !== garminId) : providers;
+  const connections = { href: "#more/connections", label: "Anbindungen öffnen" };
+  let provider = null;
+  if (others.length) {
+    const labels = [...new Set(others.map((entry) => entry.label || entry.provider || "Eine Anbindung"))];
+    // Only hard failures are critical; stale or partial data is a warning.
+    const hardError = others.some((entry) => entry.state === "error"
+      || ["auth_required", "invalid_configuration"].includes(entry.error_code));
+    provider = {
+      level: hardError ? "critical" : "warning",
+      title: "Anbindung benötigt Aufmerksamkeit",
+      detail: labels.length === 1 ? `${labels[0]} benötigt manuelles Eingreifen.` : `${labels.length} Anbindungen benötigen manuelles Eingreifen.`,
+      action: connections,
+    };
   }
-  banner.hidden = !providers.length;
-  if (!providers.length) {
-    detail.textContent = "";
-    return;
-  }
-  // Only hard failures interrupt assistive technology; stale or partial data is a polite status.
-  const hasHardError = providers.some((entry) => entry.state === "error"
-    || ["auth_required", "invalid_configuration"].includes(entry.error_code));
-  banner.setAttribute("role", hasHardError ? "alert" : "status");
-  banner.setAttribute("aria-live", hasHardError ? "assertive" : "polite");
-  const labels = [...new Set(providers.map((entry) => entry.label || entry.provider || "Eine Anbindung"))];
-  detail.textContent = labels.length === 1
-    ? `${labels[0]} benötigt manuelles Eingreifen.`
-    : `${labels.length} Anbindungen benötigen manuelles Eingreifen.`;
+  updateStatusSources({
+    provider,
+    provider_key: keyHint.text ? {
+      level: keyHint.urgent ? "critical" : "warning",
+      title: "Garmin-Anbindung",
+      detail: keyHint.text,
+      action: connections,
+    } : null,
+  });
 }
 
 

@@ -210,6 +210,10 @@ class ZoneConfigurationService:
         with self._database_manager.reader() as db:
             return self._reader.zone_configurations(db)
 
+    def threshold_warnings(self) -> dict[str, Any] | None:
+        """The stale-threshold warning for the app-wide status strip, or None."""
+        return self._threshold_warnings() or None
+
     def read(self) -> dict[str, Any]:
         configurations = self.configurations()
         payload: dict[str, Any] = {

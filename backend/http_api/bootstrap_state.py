@@ -57,6 +57,8 @@ class PublicBootstrapDependencies:
     provider_state_service: Callable[[], Any]
     provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
     provider_credentials: Callable[[], Any] | None = None
+    # Stale-threshold warning for the status strip; null in the bootstrap when none.
+    threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None
 
 
 class PublicBootstrapService:
@@ -262,6 +264,8 @@ class PublicBootstrapService:
                 ),
                 "usage": deps.provider_state_service().summary("openai"),
             }
+            # Always present, so a cleared warning also clears on a client that merges bootstraps.
+            state["threshold_warnings"] = deps.threshold_warnings() or None
             return neutral_calendar_state(state)
 
 
