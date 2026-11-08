@@ -184,7 +184,7 @@ The canonical backfill runner SHALL run a retirement stage after the activity de
 - **THEN** the stage resumes from its stored cursor or reports completion, and repeating it changes no further rows.
 
 #### Scenario: Upgrade from supported released schemas
-- **WHEN** populated databases built from the frozen fixtures for schema v16 through v18 with seeded kv detail records are upgraded and the backfill and retirement stages run
+- **WHEN** populated databases built from the frozen schema v21 fixture with seeded kv detail records are upgraded and the backfill and retirement stages run
 - **THEN** every seeded detail remains readable as `activity_detail.v1`, verified kv records are retired, and unverifiable ones remain stored.
 
 #### Scenario: Legacy target basis

@@ -143,7 +143,9 @@ class ChangeHistoryTests(unittest.TestCase):
             list(json.loads(record["diff"])["fields"]), ["starts_at_local"]
         )
 
-    def test_rows_recorded_before_the_planning_field_rename_stay_matchable(self):
+    def test_planning_field_names_before_schema_v16_are_not_translated(self):
+        # Schema v21 is the baseline (#1798): history rows written under the
+        # former Intervals.icu names are neither matched nor renamed.
         value = {
             "id": "u1",
             "name": "Lauf",
@@ -156,33 +158,19 @@ class ChangeHistoryTests(unittest.TestCase):
             "start_date_local": "2026-09-21T10:00:00",
             "moving_time": 3600,
         }
-        before_start = {"id": "u1", "name": "Lauf", "moving_time": 3600}
         self.assertEqual(
             change_history.accepted_audit_hashes("planned_unit", value),
             {
                 change_history.audit_hash(value),
-                change_history.audit_hash(recorded),
                 change_history.audit_hash(
                     {"id": "u1", "name": "Lauf", "planned_duration_s": 3600}
                 ),
-                change_history.audit_hash(before_start),
             },
         )
-        library = {"id": "w1", "planned_duration_s": 600}
-        self.assertIn(
-            change_history.audit_hash({"id": "w1", "moving_time": 600}),
-            change_history.accepted_audit_hashes("workout_library", library),
+        self.assertNotIn(
+            change_history.audit_hash(recorded),
+            change_history.accepted_audit_hashes("planned_unit", value),
         )
-        self.assertEqual(
-            change_history.current_audit_fields("competition", recorded),
-            value,
-        )
-        self.assertEqual(
-            change_history.current_audit_fields("profile", {"moving_time": 1}),
-            {"moving_time": 1},
-        )
-
-    def test_public_view_names_recorded_planning_fields_with_current_names(self):
         row = {
             "id": "change-1",
             "entity_type": "planned_unit",
@@ -205,7 +193,7 @@ class ChangeHistoryTests(unittest.TestCase):
         }
         self.assertEqual(
             change_history.public_view(row)["diff"]["fields"],
-            {"starts_at_local": {"changed": True}, "name": {"changed": True}},
+            {"start_date_local": {"changed": True}, "name": {"changed": True}},
         )
 
     def test_public_view_skips_fields_that_are_not_an_object(self):

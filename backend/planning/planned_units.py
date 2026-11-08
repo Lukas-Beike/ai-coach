@@ -79,9 +79,8 @@ def planned_unit_payload_hash(payload: Any) -> str:
         comparable.pop("environment", None)
         comparable.pop("sport_detail", None)
         comparable["sport"] = comparable["type"] = token
-    # Likewise a payload with the provider-neutral start and duration names
-    # hashes like the same payload stored before schema version 16, so baselines
-    # recorded under the old field names do not report a remote change.
+    # Likewise the start and duration are hashed under their Intervals.icu wire
+    # names, the form every recorded baseline was hashed in.
     serialized = json.dumps(
         intervals_fields_from_planning(comparable),
         sort_keys=True,

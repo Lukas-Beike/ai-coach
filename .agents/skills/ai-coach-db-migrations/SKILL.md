@@ -9,8 +9,8 @@ description: Plan, implement, or review SQLCipher schema migrations and released
    `backend/db/schema.py`, `schema_history.py`, and `migrations.py`. Trace changed
    readers, writers, restore validation, and startup before choosing a migration.
    Record the current version and every supported released fixture from code;
-   v16 (release 1.13.32) is the oldest schema the code opens; new changes need
-   evidence from v20 (release 1.13.40, the only production instance) onward.
+   v21 (release 1.13.44, the only production instance) is the oldest schema the
+   code opens; new changes need evidence from v21 onward.
    Before choosing a number, fetch `develop` and record its `CURRENT_SCHEMA_VERSION`
    and any open schema PRs; take the next free version and rebase on conflict.
 2. Plan the before/after records, version transition, transaction boundary,

@@ -16,10 +16,9 @@ Use [README.md](README.md) for setup and operational commands.
   athlete-entered data and writing a recovery backup; output ids stay.
 - Schema changes require versioned, transactional SQLCipher migrations from
   supported released schemas, including documented skipped-release upgrades.
-  Release 1.13.32 (schema v16) is the oldest schema the code still opens; keep
-  those paths and their tests passing. The only production instance runs
-  1.13.40 (schema v20), so new schema changes need upgrade evidence only from
-  v20 and each newer released schema, not new v16-v19 fixtures or tests.
+  Release 1.13.44 (schema v21, the only production instance) is the oldest
+  schema the code still opens; older schemas are refused unchanged. New schema
+  changes need upgrade evidence from v21 and each newer released schema.
   Preserve frozen released-schema fixtures; verify populated upgrades, rollback
   on failure, and same-build restarts. A schema PR is not release-ready without
   this evidence.

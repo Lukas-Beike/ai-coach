@@ -66,11 +66,11 @@ flow rather than demanding unrelated changes or a repository-wide redesign.
   failures do not leave partially applied state.
 - Schema changes require an explicit versioned, transactional migration from
   supported released schemas, including documented skipped-release upgrades.
-  Release 1.13.32 (schema v16) is the oldest schema the code still opens;
-  missing upgrades from older releases are intended and not a finding. New
-  schema changes need evidence from v20 (release 1.13.40, the only production
-  instance) and each newer released schema; missing new v16-v19 fixtures or
-  tests are not a finding, but a broken existing v16-v19 path is.
+  Release 1.13.44 (schema v21, the only production instance) is the oldest
+  schema the code still opens; missing upgrades from older releases are
+  intended and not a finding, but opening or restoring one must still be
+  refused unchanged. New schema changes need evidence from v21 and each newer
+  released schema.
   Require frozen released-schema fixtures and regression evidence for populated
   upgrades, rollback on failure, and same-build restart. Identify the specific
   missing upgrade path or evidence when reporting a violation.

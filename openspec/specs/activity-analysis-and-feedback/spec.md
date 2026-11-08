@@ -326,7 +326,7 @@ The system SHALL store when the athlete last set a feedback row's session RPE, k
 - **WHEN** the activity detail of a session with local RPE 6.5 and 62 elapsed minutes is opened or its feedback is saved
 - **THEN** it shows `403 AU · RPE 6,5 (Athletenfeedback) × 62 min`; a session without a summary shows no load line.
 
-Evidence: `backend/db/repositories.py:ActivityFeedbackRepository.upsert`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `public/activity-details.js:rpeSelect`; `tests/test_db_feedback_rating_time_migration.py::test_upgraded_feedback_records_its_rating_time_only_on_an_rpe_change`, `tests/test_detail_envelope.py`, `e2e/activity-details.spec.js`.
+Evidence: `backend/db/repositories.py:ActivityFeedbackRepository.upsert`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `public/activity-details.js:rpeSelect`; `tests/test_activity_feedback.py::test_rating_time_is_recorded_only_on_an_rpe_change`, `tests/test_detail_envelope.py`, `e2e/activity-details.spec.js`.
 
 ### Requirement: One activity list entry per canonical session
 The activity list (`GET /api/activities`) and the Coach tool `list_recent_activities` SHALL list each live canonical session exactly once, from every provider, as its session summary keyed by the local session id, newest first. Paging SHALL use a version-3 keyset cursor; any other cursor SHALL restart at page one. Rows SHALL carry no `detail_error`: Intervals.icu details are never served (#1685), so their failure notes mark no session.
