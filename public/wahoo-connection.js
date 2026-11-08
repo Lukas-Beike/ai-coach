@@ -57,13 +57,20 @@ function wahooConnectionView(data) {
   else if (!configured) status = "Nicht konfiguriert";
   else if (reconnect) status = "Erneute Verbindung erforderlich";
   const since = connected && wahoo.connected_at ? globalThis.AppFormat?.dateTime(wahoo.connected_at) : null;
+  let detail = WAHOO_SCOPE_DETAIL;
+  if (since) detail = `Verbunden seit ${since} · ${WAHOO_SCOPE_DETAIL}`;
+  else if (reconnect) detail = `${status} · ${WAHOO_SCOPE_DETAIL}`;
+  let kind = "off";
+  if (connected) kind = "ok";
+  else if (reconnect) kind = "error";
   return {
     configured,
     connected,
     reconnect,
     status,
+    kind,
     ok: connected,
-    detail: since ? `Verbunden seit ${since} · ${WAHOO_SCOPE_DETAIL}` : WAHOO_SCOPE_DETAIL,
+    detail,
     connectLabel: reconnect ? "Wahoo erneut verbinden" : "Wahoo verbinden",
     canConnect: configured && !connected,
     canDisconnect: connected,
@@ -112,7 +119,7 @@ function renderWahooConnection(data) {
   const view = wahooConnectionView(data);
   const title = $("#wahooConnectionTitle");
   if (title) title.textContent = wahooProviderLabel(data);
-  settingsStatus("#wahooConnectionStatus", view.ok, view.status);
+  setConnectionChip("#wahooConnectionStatus", view.kind);
   const detail = $("#wahooConnectionDetail");
   if (detail) detail.textContent = view.detail;
   const connect = $("#wahooConnectButton");

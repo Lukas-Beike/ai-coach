@@ -112,6 +112,23 @@ The client SHALL show at most one status strip above every screen: the most seve
 
 Evidence: `public/status-strip.js::statusStripItems`, `public/status-strip.js::renderStatusStrip`, `public/shared.js::renderStatus`, `public/sync-status.js::renderProviderAttention`, `public/settings.js::thresholdStatusItem`; `e2e/status-strip.spec.js::offline, a Coach error and the missing Intervals.icu key show one strip @responsive`, `tests/status-strip.test.cjs::the strip ranks notices by the athlete's order and shows only one as text`.
 
+### Requirement: Mehr groups settings under one title with text status and a structured profile
+The client SHALL show the settings areas under the fixed title "Mehr" as one swipeable row whose active area is filled, state every provider connection as a text chip (Verbunden, Nicht eingerichtet, Fehler or Nicht geprüft) and let the athlete pick sports by touch. The profile SHALL be four collapsible sections with a one-line summary each and a save bar that stays above the navigation and shows the unsaved state.
+
+#### Scenario: Sports without a hint
+- **WHEN** the athlete opens the profile
+- **THEN** each sport is a toggle chip of at least 44 px, selecting needs no keyboard modifier and no hint text is shown.
+
+#### Scenario: Status without colour
+- **WHEN** the athlete opens Anbindungen
+- **THEN** every provider names its status as a text chip, the section header counts them (for example "5 verbunden · 1 Fehler") and the Garmin card names the Personal API key and the SDK login in words.
+
+#### Scenario: Unsaved profile
+- **WHEN** a profile field changes
+- **THEN** the save bar shows "Ungespeichert" until the profile is saved, then "Gespeichert"; a closed section opens when it holds an invalid value.
+
+Evidence: `public/connection-status.js::connectionsSummaryText`, `public/connection-status.js::garminSourceLines`, `public/views.js::profileSummaries`; `e2e/settings-hub.spec.js::sports are toggle chips of at least 44 px and need no hint @responsive`, `tests/settings-hub.test.cjs::the section header counts chips instead of listing providers`.
+
 ### Requirement: Composer follows desktop and touch input conventions
 The client SHALL support editable multiline Coach drafts, sending with the explicit send control, desktop Enter-to-send, and touch-first Enter-for-newline. IME composition SHALL never submit a turn.
 

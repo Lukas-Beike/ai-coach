@@ -693,14 +693,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   function renderExternalCalendar(data) {
     const calendar = data.external_calendar || {};
-    const status = $("#externalCalendarConnectionStatus");
     const syncButton = $("#externalCalendarSyncButton");
-    if (status) {
-      if (!calendar.configured) status.textContent = "Nicht konfiguriert";
-      else if (calendar.last_error) status.textContent = "Fehler bei letzter Aktualisierung";
-      else status.textContent = "Konfiguriert · nur lesend";
-      status.className = calendar.configured && !calendar.last_error ? "configured" : "not-configured";
-    }
+    setConnectionChip("#externalCalendarConnectionStatus", connectionKind({ configured: calendar.configured, error: Boolean(calendar.last_error) }));
+    const detail = $("#externalCalendarConnectionDetail");
+    if (detail) detail.textContent = calendar.last_error ? "Fehler bei letzter Aktualisierung · nur lesend" : "Nur lesen · Termine erscheinen im Tab „Kalender“ als Zeit- und Erholungssignal";
     if (syncButton) {
       syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
       syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";

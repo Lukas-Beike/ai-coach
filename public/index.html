@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=372">
+  <link rel="stylesheet" href="/styles.css?v=374">
   <title>Pacecraft · AI Coach</title>
   <meta name="apple-mobile-web-app-title" content="Pacecraft">
 </head>
@@ -200,7 +200,8 @@
 
       <section id="profilePanel" class="panel" aria-label="Profil">
         <div class="section-heading">
-          <div><h2>Profil <span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span></h2></div>        </div>
+          <div><h2>Mehr</h2></div>
+        </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
           <a href="#more/appearance" data-more-segment="appearance">Darstellung</a>
           <a href="#more/profile" data-more-segment="profile" aria-current="page">Profil</a>
@@ -210,25 +211,29 @@
           <a href="#more/operations" data-more-segment="operations">Betrieb &amp; Diagnose</a>
         </nav>
         <form id="profileForm" class="profile-form" aria-describedby="profileContextNotice">
+          <p id="profileContextNotice" class="context-sharing-notice" role="note"><strong>Coach-Kontext:</strong> Die folgenden Profil-, Ziel- und Verfügbarkeitsangaben werden lokal gespeichert und können in Coach-Anfragen an OpenAI eingehen. Prüfe sie vor dem Speichern.</p>
           <details class="profile-section collapsible-section" open>
-            <summary class="collapsible-summary"><span class="collapsible-summary-title">Dauerhaftes Profil</span><span id="profileSummary" class="collapsible-summary-meta">Noch nicht ausgefüllt</span></summary>
-            <p id="profileContextNotice" class="context-sharing-notice" role="note"><strong>Coach-Kontext:</strong> Die folgenden Profil-, Ziel- und Verfügbarkeitsangaben werden lokal gespeichert und können in Coach-Anfragen an OpenAI eingehen. Prüfe sie vor dem Speichern.</p>
-            <div class="form-grid">
-              <label>Name<input name="name" autocomplete="name"></label>
-              <label>Sportarten<select name="sports" multiple size="4" aria-describedby="sportsHelp"><option value="Cycling">Radfahren</option><option value="Running">Laufen</option><option value="Swimming">Schwimmen</option><option value="Strength">Krafttraining</option><option value="Triathlon">Triathlon</option><option value="Other">Andere</option></select><small id="sportsHelp">Mit Strg/Ctrl oder Cmd mehrere Sportarten auswählen.</small></label>
-            </div>
+            <summary class="collapsible-summary"><span class="collapsible-summary-title">Person</span><span id="profileSummary" class="collapsible-summary-meta">Noch nicht ausgefüllt</span></summary>
+            <div class="form-grid"><label>Name<input name="name" autocomplete="name"></label></div>
+            <fieldset class="chip-field"><legend>Sportarten</legend><div class="chip-group"><label class="chip"><input type="checkbox" name="sports" value="Cycling"><span>Radfahren</span></label><label class="chip"><input type="checkbox" name="sports" value="Running"><span>Laufen</span></label><label class="chip"><input type="checkbox" name="sports" value="Swimming"><span>Schwimmen</span></label><label class="chip"><input type="checkbox" name="sports" value="Strength"><span>Krafttraining</span></label><label class="chip"><input type="checkbox" name="sports" value="Triathlon"><span>Triathlon</span></label><label class="chip"><input type="checkbox" name="sports" value="Other"><span>Andere</span></label></div></fieldset>
             <label>Trainingserfahrung<textarea name="training_background" rows="3" placeholder="Erfahrung, Trainingshistorie, Stärken und Schwächen…"></textarea></label>
             <div class="form-grid">
-              <label>Größe (cm)<input name="height_cm" type="number" min="50" max="250" step="0.1"></label>
-              <label>Gewicht (kg)<input name="weight_kg" type="number" min="20" max="300" step="0.1"></label>
-              <label>Körperfettanteil (%)<input name="body_fat_pct" type="number" min="1" max="70" step="0.1"></label>
-              <label>Geschlecht<select name="sex"><option value="">Nicht gesetzt (männlich angenommen)</option><option value="male">Männlich</option><option value="female">Weiblich</option></select></label>
+            <label>Größe (cm)<input name="height_cm" type="number" min="50" max="250" step="0.1"></label>
+            <label>Gewicht (kg)<input name="weight_kg" type="number" min="20" max="300" step="0.1"></label>
+            <label>Körperfettanteil (%)<input name="body_fat_pct" type="number" min="1" max="70" step="0.1"></label>
+            <label>Geschlecht<select name="sex"><option value="">Nicht gesetzt (männlich angenommen)</option><option value="male">Männlich</option><option value="female">Weiblich</option></select></label>
             </div>
+          </details>
+          <details class="profile-section collapsible-section">
+            <summary class="collapsible-summary"><span class="collapsible-summary-title">Ziele &amp; Woche</span><span id="profileGoalsSummary" class="collapsible-summary-meta">Noch nicht ausgefüllt</span></summary>
             <label>Typischer Wochenumfang<input name="typical_weekly_volume" placeholder="Zum Beispiel: 8–10 Stunden, 5 Trainingstage"></label>
             <label>Langfristige Ziele<textarea name="goals" rows="4" placeholder="Saisonziele und Wettkampfziele…"></textarea></label>
             <fieldset class="profile-subsection"><legend>Wochenplan</legend><input type="hidden" name="weekly_plan"><div id="weeklyPlanEditor" class="weekly-plan"></div></fieldset>
             <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
             <label>Rahmenbedingungen<textarea name="constraints" rows="3" placeholder="Verletzungen, Reisen, feste Grenzen…"></textarea></label>
+          </details>
+          <details class="profile-section collapsible-section">
+            <summary class="collapsible-summary"><span class="collapsible-summary-title">Training</span><span id="profileTrainingSummary" class="collapsible-summary-meta">Noch nicht ausgefüllt</span></summary>
             <label>Ausrüstung<textarea name="equipment" rows="2" placeholder="Rad, Smarttrainer, Gym, Powermeter…"></textarea></label>
             <fieldset class="profile-subsection"><legend>Trainingspräferenzen</legend>
               <label>Allgemein<textarea name="training_preferences" rows="2" placeholder="Drinnen/draußen, Ruhetage, Trainingszeiten…"></textarea></label>
@@ -239,6 +244,10 @@
               <label>Mobility<textarea name="training_preferences_mobility" rows="2" placeholder="Yoga, Dehnen, Faszienrolle, Dauer, Tageszeit…"></textarea></label>
               <label>Trainingsmodell<select name="training_model"><option value="pyramidal">Pyramidal</option><option value="polarized">Polarisiert</option><option value="threshold">Schwellenbetont</option><option value="sweet_spot">Sweet Spot</option></select></label>
             </fieldset>
+            <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Garmin oder Wahoo stehen…"></textarea></label>
+          </details>
+          <details class="profile-section collapsible-section">
+            <summary class="collapsible-summary"><span class="collapsible-summary-title">Quellen &amp; Coach</span><span id="profileSourcesSummary" class="collapsible-summary-meta">Noch nicht ausgefüllt</span></summary>
             <fieldset class="profile-subsection"><legend>Bevorzugte Quelle</legend>
               <label>Schwellen<select name="preferred_source_thresholds"><option value="">Standard</option><option value="garmin">Garmin Connect</option></select></label>
               <label>Gewicht und Körperfett<select name="preferred_source_body"><option value="">Standard</option><option value="garmin">Garmin Connect</option></select></label>
@@ -246,18 +255,16 @@
               <label>Ruhepuls<select name="preferred_source_resting_hr"><option value="">Standard</option><option value="garmin">Garmin Connect</option></select></label>
               <label>Schlaf<select name="preferred_source_sleep"><option value="">Standard</option><option value="garmin">Garmin Connect</option></select></label>
             </fieldset>
-            <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Garmin oder Wahoo stehen…"></textarea></label>
             <label>Persönliches Schlafziel (Stunden)<input name="sleep_target_hours" type="number" min="4" max="12" step="0.25" placeholder="Optional, zum Beispiel 8"></label>
             <div class="form-grid">
-              <label>Coaching-Stil<input name="coaching_style" placeholder="Unterstützend, direkt und evidenzbasiert"></label>
-              <label>Zeitzone<select name="timezone" autocomplete="off"><option value="Europe/Berlin">Europe/Berlin</option><option value="Europe/London">Europe/London</option><option value="Europe/Paris">Europe/Paris</option><option value="Europe/Zurich">Europe/Zurich</option><option value="America/New_York">America/New_York</option><option value="America/Chicago">America/Chicago</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="Asia/Tokyo">Asia/Tokyo</option><option value="Australia/Sydney">Australia/Sydney</option><option value="UTC">UTC</option></select><small>IANA-Zeitzone; die Auswahl steuert Tagesgrenzen und Zeitformatierung.</small></label>
+            <label>Coaching-Stil<input name="coaching_style" placeholder="Unterstützend, direkt und evidenzbasiert"></label>
+            <label>Zeitzone<select name="timezone" autocomplete="off"><option value="Europe/Berlin">Europe/Berlin</option><option value="Europe/London">Europe/London</option><option value="Europe/Paris">Europe/Paris</option><option value="Europe/Zurich">Europe/Zurich</option><option value="America/New_York">America/New_York</option><option value="America/Chicago">America/Chicago</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="Asia/Tokyo">Asia/Tokyo</option><option value="Australia/Sydney">Australia/Sydney</option><option value="UTC">UTC</option></select></label>
             </div>
             <label>Wetter-/Urlaubsstandort<input name="weather_location" placeholder="Stadt oder PLZ, z. B. Münster"></label>
             <p class="fine-print profile-help">Diesen Standort kannst du jederzeit ändern, zum Beispiel für einen Urlaub. Eine Stadt oder PLZ reicht; konkrete Zeitvorschläge gibt es nur für die nächsten 5 Tage.</p>
           </details>
-
-          <button type="submit">Athletenkontext speichern</button>
           <button id="retryBodyGarmin" type="button" class="secondary-button" hidden>Körperwerte erneut an Garmin senden</button>
+          <div class="save-bar"><span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span><span class="save-clean">Gespeichert</span><button type="submit">Athletenkontext speichern</button></div>
         </form>
         <details id="zoneSettings" class="profile-section collapsible-section">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Zonen &amp; Schwellen</span></summary>
@@ -291,7 +298,7 @@
 
       <section id="settingsPanel" class="panel" aria-label="Systemeinstellungen">
         <div class="section-heading">
-          <div><h2>Bereiche &amp; Einstellungen</h2><p class="settings-app-version">Version <span id="settingsAppVersion">wird geladen…</span></p></div>
+          <div><h2>Mehr</h2></div>
         </div>
         <nav class="more-segment-nav" aria-label="Mehr-Bereiche">
           <a href="#more/appearance" data-more-segment="appearance">Darstellung</a>
@@ -318,13 +325,13 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
           <output id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></output>
           <div class="connection-cards">
-            <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small><small data-check-result="weather"></small></div><div class="connection-actions"><button data-check-button="weather" class="secondary-button" type="button">Verbindung prüfen</button><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></div></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus">Status wird geprüft…</span><small id="openaiConnectionDetail"></small><small data-check-result="openai"></small></div><div class="connection-actions"><button data-check-button="openai" class="secondary-button" type="button">Verbindung prüfen</button><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></div></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small><small data-check-result="intervals"></small></div><div class="connection-actions"><button data-check-button="intervals" class="secondary-button" type="button">Verbindung prüfen</button></div><p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege API-Schlüssel und Athlete ID im Bereich „Zugangsdaten“ oder als <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration.</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus">Status wird geprüft…</span><small id="garminStatus"></small><small id="garminKeyHint" class="provider-key-hint" hidden></small><small data-check-result="garmin"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button data-check-button="garmin" data-check-group="garmin-login" class="secondary-button" type="button">Verbindung prüfen</button><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht verbunden. Melde dich im Bereich „Zugangsdaten“ an oder hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration (siehe README).</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong id="wahooConnectionTitle">Wahoo</strong><span id="wahooConnectionStatus">Status wird geprüft…</span><small id="wahooConnectionDetail">Importiert Einheiten · schreibt nur bei ausdrücklichem Plan-Export</small><small data-check-result="wahoo"></small></div><div id="wahooConnectionActions" class="connection-actions" hidden><button id="wahooConnectButton" class="secondary-button" type="button" hidden>Wahoo verbinden</button><button id="wahooDisconnectButton" class="secondary-button danger-button" type="button" hidden>Wahoo trennen</button></div><div id="wahooSyncActions" class="connection-actions connection-sync-actions" hidden><button data-check-button="wahoo" data-check-group="wahoo wahoo-connection" class="secondary-button" type="button">Verbindung prüfen</button><button id="wahooSyncButton" class="secondary-button" type="button">Jetzt synchronisieren</button><button id="wahooFullResyncButton" class="secondary-button" type="button">Vollständig neu synchronisieren</button></div><small id="wahooFullResyncStatus" class="connection-resync-status" hidden></small><p id="wahooSetupHint" class="provider-setup-hint" hidden>Wahoo ist optional und nicht konfiguriert. Hinterlege Client-ID und Client-Secret im Bereich „Zugangsdaten“ oder als <code>WAHOO_CLIENT_ID</code> und <code>WAHOO_CLIENT_SECRET</code> in der Serverkonfiguration. <code>WAHOO_REDIRECT_URI</code> bleibt eine Serverkonfiguration (siehe README).</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Yazio</strong><span id="yazioConnectionStatus">Status wird geladen…</span><small id="yazioConnectionDetail"></small></div><button id="yazioCheckButton" class="secondary-button" type="button">Verbindung prüfen</button></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus">Status wird geprüft…</span><small>Nur lesen · Termine erscheinen im Tab „Kalender“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small><small data-check-result="weather"></small></div><div class="connection-actions"><button data-check-button="weather" class="secondary-button" type="button">Verbindung prüfen</button><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></div></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="openaiConnectionDetail"></small><small data-check-result="openai"></small></div><div class="connection-actions"><button data-check-button="openai" class="secondary-button" type="button">Verbindung prüfen</button><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></div></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small><small data-check-result="intervals"></small></div><div class="connection-actions"><button data-check-button="intervals" class="secondary-button" type="button">Verbindung prüfen</button></div><p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege API-Schlüssel und Athlete ID im Bereich „Zugangsdaten“ oder als <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration.</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus" class="connection-chip">Status wird geprüft…</span><ul id="garminSourceLines" class="connection-lines"></ul><small id="garminStatus"></small><small id="garminKeyHint" class="provider-key-hint" hidden></small><small data-check-result="garmin"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button data-check-button="garmin" data-check-group="garmin-login" class="secondary-button" type="button">Verbindung prüfen</button><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht verbunden. Melde dich im Bereich „Zugangsdaten“ an oder hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration (siehe README).</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong id="wahooConnectionTitle">Wahoo</strong><span id="wahooConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="wahooConnectionDetail">Importiert Einheiten · schreibt nur bei ausdrücklichem Plan-Export</small><small data-check-result="wahoo"></small></div><div id="wahooConnectionActions" class="connection-actions" hidden><button id="wahooConnectButton" class="secondary-button" type="button" hidden>Wahoo verbinden</button><button id="wahooDisconnectButton" class="secondary-button danger-button" type="button" hidden>Wahoo trennen</button></div><div id="wahooSyncActions" class="connection-actions connection-sync-actions" hidden><button data-check-button="wahoo" data-check-group="wahoo wahoo-connection" class="secondary-button" type="button">Verbindung prüfen</button><button id="wahooSyncButton" class="secondary-button" type="button">Jetzt synchronisieren</button><button id="wahooFullResyncButton" class="secondary-button" type="button">Vollständig neu synchronisieren</button></div><small id="wahooFullResyncStatus" class="connection-resync-status" hidden></small><p id="wahooSetupHint" class="provider-setup-hint" hidden>Wahoo ist optional und nicht konfiguriert. Hinterlege Client-ID und Client-Secret im Bereich „Zugangsdaten“ oder als <code>WAHOO_CLIENT_ID</code> und <code>WAHOO_CLIENT_SECRET</code> in der Serverkonfiguration. <code>WAHOO_REDIRECT_URI</code> bleibt eine Serverkonfiguration (siehe README).</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Yazio</strong><span id="yazioConnectionStatus" class="connection-chip">Status wird geladen…</span><small id="yazioConnectionDetail"></small></div><button id="yazioCheckButton" class="secondary-button" type="button">Verbindung prüfen</button></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="externalCalendarConnectionDetail">Nur lesen · Termine erscheinen im Tab „Kalender“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
           </div>
           <section id="providerCredentials" class="provider-credentials" aria-labelledby="providerCredentialsTitle">
             <div class="settings-section-heading"><div><h3 id="providerCredentialsTitle">Zugangsdaten</h3><p>Werte aus diesem Bereich werden verschlüsselt in der Datenbank gespeichert und wirken sofort, ohne Neustart. Ohne gespeicherten Wert gilt der Wert aus der Serverumgebung.</p></div></div>
@@ -546,6 +553,7 @@
             <div><strong>Sitzung</strong><span>Meldet dich auf diesem Gerät ab und entfernt die lokal zwischengespeicherten Ansichten.</span></div>
             <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
           </div>
+          <p class="settings-app-version">Version <span id="settingsAppVersion">wird geladen…</span></p>
         </section>
       </section>
     </main>
@@ -613,10 +621,11 @@
   <script src="/api.js?v=224" defer></script>
   <script src="/navigation.js?v=236" defer></script>
   <script src="/state.js?v=228" defer></script>
-  <script src="/views.js?v=238" defer></script>
-  <script src="/plan-views.js?v=31" defer></script>
+  <script src="/views.js?v=239" defer></script>
+  <script src="/plan-views.js?v=32" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=218" defer></script>
+  <script src="/connection-status.js?v=1" defer></script>
   <script src="/status-strip.js?v=1" defer></script>
   <script src="/coach.js?v=53" defer></script>
   <script src="/shared.js?v=24" defer></script>
@@ -632,11 +641,11 @@
   <script src="/diagnostics.js?v=5" defer></script>
   <script src="/state-loader.js?v=27" defer></script>
   <script src="/sync-actions.js?v=7" defer></script>
-  <script src="/wahoo-connection.js?v=5" defer></script>
-  <script src="/provider-connections.js?v=12" defer></script>
+  <script src="/wahoo-connection.js?v=6" defer></script>
+  <script src="/provider-connections.js?v=13" defer></script>
   <script src="/provider-checks.js?v=4" defer></script>
   <script src="/weekly-plan.js?v=4" defer></script>
   <script src="/settings.js?v=20" defer></script>
-  <script src="/app.js?v=302" defer></script>
+  <script src="/app.js?v=303" defer></script>
 </body>
 </html>

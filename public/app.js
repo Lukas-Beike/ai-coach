@@ -77,6 +77,8 @@ $("#garminFullResyncButton").addEventListener("click", () => fullResync(provider
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#retryBodyGarmin").addEventListener("click", retryBodyGarmin);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
+// A closed profile section cannot show its invalid field: open it first.
+$("#profileForm").addEventListener("invalid", (event) => { event.target.closest?.("details")?.setAttribute("open", ""); }, true);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#serviceTierSelect").addEventListener("change", saveServiceTier);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);

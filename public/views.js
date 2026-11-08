@@ -323,7 +323,15 @@ function renderMoreSegments(segment) {
     link.classList.toggle("active", active);
     if (active) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
+    if (active) centerInScroller(link);
   });
+}
+
+// The one-row area bar scrolls sideways: the active area stays in view.
+function centerInScroller(link) {
+  const bar = link.parentElement;
+  if (!bar || bar.scrollWidth <= bar.clientWidth) return;
+  bar.scrollLeft = link.offsetLeft - (bar.clientWidth - link.offsetWidth) / 2;
 }
 
 function renderPlanSegments(segment) {
@@ -340,9 +348,9 @@ function renderPlanSegments(segment) {
 }
 
 globalThis.AppViews = Object.freeze({ renderMoreSegments, renderPlanSegments });
-function populateProfileSports(field, value) {
+function populateProfileSports(form, value) {
   const selectedSports = new Set(String(value || "").split(",").map((item) => item.trim()).filter(Boolean));
-  [...field.options].forEach((option) => { option.selected = selectedSports.has(option.value); });
+  form.querySelectorAll('input[name="sports"]').forEach((box) => { box.checked = selectedSports.has(box.value); });
 }
 
 function populateProfileTimezone(field, value) {
@@ -351,9 +359,9 @@ function populateProfileTimezone(field, value) {
 }
 
 function populateProfileField(form, key, value) {
+  if (key === "sports") return populateProfileSports(form, value);
   const field = form.elements[key];
   if (!field) return;
-  if (key === "sports" && field.multiple) return populateProfileSports(field, value);
   if (key === "timezone" && field.tagName === "SELECT") return populateProfileTimezone(field, value);
   field.value = value || "";
 }
@@ -365,11 +373,37 @@ function profileSportsLabel(sports) {
     .map((item) => (Object.hasOwn(PROFILE_SPORT_LABELS, item) ? PROFILE_SPORT_LABELS[item] : item)).join(", ");
 }
 
+const PROFILE_TRAINING_MODEL_LABELS = { pyramidal: "Pyramidal", polarized: "Polarisiert", threshold: "Schwellenbetont", sweet_spot: "Sweet Spot" };
+const PROFILE_SUMMARY_EMPTY = "Noch nicht ausgefüllt";
+const PROFILE_SUMMARY_GOALS_LENGTH = 40;
+
+function profileGoalsLine(goals) {
+  const line = String(goals || "").trim().split("\n")[0].trim();
+  return line.length > PROFILE_SUMMARY_GOALS_LENGTH ? `${line.slice(0, PROFILE_SUMMARY_GOALS_LENGTH - 1).trimEnd()}…` : line;
+}
+
+function profilePreferencesLine(profile) {
+  const count = Object.entries(profile).filter(([key, value]) => key.startsWith("training_preferences") && String(value || "").trim()).length;
+  if (!count) return "";
+  return count === 1 ? "1 Präferenz" : `${count} Präferenzen`;
+}
+
+// One line per profile section: what the athlete finds inside before opening it.
+function profileSummaries(profile) {
+  const lines = {
+    profileSummary: [profile.name, profileSportsLabel(profile.sports)],
+    profileGoalsSummary: [profile.typical_weekly_volume, profileGoalsLine(profile.goals)],
+    profileTrainingSummary: [PROFILE_TRAINING_MODEL_LABELS[profile.training_model], profilePreferencesLine(profile)],
+    profileSourcesSummary: [profile.timezone, profile.weather_location],
+  };
+  return Object.fromEntries(Object.entries(lines).map(([id, parts]) => [id, parts.filter(Boolean).join(" · ") || PROFILE_SUMMARY_EMPTY]));
+}
+
 function renderProfileSummary(profile) {
-  const summary = $("#profileSummary");
-  if (!summary) return;
-  const values = [profile.name, profileSportsLabel(profile.sports), profile.typical_weekly_volume].filter(Boolean);
-  summary.textContent = values.length ? values.join(" · ") : "Noch nicht ausgefüllt";
+  for (const [id, text] of Object.entries(profileSummaries(profile))) {
+    const node = document.getElementById(id);
+    if (node) node.textContent = text;
+  }
 }
 
 function renderProfile(profile) {
@@ -435,18 +469,6 @@ function renderAppVersion(app = {}) {
   if (settingsVersionNode) settingsVersionNode.textContent = app.version ? `v${app.version}` : "unbekannt";
 }
 
-function settingsStatus(selector, ok, text) {
-  const node = $(selector);
-  if (!node) return;
-  node.textContent = text;
-  node.className = ok ? "configured" : "not-configured";
-}
-
-function aiConnectionLabel(configured, activeError) {
-  if (!configured) return "Nicht konfiguriert";
-  return activeError ? "Fehler bei letzter Anfrage" : "Konfiguriert";
-}
-
 function aiConnectionConfigurationDetail() { return "OPENAI_API_KEY nicht konfiguriert"; }
 
 function aiConnectionErrorDetail(status) {
@@ -464,14 +486,12 @@ function aiConnectionDetail(configured, status) {
 
 function renderAiConnection(configured, status) {
   const activeError = status.state === "error";
-  const healthy = configured && !activeError;
-  settingsStatus("#openaiConnectionStatus", healthy, aiConnectionLabel(configured, activeError));
+  setConnectionChip("#openaiConnectionStatus", connectionKind({ configured, error: activeError }));
   const detail = $("#openaiConnectionDetail");
   if (detail) {
     detail.classList.toggle("error", Boolean(configured && activeError));
     detail.textContent = aiConnectionDetail(configured, status);
   }
-  return healthy;
 }
 
 function intervalsConnectionState(data, configured) {
@@ -486,6 +506,7 @@ function intervalsConnectionDetail(intervals) {
   if (!intervals.configured) return "API-Schlüssel nicht konfiguriert";
   if (intervals.state === "syncing") return "Intervals.icu wird synchronisiert.";
   if (intervals.last_error) return intervals.last_error;
+  if (intervals.state === "configured") return "Noch nicht getestet";
   if (!librarySync.last_sync_at) return "Noch keine Synchronisierung durchgeführt";
   const updated = formatTime(librarySync.last_sync_at);
   const libraryCount = Number(librarySync.state?.synced || 0);
@@ -495,25 +516,12 @@ function intervalsConnectionDetail(intervals) {
 
 function renderIntervalsConnection(data, configured) {
   const intervals = intervalsConnectionState(data, configured);
-  const healthy = intervals.configured && intervals.state !== "error";
-  const labels = {
-    not_configured: "Nicht konfiguriert",
-    syncing: "Synchronisierung läuft…",
-    error: "Fehler bei letzter Aktualisierung",
-    connected: "Verbunden",
-  };
-  settingsStatus("#intervalsConnectionStatus", healthy, labels[intervals.state] || "Konfiguriert · noch nicht getestet");
+  setConnectionChip("#intervalsConnectionStatus", intervalsConnectionKind(intervals));
   const detail = $("#intervalsConnectionDetail");
   if (detail) {
     detail.classList.toggle("error", Boolean(intervals.last_error));
     detail.textContent = intervalsConnectionDetail(intervals);
   }
-  return healthy;
-}
-
-function weatherConnectionLabel(weather) {
-  if (!weather.configured) return "Nicht konfiguriert";
-  return weather.loading ? "Wird geladen" : "Konfiguriert";
 }
 
 function weatherConnectionDetail(weather) {
@@ -521,11 +529,11 @@ function weatherConnectionDetail(weather) {
   const location = [weather.location?.name, weather.location?.country].filter(Boolean).join(", ");
   const prefix = location ? "Standort: " + location + " · " : "";
   const fetched = weather.fetched_at ? "letzte Abfrage: " + formatTime(weather.fetched_at) : "Standort im Profil hinterlegen";
-  return prefix + fetched;
+  return weather.loading ? prefix + "wird geladen" : prefix + fetched;
 }
 
 function renderWeatherConnection(weather) {
-  settingsStatus("#weatherConnectionStatus", weather.configured, weatherConnectionLabel(weather));
+  setConnectionChip("#weatherConnectionStatus", connectionKind({ configured: weather.configured }));
   const detail = $("#weatherConnectionDetail");
   if (detail) detail.textContent = weatherConnectionDetail(weather);
   const button = $("#weatherSyncButton");
@@ -619,30 +627,27 @@ function renderSettingsUsage(data) {
   }
 }
 
-function garminConnectionLabel(garmin, running) {
-  if (!garmin.configured) return "Nicht konfiguriert";
-  if (running) return "Synchronisierung läuft…";
-  return garmin.source === "fixture" ? "Lokale Testdatei aktiv" : "Konfiguriert";
-}
-
-function renderConnectionsSummary(openaiHealthy, intervalsHealthy, garminConfigured, weatherConfigured, wahoo) {
-  const connections = $("#connectionsSummary");
-  if (!connections) return;
-  const values = [["OpenAI", openaiHealthy], [providerShortLabel(providerIds().intervals), intervalsHealthy], [providerShortLabel(providerIds().garmin), garminConfigured], [wahoo.label, wahoo.connected], ["Open-Meteo", weatherConfigured]];
-  connections.textContent = values.map(([label, active]) => `${label} ${active ? "✓" : "–"}`).join(" · ");
+function renderGarminConnection(data) {
+  const garmin = data.garmin || {};
+  setConnectionChip("#garminConnectionStatus", garminConnectionKind(garmin));
+  const lines = $("#garminSourceLines");
+  if (!lines) return;
+  const sdkConnected = Boolean(data.credentials?.garmin_connection?.connected ?? data.credentials?.garmin_connected);
+  lines.replaceChildren(...garminSourceLines(garmin, sdkConnected).map((line) => {
+    const item = document.createElement("li");
+    item.textContent = `${line.label}: ${line.text}`;
+    return item;
+  }));
 }
 
 function renderSettings(data) {
   const configured = data.configured || {};
   const status = data.usage?.status || {};
-  const openaiHealthy = renderAiConnection(configured.openai, status);
-  const intervalsHealthy = renderIntervalsConnection(data, configured);
-  const garmin = data.garmin || {};
-  const garminRunning = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-  settingsStatus("#garminConnectionStatus", garmin.configured, garminConnectionLabel(garmin, garminRunning));
+  renderAiConnection(configured.openai, status);
+  renderIntervalsConnection(data, configured);
+  renderGarminConnection(data);
   renderWeatherConnection(data.weather || {});
-  const wahoo = { ...renderWahooConnection(data), label: wahooProviderLabel(data) };
-  renderConnectionsSummary(openaiHealthy, intervalsHealthy, garmin.configured, data.weather?.configured, wahoo);
+  renderWahooConnection(data);
   renderSettingsInputs(data);
   renderSettingsSyncControls(data, configured);
   renderSettingsUsage(data);
