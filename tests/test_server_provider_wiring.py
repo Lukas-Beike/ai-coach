@@ -26,9 +26,8 @@ class ProductionProviderWiringTests(unittest.TestCase):
 
         self.assertEqual(expected, tuple(runtime.job_owners()))
         self.assertEqual(expected, tuple(runtime.freshness_sources()))
-        self.assertEqual(
-            (INTERVALS_ID, GARMIN_ID, WAHOO_ID), tuple(runtime.resync_handlers())
-        )
+        # Intervals.icu is an output target without a full resync (#1728).
+        self.assertEqual((GARMIN_ID, WAHOO_ID), tuple(runtime.resync_handlers()))
         self.assertIs(DEFAULT_PROVIDER_REGISTRY, runtime.static)
 
     @unittest.skipUnless(server.SQLCIPHER_AVAILABLE, SQLCIPHER_SKIP_REASON)
@@ -36,11 +35,11 @@ class ProductionProviderWiringTests(unittest.TestCase):
         policies = server.provider_runtime().schedule_policies()
 
         self.assertEqual(
-            (WEATHER_ID, CALENDAR_ID, GARMIN_ID, INTERVALS_ID, WAHOO_ID),
+            (WEATHER_ID, CALENDAR_ID, GARMIN_ID, WAHOO_ID),
             tuple(policies["daily"]),
         )
         self.assertEqual(
-            (CALENDAR_ID, INTERVALS_ID, GARMIN_ID, WEATHER_ID, WAHOO_ID),
+            (CALENDAR_ID, GARMIN_ID, WEATHER_ID, WAHOO_ID),
             tuple(policies["startup"]),
         )
         self.assertEqual(

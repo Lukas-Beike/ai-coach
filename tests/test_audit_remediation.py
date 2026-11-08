@@ -584,7 +584,7 @@ with patch.object(Path, 'read_text', deny):
                 try:
                     server.initialise_database()
                     job = server.SYNC_JOB_QUEUE.service().enqueue(
-                        "intervals", "refresh", {"days": 1}
+                        "garmin", "refresh", {"days": 1}
                     )
                     server.SYNC_JOB_QUEUE.store().claim()
                     backup = server.BACKUP_ASSEMBLY.backup_service().read_bytes()

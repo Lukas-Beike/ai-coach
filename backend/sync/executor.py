@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
@@ -43,6 +43,7 @@ from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
 
+UNKNOWN_PROVIDER_JOB: Final = "Unbekannter Providerjob."
 _LOGGER = logging.getLogger(__name__)
 
 # Consecutive chunks without any fetched record (2 x 90 days) end a backfill.
@@ -404,7 +405,7 @@ class CalendarWeatherSyncJobOwner:
                 force=bool(payload.get("force", True)),
                 operation_id=job["id"],
             )
-        raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
+        raise AppError(400, UNKNOWN_PROVIDER_JOB, reason="invalid_job_request")
 
 
 def _reject_plan_push(job_type: str) -> None:
@@ -439,7 +440,7 @@ class IntervalsJobAdapter:
         specific = self._jobs.execute_specific(job, payload, reason, job_type)
         if specific is None:
             raise AppError(
-                400, "Unbekannter Providerjob.", reason="invalid_job_request"
+                400, UNKNOWN_PROVIDER_JOB, reason="invalid_job_request"
             )
         return specific
 
@@ -582,7 +583,7 @@ def dispatch_provider_job(
     owner = job_owners.get(provider)
     if owner is None:
         _reject_plan_push(job_type)
-        raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
+        raise AppError(400, UNKNOWN_PROVIDER_JOB, reason="invalid_job_request")
     return owner.execute(job, payload, reason, job_type=job_type)
 
 
