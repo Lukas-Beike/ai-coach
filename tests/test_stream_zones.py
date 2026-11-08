@@ -40,7 +40,7 @@ PROVENANCE = Provenance(
     label="Garmin Connect",
 )
 # LTHR 160 bpm with the default limits: Z1 <= 108.8, Z2 <= 132.8, Z3 <= 150.4,
-# Z4 <= 168, Z5 <= 192, Z6 <= 240, Z7 above.
+# Z4 <= 168, Z5 above.
 SETTINGS = ZoneSettings(lthr=160.0, ftp=250.0)
 
 
@@ -104,14 +104,14 @@ class StreamZoneTests(unittest.TestCase):
 
         zones = _zones(merged, ZoneMetric.HEART_RATE)
         # Each sample counts the second until the next one; the last counts nothing.
-        self.assertEqual([4.0, 0.0, 4.0, 0.0, 2.0, 0.0, 0.0], _seconds(zones))
+        self.assertEqual([4.0, 0.0, 4.0, 0.0, 2.0], _seconds(zones))
         self.assertIs(ZoneBoundarySource.PROFILE, zones.boundary_source)
         self.assertIs(SourceKind.DERIVED, zones.provenance.source_kind)
         self.assertEqual(
             (None, 108.8), (zones.buckets[0].lower, zones.buckets[0].upper)
         )
         self.assertEqual(
-            (240.0, None), (zones.buckets[6].lower, zones.buckets[6].upper)
+            (168.0, None), (zones.buckets[4].lower, zones.buckets[4].upper)
         )
 
     def test_power_uses_the_ftp(self) -> None:
@@ -140,15 +140,15 @@ class StreamZoneTests(unittest.TestCase):
         )
 
     def test_a_high_threshold_leaves_bounds_beyond_the_range_open(self) -> None:
-        # LTHR 175: 150 % is 262.5 bpm, above the 250 bpm boundary range.
+        # LTHR 245: 105 % is 257.25 bpm, above the 250 bpm boundary range.
         merged = with_stream_zones(
             merge_details([_streams(SECONDS, heart_rate_bpm=HEART_RATE)]),
-            _with(ZoneSettings(lthr=175.0)),
+            _with(ZoneSettings(lthr=245.0)),
         )
 
         buckets = _zones(merged, ZoneMetric.HEART_RATE).buckets
-        self.assertEqual((210.0, None), (buckets[5].lower, buckets[5].upper))
-        self.assertEqual((None, None), (buckets[6].lower, buckets[6].upper))
+        self.assertEqual((230.3, None), (buckets[3].lower, buckets[3].upper))
+        self.assertEqual((None, None), (buckets[4].lower, buckets[4].upper))
 
     def test_settings_are_not_read_without_a_stream_to_derive(self) -> None:
         def unexpected() -> ZoneSettings:
@@ -289,11 +289,11 @@ class ReportZoneTimeTests(unittest.TestCase):
         times = zone_times(merged.streams, SETTINGS, pace=False)
 
         self.assertEqual(
-            [4.0, 0.0, 4.0, 0.0, 2.0, 0.0, 0.0],
+            [4.0, 0.0, 4.0, 0.0, 2.0],
             [zone["secs"] for zone in times["heart_rate"]],
         )
         self.assertEqual(
-            ["Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7"],
+            ["Z1", "Z2", "Z3", "Z4", "Z5"],
             [zone["id"] for zone in times["heart_rate"]],
         )
         # FTP 250 W: 100 W is Z1, 200 W (80 %) is Z3.

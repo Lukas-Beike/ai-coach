@@ -1,9 +1,10 @@
 """Zone limits and thresholds used to color plan steps and recordings.
 
-Defaults follow Intervals.icu's standard zones. Canonical zone configurations
-replace them per metric: a confirmed local configuration valid on the day wins,
-then the provider's. A metric without a configuration keeps the sport's canonical
-thresholds (``from_thresholds``) and the default limits.
+Power and pace defaults follow Intervals.icu's standard zones, heart rate
+Coggan's five zones. Canonical zone configurations replace them per metric: a
+confirmed local configuration valid on the day wins, then the provider's. A metric
+without a configuration keeps the sport's canonical thresholds
+(``from_thresholds``) and the default limits.
 """
 
 from __future__ import annotations
@@ -23,9 +24,11 @@ from backend.canonical.vocabulary import (
     ZonePercentBasis,
 )
 
-# Upper zone limits (Z1..Z6; everything above is Z7) as percent of the threshold.
+# Upper zone limits as percent of the threshold; everything above the last limit is
+# the top zone. Power: Z1..Z6, above is Z7 (Intervals.icu). Heart rate: Coggan's five
+# zones as percent of LTHR, Z1..Z4, above 105 % is Z5.
 POWER_ZONE_LIMITS = (55, 75, 90, 105, 120, 150)
-HR_ZONE_LIMITS = (68, 83, 94, 105, 120, 150)
+HR_ZONE_LIMITS = (68, 83, 94, 105)
 PACE_ZONE_LIMITS = (77.5, 87.7, 94.3, 100, 103.4, 111.5)
 # Heart-rate steps are usually written as percent of max HR; threshold HR is
 # about 90 % of it.

@@ -25,6 +25,17 @@ RUN = {
 
 
 class ZoneSettingsTests(unittest.TestCase):
+    def test_default_heart_rate_zones_are_coggans_five(self):
+        self.assertEqual((68, 83, 94, 105), HR_ZONE_LIMITS)
+        settings = ZoneSettings(lthr=160.0)
+        self.assertEqual(
+            [1, 2, 3, 4, 5, 5],
+            [
+                settings.hr_zone_of_lthr(value)
+                for value in (50, 68.1, 90, 100, 105.1, 150)
+            ],
+        )
+
     def test_settings_are_chosen_per_sport(self):
         settings = [RUN, RIDE]
         ride = canonical_zone_settings(settings, Sport.RIDE)

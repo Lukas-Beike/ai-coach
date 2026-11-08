@@ -232,7 +232,7 @@ class CanonicalDetailReaderTests(unittest.TestCase):
         # 100..149 bpm repeating: per 50 s, 9 s up to 108.8, 24 s up to 132.8,
         # 17 s up to 150.4; 54 full cycles, the last sample counts nothing.
         self.assertEqual(
-            [486.0, 1296.0, 918.0, 0.0, 0.0, 0.0, 0.0],
+            [486.0, 1296.0, 918.0, 0.0, 0.0],
             [bucket["seconds"] for bucket in zones["buckets"]],
         )
         self.assertEqual("derived", zones["source"]["kind"])
