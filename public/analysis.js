@@ -674,11 +674,13 @@ function criticalPowerLine(result) {
   const parts = estimate.fits.map((fit) => {
     const label = labels[`${fit.sport}:${fit.environment}`] || fit.sport;
     if (fit.status !== "ok") return `${label} —`;
-    return fit.sport === "run"
-      ? `${label} CS ${AppFormat.number(fit.cs_mps, { digits: 2 })} m/s · D′ ${analysisValue(fit.d_prime_meters, "m")}`
-      : `${label} CP ${analysisValue(fit.cp_watts, "W")} · W′ ${analysisValue(fit.w_prime_joules / 1000, "kJ")}`;
+    const value = fit.sport === "run"
+      ? `${label} CS ${AppFormat.number(fit.cs_mps, { digits: 2 })} m/s · D′ ${analysisValue(fit.d_prime_meters, "m")} (unsicher)`
+      : `${label} CP ${analysisValue(fit.cp_watts, "W")} · W′ ${analysisValue(fit.w_prime_joules / 1000, "kJ")} (unsicher)`;
+    const races = (fit.efforts || []).filter((effort) => effort.effort_context === "race").length;
+    return races ? `${value} · ${races}× Wettkampf` : value;
   });
-  const line = reportNode("p", `Experimentelle CP/CS-Schätzung (3/7/12 min, ${estimate.window_days} Tage): ${parts.join(" · ")}`, "analysis-reference-note");
+  const line = reportNode("p", `Experimentelle CP/CS-Schätzung (${estimate.window_days} Tage): ${parts.join(" · ")}`, "analysis-reference-note");
   line.dataset.criticalPower = "true";
   line.title = estimate.scope || "";
   return line;

@@ -204,6 +204,8 @@ accessible text, not a declared absence.
 | R47 | Plews et al. 2012, "Heart rate variability in elite triathletes, is variation in variability the key to effective training? A case comparison", Eur J Appl Physiol 112(11):3729-3741, PMID 22367011, DOI `10.1007/s00421-012-2354-4` | abstract | Two elite triathletes; the 7-day rolling mean of ln(RMSSD) and its CV followed training better than single days. Case comparison, morning recordings. |
 | R48 | Plews et al. 2014, "Monitoring training with heart-rate variability: how much compliance is needed for valid assessment?", IJSPP 9(5):784-791, DOI `10.1123/IJSPP.2013-0455` | abstract | Trained triathletes; ln(RMSSD) averaged over 1-7 random days per week; standardised changes and correlations plateau after 3-4 days; recommends at least 3 valid days per week. |
 | R49 | Buchheit 2014, "Monitoring training status with HR measures: do all roads lead to Rome?", Front Physiol 5:73, PMID 24578692, DOI `10.3389/fphys.2014.00073` | abstract | Review; recommends log-transformed vagal HRV indices and weekly means over single values; interpretation depends on context. |
+| R50 | Mattioni Maturana et al. 2018, "Critical power: How different protocols and models affect its determination", J Sci Med Sport 21(7):742-747, PMID 29203319, DOI `10.1016/j.jsams.2017.11.015` | abstract | 13 trained cyclists, five exhaustive trials of about 1-20 min on separate days. CP was considerably overestimated when only trials under 10 min entered the fit, independent of the model; fits with two trials of 12-20 min agreed well with the criterion for CP and W′. Lab trials, not training files. |
+| R51 | Hunter, Ledger & Muniz-Pumares 2023, "Remote determination of critical speed and critical power in recreational runners", IJSPP, PMID 37888148 | abstract | 23 recreational runners, 8 weeks of foot-pod training data vs time trials and 3-min all-out tests. CS/CP from habitual training agreed with the tests; D′/W′ agreed only weakly and were moderately reliable. Running, not cycling. |
 | L1 | Phillips & Steven 2026, "Perspective: sleep regularity—where do we go from here?", Sleep 49(8), PMID 42023690, DOI `10.1093/sleep/zsag114` | full text | Perspective without new data, formula, threshold or wearable/athlete content. Background only; not decision evidence. |
 
 ### Vendor documentation (not peer-reviewed)
@@ -232,6 +234,10 @@ R47 to R49 and V6 were added on 2026-11-07 (#1772) from a web search
 (`Garmin HRV status 7-day average baseline`, `Plews 2014 compliance ln
 rMSSD`, `Garmin resting heart rate lowest 30-minute average`) and the science
 review's citations; their correction status was not checked.
+R50 and R51 were added on 2026-11-08 (#1773) from a web search
+(`Mattioni Maturana 2018 critical power trial duration`, `Hunter 2023 critical
+power W' training data`) and the science review's citations; their correction
+status was not checked.
 R45 and R46 were added on 2026-11-07 (#1771) from a web and PubMed search
 (`session RPE resistance training`, TrainingPeaks and Intervals.icu pages on
 TSS from RPE); no study converting session-RPE AU into TSS was found. Their

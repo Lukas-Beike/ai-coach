@@ -1,10 +1,14 @@
 """Critical Power and Critical Speed model estimates (evidence card M4).
 
-Two-parameter models fitted to the best 3, 7 and 12 min efforts of the last 28
-days from full-resolution streams (training-file protocol, card M4):
+Two-parameter models fitted to the best efforts of the last 28 days from
+full-resolution streams (training-file protocol, card M4): 3, 7, 12 and 20 min
+for cycling (v2, card 4: efforts under 12 min alone overestimate CP), 3, 7 and
+12 min for running:
 ``work(t) = CP × t + W′`` for cycling and ``distance(t) = CS × t + D′`` for
 running. The primary fit is least squares of work or distance on time; the
-power-versus-1/t fit and leave-one-out fits are reported only as sensitivity.
+power-versus-1/t fit, the cycling 3/7/12-min fit and leave-one-out fits are
+reported only as sensitivity. W′ and D′ are marked as much less reliable than
+CP and CS.
 Every limit below was fixed on the card before any real-data fit. The result is
 always an experimental model estimate and never feeds FTP or zones.
 """
@@ -19,9 +23,13 @@ from typing import Any, Final
 from backend.canonical.activity_summary import summary_is_trail_run
 
 METHOD_ID: Final = "critical-power-speed"
-METHOD_VERSION: Final = 1
+METHOD_VERSION: Final = 2
 WINDOW_DAYS: Final = 28
-EFFORT_SECONDS: Final = (180, 420, 720)
+EFFORT_SECONDS: Final = {"ride": (180, 420, 720, 1200), "run": (180, 420, 720)}
+# The card 3 protocol, kept for cycling as a sensitivity fit.
+THREE_POINT_SECONDS: Final = (180, 420, 720)
+# Hunter 2023: W′/D′ from everyday training agree only weakly with tests.
+INTERCEPT_RELIABILITY: Final = "low"
 # Efforts in one session count separately only with this much recovery between.
 MIN_RECOVERY_SECONDS: Final = 1800
 MAX_RELATIVE_RESIDUAL: Final = 0.03
@@ -34,11 +42,12 @@ _FIELDS: Final = {
     "run": ("speed_mps", "cs_mps", "d_prime_meters", 3, 1),
 }
 SCOPE: Final = (
-    "Experimentelle Modellschätzung aus den besten 3-, 7- und 12-Minuten-"
-    "Belastungen der letzten 28 Tage (Trainingsdatei-Protokoll, Karte M4); "
-    "Ausbelastung, Testabsicht, Sensor und Kalibrierung sind unbekannt. CP/CS "
-    "ist keine FTP, Schwelle, MLSS oder Zonengrenze; W′/D′ ist keine gemessene "
-    "anaerobe Kapazität; keine Langstreckenprognose."
+    "Experimentelle Modellschätzung aus den besten Belastungen der letzten 28 "
+    "Tage (Rad 3, 7, 12 und 20 Minuten, Lauf 3, 7 und 12 Minuten; "
+    "Trainingsdatei-Protokoll, Karte M4); Ausbelastung, Testabsicht, Sensor und "
+    "Kalibrierung sind unbekannt. CP/CS ist keine FTP, Schwelle, MLSS oder "
+    "Zonengrenze; W′/D′ ist deutlich weniger verlässlich als CP/CS und keine "
+    "gemessene anaerobe Kapazität; keine Langstreckenprognose."
 )
 
 
@@ -65,7 +74,7 @@ def critical_power_speed(
         "classification": "model estimate",
         "status": "experimental",
         "window_days": WINDOW_DAYS,
-        "protocol": "best 180, 420 and 720 s from training files",
+        "protocol": "best 180, 420, 720 and 1200 s (cycling) or 180, 420 and 720 s (running) from training files",
         "fit": "least squares of work or distance on time",
         "test_intent": "unknown",
         "sensor": "unknown",
@@ -87,25 +96,36 @@ def fit_line(
 def _fit(
     records: Sequence[dict[str, Any]], sport: str, environment: str, today: date
 ) -> dict[str, Any]:
-    field, slope_key, intercept_key, slope_digits, intercept_digits = _FIELDS[sport]
-    efforts = _select_efforts(records, sport, environment, field)
+    field = _FIELDS[sport][0]
+    wanted = EFFORT_SECONDS[sport]
+    efforts = _select_efforts(records, sport, environment, field, wanted)
     result: dict[str, Any] = {
         "sport": sport,
         "environment": environment,
         "efforts": efforts,
+        "intercept_reliability": INTERCEPT_RELIABILITY,
     }
     if sport == "ride":
         # Card M4 v3: no provider marks estimated cycling power.
         result["power_source"] = POWER_SOURCE_UNCHECKED
-    if len(efforts) < len(EFFORT_SECONDS):
+    if len(efforts) < len(wanted):
+        minutes = ", ".join(str(seconds // 60) for seconds in wanted)
         return {
             **result,
             "status": "insufficient_data",
-            "reason": "Weniger als drei unabhängige 3-, 7- und 12-Minuten-Belastungen in 28 Tagen.",
+            "reason": f"Keine unabhängigen {minutes}-Minuten-Belastungen in 28 Tagen.",
         }
     result["data_age_days"] = (
         today - min(date.fromisoformat(str(effort["date"])) for effort in efforts)
     ).days
+    return _fitted(result, sport, efforts)
+
+
+def _fitted(
+    result: dict[str, Any], sport: str, efforts: Sequence[dict[str, Any]]
+) -> dict[str, Any]:
+    """Fit the selected efforts, or withhold the fit by the card's stop rules."""
+    field, slope_key, intercept_key, slope_digits, intercept_digits = _FIELDS[sport]
     durations = [float(effort["duration_seconds"]) for effort in efforts]
     rates = [float(effort[field]) for effort in efforts]
     # Work in J or distance in m: the mean power or speed times the duration.
@@ -153,6 +173,15 @@ def _fit(
             "reason": "Parameter außerhalb des Plausibilitätsbereichs.",
         }
     inverse_cp, inverse_w_prime = _inverse_time_fit(durations, rates)
+    sensitivity: dict[str, Any] = {
+        "inverse_time": {
+            slope_key: round(inverse_cp, slope_digits),
+            intercept_key: round(inverse_w_prime, intercept_digits),
+        },
+        "leave_one_out": leave_one_out,
+    }
+    if sport == "ride":
+        sensitivity["three_point"] = _three_point(durations, amounts, sport)
     return {
         **result,
         "status": "ok",
@@ -162,13 +191,23 @@ def _fit(
             {"duration_seconds": int(t), "relative": round(residual, 4)}
             for t, residual in zip(durations, residuals, strict=True)
         ],
-        "sensitivity": {
-            "inverse_time": {
-                slope_key: round(inverse_cp, slope_digits),
-                intercept_key: round(inverse_w_prime, intercept_digits),
-            },
-            "leave_one_out": leave_one_out,
-        },
+        "sensitivity": sensitivity,
+    }
+
+
+def _three_point(
+    durations: Sequence[float], amounts: Sequence[float], sport: str
+) -> dict[str, Any]:
+    """The card 3 fit on the 3, 7 and 12 min efforts alone, for comparison."""
+    _field, slope_key, intercept_key, slope_digits, intercept_digits = _FIELDS[sport]
+    kept = [index for index, t in enumerate(durations) if t in THREE_POINT_SECONDS]
+    slope, intercept = fit_line(
+        [durations[index] for index in kept], [amounts[index] for index in kept]
+    )
+    return {
+        "duration_seconds": list(THREE_POINT_SECONDS),
+        slope_key: round(slope, slope_digits),
+        intercept_key: round(intercept, intercept_digits),
     }
 
 
@@ -190,7 +229,11 @@ def _fits(row: dict[str, Any], sport: str, environment: str) -> bool:
 
 
 def _select_efforts(
-    records: Sequence[dict[str, Any]], sport: str, environment: str, field: str
+    records: Sequence[dict[str, Any]],
+    sport: str,
+    environment: str,
+    field: str,
+    wanted: Sequence[int],
 ) -> list[dict[str, Any]]:
     """Pick the best effort per duration, longest first, keeping efforts independent.
 
@@ -203,7 +246,7 @@ def _select_efforts(
         else ("running_profile", "speed")
     )
     chosen: list[dict[str, Any]] = []
-    for duration in sorted(EFFORT_SECONDS, reverse=True):
+    for duration in sorted(wanted, reverse=True):
         candidates = [
             {
                 "duration_seconds": duration,
@@ -212,12 +255,11 @@ def _select_efforts(
                 "activity_id": row.get("activity_id"),
                 "date": row.get("date"),
                 "source": row.get("source"),
-                # A race is the most likely maximal effort; flag it.
-                **(
-                    {"effort_context": "race"}
-                    if row.get("effort_context") == "race"
-                    else {}
-                ),
+                # A race is the most likely maximal effort (card M4 v4: shown
+                # per effort); everything else is everyday training.
+                "effort_context": "race"
+                if row.get("effort_context") == "race"
+                else "training",
             }
             for row in records
             if _fits(row, sport, environment)

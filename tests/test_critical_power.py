@@ -38,10 +38,15 @@ def _run(activity_id, points, *, environment="outdoor", days_ago=1):
 
 
 def _model_rides(cp=250.0, w_prime=18000.0, **kwargs):
-    """Three separate sessions, one exact model effort each."""
+    """Four separate sessions, one exact model effort each (3/7/12/20 min)."""
     return [
         _ride(name, [(t, cp + w_prime / t, 0.0)], **kwargs)
-        for name, t in (("short", 180), ("mid", 420), ("long", 720))
+        for name, t in (
+            ("short", 180),
+            ("mid", 420),
+            ("long", 720),
+            ("longest", 1200),
+        )
     ]
 
 
@@ -60,6 +65,8 @@ class ReferenceCaseTests(unittest.TestCase):
         self.assertEqual(350, powers[0])
         self.assertAlmostEqual(292.857142857, powers[1], places=9)
         self.assertEqual(275, powers[2])
+        # Card M4 v4: the 20-min reference point is 265 W.
+        self.assertEqual(265, 250 + 18000 / 1200)
         slope, intercept = fit_line(
             [180, 420, 720],
             [p * t for p, t in zip(powers, (180, 420, 720), strict=True)],
@@ -74,8 +81,15 @@ class ReferenceCaseTests(unittest.TestCase):
             fit["sensitivity"]["inverse_time"],
         )
         self.assertEqual(
-            [180, 420, 720],
+            [180, 420, 720, 1200],
             [row["left_out_seconds"] for row in fit["sensitivity"]["leave_one_out"]],
+        )
+        self.assertEqual(
+            {"duration_seconds": [180, 420, 720], "cp_watts": 250.0},
+            {
+                key: fit["sensitivity"]["three_point"][key]
+                for key in ("duration_seconds", "cp_watts")
+            },
         )
         self.assertTrue(all(row["relative"] == 0 for row in fit["residuals"]))
         self.assertEqual(1, fit["data_age_days"])
@@ -93,7 +107,7 @@ class ReferenceCaseTests(unittest.TestCase):
     def test_result_is_always_an_experimental_model_estimate(self):
         result = critical_power_speed(_model_rides(), TODAY, input_fingerprint="fp")
         self.assertEqual(
-            ("critical-power-speed", 1, "M4", "experimental", "unknown"),
+            ("critical-power-speed", 2, "M4", "experimental", "unknown"),
             (
                 result["method"],
                 result["method_version"],
@@ -103,6 +117,36 @@ class ReferenceCaseTests(unittest.TestCase):
             ),
         )
         self.assertIn("keine FTP", result["scope"])
+        self.assertIn("weniger verlässlich", result["scope"])
+
+    def test_card_worked_example_four_points_lower_cp_than_three(self):
+        # Card M4 v4 worked example: 330/290/275/262 W at 3/7/12/20 min give
+        # CP 249.7 W and W′ 16,096 J; the 3/7/12 fit gives CP 256.6 W, 13,515 J.
+        records = [
+            _ride(f"w{t}", [(t, watts, 0.0)])
+            for t, watts in ((180, 330.0), (420, 290.0), (720, 275.0), (1200, 262.0))
+        ]
+        fit = _fit(records)
+        self.assertEqual("ok", fit["status"])
+        self.assertEqual((249.7, 16096), (fit["cp_watts"], fit["w_prime_joules"]))
+        three = fit["sensitivity"]["three_point"]
+        self.assertEqual((256.6, 13515), (three["cp_watts"], three["w_prime_joules"]))
+
+    def test_w_prime_and_d_prime_are_marked_less_reliable(self):
+        result = critical_power_speed(_model_rides(), TODAY, input_fingerprint="fp")
+        self.assertEqual(
+            {"low"}, {fit["intercept_reliability"] for fit in result["fits"]}
+        )
+
+    def test_running_keeps_three_efforts_without_a_three_point_sensitivity(self):
+        records = [
+            _run(f"r{t}", [(t, (4 * t + 200) / t, 0.0)]) for t in (180, 420, 720)
+        ]
+        fit = _fit(records, "run")
+        self.assertEqual(
+            [180, 420, 720], [e["duration_seconds"] for e in fit["efforts"]]
+        )
+        self.assertNotIn("three_point", fit["sensitivity"])
 
     def test_cycling_fits_report_an_unchecked_power_source(self):
         # Card M4 v3: Garmin and Wahoo mark no estimated power, so every ride
@@ -129,10 +173,11 @@ class StopRuleTests(unittest.TestCase):
         self.assertNotIn("cp_watts", fit)
         self.assertNotIn("sensitivity", fit)
 
-    def test_two_efforts_give_no_estimate(self):
-        fit = _fit(_model_rides()[:2])
+    def test_without_a_twenty_minute_effort_there_is_no_cycling_estimate(self):
+        fit = _fit(_model_rides()[:3])
         self.assertEqual("insufficient_data", fit["status"])
-        self.assertEqual(2, len(fit["efforts"]))
+        self.assertEqual(3, len(fit["efforts"]))
+        self.assertIn("3, 7, 12, 20", fit["reason"])
         self.assertNotIn("cp_watts", fit)
 
     def test_residual_above_three_percent_is_withheld(self):
@@ -143,7 +188,7 @@ class StopRuleTests(unittest.TestCase):
     def test_non_positive_parameter_is_withheld(self):
         records = [
             _ride(name, [(t, 200.0, 0.0)])
-            for name, t in (("a", 180), ("b", 420), ("c", 720))
+            for name, t in (("a", 180), ("b", 420), ("c", 720), ("d", 1200))
         ]
         self.assertWithheld(_fit(records), "Nicht positiver")
 
@@ -154,11 +199,12 @@ class StopRuleTests(unittest.TestCase):
         )
 
     def test_leave_one_out_non_positive_parameter_is_withheld(self):
-        # Within 3 % of the full fit, but the 420/720 s pair alone gives W′ < 0.
+        # Within 3 % of the full fit, but a three-effort fit gives W′ <= 0.
         records = [
-            _ride("a", [(180, 300.0, 0.0)]),
-            _ride("b", [(420, 257.0, 0.0)]),
+            _ride("a", [(180, 262.0, 0.0)]),
+            _ride("b", [(420, 255.0, 0.0)]),
             _ride("c", [(720, 257.0, 0.0)]),
+            _ride("d", [(1200, 256.0, 0.0)]),
         ]
         fit = _fit(records)
         self.assertWithheld(fit, "Ohne eine Belastung")
@@ -175,23 +221,37 @@ class EffortSelectionTests(unittest.TestCase):
 
     def test_efforts_of_one_session_need_thirty_minutes_between(self):
         apart = _ride(
-            "one", [(180, 350.0, 2940.0), (420, 300.0, 0.0), (720, 275.0, 4920.0)]
+            "one",
+            [
+                (180, 350.0, 2940.0),
+                (420, 300.0, 0.0),
+                (720, 275.0, 4920.0),
+                (1200, 265.0, 7440.0),
+            ],
         )
-        self.assertEqual(3, len(_fit([apart])["efforts"]))
+        self.assertEqual(4, len(_fit([apart])["efforts"]))
         close = _ride(
-            "one", [(180, 350.0, 2941.0), (420, 300.0, 0.0), (720, 275.0, 4920.0)]
+            "one",
+            [
+                (180, 350.0, 2941.0),
+                (420, 300.0, 0.0),
+                (720, 275.0, 4920.0),
+                (1200, 265.0, 7440.0),
+            ],
         )
-        self.assertEqual(2, len(_fit([close])["efforts"]))
+        self.assertEqual(3, len(_fit([close])["efforts"]))
 
     def test_lower_effort_from_another_session_replaces_an_overlap(self):
         records = [
             _ride("one", [(180, 400.0, 0.0), (720, 275.0, 0.0)]),
             _ride("two", [(180, 350.0, 0.0)]),
             _ride("three", [(420, 292.857142857, 0.0)]),
+            _ride("four", [(1200, 265.0, 0.0)]),
         ]
         fit = _fit(records)
         self.assertEqual(
-            ["two", "three", "one"], [e["activity_id"] for e in fit["efforts"]]
+            ["two", "three", "one", "four"],
+            [e["activity_id"] for e in fit["efforts"]],
         )
         self.assertEqual(250.0, fit["cp_watts"])
 
@@ -219,8 +279,13 @@ class EffortContextTests(unittest.TestCase):
         efforts = _fit(rides)["efforts"]
 
         self.assertEqual(
-            [("short", "race"), ("mid", None), ("long", None)],
-            [(e["activity_id"], e.get("effort_context")) for e in efforts],
+            [
+                ("short", "race"),
+                ("mid", "training"),
+                ("long", "training"),
+                ("longest", "training"),
+            ],
+            [(e["activity_id"], e["effort_context"]) for e in efforts],
         )
 
 

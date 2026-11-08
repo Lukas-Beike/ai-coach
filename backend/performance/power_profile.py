@@ -1,20 +1,30 @@
 """Observed power and running best efforts from original activity streams."""
 
 from bisect import bisect_left, bisect_right
+from collections.abc import Callable
 from itertools import accumulate, pairwise
 from typing import Any, Final
 
+from backend.canonical.activity_summary import summary_is_indoor
 from backend.performance.session_analysis import _number
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 
-# 180/420/720 s are the 3/7/12-min efforts of the CP/CS field protocols (M4).
+# 180/420/720 s are the 3/7/12-min efforts of the CP/CS field protocols; cycling
+# CP also fits the 1200 s effort (M4 card 4).
 POWER_DURATIONS = (5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600)
 LEGACY_POWER_DURATIONS = (5, 60, 300, 1200)
 RUNNING_DURATIONS = (60, 180, 300, 420, 720, 1200)
 RUNNING_DISTANCES = (1000, 5000)
 METHOD_ID: Final = "mean-max-curve"
 # Version 1: time-weighted windows that must be fully covered by valid samples.
-METHOD_VERSION: Final = 1
+# Version 2 (card M4 v4, #1773): an outdoor running window counts only when its
+# net altitude change is at most 1 % of its distance; without altitude it does
+# not count.
+METHOD_VERSION: Final = 2
+MAX_RUNNING_NET_GRADE: Final = 0.01
+
+# Whether the window from sample ``start`` to sample ``stop`` over ``metres`` counts.
+type WindowCheck = Callable[[int, int, float], bool]
 
 
 def power_profile(
@@ -105,12 +115,14 @@ def running_profile(
             "distance": [],
         }
     rates = _running_rates(times, speed, distance, streams.get("moving"))
+    flat = _flat_window_check(activity, len(times))
     speed_points = [
-        _best_running_speed(times, rates, duration) for duration in RUNNING_DURATIONS
+        _best_running_speed(times, rates, duration, flat)
+        for duration in RUNNING_DURATIONS
     ]
     distances = [_number(value) for value in distance]
     distance_points = [
-        _best_running_distance(times, rates, distances, target)
+        _best_running_distance(times, rates, distances, target, flat)
         for target in RUNNING_DISTANCES
     ]
     ok = any(point["speed_mps"] is not None for point in speed_points) or any(
@@ -122,6 +134,28 @@ def running_profile(
         "speed": speed_points,
         "distance": distance_points,
     }
+
+
+def _flat_window_check(activity: dict[str, Any], count: int) -> WindowCheck:
+    """Accept every window indoors; outdoors only windows with a flat net altitude.
+
+    A downhill window would inflate a best effort and the Critical Speed fit
+    (card M4 v4); a window with a missing altitude end does not count outdoors.
+    """
+    if summary_is_indoor(activity):
+        return lambda _start, _stop, _metres: True
+    raw = (activity.get("streams") or {}).get("altitude") or []
+    altitude = [_number(value) for value in raw] if len(raw) == count else []
+
+    def flat(start: int, stop: int, metres: float) -> bool:
+        if not altitude or metres <= 0:
+            return False
+        first, last = altitude[start], altitude[min(stop, count - 1)]
+        if first is None or last is None:
+            return False
+        return abs(last - first) <= MAX_RUNNING_NET_GRADE * metres
+
+    return flat
 
 
 def _power_integrals(
@@ -177,7 +211,9 @@ def _best_power_point(
     }
 
 
-def _best_running_speed(times: list, rates: list, duration: int) -> dict[str, Any]:
+def _best_running_speed(
+    times: list, rates: list, duration: int, flat: WindowCheck
+) -> dict[str, Any]:
     elapsed = [0.0, *accumulate(delta for _, delta, _ in rates)]
     covered = [0.0, *accumulate(rate * delta for rate, delta, _ in rates)]
     run_end = _valid_run_ends([valid for _, _, valid in rates])
@@ -186,8 +222,10 @@ def _best_running_speed(times: list, rates: list, duration: int) -> dict[str, An
         candidate = _running_speed_candidate(
             elapsed, covered, rates, start, run_end[start], duration
         )
-        if candidate is not None and (best is None or candidate > best[0]):
-            best = (candidate, time)
+        if candidate is None or (best is not None and candidate[0] <= best[0]):
+            continue
+        if flat(start, candidate[1], candidate[0] * duration):
+            best = (candidate[0], time)
     return {
         "duration_seconds": duration,
         "speed_mps": round(best[0], 3) if best else None,
@@ -198,7 +236,7 @@ def _best_running_speed(times: list, rates: list, duration: int) -> dict[str, An
 
 
 def _best_running_distance(
-    times: list, rates: list, distances: list, target: int
+    times: list, rates: list, distances: list, target: int, flat: WindowCheck
 ) -> dict[str, Any]:
     if len(distances) != len(times):
         return {
@@ -218,11 +256,13 @@ def _best_running_distance(
     for start in range(len(times) - 1):
         if not rates[start][2] or distances[start] is None:
             continue
-        elapsed = _running_distance_candidate(
+        candidate = _running_distance_candidate(
             times, distances, start, run_end[start], target
         )
-        if elapsed is not None and (best is None or elapsed < best[0]):
-            best = (elapsed, times[start])
+        if candidate is None or (best is not None and candidate[0] >= best[0]):
+            continue
+        if flat(start, candidate[1], target):
+            best = (candidate[0], times[start])
     return {
         "distance_meters": target,
         "seconds": round(best[0], 2) if best else None,
@@ -302,8 +342,9 @@ def _running_speed_candidate(
     start: int,
     end: int,
     duration: int,
-) -> float | None:
-    """Mean speed over ``duration`` from ``start`` within one valid run."""
+) -> tuple[float, int] | None:
+    """Mean speed over ``duration`` from ``start`` within one valid run, and the
+    sample index the window ends at."""
     if end <= start:
         return None
     target = elapsed[start] + duration
@@ -318,13 +359,14 @@ def _running_speed_candidate(
     total = (
         covered[stop - 1] - covered[start] + rates[stop - 1][0] * (duration - before)
     )
-    return total / duration
+    return total / duration, stop
 
 
 def _running_distance_candidate(
     times: list, distances: list, start: int, end: int, target: int
-) -> float | None:
-    """Time to cover ``target`` metres from ``start`` within one valid run."""
+) -> tuple[float, int] | None:
+    """Time to cover ``target`` metres from ``start`` within one valid run, and
+    the sample index the window ends at."""
     if end <= start:
         return None
     base = distances[start]
@@ -340,4 +382,7 @@ def _running_distance_candidate(
     if segment <= 0:
         return None
     fraction = (target - (delta - segment)) / segment
-    return (times[stop - 1] - times[start]) + fraction * (times[stop] - times[stop - 1])
+    seconds = (times[stop - 1] - times[start]) + fraction * (
+        times[stop] - times[stop - 1]
+    )
+    return seconds, stop

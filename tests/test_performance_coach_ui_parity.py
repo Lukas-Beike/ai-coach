@@ -339,7 +339,7 @@ class CoachUiParityTests(unittest.TestCase):
         status, ui = handler.sent
         self.assertEqual(200, status)
         self.assertEqual(
-            ("mean-max-curve", 1, "ok"),
+            ("mean-max-curve", 2, "ok"),
             (ui["method"], ui["method_version"], ui["status"]),
         )
         coach = self.coach_report("power_profiles")["power_profiles"]
