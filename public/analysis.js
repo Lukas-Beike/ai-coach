@@ -1244,6 +1244,17 @@ function recoveryReferenceLabel(item, range, target, unit, position) {
   return item.reason || "Noch kein Vergleich verfügbar";
 }
 
+// M2 rolling-lnrmssd-v1 (#1772): seven-day mean of ln(RMSSD), back-transformed to ms.
+// The caller ends the note with a full stop, so a reason drops its own.
+function recoveryRollingNote(rolling) {
+  if (!["ok", "provisional"].includes(rolling.status)) return `7-Tage-Mittel: ${String(rolling.reason || "kein Vergleich").replace(/\.$/, "")}`;
+  const position = { below: "unter", within: "in", above: "über" }[rolling.position] || "neben";
+  const range = `${analysisValue(rolling.lower_ms, "ms")}–${analysisValue(rolling.upper_ms, "ms")}`;
+  const spread = rolling.cv_pct == null ? "" : ` · Schwankung ${analysisValue(rolling.cv_pct, "%")}`;
+  const provisional = rolling.status === "provisional" ? " · vorläufig" : "";
+  return `7-Tage-Mittel ${analysisValue(rolling.mean_ms, "ms")} (${rolling.window_nights} Nächte) · ${position} deinem Bereich ${range}${spread}${provisional}`;
+}
+
 function renderRecoveryCharts(report, root) {
   const metrics = [["sleep", "Schlafdauer", "h", 0], ["hrv", "HRV", "ms", 2], ["resting_hr", "Ruhepuls", "bpm", 3]];
   const baselines = selectedRecoveryBaselines(report);
@@ -1272,12 +1283,13 @@ function renderRecoveryCharts(report, root) {
     const rangeDescription = range ? " Vergleich mit " + item.nights + " früheren Nächten." : "";
     const changed = item.context_changed_on ? ` Messkontext geändert am ${dateLabel(item.context_changed_on)}.` : "";
     const continuity = `${changed}${item.continuity === "unknown" ? " Messkontext unbekannt." : ""}`;
+    const rolling = item.rolling ? ` ${recoveryRollingNote(item.rolling)}.` : "";
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
       bars: metric === "sleep", average: true, averageInHeading: true, cadenceDays: recoveryHistoryPeriod === "twelveWeeks" ? 7 : 1, range, target,
       currentPoint: points.some(analysisValidPoint) ? null : item.history.findLast((point) => point.date <= today && analysisValidPoint(point)),
       referenceLabel: metric === "sleep" ? "Durchschnitt der angezeigten Werte" : recoveryReferenceLabel(item, range, target, unit, position),
       coverageShort: analysisCoverageText(readings.length, expectedDays, "Tagen"),
-      coverage: `${analysisCoverageText(readings.length, expectedDays, "Tagen")}${rangeDescription}${continuity}`, points };
+      coverage: `${analysisCoverageText(readings.length, expectedDays, "Tagen")}${rangeDescription}${continuity}${rolling}`, points };
   });
   const missing = [];
   const charts = series.map((item) => {

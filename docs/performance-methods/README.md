@@ -201,6 +201,9 @@ accessible text, not a declared absence.
 | R44 | Minetti et al. 2002, "Energy cost of walking and running at extreme uphill and downhill slopes", J Appl Physiol 93(3):1039-1046, PMID 12183501, DOI `10.1152/japplphysiol.01177.2001` | abstract | 10 elite mountain runners on a treadmill, slopes −0.45 to +0.45; cost of running as a polynomial of slope. Laboratory model, not Garmin's GAP; used for grade-adjusted speed (M8, pace at heart rate). |
 | R45 | Sweet et al. 2004, "Quantitation of resistance training using the session rating of perceived exertion method", J Strength Cond Res 18(4):796-802, PMID 15574104, DOI `10.1519/14153.1` | abstract | Session RPE in resistance training rose with lifting intensity while total work fell; session RPE may underrate the mean of per-set ratings. Supports the AU of strength sessions, not a conversion into TSS. |
 | R46 | Day et al. 2004, "Monitoring exercise intensity during resistance training using the session RPE scale", J Strength Cond Res 18(2):353-358, PMID 15142026, DOI `10.1519/R-13113.1` | abstract | Session RPE distinguished resistance-training intensities; ICC 0.88. No TSS conversion. |
+| R47 | Plews et al. 2012, "Heart rate variability in elite triathletes, is variation in variability the key to effective training? A case comparison", Eur J Appl Physiol 112(11):3729-3741, PMID 22367011, DOI `10.1007/s00421-012-2354-4` | abstract | Two elite triathletes; the 7-day rolling mean of ln(RMSSD) and its CV followed training better than single days. Case comparison, morning recordings. |
+| R48 | Plews et al. 2014, "Monitoring training with heart-rate variability: how much compliance is needed for valid assessment?", IJSPP 9(5):784-791, DOI `10.1123/IJSPP.2013-0455` | abstract | Trained triathletes; ln(RMSSD) averaged over 1-7 random days per week; standardised changes and correlations plateau after 3-4 days; recommends at least 3 valid days per week. |
+| R49 | Buchheit 2014, "Monitoring training status with HR measures: do all roads lead to Rome?", Front Physiol 5:73, PMID 24578692, DOI `10.3389/fphys.2014.00073` | abstract | Review; recommends log-transformed vagal HRV indices and weekly means over single values; interpretation depends on context. |
 | L1 | Phillips & Steven 2026, "Perspective: sleep regularity—where do we go from here?", Sleep 49(8), PMID 42023690, DOI `10.1093/sleep/zsag114` | full text | Perspective without new data, formula, threshold or wearable/athlete content. Background only; not decision evidence. |
 
 ### Vendor documentation (not peer-reviewed)
@@ -212,6 +215,7 @@ accessible text, not a declared absence.
 
 | V3 | Friel, TrainingPeaks, "Efficiency Factor and Decoupling" (2011-12-07, updated 2026-07-18), https://www.trainingpeaks.com/blog/efficiency-factor-and-decoupling/ | full text (web) | EF ride = NP / avg HR, run = normalized graded speed / avg HR; decoupling = (EF1 − EF2)/EF1 on a steady effort; "5 % or less" as a preference, no citations. |
 | V4 | Friel, TrainingPeaks, "Aerobic Endurance and Decoupling" (2008-10-10, updated 2026-06-03), https://www.trainingpeaks.com/learn/articles/aerobic-endurance-and-decoupling/ | full text (web) | Bands < 5 %, 5-10 %, > 10 %, with "There's no hard research-based rule here"; heat and dehydration named as causes. |
+| V6 | Garmin, "HRV Status" (health science page, https://www.garmin.co.jp/minisite/garmin-technology/health-science/hrv-status) and device manuals ("Daily RHR is calculated using the lowest 30 minute average in a 24 hour period", as quoted in Garmin forums) | search snippet only | HRV status = seven-night average of overnight HRV against a slowly adapting personal baseline after about three weeks; no formula. Resting HR definition as quoted, not verified from a manual page. |
 | V5 | TrainingPeaks Help, "Aerobic Decoupling and Efficiency Factor" (204071724) and "Variability Index (VI)" (204071734) | search snippet only | VI = NP / AP; steady ride 1.00-1.02, MTB or cyclocross 1.13-1.50; decoupling under 20 min "not as valid". Not verified from the page. |
 
 M8 search on 2026-11-07 (PubMed E-utilities, Crossref, vendor pages):
@@ -224,6 +228,10 @@ retraction for R32-R43. No peer-reviewed validity or reliability study of EF or
 VI and no peer-reviewed decoupling threshold was found.
 R44 was added on 2026-11-07 (#1770) from a bibliographic search (PubMed
 ID, repository records); its correction status was not checked.
+R47 to R49 and V6 were added on 2026-11-07 (#1772) from a web search
+(`Garmin HRV status 7-day average baseline`, `Plews 2014 compliance ln
+rMSSD`, `Garmin resting heart rate lowest 30-minute average`) and the science
+review's citations; their correction status was not checked.
 R45 and R46 were added on 2026-11-07 (#1771) from a web and PubMed search
 (`session RPE resistance training`, TrainingPeaks and Intervals.icu pages on
 TSS from RPE); no study converting session-RPE AU into TSS was found. Their

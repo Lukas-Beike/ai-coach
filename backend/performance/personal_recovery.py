@@ -26,6 +26,7 @@ from backend.canonical.sleep_bounds import bounds_fields
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.canonical_recovery import CanonicalRecoveryInputs
 from backend.performance.display_sources import preferred_providers
+from backend.performance.rolling_hrv import rolling_lnrmssd
 from backend.performance.source_policy import NO_PREFERENCES
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -245,6 +246,14 @@ def _baseline(
         )
     else:
         baseline["reason"] = _reason(current=current, changed=changed_on is not None)
+    # The seven-day ln(RMSSD) comparison (#1772) reads local-method providers only.
+    if (metric, field) == ("hrv", "RMSSD") and provider is not ProviderId.INTERVALS:
+        baseline["rolling"] = rolling_lnrmssd(
+            records,
+            observed,
+            current=current,
+            segment_start=_segment_start(records, observations, observed),
+        )
 
     return baseline
 

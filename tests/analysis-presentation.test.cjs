@@ -243,3 +243,19 @@ test("12-week body charts show the latest reading of each week and draw a single
   assert.equal(analysisPlottable({ points: weeks, minPoints: 1 }), true, "body charts draw one weekly value");
   assert.equal(analysisPlottable({ points: weeks }), false, "other charts still need two values");
 });
+
+test("the seven-day ln(RMSSD) note shows the back-transformed mean, range and spread", () => {
+  const { recoveryRollingNote } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisNumber", "analysisValue", "recoveryRollingNote"], { AppFormat: require("../public/format.js") });
+  assert.equal(
+    recoveryRollingNote({ status: "ok", mean_ms: 51.9, lower_ms: 53, upper_ms: 62.2, position: "below", cv_pct: 3, window_nights: 5 }),
+    "7-Tage-Mittel 51,9 ms (5 Nächte) · unter deinem Bereich 53 ms–62,2 ms · Schwankung 3 %",
+  );
+  assert.equal(
+    recoveryRollingNote({ status: "provisional", mean_ms: 57, lower_ms: 53, upper_ms: 62.2, position: "within", cv_pct: null, window_nights: 3 }),
+    "7-Tage-Mittel 57 ms (3 Nächte) · in deinem Bereich 53 ms–62,2 ms · vorläufig",
+  );
+  assert.equal(
+    recoveryRollingNote({ status: "insufficient_data", reason: "Mindestens 3 Nächte in den letzten 7 Tagen erforderlich." }),
+    "7-Tage-Mittel: Mindestens 3 Nächte in den letzten 7 Tagen erforderlich",
+  );
+});
