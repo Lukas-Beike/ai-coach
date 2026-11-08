@@ -133,7 +133,7 @@ test("@responsive current performance groups real values by sport before the cha
   await performanceFixture(page, { metrics: {
     cycling_ftp_watts: { value: 280, unit: "W", source: "Garmin Connect", observed_at: "2026-10-01", freshness: "stale" },
     run_threshold_pace_seconds_per_km: { value: 270, unit: "s/km", source: "Garmin Connect" },
-    running_vo2max_ml_kg_min: { value: 52, unit: "ml/kg/min", source: "Intervals.icu" },
+    running_vo2max_ml_kg_min: { value: 52, unit: "ml/kg/min", source: "Garmin Connect" },
     run_5k_seconds: { value: 1200, unit: "s", source: "Garmin Connect" },
   } });
   const root = page.locator("#currentPerformance");
@@ -166,7 +166,7 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
       { metric: "hrv", source: "Garmin Connect", measurement: "RMSSD", observed_at: "2026-10-01", nights: 28,
         status: "ok", lower: 50, upper: 60, position: "within", continuity: "unknown", context_changed_on: null,
         rolling: { method: "rolling-lnrmssd-v1", status: "provisional", window_nights: 3, mean_ms: 55.2, lower_ms: 53, upper_ms: 62.2, position: "within", cv_pct: 2.5 }, history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
-      { metric: "resting_hr", source: "Intervals.icu", measurement: "resting", observed_at: "2026-10-01", nights: 1,
+      { metric: "resting_hr", source: "Garmin Connect", measurement: "resting", observed_at: "2026-10-01", nights: 1,
         status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", continuity: "known", context_changed_on: "2026-09-30", history: [{ date: "2026-10-01", value: 48 }] },
     ],
   } }), "recovery");
@@ -262,7 +262,7 @@ async function chartLabelCollisions(svg) {
 
 test("@responsive Garmin acute load switches fourteen days and twelve weeks with real gaps", async ({ page }) => {
   const points = Array.from({ length: 90 }, (_, index) => ({ date: new Date(Date.UTC(2026, 6, 3 + index)).toISOString().slice(0, 10), value: index >= 38 && index <= 44 ? null : 300 + index }));
-  await performanceFixture(page, { history: { start: points[0].date, end: points.at(-1).date, load: { source: "Garmin Connect", points }, training_time: { source: "Intervals.icu", points: points.map((point) => ({ ...point, value: point.value == null ? null : 1 })) }, metrics: {} } }, "load");
+  await performanceFixture(page, { history: { start: points[0].date, end: points.at(-1).date, load: { source: "Garmin Connect", points }, training_time: { source: "Garmin Connect, Wahoo", points: points.map((point) => ({ ...point, value: point.value == null ? null : 1 })) }, metrics: {} } }, "load");
   const loadRoot = page.locator("#analysisLoadCharts");
   await expect(loadRoot.locator("svg")).toHaveCount(2);
   const root = loadRoot.locator(".analysis-chart-card").first();

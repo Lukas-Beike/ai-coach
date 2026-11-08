@@ -341,9 +341,6 @@
     if (!payload) return;
     if (streams && !charts.length) panel.append(node("p", "Keine darstellbaren Messreihen", "muted"));
     panel.append(...ActivityDetails.providerNotes(payload));
-    // A successful reload clears the list marker without reloading the list.
-    const failed = (payload.detail_data?.providers || []).some((entry) => entry.load_error);
-    panel.parentElement?.querySelector("summary > .activity-analysis-error")?.toggleAttribute("hidden", !failed);
     appendRefresh(panel, summary, payload, epoch);
   }
 
@@ -383,11 +380,6 @@
     const facts = [day ? dateLabel(day) : null, sportLabel(activity), finite(activity.moving_duration_s) ? AppFormat.duration(activity.moving_duration_s) : null, AppFormat.distance(activity.distance_m)].filter(Boolean);
     text.append(node("span", facts.join(" · "), "muted"));
     summary.append(text);
-    if (activity.detail_error) {
-      const flag = node("span", "Details nicht geladen", "activity-analysis-error");
-      flag.title = activity.detail_error;
-      summary.append(flag);
-    }
     if (finite(activity.training_load)) summary.append(node("span", `${numberText(activity.training_load)} Last`, "activity-analysis-load"));
     const panel = node("div", null, "activity-analysis-panel");
     entry.append(summary, panel);

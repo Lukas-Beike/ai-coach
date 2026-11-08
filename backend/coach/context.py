@@ -688,8 +688,7 @@ class CoachPerformanceContextReader:
     def recovery(
         self, canonical: CanonicalPerformanceInputs | None = None
     ) -> dict[str, Any]:
-        """The Garmin recovery section; without an Intervals.icu sync also Garmin's
-        performance values."""
+        """The Garmin recovery section, with Garmin's performance values."""
         projection = self._garmin_projection_service.coach_context(
             include_performance=canonical is None
             or canonical.intervals_synced_at is None
@@ -949,9 +948,9 @@ class CoachStructuredContextService:
         return {"truncated": truncated, "items": items}
 
 
-def _intervals_sync_compacted(context: Mapping[str, Any]) -> bool:
-    """Whether the context holds a canonical Intervals.icu sync: its activities or
-    its athlete settings carry a sync time."""
+def _activity_data_compacted(context: Mapping[str, Any]) -> bool:
+    """Whether the context holds synced activity data: its activities or its
+    performance values carry a sync time."""
     return any(
         isinstance(section := context.get(key), Mapping)
         and section.get(field) is not None
@@ -1491,7 +1490,7 @@ class CoachContextPreviewService:
         return {
             "generated_at": self._utc_now().isoformat(),
             "snapshot_truncated": False,
-            "snapshot_compacted": _intervals_sync_compacted(preview_structured_context),
+            "snapshot_compacted": _activity_data_compacted(preview_structured_context),
             "assembly": [
                 "COACH_PROMPT: feste Coaching-Regeln und Sicherheitsvorgaben",
                 "STRUCTURED ATHLETE CONTEXT: Profil, Zielwettkämpfe, Leistungsdaten und Garmin",

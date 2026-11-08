@@ -203,30 +203,6 @@ test("@responsive analysis shows running step frequency and cycling cadence", as
   await expect(ride.getByRole("img", { name: /^Kadenz: Ø 86/ })).toBeVisible();
 });
 
-test("@responsive analysis lists sessions whose details failed to load", async ({ page }) => {
-  const message = "Intervals.icu hat für diese Einheit keine Detaildaten geliefert.";
-  const summaries = [
-    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", sport: "ride", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3, detail_error: message },
-  ];
-  await page.route(/\/api\/activities(\?|\/)/, (route) => {
-    const id = new URL(route.request().url()).pathname.split("/")[3];
-    const body = id
-      ? { session: { activity_id: id, sport: "ride" }, metrics: {}, detail_data: { providers: [{ provider: "intervals", label: "Intervals.icu", kinds: [], fetched_at: null, refreshable: true, stale: false, load_error: { message, observed_at: "2026-10-17T09:00:00Z" }, coverage: {} }] } }
-      : { activities: summaries, snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null };
-    return route.fulfill({ json: body });
-  });
-  await page.goto("/#analysis/sessions");
-  await expect(page.locator("#appShell")).toBeVisible();
-  const item = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic failed <img src=x>" });
-  const flag = item.locator("summary > .activity-analysis-error");
-  await expect(flag).toHaveText("Details nicht geladen");
-  await expect(flag).toHaveAttribute("title", message);
-  await item.locator("summary").click();
-  await expect(item.locator(".activity-analysis-panel .activity-analysis-error")).toContainText(message);
-  expect(await item.locator("img").count()).toBe(0);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-});
-
 test("@responsive analysis lists a Garmin-only indoor session and loads more", async ({ page }) => {
   const first = { id: "act_garmin_only", sport: "ride", environment: "virtual", record_ids: { garmin: "910002" }, started_at: "2026-10-17T08:00:00+02:00", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3600, distance_m: 30000 };
   const second = { id: "act_older", name: "Synthetic older run", sport: "run", environment: "outdoor", record_ids: { intervals: "i-1" }, started_at: "2026-10-16T08:00:00+02:00", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 1800 };
