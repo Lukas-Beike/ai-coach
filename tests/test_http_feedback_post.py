@@ -90,3 +90,28 @@ class ActivityFeedbackPostRouteTests(unittest.TestCase):
 
         self.assertTrue(route.handle(handler, "/api/activities/ride-1/feedback"))
         handler.send_json.assert_called_once_with(200, {"status": "ok"})
+
+
+class ActivityPurposePostRouteTests(unittest.TestCase):
+    def post(self, payload: dict) -> Mock:
+        service = Mock()
+        handler = SimpleNamespace(
+            read_json=Mock(return_value=payload), send_json=Mock()
+        )
+        route = FeedbackPostRoutes(lambda: Mock(), lambda: service)
+        self.assertTrue(route.handle(handler, "/api/activities/ride-1/feedback"))
+        return service
+
+    def test_marking_a_purpose_needs_a_live_session(self) -> None:
+        service = self.post({"purpose": "commute"})
+
+        service.save_coach.assert_called_once_with("ride-1", {"purpose": "commute"})
+        service.save.assert_not_called()
+
+    def test_removing_a_purpose_needs_no_live_session(self) -> None:
+        for payload in ({"purpose": None}, {"purpose": ""}):
+            with self.subTest(payload=payload):
+                service = self.post(payload)
+
+                service.save.assert_called_once_with("ride-1", payload)
+                service.save_coach.assert_not_called()

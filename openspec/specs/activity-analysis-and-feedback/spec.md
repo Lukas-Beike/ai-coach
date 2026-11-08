@@ -231,6 +231,19 @@ Detailed contract: Feedback SHALL remain separate from provider measurements and
 
 Evidence: `backend/activities/feedback.py:normalize_activity_feedback`, `backend/activities/feedback.py:ActivityFeedbackService.save`, `backend/activities/feedback.py:ActivityFeedbackService.save_coach`; `tests/test_activity_feedback.py:test_rpe_only_preserves_notes_and_explicit_clear_deletes`, `tests/test_activity_feedback.py:test_coach_save_requires_known_snapshot_activity_and_accepts_aliases`, `tests/test_activity_feedback.py:test_for_activity_ids_queries_in_bounded_chunks`. Served load: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.session_rpe_load`; `tests/test_detail_envelope.py:test_save_response_load_matches_the_served_detail_load`, `tests/test_http_feedback_post.py:test_activity_feedback_save_returns_the_session_load`, `tests/test_http_history_undo_post_routes.py:test_feedback_undo_returns_the_session_load_of_the_named_activity`, and `e2e/activity-details.spec.js`.
 
+### Requirement: Athlete marking of the session purpose
+The system SHALL let the athlete mark a completed session as training, race, commute, warm-up or cool-down on the feedback of the session, in the activity details and through the Coach tool `save_activity_feedback` (`purpose`, null removes the marking). The marking is stored with the feedback rows of the session, so it shares their receipts, undo and merge groups, is kept when other feedback fields are omitted or deleted, and applies to every row of a group. A marked purpose SHALL win over the provider event type and over the competition hint on every read of the activity summaries (detail document, Coach, curve and critical-power candidates, planned-session matching, race results). A marked race SHALL be linked to the stored competition of its day like a provider race; any other marking, training included, SHALL keep the session out of the race hint and remove its competition link. Commute, warm-up and cool-down sessions SHALL stay out of bests, mean-maximal curves, critical-power efforts and planned-session matching. Undo SHALL restore the previous marking and, because the link is derived on read, the previous competition link.
+
+#### Scenario: Training overrides a race
+- **WHEN** the athlete marks a Garmin race or a hint-linked session as training
+- **THEN** the summaries report purpose training from the athlete, and the competition link is gone.
+
+#### Scenario: Undo restores the previous purpose
+- **WHEN** the athlete undoes the marking
+- **THEN** the previous marking, or the Garmin purpose and the competition hint, is served again.
+
+Evidence: `backend/activities/feedback.py:session_purpose_marks`, `backend/activities/session_purpose.py:with_marked_purposes`; `tests/test_feedback_purpose.py`, `tests/test_session_purpose.py:SelectorMarkedPurposeTests`, `e2e/activity-details.spec.js`.
+
 ### Requirement: Authenticated analysis and scoped refresh
 The system SHALL require authentication for local activity/analysis reads, including the session detail document, and preserve the POST authentication/CSRF boundary for feedback and refresh actions. Analysis refresh SHALL accept only load, performance, recovery, or sessions, with optional 14/84-day periods only for load/recovery, and refresh the selected bounded sources. Session detail reads SHALL never trigger provider requests.
 

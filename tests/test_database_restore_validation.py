@@ -16,6 +16,7 @@ from backend.db.schema import CURRENT_SCHEMA_VERSION, database_schema_is_current
 from backend.errors import AppError
 
 V21_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v21.sql.txt"
+V22_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v22.sql.txt"
 
 
 def service(data_dir: Path, **overrides: object) -> DatabaseRestoreValidationService:
@@ -133,33 +134,39 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0
                 )
 
-    def test_validate_upgrades_a_populated_release_v21_backup(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "backup.db"
-            with closing(sqlite3.connect(path)) as connection:
-                connection.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
-                connection.execute(
-                    "INSERT INTO messages(role, content, created_at) "
-                    "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
-                )
-                connection.commit()
-            service(
-                Path(directory),
-                maximum_bytes=10_000_000,
-                schema_is_current=database_schema_is_current,
-                migrate_schema=migrate_schema,
-            ).validate(path)
-            with closing(sqlite3.connect(path)) as connection:
-                connection.row_factory = sqlite3.Row
-                self.assertEqual(
-                    connection.execute("PRAGMA user_version").fetchone()[0],
-                    CURRENT_SCHEMA_VERSION,
-                )
-                self.assertTrue(database_schema_is_current(connection))
-                self.assertEqual(
-                    connection.execute("SELECT content FROM messages").fetchone()[0],
-                    "Hallo",
-                )
+    def test_validate_upgrades_a_populated_released_backup(self) -> None:
+        for fixture in (V21_FIXTURE, V22_FIXTURE):
+            with (
+                self.subTest(fixture=fixture.name),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                path = Path(directory) / "backup.db"
+                with closing(sqlite3.connect(path)) as connection:
+                    connection.executescript(fixture.read_text(encoding="utf-8"))
+                    connection.execute(
+                        "INSERT INTO messages(role, content, created_at) "
+                        "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
+                    )
+                    connection.commit()
+                service(
+                    Path(directory),
+                    maximum_bytes=10_000_000,
+                    schema_is_current=database_schema_is_current,
+                    migrate_schema=migrate_schema,
+                ).validate(path)
+                with closing(sqlite3.connect(path)) as connection:
+                    connection.row_factory = sqlite3.Row
+                    self.assertEqual(
+                        connection.execute("PRAGMA user_version").fetchone()[0],
+                        CURRENT_SCHEMA_VERSION,
+                    )
+                    self.assertTrue(database_schema_is_current(connection))
+                    self.assertEqual(
+                        connection.execute("SELECT content FROM messages").fetchone()[
+                            0
+                        ],
+                        "Hallo",
+                    )
 
     def test_validate_rejects_a_pre_v21_backup_by_release_without_modifying_it(
         self,

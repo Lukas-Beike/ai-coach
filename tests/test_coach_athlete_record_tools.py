@@ -99,6 +99,24 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         )
         self.nutrition.delete_meal.assert_called_once_with("nut-1")
 
+    def test_a_purpose_marking_reaches_the_feedback_service(self):
+        for purpose in ("commute", None):
+            with self.subTest(purpose=purpose):
+                self.feedback.save_coach.reset_mock()
+                self.feedback.save_coach.return_value = {"status": "ok"}
+                self.service.execute(
+                    "save_activity_feedback",
+                    {"payload": {"activity_id": "a1", "purpose": purpose}},
+                    {
+                        "operation": "save_activity_feedback",
+                        "authorization_scope": ["activity_feedback"],
+                    },
+                )
+
+                self.feedback.save_coach.assert_called_once_with(
+                    "a1", {"purpose": purpose}
+                )
+
     def test_session_tools_call_the_correction_service_with_coach_source(self):
         sessions = Mock()
         receipt = {"status": "ok", "change": {"id": "c1"}}

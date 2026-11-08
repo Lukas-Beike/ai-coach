@@ -113,6 +113,18 @@
     return select;
   }
 
+  // The athlete's own marking wins over Garmin's event type and a competition hint; "" removes it.
+  const PURPOSES = [["training", "Training"], ["race", "Wettkampf"], ["commute", "Pendeln"], ["warmup", "Einfahren"], ["cooldown", "Ausfahren"]];
+
+  function purposeSelect(marked, detected) {
+    const select = document.createElement("select"); select.name = "purpose";
+    const detectedLabel = PURPOSES.find(([key]) => key === detected)?.[1];
+    const automatic = node("option", !marked && detectedLabel ? `Automatisch · ${detectedLabel}` : "Automatisch"); automatic.value = ""; select.append(automatic);
+    for (const [key, label] of PURPOSES) { const option = node("option", label); option.value = key; select.append(option); }
+    select.value = PURPOSES.some(([key]) => key === marked) ? marked : "";
+    return select;
+  }
+
   const SESSION_LOAD_REASONS = { no_rating: "kein RPE", conflicting_provider_ratings: "widersprüchliche Provider-RPE", no_elapsed_duration: "keine Gesamtdauer", invalid_duration: "ungültige Dauer" };
 
   function sessionLoadText(load) {
@@ -130,6 +142,7 @@
   function renderFeedback(feedback, session, api, activityId, content, sessionLoad) {
     const section = node("section", null, "activity-feedback"); section.append(node("h3", "Dein Feedback"));
     const form = document.createElement("form"); form.className = "activity-feedback-form";
+    const purposeLabel = node("label", "Art der Einheit"); const purpose = purposeSelect(feedback?.purpose, session?.purpose); purposeLabel.append(purpose);
     const rpeLabel = node("label", "Session-RPE (0–10)"); const rpe = rpeSelect(feedback?.session_rpe); rpeLabel.append(rpe);
     const reasonLabel = node("label", "Abweichungsgrund"); const reason = document.createElement("input"); reason.name = "deviation_reason"; reason.maxLength = 500; reason.value = feedback?.deviation_reason || ""; reasonLabel.append(reason);
     const notesLabel = node("label", "Notizen"); const notes = document.createElement("textarea"); notes.name = "notes"; notes.rows = 3; notes.maxLength = 4000; notes.value = feedback?.notes || ""; notesLabel.append(notes);
@@ -137,9 +150,9 @@
     const load = node("p"); load.dataset.sessionRpeLoad = "";
     const showLoad = (value) => { load.textContent = sessionLoadText(value); load.hidden = !load.textContent; };
     showLoad(sessionLoad);
-    form.append(rpeLabel, reasonLabel, notesLabel, save); section.append(load, form, status); content.append(section);
+    form.append(purposeLabel, rpeLabel, reasonLabel, notesLabel, save); section.append(load, form, status); content.append(section);
     let shown = feedback;
-    const fill = (value) => { setRpe(rpe, value?.session_rpe); reason.value = value?.deviation_reason || ""; notes.value = value?.notes || ""; };
+    const fill = (value) => { purpose.value = PURPOSES.some(([key]) => key === value?.purpose) ? value.purpose : ""; setRpe(rpe, value?.session_rpe); reason.value = value?.deviation_reason || ""; notes.value = value?.notes || ""; };
     // The save and undo responses carry the load recomputed from the saved feedback and its provider fallback.
     let loadGeneration = 0;
     // Only the newest request may write, so a slow save response cannot overwrite a later undo.
@@ -159,7 +172,7 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
       try {
-        const raw = rpe.value; const value = { activity_name: session?.name || "", activity_date: session?.started_at_local || "", notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
+        const raw = rpe.value; const value = { activity_name: session?.name || "", activity_date: session?.started_at_local || "", notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw), purpose: purpose.value || null };
         if (raw !== "" && (!Number.isFinite(value.session_rpe) || value.session_rpe < 0 || value.session_rpe > 10)) throw new Error("RPE muss zwischen 0 und 10 liegen.");
         const generation = ++loadGeneration;
         const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });

@@ -61,7 +61,8 @@ TimeoutErrorFactory = Callable[[], Exception]
 # observations are included (schema v21).
 # Version 12 adds activity_strength_sets and activity_detail_sets.set_source
 # (schema v22).
-PRIVACY_EXPORT_FORMAT_VERSION = 12
+# Version 13 adds activity_feedback.purpose (schema v23).
+PRIVACY_EXPORT_FORMAT_VERSION = 13
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",

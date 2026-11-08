@@ -12,6 +12,11 @@ competition: the session nearest the competition's local start time (a stored
 midnight counts as unknown), else the longest one, then the earliest; with a
 planned duration it must last at least half of it. A commute, warm-up or
 cool-down is never a candidate. A session links to at most one competition.
+
+The athlete's own marking (``with_marked_purposes``) wins over both sources: a
+marked session keeps its marked purpose, a marked race counts like a provider
+race, and any other marking, training included, takes the session out of the
+race hint and removes its competition link.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from backend.canonical.stored_sports import resolve_competition_sport
 from backend.canonical.vocabulary import ActivityPurpose, Environment
 
 COMPETITION_SOURCE_LABEL: Final = "Lokale Wettkämpfe"
+MARKED_SOURCE_LABEL: Final = "Von dir markiert"
 # A hint needs at least this share of the competition's planned duration.
 MIN_HINT_SHARE_OF_PLANNED: Final = 0.5
 _INDOOR: Final = frozenset({Environment.INDOOR.value, Environment.VIRTUAL.value})
@@ -63,6 +69,30 @@ def session_purpose(
         (record for record in derived if record.purpose is ActivityPurpose.RACE),
         None,
     ) or next((record for record in derived if record.purpose is not None), None)
+
+
+def with_marked_purposes(
+    summaries: Iterable[dict[str, Any]], marks: Mapping[str, str]
+) -> list[dict[str, Any]]:
+    """Give each marked session the athlete's purpose, ahead of Garmin and the hint.
+
+    Marked summaries get ``purpose_marked``; the input objects are never modified.
+    """
+    result = []
+    for summary in summaries:
+        mark = marks.get(str(summary.get("id")))
+        if mark is None:
+            result.append(summary)
+            continue
+        marked = dict(summary)
+        marked["purpose"] = mark
+        marked["purpose_marked"] = True
+        marked["sources"] = {
+            **summary.get("sources", {}),
+            "purpose": MARKED_SOURCE_LABEL,
+        }
+        result.append(marked)
+    return result
 
 
 def with_competitions(
@@ -115,6 +145,7 @@ def _match(
         index
         for index in days.get((day, stored.sport.value), ())
         if summaries[index].get("purpose") not in NOT_TRAINING_PURPOSES
+        and _may_link(summaries[index])
         and (
             indoor is None
             or _indoor(summaries[index].get("environment")) in {None, indoor}
@@ -145,6 +176,14 @@ def _match(
     if not plausible:
         return None
     return min(plausible, key=lambda i: _rank(summaries[i], start))
+
+
+def _may_link(summary: Mapping[str, Any]) -> bool:
+    """A marked session links to a competition only as a race."""
+    return (
+        not summary.get("purpose_marked")
+        or summary.get("purpose") == ActivityPurpose.RACE.value
+    )
 
 
 def _rank(

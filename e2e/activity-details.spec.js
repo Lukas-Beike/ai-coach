@@ -321,6 +321,43 @@ test("@responsive feedback save and undo show the returned load without a detail
   await page.evaluate(() => ActivityDetails.close(false));
 });
 
+test("@responsive marking the session purpose sends it with a receipt whose undo restores the previous one", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(async () => {
+    const data = { session: { activity_id: "mark-1", name: "Synthetic marked ride", sport: "ride", purpose: "race" }, streams: { time_s: [0, 1, 2], channels: {} }, detail_data: { providers: [] }, activity_feedback: null, equipment: [], session_rpe_load: null };
+    globalThis.feedbackBodies = [];
+    const fakeApi = async (url, options) => {
+      if (url.endsWith("/feedback")) {
+        const body = JSON.parse(options.body);
+        feedbackBodies.push(body);
+        return { status: "ok", activity_feedback: body.purpose ? { purpose: body.purpose } : null, change: { id: "c1", after_hash: "h" } };
+      }
+      if (url === "/api/change-history/undo") return { status: "undone" };
+      return data;
+    };
+    await ActivityDetails.open({ id: "mark-1" }, { api: fakeApi, showDialog: (dialog) => dialog.showModal() });
+  });
+  const dialog = page.getByRole("dialog", { name: "Synthetic marked ride" });
+  const purpose = dialog.getByLabel("Art der Einheit");
+  await expect(purpose).toHaveValue("");
+  await expect(purpose.locator("option").first()).toHaveText("Automatisch · Wettkampf");
+  await purpose.selectOption("training");
+  await dialog.getByRole("button", { name: "Feedback speichern" }).click();
+  await expect(dialog.locator('[role="status"]').filter({ hasText: "Feedback gespeichert" })).toBeVisible();
+  expect(await page.evaluate(() => feedbackBodies.at(-1).purpose)).toBe("training");
+  await dialog.getByRole("button", { name: "Rückgängig" }).click();
+  await expect(purpose).toHaveValue("");
+  await purpose.selectOption("commute");
+  await dialog.getByRole("button", { name: "Feedback speichern" }).click();
+  await expect(purpose).toHaveValue("commute");
+  expect(await page.evaluate(() => feedbackBodies.at(-1).purpose)).toBe("commute");
+  await purpose.selectOption("");
+  await dialog.getByRole("button", { name: "Feedback speichern" }).click();
+  expect(await page.evaluate(() => feedbackBodies.at(-1).purpose)).toBeNull();
+  await page.evaluate(() => ActivityDetails.close(false));
+});
+
 test("@responsive provider copies split with a receipt whose undo restores the bundle", async ({ page }) => {
   await page.goto("/#plan/overview");
   await expect(page.locator("#appShell")).toBeVisible();

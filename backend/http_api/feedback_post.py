@@ -44,6 +44,7 @@ class FeedbackPostRoutes:
                 str(payload.get("notes") or "").strip()
                 or payload.get("session_rpe") is not None
                 or str(payload.get("deviation_reason") or "").strip()
+                or payload.get("purpose") not in (None, "")
             )
             result = (
                 feedback.save_coach(activity_id, payload)

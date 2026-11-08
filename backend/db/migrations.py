@@ -15,14 +15,17 @@ from typing import Any, Final
 
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
+    FEEDBACK_PURPOSE_DDL,
     database_schema_is_current,
     database_schema_signature,
+    execute_ddl,
 )
 from backend.db.schema_history import (
     ACCEPTED_SHAPES_BY_VERSION,
     OLDEST_SUPPORTED_SCHEMA_VERSION,
     SHAPE_CURRENT,
     SHAPE_SCHEMA_V21,
+    SHAPE_SCHEMA_V22,
     released_shape,
 )
 from backend.db.strength_sets_migration import add_strength_sets
@@ -101,6 +104,13 @@ def _upgrade_v21_to_v22(db: Any) -> None:
     add_strength_sets(db)
 
 
+def _upgrade_v22_to_v23(db: Any) -> None:
+    # Adds the athlete's session purpose marking; every feedback row stays as it
+    # was and carries no marking (NULL).
+    execute_ddl(db, FEEDBACK_PURPOSE_DDL)
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
-    SHAPE_SCHEMA_V21: (SHAPE_CURRENT, _upgrade_v21_to_v22),
+    SHAPE_SCHEMA_V21: (SHAPE_SCHEMA_V22, _upgrade_v21_to_v22),
+    SHAPE_SCHEMA_V22: (SHAPE_CURRENT, _upgrade_v22_to_v23),
 }

@@ -12,8 +12,10 @@ from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
 from backend.activities.session_purpose import (
     COMPETITION_SOURCE_LABEL,
+    MARKED_SOURCE_LABEL,
     session_purpose,
     with_competitions,
+    with_marked_purposes,
 )
 from backend.canonical.mapping import IssueReason
 from backend.canonical.records import ActivityRecord
@@ -305,6 +307,157 @@ class SelectorCompetitionTests(CanonicalReadFixture):
         summaries = self.read(make_selector(self).activity_summaries)
 
         self.assertNotIn("c-long", [row.get("competition_id") for row in summaries])
+
+
+class MarkedPurposeTests(unittest.TestCase):
+    def test_a_marking_wins_over_the_provider_purpose(self) -> None:
+        race = _summary("act_r", "2026-10-11T10:00:00", purpose="race")
+        plain = _summary("act_p", "2026-10-11T12:00:00")
+
+        result = with_marked_purposes([race, plain], {"act_r": "commute"})
+
+        self.assertEqual(result[0]["purpose"], "commute")
+        self.assertTrue(result[0]["purpose_marked"])
+        self.assertEqual(result[0]["sources"]["purpose"], MARKED_SOURCE_LABEL)
+        self.assertEqual(result[0]["sources"]["moving_duration_s"], "Garmin Connect")
+        self.assertIs(result[1], plain)
+        self.assertEqual(race["purpose"], "race")
+        self.assertNotIn("purpose_marked", race)
+
+    def test_a_session_without_a_marking_is_returned_unchanged(self) -> None:
+        plain = _summary("act_p", "2026-10-11T12:00:00")
+
+        self.assertEqual(with_marked_purposes([plain], {}), [plain])
+        self.assertEqual(with_marked_purposes([plain], {"act_other": "race"}), [plain])
+
+    def test_training_removes_the_race_hint(self) -> None:
+        run = _summary("act_a", "2026-10-11T10:00:00")
+
+        result = with_competitions(
+            with_marked_purposes([run], {"act_a": "training"}), [_competition()]
+        )
+
+        self.assertEqual(result[0]["purpose"], "training")
+        self.assertNotIn("competition_id", result[0])
+
+    def test_training_on_a_provider_race_drops_its_link(self) -> None:
+        race = _summary("act_r", "2026-10-11T10:00:00", purpose="race")
+
+        result = with_competitions(
+            with_marked_purposes([race], {"act_r": "training"}), [_competition()]
+        )
+
+        self.assertEqual(result[0]["purpose"], "training")
+        self.assertNotIn("competition_id", result[0])
+
+    def test_other_markings_are_never_linked(self) -> None:
+        for purpose in ("commute", "warmup", "cooldown"):
+            with self.subTest(purpose=purpose):
+                run = _summary("act_a", "2026-10-11T10:00:00")
+
+                result = with_competitions(
+                    with_marked_purposes([run], {"act_a": purpose}), [_competition()]
+                )
+
+                self.assertEqual(result[0]["purpose"], purpose)
+                self.assertNotIn("competition_id", result[0])
+
+    def test_a_marked_race_is_linked_and_the_day_gets_no_hint(self) -> None:
+        longest = _summary("act_long", "2026-10-11T09:00:00", duration=5400.0)
+        marked = _summary("act_mark", "2026-10-11T12:00:00", duration=1200.0)
+
+        result = with_competitions(
+            with_marked_purposes([longest, marked], {"act_mark": "race"}),
+            [_competition()],
+        )
+
+        self.assertNotIn("competition_id", result[0])
+        self.assertNotIn("purpose", result[0])
+        self.assertEqual(result[1]["competition_id"], "c-1")
+        self.assertEqual(result[1]["purpose"], "race")
+        self.assertEqual(result[1]["sources"]["purpose"], MARKED_SOURCE_LABEL)
+
+    def test_a_marked_race_without_a_competition_stays_a_race(self) -> None:
+        run = _summary("act_a", "2026-10-11T10:00:00")
+
+        result = with_competitions(with_marked_purposes([run], {"act_a": "race"}), [])
+
+        self.assertEqual(result[0]["purpose"], "race")
+        self.assertNotIn("competition_id", result[0])
+
+
+class SelectorMarkedPurposeTests(CanonicalReadFixture):
+    COMPETITION = (
+        "INSERT INTO competitions(id, name, event_date, sport, priority, distance, "
+        "target, course_profile, notes, created_at, updated_at) "
+        "VALUES ('c-run', 'Stadtlauf', '2026-10-09', 'run', 'A', '10 km', '', '', "
+        "'', '2026-10-01T00:00:00', '2026-10-01T00:00:00')"
+    )
+    STAMP = "2026-10-10T08:00:00+00:00"
+
+    def mark(self, session: str, purpose: str | None) -> None:
+        self.execute(
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, "
+            "notes, deviation_reason, created_at, updated_at, session_id, purpose) "
+            "VALUES (?, '', '', '', '', ?, ?, ?, ?) "
+            "ON CONFLICT(activity_id) DO UPDATE SET purpose = excluded.purpose",
+            (session, self.STAMP, self.STAMP, session, purpose),
+        )
+
+    def sessions(self) -> dict[str, dict[str, Any]]:
+        return {
+            row["sport"]: row
+            for row in self.read(make_selector(self).activity_summaries)
+            if row["started_at_local"][:10] in {"2026-10-08", "2026-10-09"}
+        }
+
+    def test_training_overrides_the_hint_and_the_garmin_event_type(self) -> None:
+        self.garmin["activities"][0]["eventType"] = {"typeKey": "race"}
+        populate(self)
+        self.execute(self.COMPETITION)
+        before = self.sessions()
+        self.assertEqual(before["run"]["competition_id"], "c-run")
+        self.assertEqual(before["ride"]["purpose"], "race")
+
+        self.mark(before["run"]["id"], "training")
+        self.mark(before["ride"]["id"], "training")
+        after = self.sessions()
+
+        for sport in ("run", "ride"):
+            self.assertEqual(after[sport]["purpose"], "training")
+            self.assertTrue(after[sport]["purpose_marked"])
+            self.assertEqual(after[sport]["sources"]["purpose"], MARKED_SOURCE_LABEL)
+            self.assertNotIn("competition_id", after[sport])
+
+    def test_removing_the_marking_restores_the_previous_purpose_and_link(self) -> None:
+        populate(self)
+        self.execute(self.COMPETITION)
+        run = self.sessions()["run"]
+        self.mark(run["id"], "commute")
+        self.assertEqual(self.sessions()["run"]["purpose"], "commute")
+
+        self.execute("DELETE FROM activity_feedback")
+
+        restored = self.sessions()["run"]
+        self.assertEqual(restored["purpose"], "race")
+        self.assertEqual(restored["competition_id"], "c-run")
+        self.assertNotIn("purpose_marked", restored)
+
+    def test_a_marked_race_links_to_its_competition(self) -> None:
+        populate(self)
+        self.execute(self.COMPETITION)
+        ride = self.sessions()["ride"]
+        self.assertNotIn("purpose", ride)
+        self.execute(
+            "UPDATE competitions SET sport = 'ride', event_date = ? WHERE id = 'c-run'",
+            (ride["started_at_local"][:10],),
+        )
+        self.mark(ride["id"], "race")
+
+        marked = self.sessions()["ride"]
+
+        self.assertEqual(marked["purpose"], "race")
+        self.assertEqual(marked["competition_id"], "c-run")
 
 
 if __name__ == "__main__":
