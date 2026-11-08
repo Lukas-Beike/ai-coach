@@ -1,0 +1,38 @@
+# Configuration
+
+Configuration comes from container environment variables or a `.env` file in the application root; `APP_PASSWORD` belongs in the container environment or that root file, never in `DATA_DIR`. The [README](../README.md#configuration) lists every variable in one line; this file adds the details. Only `APP_PASSWORD` is required to start. The Coach needs an OpenAI key (environment or **Mehr > Anbindungen > Zugangsdaten**). Intervals.icu and the other providers are optional.
+
+## Models
+
+Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astra, plus the configured deployment on the official OpenAI endpoint. Compatible endpoints offer only their configured deployment and omit the service-tier parameter. Thinking defaults to Medium. Speed defaults to Fast for these models; Standard is always available, and Ultrafast is available for GPT-6.1 Sol and GPT-6 Astra. Fast/Ultrafast have higher API prices. Unknown configured deployments omit the service-tier parameter. Choices are saved locally; unsupported speed choices fall back to Fast (or Standard for unknown deployments). Account availability depends on the API provider. See [Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) and [Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode).
+
+## Variables
+
+| Variable | Default Value | Required? | Description |
+| :--- | :--- | :--- | :--- |
+| `APP_PASSWORD` | *None* | **Yes** | Master password (minimum 12 characters). Secures web UI authentication and acts as the encryption key for the SQLCipher database. |
+| `OPENAI_API_KEY` | *None* | For the Coach | Server-side API key for the OpenAI Responses API or compatible endpoint. Can also be set in **Mehr > Anbindungen > Zugangsdaten**. |
+| `OPENAI_MODEL` | `gpt-6-luna` | No | Default OpenAI model deployment; selectable in Coach settings. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | No | Optional Responses-compatible API base URL. HTTPS is required; HTTP is allowed only for loopback addresses. |
+| `INTERVALS_API_KEY` | *None* | No | Personal API key of Intervals.icu, the output target. Needed only to synchronize workouts, competitions, nutrition and sport settings. Can also be set in **Mehr > Anbindungen > Zugangsdaten**. |
+| `INTERVALS_ATHLETE_ID` | `0` | No | Athlete ID for Intervals.icu (`0` targets the athlete account associated with the API key). |
+| `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Read-only fallback used when no Garmin login is stored in the app. The UI login does not need it. |
+| `GARMIN_PASSWORD` | *None* | No | Garmin Connect account password. Read-only fallback for login; the UI never stores the password. Remove it once tokens are stored. |
+| `GARMIN_PERSONAL_API_KEY` | *None* | No | Garmin Personal API key (Garmin Connect Web > Settings > Personal API Key). Can also be set in **Mehr > Anbindungen > Zugangsdaten**. Exchanged server-side for a 24-hour access token on demand; never logged or returned. |
+| `GARMIN_PERSONAL_API_KEY_EXPIRES` | *None* | No | Expiry date (`YYYY-MM-DD`) of the Personal API key, shown in Garmin Connect Web. Can also be set as **Gültig bis** next to the key. The Garmin card warns 14 days ahead and when the key is rejected; saving or removing the key in the app clears its stored date. |
+| `GARMINTOKENS` | `/data/garmin_tokens` | No | Path of the legacy Garmin token file. It is imported once when the database has no Garmin tokens and is left in place. |
+| `GARMIN_FIXTURE_PATH` | *None* | No | Local mock JSON fixture path for development and testing without live Garmin credentials. |
+| `WAHOO_CLIENT_ID` | *None* | No | Wahoo Cloud API application client ID. Wahoo counts as configured only when all three `WAHOO_*` values are set. |
+| `WAHOO_CLIENT_SECRET` | *None* | No | Wahoo Cloud API application client secret. Stored server-side only and redacted from logs. |
+| `WAHOO_REDIRECT_URI` | *None* | No | Full HTTPS callback URL, `https://<app-host>/api/wahoo/callback`. Never derived from the request Host header. |
+| `YAZIO_EMAIL`, `YAZIO_PASSWORD` | *None* | No | Yazio account used for the optional read-only product lookup. Stored server-side only and redacted from logs; also editable under **Mehr > Anbindungen > Zugangsdaten**, where a stored value wins. |
+| `YAZIO_COUNTRY` | `DE` | No | Two-letter country code sent as the Yazio search region (`DE` also selects German-language ranking). |
+| `YAZIO_USER_AGENT` | built-in iOS client string | No | User-Agent sent to Yazio, which blocks unrecognized client versions (`version_blocked`). Set a current value when lookups fail with that error. |
+| `CALENDAR_ICAL_URL` | *None* | No | Private read-only iCalendar (ICS) feed URL from Google Calendar, iCloud, or Outlook. |
+| `COOKIE_SECURE` | `false` | No | Set to `true` when running behind an HTTPS reverse proxy to add the `Secure` flag to cookies. |
+| `TRUSTED_PROXY_IPS` | *None* | No | Comma- or space-separated reverse-proxy addresses or CIDR networks (e.g. `192.168.1.6`). Only requests whose direct peer is in this list have `X-Forwarded-For` honored; the rightmost untrusted hop then becomes the client IP for login and API rate limits. The proxy must append the address it sees (nginx: `$proxy_add_x_forwarded_for`). List only the proxies themselves: a network that also contains clients, such as the whole LAN, lets those clients choose their rate-limit address through the header. Invalid entries, including a host address with a mask such as `192.168.1.6/24`, are ignored with a startup warning. |
+| `DATA_RETENTION_DAYS` | `-1` | No | `-1` (or any value ≤ 0) retains data indefinitely; positive values are clamped to 30–3650 days and remove older chat messages and snapshots at startup. |
+| `SYNC_HISTORY_EARLIEST_DATE` | `2000-01-01` | No | ISO date (`YYYY-MM-DD`) that bounds the historical Garmin backfill. The backfill walks back in 90-day chunks, never beyond this date, and stops after 180 consecutive days without records. An invalid value is ignored with a logged warning. |
+| `PORT` | `8090` | No | Internal HTTP port the application listens on. |
+| `DATA_DIR` | `/data` | No | Path to the directory where the encrypted database and any legacy Garmin token file are stored. |
+| `TZ` | `Europe/Berlin` | No | IANA timezone (e.g., `Europe/Berlin`) used as the default athlete timezone when none is saved and as the container's local timezone. Crucial for accurate daily scheduling and sleep windows. |

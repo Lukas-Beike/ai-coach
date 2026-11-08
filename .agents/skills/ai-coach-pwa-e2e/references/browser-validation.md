@@ -4,7 +4,7 @@ Run from the repository root. Never use
 `--env-file .env`, an existing data directory, or a connected application.
 
 Use the shared runner commands in
-[README testing](../../../../README.md#playwright-browser-e2e-tests) as the
+[testing docs](../../../../docs/testing.md#playwright-browser-e2e-tests) as the
 maintained setup and operational runbook. Build current source, prepare the
 locked native browser once, and use explicit `--project`/`--spec` selections or
 `--project all` for the complete five-project set. `--list` starts no fixtures.

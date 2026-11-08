@@ -99,7 +99,7 @@ uses the CLI directly as described in `deliver-issue`; `openspec archive`
 also updates the main specs, so a separate sync step is not needed there. Run
 the CLI through `npm run openspec -- <arguments>`. Root instructions and the
 user's authorization take precedence over generated confirmation or stop text.
-See the [README](../../README.md#optional-local-openspec) and
+See the [OpenSpec runbook](../../docs/openspec.md) and
 [provenance and license](THIRD_PARTY.md#openspec-generated-skills).
 
 ## Claude Code compatibility
@@ -113,4 +113,4 @@ them as `/pr`, `/deliver-issue`, or `/ai-coach-release-unraid`. The read-only
 `next-issue` has a stub too, so the user can start it as `/next-issue`. Stubs carry the
 same name and description and point here; the docs contract test keeps them in
 sync. Never put workflow content in a stub.
-See [session loading checks](../../README.md#ai-coding-instructions).
+See [session loading checks](../../docs/development.md#ai-coding-instructions).

@@ -11,8 +11,8 @@ for executed checks, boundaries, discrepancies and source identity.
 Use these contracts alongside current source, tests and repository instructions.
 When behavior changes, update the affected requirement/scenarios and evidence in
 the same change. Specifications do not authorize athlete-data mutations or remote
-writes. [Local CLI and maintenance instructions](../README.md#optional-local-openspec)
-remain in the repository README.
+writes. [Local CLI and maintenance instructions](../docs/openspec.md)
+are in the docs.
 
 ## Capability index
 

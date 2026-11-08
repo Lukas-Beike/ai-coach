@@ -157,3 +157,42 @@ and other aerobic sports.
 The regression suite executes the real Coach tool and job path with synthetic
 responses for a run incorrectly stored as WeightTraining, two remote copies,
 sport correction, duplicate removal, and a second idempotent repair.
+
+## Native workout text syntax
+
+Endurance workouts synchronized to Intervals.icu must comply with its native workout builder syntax. The application validates the text locally before any remote synchronization.
+
+### Cycling Intervals (Power & Cadence Targets)
+```text
+Warmup
+- 15m ramp 50-70%
+- 3m 80%
+- 3m 50-60%
+
+Main Set
+3x
+- 8m 88-92% 85-95rpm
+- 4m 50-60%
+
+Cooldown
+- 10m 50-60%
+```
+
+### Running Workout (Pace & Heart Rate Targets)
+```text
+Warmup
+- 15m Z1 HR
+
+Main Set
+- 6km Z2 Pace
+- 1km 90-95% HR
+
+Cooldown
+- 10m Z1 HR
+```
+
+## Strict Validation Rules
+1. **Executable Steps Required**: Endurance workouts (Ride, Run, Swim, Row) require explicit step durations (`m`, `s`) or distances (`km`, `m`) paired with an intensity target.
+2. **Relative Targets Preferred**: Use percentage FTP (`88-92%`) or zones (`Z2 HR`). Do not hardcode absolute wattages into steps, as they conflict with dynamic FTP adjustments.
+3. **Repeat Block Formatting**: Multi-interval blocks must begin with a repeat line (e.g., `3x`) and must be surrounded by blank lines. All steps within the block repeat equally.
+4. **Non-Endurance Activities**: Strength training, yoga, and mobility workouts use free-text prose instructions and bypass step validation.
