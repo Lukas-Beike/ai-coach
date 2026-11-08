@@ -127,7 +127,7 @@ class PerformanceMethodCardTests(unittest.TestCase):
 
     def test_register_lists_sources_and_lead(self) -> None:
         self.assertEqual(
-            self.known_ids, {f"R{number}" for number in range(1, 52)} | {"L1"}
+            self.known_ids, {f"R{number}" for number in range(1, 53)} | {"L1"}
         )
 
     def test_every_card_is_complete(self) -> None:

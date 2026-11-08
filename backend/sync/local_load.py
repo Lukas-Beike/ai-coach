@@ -35,13 +35,17 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.db import canonical_store
+from backend.db.activity_analysis_reads import stored_heart_rate_histogram
 from backend.db.repositories import KeyValueRepository
+from backend.performance.canonical_session_analysis import ANALYSIS_VERSION
 from backend.performance.local_tss import (
     METHOD_ID,
     METHOD_VERSION,
     THRESHOLD_KINDS,
     DatedThresholds,
+    HistogramLookup,
     LocalLoad,
+    parse_heart_rate_histogram,
     rated_sessions,
     session_loads,
 )
@@ -116,14 +120,18 @@ def reconcile_local_loads(
     now: str,
     feedback: Mapping[str, Mapping[str, Any]] | None = None,
     sex: str | None = None,
+    histograms: HistogramLookup | None = None,
 ) -> dict[str, Any]:
     """Write every session's local load and retire stale rows; return counts.
 
     ``feedback`` is each session's effective local feedback by stored key, which
     the session-RPE branch of strength sessions and its calibration read;
-    ``sex`` is the profile sex the heart-rate branch reads.
+    ``sex`` is the profile sex the heart-rate branch reads; ``histograms`` looks up
+    a session's stored heart-rate histogram for that branch.
     """
-    loads = session_loads(summaries, thresholds, feedback, sex=sex)
+    loads = session_loads(
+        summaries, thresholds, feedback, sex=sex, histograms=histograms
+    )
     by_id = {str(summary.get("id")): summary for summary in summaries}
     keep: set[str] = set()
     written = 0
@@ -229,6 +237,9 @@ class LocalLoadStage:
                 rated_sessions(summaries), self._session_feedback
             ),
             sex=self._athlete_sex(db),
+            histograms=lambda session_id: parse_heart_rate_histogram(
+                stored_heart_rate_histogram(db, ANALYSIS_VERSION, session_id)
+            ),
         )
         self._save(
             db,

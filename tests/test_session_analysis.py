@@ -2,7 +2,11 @@
 
 import unittest
 
-from backend.performance.session_analysis import aerobic_analysis, interval_quality
+from backend.performance.session_analysis import (
+    aerobic_analysis,
+    heart_rate_histogram,
+    interval_quality,
+)
 from backend.planning.target_snapshot import freeze_targets
 
 
@@ -32,6 +36,26 @@ def run(environment="outdoor", grade=True):
 
 
 class SessionAnalysisTests(unittest.TestCase):
+    def test_heart_rate_histogram_counts_moving_seconds_per_bpm(self):
+        # 100 s at 120 bpm, a 20 s gap (nothing counted), 50 s at 150 bpm of
+        # which the first 10 s are stopped; 25 and 250 bpm are no readings.
+        times = list(range(101)) + [120 + second for second in range(51)]
+        heart = [120.4] * 101 + [150] * 51
+        moving = [True] * 101 + [False] * 10 + [True] * 41
+        heart[10] = 25
+        heart[11] = 250
+        result = heart_rate_histogram(
+            {"streams": {"time": times, "heartrate": heart, "moving": moving}}
+        )
+        self.assertEqual({"120": 98.0, "150": 40.0}, result["seconds"])
+        self.assertEqual(138.0, result["covered_s"])
+
+    def test_heart_rate_histogram_needs_a_matching_stream(self):
+        self.assertIsNone(heart_rate_histogram({"streams": {"time": [0, 1, 2]}}))
+        self.assertIsNone(
+            heart_rate_histogram({"streams": {"time": [0, 1], "heartrate": [100]}})
+        )
+
     def test_outdoor_run_decoupling_uses_grade_adjusted_speed(self):
         # Card M8 v2 worked example: Minetti cost at 2 % is 3.6 * 3.1175 / 2.8 J/kg/m,
         # so 2.8 m/s uphill is 3.1175 m/s on level ground. Raw speed would give

@@ -303,6 +303,26 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertEqual({"power_zone_times": "local"}, summary["zone_models"])
         self.assertEqual("Zoneneinstellungen", summary["sources"]["power_zone_times"])
 
+    def test_the_row_stores_the_heart_rate_histogram(self) -> None:
+        self._write(lambda db: _streams(db, GARMIN, "g1"))
+        self._run()
+        row = self._row("act_g1")
+        assert row is not None
+        histogram = row["payload"]["hr_histogram"]
+        # 140 bpm for every second but the last, which counts nothing.
+        self.assertEqual({"140": float(SECONDS)}, histogram["seconds"])
+        self.assertEqual(float(SECONDS), histogram["covered_s"])
+
+    def test_a_new_histogram_version_recomputes_every_row(self) -> None:
+        self._write(lambda db: _streams(db, GARMIN, "g1"))
+        self._run()
+        self.assertEqual(0, self._run()["counts"]["computed"])
+
+        with patch.object(
+            canonical_session_analysis, "HEART_RATE_HISTOGRAM_VERSION", 2
+        ):
+            self.assertEqual(1, self._run()["counts"]["computed"])
+
     def test_a_new_threshold_recomputes_the_zone_times(self) -> None:
         self._write(
             lambda db: _streams(db, GARMIN, "g1"),
