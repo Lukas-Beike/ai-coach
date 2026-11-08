@@ -32,6 +32,7 @@ from backend.diagnostics.plan_sync import summarize_plan_sync
 from backend.diagnostics.provider_composition import summarize_provider_composition
 from backend.diagnostics.rating_backfill import summarize_rating_backfill
 from backend.diagnostics.session_conflicts import summarize_session_conflicts
+from backend.diagnostics.stream_backfill import summarize_stream_backfill
 from backend.observability import DiagnosticCapture, Redactor
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
@@ -222,6 +223,9 @@ class DiagnosticReportService:
                 "canonical_provider_composition": summarize_provider_composition(db),
                 "local_load": summarize_local_load(deps.key_values, db),
                 "rating_backfill": summarize_rating_backfill(
+                    deps.key_values, db, deps.config.sync_history_earliest_date
+                ),
+                "stream_backfill": summarize_stream_backfill(
                     deps.key_values, db, deps.config.sync_history_earliest_date
                 ),
                 "intervals_purge": summarize_intervals_purge(

@@ -30,6 +30,7 @@ from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
     BACKFILL_JOB_TYPES,
     RATING_BACKFILL,
+    STREAM_BACKFILL,
     WELLNESS_BACKFILL,
     JobValidationError,
     decode_job_payload,
@@ -268,10 +269,12 @@ class GarminSyncJobOwner:
         activity_detail_service: Any = None,
         wellness_history_service: GarminWellnessBackfill | None = None,
         rating_backfill_service: GarminRatingBackfill | None = None,
+        stream_backfill_service: StreamBackfill | None = None,
     ) -> None:
         self._historical_sync = historical_sync
         self._wellness_history_service = wellness_history_service
         self._rating_backfill_service = rating_backfill_service
+        self._stream_backfill_service = stream_backfill_service
         self._garmin_sync_service = garmin_sync_service
         self._morning_body_battery_service = morning_body_battery_service
         self._garmin_fixture_loader = garmin_fixture_loader
@@ -291,6 +294,8 @@ class GarminSyncJobOwner:
             return self._wellness_backfill(payload)
         if job_type == RATING_BACKFILL:
             return self._rating_backfill(payload)
+        if job_type == STREAM_BACKFILL:
+            return run_stream_backfill(self._stream_backfill_service, payload)
         days, historical_end = self._historical_sync.window(
             payload, job_type, lambda: self._sync_days(job_type)
         )
@@ -374,6 +379,28 @@ class GarminRatingBackfill(Protocol):
     def available(self) -> bool: ...
 
     def backfill(self, end: date | None) -> dict[str, Any]: ...
+
+
+class StreamBackfill(Protocol):
+    """Backfills the FIT streams of one batch of past activities."""
+
+    def available(self) -> bool: ...
+
+    def backfill(self, end: date | None) -> dict[str, Any]: ...
+
+
+def run_stream_backfill(
+    service: StreamBackfill | None, payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Run one stream backfill batch (newest first); its chain keeps the cursor."""
+    if service is None:
+        raise AppError(503, "Der Stream-Backfill ist nicht verfügbar.")
+    if not service.available():
+        # Fixture mode: no remote read, no cursor move, no continuation.
+        return {"status": "ok", "reason": "not_configured", "window_records": 0}
+    end_date = payload.get("end_date")
+    end = date.fromisoformat(iso_date_prefix(str(end_date))) if end_date else None
+    return service.backfill(end)
 
 
 class CalendarWeatherSyncJobOwner:
@@ -526,13 +553,18 @@ class WahooPlanPushOwner(Protocol):
 
 
 class WahooJobAdapter:
-    """Run the explicit Wahoo plan export or the read-only Wahoo sync."""
+    """Run the explicit Wahoo plan export, the stream backfill or the read-only sync."""
 
     def __init__(
-        self, *, sync: WahooSyncJobOwner, plan_push: WahooPlanPushOwner | None = None
+        self,
+        *,
+        sync: WahooSyncJobOwner,
+        plan_push: WahooPlanPushOwner | None = None,
+        stream_backfill: StreamBackfill | None = None,
     ) -> None:
         self._sync = sync
         self._plan_push = plan_push
+        self._stream_backfill = stream_backfill
 
     def execute(
         self,
@@ -547,6 +579,8 @@ class WahooJobAdapter:
             if payload.get("repair"):
                 selected_payload["repair"] = True
             return self._plan_push.sync(selected_payload)
+        if job_type == STREAM_BACKFILL:
+            return run_stream_backfill(self._stream_backfill, payload)
         _reject_plan_push(job_type)
         return self._sync.sync(payload.get("days"), reason, operation_id=job["id"])
 

@@ -14,13 +14,17 @@ from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.providers import garmin as garmin_provider
+from backend.providers.descriptors import GARMIN_ID
 from backend.sync import garmin, garmin_service
 from backend.sync.garmin_activity_details import GarminActivityDetailService
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
 )
-from backend.sync.garmin_rating_backfill import GarminRatingBackfillService
+from backend.sync.garmin_rating_backfill import (
+    GarminRatingBackfillService,
+    coordinated_guard,
+)
 from backend.sync.garmin_service import (
     GarminAnalysisRefreshService,
     GarminNutritionRefreshService,
@@ -32,10 +36,16 @@ from backend.sync.garmin_service import (
     shared_garmin_sync_lock,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.garmin_stream_backfill import (
+    STREAM_BATCH_LIMIT,
+    GarminStreamMapping,
+    GarminStreamSource,
+)
 from backend.sync.garmin_wellness_history import GarminWellnessHistoryService
 from backend.sync.gates import RESYNC_RUNNING_REASON
 from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncOperationStateWriter
+from backend.sync.stream_backfill import StreamBackfillService
 
 
 @dataclass(frozen=True)
@@ -344,6 +354,24 @@ class GarminAssembly:
             utc_now=self._utc_now,
             configured=lambda: fixture_loader.path() is None and reader.configured(),
             earliest_date=self._earliest_date,
+        )
+
+    def stream_backfill_service(self) -> StreamBackfillService:
+        """Compose the backfill of the FIT streams of past Garmin activities."""
+        fixture_loader = self.fixture_loader()
+        reader = self.remote_reader()
+        coordination = self._sync_coordination()
+        return StreamBackfillService(
+            provider=GARMIN_ID,
+            source=GarminStreamSource(reader),
+            mapping=GarminStreamMapping(),
+            database_manager=self._database_manager,
+            key_values=self._key_values,
+            guard=lambda: coordinated_guard(coordination),
+            utc_now=self._utc_now,
+            configured=lambda: fixture_loader.path() is None and reader.configured(),
+            earliest_date=self._earliest_date,
+            batch_limit=STREAM_BATCH_LIMIT,
         )
 
     def analysis_refresh_service(self) -> GarminAnalysisRefreshService:

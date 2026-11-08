@@ -28,6 +28,11 @@ from backend.providers.garmin import (
     collect_garmin_data,
 )
 from backend.providers.garmin_fields import GARMIN_EXTENDED_DATE_ALIASES
+from backend.providers.garmin_fit_history import (
+    FileSink,
+    FitTransportMissing,
+    collect_activity_fit_files,
+)
 from backend.providers.garmin_personal import (
     PERSONAL_KEY_REJECTED_REASON,
     GarminPersonalClient,
@@ -434,6 +439,42 @@ class GarminRemoteReader:
                 client,
                 activities,
                 on_row,
+                on_skip,
+                external_call=call_external,
+                hooks=RatingReadHooks(
+                    error_class=sync_job_error_class,
+                    skippable=_skippable_history_error,
+                    key_rejected=self._state_service.personal_key_rejected,
+                    guard=guard,
+                ),
+            )
+        finally:
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
+
+    def fetch_activity_files(
+        self,
+        activity_ids: Sequence[str],
+        on_file: FileSink,
+        on_skip: Callable[[str], None],
+        guard: Callable[[], AbstractContextManager[Any]],
+    ) -> None:
+        """Download the FIT files of past activities for the stream backfill (#1763).
+
+        One authenticated client serves the whole batch, so the Personal API token
+        is exchanged once. Raises ``FitTransportMissing`` without a Personal API key.
+        """
+        if not self.configured():
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
+        if not self._personal_configured():
+            # The SDK has no file download: do not log in for nothing.
+            raise FitTransportMissing
+        call_external = self._external_call(None)
+        client, login_argument = self._authenticated_client(call_external)
+        try:
+            collect_activity_fit_files(
+                client,
+                activity_ids,
+                on_file,
                 on_skip,
                 external_call=call_external,
                 hooks=RatingReadHooks(

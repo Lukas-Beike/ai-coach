@@ -44,6 +44,7 @@ from backend.sync.executor import (
     CalendarWeatherJobAdapter,
     GarminJobAdapter,
     IntervalsJobAdapter,
+    StreamBackfill,
     WahooJobAdapter,
 )
 from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
@@ -72,6 +73,7 @@ class WahooRuntimeDependencies:
     sync_service: Callable[[], WahooSyncService]
     plan_push_service: Callable[[], WahooPlanPushService]
     resync_gate: ProviderResyncGate
+    stream_backfill_service: Callable[[], StreamBackfill] | None = None
 
 
 @dataclass(frozen=True)
@@ -167,7 +169,13 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
     def job_owner() -> ProviderJobOwner:
         return WahooJobAdapter(
-            sync=wahoo.sync_service(), plan_push=wahoo.plan_push_service()
+            sync=wahoo.sync_service(),
+            plan_push=wahoo.plan_push_service(),
+            stream_backfill=(
+                wahoo.stream_backfill_service()
+                if wahoo.stream_backfill_service is not None
+                else None
+            ),
         )
 
     def schedule() -> WahooSchedulePolicy:

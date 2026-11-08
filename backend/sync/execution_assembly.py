@@ -47,6 +47,7 @@ class GarminJobDependencies:
     strength_push_service: Callable[[], Any] | None = None
     wellness_history_service: Callable[[], Any] | None = None
     rating_backfill_service: Callable[[], Any] | None = None
+    stream_backfill_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,9 @@ def build_garmin_owner(
         else None,
         rating_backfill_service=garmin.rating_backfill_service()
         if garmin.rating_backfill_service
+        else None,
+        stream_backfill_service=garmin.stream_backfill_service()
+        if garmin.stream_backfill_service
         else None,
     )
 

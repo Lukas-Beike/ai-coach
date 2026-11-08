@@ -150,13 +150,18 @@ class WahooClient:
         self._refresh_access_token = refresh_access_token
 
     def list_workouts(
-        self, *, since: datetime, until: datetime | None = None
+        self,
+        *,
+        since: datetime,
+        until: datetime | None = None,
+        max_pages: int = MAX_WORKOUT_PAGES,
     ) -> WahooWorkoutFetch:
         """Return workouts that started inside the window, newest first.
 
         Wahoo sorts by start time, newest first, and embeds the workout summary
         in the list, so the walk stops at the first page that reaches back past
-        ``since`` and no per-workout call is needed.
+        ``since`` and no per-workout call is needed. ``max_pages`` bounds the walk;
+        the history backfill raises it to reach workouts far behind the newest.
         """
         if since.utcoffset() is None:
             raise ValueError("since must be timezone-aware")
@@ -164,7 +169,7 @@ class WahooClient:
         skipped = 0
         listed = 0
         expected = 0
-        for page in range(1, MAX_WORKOUT_PAGES + 1):
+        for page in range(1, max_pages + 1):
             payload = self._get(
                 WORKOUTS_PATH, {"page": page, "per_page": WORKOUTS_PER_PAGE}
             )

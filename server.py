@@ -610,6 +610,7 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                     sync_service=WAHOO_SYNC.sync_service,
                     plan_push_service=WAHOO_SYNC.plan_push_service,
                     resync_gate=WAHOO_RESYNC_GATE,
+                    stream_backfill_service=WAHOO_SYNC.stream_backfill_service,
                 ),
             )
         ),
@@ -1204,6 +1205,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         redactor=REDACTOR.redact_text,
         resync_gate=WAHOO_RESYNC_GATE,
         export_thresholds=EXPORT_THRESHOLDS,
+        history_earliest_date=SYNC_EARLIEST_DATE,
     )
 )
 NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
@@ -1582,6 +1584,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
         wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
         rating_backfill_service=GARMIN_ASSEMBLY.rating_backfill_service,
+        stream_backfill_service=GARMIN_ASSEMBLY.stream_backfill_service,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
