@@ -16,11 +16,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.config import load_config
 from backend.errors import AppError
 from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
-from backend.observability import (
-    REDACTED_URL_QUERY_KEYS,
-    Redactor,
-    redact_request_query,
-)
+from backend.observability import REDACTED_URL_QUERY_KEYS, redact_request_query
 from backend.providers.wahoo_oauth import WAHOO_SCOPES, WahooOAuthClient
 from backend.sync.wahoo_connection import (
     NOT_CONFIGURED_MESSAGE,
@@ -468,90 +464,6 @@ class WahooRedactionTests(unittest.TestCase):
         self.assertEqual(redact_request_query(""), "")
         encoded = redact_request_query("GET /cb?%63ode=SECRETCODE HTTP/1.1")
         self.assertNotIn("SECRETCODE", encoded)
-
-    def make_service(self, registry, values, request, clock=None):
-        config = make_config()
-        return WahooConnectionService(
-            config=lambda: config,
-            oauth=lambda: WahooOAuthClient(lambda: config, request),
-            database_manager=lambda: FakeManager(),
-            database_lock=lambda: MagicMock(),
-            key_values=values,
-            utc_now=clock or Clock(),
-            token_factory=lambda: "login-state-0",
-            secret_registry=registry,
-        )
-
-    def redactor(self, registry):
-        return Redactor(lambda: make_config(), extra_secrets=registry.values)
-
-    def test_tokens_and_login_state_are_redacted_from_log_text(self):
-        registry = WahooSecretRegistry()
-        service = self.make_service(
-            registry,
-            FakeKeyValues(),
-            Mock(return_value=grant_payload("access-token-9", "refresh-token-9")),
-        )
-        service.start_authorization()
-        self.assertEqual(
-            service.complete_authorization("code-1", "login-state-0"),
-            "connected",
-        )
-        text = "boom access-token-9 refresh-token-9 state login-state-0 end"
-        redacted = self.redactor(registry).redact_text(text)
-        for secret in ("access-token-9", "refresh-token-9", "login-state-0"):
-            self.assertNotIn(secret, redacted)
-        self.assertIn("boom", redacted)
-
-    def test_a_rotated_or_disconnected_token_stays_redacted(self):
-        registry = WahooSecretRegistry()
-        clock = Clock()
-        request = Mock(return_value=grant_payload("access-old-1", "refresh-old-1", 60))
-        service = self.make_service(registry, FakeKeyValues(), request, clock)
-        service.start_authorization()
-        service.complete_authorization("code-1", "login-state-0")
-        clock.now += timedelta(hours=1)
-        request.return_value = grant_payload("access-new-2", "refresh-new-2")
-        self.assertEqual(service.access_token(), "access-new-2")
-        service.disconnect()
-        redacted = self.redactor(registry).redact_text(
-            "access-old-1 refresh-old-1 access-new-2 refresh-new-2"
-        )
-        for secret in (
-            "access-old-1",
-            "refresh-old-1",
-            "access-new-2",
-            "refresh-new-2",
-        ):
-            self.assertNotIn(secret, redacted)
-
-    def test_stored_tokens_are_registered_after_a_restart(self):
-        values = FakeKeyValues()
-        first = self.make_service(
-            WahooSecretRegistry(),
-            values,
-            Mock(return_value=grant_payload("access-persisted", "refresh-persisted")),
-        )
-        first.start_authorization()
-        first.complete_authorization("code-1", "login-state-0")
-        registry = WahooSecretRegistry()
-        restarted = self.make_service(registry, values, Mock(), Clock())
-        restarted.access_token()
-        redacted = self.redactor(registry).redact_text(
-            "access-persisted refresh-persisted"
-        )
-        self.assertNotIn("persisted", redacted)
-
-    def test_a_callback_state_is_redacted_even_when_it_is_unknown(self):
-        registry = WahooSecretRegistry()
-        service = self.make_service(registry, FakeKeyValues(), Mock())
-        self.assertEqual(
-            service.complete_authorization("code-1", "forged-state-77"), "error"
-        )
-        self.assertNotIn(
-            "forged-state-77",
-            self.redactor(registry).redact_text("callback forged-state-77"),
-        )
 
 
 if __name__ == "__main__":

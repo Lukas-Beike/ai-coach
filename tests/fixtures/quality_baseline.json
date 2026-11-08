@@ -892,12 +892,6 @@
       "tool": "mypy",
       "path": "server.py",
       "code": "has-type",
-      "message_sha256": "9076d7668e920f937d99a8809d7222f870ef1d895bef707f657887bd19ded42e"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
       "message_sha256": "94da6fdb643bb7fdae17520992388789ed92191c10417ffa418440357da2d4e9"
     },
     {

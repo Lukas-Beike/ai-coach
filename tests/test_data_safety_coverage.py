@@ -782,7 +782,10 @@ class DataKindDeleteTests(DataKindFixture):
                     self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
                 )
         keys = {row[0] for row in self.db.execute("SELECT key FROM kv")}
-        self.assertEqual(keys, {"profile", "garmin_tokenstore_state"})
+        # The erased database is marked as purged so no new recovery copy is saved.
+        self.assertEqual(
+            keys, {"profile", "garmin_tokenstore_state", "intervals_purge_state"}
+        )
         profile = json.loads(
             self.db.execute("SELECT value FROM kv WHERE key = 'profile'").fetchone()[0]
         )
