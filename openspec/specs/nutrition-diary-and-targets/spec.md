@@ -68,11 +68,15 @@ The system SHALL update or delete the identified local meal, preserve omitted co
 - **WHEN** the last meal on an already-synced date is deleted
 - **THEN** it disappears from reads while the now-empty date remains pending so a later explicit export can clear prior remote totals.
 
+#### Scenario: Add a product to a logged meal
+- **WHEN** the athlete adds a saved product to a logged meal
+- **THEN** the change gets a change-history record, so it can be undone, and its date is marked pending again.
+
 #### Scenario: Invalid correction
 - **WHEN** a correction is empty, contains unsupported fields or invalid nutrient values, or names a nonexistent entry
 - **THEN** the service rejects it and retains the valid local state.
 
-Evidence: `backend/nutrition/diary.py::NutritionDiaryService.correct_meal`, `backend/nutrition/diary.py::NutritionDiaryService.delete_meal`; `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_preserves_omitted_fields_and_marks_old_and_new_days_pending`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_rejects_empty_invalid_or_missing_target`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_deleting_last_synced_entry_keeps_empty_date_pending`. Shared history/undo authorization is owned by the history and Coach contracts.
+Evidence: `backend/nutrition/diary.py::NutritionDiaryService.correct_meal`, `backend/nutrition/diary.py::NutritionDiaryService.delete_meal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`; `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_an_added_product_restores_the_previous_meal`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_preserves_omitted_fields_and_marks_old_and_new_days_pending`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_rejects_empty_invalid_or_missing_target`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_deleting_last_synced_entry_keeps_empty_date_pending`. Shared history/undo authorization is owned by the history and Coach contracts.
 
 ### Requirement: Daily macro completeness is distinct from known subtotals
 The system SHALL sum calories and counts for recorded meals while preserving unknown macronutrients as unknown. It SHALL expose known macro subtotals and the number of entries with incomplete macros rather than treating omitted values as zero.

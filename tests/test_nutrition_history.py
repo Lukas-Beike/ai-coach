@@ -43,7 +43,7 @@ class NutritionHistoryTests(unittest.TestCase):
         )
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-        self.diary, _library = build_nutrition_services(
+        self.diary, self.library = build_nutrition_services(
             self.manager,
             threading.Lock(),
             lambda: "2026-09-24T12:00:00+00:00",
@@ -97,6 +97,41 @@ class NutritionHistoryTests(unittest.TestCase):
         restored = self.diary.get_meal(entry["id"])
         self.assertEqual(restored["kcal"], 600)
         self.assertEqual(restored["carbs_g"], 80)
+
+    def test_undo_of_an_added_product_restores_the_previous_meal(self) -> None:
+        library = self.library
+        banana = library.save_product(
+            {
+                "name": "Banane",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 90,
+                "carbs_g": 20,
+                "protein_g": 1,
+                "fat_g": 0.3,
+                "source": "manual",
+            }
+        )
+        entry = self.diary.log_meal(MEAL)
+        self.diary.mark_date_synced(MEAL_DATE, self.pending_revision())
+        self.assertEqual(self.pending_revision(), 0)
+
+        updated, changes = self.collected(
+            lambda: self.diary.add_product_to_meal(entry["id"], banana["id"], 100, "g")
+        )
+
+        self.assertEqual([change["action"] for change in changes], ["update"])
+        self.assertEqual(updated["kcal"], 690)
+        self.assertGreater(self.pending_revision(), 0)
+        self.diary.mark_date_synced(MEAL_DATE, self.pending_revision())
+
+        self.undo(changes)
+
+        restored = self.diary.get_meal(entry["id"])
+        self.assertEqual(restored["description"], "Rice bowl")
+        self.assertEqual(restored["kcal"], 600)
+        self.assertEqual(restored["nutrition_basis"], entry["nutrition_basis"])
+        self.assertGreater(self.pending_revision(), 0)
 
     def test_undo_of_a_delete_brings_the_entry_back_after_a_sync(self) -> None:
         entry = self.diary.log_meal(MEAL)
