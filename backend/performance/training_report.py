@@ -23,6 +23,7 @@ from backend.performance.zone_time_reads import (
     PROVIDER_MODEL,
     zone_model,
 )
+from backend.providers.source_labels import SESSION_SOURCES_LABEL
 
 METHOD = "local-training-report-v1"
 _SUMMARY_METRICS = ("moving_duration_s", "distance_m", "training_load")
@@ -242,7 +243,7 @@ def training_report(
     ]
     return {
         "method": METHOD,
-        "source": "Intervals.icu + local planning/check-ins",
+        "source": f"{SESSION_SOURCES_LABEL} + local planning/check-ins",
         "observed_at": observed_at,
         "start": start.isoformat(),
         "end": end.isoformat(),
