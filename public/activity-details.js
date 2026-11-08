@@ -444,11 +444,11 @@
   function renderAerobic(payload, content) {
     const aerobic = payload.analysis?.aerobic;
     if (aerobic) {
-      content.append(node("h3", "Aerobe Effizienz"));
+      content.append(node("h3", "Herzfrequenzdrift"));
       let description = aerobic.reason;
       if (aerobic.status === "ok") {
         const longSession = aerobic.long_session ? " · lange Einheit" : "";
-        description = `${aerobic.efficiency} ${aerobic.unit} · lokale Herzfrequenzdrift ${aerobic.drift_percent}%${longSession}`;
+        description = `Drift ${aerobic.drift_percent}% · gleichmäßige Leistung pro Schlag ${aerobic.efficiency} ${aerobic.unit}${longSession}`;
       }
       content.append(node("p", description));
       content.append(node("p", "Lokale Methode: zehn Minuten Aufwärmen ausgeschlossen, danach zwei gleich lange Hälften bei gleichmäßiger Belastung und mindestens 85% Messabdeckung. Temperatur, Gelände und Indoor/Outdoor beeinflussen den Vergleich; keine pauschale Fitnessbewertung.", "muted"));

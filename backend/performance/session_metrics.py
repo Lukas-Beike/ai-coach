@@ -34,7 +34,9 @@ from backend.performance.session_analysis import aerobic_analysis
 
 METHOD_ID: Final = "local-session-metrics"
 # v2: grade-adjusted Pa:HR of outdoor runs (#1770).
-METHOD_VERSION: Final = 2
+# v3: the decoupling's output per heartbeat is named apart from the session EF,
+# and run work names Garmin's running-power model (card M8 v3, #1773).
+METHOD_VERSION: Final = 3
 CARD: Final = "M8"
 
 METRIC_SPORTS: Final = frozenset({Sport.RIDE.value, Sport.RUN.value})
@@ -52,6 +54,8 @@ EF_GAP_BASIS: Final = "grade_adjusted_speed"
 EF_SPEED_BASIS: Final = "average_speed"
 WORK_DEVICE_BASIS: Final = "device_total"
 WORK_STREAM_BASIS: Final = "power_stream"
+# Run power is the output of the device's running-power model, not a measured force.
+RUN_POWER_MODEL: Final = "running_power_model"
 
 # The summary values the method reads; their change changes the fingerprint.
 _SUMMARY_INPUTS: Final = (
@@ -174,9 +178,14 @@ def _variability(summary: Mapping[str, Any]) -> tuple[float, dict[str, Any]] | N
 def _work(
     summary: Mapping[str, Any], activity: Mapping[str, Any] | None
 ) -> tuple[float, dict[str, Any]] | None:
+    model = (
+        {"power_model": RUN_POWER_MODEL}
+        if summary.get("sport") == Sport.RUN.value
+        else {}
+    )
     device = _positive(summary.get("energy_kj"))
     if device is not None:
-        return device, {"basis": WORK_DEVICE_BASIS}
+        return device, {"basis": WORK_DEVICE_BASIS, **model}
     streams = (activity or {}).get("streams") or {}
     times, watts = streams.get("time") or [], streams.get("watts") or []
     moving = summary_duration_s(summary)
@@ -196,6 +205,7 @@ def _work(
     return joules / JOULES_PER_KJ, {
         "basis": WORK_STREAM_BASIS,
         "coverage": round(min(coverage, 1.0), 3),
+        **model,
     }
 
 
@@ -210,11 +220,15 @@ def _decoupling(
     return float(result["drift_percent"]), {
         "sensor": result["sensor"],
         "unit": result["unit"],
-        "efficiency": result["efficiency"],
+        # Mean non-zero output over mean HR of the steady halves; not the
+        # session EF, which uses NP (rides) or Garmin's grade-adjusted speed.
+        "steady_output_per_hr": result["efficiency"],
         "halves": [
             {
-                key: half[key]
-                for key in ("measured_seconds", "mean_output", "mean_hr", "efficiency")
+                "measured_seconds": half["measured_seconds"],
+                "mean_output": half["mean_output"],
+                "mean_hr": half["mean_hr"],
+                "output_per_hr": half["efficiency"],
             }
             for half in result["halves"]
         ],
