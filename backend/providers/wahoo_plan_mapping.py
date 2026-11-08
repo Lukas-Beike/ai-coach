@@ -53,6 +53,11 @@ _PACE = re.compile(
 )
 
 
+# Header fields that carry the athlete references; a relative target names its
+# reference by the same key.
+_REFERENCE_KEYS: Final = frozenset({"ftp", "max_hr", "threshold_hr", "threshold_speed"})
+
+
 class WahooPlanMappingError(AppError):
     """A local workout the Wahoo plan format cannot represent."""
 
@@ -122,6 +127,30 @@ def wahoo_plan(
     if text:
         header["description"] = text
     return {"header": header, "intervals": intervals}
+
+
+def comparable_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """Return what Wahoo acts on in ``plan``, for comparing two plans.
+
+    The header references only count when a relative step resolves against
+    them, so a changed FTP leaves an absolute-only plan equal to its earlier
+    self.
+    """
+    header = plan.get("header") or {}
+    intervals = plan.get("intervals") or []
+    used = {
+        target.get("type")
+        for interval in intervals
+        for target in interval.get("targets") or []
+    }
+    return {
+        "header": {
+            key: value
+            for key, value in header.items()
+            if key not in _REFERENCE_KEYS or key in used
+        },
+        "intervals": intervals,
+    }
 
 
 def _interval(

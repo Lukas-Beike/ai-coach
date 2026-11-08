@@ -1033,6 +1033,10 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .library-card h4 { margin: 0; color: var(--ink); font-size: .88rem; }
 .library-card > div:first-child span { color: var(--subtle); font-size: .68rem; }
 .library-card p { margin: 9px 0 0; color: var(--muted); font-size: .76rem; line-height: 1.45; white-space: pre-wrap; }
+.library-wahoo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; margin-top: 9px; font-size: .75rem; }
+.library-wahoo-state { color: var(--muted); }
+.library-wahoo-state.is-changed { color: var(--ink); font-weight: 650; }
+.library-wahoo-send { min-height: 44px; }
 .training-plans { display: grid; gap: 8px; margin-top: 20px; }
 .training-plan { overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: var(--translucent-surface); }
 .training-plan > summary { cursor: pointer; display: flex; justify-content: space-between; gap: 12px; padding: 13px 14px; color: var(--ink); }

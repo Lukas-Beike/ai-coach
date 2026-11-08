@@ -291,11 +291,11 @@ class WorkoutLibraryService:
             params.extend(cursor)
         return db.execute(
             "WITH templates AS ("
-            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.sport'), '')) AS sport_key, "
+            "SELECT id, local_id, payload, lower(COALESCE(json_extract(payload, '$.sport'), '')) AS sport_key, "
             "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
             "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
             "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
-            f"SELECT id, payload, sport_key, name_key FROM templates {after_clause} "
+            f"SELECT id, local_id, payload, sport_key, name_key FROM templates {after_clause} "
             "ORDER BY sport_key, name_key, id LIMIT ?",
             (*params, limit),
         ).fetchall()

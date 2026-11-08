@@ -2268,6 +2268,7 @@ HTTP_API = HttpApiAssembly(
             ),
             workout_library=PLANNING_DATA.workout_library,
             planned_unit=PLANNING_DATA.planned_unit,
+            wahoo_library_state=WAHOO_SYNC.library_state,
         ),
         domains=HttpDomainRouteServices(
             privacy=HttpPrivacyServices(

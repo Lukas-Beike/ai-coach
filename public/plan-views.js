@@ -11,6 +11,12 @@
 
 globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets, plannedPushTargetLabel, plannedGarminBlockedText });
 
+// One explicit plan_push job for one entry, carrying the hash it was shown with.
+async function runPlanPush(provider, entryId, payloadHash) {
+  const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entryId, expected_payload_hash: payloadHash }] } }) });
+  return globalThis.waitForSyncJob(job.id);
+}
+
 // What one successful push delivered: Garmin gets the structured workout,
 // Intervals.icu gets strength only as a calendar note.
 function plannedPushTargetLabel(provider, entry, ids = {}) {
@@ -1030,8 +1036,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const reached = [];
       for (const provider of targets) {
         try {
-          const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }] } }) });
-          const done = await globalThis.waitForSyncJob(job.id);
+          const done = await runPlanPush(provider, entry.local_id, entry.payload_hash);
           if (done.status === "completed") reached.push(plannedPushTargetLabel(provider, entry, ids));
           else failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
         } catch (error) {
@@ -1396,6 +1401,47 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
   }
 
+  // Wahoo state of an exported library workout. A changed one offers the
+  // explicit send; the job carries the payload hash the server returned, so a
+  // workout edited meanwhile is refused instead of pushed.
+  function libraryWahooRow(workout) {
+    const wahoo = workout.wahoo_state;
+    if (!wahoo?.state || !workout.id) return null;
+    const changed = wahoo.state === "changed";
+    const row = document.createElement("div");
+    row.className = "library-wahoo";
+    const label = document.createElement("span");
+    label.className = `library-wahoo-state is-${changed ? "changed" : "synced"}`;
+    label.textContent = changed ? "Wahoo: geändert" : "Wahoo: synchron";
+    row.append(label);
+    if (!changed || !wahoo.payload_hash) return row;
+    state.librarySyncInFlight ||= new Set();
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button library-wahoo-send";
+    button.textContent = "Erneut senden";
+    button.setAttribute("aria-label", `${workout.name || "Einheit"} an Wahoo senden`);
+    button.disabled = state.librarySyncInFlight.has(workout.id);
+    button.addEventListener("click", async () => {
+      if (state.librarySyncInFlight.has(workout.id)) return;
+      state.librarySyncInFlight.add(workout.id);
+      button.disabled = true;
+      let failure = "";
+      try {
+        const done = await runPlanPush(providerIds().wahoo, workout.id, wahoo.payload_hash);
+        if (done.status !== "completed") failure = globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen";
+      } catch (error) {
+        failure = error.message;
+      }
+      state.librarySyncInFlight.delete(workout.id);
+      globalThis.toast?.(failure || "An Wahoo gesendet", Boolean(failure));
+      button.disabled = false;
+      await globalThis.load?.();
+    });
+    row.append(button);
+    return row;
+  }
+
   function renderLibrary(workouts) {
     const root = $("#library");
     if (!root) return;
@@ -1443,6 +1489,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
           const description = document.createElement("p");
           description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
           card.append(heading, description);
+          const wahoo = libraryWahooRow(workout);
+          if (wahoo) card.append(wahoo);
           cards.append(card);
         });
         section.append(cards);
