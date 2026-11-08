@@ -16,7 +16,6 @@ from canonical_read_support import (
 from intervals_compaction import compact_activity_rows
 
 from backend.activities.activity_reference import ActivityReferences
-from backend.activities.detail_store import summary_fingerprint
 from backend.activities.read_service import ActivityReadService
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
@@ -192,31 +191,18 @@ class PendingAndTableReadTests(_ActivityCase):
 
 
 class SessionListFreshnessTests(_ActivityCase):
-    def test_fingerprints_keep_the_stored_values(self) -> None:
-        """Intervals keeps summary_fingerprint of its row, others the payload hash."""
+    def test_fingerprints_are_the_payload_hash_and_intervals_has_none(self) -> None:
+        """Garmin keeps the payload hash of its raw record; Intervals.icu has none."""
         populate(self)
         selector = make_selector(self)
         with self.manager.reader() as db:
-            rows = [
-                json.loads(text)
-                for text in canonical_store.active_activity_payload_texts(
-                    db,
-                    provider=ProviderId.INTERVALS.value,
-                    record_kind=ACTIVITY_RECORD_KIND,
-                )
-            ]
-            keys = [("intervals", str(row["id"])) for row in rows]
-            keys += [("garmin", "910002"), ("intervals", "missing")]
+            keys = [("intervals", "i1"), ("garmin", "910002"), ("garmin", "missing")]
             current = selector.summary_fingerprints(db, keys)
             garmin_hash = canonical_store.active_provider_record_hash(
                 db, "garmin", ACTIVITY_RECORD_KIND, "910002"
             )
-        self.assertEqual(
-            {("intervals", str(row["id"])): summary_fingerprint(row) for row in rows}
-            | {("garmin", "910002"): garmin_hash},
-            current,
-        )
         self.assertIsNotNone(garmin_hash)
+        self.assertEqual({("garmin", "910002"): garmin_hash}, current)
 
     def test_garmin_only_session_is_listed_and_its_detail_loads(self) -> None:
         populate(self)

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe deterministic local performance, training-load, readiness, recovery, body, history, and report projections. Provider forecasts and derived observations retain their evidence limits; these requirements do not claim medical or physiological validation. Intervals.icu is an output target only; scenarios that name stored Intervals.icu data describe retired read paths, and the one-time #1728 purge deletes those rows.
+Describe deterministic local performance, training-load, readiness, recovery, body, history, and report projections. Provider forecasts and derived observations retain their evidence limits; these requirements do not claim medical or physiological validation. Intervals.icu is an output target only; scenarios that name stored Intervals.icu data describe rows of a database restored from a release before 2.0.0, which are not read.
 
 ## Requirements
 
@@ -56,7 +56,7 @@ The system SHALL calculate current/previous 7- and 30-day completed-activity rol
 
 Detailed contract: rollups sum multiple known loads on the same day. `current_load` carries the source `Lokal berechnet (M7)`, the method id and version, status and reason, the count of incomplete days and `averages_7d`; no ATL is reconstructed from Intervals.icu ATL.
 
-Evidence: `backend/performance/load.py:activity_rollup`, `tests/test_performance_load.py:test_sessions_without_a_tss_scale_load_are_counted_with_their_rpe_load`, `tests/test_local_load_store.py`, `tests/test_intervals_mapping_parity.py:test_rollup_totals_match_the_mapped_records`, `backend/performance/load_context.py:performance_load_context`, `backend/performance/garmin_load.py:acute_load_value`; `tests/test_performance_load_context.py`, `tests/test_performance_chart_history.py:test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load`, `tests/test_performance_chart_history.py:test_acute_load_rejects_invalid_and_conflicting_device_values`. The history and local-load scenarios are verified by `tests/test_performance_canonical_load_metrics.py:FormTests`, `tests/test_performance_load_context.py:test_the_inputs_hold_no_intervals_load_and_the_context_no_history` and `tests/test_characterization_load_focus.py:CharacterizationLoadContextTests`.
+Evidence: `backend/performance/load.py:activity_rollup`, `tests/test_performance_load.py:test_sessions_without_a_tss_scale_load_are_counted_with_their_rpe_load`, `tests/test_local_load_store.py`, `backend/performance/load_context.py:performance_load_context`, `backend/performance/garmin_load.py:acute_load_value`; `tests/test_performance_load_context.py`, `tests/test_performance_chart_history.py:test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load`, `tests/test_performance_chart_history.py:test_acute_load_rejects_invalid_and_conflicting_device_values`. The history and local-load scenarios are verified by `tests/test_performance_canonical_load_metrics.py:FormTests`, `tests/test_performance_load_context.py:test_the_inputs_hold_no_intervals_load_and_the_context_no_history` and `tests/test_characterization_load_focus.py:CharacterizationLoadContextTests`.
 
 ### Requirement: Training reports retain coverage and actual execution
 The system SHALL build local period reports from the neutral activity summaries, one per canonical session, using athlete-local dates, exclude future completed data, and expose measured-session coverage for duration, distance, and load. Reports SHALL include supported period comparisons, daily/cumulative load, eight calendar weeks of load, sports, key sessions, feedback, and plan-execution context with a common period. Unknown values SHALL stay unknown while valid zero load remains measured.
@@ -446,7 +446,7 @@ The system SHALL NOT read Intervals.icu CTL, ATL, form or eFTP observations in a
 - **WHEN** snapshot wellness rows still carry `tsb`, `rampRate` and `sportInfo`
 - **THEN** none of them influences these values.
 
-Evidence: `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`, `backend/providers/intervals_wellness_mapping.py:map_intervals_athlete_thresholds`; `tests/test_intervals_wellness_mapping.py` (EFTP and FORM mapping), `tests/test_performance_canonical_parity.py`. The strict-read scenarios are verified by `tests/test_performance_canonical_load_metrics.py` (carrier rows are stripped or contradicting), `tests/test_performance_canonical_parity.py:CanonicalInputEdgeTests` and `tests/test_server_performance.py`.
+Evidence: `tests/test_performance_canonical_parity.py`. The strict-read scenarios are verified by `tests/test_performance_canonical_load_metrics.py` (carrier rows are stripped or contradicting), `tests/test_performance_canonical_parity.py:CanonicalInputEdgeTests` and `tests/test_server_performance.py`.
 
 ### Requirement: Report-family reads use canonical activity rows only
 The system SHALL read the activities of period reports, the training-record observation list, tag impact, training focus, load rollups and season preparation from the canonical activity summary port only, and SHALL NOT fall back to the stored snapshot's `raw_provider_data.activities` or `recent_activities`.
@@ -459,9 +459,9 @@ The system SHALL read the activities of period reports, the training-record obse
 - **WHEN** the canonical summary port returns no summaries
 - **THEN** the read returns its existing empty-data result (no sessions, insufficient data) instead of an error or snapshot data.
 
-#### Scenario: Copies stored by the first backfill
-- **WHEN** the first canonical backfill stores copies of one activity from two providers
-- **THEN** it links them into one session, so these reads count the activity once.
+#### Scenario: Copies stored by two providers
+- **WHEN** the canonical tables hold copies of one activity from two providers
+- **THEN** session linking has joined them into one session, so these reads count the activity once.
 
 Detailed contract: The services that run these reads require their canonical source at construction. Duplicates are merged by canonical session linking, not by row de-duplication; only the raw-row equipment read keeps the Wahoo/Garmin row de-duplication.
 

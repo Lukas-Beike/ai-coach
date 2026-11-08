@@ -218,9 +218,14 @@ class M1SessionRpeInputs(linking.LinkingCase):
         session = self._sessions()[linking.INTERVALS_ID]["activity_id"]
         self.assertEqual(self._stored_feedback(session)[0]["session_rpe"], 5)
         with self.manager.reader() as db:
-            payloads = canonical_store.active_activity_payload_texts(
-                db, provider=INTERVALS, record_kind=ACTIVITY_RECORD_KIND
-            )
+            payloads = [
+                row["payload"]
+                for row in db.execute(
+                    "SELECT payload FROM provider_records WHERE provider = ? "
+                    "AND record_kind = ? AND state = 'active'",
+                    (INTERVALS, ACTIVITY_RECORD_KIND),
+                )
+            ]
             columns = [
                 row["name"] for row in db.execute("PRAGMA table_info(activity_records)")
             ]

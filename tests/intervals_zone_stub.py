@@ -1,4 +1,10 @@
-"""Map Intervals.icu sport settings to canonical zone configurations.
+"""Test-only builder of Intervals.icu-shaped athlete zone settings (formerly a production mapper).
+
+Intervals.icu is an output target; nothing reads or maps its activities in the
+application. Tests that need Intervals-shaped records as input for provider-neutral
+logic build them here.
+
+Map Intervals.icu sport settings to canonical zone configurations.
 
 Each sport takes the first ``sportSettings`` entry (``sport_settings`` as the
 fallback) with a ``types`` text that classifies to it, as the plan and calendar

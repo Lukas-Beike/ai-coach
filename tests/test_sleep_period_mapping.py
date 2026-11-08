@@ -11,6 +11,8 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_plan_stub import intervals_ingest_plan, intervals_reprojection_plan
+
 from backend.canonical.sleep_bounds import bounds_fields, bounds_method, sleep_intervals
 from backend.canonical.vocabulary import ProviderId, SleepKind, SourceKind
 from backend.providers import canonical_plans
@@ -243,7 +245,7 @@ class PlanTests(unittest.TestCase):
             "sleep_start_at": "2026-10-09T22:15:00+02:00",
             "sleep_end_at": "2026-10-10T06:45:00+02:00",
         }
-        plan = canonical_plans.intervals_ingest_plan(
+        plan = intervals_ingest_plan(
             {"wellness": [row, {"id": "2026-10-11"}]},
             zone=ZONE,
             retrieved_at=RETRIEVED_AT,
@@ -252,7 +254,7 @@ class PlanTests(unittest.TestCase):
             [(b.source_record_id, len(b.sleep_periods)) for b in plan.domain_batches],
             [("2026-10-10", 1), ("2026-10-11", 0)],
         )
-        reprojected = canonical_plans.reprojection_plan(
+        reprojected = intervals_reprojection_plan(
             {
                 "provider": "intervals",
                 "record_kind": "wellness",

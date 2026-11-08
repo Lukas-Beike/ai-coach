@@ -29,6 +29,7 @@ from canonical_read_support import (
     store_garmin,
 )
 from canonical_recovery_support import NoActivityRows
+from intervals_plan_stub import project_intervals_snapshot
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
@@ -57,7 +58,6 @@ from backend.performance.canonical_recovery import (
 from backend.performance.chart_history import analysis_history
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
-from backend.providers.snapshot_projection import project_intervals_snapshot
 from backend.runtime.ports import ObservationReader
 from backend.sync.canonical_table_reader import CanonicalTableReader
 

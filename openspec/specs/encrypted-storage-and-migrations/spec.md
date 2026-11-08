@@ -131,16 +131,6 @@ The database SHALL reject schema versions older than v21 (releases before 1.13.4
 
 Evidence: `backend/db/migrations.py::migrate_schema`, `backend/db/schema_history.py::OLDEST_SUPPORTED_SCHEMA_VERSION`; `tests/test_db_migrations.py::test_older_database_file_is_refused_at_startup_without_changes`, `tests/test_db_migrations.py::test_older_or_newer_schema_version_is_rejected_without_modification`, `tests/test_change_history.py::test_planning_field_names_before_schema_v16_are_not_translated`.
 
-### Requirement: Legacy detail target basis
-
-Canonical backfill SHALL normalize the former FTP target basis of a preserved legacy detail record without changing the source record until it is safely retired.
-
-#### Scenario: Retired detail record is backfilled
-- **WHEN** a preserved legacy detail record has a former FTP basis
-- **THEN** canonical analysis stores the equivalent neutral basis while the source record stays unchanged until safely retired.
-
-Evidence: `backend/canonical/legacy_planning_fields.py`, `backend/sync/activity_detail_canonical.py`, `backend/sync/activity_detail_retirement.py`; `tests/test_activity_detail_canonical.py`, `tests/test_activity_detail_retirement.py`.
-
 ### Requirement: Strength set storage upgrade
 
 The v21 to v22 step SHALL rebuild the detail set tables so the kind CHECK accepts `strength_sets`, add `activity_detail_sets.set_source` (NULL for every released set) and an empty `activity_strength_sets` table, keep every stream, lap, zone and analysis row unchanged with foreign keys enforced, and fail without changes when a detail row has no parent.

@@ -16,10 +16,6 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
-from backend.providers.intervals_wellness_mapping import (
-    map_intervals_athlete_thresholds,
-    map_intervals_wellness,
-)
 from backend.providers.source_labels import (
     SourceView,
     observation_source_label,
@@ -131,20 +127,6 @@ class ProviderLabelTests(unittest.TestCase):
 
     def test_view_overrides_replace_the_base_label(self) -> None:
         self.assertEqual(
-            provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY),
-            "Intervals.icu Wellness",
-        )
-        self.assertEqual(
-            provider_label(ProviderId.INTERVALS, SourceView.SEASON_PREPARATION),
-            "Intervals.icu recorded wellness",
-        )
-        self.assertEqual(
-            provider_label(
-                ProviderId.INTERVALS, SourceView.SEASON_PREPARATION_ACTIVITY
-            ),
-            "Intervals.icu recorded activities",
-        )
-        self.assertEqual(
             provider_label(ProviderId.GARMIN, SourceView.DUPLICATE), "Garmin"
         )
         self.assertEqual(
@@ -154,92 +136,21 @@ class ProviderLabelTests(unittest.TestCase):
 
 
 class IntervalsSourceLabelTests(unittest.TestCase):
-    def test_wellness_row_weight_is_wellness_in_current_metrics(self) -> None:
-        observation = _observation(MetricKind.WEIGHT, record_id=WELLNESS_RECORD_ID)
-        self.assertEqual(
-            observation_source_label(observation, SourceView.CURRENT_METRIC),
-            "Intervals.icu Wellness",
-        )
-
-    def test_athlete_record_weight_is_intervals_in_current_metrics(self) -> None:
-        observation = _observation(MetricKind.WEIGHT, record_id=ATHLETE_RECORD_ID)
-        self.assertEqual(
-            observation_source_label(observation, SourceView.CURRENT_METRIC),
-            "Intervals.icu",
-        )
-
-    def test_missing_record_id_is_not_a_wellness_row(self) -> None:
-        observation = _observation(MetricKind.BODY_FAT, record_id=None)
-        self.assertEqual(
-            observation_source_label(observation, SourceView.CURRENT_METRIC),
-            "Intervals.icu",
-        )
-
-    def test_body_history_labels_all_weight_and_body_fat_as_wellness(self) -> None:
-        # Legacy body history reads wellness rows only, so it never splits them.
+    def test_every_view_shows_the_base_label(self) -> None:
+        # Intervals.icu is output-only: no wellness, athlete or threshold split.
         for record_id in (WELLNESS_RECORD_ID, ATHLETE_RECORD_ID, None):
-            for kind in (MetricKind.WEIGHT, MetricKind.BODY_FAT):
-                with self.subTest(kind=kind, record_id=record_id):
-                    observation = _observation(kind, record_id=record_id)
-                    self.assertEqual(
-                        observation_source_label(observation, SourceView.BODY_HISTORY),
-                        "Intervals.icu Wellness",
-                    )
-
-    def test_split_kinds_use_the_base_label_in_other_views(self) -> None:
-        observation = _observation(MetricKind.WEIGHT, record_id=WELLNESS_RECORD_ID)
-        self.assertEqual(
-            observation_source_label(observation, SourceView.DAILY_HEALTH),
-            "Intervals.icu",
-        )
-
-    def test_current_metric_ftp_uses_the_base_label(self) -> None:
-        observation = _observation(MetricKind.FTP, record_id=ATHLETE_RECORD_ID)
-        self.assertEqual(
-            observation_source_label(observation, SourceView.CURRENT_METRIC),
-            "Intervals.icu",
-        )
-
-    def test_general_threshold_hr_without_sport_is_labelled_allgemein(
-        self,
-    ) -> None:
-        observation = _observation(MetricKind.THRESHOLD_HR, record_id=ATHLETE_RECORD_ID)
-        self.assertEqual(
-            observation_source_label(observation, SourceView.CURRENT_METRIC),
-            "Intervals.icu (allgemein)",
-        )
-
-    def test_sport_threshold_hr_uses_the_base_label(self) -> None:
-        observation = _observation(
-            MetricKind.THRESHOLD_HR,
-            record_id=ATHLETE_RECORD_ID,
-            sport=Sport.RIDE,
-        )
-        self.assertEqual(
-            observation_source_label(observation, SourceView.CURRENT_METRIC),
-            "Intervals.icu",
-        )
-
-    def test_general_threshold_hr_outside_current_metrics_is_base(self) -> None:
-        observation = _observation(MetricKind.THRESHOLD_HR, record_id=ATHLETE_RECORD_ID)
-        self.assertEqual(
-            observation_source_label(observation, SourceView.DAILY_HEALTH),
-            "Intervals.icu",
-        )
-
-    def test_season_preparation_views_label_wellness_rows_as_recorded_wellness(
-        self,
-    ) -> None:
-        observation = _observation(MetricKind.CTL, record_id=WELLNESS_RECORD_ID)
-        for view in (
-            SourceView.SEASON_PREPARATION,
-            SourceView.SEASON_PREPARATION_ACTIVITY,
-        ):
-            with self.subTest(view=view):
-                self.assertEqual(
-                    observation_source_label(observation, view),
-                    "Intervals.icu recorded wellness",
-                )
+            for kind in (
+                MetricKind.WEIGHT,
+                MetricKind.BODY_FAT,
+                MetricKind.THRESHOLD_HR,
+            ):
+                observation = _observation(kind, record_id=record_id)
+                for view in SourceView:
+                    with self.subTest(record_id=record_id, kind=kind, view=view):
+                        self.assertEqual(
+                            observation_source_label(observation, view),
+                            provider_label(ProviderId.INTERVALS, view),
+                        )
 
 
 class GarminSourceLabelTests(unittest.TestCase):
@@ -388,30 +299,6 @@ class GarminSourceLabelTests(unittest.TestCase):
 
 
 class MapperRoundTripTests(unittest.TestCase):
-    def test_intervals_mapper_output_keeps_the_wellness_athlete_split(self) -> None:
-        wellness = map_intervals_wellness(
-            [{"id": WELLNESS_RECORD_ID, "weight": 80.0}], retrieved_at=RETRIEVED_AT
-        )
-        athlete = map_intervals_athlete_thresholds(
-            {"id": ATHLETE_RECORD_ID, "weight": 80.0},
-            observed_on=OBSERVED_ON,
-            retrieved_at=RETRIEVED_AT,
-        )
-        wellness_weight = _only(wellness, MetricKind.WEIGHT)
-        athlete_weight = _only(athlete, MetricKind.WEIGHT)
-        self.assertEqual(
-            wellness_weight.provenance.source_record_id, WELLNESS_RECORD_ID
-        )
-        self.assertEqual(athlete_weight.provenance.source_record_id, ATHLETE_RECORD_ID)
-        self.assertEqual(
-            observation_source_label(wellness_weight, SourceView.CURRENT_METRIC),
-            "Intervals.icu Wellness",
-        )
-        self.assertEqual(
-            observation_source_label(athlete_weight, SourceView.CURRENT_METRIC),
-            "Intervals.icu",
-        )
-
     def test_garmin_mapper_output_gets_its_section_notes(self) -> None:
         result = map_garmin_health(
             {

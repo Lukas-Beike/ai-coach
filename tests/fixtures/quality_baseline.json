@@ -8,24 +8,6 @@
   "diagnostics": [
     {
       "tool": "ruff",
-      "path": "backend/providers/source_labels.py",
-      "code": "ARG001",
-      "message_sha256": "344e4547908f3c6648047a93e26e681434a3389f1721a6f92a24d758864f76ce"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/sync/canonical_backfill.py",
-      "code": "ARG001",
-      "message_sha256": "6ed16008a3c74c0d3c454e048949d2553213d48cd3f164df37d3719be1723f57"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/providers/source_labels.py",
-      "code": "ARG001",
-      "message_sha256": "d4af0d95edf216a8ecf98591f90a9418d237f5d2a8b59f7ba191e2f62b625910"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/providers/http.py",
       "code": "ARG002",
       "message_sha256": "1254ae6a1908d8deba2afa1ab0aa9b9ffb29076ae5b3df2ced462536a5edbae3"

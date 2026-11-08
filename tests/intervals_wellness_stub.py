@@ -1,4 +1,10 @@
-"""Map Intervals.icu wellness rows and athlete thresholds to canonical observations.
+"""Test-only builder of Intervals.icu-shaped wellness and athlete rows (formerly a production mapper).
+
+Intervals.icu is an output target; nothing reads or maps its activities in the
+application. Tests that need Intervals-shaped records as input for provider-neutral
+logic build them here.
+
+Map Intervals.icu wellness rows and athlete thresholds to canonical observations.
 
 Both mappers are pure: no I/O, no logging, and no raw provider values in the
 returned issues. Malformed input is reported as a ``MappingIssue`` and never
@@ -70,7 +76,7 @@ Athlete record
     that the readers use when a sport has no value of its own. A consumer applies
     that fallback per sport and must not treat sport None as a sport value.
 
-    Known deviations from the readers, pinned in ``tests/test_intervals_mapping_parity.py``:
+    Known deviations from the readers:
     a zero athlete-wide lthr is 0 bpm in ``current_metrics`` but unset here;
     a rejected sport value lets the athlete-wide fallback apply, as the top-level
     FTP does. Text with underscore digit separators or non-ASCII digits is
@@ -87,6 +93,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any, Final, cast
+
+from intervals_zone_stub import type_sports
 
 from backend.canonical.mapping import (
     MAX_ISSUE_TEXT_LENGTH,
@@ -111,8 +119,9 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
-from backend.providers.intervals_performance_fields import CONFIGURED_FTP, W_PRIME
-from backend.providers.intervals_zone_mapping import type_sports
+
+CONFIGURED_FTP = "icu_ftp"
+W_PRIME = "icu_w_prime"
 
 # Version 4: the athlete-profile weight has its own observation key, so it no
 # longer overwrites the wellness weight of the same day. Version 6: wellness rows

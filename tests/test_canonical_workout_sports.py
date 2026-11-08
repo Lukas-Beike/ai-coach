@@ -6,6 +6,8 @@ import re
 import unittest
 from typing import Any
 
+from intervals_activity_stub import INTERVALS_ACTIVITY_TYPES
+
 from backend.canonical.stored_sports import (
     WORKOUT_SPORT_ALIASES,
     WORKOUT_SPORT_TOKENS,
@@ -14,7 +16,6 @@ from backend.canonical.stored_sports import (
 )
 from backend.canonical.vocabulary import Environment, Sport
 from backend.planning.sport import planned_sport_environment
-from backend.providers.intervals_activity_mapping import INTERVALS_ACTIVITY_TYPES
 from backend.providers.intervals_workouts import (
     INTERVALS_WORKOUT_SPORTS,
     INTERVALS_WORKOUT_TYPES,

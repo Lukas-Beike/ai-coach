@@ -1,4 +1,10 @@
-"""Map Intervals.icu activity rows to canonical activity records.
+"""Test-only builder of Intervals.icu-shaped activity rows (formerly a production mapper).
+
+Intervals.icu is an output target; nothing reads or maps its activities in the
+application. Tests that need Intervals-shaped records as input for provider-neutral
+logic build them here.
+
+Map Intervals.icu activity rows to canonical activity records.
 
 The mapper is pure: it performs no I/O, logs nothing and never raises on
 malformed provider input. A row without a usable id or start time is dropped

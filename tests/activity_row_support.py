@@ -2,21 +2,33 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_activity_stub import map_intervals_activities
+from intervals_plan_stub import intervals_activity_rows
+
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
-from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
-from backend.providers.intervals_activity_mapping import map_intervals_activities
-from backend.providers.snapshot_projection import intervals_activity_rows
+
+
+def summary_fingerprint(row: dict[str, Any]) -> str:
+    """Stand-in for the stored summary hash of a raw row: a digest of its summary fields."""
+    summary = {
+        key: value for key, value in row.items() if key not in ("streams", "laps")
+    }
+    return hashlib.sha256(
+        json.dumps(summary, sort_keys=True, default=str).encode()
+    ).hexdigest()
 
 
 def summaries_of_rows(rows: Any) -> tuple[ActivitySummary, ...]:

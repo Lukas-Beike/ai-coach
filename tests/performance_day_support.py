@@ -5,6 +5,9 @@ from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_activity_stub import map_intervals_activities
+from intervals_plan_stub import project_intervals_snapshot
+
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.canonical.local_time import local_date
 from backend.canonical.records import MetricValue, Observation, Provenance
@@ -35,8 +38,6 @@ from backend.providers.garmin_activity_mapping import (
     merge_training_load_rows,
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
-from backend.providers.intervals_activity_mapping import map_intervals_activities
-from backend.providers.snapshot_projection import project_intervals_snapshot
 
 UTC_ZONE = ZoneInfo("UTC")
 SYNCED_AT = datetime(2026, 10, 12, 8, tzinfo=UTC)

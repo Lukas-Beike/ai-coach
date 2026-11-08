@@ -782,10 +782,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("activity_datetime", "activity_kind"),
     ),
     (
-        "backend.providers.intervals_activity_fields",
-        ("intervals_activity_device_source", "intervals_activity_recorded_by_wahoo"),
-    ),
-    (
         "backend.activities.calendar_projection",
         (
             "CALENDAR_ACTIVITY_FIELDS",
@@ -803,21 +799,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "_weekly_compliance_row",
             "planning_compliance_state",
             "training_calendar_items",
-        ),
-    ),
-    (
-        "backend.providers.intervals_activity_detail_projection",
-        (
-            "COACH_ACTIVITY_DETAIL_FIELDS",
-            "COACH_ACTIVITY_DETAIL_STREAM_FIELDS",
-            "COACH_ACTIVITY_DETAIL_LAP_FIELDS",
-            "COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS",
-            "COACH_ACTIVITY_DETAIL_MAX_LAPS",
-            "_analysis_scalar",
-            "_downsample_series",
-            "_analysis_laps",
-            "detailed_coach_activity",
-            "detailed_activity",
         ),
     ),
     (

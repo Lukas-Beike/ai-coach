@@ -15,8 +15,10 @@ from canonical_detail_support import (
     open_manager,
     seed_intervals_activity,
 )
+from intervals_wellness_stub import map_intervals_wellness
 
 from backend.activities.activity_reference import ActivityReferences
+from backend.activities.detail_contract import COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
 from backend.canonical.vocabulary import MetricKind
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import coach_context_json_size
@@ -24,14 +26,10 @@ from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
-from backend.providers.intervals_activity_detail_projection import (
-    COACH_ACTIVITY_DETAIL_MAX_LAPS,
-    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
-)
-from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.runtime.ports import ObservationSourceSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
+COACH_ACTIVITY_DETAIL_MAX_LAPS = 200
 LEGACY_KEYS = {
     "activity",
     "session_analysis",

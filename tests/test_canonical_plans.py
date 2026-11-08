@@ -14,13 +14,14 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_activity_stub import map_intervals_activities
+
 from backend.canonical.mapping import MappingResult
 from backend.canonical.records import ActivityRecord
 from backend.canonical.section_items import section_of, split_section, wrapped
 from backend.canonical.vocabulary import ProviderId
 from backend.providers import canonical_plans as plans
 from backend.providers.garmin_health_mapping import map_garmin_health
-from backend.providers.intervals_activity_mapping import map_intervals_activities
 
 ZONE = ZoneInfo("Europe/Berlin")
 RETRIEVED_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
@@ -106,95 +107,6 @@ class ActivityBatchTests(unittest.TestCase):
         self.assertEqual((items, raw, skipped), ([], [], 1))
         # The provider still returned this id, so a full-window deletion must keep it.
         self.assertEqual(present, {"i-plan-1"})
-
-
-class IntervalsPlanTests(unittest.TestCase):
-    def test_non_mapping_raw_block_yields_an_empty_plan(self) -> None:
-        plan = plans.intervals_ingest_plan(None, zone=ZONE, retrieved_at=RETRIEVED_AT)
-        self.assertEqual(plan, plans.IngestPlan(provider=ProviderId.INTERVALS))
-
-    def test_non_list_activities_are_ignored(self) -> None:
-        plan = plans.intervals_ingest_plan(
-            {"activities": "nope"}, zone=ZONE, retrieved_at=RETRIEVED_AT
-        )
-        self.assertEqual(plan.activities, ())
-        self.assertEqual(plan.raw_records, ())
-        self.assertEqual(plan.skipped_invalid, 0)
-
-    def test_valid_activity_is_planned_and_invalid_rows_are_counted(self) -> None:
-        raw = {
-            "activities": [
-                ACTIVITY_ROW,
-                {"type": "Ride", "start_date_local": "2026-06-01T07:00:00"},
-                "junk",
-            ]
-        }
-        plan = plans.intervals_ingest_plan(raw, zone=ZONE, retrieved_at=RETRIEVED_AT)
-        self.assertEqual(
-            [item.record.provenance.source_record_id for item in plan.activities],
-            ["i-plan-1"],
-        )
-        self.assertEqual(plan.activities[0].local_date.isoformat(), "2026-06-01")
-        self.assertEqual(plan.skipped_invalid, 2)
-        self.assertEqual(plan.present_activity_ids, frozenset({"i-plan-1"}))
-        self.assertEqual(
-            [(item.record_kind, item.source_record_id) for item in plan.raw_records],
-            [(plans.ACTIVITY_RECORD_KIND, "i-plan-1")],
-        )
-
-    def test_wellness_rows_need_an_identifier(self) -> None:
-        raw = {
-            "wellness": [
-                {"id": "2026-10-08", "ctl": 40.0},
-                {"ctl": 40.0},
-                "junk",
-            ]
-        }
-        plan = plans.intervals_ingest_plan(raw, zone=ZONE, retrieved_at=RETRIEVED_AT)
-        wellness = [
-            item
-            for item in plan.raw_records
-            if item.record_kind == plans.WELLNESS_RECORD_KIND
-        ]
-        self.assertEqual([item.source_record_id for item in wellness], ["2026-10-08"])
-        self.assertEqual(plan.skipped_invalid, 2)
-
-    def test_wellness_observations_come_from_the_mapper(self) -> None:
-        plan = plans.intervals_ingest_plan(
-            {"wellness": fixture("intervals", "wellness.json")},
-            zone=ZONE,
-            retrieved_at=RETRIEVED_AT,
-        )
-        self.assertTrue(plan.observations)
-        self.assertTrue(
-            all(
-                item.mapper_version == plans.INTERVALS_WELLNESS_VERSION
-                for item in plan.observations
-            ),
-        )
-
-    def test_athlete_block_is_mapped_and_a_non_mapping_athlete_is_counted(self) -> None:
-        plan = plans.intervals_ingest_plan(
-            {"athlete": fixture("intervals", "athlete.json")},
-            zone=ZONE,
-            retrieved_at=RETRIEVED_AT,
-        )
-        self.assertIn(
-            plans.ATHLETE_RECORD_KIND, [item.record_kind for item in plan.raw_records]
-        )
-        self.assertTrue(plan.observations)
-        self.assertEqual(plan.skipped_invalid, 0)
-
-        malformed = plans.intervals_ingest_plan(
-            {"athlete": "bad"}, zone=ZONE, retrieved_at=RETRIEVED_AT
-        )
-        self.assertEqual(malformed.skipped_invalid, 1)
-        self.assertEqual(malformed.raw_records, ())
-
-        absent = plans.intervals_ingest_plan(
-            {"athlete": None}, zone=ZONE, retrieved_at=RETRIEVED_AT
-        )
-        self.assertEqual(absent.skipped_invalid, 0)
 
 
 class GarminPlanTests(unittest.TestCase):

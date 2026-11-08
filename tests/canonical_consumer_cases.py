@@ -13,11 +13,10 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, tzinfo
 from typing import Any, Final
 
+from intervals_plan_stub import project_intervals_snapshot
+
 from backend.canonical.records import Observation
-from backend.providers.snapshot_projection import (
-    project_garmin_snapshot,
-    project_intervals_snapshot,
-)
+from backend.providers.snapshot_projection import project_garmin_snapshot
 
 ZONE: Final[tzinfo] = UTC
 RETRIEVED_AT: Final = datetime(2026, 10, 12, 6, 0, tzinfo=UTC)

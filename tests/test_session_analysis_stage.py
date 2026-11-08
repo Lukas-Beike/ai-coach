@@ -467,8 +467,9 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self._write(lambda db: _streams(db, GARMIN, "g1"))
         self._run()
         self._write(
-            lambda db: activity_detail_store.remove_detail_sets(
-                db, "garmin", "g1", keep=()
+            lambda db: db.execute(
+                "DELETE FROM activity_detail_sets "
+                "WHERE provider = 'garmin' AND provider_activity_id = 'g1'"
             )
         )
 
@@ -542,8 +543,7 @@ class SessionAnalysisStageTests(unittest.TestCase):
 
 
 class StageOrderTests(unittest.TestCase):
-    def test_analysis_runs_after_the_legacy_detail_copy(self) -> None:
-        # The legacy copy writes the target snapshots the stage carries over.
+    def test_analysis_is_the_last_follow_up_stage(self) -> None:
         assembly = build_canonical_backfill(
             database=lambda: None,
             key_values=KeyValueRepository(lambda: NOW),
@@ -552,13 +552,8 @@ class StageOrderTests(unittest.TestCase):
             clock=lambda: NOW,
         )
         order = [stage.stage for stage in assembly.worker._followups]
-        self.assertLess(
-            order.index(assembly.detail_backfill.stage), order.index("session_analysis")
-        )
-        self.assertLess(
-            order.index("session_analysis"),
-            order.index(assembly.detail_retirement.stage),
-        )
+        self.assertEqual("session_analysis", order[-1])
+        self.assertNotIn("activity_details", order)
 
 
 if __name__ == "__main__":

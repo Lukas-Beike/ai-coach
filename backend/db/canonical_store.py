@@ -122,14 +122,6 @@ _INPUT_FINGERPRINT_KEY: Final = "input_fingerprint"
 _DERIVATION_KEY: Final = "derivation"
 _PERIOD_KEY: Final = "period"
 _MAX_MERGE_HOPS: Final = 64
-_PROVIDER_RECORD_EXISTS: Final = (
-    "SELECT 1 AS present FROM provider_records "
-    "WHERE provider = ? AND record_kind = ? AND source_record_id = ?"
-)
-_ACTIVITY_RECORD_EXISTS: Final = "SELECT 1 AS present FROM activity_records WHERE provider = ? AND provider_activity_id = ?"
-_OBSERVATION_EXISTS: Final = (
-    "SELECT 1 AS present FROM observations WHERE natural_key = ?"
-)
 
 _ACTIVITY_COLUMNS: Final = (
     "source_kind",
@@ -452,101 +444,6 @@ def retire_unemitted_activity(
     return True
 
 
-def insert_provider_record_if_absent(
-    db: Any,
-    *,
-    provider: str,
-    record_kind: str,
-    source_record_id: str,
-    payload: Mapping[str, Any],
-    mapper_version: int,
-    fetched_at: str,
-    now: str,
-) -> bool:
-    """Insert one sanitized raw record when no row exists; return True when inserted.
-
-    A row that exists, live or deleted, is never changed or revived.
-    """
-    if (
-        _fetch_row(
-            db, _PROVIDER_RECORD_EXISTS, (provider, record_kind, source_record_id)
-        )
-        is not None
-    ):
-        return False
-    text = canonical_json(payload)
-    _insert_provider_record(
-        db,
-        provider=provider,
-        record_kind=record_kind,
-        source_record_id=source_record_id,
-        text=text,
-        digest=payload_hash(text),
-        mapper_version=mapper_version,
-        fetched_at=fetched_at,
-        now=now,
-    )
-    return True
-
-
-def insert_activity_record_if_absent(
-    db: Any,
-    record: ActivityRecord,
-    *,
-    local_date: date,
-    mapper_version: int,
-    fetched_at: str,
-    now: str,
-) -> bool:
-    """Insert one activity with its single-link session when absent; return True when inserted.
-
-    An existing activity, live or deleted, is never changed or revived.
-    """
-    provider, provider_activity_id = _activity_identity(record)
-    if (
-        _fetch_row(db, _ACTIVITY_RECORD_EXISTS, (provider, provider_activity_id))
-        is not None
-    ):
-        return False
-    _insert_activity(
-        db,
-        provider=provider,
-        provider_activity_id=provider_activity_id,
-        values=_activity_values(
-            record, local_date=local_date, mapper_version=mapper_version
-        ),
-        fetched_at=fetched_at,
-        now=now,
-    )
-    return True
-
-
-def insert_observation_if_absent(
-    db: Any,
-    observation: Observation,
-    *,
-    mapper_version: int,
-    now: str,
-    owner: str | None = None,
-) -> bool:
-    """Insert one observation when its natural key is absent; return True when inserted.
-
-    A retired row counts as present, so this never revives it.
-    """
-    natural_key = observation_natural_key(observation)
-    if _fetch_row(db, _OBSERVATION_EXISTS, (natural_key,)) is not None:
-        return False
-    _insert_observation(
-        db,
-        natural_key=natural_key,
-        values=_observation_values(
-            observation, mapper_version=mapper_version, owner=owner
-        ),
-        now=now,
-    )
-    return True
-
-
 def provider_records_after(
     db: Any, *, after_id: int, limit: int
 ) -> list[dict[str, Any]]:
@@ -758,60 +655,6 @@ def session_activity_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
     )
 
 
-def active_activity_payload_texts(
-    db: Any,
-    *,
-    provider: str,
-    record_kind: str,
-    start: str | None = None,
-    end: str | None = None,
-    limit: int | None = None,
-) -> list[str]:
-    """Return the stored raw payload text of one provider's live activities.
-
-    Only active raw records whose activity record is active and whose session is
-    not deleted are returned, so tombstoned activities are never served. ``start``
-    and ``end`` are inclusive ISO dates on the stored athlete-local date. Newest
-    first, like the stored snapshot: activity start time, then provider activity
-    id, both descending. ``limit`` bounds the rows in SQL.
-    """
-    clauses = [
-        "p.provider = ?",
-        "p.record_kind = ?",
-        "p.state = ?",
-        "r.state = ?",
-        "s.state <> ?",
-    ]
-    params: list[object] = [
-        provider,
-        record_kind,
-        ProviderRecordState.ACTIVE.value,
-        ActivityRecordState.ACTIVE.value,
-        ActivitySessionState.DELETED.value,
-    ]
-    if start is not None:
-        clauses.append("r.local_date >= ?")
-        params.append(start)
-    if end is not None:
-        clauses.append("r.local_date <= ?")
-        params.append(end)
-    limit_clause = ""
-    if limit is not None:
-        limit_clause = " LIMIT ?"
-        params.append(limit)
-    rows = _fetch_all(
-        db,
-        "SELECT p.payload FROM provider_records AS p "
-        "JOIN activity_records AS r ON r.provider = p.provider "
-        "AND r.provider_activity_id = p.source_record_id "
-        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-        f"WHERE {' AND '.join(clauses)} ORDER BY r.started_at DESC, "
-        f"r.provider_activity_id DESC{limit_clause}",
-        tuple(params),
-    )
-    return [str(row["payload"]) for row in rows]
-
-
 def _current_version_clause(
     versions: Mapping[str, int], oldest_versions: Mapping[str, int] | None
 ) -> tuple[str, list[object]]:
@@ -925,19 +768,6 @@ def provider_totals(db: Any, provider: str) -> dict[str, Any]:
     }
 
 
-def active_record_payloads(
-    db: Any, *, provider: str, record_kind: str
-) -> dict[str, str]:
-    """Return the stored payload text of each active raw record, by source record id."""
-    rows = _fetch_all(
-        db,
-        "SELECT source_record_id, payload FROM provider_records "
-        "WHERE provider = ? AND record_kind = ? AND state = ?",
-        (provider, record_kind, ProviderRecordState.ACTIVE.value),
-    )
-    return {str(row["source_record_id"]): str(row["payload"]) for row in rows}
-
-
 def set_mapped_version(
     db: Any, *, record_id: int, mapper_version: int, now: str
 ) -> None:
@@ -946,21 +776,6 @@ def set_mapped_version(
         "UPDATE provider_records SET mapped_version = ?, updated_at = ? WHERE id = ?",
         (mapper_version, now, record_id),
     )
-
-
-def count_unresolved_feedback(db: Any, provider: str) -> int:
-    """Count feedback rows whose activity has no activity row of the given provider.
-
-    Feedback rows are only read here and are never changed.
-    """
-    row = _fetch_row(
-        db,
-        "SELECT COUNT(*) AS count FROM activity_feedback AS feedback WHERE NOT EXISTS "
-        "(SELECT 1 FROM activity_records AS record WHERE record.provider = ? "
-        "AND record.provider_activity_id = feedback.activity_id)",
-        (provider,),
-    )
-    return int(row["count"]) if row is not None else 0
 
 
 def observation_natural_key(observation: Observation) -> str:
@@ -2613,20 +2428,16 @@ def active_provider_records(
     provider: str,
     record_kind: str,
     source_record_ids: Sequence[str],
-    *,
-    payloads: bool = False,
 ) -> dict[str, str]:
     """Map source record ids to the payload hash of their active raw record.
 
-    With ``payloads`` the stored payload text is returned instead of its hash.
     Ids without an active raw record are absent.
     """
-    column = "payload" if payloads else "payload_hash"
     found: dict[str, str] = {}
     for chunk in _chunked(list(dict.fromkeys(source_record_ids))):
         for row in _fetch_all(
             db,
-            f"SELECT source_record_id, {column} AS value FROM provider_records "
+            "SELECT source_record_id, payload_hash AS value FROM provider_records "
             "WHERE provider = ? AND record_kind = ? AND state = ? "
             f"AND source_record_id IN ({_placeholders(chunk)})",
             (provider, record_kind, ProviderRecordState.ACTIVE.value, *chunk),

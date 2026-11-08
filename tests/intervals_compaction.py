@@ -10,26 +10,61 @@ from collections.abc import Iterable, Mapping
 from datetime import date, timedelta, tzinfo
 from typing import Any
 
+from intervals_plan_stub import intervals_ingest_plan
+
 from backend.canonical.local_time import local_date
 from backend.canonical.mapping import selected
 from backend.planning.compact_activities import RECENT_ACTIVITY_LIMIT
-from backend.providers.canonical_plans import (
-    INTERVALS_POWER_CURVE_KEY,
-    intervals_ingest_plan,
-)
-from backend.providers.intervals_activity_fields import ACTIVITY_FIELDS
-from backend.providers.intervals_performance_fields import (
-    CONFIGURED_FTP,
-    INTENSITY,
-    TRAINING_LOAD,
-    W_PRIME,
-)
+from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 from backend.providers.snapshot_projection import stored_retrieved_at
 from backend.sync.canonical_ingest import (
     DELETION_EDGE_MARGIN,
     CanonicalIngestCounters,
     DeletionWindow,
     ingest_plan,
+)
+
+INTERVALS_POWER_CURVE_KEY = "cycling_power_profile"
+CONFIGURED_FTP = "icu_ftp"
+W_PRIME = "icu_w_prime"
+
+ACTIVITY_FIELDS = (
+    "id",
+    "start_date_local",
+    "name",
+    "type",
+    "moving_time",
+    "distance",
+    "total_elevation_gain",
+    "elapsed_time",
+    "icu_training_load",
+    "icu_intensity",
+    "icu_ctl",
+    "icu_atl",
+    "icu_ftp",
+    "icu_eftp",
+    "average_heartrate",
+    "max_heartrate",
+    "average_watts",
+    "weighted_average_watts",
+    "icu_weighted_avg_watts",
+    "normalized_power",
+    "average_speed",
+    "max_speed",
+    "icu_weighted_avg_speed",
+    "icu_pace",
+    "vo2max",
+    "vo2_max",
+    "vO2MaxValue",
+    "vo2MaxValue",
+    "icu_vo2max",
+    "feel",
+    "icu_rpe",
+    "paired_event_id",
+    "source",
+    "device_name",
+    "external_id",
+    "file_type",
 )
 
 SPORT_SETTING_FIELDS = (

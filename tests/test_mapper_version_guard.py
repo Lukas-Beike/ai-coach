@@ -38,12 +38,7 @@ REPLAYED_BY: Final[dict[str, tuple[str, ...]]] = {
     "garmin_health_mapping": ("garmin_health_mapping",),
     "garmin_status_mapping": ("garmin_health_mapping",),
     "garmin_training_mapping": ("garmin_health_mapping",),
-    "intervals_activity_detail_mapping": ("intervals_activity_detail_mapping",),
-    "intervals_activity_mapping": ("intervals_activity_mapping",),
-    "intervals_power_curve_mapping": ("intervals_power_curve_mapping",),
-    "intervals_wellness_mapping": ("intervals_wellness_mapping",),
-    "intervals_zone_mapping": ("intervals_wellness_mapping",),
-    "sleep_period_mapping": ("garmin_health_mapping", "intervals_wellness_mapping"),
+    "sleep_period_mapping": ("garmin_health_mapping",),
     # garmin_activity_mapping uses wahoo_device_type for relayed Wahoo rides.
     "wahoo_activity_mapping": ("wahoo_activity_mapping", "garmin_activity_mapping"),
     "wahoo_threshold_mapping": ("wahoo_threshold_mapping",),
@@ -82,28 +77,8 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         (19,),
         "34fd2a6d7884c0b54f9b87ccba040fb83f5cc7c481c69776edbd71c30e87be0e",
     ),
-    "intervals_activity_detail_mapping": (
-        (2,),
-        "d1556e715a8c85384ac6da1444683f6093e8c61599a9c46c8b9d5a4eee483280",
-    ),
-    "intervals_activity_mapping": (
-        (10,),
-        "814125637b58cd0ec59d6484a2db42c46b8f05fa0c279b00e84fa7877b2b005f",
-    ),
-    "intervals_power_curve_mapping": (
-        (1,),
-        "e2496632923707d6e14984261722a6345e7f8745ef4ab0c95a29571396387d1e",
-    ),
-    "intervals_wellness_mapping": (
-        (12,),
-        "3537dd0f49deaf687a8ac32662fa83b02a7a9cf058517272cad53641b9ca9eb2",
-    ),
-    "intervals_zone_mapping": (
-        (12,),
-        "6d741d7c81757d9149da43d1f0635532ef181918a47c6da3485f396eb229ca75",
-    ),
     "sleep_period_mapping": (
-        (19, 12),
+        (19,),
         "77efab15de0cda5414ed02c0d5005a9fe6fb1a650ec103bdb40e01cef065cf0f",
     ),
     "wahoo_activity_mapping": (

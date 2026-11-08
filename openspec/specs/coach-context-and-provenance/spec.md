@@ -200,7 +200,7 @@ The Coach context SHALL list recent activities from the neutral activity summari
 
 #### Scenario: Unchanged values and labels
 - **WHEN** the Coach context is built from synthetic activity summaries
-- **THEN** each activity's values, the per-sport rollups and the source labels equal the former raw-row context, under the neutral keys; summaries of retired Intervals.icu rows keep their values and `Intervals.icu` label until the #1728 purge has removed them.
+- **THEN** each activity's values, the per-sport rollups and the source labels equal the former raw-row context, under the neutral keys; summaries of Intervals.icu rows of a database restored from an earlier release keep their values and `Intervals.icu` label.
 
 #### Scenario: Garmin-only session
 - **WHEN** a recent session has only a Garmin Connect record

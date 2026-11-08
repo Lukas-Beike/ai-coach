@@ -136,22 +136,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/providers/intervals_activity_detail_projection.py",
-      "capabilities": [
-        "activity-ingestion-and-storage",
-        "activity-analysis-and-feedback"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/activities/detail_store.py",
-      "capabilities": [
-        "activity-ingestion-and-storage",
-        "activity-analysis-and-feedback"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/activities/duplicates.py",
       "capabilities": [
         "activity-ingestion-and-storage",
@@ -2973,14 +2957,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/providers/intervals_activity_detail_mapping.py",
-      "capabilities": [
-        "provider-connections",
-        "provider-normalization-and-provenance"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/providers/intervals_activity_fields.py",
       "capabilities": [
         "provider-connections",
@@ -2997,14 +2973,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/providers/intervals_activity_mapping.py",
-      "capabilities": [
-        "provider-connections",
-        "provider-normalization-and-provenance"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/providers/intervals_client.py",
       "capabilities": [
         "provider-connections",
@@ -3014,22 +2982,6 @@
     },
     {
       "path": "backend/providers/intervals_performance_fields.py",
-      "capabilities": [
-        "provider-connections",
-        "provider-normalization-and-provenance"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/providers/intervals_power.py",
-      "capabilities": [
-        "provider-connections",
-        "provider-normalization-and-provenance"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/providers/intervals_wellness_mapping.py",
       "capabilities": [
         "provider-connections",
         "provider-normalization-and-provenance"
@@ -3280,24 +3232,6 @@
     },
     {
       "path": "backend/sync/__init__.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/sync/activity_detail_backfill.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/sync/activity_detail_canonical.py",
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",

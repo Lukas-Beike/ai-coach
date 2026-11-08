@@ -16,6 +16,10 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from intervals_wellness_stub import (
+    map_intervals_athlete_thresholds,
+)
+
 from backend.canonical.records import (
     ActivityRecord,
     MetricValue,
@@ -36,9 +40,6 @@ from backend.db import canonical_store
 from backend.db.canonical_store import WriteOutcome
 from backend.db.schema import initialize_schema
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
-from backend.providers.intervals_wellness_mapping import (
-    map_intervals_athlete_thresholds,
-)
 
 RETRIEVED_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
 STAMP = "2026-10-11T08:00:00+00:00"
