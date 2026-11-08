@@ -37,7 +37,6 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 
-from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.coverage import MetricWindow
 from backend.canonical.domain_records import (
     CategoricalObservation,
@@ -79,7 +78,7 @@ from backend.providers.canonical_plans import (
     current_observation_mapper_versions,
 )
 from backend.providers.garmin_activity_mapping import GARMIN_LABEL
-from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
+from backend.providers.source_labels import INTERVALS_LABEL
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
 from backend.runtime.ports import (
     ActivityReader,
@@ -197,24 +196,20 @@ class CanonicalTableReader(
     ) -> dict[ProviderActivityKey, str]:
         """Return the current summary fingerprint of each requested activity.
 
-        Intervals.icu: ``summary_fingerprint`` of the stored payload, the value
-        stored detail sets and analyses were built with. Other providers: the
-        payload hash of the active raw record.
+        The payload hash of the active raw record. Intervals.icu is an output
+        target: its stored rows have no fingerprint.
         """
         requested: dict[str, list[str]] = {}
         for provider, activity_id in keys:
-            requested.setdefault(provider, []).append(activity_id)
+            if provider != ProviderId.INTERVALS.value:
+                requested.setdefault(provider, []).append(activity_id)
         fingerprints: dict[ProviderActivityKey, str] = {}
         for provider, ids in requested.items():
-            intervals = provider == ProviderId.INTERVALS.value
             stored = canonical_store.active_provider_records(
-                db, provider, ACTIVITY_RECORD_KIND, ids, payloads=intervals
+                db, provider, ACTIVITY_RECORD_KIND, ids
             )
             for activity_id, value in stored.items():
-                if not intervals:
-                    fingerprints[(provider, activity_id)] = value
-                elif (row := _payload_object(value)) is not None:
-                    fingerprints[(provider, activity_id)] = summary_fingerprint(row)
+                fingerprints[(provider, activity_id)] = value
         return fingerprints
 
     def observations(

@@ -96,9 +96,9 @@ class ActivityFingerprintReader(Protocol):
 
     Stored detail sets, analyses, workout profiles and curves record the
     fingerprint they were built from; a different current one makes them stale.
-    For Intervals.icu it is ``summary_fingerprint`` of the stored payload, for
-    other providers the payload hash of the active raw record. Keys without an
-    active raw record are absent. Only the requested payloads are read.
+    It is the payload hash of the active raw record. Keys without an active raw
+    record are absent, and so are Intervals.icu keys: that provider is an output
+    target and its stored rows have no fingerprint.
     """
 
     def summary_fingerprints(

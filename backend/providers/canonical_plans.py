@@ -67,29 +67,7 @@ from backend.providers.garmin_status_mapping import (
 )
 from backend.providers.garmin_status_mapping import map_garmin_status_codes
 from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
-from backend.providers.intervals_activity_mapping import (
-    MAPPER_VERSION as INTERVALS_ACTIVITY_VERSION,
-)
-from backend.providers.intervals_activity_mapping import map_intervals_activities
-from backend.providers.intervals_power_curve_mapping import (
-    MAPPER_VERSION as INTERVALS_POWER_CURVE_VERSION,
-)
-from backend.providers.intervals_power_curve_mapping import map_intervals_power_curve
-from backend.providers.intervals_wellness_mapping import (
-    MAPPER_VERSION as INTERVALS_WELLNESS_VERSION,
-)
-from backend.providers.intervals_wellness_mapping import (
-    map_intervals_athlete_thresholds,
-    map_intervals_wellness,
-)
-from backend.providers.intervals_zone_mapping import (
-    map_intervals_zone_configurations,
-)
 from backend.providers.sleep_period_mapping import map_sleep_periods
-from backend.providers.snapshot_projection import (
-    intervals_snapshot_is_stripped,
-    stored_retrieved_at,
-)
 from backend.providers.wahoo_activity_mapping import (
     MAPPER_VERSION as WAHOO_ACTIVITY_VERSION,
 )
@@ -112,20 +90,11 @@ from backend.providers.wahoo_threshold_mapping import (
 )
 
 ACTIVITY_RECORD_KIND: Final = "activity"
-WELLNESS_RECORD_KIND: Final = "wellness"
-ATHLETE_RECORD_KIND: Final = "athlete"
 HEALTH_RECORD_KIND: Final = "health"
-POWER_CURVE_RECORD_KIND: Final = "power_curve"
 WAHOO_POWER_ZONES_RECORD_KIND: Final = "power_zones"
 WAHOO_USER_RECORD_KIND: Final = "user"
 
-ATHLETE_RECORD_ID: Final = "athlete"
-POWER_CURVE_RECORD_ID: Final = "power_curve"
-# The snapshot key IntervalsReader stores the fetched power curve envelope under.
-INTERVALS_POWER_CURVE_KEY: Final = "cycling_power_profile"
 MAX_RECORD_ID_LENGTH: Final = 256
-INTERVALS_ACTIVITY_ID_KEY: Final = "id"
-INTERVALS_WELLNESS_ID_KEY: Final = "id"
 GARMIN_ACTIVITY_ID_KEY: Final = "activityId"
 WAHOO_ACTIVITY_ID_KEY: Final = "id"
 WAHOO_SYNCED_AT_KEY: Final = "synced_at"
@@ -253,186 +222,10 @@ class IngestPlan:
     activity_ids_complete: bool = False
 
 
-def intervals_ingest_plan(
-    raw: object,
-    *,
-    zone: tzinfo,
-    retrieved_at: datetime,
-    power_curve: object = None,
-) -> IngestPlan:
-    """Plan the canonical rows of one Intervals.icu ``raw_provider_data`` block.
-
-    ``power_curve`` is the snapshot's stored power curve envelope; a mapping
-    becomes the ``power_curve`` raw record and its fetch and points, anything else
-    plans nothing for it, so the stored curve rows stay as they are.
-    """
-    curve = _power_curve_items(power_curve, zone=zone, retrieved_at=retrieved_at)
-    if not isinstance(raw, Mapping):
-        return IngestPlan(
-            provider=ProviderId.INTERVALS,
-            raw_records=curve.raw_records,
-            domain_batches=curve.batches,
-        )
-    activity_rows, raw_records, skipped, present = _activity_batch(
-        raw.get("activities"),
-        id_key=INTERVALS_ACTIVITY_ID_KEY,
-        mapper=lambda rows: map_intervals_activities(
-            rows, zone=zone, retrieved_at=retrieved_at
-        ),
-        mapper_version=INTERVALS_ACTIVITY_VERSION,
-        zone=zone,
-    )
-    observations: list[ObservationItem] = []
-    batches: list[DomainBatch] = []
-    owners: dict[str, str] = {}
-    wellness_rows = raw.get("wellness")
-    if isinstance(wellness_rows, list):
-        valid_rows: list[Any] = []
-        for row in wellness_rows:
-            row_id = _row_id(row, INTERVALS_WELLNESS_ID_KEY)
-            if row_id is None:
-                skipped += 1
-                continue
-            valid_rows.append(row)
-            owners[row_id] = row_id
-            raw_records.append(
-                RawRecord(WELLNESS_RECORD_KIND, row_id, row, INTERVALS_WELLNESS_VERSION)
-            )
-            batches.append(
-                _wellness_batch(row, row_id, zone=zone, retrieved_at=retrieved_at)
-            )
-        wellness = map_intervals_wellness(valid_rows, retrieved_at=retrieved_at)
-        # A wellness value names its row id as its source record.
-        observations.extend(
-            ObservationItem(
-                observation,
-                INTERVALS_WELLNESS_VERSION,
-                owner=_owned_by(observation, owners),
-            )
-            for observation in wellness.records
-        )
-    athlete = raw.get("athlete")
-    if isinstance(athlete, dict):
-        raw_records.append(
-            RawRecord(
-                ATHLETE_RECORD_KIND,
-                ATHLETE_RECORD_ID,
-                athlete,
-                INTERVALS_WELLNESS_VERSION,
-            )
-        )
-        thresholds = map_intervals_athlete_thresholds(
-            athlete,
-            observed_on=local_date(retrieved_at, zone),
-            retrieved_at=retrieved_at,
-        )
-        owners[ATHLETE_RECORD_ID] = local_date(retrieved_at, zone).isoformat()
-        observations.extend(
-            ObservationItem(
-                observation, INTERVALS_WELLNESS_VERSION, owner=ATHLETE_RECORD_ID
-            )
-            for observation in thresholds.records
-        )
-        batches.append(_athlete_batch(athlete, retrieved_at=retrieved_at))
-    elif athlete is not None:
-        skipped += 1
-    return IngestPlan(
-        provider=ProviderId.INTERVALS,
-        raw_records=(*raw_records, *curve.raw_records),
-        activities=tuple(activity_rows),
-        observations=tuple(observations),
-        present_activity_ids=frozenset(present),
-        activity_ids_complete=_ids_complete(
-            raw.get("activities"), INTERVALS_ACTIVITY_ID_KEY
-        ),
-        skipped_invalid=skipped,
-        domain_batches=(*batches, *curve.batches),
-        observation_owners=owners,
-    )
-
-
 def _owned_by(observation: Observation, owners: Collection[str]) -> str | None:
     """Return the observation's source record id when it is one of ``owners``."""
     source_id = observation.provenance.source_record_id
     return source_id if source_id in owners else None
-
-
-@dataclass(frozen=True, slots=True)
-class _PowerCurveItems:
-    """The raw record and the domain batch a stored power curve envelope plans."""
-
-    raw_records: tuple[RawRecord, ...] = ()
-    batches: tuple[DomainBatch, ...] = ()
-
-
-def _power_curve_items(
-    envelope: object, *, zone: tzinfo, retrieved_at: datetime
-) -> _PowerCurveItems:
-    """Return the raw record and the batch of a stored power curve envelope."""
-    if not isinstance(envelope, Mapping) or not envelope:
-        return _PowerCurveItems()
-    return _PowerCurveItems(
-        raw_records=(
-            RawRecord(
-                POWER_CURVE_RECORD_KIND,
-                POWER_CURVE_RECORD_ID,
-                envelope,
-                INTERVALS_POWER_CURVE_VERSION,
-            ),
-        ),
-        batches=(_power_curve_batch(envelope, zone=zone, fetched_at=retrieved_at),),
-    )
-
-
-def _power_curve_batch(
-    envelope: object, *, zone: tzinfo, fetched_at: datetime
-) -> DomainBatch:
-    """Return the fetch and points of the Intervals.icu power curve record.
-
-    An envelope that reports no usable curve keeps the stored points (None).
-    """
-    mapped = map_intervals_power_curve(
-        envelope,
-        source_record_id=POWER_CURVE_RECORD_ID,
-        fetched_at=fetched_at,
-        zone=zone,
-    )
-    return DomainBatch(
-        POWER_CURVE_RECORD_ID,
-        INTERVALS_POWER_CURVE_VERSION,
-        power_curve=mapped.points,
-        power_curve_fetch=mapped.fetch,
-    )
-
-
-def _wellness_batch(
-    row: Mapping[str, Any], row_id: str, *, zone: tzinfo, retrieved_at: datetime
-) -> DomainBatch:
-    """Return the domain rows of one Intervals.icu wellness row."""
-    return DomainBatch(
-        row_id,
-        INTERVALS_WELLNESS_VERSION,
-        sleep_periods=map_sleep_periods(
-            row,
-            provider=ProviderId.INTERVALS,
-            source_record_id=row_id,
-            retrieved_at=retrieved_at,
-            zone=zone,
-        ),
-    )
-
-
-def _athlete_batch(
-    athlete: Mapping[str, Any], *, retrieved_at: datetime
-) -> DomainBatch:
-    """Return the zone configurations of the Intervals.icu athlete record."""
-    return DomainBatch(
-        ATHLETE_RECORD_ID,
-        INTERVALS_WELLNESS_VERSION,
-        zones=map_intervals_zone_configurations(
-            athlete, source_record_id=ATHLETE_RECORD_ID, retrieved_at=retrieved_at
-        ),
-    )
 
 
 def _garmin_batch(
@@ -881,43 +674,7 @@ def _wahoo_threshold_items(
     return tuple(raw), observations, len(mapped.issues)
 
 
-def intervals_snapshot_ingest_plan(
-    snapshot: Mapping[str, Any], *, zone: tzinfo, include_power_curve: bool = True
-) -> IngestPlan:
-    """Plan the Intervals.icu rows of one stored snapshot for the backfill.
-
-    A snapshot without a sync time or without a ``raw_provider_data`` block has no
-    mapper input. Its ``recent_activities`` fallback is a compact read model, so it
-    is not mapped and counts as one invalid row. A snapshot stored without its
-    activity sections (``intervals_snapshot_is_stripped``) plans only what it still
-    carries; with nothing left to map it plans nothing and counts no invalid row.
-    The stored power curve envelope is planned with the raw block unless
-    ``include_power_curve`` is False: an older snapshot's curve is superseded.
-    """
-    retrieved_at = stored_retrieved_at(snapshot, zone=zone)
-    raw = snapshot.get("raw_provider_data")
-    curve = snapshot.get(INTERVALS_POWER_CURVE_KEY) if include_power_curve else None
-    if intervals_snapshot_is_stripped(snapshot) and not isinstance(raw, Mapping):
-        if retrieved_at is None:
-            return IngestPlan(provider=ProviderId.INTERVALS)
-        return intervals_ingest_plan(
-            None, zone=zone, retrieved_at=retrieved_at, power_curve=curve
-        )
-    if retrieved_at is None or not isinstance(raw, Mapping):
-        return IngestPlan(provider=ProviderId.INTERVALS, skipped_invalid=1)
-    return intervals_ingest_plan(
-        raw, zone=zone, retrieved_at=retrieved_at, power_curve=curve
-    )
-
-
 _MAPPER_VERSIONS: Final[dict[tuple[str, str], int]] = {
-    (ProviderId.INTERVALS.value, ACTIVITY_RECORD_KIND): INTERVALS_ACTIVITY_VERSION,
-    (ProviderId.INTERVALS.value, WELLNESS_RECORD_KIND): INTERVALS_WELLNESS_VERSION,
-    (ProviderId.INTERVALS.value, ATHLETE_RECORD_KIND): INTERVALS_WELLNESS_VERSION,
-    (
-        ProviderId.INTERVALS.value,
-        POWER_CURVE_RECORD_KIND,
-    ): INTERVALS_POWER_CURVE_VERSION,
     (ProviderId.GARMIN.value, ACTIVITY_RECORD_KIND): GARMIN_ACTIVITY_VERSION,
     (ProviderId.GARMIN.value, HEALTH_RECORD_KIND): GARMIN_HEALTH_VERSION,
     (ProviderId.WAHOO.value, ACTIVITY_RECORD_KIND): WAHOO_ACTIVITY_VERSION,
@@ -941,8 +698,6 @@ def current_mapper_versions() -> dict[str, int]:
 
 _OBSERVATION_RECORD_KINDS: Final = frozenset(
     {
-        WELLNESS_RECORD_KIND,
-        ATHLETE_RECORD_KIND,
         HEALTH_RECORD_KIND,
         WAHOO_POWER_ZONES_RECORD_KIND,
         WAHOO_USER_RECORD_KIND,
@@ -1008,48 +763,6 @@ def reprojection_plan(
             training_loads=training_loads,
         )
     source_id = str(raw_row["source_record_id"])
-    if kind == WELLNESS_RECORD_KIND:
-        wellness = map_intervals_wellness([payload], retrieved_at=fetched)
-        return IngestPlan(
-            provider=provider,
-            observations=tuple(
-                ObservationItem(
-                    observation, INTERVALS_WELLNESS_VERSION, owner=source_id
-                )
-                for observation in wellness.records
-            ),
-            observation_owners={source_id: source_id},
-            domain_batches=(
-                _wellness_batch(
-                    payload,
-                    str(raw_row["source_record_id"]),
-                    zone=zone,
-                    retrieved_at=fetched,
-                ),
-            ),
-        )
-    if kind == ATHLETE_RECORD_KIND:
-        thresholds = map_intervals_athlete_thresholds(
-            payload, observed_on=local_date(fetched, zone), retrieved_at=fetched
-        )
-        return IngestPlan(
-            provider=provider,
-            observations=tuple(
-                ObservationItem(
-                    observation, INTERVALS_WELLNESS_VERSION, owner=source_id
-                )
-                for observation in thresholds.records
-            ),
-            observation_owners={source_id: local_date(fetched, zone).isoformat()},
-            domain_batches=(_athlete_batch(payload, retrieved_at=fetched),),
-        )
-    if kind == POWER_CURVE_RECORD_KIND:
-        return IngestPlan(
-            provider=provider,
-            domain_batches=(
-                _power_curve_batch(payload, zone=zone, fetched_at=fetched),
-            ),
-        )
     if kind == WAHOO_POWER_ZONES_RECORD_KIND:
         zones = map_wahoo_power_zones([payload], zone=zone, retrieved_at=fetched)
         return _threshold_observation_plan(
@@ -1092,18 +805,7 @@ def _reprojected_activities(
     training_loads: TrainingLoadLookup | None = None,
 ) -> IngestPlan:
     """Re-map one stored activity row with the same mapper and fetch time as its ingest."""
-    if provider is ProviderId.INTERVALS:
-        items, _raw, skipped, _present = _activity_batch(
-            [payload],
-            id_key=INTERVALS_ACTIVITY_ID_KEY,
-            mapper=lambda rows: map_intervals_activities(
-                rows, zone=zone, retrieved_at=fetched
-            ),
-            mapper_version=INTERVALS_ACTIVITY_VERSION,
-            zone=zone,
-            retrieved_at=fetched,
-        )
-    elif provider is ProviderId.WAHOO:
+    if provider is ProviderId.WAHOO:
         items, _raw, skipped, _present = _activity_batch(
             [payload],
             id_key=WAHOO_ACTIVITY_ID_KEY,

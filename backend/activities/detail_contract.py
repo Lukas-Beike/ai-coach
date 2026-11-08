@@ -42,12 +42,9 @@ from backend.canonical.vocabulary import (
     ZoneMetric,
 )
 from backend.db.activity_detail_store import StoredDetailSet
-from backend.providers.intervals_activity_detail_projection import (
-    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
-    _downsample_series,
-)
 
 ACTIVITY_DETAIL_CONTRACT: Final = "activity_detail.v1"
+COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS: Final = 2000
 
 _ENVELOPE_KEYS: Final = (
     "activity_feedback",
@@ -108,6 +105,34 @@ class ProviderStatus:
 
     stale: bool = False
     load_error: Mapping[str, Any] | None = None
+
+
+def _downsample_series(
+    values: Sequence[Any], *, limit: int = COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
+) -> list[Any]:
+    """Keep at most ``limit`` evenly spaced points, always including both ends.
+
+    Floats that are not finite and values other than numbers, booleans and
+    short text become None.
+    """
+    cleaned = [_series_scalar(value) for value in values]
+    if len(cleaned) <= limit:
+        return cleaned
+    indexes = {0, len(cleaned) - 1}
+    indexes.update(
+        round(index * (len(cleaned) - 1) / (limit - 1)) for index in range(limit)
+    )
+    return [cleaned[index] for index in sorted(indexes)]
+
+
+def _series_scalar(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:80]
+    return None
 
 
 def measured_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:

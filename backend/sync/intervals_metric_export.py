@@ -1,9 +1,8 @@
 """Intervals.icu implementation of the metric export port.
 
 REST transport lives in ``backend.providers.intervals_client``. Field names are
-the ones the read mapping (``backend.providers.intervals_wellness_mapping``)
-accepts, so an exported value reads back as the same canonical metric. The
-client is resolved per call; a preview only reads the records of offered values.
+the Intervals.icu wellness field names. The client is resolved per call; a
+preview only reads the records of offered values.
 """
 
 from __future__ import annotations

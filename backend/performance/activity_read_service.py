@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo
 from backend.activities.activity_reference import ActivityReferenceResolver
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.detail_contract import measured_order
-from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.read_service import ActivityReadService, ActivitySummarySource
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.profile import timezone_name
@@ -50,7 +49,6 @@ class ActivityAnalysisReadService(ActivityReadService):
         database_manager: Any,
         summaries: ActivitySummarySource,
         feedback_service: Any,
-        detail_store: ActivityDetailStore | None = None,
         *,
         read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
@@ -62,7 +60,6 @@ class ActivityAnalysisReadService(ActivityReadService):
             database_manager,
             summaries,
             feedback_service,
-            detail_store,
             read_equipment=read_equipment,
             references=references,
             coverage=canonical.coverage,

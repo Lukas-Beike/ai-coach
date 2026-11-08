@@ -38,7 +38,6 @@ from backend.providers.canonical_plans import (
 )
 from backend.providers.snapshot_projection import (
     project_garmin_snapshot,
-    project_intervals_snapshot,
     stored_retrieved_at,
 )
 from backend.providers.wahoo_activity_mapping import map_wahoo_activities
@@ -47,7 +46,7 @@ from backend.providers.wahoo_threshold_mapping import map_wahoo_threshold_payloa
 COVERAGE_KEY_PREFIX: Final = "canonical_coverage:"
 # The providers whose ingest persists a coverage summary. A provider without a
 # canonical ingest is absent here, so it never blocks the persisted path.
-CANONICAL_COVERAGE_PROVIDERS: Final = (ProviderId.INTERVALS, ProviderId.GARMIN)
+CANONICAL_COVERAGE_PROVIDERS: Final = (ProviderId.GARMIN,)
 # Providers ingested live without a stored snapshot. Their persisted summary is
 # reported when present, after the snapshot-ingested providers.
 LIVE_COVERAGE_PROVIDERS: Final = (ProviderId.WAHOO,)
@@ -55,36 +54,6 @@ LIVE_COVERAGE_PROVIDERS: Final = (ProviderId.WAHOO,)
 
 def coverage_key(provider: ProviderId) -> str:
     return f"{COVERAGE_KEY_PREFIX}{provider.value}"
-
-
-def intervals_snapshot_coverage(
-    snapshot: object, *, zone: tzinfo
-) -> ProviderCoverage | None:
-    """Summarize a stored Intervals.icu snapshot, or None without a stored sync time."""
-    stored_at = stored_retrieved_at(snapshot, zone=zone)
-    if stored_at is None:
-        return None
-    activity_time = (
-        stored_retrieved_at(
-            {"synced_at": snapshot.get("activities_synced_at")}, zone=zone
-        )
-        if isinstance(snapshot, Mapping) and "activities_synced_at" in snapshot
-        else stored_at
-    )
-    activities, _activity_observations = project_intervals_snapshot(
-        snapshot, zone=zone, retrieved_at=activity_time or stored_at
-    )
-    _observation_activities, observations = project_intervals_snapshot(
-        snapshot, zone=zone, retrieved_at=stored_at
-    )
-    return summarize_provider(
-        ProviderId.INTERVALS,
-        stored_at,
-        activities,
-        observations,
-        activities_retrieved_at=activity_time,
-        observations_retrieved_at=stored_at,
-    )
 
 
 def garmin_payload_coverage(

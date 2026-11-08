@@ -304,8 +304,31 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
 # tests/test_canonical_enum_retirement.py), never by deletion.
 UNPRODUCED_LOAD_MODELS: Final[Mapping[LoadModel, str]] = {
     LoadModel.TRIMP: "no provider reports TRIMP; retained so a stored value stays readable",
+    LoadModel.INTERVALS_TRAINING_LOAD: (
+        "no longer produced: Intervals.icu is output-only and its activity mapper "
+        "is retired; retained so a restored backup's stored value stays readable"
+    ),
 }
 UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
+    **dict.fromkeys(
+        (
+            MetricKind.HRV_SDNN,
+            MetricKind.CTL,
+            MetricKind.ATL,
+            MetricKind.FORM,
+            MetricKind.EFTP,
+            MetricKind.SUBJECTIVE_FATIGUE,
+            MetricKind.SUBJECTIVE_SORENESS,
+            MetricKind.SUBJECTIVE_STRESS,
+            MetricKind.SUBJECTIVE_MOOD,
+            MetricKind.W_PRIME,
+            MetricKind.HEIGHT,
+            MetricKind.ZONE2_PACE,
+            MetricKind.INDOOR_FTP,
+        ),
+        "no longer produced: Intervals.icu is output-only and its wellness mapper is "
+        "retired; retained so a restored backup's stored value stays readable",
+    ),
     MetricKind.TRAINING_LOAD: (
         "never produced: activity loads carry LoadModel and Garmin's daily load is "
         "ACUTE_LOAD; retained so a stored value stays readable"
