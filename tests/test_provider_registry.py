@@ -38,27 +38,21 @@ TWO_DAYS = 48 * 60 * 60
 THREE_HOURS = 3 * 60 * 60
 
 PREVIOUS_STALE_SECONDS: dict[tuple[str, str], int] = {
-    ("intervals", "activities"): TWO_DAYS,
     ("intervals", "competitions"): TWO_DAYS,
-    ("intervals", "performance"): TWO_DAYS,
     ("garmin", "data"): TWO_DAYS,
     ("weather", "forecast"): THREE_HOURS,
     ("calendar", "events"): TWO_DAYS,
     ("wahoo", "activities"): TWO_DAYS,
 }
 PREVIOUS_LABELS: dict[tuple[str, str], str] = {
-    ("intervals", "activities"): "Intervals.icu · Training",
     ("intervals", "competitions"): "Intervals.icu · Wettkämpfe",
-    ("intervals", "performance"): "Intervals.icu · Leistung",
     ("garmin", "data"): "Garmin",
     ("weather", "forecast"): "Open-Meteo",
     ("calendar", "events"): "Gemeinsamer Kalender",
     ("wahoo", "activities"): "Wahoo",
 }
 PREVIOUS_PROJECTION: list[tuple[str, str, str, bool]] = [
-    ("intervals", "activities", "Intervals.icu · Training", True),
     ("intervals", "competitions", "Intervals.icu · Wettkämpfe", False),
-    ("intervals", "performance", "Intervals.icu · Leistung", True),
     ("garmin", "data", "Garmin", True),
     ("weather", "forecast", "Open-Meteo", True),
     ("calendar", "events", "Gemeinsamer Kalender", True),
@@ -188,7 +182,7 @@ class DefaultDescriptorParityTests(unittest.TestCase):
                 )
 
     def test_resync_keys_match_full_resync_table(self) -> None:
-        for provider_id in ("intervals", "garmin", "wahoo"):
+        for provider_id in ("garmin", "wahoo"):
             with self.subTest(provider_id=provider_id):
                 keys = PROVIDER_RESYNC_KEYS[provider_id]
                 self.assertEqual(
@@ -206,7 +200,7 @@ class DefaultDescriptorParityTests(unittest.TestCase):
     def test_capabilities_are_assigned_per_provider(self) -> None:
         registry = DEFAULT_PROVIDER_REGISTRY
         self.assertEqual(
-            ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.ACTIVITIES)
+            ("garmin", "wahoo"), registry.ids_with(Capability.ACTIVITIES)
         )
         self.assertEqual(
             ("intervals", "wahoo"), registry.ids_with(Capability.WORKOUT_EXPORT)
@@ -214,7 +208,7 @@ class DefaultDescriptorParityTests(unittest.TestCase):
         self.assertEqual(("intervals",), registry.ids_with(Capability.COMPETITIONS))
         self.assertEqual(("weather",), registry.ids_with(Capability.WEATHER_FORECAST))
         self.assertEqual(("calendar",), registry.ids_with(Capability.PUBLIC_CALENDAR))
-        self.assertEqual(("intervals",), registry.ids_with(Capability.PLANNED_EVENTS))
+        self.assertEqual((), registry.ids_with(Capability.PLANNED_EVENTS))
         self.assertEqual(("intervals",), registry.ids_with(Capability.METRIC_EXPORT))
         self.assertEqual(
             {
@@ -229,12 +223,8 @@ class DefaultDescriptorParityTests(unittest.TestCase):
             registry.get("intervals").metric_exports,
         )
         # Wahoo reads body and threshold values only as lowest-priority fallbacks.
-        self.assertEqual(
-            ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.BODY)
-        )
-        self.assertEqual(
-            ("intervals", "garmin", "wahoo"), registry.ids_with(Capability.THRESHOLDS)
-        )
+        self.assertEqual(("garmin", "wahoo"), registry.ids_with(Capability.BODY))
+        self.assertEqual(("garmin", "wahoo"), registry.ids_with(Capability.THRESHOLDS))
 
     def test_registry_exposes_default_descriptors_unchanged(self) -> None:
         self.assertEqual(DEFAULT_PROVIDER_DESCRIPTORS, DEFAULT_PROVIDER_REGISTRY.all())
@@ -401,17 +391,7 @@ class DescriptorValidationTests(unittest.TestCase):
         self.assertEqual(("mock_running", "mock_status"), descriptor.resync_keys)
 
 
-INTERVALS_JOB_TYPES = frozenset(
-    {
-        "refresh",
-        "performance_refresh",
-        "activity_details",
-        "plan_push",
-        "competition_push",
-        "nutrition_sync",
-        "historical_backfill",
-    }
-)
+INTERVALS_JOB_TYPES = frozenset({"plan_push", "competition_push", "nutrition_sync"})
 PREVIOUS_JOB_SUPPORT: dict[str, frozenset[str]] = {
     "intervals": INTERVALS_JOB_TYPES,
     "garmin": frozenset(
@@ -429,27 +409,22 @@ PREVIOUS_JOB_SUPPORT: dict[str, frozenset[str]] = {
     "wahoo": frozenset({"refresh", "plan_push"}),
 }
 PREVIOUS_REFRESH_FIELDS: dict[str, frozenset[str]] = {
-    "intervals": frozenset({"days", "reason", "end_date", "automatic", "one_off"}),
+    "intervals": frozenset({"reason"}),
     "garmin": frozenset({"days", "reason", "end_date"}),
     "calendar": frozenset({"reason"}),
     "weather": frozenset({"force", "reason"}),
 }
 PREVIOUS_MANUAL_ROUTES: tuple[tuple[str, str], ...] = (
-    ("/api/sync", "intervals"),
     ("/api/garmin/sync", "garmin"),
     ("/api/weather/sync", "weather"),
     ("/api/external-calendar/sync", "calendar"),
     ("/api/wahoo/sync", "wahoo"),
 )
 PREVIOUS_FULL_RESYNC_ROUTES: tuple[tuple[str, str], ...] = (
-    ("/api/intervals/full-resync", "intervals"),
     ("/api/garmin/full-resync", "garmin"),
     ("/api/wahoo/full-resync", "wahoo"),
 )
 PREVIOUS_PERIOD_MESSAGES = {
-    "intervals": (
-        "Der Zeitraum für intervals muss -1 oder zwischen 1 und 365 Tagen liegen."
-    ),
     "garmin": "Der Zeitraum für garmin muss -1 oder zwischen 1 und 90 Tagen liegen.",
 }
 PREVIOUS_NOT_CONFIGURED_MESSAGES = {
@@ -516,31 +491,31 @@ class OrchestrationParityTests(unittest.TestCase):
 
     def test_sync_period_defaults_match_server_table(self) -> None:
         self.assertEqual(
-            {"intervals": 84, "garmin": 84, "wahoo": 84},
+            {"garmin": 84, "wahoo": 84},
             DEFAULT_PROVIDER_REGISTRY.sync_period_defaults(),
         )
 
     def test_daily_order_matches_scheduler_ranks(self) -> None:
         self.assertEqual(
-            ("weather", "calendar", "garmin", "intervals", "wahoo"),
+            ("weather", "calendar", "garmin", "wahoo"),
             DEFAULT_PROVIDER_REGISTRY.daily_order(),
         )
 
     def test_startup_order_matches_scheduler_ranks(self) -> None:
         self.assertEqual(
-            ("calendar", "intervals", "garmin", "weather", "wahoo"),
+            ("calendar", "garmin", "weather", "wahoo"),
             DEFAULT_PROVIDER_REGISTRY.startup_order(),
         )
 
     def test_daily_marker_ids_match_daily_marker_providers(self) -> None:
         self.assertEqual(
-            frozenset({"intervals", "garmin", "calendar", "wahoo"}),
+            frozenset({"garmin", "calendar", "wahoo"}),
             DEFAULT_PROVIDER_REGISTRY.daily_marker_ids(),
         )
 
     def test_coach_refresh_targets_match_authorization_order(self) -> None:
         self.assertEqual(
-            ("intervals", "garmin", "calendar", "weather", "wahoo"),
+            ("garmin", "calendar", "weather", "wahoo"),
             DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets(),
         )
 
@@ -550,7 +525,7 @@ class OrchestrationParityTests(unittest.TestCase):
             for descriptor in DEFAULT_PROVIDER_REGISTRY.all()
             if descriptor.coach_waits_for_completion
         ]
-        self.assertEqual(["intervals", "garmin"], waiting)
+        self.assertEqual(["garmin", "wahoo"], waiting)
 
     def test_resync_key_map_matches_full_resync_table_in_order(self) -> None:
         mapping = DEFAULT_PROVIDER_REGISTRY.resync_key_map()
@@ -574,7 +549,6 @@ class OrchestrationParityTests(unittest.TestCase):
 
     def test_manual_route_payloads_match_sync_command_builders(self) -> None:
         expected = {
-            "intervals": (True, (("reason", "manual"),)),
             "garmin": (True, (("reason", "manual"),)),
             "calendar": (False, (("reason", "manuell"),)),
             "weather": (False, (("reason", "manuell"), ("force", True))),
@@ -672,20 +646,20 @@ class CustomOrchestrationDescriptorTests(unittest.TestCase):
             frozenset({"days", "reason"}), registry.refresh_fields("wahoo-mock")
         )
         self.assertEqual(
-            {"intervals": 84, "garmin": 84, "wahoo": 84, "wahoo-mock": 30},
+            {"garmin": 84, "wahoo": 84, "wahoo-mock": 30},
             registry.sync_period_defaults(),
         )
         self.assertEqual(
-            ("weather", "calendar", "garmin", "intervals", "wahoo", "wahoo-mock"),
+            ("weather", "calendar", "garmin", "wahoo", "wahoo-mock"),
             registry.daily_order(),
         )
         self.assertEqual(
-            ("calendar", "wahoo-mock", "intervals", "garmin", "weather", "wahoo"),
+            ("calendar", "wahoo-mock", "garmin", "weather", "wahoo"),
             registry.startup_order(),
         )
         self.assertIn("wahoo-mock", registry.daily_marker_ids())
         self.assertEqual(
-            ("intervals", "garmin", "calendar", "weather", "wahoo", "wahoo-mock"),
+            ("garmin", "calendar", "weather", "wahoo", "wahoo-mock"),
             registry.coach_refresh_targets(),
         )
         self.assertEqual(

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from intervals_compaction import compact_sport_settings
 from zone_settings_reference import (
     canonical_sport_inputs,
     canonical_zone_settings,
@@ -38,7 +39,6 @@ from backend.history.undo_service import HistoryUndoService
 from backend.planning import calendar_read_model
 from backend.providers.intervals_zone_mapping import map_intervals_zone_configurations
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.intervals_compaction import compact_sport_settings
 
 RETRIEVED_AT = datetime(2026, 10, 11, 6, tzinfo=UTC)
 NOW = "2026-10-11T06:00:00+00:00"

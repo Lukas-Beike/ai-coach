@@ -32,7 +32,6 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
             "profile_service",
             "database_manager",
             "database_lock",
-            "duplicate_activity",
             "intervals_client",
         )
         dependencies = {name: Mock(name=name) for name in names}
@@ -55,7 +54,6 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
                         "plan_repair_manifest",
                         "plan_push_command",
                         "provider_refresh_command",
-                        "duplicate_activity",
                     )
                 }
             ),
@@ -106,8 +104,6 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
             deps["plan_repair_manifest"].return_value,
             deps["plan_push_command"].return_value,
             deps["provider_refresh_command"].return_value,
-            duplicate_activity=deps["duplicate_activity"].return_value,
-            intervals_client_factory=deps["intervals_client"],
             nutrition_diary=deps["nutrition_diary_service"].return_value,
         )
         constructors["CoachAthleteRecordToolService"].assert_called_once_with(

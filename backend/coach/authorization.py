@@ -22,8 +22,12 @@ def coach_session_key(session_csrf_hash: str) -> str:
 def request_target_enum(
     registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> list[str]:
-    """Return the request targets: local first, then Coach refresh providers by rank."""
-    return [LOCAL_REQUEST_TARGET, *registry.coach_refresh_targets()]
+    """Return the request targets: local, the output-only write targets, then refresh providers by rank."""
+    return [
+        LOCAL_REQUEST_TARGET,
+        *registry.coach_write_targets(),
+        *registry.coach_refresh_targets(),
+    ]
 
 
 def request_schema(

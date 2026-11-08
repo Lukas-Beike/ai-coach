@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import snapshot_seed
+
 from backend.canonical import garmin_payload
 from backend.db import garmin_store
 from backend.db.manager import DatabaseManager
@@ -815,7 +817,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
             return garmin_store.read_view(db)
 
     def store_intervals_snapshot(self, activities):
-        self.sync_state.save_snapshot(
+        snapshot_seed.save_snapshot(self.sync_state, 
             {"synced_at": "2026-09-20T11:00:00", "recent_activities": activities}
         )
 

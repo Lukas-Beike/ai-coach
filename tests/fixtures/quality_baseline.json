@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "4bbc14b8a0f45c786bf1899e497a0aa83f234fce",
+  "base": "3e9ae4e595d87c00c1ed9dac7b3de39f3ca8e3b3",
   "versions": {
     "ruff": "0.17.3",
     "mypy": "2.4.1"
@@ -86,12 +86,6 @@
     },
     {
       "tool": "ruff",
-      "path": "backend/sync/library.py",
-      "code": "ARG002",
-      "message_sha256": "f6772a07caa6c6987ae60b2292231352aaf7639b6bcfe90946388269249b38e1"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/sync/wahoo_workout_export.py",
       "code": "ARG002",
       "message_sha256": "fcfd3fe4ee166a29b87591ac16a39846c245d84b11225b61048102e0ea69d866"
@@ -128,33 +122,15 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_sync_executor.py",
-      "code": "arg-type",
-      "message_sha256": "0956c666a923da5a115b49fe3dbb06c9a765b1aea5b3f51ace020a40960d8ab6"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_layering_contracts.py",
       "code": "arg-type",
       "message_sha256": "10961fea979509f4856fc0d143fd27ad84b772fbfe5853cfca5e0dc21d691ffc"
     },
     {
       "tool": "mypy",
-      "path": "tests/test_sync_intervals.py",
-      "code": "arg-type",
-      "message_sha256": "1700ef4aeab756114a9196c6105dd44a9d20a852e87555ba00bd366a1df6f8ef"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_worker.py",
       "code": "arg-type",
       "message_sha256": "197cf02cc28324d81cd944715a85befacf58c62f567adceeb29340a7f2b878aa"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_executor.py",
-      "code": "arg-type",
-      "message_sha256": "1c1223a819a3f355d8614d19c65050a86f894f1560a2804db67a22aaee5bb9d9"
     },
     {
       "tool": "mypy",
@@ -173,12 +149,6 @@
       "path": "backend/http_api/handler.py",
       "code": "arg-type",
       "message_sha256": "202e95d88c01d1a85fa2f434c5a0096706c95cfdc41dcab4a22472c904bb44b0"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_intervals.py",
-      "code": "arg-type",
-      "message_sha256": "20df52070c7cbb6aefb93f061f5f462ebc387f51c717054e0cb145a8332b726e"
     },
     {
       "tool": "mypy",
@@ -209,12 +179,6 @@
       "path": "tests/test_sync_executor.py",
       "code": "arg-type",
       "message_sha256": "34d81fff6a2322d236e7a27db20b4675bd8c9204dd1c95b978cd2bbcd2f997a2"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_planned_units.py",
-      "code": "arg-type",
-      "message_sha256": "3752d60f1464ca74bc92b22a587a37ffd7e01ac40903015e3ef8512f4d57129e"
     },
     {
       "tool": "mypy",
@@ -290,21 +254,9 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/sync/executor.py",
-      "code": "arg-type",
-      "message_sha256": "530a51c91fbfa215c0ccd47e2a7f8f0c30332690eab03333160b2ba27982b6cf"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_public_state_calendar_projection.py",
       "code": "arg-type",
       "message_sha256": "543e8ca43935d83c5d5f0cbcc6c151f0c62dcb762d86da4b81b11a3f88c52d29"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/executor.py",
-      "code": "arg-type",
-      "message_sha256": "54675efae78d2298f72fc6821d8a0ee9fcd38848c5c0d8e889716a8795435a11"
     },
     {
       "tool": "mypy",
@@ -371,12 +323,6 @@
       "path": "tests/test_sync_executor.py",
       "code": "arg-type",
       "message_sha256": "6841e9b280db9b30dd86cf9dfda64bcab848a8e2b8997cc2865d35eb44995f2e"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/executor.py",
-      "code": "arg-type",
-      "message_sha256": "6944204e882f524b4a6db9a03ee284dd02193846f03f0d550e312366fc422eca"
     },
     {
       "tool": "mypy",
@@ -476,12 +422,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "code": "arg-type",
-      "message_sha256": "af74b19bd3a115f10dee908c9d9d66525c5a37522cb02042b933432e3f9c3ae4"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/architecture_analysis.py",
       "code": "arg-type",
       "message_sha256": "b3400639f6486b6f2bfd9393c50fbfbe8e417675811b9e5e55763387699387a4"
@@ -539,12 +479,6 @@
       "path": "tests/test_coach_planning_action_tools.py",
       "code": "arg-type",
       "message_sha256": "e07c3f3a1a82f81edbd6276e64568a3ce217078721bfbcbb1f22886d9865a857"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_intervals.py",
-      "code": "arg-type",
-      "message_sha256": "e1e530588934f739b54ee6c375a149232c715a7c74279c98e8d0a081b8090daa"
     },
     {
       "tool": "mypy",
@@ -653,12 +587,6 @@
       "path": "tests/test_planning_change_preparation.py",
       "code": "assignment",
       "message_sha256": "d8fa2ef73b7e0da8da970f812f087475db9b32cea2112e115841733a7a2934a9"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_sync_executor.py",
-      "code": "assignment",
-      "message_sha256": "d8ff17413131b81238284fff67de6570a36dd36adb5f5d0d993e2f13f4e23825"
     },
     {
       "tool": "mypy",
@@ -928,12 +856,6 @@
       "tool": "mypy",
       "path": "server.py",
       "code": "has-type",
-      "message_sha256": "6aa98648523c886c38d6ec5ff2cba0b9a86a5cb9fe5f9593e07c2251a0075a22"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
       "message_sha256": "6b3bf53c953464ae5eca5af23f6ee4aa9b3fe9f5856d07f358d76bd3a8dee02e"
     },
     {
@@ -1001,18 +923,6 @@
       "path": "server.py",
       "code": "has-type",
       "message_sha256": "a71d8cd1f1bb21b8a832bf9014c2745772ae19f5381cf5e9b35b3da455b5e71d"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "c3827639903091a4321d0e0848e6289e336e994114e1a16099bebc3274bf7946"
-    },
-    {
-      "tool": "mypy",
-      "path": "server.py",
-      "code": "has-type",
-      "message_sha256": "c53b9e646657d76e58ce4a8d414022143183888c840336c5e976cccc80e9fdda"
     },
     {
       "tool": "mypy",
@@ -1391,12 +1301,6 @@
       "path": "tests/test_public_state_calendar_projection.py",
       "code": "return-value",
       "message_sha256": "2553b6187dc2afbd2ac643e581202533bab396c6e515c5be418513823cdbc81f"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/performance.py",
-      "code": "return-value",
-      "message_sha256": "a0e5eaad7dba0a912f8407d1698bf050624d54d66a17c5a26fe0074def6714fb"
     },
     {
       "tool": "mypy",

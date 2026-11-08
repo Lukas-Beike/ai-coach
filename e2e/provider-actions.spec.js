@@ -9,8 +9,8 @@ test("@responsive provider sync actions are disabled with a setup hint without c
   await expect(page.locator("#appShell")).toBeVisible();
   await expandConnections(page);
   await expect(page.locator("#intervalsConnectionStatus")).not.toHaveText("Status wird geprüft…");
-  await expect(page.locator("#systemIntervalsSyncButton")).toBeDisabled();
-  await expect(page.locator("#systemIntervalsFullResyncButton")).toBeDisabled();
+  await expect(page.locator("#systemIntervalsSyncButton")).toHaveCount(0);
+  await expect(page.locator("#systemIntervalsFullResyncButton")).toHaveCount(0);
   await expect(page.locator("#garminSyncButton")).toBeDisabled();
   await expect(page.locator("#garminFullResyncButton")).toBeDisabled();
 

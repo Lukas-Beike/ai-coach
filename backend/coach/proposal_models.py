@@ -9,7 +9,6 @@ from typing import Any
 
 COACH_ACTION_TYPES = {
     "undo_change",
-    "delete_duplicate_intervals_activity",
     "remote_coach_write",
     "local_coach_write",
 }
@@ -20,7 +19,6 @@ REMOTE_COACH_WRITE_TOOLS = frozenset(
         "start_intervals_plan_sync",
         "push_strength_to_garmin",
         "sync_competitions",
-        "delete_duplicate_intervals_activity",
         "sync_nutrition",
         "resolve_training_sync_conflict",
         "apply_adaptive_replan",

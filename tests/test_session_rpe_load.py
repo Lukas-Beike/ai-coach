@@ -16,6 +16,7 @@ from datetime import date
 from functools import partial
 from typing import Any
 
+import intervals_compaction as intervals_fixture
 from test_feedback_session_identity import (
     GARMIN_ID,
     INTERVALS_ID,
@@ -38,7 +39,6 @@ from backend.performance.session_rpe_load import (
     session_rpe_load,
 )
 from backend.performance.training_report import training_report
-from backend.sync import canonical_ingest
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 DAY = "2026-10-21"
@@ -372,11 +372,34 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
         (session,) = self.load()["sessions"]
         self.assertEqual((session["value"], session["rpe_source"]), (420.0, "provider"))
 
+
+    def test_a_rating_without_a_stored_session_counts_once_its_id_is_unique(
+        self,
+    ) -> None:
+        # Written before its record was linked: session_id stays NULL, but the
+        # Intervals.icu id now resolves to exactly one session.
+        self.service.save(INTERVALS_ID, {"session_rpe": 5})
+        with self.manager.unit_of_work() as db:
+            db.execute("UPDATE activity_feedback SET session_id = NULL")
+        (session,) = self.load()["sessions"]
+        self.assertEqual(
+            (session["value"], session["rpe_source"]), (300.0, "athlete_feedback")
+        )
+
+    def test_clearing_the_local_rating_falls_back_to_the_provider_rating(
+        self,
+    ) -> None:
+        self.service.save(INTERVALS_ID, {"session_rpe": 3, "notes": "kept"})
+        self.assertEqual(self.load()["totals"]["value"], 180.0)
+        self.service.save(INTERVALS_ID, {"session_rpe": None})
+        (session,) = self.load()["sessions"]
+        self.assertEqual((session["value"], session["rpe_source"]), (420.0, "provider"))
+
     def test_a_rating_with_an_ambiguous_session_gives_no_load(self) -> None:
         # A second Intervals.icu ride uses the Garmin copy's id, so feedback
         # saved under that id cannot be assigned to one session.
         with self.manager.unit_of_work() as db:
-            canonical_ingest.ingest_intervals_partial_snapshot(
+            intervals_fixture.ingest_intervals_partial_snapshot(
                 db,
                 {
                     "synced_at": SYNCED,
@@ -413,28 +436,6 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
             [item["rpe_source"] for item in result["sessions"] if item["rpe"]],
             ["provider"],
         )
-
-    def test_a_rating_without_a_stored_session_counts_once_its_id_is_unique(
-        self,
-    ) -> None:
-        # Written before its record was linked: session_id stays NULL, but the
-        # Intervals.icu id now resolves to exactly one session.
-        self.service.save(INTERVALS_ID, {"session_rpe": 5})
-        with self.manager.unit_of_work() as db:
-            db.execute("UPDATE activity_feedback SET session_id = NULL")
-        (session,) = self.load()["sessions"]
-        self.assertEqual(
-            (session["value"], session["rpe_source"]), (300.0, "athlete_feedback")
-        )
-
-    def test_clearing_the_local_rating_falls_back_to_the_provider_rating(
-        self,
-    ) -> None:
-        self.service.save(INTERVALS_ID, {"session_rpe": 3, "notes": "kept"})
-        self.assertEqual(self.load()["totals"]["value"], 180.0)
-        self.service.save(INTERVALS_ID, {"session_rpe": None})
-        (session,) = self.load()["sessions"]
-        self.assertEqual((session["value"], session["rpe_source"]), (420.0, "provider"))
 
 
 if __name__ == "__main__":

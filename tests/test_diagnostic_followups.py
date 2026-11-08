@@ -9,8 +9,6 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
-from canonical_detail_support import seed_intervals_activity
-from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
 from support import store_canonical_snapshot
 
@@ -18,7 +16,6 @@ from backend.activities.feedback import ActivityFeedbackService
 from backend.performance import morning_battery as performance_morning_battery
 from backend.providers import garmin as garmin_provider
 from backend.providers import garmin_morning
-from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import garmin as garmin_sync
 from backend.sync import garmin_payload_metrics
@@ -279,110 +276,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(json.dumps(snapshot, sort_keys=True), original)
         self.assertIn("weight", read_garmin())
 
-    def test_feedback_answer_after_plain_text_morning_question_is_saved_once(self):
-        store_canonical_snapshot(
-            server,
-            {
-                "synced_at": runtime_clock.utc_now(),
-                "recent_activities": [
-                    {
-                        "id": "synthetic-ride",
-                        "name": "Synthetic recovery ride",
-                        "type": "Ride",
-                        "start_date_local": "2026-09-06T10:00:00",
-                    }
-                ],
-            },
-        )
-        self.turn(
-            "Morgen-Check-in",
-            [
-                {
-                    "output_text": "Wie haben sich deine Beine bei der gestrigen Fahrt angefühlt?"
-                }
-            ],
-        )
-        result, _ = self.turn(
-            "Beine fühlten sich gut an, die geringe Leistung war aber zäh und langweilig.",
-            [
-                lambda _: self.call("inspect_activity_duplicates"),
-                lambda _: self.call(
-                    "save_activity_feedback",
-                    {
-                        "payload": {
-                            "activity_id": "synthetic-ride",
-                            "notes": "Beine gut; geringe Leistung fühlte sich zäh und langweilig an.",
-                        }
-                    },
-                    ["activity_feedback"],
-                ),
-                {"output_text": "Deine Rückmeldung zur Fahrt ist gespeichert."},
-            ],
-        )
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(len(server.ATHLETE_DATA.activity_feedback().list()), 1)
-        # The Coach names the provider id; the feedback is stored under the session.
-        self.assertTrue(
-            server.ATHLETE_DATA.activity_feedback()
-            .list()[0]["activity_id"]
-            .startswith("act_")
-        )
 
-    def test_duplicate_inspection_returns_facts_without_proposal_or_remote_deletion(
-        self,
-    ):
-        activities = [
-            {
-                "id": "synthetic-wahoo",
-                "source": "Wahoo",
-                "type": "Ride",
-                "start_date_local": "2026-09-06T10:00:00",
-                "moving_time": 3600,
-                "distance": 30000,
-            },
-            {
-                "id": "synthetic-garmin",
-                "source": "Garmin",
-                "type": "Ride",
-                "start_date_local": "2026-09-06T10:01:00",
-                "moving_time": 3610,
-                "distance": 30100,
-            },
-        ]
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
-            {"synced_at": runtime_clock.utc_now(), "recent_activities": activities}
-        )
-        # Duplicate inspection reads the canonical tables, not the snapshot.
-        mark_tables_serving(server)
-        for activity in activities:
-            seed_intervals_activity(
-                server.database_manager(),
-                activity["id"],
-                **{key: value for key, value in activity.items() if key != "id"},
-            )
-        before = server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
-        with patch.object(intervals_client_module, "IntervalsClient") as provider:
-            result, model = self.turn(
-                "Analysiere die letzte Fahrt.",
-                [
-                    lambda _: self.call("inspect_activity_duplicates"),
-                    {
-                        "output_text": "Die Fahrt wurde doppelt aufgezeichnet. Die Wahoo-Aufzeichnung bleibt maßgeblich."
-                    },
-                ],
-            )
-        self.assertEqual(result["status"], "completed")
-        provider.assert_not_called()
-        self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot(), before
-        )
-        output = json.loads(model.call_args.args[0]["input"][0]["output"])
-        self.assertTrue(output["ok"])
-        self.assertEqual(output["duplicate"]["canonical_id"], "synthetic-wahoo")
-        self.assertEqual(output["duplicate"]["duplicate_id"], "synthetic-garmin")
-        self.assertNotIn("status", output)
-        self.assertNotIn("proposal", output)
-        self.assertFalse(result.get("proposed_actions"))
 
     def test_failed_tool_is_diagnosable_without_session_credentials(self):
         private = "synthetic-private-content-never-export"
@@ -429,3 +323,51 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertEqual(history[0]["steps"][0]["error"]["status"], 404)
         self.assertEqual(history[0]["steps"][0]["tool"], "save_activity_feedback")
         self.assertNotIn("Synthetic note", json.dumps(history))
+
+    def test_feedback_answer_after_plain_text_morning_question_is_saved_once(self):
+        store_canonical_snapshot(
+            server,
+            {
+                "synced_at": runtime_clock.utc_now(),
+                "recent_activities": [
+                    {
+                        "id": "synthetic-ride",
+                        "name": "Synthetic recovery ride",
+                        "type": "Ride",
+                        "start_date_local": "2026-09-06T10:00:00",
+                    }
+                ],
+            },
+        )
+        self.turn(
+            "Morgen-Check-in",
+            [
+                {
+                    "output_text": "Wie haben sich deine Beine bei der gestrigen Fahrt angefühlt?"
+                }
+            ],
+        )
+        result, _ = self.turn(
+            "Beine fühlten sich gut an, die geringe Leistung war aber zäh und langweilig.",
+            [
+                lambda _: self.call(
+                    "save_activity_feedback",
+                    {
+                        "payload": {
+                            "activity_id": "synthetic-ride",
+                            "notes": "Beine gut; geringe Leistung fühlte sich zäh und langweilig an.",
+                        }
+                    },
+                    ["activity_feedback"],
+                ),
+                {"output_text": "Deine Rückmeldung zur Fahrt ist gespeichert."},
+            ],
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(server.ATHLETE_DATA.activity_feedback().list()), 1)
+        # The Coach names the provider id; the feedback is stored under the session.
+        self.assertTrue(
+            server.ATHLETE_DATA.activity_feedback()
+            .list()[0]["activity_id"]
+            .startswith("act_")
+        )

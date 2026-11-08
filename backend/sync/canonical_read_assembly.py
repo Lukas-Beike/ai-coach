@@ -28,7 +28,6 @@ def build_canonical_read(
     *,
     key_values: KeyValueRepository,
     profile: AthleteTimezoneReader,
-    compact_only: Callable[[Any], bool],
 ) -> CanonicalReadSelector:
     return CanonicalReadSelector(
         table=CanonicalTableReader(),
@@ -37,7 +36,6 @@ def build_canonical_read(
         ),
         key_values=key_values,
         zone=_athlete_zone(profile),
-        compact_only=compact_only,
         competitions=CompetitionRepository(),
     )
 

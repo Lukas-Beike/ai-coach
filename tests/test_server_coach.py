@@ -10,6 +10,8 @@ from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import remote_reconcilers
+import snapshot_seed
 from canonical_detail_support import add_garmin_copy, seed_intervals_activity
 from garmin_support import read_garmin, save_garmin
 from server_test_support import ServerTestCase, server
@@ -143,7 +145,6 @@ class ServerCoachTests(ServerTestCase):
                 "list_change_history",
                 "apply_workout_library_plan",
                 "delete_activity_feedback",
-                "refresh_current_performance",
             },
             names,
         )
@@ -206,7 +207,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(enqueue.call_args.kwargs, {"requested_by": "coach"})
 
     def test_explicit_activity_detail_reads_only_the_requested_local_session(self):
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "synced_at": "2026-09-11T08:00:00+00:00",
                 "athlete": {},
@@ -1138,7 +1139,7 @@ class ServerCoachTests(ServerTestCase):
             sort_keys=True,
             separators=(",", ":"),
         )
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(intervals_snapshot)
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), intervals_snapshot)
         save_garmin(garmin_snapshot)
         garmin_stored = read_garmin()
         self.assertEqual(garmin_stored["vendor_payload"], "kept in the full snapshot")
@@ -1314,7 +1315,7 @@ class ServerCoachTests(ServerTestCase):
         wake_worker.assert_called_once()
 
     def test_coach_planning_reuses_matching_local_template(self):
-        template = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
+        template = remote_reconcilers.library_reconciler(server).reconcile(
             [
                 {
                     "id": "remote-template-1",
@@ -1483,7 +1484,7 @@ class ServerCoachTests(ServerTestCase):
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", push_local=True
+                "test", 
             )
 
         self.assertEqual(result["pushed"], 1)

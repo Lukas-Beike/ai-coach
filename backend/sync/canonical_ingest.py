@@ -5,11 +5,9 @@ the legacy snapshot write commit or roll back together. They return counters
 only and never commit or log provider content.
 
 Deletion rule: only a completely read activity list marks missing activities
-deleted, and only inside its window shrunk by one edge day: a full,
-non-incremental Intervals.icu window, a Garmin activity range read without
-failure or pause, or a fully paged Wahoo listing. Partial, failed, paused,
-truncated or incremental fetches and historical Intervals.icu fetches never
-delete.
+deleted, and only inside its window shrunk by one edge day: a Garmin activity
+range read without failure or pause, or a fully paged Wahoo listing. Partial,
+failed, paused or truncated fetches never delete.
 """
 
 from __future__ import annotations
@@ -24,20 +22,16 @@ from backend.activities.session_linking import (
     split_unmatched_sessions,
 )
 from backend.canonical.garmin_payload import DEDICATED_ACTIVITY_SECTIONS
-from backend.canonical.local_time import local_date
 from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.canonical_domain_store import ReplaceResult
 from backend.db.canonical_store import ObservationScope, WriteOutcome
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
-    INTERVALS_POWER_CURVE_KEY,
     IngestPlan,
     garmin_ingest_plan,
     garmin_payload_retrieved_at,
-    intervals_ingest_plan,
 )
-from backend.providers.snapshot_projection import stored_retrieved_at
 
 
 @dataclass(slots=True)
@@ -91,33 +85,12 @@ class DeletionWindow:
     end: date
 
 
-def intervals_deletion_window(
-    *, today: date, activity_days: int, all_sync_days: int, earliest_date: date
-) -> DeletionWindow:
-    """Return the days a full Intervals.icu fetch covers with certainty.
-
-    The fetch window follows split_date_windows on the provider's local start
-    date, while stored rows carry the athlete-local date. Both can differ by a
-    day (travel, offset fallback around midnight), so the first and last day are
-    excluded: a deletion there might hit an activity the fetch never asked for,
-    and an edge day can fall out of every later window. A deletion on those days
-    is picked up by a later, wider full fetch instead.
-    """
-    if activity_days == all_sync_days:
-        start = earliest_date
-    else:
-        start = today - timedelta(days=max(1, activity_days) - 1)
-    return DeletionWindow(
-        start=start + DELETION_EDGE_MARGIN, end=today - DELETION_EDGE_MARGIN
-    )
-
-
 def fetch_deletion_window(start: date, end: date) -> DeletionWindow | None:
     """Return the inner days of a completely read provider date range.
 
     The provider filters on its own local dates while stored rows carry the
-    athlete-local date, so the first and last day are excluded as in
-    ``intervals_deletion_window``. A range of two days or less returns None.
+    athlete-local date, so a deletion at the first or last day might hit an
+    activity the fetch never asked for; both days are excluded. A range of two days or less returns None.
     """
     window = DeletionWindow(
         start=start + DELETION_EDGE_MARGIN, end=end - DELETION_EDGE_MARGIN
@@ -128,74 +101,6 @@ def fetch_deletion_window(start: date, end: date) -> DeletionWindow | None:
 def _has_activity_list(raw: object) -> bool:
     """A missing or non-list activity block must never be read as "nothing fetched"."""
     return isinstance(raw, Mapping) and isinstance(raw.get("activities"), list)
-
-
-def ingest_intervals_snapshot(
-    db: Any,
-    snapshot: Mapping[str, Any],
-    *,
-    zone: tzinfo,
-    activity_days: int | None,
-    all_sync_days: int,
-    earliest_date: date,
-) -> CanonicalIngestCounters:
-    """Write the Intervals.icu raw block and the stored power curve of a snapshot.
-
-    ``activity_days`` is None for historical fetches, which never delete. An
-    incremental snapshot never deletes either. A snapshot without a sync time
-    writes nothing and returns empty counters.
-    """
-    retrieved_at = stored_retrieved_at(snapshot, zone=zone)
-    if retrieved_at is None:
-        return CanonicalIngestCounters()
-    raw = snapshot.get("raw_provider_data")
-    plan = intervals_ingest_plan(
-        raw,
-        zone=zone,
-        retrieved_at=retrieved_at,
-        power_curve=snapshot.get(INTERVALS_POWER_CURVE_KEY),
-    )
-    deletion_window = None
-    if (
-        activity_days is not None
-        and snapshot.get("incremental") is not True
-        and _has_activity_list(raw)
-    ):
-        deletion_window = intervals_deletion_window(
-            today=local_date(retrieved_at, zone),
-            activity_days=activity_days,
-            all_sync_days=all_sync_days,
-            earliest_date=earliest_date,
-        )
-    return ingest_plan(
-        db,
-        plan,
-        retrieved_at=retrieved_at,
-        deletion_window=deletion_window,
-        zone=zone,
-    )
-
-
-def ingest_intervals_partial_snapshot(
-    db: Any, snapshot: Mapping[str, Any], *, zone: tzinfo
-) -> CanonicalIngestCounters:
-    """Write the raw block of a partial Intervals.icu fetch, such as a performance refresh.
-
-    A partial window never marks missing records deleted: only a full window
-    knows which records the provider no longer returns.
-    """
-    retrieved_at = stored_retrieved_at(snapshot, zone=zone)
-    if retrieved_at is None:
-        return CanonicalIngestCounters()
-    plan = intervals_ingest_plan(
-        snapshot.get("raw_provider_data"),
-        zone=zone,
-        retrieved_at=retrieved_at,
-        power_curve=snapshot.get(INTERVALS_POWER_CURVE_KEY),
-    )
-    return ingest_plan(
-        db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=zone
-    )
 
 
 def ingest_garmin_payload(

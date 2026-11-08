@@ -2,59 +2,34 @@ import unittest
 from datetime import date
 from unittest.mock import Mock
 
+from backend.errors import AppError
 from backend.sync.analysis_refresh import AnalysisRefreshService
 
 
 class AnalysisRefreshTests(unittest.TestCase):
     def make_service(self, today=date(2026, 10, 20)):
-        intervals = Mock()
-        intervals.refresh.return_value = {"status": "ok"}
-        sessions = Mock()
-        sessions.refresh.return_value = {
-            "status": "partial",
-            "reconciliation_pending": True,
-        }
         garmin = Mock()
         garmin.refresh.return_value = {
             "status": "ok",
             "sources": {"activities": True},
         }
-        service = AnalysisRefreshService(
-            lambda: intervals, lambda: sessions, lambda: garmin, lambda: today
-        )
-        return service, intervals, sessions, garmin
+        return AnalysisRefreshService(lambda: garmin, lambda: today), garmin
 
-    def test_sessions_refreshes_only_bounded_activity_sources(self):
-        service, intervals, sessions, garmin = self.make_service()
+    def test_sessions_refresh_the_bounded_garmin_activity_window(self):
+        service, garmin = self.make_service()
 
         result = service.refresh("sessions")
 
-        intervals.refresh.assert_not_called()
-        sessions.refresh.assert_called_once_with()
         garmin.refresh.assert_called_once_with(
             "sessions", date(2026, 9, 9), date(2026, 10, 20)
         )
-        self.assertEqual("partial", result["status"])
-        self.assertEqual(
-            ["Intervals.icu-Aktivitätsübersicht"], result["incomplete_sources"]
-        )
-        self.assertEqual(2, len(result["refreshed_sources"]))
-
-    def test_dormant_intervals_ingest_is_neither_refreshed_nor_missing(self):
-        service, intervals, _sessions, _garmin = self.make_service()
-        intervals.refresh.return_value = {
-            "status": "skipped",
-            "reason": "intervals_ingest_off",
-        }
-
-        result = service.refresh("performance")
-
         self.assertEqual("ok", result["status"])
+        self.assertEqual(["Garmin-Aktivitätsübersicht"], result["refreshed_sources"])
         self.assertEqual([], result["not_refreshed_sources"])
-        self.assertEqual(1, len(result["refreshed_sources"]))
+        self.assertEqual([], result["truncated_sources"])
 
     def test_recovery_refreshes_its_own_garmin_area_and_reports_partial_sources(self):
-        service, intervals, sessions, garmin = self.make_service()
+        service, garmin = self.make_service()
         garmin.refresh.return_value = {
             "status": "partial",
             "sources": {"sleep": True, "hrv": False},
@@ -62,62 +37,108 @@ class AnalysisRefreshTests(unittest.TestCase):
 
         result = service.refresh("recovery", days=84)
 
-        intervals.refresh.assert_called_once_with(include_power_profile=False)
-        sessions.refresh.assert_not_called()
         garmin.refresh.assert_called_once_with(
             "recovery", date(2026, 7, 29), date(2026, 10, 20)
         )
         self.assertEqual("partial", result["status"])
         self.assertEqual(["Garmin-Erholungswerte"], result["incomplete_sources"])
+        self.assertEqual({"Garmin-Erholungswerte": "partial"}, result["source_status"])
 
-    def test_failed_provider_does_not_discard_other_fresh_results(self):
-        service, intervals, _sessions, garmin = self.make_service()
-        intervals.refresh.side_effect = RuntimeError("synthetic provider failure")
+    def test_a_failed_garmin_read_is_reported_as_not_refreshed(self):
+        service, garmin = self.make_service()
+        garmin.refresh.side_effect = RuntimeError("provider failure")
 
         result = service.refresh("load")
 
-        self.assertEqual("partial", result["status"])
-        self.assertEqual(["Garmin-Belastungswerte"], result["refreshed_sources"])
-        self.assertEqual(
-            ["Intervals.icu-Belastungsdaten"], result["not_refreshed_sources"]
-        )
-        garmin.refresh.assert_called_once()
+        self.assertEqual("failed", result["status"])
+        self.assertEqual(["Garmin-Belastungswerte"], result["not_refreshed_sources"])
+        self.assertEqual([], result["refreshed_sources"])
 
-    def test_performance_includes_power_profile(self):
-        service, intervals, sessions, garmin = self.make_service()
+    def test_a_garmin_result_without_any_source_is_not_reported_as_refreshed(self):
+        service, garmin = self.make_service()
+        garmin.refresh.return_value = {"status": "ok", "sources": {"activities": False}}
 
         result = service.refresh("performance")
 
-        intervals.refresh.assert_called_once_with(include_power_profile=True)
-        sessions.refresh.assert_not_called()
-        garmin.refresh.assert_called_once_with(
-            "performance", date(2026, 7, 23), date(2026, 10, 20)
-        )
-        self.assertEqual("ok", result["status"])
+        self.assertEqual("failed", result["status"])
+        self.assertEqual([], result["refreshed_sources"])
 
-    def test_truncated_intervals_result_is_incomplete_without_partial_status(self):
-        service, intervals, _sessions, _garmin = self.make_service()
-        intervals.refresh.return_value = {"status": "ok", "truncated": True}
+    def test_a_running_garmin_sync_is_pending(self):
+        service, garmin = self.make_service()
+        garmin.refresh.return_value = {"status": "already_running"}
 
         result = service.refresh("load")
 
-        self.assertEqual("partial", result["status"])
-        self.assertEqual(
-            ["Intervals.icu-Belastungsdaten"], result["incomplete_sources"]
+        self.assertEqual("already_running", result["status"])
+        self.assertEqual(["Garmin-Belastungswerte"], result["pending_sources"])
+
+    def make_both(self, *, garmin_configured=True, wahoo_configured=True):
+        garmin = Mock()
+        garmin.refresh.return_value = (
+            {"status": "ok", "sources": {"activities": True}}
+            if garmin_configured
+            else {"status": "partial", "reason": "not_configured"}
         )
-        self.assertEqual(["Intervals.icu-Belastungsdaten"], result["truncated_sources"])
+        wahoo = Mock()
+        wahoo.configured.return_value = wahoo_configured
+        wahoo.sync.return_value = {"status": "ok"}
+        service = AnalysisRefreshService(
+            lambda: garmin, lambda: date(2026, 10, 20), lambda: wahoo
+        )
+        return service, garmin, wahoo
 
-    def test_no_garmin_source_is_not_reported_as_refreshed(self):
-        service, _intervals, _sessions, garmin = self.make_service()
-        garmin.refresh.return_value = {
-            "status": "partial",
-            "sources": {"sleep": False},
-        }
+    def test_garmin_only_ignores_an_unconfigured_wahoo(self):
+        service, _garmin, wahoo = self.make_both(wahoo_configured=False)
 
-        result = service.refresh("recovery")
+        result = service.refresh("sessions")
 
-        self.assertEqual(["Intervals.icu-Erholungsdaten"], result["refreshed_sources"])
-        self.assertEqual(["Garmin-Erholungswerte"], result["not_refreshed_sources"])
+        wahoo.sync.assert_not_called()
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(["Garmin-Aktivitätsübersicht"], result["refreshed_sources"])
+        self.assertEqual([], result["not_refreshed_sources"])
+
+    def test_wahoo_only_is_ok_without_a_configured_garmin(self):
+        service, _garmin, wahoo = self.make_both(garmin_configured=False)
+
+        result = service.refresh("performance")
+
+        wahoo.sync.assert_called_once_with(90, "Analyse-Aktualisierung")
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(["Wahoo-Leistungswerte"], result["refreshed_sources"])
+        self.assertEqual([], result["not_refreshed_sources"])
+
+    def test_both_sources_refresh_and_a_failed_wahoo_read_is_partial(self):
+        service, _garmin, wahoo = self.make_both()
+
+        result = service.refresh("sessions")
+
+        wahoo.sync.assert_called_once_with(42, "Analyse-Aktualisierung")
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(
+            ["Garmin-Aktivitätsübersicht", "Wahoo-Aktivitätsübersicht"],
+            result["refreshed_sources"],
+        )
+        wahoo.sync.side_effect = RuntimeError("provider failure")
+        result = service.refresh("sessions")
+        self.assertEqual("partial", result["status"])
+        self.assertEqual(["Wahoo-Aktivitätsübersicht"], result["not_refreshed_sources"])
+
+    def test_areas_without_wahoo_data_skip_the_wahoo_read(self):
+        service, _garmin, wahoo = self.make_both()
+
+        service.refresh("recovery")
+
+        wahoo.sync.assert_not_called()
+
+    def test_invalid_area_and_period_are_rejected(self):
+        service, _garmin = self.make_service()
+
+        with self.assertRaises(AppError):
+            service.refresh("unknown")
+        with self.assertRaises(AppError):
+            service.refresh("sessions", days=84)
+        with self.assertRaises(AppError):
+            service.refresh("load", days=30)
 
 
 if __name__ == "__main__":

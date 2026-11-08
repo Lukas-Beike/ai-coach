@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
+import snapshot_seed
 from canonical_recovery_support import recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
 from support import store_canonical_snapshot
@@ -29,7 +30,6 @@ from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import garmin as garmin_sync
 from backend.sync import garmin_payload_metrics, garmin_service
 from backend.sync import garmin_performance_history as performance_history
-from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.worker import SyncJobWorker
 
 server = fixtures.server
@@ -80,81 +80,6 @@ class ProviderReviewTests(unittest.TestCase):
             item.stop()
         self.directory.cleanup()
 
-    def test_performance_commit_merges_latest_full_source_and_historical_wellness(self):
-        initial = {
-            "synced_at": "2026-09-01T00:00:00+00:00",
-            "athlete": {},
-            "recent_activities": [{"id": "first"}],
-            "recent_wellness": [{"id": "2025-01-01", "weight": 70}],
-            "upcoming_calendar": [{"id": "calendar"}],
-            "raw_provider_data": {
-                "activities": [{"id": "first", "extra": "kept"}],
-                "wellness": [{"id": "2025-01-01", "extra": 1}],
-            },
-            "provider_sync": {
-                "calendar_window": {"start": "2025-01-01"},
-                "pagination": {"activities": {"complete": True}},
-            },
-            "historical_sync": {"window": "past"},
-        }
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(initial)
-        server.INTERVALS_SYNC.ingest_switch().save({"enabled": True})
-        entered, release = threading.Event(), threading.Event()
-        errors = []
-
-        def fetch(existing):
-            entered.set()
-            self.assertTrue(release.wait(5))
-            return {
-                "synced_at": "2026-09-05T00:00:00+00:00",
-                "athlete": {"weight": 71},
-                "recent_wellness": [{"id": "2026-09-05", "weight": 71}],
-                "recent_activities": existing["recent_activities"],
-                "upcoming_calendar": [],
-                "raw_provider_data": {
-                    "athlete": {"provider_extra": 2},
-                    "wellness": [{"id": "2026-09-05", "extra": 2}],
-                },
-            }
-
-        def refresh():
-            try:
-                server.INTERVALS_SYNC.performance_service().refresh()
-            except Exception as exc:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
-                errors.append(exc)
-
-        with patch.object(
-            IntervalsSnapshotReader, "fetch_performance_snapshot", side_effect=fetch
-        ):
-            worker = threading.Thread(target=refresh)
-            worker.start()
-            self.assertTrue(entered.wait(5))
-            latest = {
-                **initial,
-                "recent_activities": [{"id": "concurrent"}],
-                "raw_provider_data": {
-                    **initial["raw_provider_data"],
-                    "activities": [{"id": "concurrent", "extra": "new"}],
-                },
-            }
-            server.SYNC_PERSISTENCE.state_repository().save_snapshot(latest)
-            release.set()
-            worker.join(5)
-        self.assertFalse(worker.is_alive())
-        self.assertEqual(errors, [])
-        saved = server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
-        self.assertEqual(saved["recent_activities"], latest["recent_activities"])
-        self.assertEqual(
-            saved["raw_provider_data"]["activities"],
-            latest["raw_provider_data"]["activities"],
-        )
-        self.assertEqual(
-            saved["provider_sync"]["calendar_window"],
-            initial["provider_sync"]["calendar_window"],
-        )
-        self.assertEqual(saved["upcoming_calendar"], initial["upcoming_calendar"])
-        self.assertEqual(len(saved["raw_provider_data"]["wellness"]), 2)
-        self.assertEqual(len(saved["recent_wellness"]), 2)
 
     def test_privacy_delete_drains_nested_writer_before_reporting_success(self):
         entered, release, deleted = (
@@ -170,7 +95,7 @@ class ProviderReviewTests(unittest.TestCase):
                 entered.set()
                 release.wait(5)
                 with runtime_maintenance.MAINTENANCE_GATE.operation():
-                    server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+                    snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
                         {
                             "synced_at": "synthetic",
                             "recent_activities": [{"id": "private"}],
@@ -202,7 +127,7 @@ class ProviderReviewTests(unittest.TestCase):
         )
 
     def test_privacy_delete_discards_queued_provider_payloads(self):
-        server.SYNC_JOB_QUEUE.service().enqueue("intervals", "refresh", {"days": 7})
+        server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 7})
         server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 7})
         server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
         self.assertIsNone(server.SYNC_JOB_QUEUE.store().claim())
@@ -224,7 +149,7 @@ class ProviderReviewTests(unittest.TestCase):
         failure.assert_not_called()
 
     def test_running_job_failure_cleanup_is_drained_before_deletion(self):
-        server.SYNC_JOB_QUEUE.service().enqueue("intervals", "refresh", {"days": 7})
+        server.SYNC_JOB_QUEUE.service().enqueue("garmin", "refresh", {"days": 7})
         entered, release, deleted = (
             threading.Event(),
             threading.Event(),
@@ -300,6 +225,185 @@ class ProviderReviewTests(unittest.TestCase):
     def manager_for_login(self):
         with patch.object(server, "CONFIG", replace(server.CONFIG, app_password="")):
             return server.database_manager()
+
+
+
+    def test_retained_metric_freshness_reaches_coach_and_public_without_new_history(
+        self,
+    ):
+        first = {
+            "synced_at": "2026-09-01T09:00:00+00:00",
+            "errors": [],
+            "cycling_ftp": {
+                "calendarDate": "2026-08-30",
+                "functionalThresholdPower": 302,
+            },
+            "readiness": {"calendarDate": "2026-09-01", "score": 73},
+            "weight": {"calendarDate": "2026-08-31", "weight": 72},
+        }
+        payloads = server.GARMIN_ASSEMBLY.payload_service()
+        payloads.prepare_remote(first)
+        history = first["performance_history"]
+        self.assertEqual(
+            [row["date"] for row in history], ["2026-08-30", "2026-08-31", "2026-09-01"]
+        )
+        save_garmin(first)
+        for failed in (True, False):
+            second = {
+                "synced_at": "2026-09-05T09:00:00+00:00",
+                "errors": [
+                    {"source": source, "message": "synthetic outage"}
+                    for source in ("cycling_ftp", "readiness", "weight")
+                ]
+                if failed
+                else [],
+                "activities": [
+                    {"activityId": 8, "startTimeLocal": "2025-02-01T12:00:00"}
+                ],
+            }
+            payloads.prepare_remote(second)
+            save_garmin(second, replace=False)
+            snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+                {
+                    "synced_at": second["synced_at"],
+                    "athlete": {},
+                    "recent_wellness": [],
+                    "recent_activities": [],
+                }
+            )
+            garmin = read_garmin()
+            public = performance_context.current_performance_context(
+                GarminSyncStatus.from_state(garmin),
+                server.ATHLETE_DATA.profile().get(),
+                server.ATHLETE_CLOCK.now().date(),
+                # Recovery values come only from observations (#1411).
+                canonical=recovery_only_inputs(garmin),
+            )
+            for key in ("cycling_ftp_watts", "weight_kg"):
+                data = public["metrics"][key]
+                self.assertEqual(data["freshness"], "stale")
+                self.assertEqual(data["fetched_at"], first["synced_at"])
+                self.assertIn("Letzter guter Wert", data["note"])
+            self.assertEqual(
+                public["metrics"]["cycling_ftp_watts"]["observed_at"], "2026-08-30"
+            )
+            readiness = public["recovery"]["source_freshness"]["readiness"]
+            self.assertEqual(readiness["freshness"], "stale")
+            self.assertEqual(readiness["observed_at"], "2026-09-01")
+            self.assertEqual(
+                server.GARMIN_ASSEMBLY.projection_service().public_state()[
+                    "source_freshness"
+                ]["readiness"]["fetched_at"],
+                first["synced_at"],
+            )
+            coach = server.GARMIN_ASSEMBLY.projection_service().coach_context(
+                include_performance=True
+            )
+            self.assertEqual(
+                coach["performance"]["thresholds"]["cycling_ftp_watts"]["freshness"],
+                "stale",
+            )
+            context = server.COACH_CONTEXT.training_context_service().build()
+            self.assertIn('"freshness":"stale"', context)
+            self.assertIn('"observed_at":"2026-08-30"', context)
+            self.assertEqual(second["performance_history"], history)
+
+    def test_undated_successful_metrics_do_not_fabricate_observation_history(self):
+        payload = {
+            "synced_at": "2026-09-05T09:00:00+00:00",
+            "errors": [],
+            "cycling_ftp": {"functionalThresholdPower": 300},
+        }
+        garmin_sync.merge_sources(payload, {}, frozenset())
+        performance_history.append_garmin_performance_history(
+            payload, {}, server.ATHLETE_CLOCK.now().date()
+        )
+        metric = garmin_payload_metrics.garmin_payload_performance_metrics(
+            payload, server.ATHLETE_CLOCK.now().date()
+        )["cycling_ftp_watts"]
+        self.assertEqual(metric["freshness"], "current")
+        self.assertIsNone(metric["observed_at"])
+        self.assertEqual(metric["fetched_at"], payload["synced_at"])
+        self.assertEqual(payload["performance_history"], [])
+
+    def test_backfill_writes_no_activity_maximum_history(self):
+        first = {
+            "synced_at": "2026-09-01T09:00:00+00:00",
+            "errors": [],
+            "activities": [
+                {
+                    "activityId": 1,
+                    "startTimeLocal": "2026-08-31T12:00:00",
+                    "activityType": "cycling",
+                    "maxHR": 180,
+                }
+            ],
+        }
+        payloads = server.GARMIN_ASSEMBLY.payload_service()
+        payloads.prepare_remote(first)
+        save_garmin(first)
+        second = {
+            "synced_at": "2026-09-05T09:00:00+00:00",
+            "errors": [],
+            "activities": [
+                {
+                    "activityId": 2,
+                    "startTimeLocal": "2025-02-01T12:00:00",
+                    "activityType": "cycling",
+                    "maxHR": 150,
+                }
+            ],
+        }
+        payloads.prepare_remote(second)
+        save_garmin(second, replace=False)
+        # The activity maximum is derived at read time from canonical records
+        # (#1686), so the backfill writes no dated history entry for it.
+        self.assertEqual(second["performance_history"], first["performance_history"])
+
+    def test_fresh_password_length_boundary_counts_unicode_characters(self):
+        for length in (11, 12):
+            with (
+                patch.object(
+                    server,
+                    "CONFIG",
+                    replace(server.CONFIG, app_password="\U0001f6b4" * length),
+                ),
+                patch.object(server, "SQLCIPHER_AVAILABLE", True),
+            ):
+                self.assertEqual(
+                    server.app_config.security_configuration_error(
+                        server.CONFIG, sqlcipher_available=server.SQLCIPHER_AVAILABLE
+                    )
+                    is None,
+                    length == 12,
+                )
+
+    @unittest.skipUnless(
+        server.SQLCIPHER_AVAILABLE,
+        "SQLCipher requires the isolated application container",
+    )
+    def test_fresh_sqlcipher_unicode_key_login_and_reopen(self):
+        DATABASE_MANAGER_CACHE.reset()
+        encrypted_path = Path(self.directory.name) / "encrypted.db"
+        configured = replace(
+            server.CONFIG, app_password="synthetic-\u00e4-\U0001f6b4-123"
+        )
+        with (
+            patch.object(server, "DB_PATH", encrypted_path),
+            patch.object(server, "CONFIG", configured),
+            patch.object(
+                RateLimiter, "allow", autospec=True, return_value=(True, 0)
+            ) as rate_limit,
+        ):
+            server.initialise_database()
+            server.key_value_service().set("marker", "fresh")
+            result = server.session_auth_service().login_user(
+                Mock(client_address=("127.0.0.1", 0)), configured.app_password
+            )
+            self.assertTrue(result["authenticated"])
+            rate_limit.assert_called_with(RATE_LIMITER, "login:127.0.0.1", 5, 900)
+            DATABASE_MANAGER_CACHE.reset()
+            self.assertEqual(server.key_value_service().get("marker"), "fresh")
 
     def test_garmin_partial_metrics_and_backfill_keep_last_good_sources_and_cursors(
         self,
@@ -499,183 +603,6 @@ class ProviderReviewTests(unittest.TestCase):
                 self.assertEqual(
                     context.count('"started_at_local":"2026-09-04T10:00:00"'), 1
                 )
-
-    def test_retained_metric_freshness_reaches_coach_and_public_without_new_history(
-        self,
-    ):
-        first = {
-            "synced_at": "2026-09-01T09:00:00+00:00",
-            "errors": [],
-            "cycling_ftp": {
-                "calendarDate": "2026-08-30",
-                "functionalThresholdPower": 302,
-            },
-            "readiness": {"calendarDate": "2026-09-01", "score": 73},
-            "weight": {"calendarDate": "2026-08-31", "weight": 72},
-        }
-        payloads = server.GARMIN_ASSEMBLY.payload_service()
-        payloads.prepare_remote(first)
-        history = first["performance_history"]
-        self.assertEqual(
-            [row["date"] for row in history], ["2026-08-30", "2026-08-31", "2026-09-01"]
-        )
-        save_garmin(first)
-        for failed in (True, False):
-            second = {
-                "synced_at": "2026-09-05T09:00:00+00:00",
-                "errors": [
-                    {"source": source, "message": "synthetic outage"}
-                    for source in ("cycling_ftp", "readiness", "weight")
-                ]
-                if failed
-                else [],
-                "activities": [
-                    {"activityId": 8, "startTimeLocal": "2025-02-01T12:00:00"}
-                ],
-            }
-            payloads.prepare_remote(second)
-            save_garmin(second, replace=False)
-            server.SYNC_PERSISTENCE.state_repository().save_snapshot(
-                {
-                    "synced_at": second["synced_at"],
-                    "athlete": {},
-                    "recent_wellness": [],
-                    "recent_activities": [],
-                }
-            )
-            garmin = read_garmin()
-            public = performance_context.current_performance_context(
-                GarminSyncStatus.from_state(garmin),
-                server.ATHLETE_DATA.profile().get(),
-                server.ATHLETE_CLOCK.now().date(),
-                # Recovery values come only from observations (#1411).
-                canonical=recovery_only_inputs(garmin),
-            )
-            for key in ("cycling_ftp_watts", "weight_kg"):
-                data = public["metrics"][key]
-                self.assertEqual(data["freshness"], "stale")
-                self.assertEqual(data["fetched_at"], first["synced_at"])
-                self.assertIn("Letzter guter Wert", data["note"])
-            self.assertEqual(
-                public["metrics"]["cycling_ftp_watts"]["observed_at"], "2026-08-30"
-            )
-            readiness = public["recovery"]["source_freshness"]["readiness"]
-            self.assertEqual(readiness["freshness"], "stale")
-            self.assertEqual(readiness["observed_at"], "2026-09-01")
-            self.assertEqual(
-                server.GARMIN_ASSEMBLY.projection_service().public_state()[
-                    "source_freshness"
-                ]["readiness"]["fetched_at"],
-                first["synced_at"],
-            )
-            coach = server.GARMIN_ASSEMBLY.projection_service().coach_context(
-                include_performance=True
-            )
-            self.assertEqual(
-                coach["performance"]["thresholds"]["cycling_ftp_watts"]["freshness"],
-                "stale",
-            )
-            context = server.COACH_CONTEXT.training_context_service().build()
-            self.assertIn('"freshness":"stale"', context)
-            self.assertIn('"observed_at":"2026-08-30"', context)
-            self.assertEqual(second["performance_history"], history)
-
-    def test_undated_successful_metrics_do_not_fabricate_observation_history(self):
-        payload = {
-            "synced_at": "2026-09-05T09:00:00+00:00",
-            "errors": [],
-            "cycling_ftp": {"functionalThresholdPower": 300},
-        }
-        garmin_sync.merge_sources(payload, {}, frozenset())
-        performance_history.append_garmin_performance_history(
-            payload, {}, server.ATHLETE_CLOCK.now().date()
-        )
-        metric = garmin_payload_metrics.garmin_payload_performance_metrics(
-            payload, server.ATHLETE_CLOCK.now().date()
-        )["cycling_ftp_watts"]
-        self.assertEqual(metric["freshness"], "current")
-        self.assertIsNone(metric["observed_at"])
-        self.assertEqual(metric["fetched_at"], payload["synced_at"])
-        self.assertEqual(payload["performance_history"], [])
-
-    def test_backfill_writes_no_activity_maximum_history(self):
-        first = {
-            "synced_at": "2026-09-01T09:00:00+00:00",
-            "errors": [],
-            "activities": [
-                {
-                    "activityId": 1,
-                    "startTimeLocal": "2026-08-31T12:00:00",
-                    "activityType": "cycling",
-                    "maxHR": 180,
-                }
-            ],
-        }
-        payloads = server.GARMIN_ASSEMBLY.payload_service()
-        payloads.prepare_remote(first)
-        save_garmin(first)
-        second = {
-            "synced_at": "2026-09-05T09:00:00+00:00",
-            "errors": [],
-            "activities": [
-                {
-                    "activityId": 2,
-                    "startTimeLocal": "2025-02-01T12:00:00",
-                    "activityType": "cycling",
-                    "maxHR": 150,
-                }
-            ],
-        }
-        payloads.prepare_remote(second)
-        save_garmin(second, replace=False)
-        # The activity maximum is derived at read time from canonical records
-        # (#1686), so the backfill writes no dated history entry for it.
-        self.assertEqual(second["performance_history"], first["performance_history"])
-
-    def test_fresh_password_length_boundary_counts_unicode_characters(self):
-        for length in (11, 12):
-            with (
-                patch.object(
-                    server,
-                    "CONFIG",
-                    replace(server.CONFIG, app_password="\U0001f6b4" * length),
-                ),
-                patch.object(server, "SQLCIPHER_AVAILABLE", True),
-            ):
-                self.assertEqual(
-                    server.app_config.security_configuration_error(
-                        server.CONFIG, sqlcipher_available=server.SQLCIPHER_AVAILABLE
-                    )
-                    is None,
-                    length == 12,
-                )
-
-    @unittest.skipUnless(
-        server.SQLCIPHER_AVAILABLE,
-        "SQLCipher requires the isolated application container",
-    )
-    def test_fresh_sqlcipher_unicode_key_login_and_reopen(self):
-        DATABASE_MANAGER_CACHE.reset()
-        encrypted_path = Path(self.directory.name) / "encrypted.db"
-        configured = replace(
-            server.CONFIG, app_password="synthetic-\u00e4-\U0001f6b4-123"
-        )
-        with (
-            patch.object(server, "DB_PATH", encrypted_path),
-            patch.object(server, "CONFIG", configured),
-            patch.object(
-                RateLimiter, "allow", autospec=True, return_value=(True, 0)
-            ) as rate_limit,
-        ):
-            server.initialise_database()
-            server.key_value_service().set("marker", "fresh")
-            result = server.session_auth_service().login_user(
-                Mock(client_address=("127.0.0.1", 0)), configured.app_password
-            )
-            self.assertTrue(result["authenticated"])
-            rate_limit.assert_called_with(RATE_LIMITER, "login:127.0.0.1", 5, 900)
-            DATABASE_MANAGER_CACHE.reset()
-            self.assertEqual(server.key_value_service().get("marker"), "fresh")
 
 
 class GarminRangeContractTests(unittest.TestCase):

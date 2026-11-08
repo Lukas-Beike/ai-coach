@@ -9,11 +9,13 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import snapshot_seed
+from intervals_compaction import compact_snapshot
+
 from backend.coach import streams as coach_streams
 from backend.config import Config
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.runtime import clock as runtime_clock
-from backend.sync.intervals_compaction import compact_snapshot
 
 PROVIDER_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
 PROVIDER_SYNCED_TEXT = "2026-10-10T06:00:00+00:00"
@@ -187,15 +189,16 @@ def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -
     """
     from zoneinfo import ZoneInfo
 
+    from intervals_compaction import ingest_intervals_partial_snapshot
+
     from backend.athlete.profile import timezone_name
     from backend.providers.snapshot_projection import stored_retrieved_at
     from backend.sync.canonical_coverage_store import (
         CanonicalCoverageStore,
         intervals_snapshot_coverage,
     )
-    from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
 
-    server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot, **options)
+    snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), snapshot, **options)
     zone = ZoneInfo(timezone_name(server.ATHLETE_DATA.profile().get().get("timezone")))
     raw = dict(snapshot.get("raw_provider_data") or {})
     if not isinstance(raw.get("activities"), list):
@@ -328,3 +331,13 @@ def garmin_payload_fixture(synced_at: str = PROVIDER_SYNCED_TEXT) -> dict[str, A
     for name in GARMIN_FIXTURE_SECTIONS:
         payload[name] = load_provider_fixture(f"garmin/{name}.json")
     return payload
+
+
+def mark_tables_serving(server) -> None:
+    """Record a completed backfill so the running app serves reads from the tables."""
+    from backend.sync.canonical_backfill import STATE_KEY as BACKFILL_STATE_KEY
+
+    with server.database_manager().unit_of_work() as db:
+        server.KEY_VALUE_REPOSITORY.set(
+            db, BACKFILL_STATE_KEY, json.dumps({"completed_once": True})
+        )

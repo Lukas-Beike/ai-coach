@@ -18,7 +18,6 @@ from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.repositories import KeyValueRepository
 from backend.errors import (
-    COACH_ABORTED_ERROR,
     CORRUPT_LIBRARY_ERROR,
     INTERVALS_API_KEY_ERROR,
     INVALID_LIBRARY_ID_ERROR,
@@ -27,12 +26,7 @@ from backend.errors import (
 from backend.observability import Redactor
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
-from backend.planning.library_service import WorkoutLibraryService
-from backend.planning.session_focus import carry_focus
 from backend.providers.http import ProviderHTTPError
-from backend.runtime.events import StateEventBuffer
-from backend.runtime.maintenance import maintenance_operation
-from backend.sync.gates import intervals_operation
 from backend.sync.workout_export import WorkoutLibraryExportPort
 
 _REMOTE_LINKS = RemoteLinkRepository()
@@ -52,169 +46,6 @@ _REMOTE_LIBRARY_METADATA_FIELDS = (
 )
 
 
-class WorkoutLibraryRemoteReconciler:
-    """Merge an already-read remote workout library into local storage."""
-
-    def __init__(
-        self,
-        database_manager: DatabaseManager,
-        now: Callable[[], str],
-        new_id: Callable[[], uuid.UUID | str],
-    ):
-        self._database_manager = database_manager
-        self._now = now
-        self._new_id = new_id
-
-    def reconcile(
-        self, workouts: list[dict[str, Any]], remove_missing: bool = False
-    ) -> list[dict[str, Any]]:
-        """Atomically merge remote entries and optionally mark absent remote rows."""
-        normalized: list[dict[str, Any]] = []
-        seen_external_ids: set[str] = set()
-        now = self._now()
-        with self._database_manager.unit_of_work() as db:
-            for workout in workouts:
-                external_id = str(
-                    workout.get("id") or workout.get("external_id") or ""
-                ).strip()
-                if not external_id:
-                    continue
-                seen_external_ids.add(external_id)
-                existing = db.execute(
-                    "SELECT id, local_id, sync_dirty, sync_state, payload "
-                    "FROM workout_library WHERE external_id = ?",
-                    (external_id,),
-                ).fetchone()
-                local_id = (
-                    str(
-                        existing.get("local_id") or existing.get("id") or self._new_id()
-                    )
-                    if existing
-                    else str(self._new_id())
-                )
-                preserved = self._preserved_dirty_library_workout(
-                    existing, local_id, external_id
-                )
-                normalized.append(
-                    preserved
-                    or self._persist_remote_library_workout_entry(
-                        db, workout, existing, local_id, external_id, now
-                    )
-                )
-            if remove_missing:
-                self._mark_missing_remote_library_workouts(db, seen_external_ids, now)
-        return normalized
-
-    @staticmethod
-    def _object_payload(raw_payload: Any) -> dict[str, Any]:
-        try:
-            payload = json.loads(raw_payload or "{}")
-        except TypeError, ValueError:
-            payload = {}
-        return payload if isinstance(payload, dict) else {}
-
-    @classmethod
-    def _preserved_dirty_library_workout(
-        cls, existing: dict[str, Any] | None, local_id: str, external_id: str
-    ) -> dict[str, Any] | None:
-        if (
-            not existing
-            or not int(existing.get("sync_dirty") or 0)
-            or existing.get("sync_state") not in {"local", "sync_error"}
-        ):
-            return None
-        try:
-            local_payload = json.loads(existing.get("payload") or "{}")
-        except TypeError, ValueError:
-            local_payload = {}
-        if not isinstance(local_payload, dict):
-            return None
-        return planning_library.normalize_library_workout(
-            local_payload,
-            local_id=local_id,
-            external_id=external_id,
-            sync_status=str(existing.get("sync_state") or "local"),
-        )
-
-    @classmethod
-    def _preserve_remote_library_metadata(
-        cls, entry: dict[str, Any], existing: dict[str, Any] | None
-    ) -> None:
-        if not existing:
-            return
-        existing_payload = cls._object_payload(existing.get("payload"))
-        for metadata_key in _REMOTE_LIBRARY_METADATA_FIELDS:
-            if existing_payload.get(metadata_key) is not None:
-                entry[metadata_key] = existing_payload[metadata_key]
-        carry_focus(entry, existing_payload)
-
-    @classmethod
-    def _persist_remote_library_workout_entry(
-        cls,
-        db: Any,
-        workout: dict[str, Any],
-        existing: dict[str, Any] | None,
-        local_id: str,
-        external_id: str,
-        now: str,
-    ) -> dict[str, Any]:
-        entry = planning_library.normalize_library_workout(
-            workout,
-            local_id=local_id,
-            external_id=external_id,
-            sync_status="synced",
-        )
-        cls._preserve_remote_library_metadata(entry, existing)
-        storage_id = existing["id"] if existing else local_id
-        db.execute(
-            "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, ?, ?, 0, 'synced', NULL, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET local_id=excluded.local_id, external_id=excluded.external_id, payload=excluded.payload, sync_dirty=0, sync_state='synced', sync_error=NULL, last_synced_at=excluded.last_synced_at, updated_at=excluded.updated_at",
-            (
-                storage_id,
-                local_id,
-                external_id,
-                json.dumps(entry, ensure_ascii=False),
-                now,
-                now,
-            ),
-        )
-        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
-        return entry
-
-    @classmethod
-    def _mark_missing_remote_library_workouts(
-        cls, db: Any, seen_external_ids: set[str], now: str
-    ) -> None:
-        remote_rows = db.execute(
-            "SELECT id, local_id, external_id, sync_dirty, sync_state, payload "
-            "FROM workout_library"
-        ).fetchall()
-        for row in remote_rows:
-            external_id = str(
-                _REMOTE_LINKS.resolve_remote_external_id(
-                    db,
-                    RemoteEntityKind.LIBRARY_WORKOUT,
-                    str(row.get("local_id") or ""),
-                    row.get("external_id"),
-                )
-                or ""
-            )
-            if not external_id or external_id in seen_external_ids:
-                continue
-            if int(row.get("sync_dirty") or 0) or str(row.get("sync_state") or "") in {
-                "local",
-                "sync_error",
-            }:
-                continue
-            payload = cls._object_payload(row.get("payload"))
-            payload["sync_status"] = "remote_missing"
-            db.execute(
-                "UPDATE workout_library SET payload=?, sync_dirty=0, "
-                "sync_state='remote_missing', sync_error=NULL, updated_at=? WHERE id=?",
-                (json.dumps(payload, ensure_ascii=False), now, row["id"]),
-            )
-
-
 @contextmanager
 def workout_library_sync_guard() -> Iterator[None]:
     """Serialize operations that share the workout-library sync lock."""
@@ -225,91 +56,6 @@ def workout_library_sync_guard() -> Iterator[None]:
 def workout_library_sync_running() -> bool:
     """Return whether the shared workout-library lock is held."""
     return _WORKOUT_LIBRARY_SYNC_LOCK.locked()
-
-
-class WorkoutLibraryRefreshService:
-    """Import the remote workout library once without performing remote writes."""
-
-    def __init__(
-        self,
-        config: Config,
-        database_manager: DatabaseManager,
-        export: WorkoutLibraryExportPort,
-        remote_reconciler: WorkoutLibraryRemoteReconciler,
-        workout_library_service: WorkoutLibraryService,
-        sync_state_service: WorkoutLibrarySyncStateService,
-        key_value_repository: KeyValueRepository,
-        event_buffer: StateEventBuffer,
-        now: Callable[[], str],
-    ) -> None:
-        self._config = config
-        self._database_manager = database_manager
-        self._export = export
-        self._remote_reconciler = remote_reconciler
-        self._workout_library_service = workout_library_service
-        self._sync_state_service = sync_state_service
-        self._key_value_repository = key_value_repository
-        self._event_buffer = event_buffer
-        self._now = now
-
-    @maintenance_operation
-    @intervals_operation
-    def refresh(
-        self,
-        reason: str = "manual",
-        cancel_event: threading.Event | None = None,
-    ) -> dict[str, Any]:
-        """Refresh local library from Intervals, preserving cancellation semantics."""
-        if not self._config.intervals_api_key:
-            raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
-        self._raise_chat_cancelled(cancel_event)
-        synced_at = self._get_sync_timestamp()
-        if synced_at:
-            return {
-                "status": "skipped",
-                "reason": "local_authoritative",
-                "workouts": len(
-                    self._workout_library_service.list(include_archived=True)
-                ),
-                "local_synced": 0,
-                "local_errors": [],
-                "synced_at": synced_at,
-                "library_state": self._sync_state_service.summary(),
-            }
-
-        with workout_library_sync_guard():
-            self._raise_chat_cancelled(cancel_event)
-            workouts = self._export.library_list(cancel_event=cancel_event)
-            self._raise_chat_cancelled(cancel_event)
-            normalized = self._remote_reconciler.reconcile(
-                workouts, remove_missing=True
-            )
-
-        synced_at = self._now()
-        self._set_sync_markers(synced_at)
-        self._event_buffer.publish("coach", {"status": "changed"})
-        return {
-            "status": "ok",
-            "workouts": len(normalized),
-            "local_synced": 0,
-            "local_errors": [],
-            "synced_at": synced_at,
-            "library_state": self._sync_state_service.summary(),
-        }
-
-    def _get_sync_timestamp(self) -> str | None:
-        with self._database_manager.unit_of_work() as db:
-            return self._key_value_repository.get(db, "last_library_sync_at")
-
-    def _set_sync_markers(self, synced_at: str) -> None:
-        with self._database_manager.unit_of_work() as db:
-            self._key_value_repository.set(db, "last_library_sync_at", synced_at)
-            self._key_value_repository.set(db, "last_library_sync_error", "")
-
-    @staticmethod
-    def _raise_chat_cancelled(cancel_event: threading.Event | None) -> None:
-        if cancel_event is not None and cancel_event.is_set():
-            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
 
 
 class WorkoutLibrarySyncStateService:

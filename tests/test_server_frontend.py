@@ -85,7 +85,7 @@ class ServerFrontendTests(ServerTestCase):
             ),
             "diagnostics.js": ("loadLogs", "deleteDiagnostics"),
             "state-loader.js": ("loadState", "load", "render"),
-            "sync-actions.js": ("syncNow", "syncGarmin", "fullResync"),
+            "sync-actions.js": ("syncGarmin", "fullResync"),
             "wahoo-connection.js": (
                 "connectWahoo",
                 "disconnectWahoo",
@@ -1297,7 +1297,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="providerFreshnessTimeline"', index)
         self.assertIn("function renderProviderFreshness(data)", app)
         self.assertIn("async function retryProvider(provider, button)", app)
-        self.assertIn("provider === providerIds().intervals", app)
+        self.assertIn("provider === providerIds().garmin", app)
         self.assertIn('provider === "weather"', app)
         self.assertIn(asset_ref("/icon.svg"), index)
         self.assertIn('id="connectionsSyncProgress"', index)

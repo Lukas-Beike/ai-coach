@@ -235,7 +235,7 @@ class AdaptiveApplyPlanGuardTests(unittest.TestCase):
             )
         )
         executor = CoachProposalExecutionService(
-            self.manager, Mock(), Mock(), Mock(), Mock(), lambda: dispatch
+            self.manager, Mock(), Mock(), Mock(), lambda: dispatch
         )
         intent = self.intent
         if arguments.get("sync_illness_to_intervals"):

@@ -14,9 +14,7 @@ completes, only observations at the current mapper version are served.
 Raw activity rows (``intervals_activity_payloads``) follow the same decision as ``activities``.
 A stored Intervals.icu snapshot that lists activities only in compact form (from a
 release before ``raw_provider_data``) cannot be backfilled; its activities stay
-missing from the tables until the full read-only Intervals.icu reload returns raw
-rows for them. An incremental sync keeps the older compact rows next to its raw
-window. ``activities_need_refresh`` reports that gap.
+missing from the tables until the stored Intervals.icu data is purged.
 
 Tables keep serving after a sync, because the ingest writes each new snapshot
 into the tables in the same transaction. While the tables serve, the stored
@@ -182,8 +180,7 @@ class CanonicalReadSelector(
     """Serves reads from the tables once the backfill completed once, else nothing.
 
     ``zone`` returns the athlete's time zone, the one the backfill stores with its
-    state. ``compact_only`` returns True when a compact activity row of the stored
-    Intervals.icu snapshot has no raw counterpart.
+    state.
     """
 
     def __init__(
@@ -193,12 +190,10 @@ class CanonicalReadSelector(
         reprojecting_table: CanonicalReader,
         key_values: KeyValueRepository,
         zone: Callable[[Any], tzinfo],
-        compact_only: Callable[[Any], bool],
         competitions: CompetitionRepository,
     ) -> None:
         self._zone = zone
         self._competitions = competitions
-        self._compact_only = compact_only
         self._table = table
         self._reprojecting_table = reprojecting_table
         self._key_values = key_values
@@ -242,14 +237,6 @@ class CanonicalReadSelector(
     ) -> dict[str, Any] | None:
         """Return one stored Intervals.icu payload from the serving source."""
         return self._source(db).intervals_summary_row(db, provider_activity_id)
-
-    def activities_need_refresh(self, db: Any) -> bool:
-        """Return True while a stored compact activity row has no raw counterpart.
-
-        Those activities never reach the tables; the full read-only Intervals.icu
-        reload that returns their raw rows closes the gap.
-        """
-        return self._compact_only(db)
 
     def activity_summaries(
         self,

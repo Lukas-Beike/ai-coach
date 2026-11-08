@@ -9,13 +9,6 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from backend.activities.activity_reference import (
-    ActivityReferenceResolver,
-    NoActivityReferences,
-    resolve_duplicate_ids,
-)
-from backend.activities.duplicate_inspection import DuplicateInspector
-from backend.activities.duplicates import validate_duplicate_delete
 from backend.athlete.local_date import LocalDate
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
@@ -56,7 +49,6 @@ class CoachProposalCreationService:
     def __init__(
         self,
         database_manager: DatabaseManager,
-        duplicate_inspector: DuplicateInspector,
         *,
         ttl_seconds: int = COACH_ACTION_TTL_SECONDS,
         now: Callable[[], float] = time.time,
@@ -64,11 +56,8 @@ class CoachProposalCreationService:
         uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
         nutrition_diary_service: Callable[[], Any] | None = None,
         nutrition_meal_library_service: Callable[[], Any] | None = None,
-        references: ActivityReferenceResolver | None = None,
     ) -> None:
         self._database_manager = database_manager
-        self._references = NoActivityReferences() if references is None else references
-        self._duplicate_inspector = duplicate_inspector
         self._ttl_seconds = ttl_seconds
         self._now = now
         self._utc_now = utc_now
@@ -80,10 +69,6 @@ class CoachProposalCreationService:
         action_type, target_system, object_ids, diff, payload = (
             validated_coach_action_preview_input(values)
         )
-        if action_type == "delete_duplicate_intervals_activity":
-            payload = resolve_duplicate_ids(payload, self._references)
-            validate_duplicate_delete(payload, self._duplicate_inspector.latest())
-
         proposal_id = str(self._uuid_factory())
         expires_at = self._now() + self._ttl_seconds
         created_at = self._utc_now()
@@ -155,9 +140,7 @@ class CoachProposalCreationService:
             arguments,
             intent,
             database_manager=self._database_manager,
-            duplicate_inspector=self._duplicate_inspector,
             nutrition_diary_service=self._nutrition_diary_service,
-            references=self._references,
         )
         approval_manifest = payload["arguments"].get("_approval_manifest")
         approval_details = _remote_write_approval_details(
@@ -316,9 +299,7 @@ def _approved_remote_arguments(
     intent: dict[str, Any],
     *,
     database_manager: DatabaseManager,
-    duplicate_inspector: DuplicateInspector,
     nutrition_diary_service: Callable[[], Any] | None,
-    references: ActivityReferenceResolver,
 ) -> dict[str, Any]:
     if tool == "start_intervals_plan_sync":
         return _approved_plan_sync_arguments(arguments, intent, database_manager)
@@ -327,10 +308,6 @@ def _approved_remote_arguments(
     if tool == "sync_competitions":
         with database_manager.reader() as db:
             return {**arguments, "_approval_manifest": competition_push_manifest(db)}
-    if tool == "delete_duplicate_intervals_activity":
-        return _duplicate_approval_arguments(
-            resolve_duplicate_ids(arguments, references), duplicate_inspector
-        )
     if tool == "sync_nutrition":
         return _nutrition_approval_arguments(arguments, nutrition_diary_service)
     if tool == "apply_adaptive_replan":
@@ -653,27 +630,6 @@ def _plan_workout_details(rows: list[Any]) -> list[dict[str, str]]:
                 }
             )
     return details
-
-
-def _duplicate_approval_arguments(
-    arguments: dict[str, Any], duplicate_inspector: DuplicateInspector
-) -> dict[str, Any]:
-    duplicate = duplicate_inspector.latest()
-    if not duplicate:
-        raise AppError(409, "Das Wahoo-/Garmin-Duplikat ist nicht mehr aktuell.")
-    for field in ("canonical_id", "duplicate_id"):
-        requested = arguments.get(field)
-        if requested and str(requested) != str(duplicate[field]):
-            raise AppError(
-                409, "Das angeforderte Duplikat stimmt nicht mit der Vorschau überein."
-            )
-    manifest = {
-        "canonical_id": duplicate["canonical_id"],
-        "duplicate_id": duplicate["duplicate_id"],
-        "snapshot_synced_at": duplicate.get("snapshot_synced_at"),
-        "date": duplicate.get("start_date_local"),
-    }
-    return {**arguments, "_approval_manifest": manifest}
 
 
 def _nutrition_approval_arguments(

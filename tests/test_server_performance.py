@@ -4,13 +4,12 @@ import unittest
 from dataclasses import replace
 from datetime import date, timedelta
 from datetime import datetime as _local_datetime
-from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
+import intervals_compaction
 from canonical_detail_support import seed_intervals_activity
 from canonical_recovery_support import RecordingReader, recovery_only_inputs
-from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
 from performance_day_support import (
     canonical_from_snapshot,
@@ -23,7 +22,7 @@ from server_test_support import (
     _garmin_metrics,
     server,
 )
-from support import complete_canonical_backfill
+from support import complete_canonical_backfill, mark_tables_serving
 
 from backend.performance import activity_validation
 from backend.performance import context as performance_context
@@ -33,15 +32,8 @@ from backend.performance import planning_recovery as performance_planning_recove
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.morning_battery_service import MORNING_BATTERY_HISTORY_KEY
 from backend.providers import garmin as garmin_provider
-from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
-from backend.sync import garmin_payload_metrics, intervals_compaction
-from backend.sync import queue as sync_queue
-from backend.sync.garmin_activity_duplicates import (
-    garmin_activity_duplicates_intervals,
-)
-from backend.sync.intervals import IntervalsSnapshotReader
-from backend.sync.performance import PerformanceRefreshService
+from backend.sync import garmin_payload_metrics
 from backend.weather import history as weather_history
 
 
@@ -77,53 +69,8 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(load["totals"]["value"], 300.0)
         self.assertIsNotNone(load["computed_at"])
 
-    def test_performance_refresh_jobs_are_deduplicated_atomically(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
-            first = server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals",
-                "performance_refresh",
-                {"reason": "first"},
-                requested_by="scheduler",
-            )
-            second = server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals",
-                "performance_refresh",
-                {"reason": "second"},
-                requested_by="coach",
-            )
-        self.assertEqual(second["id"], first["id"])
-        self.assertEqual(second["payload"], {"reason": "first"})
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            self.assertEqual(
-                db.execute(
-                    "SELECT COUNT(*) AS count FROM sync_jobs WHERE type='performance_refresh'"
-                ).fetchone()["count"],
-                1,
-            )
 
-    def test_automatic_performance_follow_up_skips_direct_refresh(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(PerformanceRefreshService, "running", return_value=True),
-            patch.object(sync_queue.SyncJobQueueService, "enqueue") as enqueue,
-        ):
-            self.assertIsNone(
-                server.INTERVALS_SYNC.performance_followup().enqueue_after_sync(
-                    "startup"
-                )
-            )
-        enqueue.assert_not_called()
 
-    def test_performance_refresh_timestamp_and_initial_loading_state_are_rendered(self):
-        root = Path(__file__).resolve().parents[1] / "public"
-        app = "\n".join(
-            (root / name).read_text(encoding="utf-8")
-            for name in ("shared.js", "performance-view.js", "state-loader.js")
-        )
-        self.assertIn("performance_refresh", app)
-        self.assertIn("state.loadPromise", app)
 
     def test_garmin_coach_context_keeps_only_latest_recovery_records(self):
         latest = server.ATHLETE_CLOCK.now().date() - timedelta(days=1)
@@ -977,152 +924,10 @@ class ServerPerformanceTests(ServerTestCase):
         # The Intervals.icu athlete height is no source; the profile's stands.
         self.assertEqual(metric["value"], 181)
 
-    def test_performance_refresh_only_requests_provider_data(self):
-        calls = []
 
-        def fetch_performance_snapshot(_reader, existing):
-            calls.append(existing)
-            return {
-                "synced_at": "2026-08-28T08:00:00+00:00",
-                "athlete": {},
-                "recent_wellness": [],
-                "recent_activities": [],
-                "upcoming_calendar": [],
-            }
 
-        with (
-            patch.object(
-                IntervalsSnapshotReader,
-                "fetch_performance_snapshot",
-                fetch_performance_snapshot,
-            ),
-            patch.object(
-                server.MODEL_TRANSPORT, "openai_responses_client"
-            ) as openai_client,
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-        ):
-            result = server.INTERVALS_SYNC.performance_service().refresh()
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(len(calls), 1)
-        openai_client.assert_not_called()
 
-    def test_garmin_near_duplicate_allows_thirty_minute_start_difference(self):
-        garmin = {
-            "activityId": 3,
-            "activityType": "cycling",
-            "activityName": "Ride",
-            "startTimeLocal": "2026-08-29T07:30:00",
-            "duration": 3600,
-            "distance": 30000,
-        }
-        intervals = [
-            {
-                "type": "Ride",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 30000,
-            }
-        ]
-        self.assertTrue(garmin_activity_duplicates_intervals(garmin, intervals))
 
-    def test_garmin_activity_more_than_thirty_minutes_apart_is_kept(self):
-        garmin = {
-            "activityId": 4,
-            "activityType": "cycling",
-            "activityName": "Ride",
-            "startTimeLocal": "2026-08-29T07:31:00",
-            "duration": 3600,
-            "distance": 30000,
-        }
-        intervals = [
-            {
-                "type": "Ride",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 30000,
-            }
-        ]
-        self.assertFalse(garmin_activity_duplicates_intervals(garmin, intervals))
-
-    def test_garmin_different_activity_is_kept(self):
-        garmin = {
-            "activityId": 2,
-            "activityType": "cycling",
-            "startTimeLocal": "2026-08-29T07:05:00",
-            "duration": 3600,
-            "distance": 30000,
-        }
-        intervals = [
-            {
-                "type": "Run",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 10000,
-            }
-        ]
-        self.assertFalse(garmin_activity_duplicates_intervals(garmin, intervals))
-
-    def test_confirmed_duplicate_delete_removes_only_garmin_copy_and_keeps_the_snapshot(
-        self,
-    ):
-        snapshot = {
-            "synced_at": "2026-08-29T10:00:00+00:00",
-            "athlete": {},
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-            "recent_activities": [
-                {
-                    "id": "i-wahoo",
-                    "type": "Ride",
-                    "source": "Wahoo",
-                    "start_date_local": "2026-08-29T07:00:00",
-                    "moving_time": 7200,
-                    "distance": 60000,
-                },
-                {
-                    "id": "i-garmin",
-                    "type": "Ride",
-                    "source": "Garmin",
-                    "start_date_local": "2026-08-29T07:03:00",
-                    "moving_time": 7180,
-                    "distance": 59800,
-                },
-            ],
-        }
-        snapshot["raw_provider_data"] = {
-            "activities": list(snapshot["recent_activities"])
-        }
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
-        for activity in snapshot["recent_activities"]:
-            seed_intervals_activity(
-                server.database_manager(),
-                activity["id"],
-                **{key: value for key, value in activity.items() if key != "id"},
-            )
-        mark_tables_serving(server)
-        pair = server.ATHLETE_DATA.duplicate_inspector().latest()
-        with patch.object(
-            intervals_client_module.IntervalsClient,
-            "delete_activity",
-            return_value=None,
-        ) as delete:
-            result = server.ATHLETE_DATA.duplicate_activity().delete(
-                {
-                    "canonical_id": pair["canonical_id"],
-                    "duplicate_id": pair["duplicate_id"],
-                    "snapshot_synced_at": pair["snapshot_synced_at"],
-                },
-                server.PROVIDER_TRANSPORT.intervals_client(),
-            )
-        delete.assert_called_once_with("i-garmin")
-        self.assertEqual(result["kept_activity_id"], "i-wahoo")
-        # The snapshot is an ingestion artefact: a delete leaves it as it was.
-        self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"],
-            snapshot["synced_at"],
-        )
 
 
 if __name__ == "__main__":

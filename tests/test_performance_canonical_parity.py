@@ -716,24 +716,6 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
         self.assertNotIn("reason", served["performance"])
         self.assertTrue(self._coach_performance(source)["available"])
 
-    def test_compact_only_snapshot_marks_the_activity_gap_until_a_raw_sync(
-        self,
-    ) -> None:
-        raw = self.intervals
-        self.intervals = {
-            key: value for key, value in raw.items() if key != "raw_provider_data"
-        }
-        populate(self)
-        source = self._source()
-
-        public = _service(source, self.garmin).performance_state()
-        self.assertTrue(public["performance"]["available"])
-        self.assertTrue(public["performance"]["activities_need_refresh"])
-        self.assertTrue(self._coach_performance(source)["activities_need_refresh"])
-
-        self.intervals = raw
-        refreshed = _service(source, self.garmin).performance_state()
-        self.assertFalse(refreshed["performance"]["activities_need_refresh"])
 
     def test_activity_detail_inputs_carry_the_read_state(self) -> None:
         source = self._source()

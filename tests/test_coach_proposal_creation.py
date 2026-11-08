@@ -12,12 +12,8 @@ from typing import Any
 from unittest.mock import Mock
 from uuid import UUID
 
-from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.coach.proposal_creation import CoachProposalCreationService
-from backend.coach.proposal_models import (
-    COACH_ACTION_TTL_SECONDS,
-    coach_action_hash,
-)
+from backend.coach.proposal_models import COACH_ACTION_TTL_SECONDS, coach_action_hash
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -46,7 +42,6 @@ class CoachProposalCreationTests(unittest.TestCase):
         )
         with self.database_manager.unit_of_work() as db:
             initialize_schema(db)
-        self.inspector = Mock(spec=DuplicateInspector)
 
     def tearDown(self) -> None:
         self.database_manager.close()
@@ -61,7 +56,6 @@ class CoachProposalCreationTests(unittest.TestCase):
         options.update(overrides)
         return CoachProposalCreationService(
             self.database_manager,
-            self.inspector,
             **options,
         )
 
@@ -74,18 +68,6 @@ class CoachProposalCreationTests(unittest.TestCase):
             "payload": {"change_id": "change-1", "secret": "private"},
         }
 
-    @staticmethod
-    def _duplicate_pair(token: str) -> dict[str, object]:
-        return {
-            "canonical_id": "wahoo-1",
-            "canonical_name": "Wahoo",
-            "duplicate_id": "garmin-1",
-            "duplicate_name": "Garmin",
-            "start_date_local": "2026-08-29T07:00:00",
-            "moving_time": 7200,
-            "distance": 60000,
-            "snapshot_synced_at": token,
-        }
 
     @staticmethod
     def _delete_duplicate(synced_at: str) -> dict[str, object]:
@@ -108,43 +90,6 @@ class CoachProposalCreationTests(unittest.TestCase):
         with self.database_manager.reader() as db:
             return db.execute("SELECT * FROM coach_action_proposals").fetchall()
 
-    def test_undo_creation_persists_session_ttl_hash_and_safe_view(self) -> None:
-        payload = self._undo()["payload"]
-        result = self._service().create(self._undo(), "session-csrf-hash")
-
-        self.assertEqual(COACH_ACTION_TTL_SECONDS, 600)
-        self.assertEqual(result["status"], "preview")
-        self.assertEqual(
-            result["proposed_action"],
-            {
-                "id": "abc12345-6789-4abc-8def-0123456789ab",
-                "action_type": "undo_change",
-                "target_system": "local",
-                "object_ids": ["change-1"],
-                "diff": [{"type": "restore", "label": "Änderung"}],
-                "payload_hash": coach_action_hash(payload),
-                "expires_at": 100 + COACH_ACTION_TTL_SECONDS,
-                "status": "preview",
-            },
-        )
-        self.assertNotIn("payload", result["proposed_action"])
-        row = self._rows()[0]
-        self.assertEqual(row["session_csrf_hash"], "session-csrf-hash")
-        expected_hash = hashlib.sha256(
-            json.dumps(
-                payload,
-                sort_keys=True,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                default=str,
-            ).encode("utf-8")
-        ).hexdigest()
-        self.assertEqual(row["payload_hash"], expected_hash)
-        self.assertEqual(row["payload"], '{"change_id":"change-1","secret":"private"}')
-        self.assertEqual(row["diff"], '[{"type":"restore","label":"Änderung"}]')
-        self.assertEqual(row["created_at"], "2026-09-23T10:11:12+00:00")
-        self.assertNotIn("private", repr(result))
-        self.inspector.latest.assert_not_called()
 
     def test_creation_prunes_expired_proposals_on_the_write_path(self) -> None:
         with self.database_manager.unit_of_work() as db:
@@ -715,101 +660,60 @@ class CoachProposalCreationTests(unittest.TestCase):
             {"session-a", "session-b"},
         )
 
-    def test_duplicate_delete_validates_against_the_current_pair_before_persisting(
-        self,
-    ) -> None:
-        current_time = "2026-08-29T10:00:00+00:00"
-        self.inspector.latest.return_value = self._duplicate_pair(current_time)
-        result = self._service().create(self._delete_duplicate(current_time), "session")
 
-        self.assertEqual(
-            result["proposed_action"]["action_type"],
-            "delete_duplicate_intervals_activity",
-        )
-        self.assertEqual(len(self._rows()), 1)
-        self.inspector.latest.assert_called()
 
-    def test_duplicate_delete_resolves_local_ids_before_validation(self) -> None:
-        current_time = "2026-08-29T10:00:00+00:00"
-        self.inspector.latest.return_value = self._duplicate_pair(current_time)
-        values = self._delete_duplicate(current_time)
-        values["payload"] = {
-            "canonical_id": "act_wahoo",
-            "duplicate_id": "act_garmin",
-            "snapshot_synced_at": current_time,
-        }
 
-        self._service(references=_LocalIds()).create(values, "session")
 
-        payload = json.loads(str(self._rows()[0]["payload"]))
-        self.assertEqual(
-            (payload["canonical_id"], payload["duplicate_id"]),
-            ("wahoo-1", "garmin-1"),
-        )
 
-    def test_duplicate_remote_write_resolves_local_ids_before_manifest(self) -> None:
-        self.inspector.latest.return_value = self._duplicate_pair(
-            "2026-08-29T10:00:00+00:00"
-        )
-        intent = {
-            "operation": "delete_duplicate_intervals_activity",
-            "intent": "remote_delete",
-            "target_system": "intervals",
-            "authorization_scope": ["intervals_sync"],
-            "request": {"remote_write": True, "source_message_ids": [8]},
-        }
 
-        self._service(references=_LocalIds()).create_remote_write(
-            "delete_duplicate_intervals_activity",
-            {"canonical_id": "act_wahoo", "duplicate_id": "act_garmin"},
-            intent,
-            conversation_id="conversation-1",
-            client_turn_id="turn-1",
-            session_csrf_hash="session-1",
-        )
-
-        arguments = json.loads(str(self._rows()[0]["payload"]))["arguments"]
-        self.assertEqual(
-            (arguments["canonical_id"], arguments["duplicate_id"]),
-            ("wahoo-1", "garmin-1"),
-        )
-        self.assertEqual(arguments["_approval_manifest"]["duplicate_id"], "garmin-1")
-
-    def test_unresolved_local_duplicate_id_still_conflicts(self) -> None:
-        self.inspector.latest.return_value = self._duplicate_pair(
-            "2026-08-29T10:00:00+00:00"
-        )
-        with self.assertRaises(AppError) as error:
-            self._service(references=_LocalIds()).create_remote_write(
-                "delete_duplicate_intervals_activity",
-                {"canonical_id": "act_unknown", "duplicate_id": "garmin-1"},
-                {"request": {"remote_write": True, "source_message_ids": [8]}},
-                conversation_id="conversation-1",
-                client_turn_id="turn-1",
-                session_csrf_hash="session-1",
+    def test_database_failure_rolls_back_insert(self) -> None:
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "CREATE TRIGGER reject_proposal BEFORE INSERT ON coach_action_proposals "
+                "BEGIN SELECT RAISE(ABORT, 'forced failure'); END"
             )
 
-        self.assertEqual(error.exception.status, 409)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._service().create(self._undo(), "session")
+
         self.assertEqual(self._rows(), [])
 
-    def test_stale_duplicate_token_rejects_before_id_clock_or_insert(self) -> None:
-        self.inspector.latest.return_value = self._duplicate_pair(
-            "2026-08-29T10:01:00+00:00"
+    def test_undo_creation_persists_session_ttl_hash_and_safe_view(self) -> None:
+        payload = self._undo()["payload"]
+        result = self._service().create(self._undo(), "session-csrf-hash")
+
+        self.assertEqual(COACH_ACTION_TTL_SECONDS, 600)
+        self.assertEqual(result["status"], "preview")
+        self.assertEqual(
+            result["proposed_action"],
+            {
+                "id": "abc12345-6789-4abc-8def-0123456789ab",
+                "action_type": "undo_change",
+                "target_system": "local",
+                "object_ids": ["change-1"],
+                "diff": [{"type": "restore", "label": "Änderung"}],
+                "payload_hash": coach_action_hash(payload),
+                "expires_at": 100 + COACH_ACTION_TTL_SECONDS,
+                "status": "preview",
+            },
         )
-        uuid_factory = Mock(return_value=UUID("abc12345-6789-4abc-8def-0123456789ab"))
-        now = Mock(return_value=100.0)
-        utc_now = Mock(return_value="now")
-
-        with self.assertRaises(AppError) as error:
-            self._service(uuid_factory=uuid_factory, now=now, utc_now=utc_now).create(
-                self._delete_duplicate("2026-08-29T10:00:00+00:00"), "session"
-            )
-
-        self.assertEqual(error.exception.status, 409)
-        uuid_factory.assert_not_called()
-        now.assert_not_called()
-        utc_now.assert_not_called()
-        self.assertEqual(self._rows(), [])
+        self.assertNotIn("payload", result["proposed_action"])
+        row = self._rows()[0]
+        self.assertEqual(row["session_csrf_hash"], "session-csrf-hash")
+        expected_hash = hashlib.sha256(
+            json.dumps(
+                payload,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(row["payload_hash"], expected_hash)
+        self.assertEqual(row["payload"], '{"change_id":"change-1","secret":"private"}')
+        self.assertEqual(row["diff"], '[{"type":"restore","label":"Änderung"}]')
+        self.assertEqual(row["created_at"], "2026-09-23T10:11:12+00:00")
+        self.assertNotIn("private", repr(result))
 
     def test_invalid_inputs_reject_before_inspection_or_insert(self) -> None:
         invalid_values = [
@@ -821,19 +725,6 @@ class CoachProposalCreationTests(unittest.TestCase):
         for values in invalid_values:
             with self.subTest(values=values), self.assertRaises(AppError):
                 self._service().create(values, "session")
-
-        self.inspector.latest.assert_not_called()
-        self.assertEqual(self._rows(), [])
-
-    def test_database_failure_rolls_back_insert(self) -> None:
-        with self.database_manager.unit_of_work() as db:
-            db.execute(
-                "CREATE TRIGGER reject_proposal BEFORE INSERT ON coach_action_proposals "
-                "BEGIN SELECT RAISE(ABORT, 'forced failure'); END"
-            )
-
-        with self.assertRaises(sqlite3.IntegrityError):
-            self._service().create(self._undo(), "session")
 
         self.assertEqual(self._rows(), [])
 

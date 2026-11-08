@@ -1,5 +1,4 @@
-"""Read-only loading of full-resolution Intervals activity data.
-
+"""Test fixture: load one Intervals.icu activity detail the way the retired refresh did.
 Every activity from the prefetch floor onward loads after an Intervals refresh;
 activities before the floor load on the athlete's explicit request.
 """
@@ -17,13 +16,14 @@ from itertools import islice, pairwise
 from typing import Any
 from urllib.parse import quote
 
+from intervals_detail_fingerprints import intervals_detail_fingerprints
+
 from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
-from backend.db.activity_detail_fingerprints import intervals_detail_fingerprints
 from backend.errors import AppError, public_error_contract
 from backend.providers.intervals_activity_detail_projection import (
     COACH_ACTIVITY_DETAIL_STREAM_FIELDS,
@@ -41,7 +41,8 @@ from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,
 )
-from backend.sync.intervals_ingest import INGEST_OFF_REASON
+
+INGEST_OFF_REASON = "intervals_ingest_off"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -290,7 +291,7 @@ class ActivityDetailRefreshService:
 
     def _prefetch_floor(self, newest: list[dict[str, Any]]) -> str:
         """Return the stored floor, setting it on the first prefetch."""
-        floor = self._store.prefetch_floor()
+        floor = prefetch_floor(self._store)
         if floor is not None:
             return floor
         initial = newest[:INITIAL_PREFETCH_ACTIVITIES]
@@ -300,8 +301,8 @@ class ActivityDetailRefreshService:
             if initial
             else self._local_today()
         )
-        self._store.save_prefetch_floor(floor, self._utc_now())
-        return self._store.prefetch_floor() or floor
+        save_prefetch_floor(self._store, floor, self._utc_now())
+        return prefetch_floor(self._store) or floor
 
     def _local_today(self) -> str:
         """Athlete-local calendar date, matching the activities' local dates."""
@@ -379,3 +380,26 @@ def _normalize_stream(stream: Any) -> tuple[str, list[Any]] | None:
     ]
 
     return name, normalized
+
+
+PREFETCH_FLOOR_KEY = "activity_detail_prefetch_floor"
+
+
+def prefetch_floor(store: ActivityDetailStore) -> str | None:
+    """Start time from which every new activity was loaded automatically."""
+    with store._database_manager.reader() as db:
+        row = db.execute(
+            "SELECT value FROM kv WHERE key=?", (PREFETCH_FLOOR_KEY,)
+        ).fetchone()
+    return None if row is None else str(row["value"])
+
+
+def save_prefetch_floor(
+    store: ActivityDetailStore, value: str, observed_at: str
+) -> None:
+    """Set the floor once; an existing floor is never moved."""
+    with store._database_manager.unit_of_work() as db:
+        db.execute(
+            "INSERT OR IGNORE INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+            (PREFETCH_FLOOR_KEY, value, observed_at),
+        )

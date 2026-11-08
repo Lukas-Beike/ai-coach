@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import unittest
 from contextlib import contextmanager
 from datetime import date
@@ -10,7 +9,6 @@ from unittest.mock import Mock
 
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
-from backend.sync.gates import ProviderResyncGate
 from backend.sync.scheduler import (
     DailySyncLoop,
     DailySyncScheduler,
@@ -40,7 +38,7 @@ class _Queue:
 
 class _Markers:
     def __init__(self, due: dict[str, bool] | None = None):
-        self.due = due or {"calendar": True, "garmin": True, "intervals": True}
+        self.due = due or {"calendar": True, "garmin": True}
         self.checked = []
 
     def is_due(self, provider: str) -> bool:
@@ -117,7 +115,6 @@ class DailySyncSchedulerTests(unittest.TestCase):
         reset_gate=None,
         maintenance_gate=None,
         calendar_enabled=True,
-        intervals_enabled=True,
     ):
         self.queue = queue or _Queue()
         self.markers = markers or _Markers()
@@ -126,19 +123,11 @@ class DailySyncSchedulerTests(unittest.TestCase):
             self.queue,
             self.markers,
             garmin or _Garmin(),
-            _Database(),
-            _KeyValues(sync_running),
-            threading.Lock(),
-            _SyncState(),
-            reset_gate or ProviderResyncGate("Intervals.icu"),
             maintenance_gate or MaintenanceGate(),
             config=DailySyncSchedulerConfig(
                 calendar_url_enabled=calendar_enabled,
-                intervals_key_enabled=intervals_enabled,
                 garmin_automatic_sync_days=2,
                 auto_update_label="automatic refresh",
-                sync_period_defaults={"intervals": 90, "garmin": 30},
-                all_sync_days=-1,
             ),
         )
 
@@ -163,12 +152,6 @@ class DailySyncSchedulerTests(unittest.TestCase):
                     {"days": 2, "reason": "automatic refresh"},
                     "scheduler",
                 ),
-                (
-                    "intervals",
-                    "refresh",
-                    {"days": 14, "reason": "automatic refresh", "automatic": True},
-                    "scheduler",
-                ),
             ],
         )
 
@@ -177,7 +160,6 @@ class DailySyncSchedulerTests(unittest.TestCase):
             profile=_Profile(""),
             garmin=_Garmin(False),
             calendar_enabled=False,
-            intervals_enabled=False,
         )
 
         scheduler.schedule()
@@ -187,30 +169,15 @@ class DailySyncSchedulerTests(unittest.TestCase):
 
     def test_skips_active_jobs_and_not_due_markers(self):
         queue = _Queue({"weather", "calendar", "garmin"})
-        markers = _Markers({"calendar": True, "garmin": True, "intervals": False})
+        markers = _Markers({"calendar": True, "garmin": True})
         scheduler = self.make_scheduler(queue=queue, markers=markers)
 
         scheduler.schedule()
 
         self.assertEqual(self.queue.jobs, [])
-        self.assertEqual(markers.checked, ["calendar", "garmin", "intervals"])
+        self.assertEqual(markers.checked, ["calendar", "garmin"])
 
-    def test_intervals_is_skipped_while_syncing_resetting_or_active(self):
-        for kwargs in (
-            {"sync_running": "1"},
-            {"reset_gate": self._resetting_gate()},
-            {"queue": _Queue({"intervals"})},
-        ):
-            with self.subTest(kwargs=kwargs):
-                scheduler = self.make_scheduler(**kwargs)
-                scheduler.schedule()
-                self.assertNotIn("intervals", [job[0] for job in self.queue.jobs])
 
-    def _resetting_gate(self):
-        gate = ProviderResyncGate("Intervals.icu")
-        self.assertTrue(gate.begin_reset())
-        self.addCleanup(gate.end_reset)
-        return gate
 
     def test_maintenance_gate_prevents_scheduling(self):
         gate = MaintenanceGate()

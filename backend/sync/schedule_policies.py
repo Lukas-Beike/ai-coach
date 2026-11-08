@@ -21,12 +21,9 @@ from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
 from backend.athlete.profile import ProfileService
-from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository
 from backend.providers.descriptors import (
     CALENDAR_ID,
     GARMIN_ID,
-    INTERVALS_ID,
     WAHOO_ID,
     WEATHER_ID,
 )
@@ -100,41 +97,6 @@ class GarminSchedulePolicy:
         return payload
 
 
-class IntervalsSchedulePolicy:
-    """Scheduled when the Intervals.icu key was configured at build time.
-
-    ``blocked_by`` reports a running sync or an Intervals.icu resync reset.
-    """
-
-    def __init__(
-        self,
-        *,
-        enabled: bool,
-        sync_state: SyncStateRepository,
-        sync_period_defaults: Mapping[str, int],
-        all_sync_days: int,
-        blocked_by: Callable[[], bool],
-    ) -> None:
-        self._enabled = enabled
-        self._sync_state = sync_state
-        self._sync_period_defaults = sync_period_defaults
-        self._all_sync_days = all_sync_days
-        self._blocked_by = blocked_by
-
-    def configured(self) -> bool:
-        return self._enabled
-
-    def blocked(self) -> bool:
-        return self._blocked_by()
-
-    def refresh_payload(self, _trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
-        days = self._sync_state.sync_period(
-            INTERVALS_ID, self._sync_period_defaults, self._all_sync_days
-        )
-        # The sync owner narrows automatic refreshes after the day's full read.
-        return {"days": days, "reason": reason, "automatic": True}
-
-
 class WahooSchedulePolicy:
     """Scheduled once Wahoo is configured and the athlete connected it.
 
@@ -170,40 +132,16 @@ class WahooSchedulePolicy:
         return {"days": days, "reason": reason}
 
 
-def intervals_busy(
-    database: DatabaseManager,
-    key_values: KeyValueRepository,
-    database_lock: Any,
-    resync_gate: ProviderResyncGate,
-) -> bool:
-    """Return whether a running sync or an Intervals.icu resync blocks a refresh."""
-    with database_lock, database.unit_of_work() as db:
-        running = key_values.get(db, "sync_running") == "1"
-    return running or resync_gate.is_resetting()
-
-
 def build_schedule_policies(
     *,
     profile: ProfileService,
     garmin: GarminSyncService,
-    sync_state: SyncStateRepository,
     calendar_enabled: bool,
-    intervals_enabled: bool,
     garmin_automatic_sync_days: int,
-    sync_period_defaults: Mapping[str, int],
-    all_sync_days: int,
-    intervals_blocked: Callable[[], bool],
 ) -> dict[str, ProviderSchedulePolicy]:
-    """Return the four built-in policies keyed by descriptor provider id."""
+    """Return the built-in policies keyed by descriptor provider id."""
     return {
         WEATHER_ID: WeatherSchedulePolicy(profile),
         CALENDAR_ID: CalendarSchedulePolicy(enabled=calendar_enabled),
         GARMIN_ID: GarminSchedulePolicy(garmin, garmin_automatic_sync_days),
-        INTERVALS_ID: IntervalsSchedulePolicy(
-            enabled=intervals_enabled,
-            sync_state=sync_state,
-            sync_period_defaults=sync_period_defaults,
-            all_sync_days=all_sync_days,
-            blocked_by=intervals_blocked,
-        ),
     }

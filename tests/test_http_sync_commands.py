@@ -23,7 +23,6 @@ class SyncCommandEndpointTests(unittest.TestCase):
         self.endpoint = SyncCommandEndpoint(
             self.queue,
             self.state,
-            self.performance,
             self.full_resync,
             lambda: "operation-1",
             {"intervals": 90, "garmin": 30},
@@ -60,36 +59,7 @@ class SyncCommandEndpointTests(unittest.TestCase):
             "garmin", "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
         )
 
-    def test_one_off_intervals_read_keeps_the_stored_period(self):
-        self.queue.enqueue.return_value = {"id": "job-2"}
 
-        self.assertEqual(
-            self.endpoint.execute("/api/sync", {"one_off": True}),
-            (202, {"id": "job-2"}),
-        )
-
-        self.state.set_sync_period.assert_not_called()
-        self.queue.enqueue.assert_called_once_with(
-            "intervals",
-            "refresh",
-            {"days": 42, "one_off": True, "reason": "manual"},
-            requested_by="user",
-        )
-
-    def test_full_resync_requires_exact_confirmation_before_provider_call(self):
-        with self.assertRaises(AppError):
-            self.endpoint.execute("/api/intervals/full-resync", {"confirm": "yes"})
-        self.full_resync.resync.assert_not_called()
-        self.full_resync.resync.return_value = {"status": "ok"}
-        self.assertEqual(
-            self.endpoint.execute(
-                "/api/intervals/full-resync", {"confirm": "FULL_RESYNC"}
-            ),
-            (200, {"status": "ok"}),
-        )
-        self.full_resync.resync.assert_called_once_with(
-            "intervals", operation_id="operation-1"
-        )
 
     def test_job_request_and_conflict_resolution_keep_requested_by_and_status(self):
         self.queue.enqueue.return_value = {"id": "job-2"}
@@ -121,12 +91,11 @@ class SyncCommandEndpointTests(unittest.TestCase):
             wraps=sync_commands._build_path_routes,
         ) as build:
             for _ in range(5):
-                self.assertTrue(handles_sync_path(registry, "/api/sync"))
-                self.assertTrue(needs_sync_body(registry, "/api/sync"))
+                self.assertTrue(handles_sync_path(registry, "/api/garmin/sync"))
+                self.assertTrue(needs_sync_body(registry, "/api/garmin/sync"))
                 SyncCommandEndpoint(
                     self.queue,
                     self.state,
-                    self.performance,
                     self.full_resync,
                     lambda: "operation-1",
                     {"intervals": 90, "garmin": 30},

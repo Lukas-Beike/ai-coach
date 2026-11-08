@@ -430,7 +430,6 @@ class GarminActivityDetailWiringTests(unittest.TestCase):
             threading.Event(),
             all_sync_days=-1,
             daily_sync_markers=Mock(),
-            references=references,
         )
 
         queue.enqueue(

@@ -20,15 +20,12 @@ from backend.sync.provider_runtime import ProviderRuntimeRegistry, SynchronousRe
 class SyncCommandCore:
     database_manager: Callable[[], Any]
     queue_service: Callable[[], Any]
-    intervals_sync: Callable[[], Any]
     planned_unit_service: Callable[[], Any]
     competition_service: Callable[[], Any]
     workout_library_sync_state: Callable[[], Any]
     planning_revision: Any
     utc_now: Callable[[], Any]
     training_change_limit: int
-    all_sync_days: int
-    # None keeps the Intervals.icu default for the synchronous refresh bindings.
     synchronous_refreshes: Mapping[str, SynchronousRefresh] | None = None
 
 
@@ -68,14 +65,11 @@ class SyncCommandAssembly:
         )
 
     def provider_refresh(self) -> ProviderRefreshCommandService:
-        synchronous_refreshes = self._core.synchronous_refreshes
+        synchronous_refreshes = self._core.synchronous_refreshes or {}
         if self._provider_runtime is not None:
             synchronous_refreshes = self._provider_runtime().synchronous_refreshes()
         return ProviderRefreshCommandService(
-            self._core.queue_service(),
-            self._core.intervals_sync(),
-            self._core.all_sync_days,
-            synchronous_refreshes=synchronous_refreshes,
+            self._core.queue_service(), synchronous_refreshes
         )
 
     def conflicts(self) -> SyncConflictCommandService:

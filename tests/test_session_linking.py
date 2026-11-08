@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import intervals_compaction as intervals_fixture
+
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ProviderId
@@ -105,7 +107,7 @@ class LinkingCase(unittest.TestCase):
             "raw_provider_data": {"activities": rows},
         }
         with self.manager.unit_of_work() as db:
-            return ingest.ingest_intervals_snapshot(
+            return intervals_fixture.ingest_intervals_snapshot(
                 db,
                 snapshot,
                 zone=ZONE,

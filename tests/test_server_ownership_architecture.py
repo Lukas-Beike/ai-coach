@@ -119,19 +119,6 @@ class ServerOwnershipArchitectureTests(unittest.TestCase):
             {"fetch_snapshot", "fetch_performance_snapshot"}.isdisjoint(methods)
         )
 
-    def test_intervals_sync_service_uses_bounded_owner_dependencies(self) -> None:
-        intervals_module = _parse(BACKEND_ROOT / "sync" / "intervals.py")
-        service = next(
-            node
-            for node in intervals_module.body
-            if isinstance(node, ast.ClassDef) and node.name == "IntervalsSyncService"
-        )
-        initializer = next(
-            node
-            for node in service.body
-            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
-        )
-        self.assertLessEqual(len(initializer.args.args) - 1, 7)
 
 
 if __name__ == "__main__":

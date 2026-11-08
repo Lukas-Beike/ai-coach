@@ -10,15 +10,15 @@ from canonical_detail_support import (
     open_manager,
     seed_intervals_activity,
 )
+from intervals_detail_fingerprints import intervals_detail_fingerprints
+from intervals_detail_refresh import normalize_streams
 
 from backend.canonical.vocabulary import ActivityDetailOrigin, RecordingOrigin
-from backend.db.activity_detail_fingerprints import intervals_detail_fingerprints
 from backend.db.activity_detail_store import detail_origins, save_analysis
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,
 )
-from backend.sync.activity_details import normalize_streams
 
 SHA = "a" * 64
 STREAMS = normalize_streams(

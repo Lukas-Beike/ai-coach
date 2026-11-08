@@ -1,25 +1,43 @@
-"""Import and reconcile remote planned calendar units."""
+"""Test fixture: the remote reconcilers of the retired Intervals.icu imports.
+
+They seed library entries and planned units that look like remote copies, so the
+conflict, adoption and archive paths that stay can be tested.
+"""
 
 from __future__ import annotations
 
 import json
 import re
+import uuid
 from collections.abc import Callable
 from datetime import date
 from typing import Any
+
+import remote_planned_unit_fixture as planned_units
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLinkRepository
-from backend.planning import planned_units
+from backend.planning import library as planning_library
 from backend.planning.planned_unit_service import PlannedUnitService
+from backend.planning.planned_units import planned_unit_payload_hash
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.session_focus import carry_focus
 from backend.providers.intervals_workouts import planning_fields_from_intervals
 
 _REMOTE_LINKS = RemoteLinkRepository()
-_DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
+_REMOTE_LIBRARY_METADATA_FIELDS = (
+    "date",
+    "rationale",
+    "plan_id",
+    "plan_name",
+    "source",
+    "private_calendar_adjustment",
+    "archived",
+    "local_marked",
+    "local_deleted",
+)
 _ROW_COLUMNS = (
     "id",
     "local_id",
@@ -41,7 +59,6 @@ _ROW_COLUMNS = (
 
 
 def _update_if_unchanged(db: Any, row: Any, sql: str, params: tuple[Any, ...]) -> bool:
-    """Use a single compare-and-swap update so a concurrent edit wins."""
     values = dict(row)
     predicates = " AND ".join(f"{column} IS ?" for column in _ROW_COLUMNS)
     result = db.execute(
@@ -49,6 +66,172 @@ def _update_if_unchanged(db: Any, row: Any, sql: str, params: tuple[Any, ...]) -
         (*params, *(values.get(column) for column in _ROW_COLUMNS)),
     )
     return result.rowcount == 1
+
+
+class WorkoutLibraryRemoteReconciler:
+    """Merge an already-read remote workout library into local storage."""
+
+    def __init__(
+        self,
+        database_manager: DatabaseManager,
+        now: Callable[[], str],
+        new_id: Callable[[], uuid.UUID | str],
+    ):
+        self._database_manager = database_manager
+        self._now = now
+        self._new_id = new_id
+
+    def reconcile(
+        self, workouts: list[dict[str, Any]], remove_missing: bool = False
+    ) -> list[dict[str, Any]]:
+        """Atomically merge remote entries and optionally mark absent remote rows."""
+        normalized: list[dict[str, Any]] = []
+        seen_external_ids: set[str] = set()
+        now = self._now()
+        with self._database_manager.unit_of_work() as db:
+            for workout in workouts:
+                external_id = str(
+                    workout.get("id") or workout.get("external_id") or ""
+                ).strip()
+                if not external_id:
+                    continue
+                seen_external_ids.add(external_id)
+                existing = db.execute(
+                    "SELECT id, local_id, sync_dirty, sync_state, payload "
+                    "FROM workout_library WHERE external_id = ?",
+                    (external_id,),
+                ).fetchone()
+                local_id = (
+                    str(
+                        existing.get("local_id") or existing.get("id") or self._new_id()
+                    )
+                    if existing
+                    else str(self._new_id())
+                )
+                preserved = self._preserved_dirty_library_workout(
+                    existing, local_id, external_id
+                )
+                normalized.append(
+                    preserved
+                    or self._persist_remote_library_workout_entry(
+                        db, workout, existing, local_id, external_id, now
+                    )
+                )
+            if remove_missing:
+                self._mark_missing_remote_library_workouts(db, seen_external_ids, now)
+        return normalized
+
+    @staticmethod
+    def _object_payload(raw_payload: Any) -> dict[str, Any]:
+        try:
+            payload = json.loads(raw_payload or "{}")
+        except TypeError, ValueError:
+            payload = {}
+        return payload if isinstance(payload, dict) else {}
+
+    @classmethod
+    def _preserved_dirty_library_workout(
+        cls, existing: dict[str, Any] | None, local_id: str, external_id: str
+    ) -> dict[str, Any] | None:
+        if (
+            not existing
+            or not int(existing.get("sync_dirty") or 0)
+            or existing.get("sync_state") not in {"local", "sync_error"}
+        ):
+            return None
+        try:
+            local_payload = json.loads(existing.get("payload") or "{}")
+        except TypeError, ValueError:
+            local_payload = {}
+        if not isinstance(local_payload, dict):
+            return None
+        return planning_library.normalize_library_workout(
+            local_payload,
+            local_id=local_id,
+            external_id=external_id,
+            sync_status=str(existing.get("sync_state") or "local"),
+        )
+
+    @classmethod
+    def _preserve_remote_library_metadata(
+        cls, entry: dict[str, Any], existing: dict[str, Any] | None
+    ) -> None:
+        if not existing:
+            return
+        existing_payload = cls._object_payload(existing.get("payload"))
+        for metadata_key in _REMOTE_LIBRARY_METADATA_FIELDS:
+            if existing_payload.get(metadata_key) is not None:
+                entry[metadata_key] = existing_payload[metadata_key]
+        carry_focus(entry, existing_payload)
+
+    @classmethod
+    def _persist_remote_library_workout_entry(
+        cls,
+        db: Any,
+        workout: dict[str, Any],
+        existing: dict[str, Any] | None,
+        local_id: str,
+        external_id: str,
+        now: str,
+    ) -> dict[str, Any]:
+        entry = planning_library.normalize_library_workout(
+            workout,
+            local_id=local_id,
+            external_id=external_id,
+            sync_status="synced",
+        )
+        cls._preserve_remote_library_metadata(entry, existing)
+        storage_id = existing["id"] if existing else local_id
+        db.execute(
+            "INSERT INTO workout_library(id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at) VALUES (?, ?, ?, ?, 0, 'synced', NULL, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET local_id=excluded.local_id, external_id=excluded.external_id, payload=excluded.payload, sync_dirty=0, sync_state='synced', sync_error=NULL, last_synced_at=excluded.last_synced_at, updated_at=excluded.updated_at",
+            (
+                storage_id,
+                local_id,
+                external_id,
+                json.dumps(entry, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+        _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
+        return entry
+
+    @classmethod
+    def _mark_missing_remote_library_workouts(
+        cls, db: Any, seen_external_ids: set[str], now: str
+    ) -> None:
+        remote_rows = db.execute(
+            "SELECT id, local_id, external_id, sync_dirty, sync_state, payload "
+            "FROM workout_library"
+        ).fetchall()
+        for row in remote_rows:
+            external_id = str(
+                _REMOTE_LINKS.resolve_remote_external_id(
+                    db,
+                    RemoteEntityKind.LIBRARY_WORKOUT,
+                    str(row.get("local_id") or ""),
+                    row.get("external_id"),
+                )
+                or ""
+            )
+            if not external_id or external_id in seen_external_ids:
+                continue
+            if int(row.get("sync_dirty") or 0) or str(row.get("sync_state") or "") in {
+                "local",
+                "sync_error",
+            }:
+                continue
+            payload = cls._object_payload(row.get("payload"))
+            payload["sync_status"] = "remote_missing"
+            db.execute(
+                "UPDATE workout_library SET payload=?, sync_dirty=0, "
+                "sync_state='remote_missing', sync_error=NULL, updated_at=? WHERE id=?",
+                (json.dumps(payload, ensure_ascii=False), now, row["id"]),
+            )
+
+
+_DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
 
 
 class RemotePlannedUnitReconciler:
@@ -129,7 +312,7 @@ class RemotePlannedUnitReconciler:
         now: str,
     ) -> tuple[int, int, int, bool]:
         current_row = self._find_current_row(db, remote_id, identity)
-        incoming_hash = planned_units.planned_unit_payload_hash(incoming)
+        incoming_hash = planned_unit_payload_hash(incoming)
         if not current_row:
             incoming["sync_status"] = "synced"
             self._planned_unit_service.insert(
@@ -325,3 +508,19 @@ class RemotePlannedUnitReconciler:
             ),
         )
         return int(updated), updated
+
+
+def library_reconciler(server: Any) -> WorkoutLibraryRemoteReconciler:
+    return WorkoutLibraryRemoteReconciler(
+        server.database_manager(), server.runtime_clock.utc_now, uuid.uuid4
+    )
+
+
+def planned_reconciler(server: Any) -> RemotePlannedUnitReconciler:
+    return RemotePlannedUnitReconciler(
+        server.database_manager(),
+        server.PLANNING_DATA.planned_unit(),
+        server.PLANNING_REVISION_SERVICE,
+        server.runtime_clock.utc_now,
+        lambda: server.ATHLETE_CLOCK.now().date(),
+    )

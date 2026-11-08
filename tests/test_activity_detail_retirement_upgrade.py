@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import legacy_detail_kv
 from activity_row_support import FixedActivityRows
 from canonical_detail_support import NOW, open_manager, seed_intervals_activity
+from intervals_detail_refresh import ActivityDetailRefreshService
 from test_activity_detail_retirement import (
     POINTS,
     RecordingWriter,
@@ -32,7 +33,6 @@ from backend.providers.intervals_activity_detail_projection import _downsample_s
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import activity_detail_retirement
 from backend.sync.activity_detail_retirement import STATE_KEY
-from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_table_reader import CanonicalTableReader

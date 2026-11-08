@@ -4,9 +4,8 @@ import json
 import threading
 import unittest
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from io import BytesIO
-from pathlib import Path
 from typing import ClassVar
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
@@ -52,8 +51,6 @@ class ServerProvidersTests(ServerTestCase):
                     outcome_service=deferred,
                 ),
                 intervals=IntervalsJobDependencies(
-                    sync_service=deferred,
-                    performance_refresh_service=deferred,
                     selected_workout_sync_service=deferred,
                     competition_sync_service=deferred,
                     nutrition_sync_service=deferred,
@@ -1091,121 +1088,6 @@ class ServerProvidersTests(ServerTestCase):
         self.assertEqual(completed["context"]["operation"], "get_sleep_daily")
         self.assertEqual(completed["context"]["result_items"], 1)
 
-    def test_provider_freshness_distinguishes_never_loaded_and_stale_last_good(self):
-        config = replace(
-            server.CONFIG,
-            intervals_api_key="fake-intervals-key",
-            garmin_fixture_path="",
-            garmin_email="",
-            garmin_tokenstore=str(self._class_data_dir / "missing-garmin-tokens"),
-            calendar_ical_url="",
-        )
-        with patch.object(server, "CONFIG", config):
-            server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
-            initial = {
-                (item["provider"], item["area"]): item
-                for item in server.PROVIDER_SYNC.freshness_service().current(
-                    profile=server.ATHLETE_DATA.profile().get(),
-                    garmin_has_core_error=bool(
-                        server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()
-                    ),
-                    garmin_tokenstore_exists=Path(
-                        server.CONFIG.garmin_tokenstore
-                    ).exists(),
-                )
-            }
-            self.assertEqual(
-                initial[("intervals", "activities")]["state"], "never_loaded"
-            )
-            self.assertEqual(initial[("weather", "forecast")]["state"], "never_loaded")
-            refresh_id = server.PROVIDER_SYNC.refresh_tracker().start(
-                "intervals", "activities", "operation-test", "manual"
-            )
-            server.PROVIDER_SYNC.refresh_tracker().finish(
-                refresh_id, "error", "failed", error_code="network_error"
-            )
-            failed = {
-                (item["provider"], item["area"]): item
-                for item in server.PROVIDER_SYNC.freshness_service().current(
-                    profile=server.ATHLETE_DATA.profile().get(),
-                    garmin_has_core_error=bool(
-                        server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()
-                    ),
-                    garmin_tokenstore_exists=Path(
-                        server.CONFIG.garmin_tokenstore
-                    ).exists(),
-                )
-            }
-            self.assertEqual(failed[("intervals", "activities")]["state"], "error")
-            self.assertEqual(
-                failed[("intervals", "activities")]["error_code"], "network_error"
-            )
-            self.assertIsNone(failed[("intervals", "activities")]["next_retry_at"])
-            with patch.object(server, "CONFIG", replace(config, intervals_api_key="")):
-                unconfigured = {
-                    (item["provider"], item["area"]): item
-                    for item in server.PROVIDER_SYNC.freshness_service().current(
-                        profile=server.ATHLETE_DATA.profile().get(),
-                        garmin_has_core_error=bool(
-                            server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()
-                        ),
-                        garmin_tokenstore_exists=Path(
-                            server.CONFIG.garmin_tokenstore
-                        ).exists(),
-                    )
-                }
-            self.assertEqual(
-                unconfigured[("intervals", "activities")]["state"], "not_configured"
-            )
-            self.assertEqual(
-                unconfigured[("intervals", "activities")]["error_code"], "network_error"
-            )
-            server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals",
-                "refresh",
-                {"days": 1},
-                requested_by="test",
-                available_at=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
-            )
-            scheduled = {
-                (item["provider"], item["area"]): item
-                for item in server.PROVIDER_SYNC.freshness_service().current(
-                    profile=server.ATHLETE_DATA.profile().get(),
-                    garmin_has_core_error=bool(
-                        server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()
-                    ),
-                    garmin_tokenstore_exists=Path(
-                        server.CONFIG.garmin_tokenstore
-                    ).exists(),
-                )
-            }
-            self.assertTrue(scheduled[("intervals", "activities")]["next_retry_at"])
-            refresh_id = server.PROVIDER_SYNC.refresh_tracker().start(
-                "intervals", "activities", "operation-test-2", "manual"
-            )
-            server.PROVIDER_SYNC.refresh_tracker().finish(
-                refresh_id, "success", "complete"
-            )
-            with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-                stale_at = (datetime.now(UTC) - timedelta(days=3)).isoformat()
-                db.execute(
-                    "UPDATE provider_refresh_history SET started_at=?, finished_at=? WHERE id=?",
-                    (stale_at, stale_at, refresh_id),
-                )
-            stale = {
-                (item["provider"], item["area"]): item
-                for item in server.PROVIDER_SYNC.freshness_service().current(
-                    profile=server.ATHLETE_DATA.profile().get(),
-                    garmin_has_core_error=bool(
-                        server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()
-                    ),
-                    garmin_tokenstore_exists=Path(
-                        server.CONFIG.garmin_tokenstore
-                    ).exists(),
-                )
-            }
-            self.assertEqual(stale[("intervals", "activities")]["state"], "stale")
-            self.assertTrue(stale[("intervals", "activities")]["has_last_good"])
 
     def test_provider_refresh_history_is_bounded_and_diagnostic_safe(self):
         for index in range(sync_freshness.PROVIDER_REFRESH_MAX_ROWS + 5):
@@ -1223,6 +1105,7 @@ class ServerProvidersTests(ServerTestCase):
         report = server.DIAGNOSTICS_ASSEMBLY.report_service().report()
         self.assertIn("provider_freshness", report)
         self.assertNotIn("operation-", json.dumps(report))
+
 
 
 if __name__ == "__main__":

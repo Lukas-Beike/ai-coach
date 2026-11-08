@@ -55,6 +55,7 @@ from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 FRESHNESS_AREA: Final = "activities"
 LAST_SYNC_KEY: Final = "last_wahoo_sync_at"
 LAST_ERROR_KEY: Final = "last_wahoo_sync_error"
+GENERAL_ERROR_KEY: Final = "last_sync_error"
 SYNC_FAILED_MESSAGE: Final = "Die Wahoo-Synchronisierung ist fehlgeschlagen."
 # Wahoo refuses an endpoint with these statuses when the athlete's grant does not
 # cover it; the run goes on without that source and its stored rows stay as they are.
@@ -244,6 +245,8 @@ class WahooSyncService:
             self._coverage.persist(db, coverage, zone=zone)
             self._key_values.set(db, LAST_SYNC_KEY, synced_at.isoformat())
             self._key_values.set(db, LAST_ERROR_KEY, "")
+            # A successful read ends the general error a failed sync left behind.
+            self._key_values.set(db, GENERAL_ERROR_KEY, "")
             self._daily_markers().mark_in_transaction(db, WAHOO_ID)
         result: dict[str, Any] = {
             "status": "partial" if fetch.truncated else "ok",

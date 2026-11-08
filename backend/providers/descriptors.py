@@ -34,7 +34,6 @@ _TWO_DAYS_SECONDS = 48 * 60 * 60
 _THREE_HOURS_SECONDS = 3 * 60 * 60
 _INTERVALS_MAX_SYNC_DAYS = 365
 DEFAULT_MAX_SYNC_DAYS = 90
-_INTERVALS_DEFAULT_SYNC_DAYS = 84
 _GARMIN_DEFAULT_SYNC_DAYS = 84
 _WAHOO_DEFAULT_SYNC_DAYS = 84
 
@@ -52,13 +51,9 @@ WAHOO_NOT_CONFIGURED_MESSAGE = (
 
 _ALL_INTERVALS_JOB_TYPES = frozenset(
     {
-        "refresh",
-        "performance_refresh",
-        "activity_details",
         "plan_push",
         "competition_push",
         "nutrition_sync",
-        "historical_backfill",
     }
 )
 
@@ -260,15 +255,10 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
     ProviderDescriptor(
         provider_id=INTERVALS_ID,
         label="Intervals.icu",
+        # Output only: the app writes workouts, competitions, nutrition and
+        # metrics to Intervals.icu and never reads training data from it.
         capabilities=frozenset(
             {
-                Capability.ACTIVITIES,
-                Capability.ACTIVITY_DETAILS,
-                Capability.DAILY_HEALTH,
-                Capability.BODY,
-                Capability.THRESHOLDS,
-                Capability.GEAR,
-                Capability.PLANNED_EVENTS,
                 Capability.COMPETITIONS,
                 Capability.WORKOUT_EXPORT,
                 Capability.METRIC_EXPORT,
@@ -276,63 +266,17 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         ),
         freshness_areas=(
             FreshnessArea(
-                area="activities",
-                label="Intervals.icu · Training",
-                stale_after_s=_TWO_DAYS_SECONDS,
-                read_only=True,
-            ),
-            FreshnessArea(
                 area="competitions",
                 label="Intervals.icu · Wettkämpfe",
                 stale_after_s=_TWO_DAYS_SECONDS,
                 read_only=False,
             ),
-            FreshnessArea(
-                area="performance",
-                label="Intervals.icu · Leistung",
-                stale_after_s=_TWO_DAYS_SECONDS,
-                read_only=True,
-            ),
         ),
         max_sync_days=_INTERVALS_MAX_SYNC_DAYS,
-        resync_keys=(
-            "intervals_full_resync_running",
-            "intervals_full_resync_status",
-            "intervals_full_resync_at",
-            "intervals_full_resync_error",
-        ),
+        resync_keys=(),
         # Accepted job types; backend/sync/jobs.py checks them via supports_job.
         job_types=_ALL_INTERVALS_JOB_TYPES,
-        # Refresh payload fields; backend/sync/jobs.py enforces them via the
-        # registry's refresh_fields. ``automatic`` marks a scheduled refresh,
-        # which reads the short window after the day's full-period read;
-        # ``one_off`` is the manual read while the ingest switch is off.
-        refresh_fields=frozenset(
-            {"days", "reason", "end_date", "automatic", "one_off"}
-        ),
-        # Default sync window reported by ProviderRegistry.sync_period_defaults to
-        # http_api public and bootstrap state. The sync services still take their
-        # window from the separate server.py SYNC_PERIOD_DEFAULTS literal, so the
-        # two values must be kept equal by hand.
-        default_sync_days=_INTERVALS_DEFAULT_SYNC_DAYS,
-        # Ranks feed ProviderRegistry.daily_order and startup_order; the daily
-        # marker feeds backend/sync/daily.py and backend/sync/queue.py.
-        schedule=SchedulePolicy(daily_rank=3, startup_rank=1, daily_marker=True),
-        # Coach refresh order; ProviderRegistry.coach_refresh_targets reads it.
-        coach_rank=1,
-        # Coach waits for this refresh before answering (coach/tool_preparation.py).
-        coach_waits_for_completion=True,
-        # Message for not-configured responses (http_api/sync_commands.py).
         not_configured_message=_INTERVALS_NOT_CONFIGURED_MESSAGE,
-        # Manual route with a sync period; http_api/sync_commands.py builds the
-        # POST table from it.
-        manual_sync=ManualSyncRoute(
-            path="/api/sync",
-            uses_sync_period=True,
-            payload=(("reason", "manual"),),
-        ),
-        # Full-resync route; ProviderRegistry.full_resync_routes lists it.
-        full_resync_path="/api/intervals/full-resync",
         # Body metrics go to the wellness day, thresholds to the Ride or Run sport
         # settings; backend/sync/intervals_metric_export.py maps the fields.
         metric_exports=frozenset(
@@ -493,6 +437,8 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         # Ranked after every earlier provider in the daily, startup and Coach order.
         schedule=SchedulePolicy(daily_rank=4, startup_rank=4, daily_marker=True),
         coach_rank=5,
+        # Coach waits for the Wahoo refresh so a current-data answer reads fresh activities.
+        coach_waits_for_completion=True,
         not_configured_message=WAHOO_NOT_CONFIGURED_MESSAGE,
         # Manual refresh uses the window of the handler's default, not the stored
         # period, so the route does not read a sync period.

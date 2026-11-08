@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import intervals_compaction as intervals_fixture
+
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.feedback import ActivityFeedbackService
 from backend.db import DatabaseManager, canonical_store, row_factory
@@ -29,7 +31,6 @@ from backend.performance.report_service import (
 )
 from backend.planning.block_review import block_review, last_completed_test
 from backend.planning.season_preparation import load_scenarios
-from backend.sync import canonical_ingest
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from tests.test_training_report import (
     _empty_season_source,
@@ -82,7 +83,7 @@ class FeedbackSessionFixture(unittest.TestCase):
         self.addCleanup(self.manager.close)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-            canonical_ingest.ingest_intervals_partial_snapshot(
+            intervals_fixture.ingest_intervals_partial_snapshot(
                 db,
                 {
                     "synced_at": SYNCED,
@@ -334,9 +335,32 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.service.save(INTERVALS_ID, {"notes": ""})
         self.assertEqual((self.service.list(), stored_rows(self)), ([], []))
 
+
+    def test_local_feedback_never_takes_the_provider_rpe(self) -> None:
+        self.service.save(INTERVALS_ID, {"notes": "No RPE given"})
+        (effective,) = self.service.list()
+        self.assertIsNone(effective["session_rpe"])
+
+    def test_a_deleted_provider_copy_keeps_its_feedback(self) -> None:
+        self.service.save(GARMIN_ID, {"notes": "Saved on the Garmin copy"})
+        with self.manager.unit_of_work() as db:
+            self.assertTrue(
+                canonical_store.mark_activity_deleted(
+                    db,
+                    "garmin",
+                    record_kind="activity",
+                    provider_activity_id=GARMIN_ID,
+                    now=SYNCED,
+                )
+            )
+        (row,) = stored_rows(self)
+        self.assertEqual(row["notes"], "Saved on the Garmin copy")
+        (shown,) = self.service.for_activity_ids([INTERVALS_ID])
+        self.assertEqual(shown["notes"], "Saved on the Garmin copy")
+
     def test_an_ambiguous_id_stands_alone(self) -> None:
         with self.manager.unit_of_work() as db:
-            canonical_ingest.ingest_intervals_partial_snapshot(
+            intervals_fixture.ingest_intervals_partial_snapshot(
                 db,
                 {
                     "synced_at": SYNCED,
@@ -362,28 +386,6 @@ class FeedbackSessionTests(FeedbackSessionFixture):
             row for row in stored_rows(self) if row["activity_id"] == GARMIN_ID
         ]
         self.assertIsNone(ambiguous["session_id"])
-
-    def test_local_feedback_never_takes_the_provider_rpe(self) -> None:
-        self.service.save(INTERVALS_ID, {"notes": "No RPE given"})
-        (effective,) = self.service.list()
-        self.assertIsNone(effective["session_rpe"])
-
-    def test_a_deleted_provider_copy_keeps_its_feedback(self) -> None:
-        self.service.save(GARMIN_ID, {"notes": "Saved on the Garmin copy"})
-        with self.manager.unit_of_work() as db:
-            self.assertTrue(
-                canonical_store.mark_activity_deleted(
-                    db,
-                    "garmin",
-                    record_kind="activity",
-                    provider_activity_id=GARMIN_ID,
-                    now=SYNCED,
-                )
-            )
-        (row,) = stored_rows(self)
-        self.assertEqual(row["notes"], "Saved on the Garmin copy")
-        (shown,) = self.service.for_activity_ids([INTERVALS_ID])
-        self.assertEqual(shown["notes"], "Saved on the Garmin copy")
 
 
 class ReportFeedbackTests(FeedbackSessionFixture):

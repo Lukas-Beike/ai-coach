@@ -30,7 +30,7 @@ _READ_ONLY_JOB_TYPES = frozenset(
     {"refresh", "performance_refresh", "activity_details", "historical_backfill"}
 )
 _READ_ONLY_REFRESH_TOOLS = frozenset(
-    {"start_provider_refresh", "refresh_current_performance"}
+    {"start_provider_refresh"}
 )
 
 

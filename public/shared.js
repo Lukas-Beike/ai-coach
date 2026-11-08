@@ -313,9 +313,8 @@ function renderStatus(data) {
   // The setup state is shown by the page-wide setup banner on every tab, so the
   // status card only reports runtime problems.
   renderSetupBanner(missing);
-  const performanceRefresh = data.performance_refresh || {};
   const openaiStatus = data.usage?.status || {};
-  const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error
+  const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const statusCard = $("#statusCard");
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";

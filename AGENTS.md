@@ -82,11 +82,12 @@ Use [README.md](README.md) for setup and operational commands.
 ## Behaviour requirements
 
 - Startup initializes the database and sync/Coach workers, then enqueues configured
-  calendar, Intervals.icu, Garmin, and weather refreshes. Preserve daily scheduling,
+  calendar, Garmin, Wahoo, and weather refreshes; Intervals.icu is an output
+  target and is not read. Preserve daily scheduling,
   manual refreshes, and browser polling of local sync state.
 - Chat uses saved profile/competitions, performance, recent local feedback,
   workout library, and latest provider snapshots. Preserve source labels for
-  Intervals.icu, Garmin, derived values, and AI estimates.
+  Garmin, Wahoo, derived values, and AI estimates.
 - Confirmed local profile/competition records are authoritative; OpenAI Conversation
   state is dialogue continuity only. Durable profile, competition, check-in, and
   planning mutations come from an explicit API/UI action or from a Coach turn

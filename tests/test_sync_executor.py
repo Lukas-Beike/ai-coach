@@ -29,7 +29,6 @@ from backend.sync.executor import (
     build_job_owners,
     dispatch_provider_job,
 )
-from backend.sync.intervals_ingest import ingest_off_result
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 
@@ -215,14 +214,10 @@ class SyncJobExecutorTests(unittest.TestCase):
             job_owners=build_job_owners(
                 nutrition_sync_service=self.nutrition,
                 intervals_jobs=IntervalsSyncJobOwner(
-                    historical_sync=historical_sync,
-                    intervals_sync_service=self.intervals,
-                    performance_refresh_service=self.performance,
                     selected_workout_sync_service=self.selected,
                     competition_sync_service=self.competitions,
                     sync_operation_observer=self.observer,
                     intervals_resync_gate=self.gate,
-                    activity_detail_service=self.details,
                 ),
                 garmin_jobs=GarminSyncJobOwner(
                     historical_sync=historical_sync,
@@ -269,12 +264,6 @@ class SyncJobExecutorTests(unittest.TestCase):
         }
 
     def test_dispatches_specific_intervals_jobs_and_preserves_plan_repair(self) -> None:
-        performance = self.executor.execute(
-            self.job("intervals", "performance_refresh", {"reason": "metrics"})
-        )
-        self.assertEqual(performance, {"status": "ok"})
-        self.assertEqual(self.performance.calls, [((), {})])
-
         competition = self.executor.execute(
             self.job(
                 "intervals",
@@ -285,7 +274,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(competition, {"status": "ok", "count": 2})
         self.assertEqual(
             self.competitions.calls[-1],
-            ((), {"reason": "manual", "push_local": True, "expected_manifest": []}),
+            ((), {"reason": "manual", "expected_manifest": []}),
         )
 
         entry = {
@@ -355,47 +344,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         )
         self.assertEqual(self.nutrition.calls[-1], ("approved", approved))
 
-    def test_intervals_sync_observes_competitions_inside_provider_gate(self) -> None:
-        self.competitions.during_call = lambda: self.assertEqual(self.gate.active, 1)
 
-        result = self.executor.execute(
-            self.job("intervals", payload={"days": 12, "reason": "manuell"})
-        )
-
-        self.assertEqual(result["competitions"], {"status": "ok", "count": 2})
-        self.assertEqual(
-            self.intervals.calls,
-            [
-                (
-                    (),
-                    {
-                        "reason": "manuell",
-                        "activity_days": 12,
-                        "operation_id": "job-123",
-                    },
-                )
-            ],
-        )
-        self.assertEqual(
-            self.observer.calls, [("intervals", "competitions", "manuell", "job-123")]
-        )
-        self.assertEqual(self.observer.scopes[0].result, {"status": "ok", "count": 2})
-        self.assertEqual(self.gate.events, ["enter", "exit"])
-
-    def test_competition_error_makes_intervals_partial_and_busy_skips_competitions(
-        self,
-    ) -> None:
-        self.competitions.error = RuntimeError("fake competition failure")
-        result = self.executor.execute(self.job("intervals"))
-        self.assertEqual(result["status"], "partial")
-        self.assertIs(result["window_complete"], True)
-        self.assertEqual(result["competitions"], {"status": "error"})
-
-        self.intervals.result = {"status": "already_running"}
-        before = len(self.competitions.calls)
-        busy_result = self.executor.execute(self.job("intervals"))
-        self.assertEqual(busy_result, {"status": "already_running"})
-        self.assertEqual(len(self.competitions.calls), before)
 
     def test_calendar_and_weather_forward_reason_operation_and_force(self) -> None:
         self.executor.execute(self.job("calendar", payload={"reason": "morning"}))
@@ -483,49 +432,10 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.executor.execute(self.job("garmin", payload={"days": -1}))
         self.assertEqual(len(self.morning.calls), 1)
 
-    def test_historical_windows_clamp_days_and_respect_earliest_boundary(self) -> None:
-        self.intervals.result = {"status": "ok"}
-        result = self.executor.execute(
-            self.job("intervals", "historical_backfill", {"days": 500})
-        )
-        self.assertEqual(self.intervals.calls[-1][1]["activity_days"], 90)
-        self.assertEqual(self.intervals.calls[-1][1]["end_date"], date(2026, 8, 21))
-        self.assertEqual(result["historical_next_end"], "2026-05-23")
-        self.assertEqual(self.state.calls[-1][0], "intervals")
-
-        self.intervals.result = {"status": "ok"}
-        exact_boundary = self.executor.execute(
-            self.job(
-                "intervals",
-                "historical_backfill",
-                {"days": 90, "end_date": "2000-03-31"},
-            )
-        )
-        self.assertEqual(exact_boundary["historical_next_end"], "2000-01-01")
-
-        below_boundary = self.executor.execute(
-            self.job(
-                "garmin",
-                "historical_backfill",
-                {"days": 90, "end_date": "2000-03-30"},
-            )
-        )
-        self.assertIsNone(below_boundary["historical_next_end"])
-
-        # The fetched window never reaches below the floor.
-        self.executor.execute(
-            self.job(
-                "intervals",
-                "historical_backfill",
-                {"days": 90, "end_date": "2000-01-10"},
-            )
-        )
-        self.assertEqual(self.intervals.calls[-1][1]["activity_days"], 10)
-        self.assertEqual(self.intervals.calls[-1][1]["end_date"], date(2000, 1, 10))
 
     def test_backfill_below_the_floor_ends_without_a_fetch(self) -> None:
         for provider, service in (
-            ("intervals", self.intervals),
+            ("garmin", self.garmin),
             ("garmin", self.garmin),
         ):
             with self.subTest(provider=provider):
@@ -556,45 +466,13 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.assertEqual((days, end), (32, date(2020, 2, 1)))
 
-    def test_run_completes_and_queues_next_historical_chunk(self) -> None:
-        self.intervals.result = {"status": "ok"}
-        job = self.job(
-            "intervals",
-            "historical_backfill",
-            {"days": 90, "end_date": "2026-09-01"},
-        )
-
-        self.executor.run(job)
-
-        self.assertEqual(self.outcomes.complete_calls[0][0], "job-123")
-        self.assertEqual(
-            self.queue.calls,
-            [
-                (
-                    (
-                        "intervals",
-                        "historical_backfill",
-                        {
-                            "days": 90,
-                            "end_date": "2026-06-03",
-                            "reason": "fortgesetzter historischer Backfill",
-                        },
-                    ),
-                    {
-                        "requested_by": "backfill",
-                        "available_at": "2026-09-20T12:00:15+00:00",
-                    },
-                )
-            ],
-        )
-        self.assertEqual(self.outcomes.failure_calls, [])
 
     def test_historical_chain_stops_after_two_empty_chunks_and_parks_cursor(
         self,
     ) -> None:
-        self.intervals.result = {"status": "ok", "window_records": 0}
+        self.garmin.result = {"status": "ok", "window_records": 0}
         job = self.job(
-            "intervals",
+            "garmin",
             "historical_backfill",
             {"days": 90, "end_date": "2026-09-01"},
         )
@@ -607,32 +485,20 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.queue.calls.clear()
         self.executor.run(
-            self.job("intervals", "historical_backfill", {**first, "days": 90})
+            self.job("garmin", "historical_backfill", {**first, "days": 90})
         )
 
         self.assertEqual(self.queue.calls, [])
         self.assertEqual(
-            self.state.cursor_updates, [("intervals", "historical", "2000-01-01")]
+            self.state.cursor_updates, [("garmin", "historical", "2000-01-01")]
         )
 
-    def test_non_empty_chunk_resets_the_empty_chunk_counter(self) -> None:
-        self.intervals.result = {"status": "ok", "window_records": 3}
-        self.executor.run(
-            self.job(
-                "intervals",
-                "historical_backfill",
-                {"days": 90, "end_date": "2026-09-01", "empty_chunks": 1},
-            )
-        )
-
-        self.assertNotIn("empty_chunks", self.queue.calls[0][0][2])
-        self.assertEqual(self.state.cursor_updates, [])
 
     def test_chunk_without_a_record_count_is_not_empty(self) -> None:
-        self.intervals.result = {"status": "ok"}
+        self.garmin.result = {"status": "ok"}
         self.executor.run(
             self.job(
-                "intervals",
+                "garmin",
                 "historical_backfill",
                 {"days": 90, "end_date": "2026-09-01", "empty_chunks": 1},
             )
@@ -669,115 +535,19 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.assertEqual(self.queue.calls, [])
 
-    def test_historical_chunk_skips_competition_sync_and_still_continues(self) -> None:
-        self.competitions.error = RuntimeError("fake competition failure")
-        job = self.job(
-            "intervals",
-            "historical_backfill",
-            {"days": 90, "end_date": "2026-09-01"},
-        )
 
-        self.executor.run(job)
 
-        self.assertEqual(self.competitions.calls, [])
-        self.assertEqual(len(self.queue.calls), 1)
-        self.assertEqual(self.queue.calls[0][0][2]["end_date"], "2026-06-03")
 
-        self.queue.calls.clear()
-        self.outcomes.fallback_status = "failed"
-        self.executor.run(job)
-        self.assertEqual(self.queue.calls, [])
 
-    def test_refresh_job_still_syncs_competitions(self) -> None:
-        self.executor.run(self.job("intervals"))
 
-        self.assertEqual(len(self.competitions.calls), 1)
 
-    def test_only_scheduled_intervals_refreshes_are_automatic(self) -> None:
-        self.executor.run(
-            self.job("intervals", payload={"days": 42, "automatic": True})
-        )
-        self.executor.run(self.job("intervals", payload={"days": 42}))
-        self.executor.run(
-            self.job(
-                "intervals",
-                "historical_backfill",
-                {"days": 5, "end_date": "2026-06-03", "automatic": True},
-            )
-        )
 
-        flags = [kwargs.get("automatic") for _args, kwargs in self.intervals.calls]
-        self.assertEqual(flags, [True, None, None])
 
-    def test_refresh_prefetches_recent_details_with_provider_gate(self) -> None:
-        def prefetch(guard):
-            self.assertEqual(self.gate.active, 0)
-            with guard():
-                self.assertEqual(self.gate.active, 1)
-            return {"fetched": 2, "failed": 0}
-
-        self.details.prefetch_new.side_effect = prefetch
-
-        result = self.executor.execute(self.job("intervals"))
-
-        self.details.prefetch_new.assert_called_once()
-        self.assertEqual(result["detail_prefetch"], {"fetched": 2, "failed": 0})
-        self.assertEqual(result["competitions"], {"status": "ok", "count": 2})
-
-    def test_prefetch_error_keeps_refresh_and_competitions(self) -> None:
-        self.details.prefetch_new.side_effect = RuntimeError("fake prefetch failure")
-
-        result = self.executor.execute(self.job("intervals"))
-
-        self.assertEqual(result["detail_prefetch"], {"status": "error"})
-        self.assertEqual(result["competitions"], {"status": "ok", "count": 2})
-        self.assertNotEqual(result.get("status"), "failed")
-
-    def test_ingest_off_refresh_only_reconciles_competitions(self) -> None:
-        self.intervals.result = ingest_off_result()
-
-        result = self.executor.execute(self.job("intervals"))
-
-        self.details.prefetch_new.assert_not_called()
-        self.assertEqual(result["status"], "skipped")
-        self.assertEqual(result["competitions"], {"status": "ok", "count": 2})
-
-    def test_ingest_off_backfill_keeps_its_cursor(self) -> None:
-        self.intervals.result = ingest_off_result()
-
-        self.executor.run(
-            self.job(
-                "intervals",
-                "historical_backfill",
-                {"days": 90, "end_date": "2026-09-01"},
-            )
-        )
-
-        self.assertEqual(self.queue.calls, [])
-        self.assertEqual(self.competitions.calls, [])
-
-    def test_one_off_refresh_reaches_the_sync(self) -> None:
-        self.executor.run(self.job("intervals", payload={"days": 42, "one_off": True}))
-        self.executor.run(self.job("intervals", payload={"days": 42}))
-
-        flags = [kwargs.get("one_off") for _args, kwargs in self.intervals.calls]
-        self.assertEqual(flags, [True, None])
-
-    def test_historical_chunk_does_not_prefetch_details(self) -> None:
-        self.executor.run(
-            self.job(
-                "intervals",
-                "historical_backfill",
-                {"days": 90, "end_date": "2026-09-01"},
-            )
-        )
-
-        self.details.prefetch_new.assert_not_called()
 
     def test_run_survives_failure_while_recording_failure(self) -> None:
-        self.intervals.error = RuntimeError("provider failure")
+        self.garmin.error = RuntimeError("provider failure")
         self.outcomes.failure_error = RuntimeError("store failure")
-        job = self.job("intervals")
+        job = self.job("garmin")
 
         with self.assertLogs("backend.sync.executor", level="ERROR") as logs:
             self.executor.run(job)
@@ -786,12 +556,12 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertNotIn("store failure", " ".join(logs.output))
 
     def test_completed_job_runs_the_after_job_hook(self) -> None:
-        self.executor.run(self.job("intervals"))
+        self.executor.run(self.job("garmin"))
         self.assertEqual(self.after_job_calls, [True])
 
     def test_failed_job_skips_the_after_job_hook(self) -> None:
-        self.intervals.error = RuntimeError("provider failure")
-        self.executor.run(self.job("intervals"))
+        self.garmin.error = RuntimeError("provider failure")
+        self.executor.run(self.job("garmin"))
         self.assertEqual(self.after_job_calls, [])
 
     def test_failing_after_job_hook_keeps_the_completed_outcome(self) -> None:
@@ -800,15 +570,15 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         executor = self.make_executor(after_job=broken)
         with self.assertLogs("backend.sync.executor", level="ERROR") as logs:
-            executor.run(self.job("intervals"))
+            executor.run(self.job("garmin"))
         self.assertEqual(len(self.outcomes.complete_calls), 1)
         self.assertEqual(self.outcomes.failure_calls, [])
         self.assertNotIn("hook failure", " ".join(logs.output))
 
     def test_run_records_execution_failure_without_reraising(self) -> None:
         failure = RuntimeError("isolated provider failure")
-        self.intervals.error = failure
-        job = self.job("intervals")
+        self.garmin.error = failure
+        job = self.job("garmin")
 
         self.executor.run(job)
 
@@ -820,8 +590,8 @@ class SyncJobExecutorTests(unittest.TestCase):
     ) -> None:
         temporary = AppError(409, "busy", reason="temporary_error")
         self.outcomes.complete_error = temporary
-        self.intervals.result = {"status": "already_running"}
-        job = self.job("intervals")
+        self.garmin.result = {"status": "already_running"}
+        job = self.job("garmin")
 
         self.executor.run(job)
 
@@ -882,38 +652,8 @@ class ProviderJobAdapterTests(unittest.TestCase):
         jobs.execute_specific.assert_not_called()
         jobs.execute_sync.assert_not_called()
 
-    def test_intervals_specific_result_short_circuits_the_sync(self) -> None:
-        jobs = Mock()
-        jobs.execute_specific.return_value = {"status": "ok"}
-        adapter = IntervalsJobAdapter(jobs=jobs, nutrition_sync_service=Mock())
 
-        result = adapter.execute(self.job, {}, "manual", job_type="performance_refresh")
 
-        self.assertEqual(result, {"status": "ok"})
-        jobs.execute_sync.assert_not_called()
-
-    def test_intervals_plan_push_is_rejected_before_the_sync(self) -> None:
-        jobs = Mock()
-        jobs.execute_specific.return_value = None
-        adapter = IntervalsJobAdapter(jobs=jobs, nutrition_sync_service=Mock())
-
-        with self.assertRaises(AppError) as raised:
-            adapter.execute(self.job, {}, "manual", job_type="plan_push")
-
-        self.assertEqual(raised.exception.status, 409)
-        self.assertEqual(raised.exception.reason, "unsupported_job")
-        jobs.execute_sync.assert_not_called()
-
-    def test_intervals_other_types_fall_through_to_the_sync(self) -> None:
-        jobs = Mock()
-        jobs.execute_specific.return_value = None
-        jobs.execute_sync.return_value = {"status": "ok"}
-        adapter = IntervalsJobAdapter(jobs=jobs, nutrition_sync_service=Mock())
-
-        result = adapter.execute(self.job, {}, "manual", job_type="refresh")
-
-        self.assertEqual(result, {"status": "ok"})
-        jobs.execute_sync.assert_called_once_with(self.job, {}, "manual")
 
     def test_garmin_plan_push_is_rejected_and_other_types_delegate(self) -> None:
         jobs = Mock()

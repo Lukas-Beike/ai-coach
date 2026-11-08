@@ -24,8 +24,6 @@ class SelectedWorkoutProviders:
 @dataclass(frozen=True)
 class SelectedWorkoutControls:
     redactor: Callable[[str], str]
-    lock: Any
-    wait_seconds: float
     provider_resync_gate: ProviderResyncGate
 
 
@@ -52,8 +50,6 @@ class SelectedWorkoutSyncAssembly:
             providers.planned_calendar_repair_service
         )
         self._redactor = controls.redactor
-        self._lock = controls.lock
-        self._wait_seconds = controls.wait_seconds
         self._provider_resync_gate = controls.provider_resync_gate
 
     def service(self) -> SelectedWorkoutSyncService:
@@ -65,7 +61,5 @@ class SelectedWorkoutSyncAssembly:
             self._planned_calendar_sync_service(),
             self._planned_calendar_repair_service(),
             self._redactor,
-            lock=self._lock,
-            wait_seconds=self._wait_seconds,
             provider_resync_gate=self._provider_resync_gate,
         )

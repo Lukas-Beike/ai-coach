@@ -8,8 +8,6 @@ from datetime import UTC, tzinfo
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
-from backend.activities.duplicate_inspection import DuplicateInspector
-from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.session_corrections import SessionCorrectionService
 from backend.activities.session_linking import garmin_activity_matches
@@ -23,7 +21,6 @@ from backend.canonical.activity_summary import ActivitySummary
 from backend.performance.source_policy import PREFERENCE_PROFILE_FIELDS
 from backend.runtime.ports import ActivityRowAndSummaryReader, CanonicalTableServing
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.intervals_ingest import IntervalsIngestSwitch
 from backend.weather.cache import invalidate_for_location_change
 
 
@@ -141,34 +138,12 @@ class AthleteDataAssembly:
         """The athlete's wall-clock zone from the saved profile."""
         return AthleteLocalClock(self.profile()).now().tzinfo or UTC
 
-    def duplicate_inspector(self) -> DuplicateInspector:
-        # Always the canonical tables, never the selector's snapshot projection,
-        # and only while the tables serve reads (see DuplicateInspector).
-        return DuplicateInspector(
-            self._database_manager(),
-            CanonicalTableReader(),
-            self._athlete_zone,
-            self._table_serving(),
-            IntervalsIngestSwitch(
-                self._database_manager(), self._key_value_repository
-            ).enabled,
-        )
-
     def session_corrections(self) -> SessionCorrectionService:
         return SessionCorrectionService(
             self._database_manager(),
             self._utc_now,
             self._event_buffer,
             on_change=self._load_inputs_changed,
-        )
-
-    def duplicate_activity(self) -> DuplicateActivityService:
-        return DuplicateActivityService(
-            self._database_manager(),
-            self.duplicate_inspector(),
-            self._utc_now,
-            self._event_buffer,
-            references=ActivityReferences(self._database_manager()),
         )
 
     def checkin(self) -> CheckinService:

@@ -17,6 +17,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import remote_reconcilers
+import snapshot_seed
 from garmin_support import save_garmin
 from server_test_support import ServerTestCase, create_test_session, server
 from support import canonical_backfill_stopped
@@ -577,7 +579,7 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials(
         self,
     ):
-        archived = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
+        archived = remote_reconcilers.library_reconciler(server).reconcile(
             [
                 {
                     "id": "remote-template-1",
@@ -672,7 +674,7 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(
         self,
     ):
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "export-test": True,
                 "synced_at": "2026-09-01",
@@ -1057,7 +1059,7 @@ class ServerDatabaseTests(ServerTestCase):
         server.COACH_CONVERSATION.message_service().add(
             "user", "Synthetic private message"
         )
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "synced_at": "synthetic",
                 "recent_activities": [],

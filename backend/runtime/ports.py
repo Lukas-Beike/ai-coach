@@ -21,10 +21,6 @@ from backend.canonical.vocabulary import (
 )
 
 
-class ProviderSnapshotReader(Protocol):
-    def latest_snapshot(self, db: Any) -> dict[str, Any] | None: ...
-
-
 class ProviderStateReader(Protocol):
     def summary(self, provider: str) -> dict[str, Any]: ...
 
@@ -301,13 +297,7 @@ class CanonicalTableServing(Protocol):
 
 
 class CanonicalReadStatus(CanonicalTableServing, Protocol):
-    """Reports the read state a consumer marks: pending, or an activity gap.
-
-    ``activities_need_refresh`` is True while a compact activity row of the stored
-    Intervals.icu snapshot has no raw counterpart; such rows never reach the tables.
-    """
-
-    def activities_need_refresh(self, db: Any) -> bool: ...
+    """Reports the read state a consumer marks: pending or failed."""
 
     def backfill_failed(self, db: Any) -> bool: ...
 

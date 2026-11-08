@@ -8,6 +8,8 @@ import threading
 import unittest
 from pathlib import Path
 
+import snapshot_seed
+
 from backend.athlete.profile import ProfileService
 from backend.db import DatabaseManager, row_factory
 from backend.db.key_value import KeyValueService
@@ -136,7 +138,7 @@ class StateVersionServiceTests(unittest.TestCase):
                     NOW,
                 ),
             )
-        self.sync_state.save_view(
+        snapshot_seed.save_view(self.sync_state, 
             {"synced_at": "intervals-at", "recent_activities": [{}, {}, {}]}
         )
         profile = self.profile.get()
@@ -196,7 +198,7 @@ class StateVersionServiceTests(unittest.TestCase):
         self.assertEqual(self.manager.unit_of_work_calls, 0)
 
     def test_snapshot_markers_are_atomic_and_do_not_decode_full_payload(self) -> None:
-        self.sync_state.save_view(
+        snapshot_seed.save_view(self.sync_state, 
             {"synced_at": "before", "recent_activities": [{}, {}]}
         )
         with self.manager.reader() as db:

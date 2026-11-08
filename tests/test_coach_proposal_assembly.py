@@ -12,64 +12,54 @@ from backend.coach.proposal_assembly import (
 )
 
 
-class CoachProposalAssemblyTests(unittest.TestCase):
-    def make_assembly(self):
-        dependencies = {
-            "manager": Mock(name="database_manager"),
-            "inspector": Mock(name="duplicate_inspector"),
-            "nutrition_diary": Mock(name="nutrition_diary_service"),
-            "nutrition_meal_library": Mock(name="nutrition_meal_library_service"),
-            "duplicate": Mock(name="duplicate_activity_service"),
-            "history": Mock(name="history_undo_service"),
-            "intervals": Mock(name="intervals_client_factory"),
-            "gate": Mock(name="maintenance_gate"),
-            "now": Mock(return_value=10.0),
-            "utc_now": Mock(return_value="2026-09-26T00:00:00Z"),
-            "uuid": Mock(name="uuid_factory"),
-        }
-        dependencies["manager_provider"] = Mock(return_value=dependencies["manager"])
-        dependencies["inspector_provider"] = Mock(
-            return_value=dependencies["inspector"]
+def make_assembly() -> tuple[CoachProposalAssembly, dict[str, Mock]]:
+    """The assembly over named mocks, with the providers that resolve them."""
+    dependencies = {
+        "manager": Mock(name="database_manager"),
+        "nutrition_diary": Mock(name="nutrition_diary_service"),
+        "nutrition_meal_library": Mock(name="nutrition_meal_library_service"),
+        "history": Mock(name="history_undo_service"),
+        "intervals": Mock(name="intervals_client_factory"),
+        "gate": Mock(name="maintenance_gate"),
+        "now": Mock(return_value=10.0),
+        "utc_now": Mock(return_value="2026-09-26T00:00:00Z"),
+        "uuid": Mock(name="uuid_factory"),
+    }
+    dependencies["manager_provider"] = Mock(return_value=dependencies["manager"])
+    dependencies["nutrition_diary_provider"] = Mock(
+        return_value=dependencies["nutrition_diary"]
+    )
+    dependencies["nutrition_meal_library_provider"] = Mock(
+        return_value=dependencies["nutrition_meal_library"]
+    )
+    dependencies["history_provider"] = Mock(return_value=dependencies["history"])
+    dependencies["gate"].return_value = Mock(name="first_gate")
+    assembly = CoachProposalAssembly(
+        dependencies=CoachProposalAssembly.Inputs(
+            persistence=ProposalPersistence(
+                dependencies["manager_provider"],
+                dependencies["nutrition_diary_provider"],
+                dependencies["nutrition_meal_library_provider"],
+            ),
+            execution=ProposalExecutionOwners(
+                dependencies["history_provider"],
+                dependencies["intervals"],
+                dependencies["gate"],
+            ),
+            clock=ProposalClock(
+                utc_now=dependencies["utc_now"],
+                now=dependencies["now"],
+                uuid_factory=dependencies["uuid"],
+            ),
         )
-        dependencies["nutrition_diary_provider"] = Mock(
-            return_value=dependencies["nutrition_diary"]
-        )
-        dependencies["nutrition_meal_library_provider"] = Mock(
-            return_value=dependencies["nutrition_meal_library"]
-        )
-        dependencies["duplicate_provider"] = Mock(
-            return_value=dependencies["duplicate"]
-        )
-        dependencies["history_provider"] = Mock(return_value=dependencies["history"])
-        first_gate = Mock(name="first_gate")
-        dependencies["gate"].return_value = first_gate
-        assembly = CoachProposalAssembly(
-            dependencies=CoachProposalAssembly.Inputs(
-                persistence=ProposalPersistence(
-                    dependencies["manager_provider"],
-                    dependencies["inspector_provider"],
-                    dependencies["nutrition_diary_provider"],
-                    dependencies["nutrition_meal_library_provider"],
-                ),
-                execution=ProposalExecutionOwners(
-                    dependencies["duplicate_provider"],
-                    dependencies["history_provider"],
-                    dependencies["intervals"],
-                    dependencies["gate"],
-                ),
-                clock=ProposalClock(
-                    utc_now=dependencies["utc_now"],
-                    now=dependencies["now"],
-                    uuid_factory=dependencies["uuid"],
-                ),
-            )
-        )
-        return assembly, dependencies
+    )
+    return assembly, dependencies
 
+
+class CoachProposalAssemblyTests(unittest.TestCase):
     def test_assembly_is_lazy_and_proposal_factories_use_current_database(self):
-        assembly, dependencies = self.make_assembly()
+        assembly, dependencies = make_assembly()
         dependencies["manager_provider"].assert_not_called()
-        dependencies["inspector_provider"].assert_not_called()
 
         with (
             patch.object(proposal_assembly, "CoachProposalReadService") as read_factory,
@@ -86,7 +76,6 @@ class CoachProposalAssemblyTests(unittest.TestCase):
 
         self.assertIs(read_factory.call_args.args[0], dependencies["manager"])
         self.assertIs(create_factory.call_args.args[0], dependencies["manager"])
-        self.assertIs(create_factory.call_args.args[1], dependencies["inspector"])
         self.assertIs(
             create_factory.call_args.kwargs["nutrition_diary_service"],
             dependencies["nutrition_diary_provider"],
@@ -99,7 +88,7 @@ class CoachProposalAssemblyTests(unittest.TestCase):
         self.assertEqual(dependencies["manager_provider"].call_count, 3)
 
     def test_execution_keeps_provider_and_gate_resolution_boundaries(self):
-        assembly, dependencies = self.make_assembly()
+        assembly, dependencies = make_assembly()
         with patch.object(
             proposal_assembly, "CoachProposalExecutionService"
         ) as factory:
@@ -107,10 +96,9 @@ class CoachProposalAssemblyTests(unittest.TestCase):
 
         args = factory.call_args.args
         self.assertIs(args[0], dependencies["manager"])
-        self.assertIs(args[1], dependencies["duplicate"])
-        self.assertIs(args[2], dependencies["history"])
-        self.assertIs(args[3], dependencies["intervals"])
-        self.assertIs(args[4], dependencies["gate"].return_value)
+        self.assertIs(args[1], dependencies["history"])
+        self.assertIs(args[2], dependencies["intervals"])
+        self.assertIs(args[3], dependencies["gate"].return_value)
         self.assertFalse(dependencies["intervals"].called)
         dependencies["gate"].return_value = Mock(name="replacement_gate")
         with patch.object(
@@ -118,7 +106,7 @@ class CoachProposalAssemblyTests(unittest.TestCase):
         ) as second_factory:
             assembly.execution_service()
         self.assertIs(
-            second_factory.call_args.args[4], dependencies["gate"].return_value
+            second_factory.call_args.args[3], dependencies["gate"].return_value
         )
         self.assertEqual(dependencies["manager_provider"].call_count, 2)
 

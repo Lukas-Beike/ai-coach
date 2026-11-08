@@ -15,6 +15,8 @@ from typing import ClassVar
 from unittest.mock import ANY, Mock, call, patch
 from urllib.error import HTTPError
 
+import remote_reconcilers
+import snapshot_seed
 from server_test_support import (
     ServerTestCase,
     _transcribe_via_http_route,
@@ -509,7 +511,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_public_state_exposes_daily_planning_context(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -614,7 +616,7 @@ class ServerHttpTests(ServerTestCase):
                 )
 
     def test_library_pagination_has_stable_type_name_id_cursor(self):
-        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
+        remote_reconcilers.library_reconciler(server).reconcile(
             [
                 {
                     "id": f"template-{index}",
@@ -684,7 +686,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_bootstrap_is_bounded_and_excludes_history_collections(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -747,7 +749,6 @@ class ServerHttpTests(ServerTestCase):
                 "sync_settings",
                 "calendar_display",
                 "competition_sync",
-                "performance_refresh",
                 "morning_checkin",
                 "coach_quick_actions",
                 "model",
@@ -1079,7 +1080,7 @@ class ServerHttpTests(ServerTestCase):
 
     def test_public_state_exposes_provider_calendar_window(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -1723,7 +1724,7 @@ class ServerHttpTests(ServerTestCase):
                 "intervals"
             ]
         self.assertEqual(state["state"], "connected")
-        self.assertIsNone(state["last_sync_at"])
+        self.assertNotIn("last_sync_at", state)
         self.assertEqual(
             state["library_sync"]["last_sync_at"], "2026-08-31T08:00:00+00:00"
         )

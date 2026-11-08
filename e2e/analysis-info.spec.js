@@ -537,7 +537,7 @@ test("@responsive missing race predictions explain the reason instead of an empt
   const predictions = page.locator("#performancePredictions");
   await expect(predictions).toBeVisible();
   await expect(predictions.getByRole("heading", { name: "Laufprognosen" })).toBeVisible();
-  await expect(predictions).toContainText("Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Intervals.icu oder Garmin.");
+  await expect(predictions).toContainText("Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Garmin oder Wahoo.");
   await expect(predictions.locator("table")).toHaveCount(0);
   await expect(predictions).not.toContainText("Gewicht");
 });

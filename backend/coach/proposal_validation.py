@@ -64,8 +64,6 @@ def validated_coach_action_preview_input(
 def _expected_target(action_type: str, payload: dict[str, Any]) -> str:
     if action_type == "remote_coach_write":
         return remote_write_target(payload.get("tool"))
-    if action_type == "delete_duplicate_intervals_activity":
-        return ProviderId.INTERVALS.value
     return "local"
 
 
@@ -158,7 +156,6 @@ REMOTE_WRITE_LABELS = {
     "start_intervals_plan_sync": "Trainingseinheiten mit Intervals.icu synchronisieren",
     "push_strength_to_garmin": "Krafteinheiten an die Garmin-Uhr senden",
     "sync_competitions": "Bestätigte Wettkämpfe mit Intervals.icu synchronisieren",
-    "delete_duplicate_intervals_activity": "Garmin-Duplikat mit Intervals.icu löschen",
     "sync_nutrition": "Ernährungsdaten mit Intervals.icu synchronisieren",
     "resolve_training_sync_conflict": "Fehlgeschlagenen Intervals.icu-Sync wiederholen",
     "apply_adaptive_replan": "Adaptive Änderung anwenden und Krankheitspause synchronisieren",
@@ -192,13 +189,6 @@ def _remote_write_summary(
     if tool == "resolve_training_sync_conflict":
         entry["date"] = (
             "Synchronisationsauftrag " + str(arguments.get("job_id") or "")[:36]
-        )
-    elif tool == "delete_duplicate_intervals_activity":
-        manifest = approval_manifest if isinstance(approval_manifest, dict) else {}
-        entry.update(
-            date=_summary_date(manifest.get("date")),
-            keep=str(manifest.get("canonical_id") or "")[:80],
-            delete=str(manifest.get("duplicate_id") or "")[:80],
         )
     elif tool == "apply_adaptive_replan":
         return _adaptive_write_summary(entry, approval_manifest)

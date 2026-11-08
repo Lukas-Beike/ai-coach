@@ -30,7 +30,6 @@ from backend.performance.training_focus import training_focus
 REASON_CANONICAL_PENDING: Final = "canonical_pending"
 PENDING_STATUS: Final = "Daten werden vorbereitet"
 # The status while stored compact-only Intervals.icu activities are missing.
-REFRESH_STATUS: Final = "Aktivitäten: Intervals.icu neu abrufen"
 # The source of a context with a canonical Intervals.icu sync.
 # The source of a context without an Intervals.icu sync, e.g. a Garmin-only setup.
 STORED_PROVIDERS_SOURCE: Final = "Gespeicherte Provider-Daten"
@@ -89,11 +88,6 @@ def _sync_status(canonical: CanonicalPerformanceInputs) -> dict[str, Any]:
     return {"source": STORED_PROVIDERS_SOURCE, "as_of": canonical.activities_synced_at}
 
 
-def _refresh_status(canonical: CanonicalPerformanceInputs) -> dict[str, str]:
-    """The status shown while compact-only activities await a full reload."""
-    return {"status": REFRESH_STATUS} if canonical.activities_need_refresh else {}
-
-
 def _pending_context(
     profile: dict[str, Any], today: date, *, failed: bool = False
 ) -> dict[str, Any]:
@@ -121,8 +115,6 @@ def _unavailable_context(
         "source": STORED_PROVIDERS_SOURCE,
         "as_of": None,
         "metrics": {},
-        "activities_need_refresh": canonical.activities_need_refresh,
-        **_refresh_status(canonical),
         "personal_recovery": personal_recovery(
             profile, today, canonical=canonical.recovery
         ),
@@ -250,8 +242,6 @@ def current_performance_context(
             activities=_activities(canonical),
         ),
         **_sync_status(canonical),
-        "activities_need_refresh": canonical.activities_need_refresh,
-        **_refresh_status(canonical),
         "metrics": metrics,
         "thresholds": {
             **performance_current_metrics.coach_thresholds(metrics),

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+import remote_planned_unit_fixture
 from legacy_planning_fixture import (
     rename_planning_fields,
     rename_planning_fields_in_database,
@@ -95,7 +96,7 @@ def legacy(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def remote_unit_payload() -> dict[str, Any]:
-    prepared = planned_units.remote_planned_unit_payload(
+    prepared = remote_planned_unit_fixture.remote_planned_unit_payload(
         planning_fields_from_intervals(REMOTE_EVENT), today=TODAY
     )
     assert prepared is not None
@@ -609,7 +610,7 @@ class PlanningFieldsMigrationTests(unittest.TestCase):
             ),
             incoming_hash,
         )
-        _current, state = planned_units.remote_planned_unit_existing_state(
+        _current, state = remote_planned_unit_fixture.remote_planned_unit_existing_state(
             row, incoming_hash
         )
         self.assertEqual(state, "unchanged")

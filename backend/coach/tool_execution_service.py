@@ -7,7 +7,6 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any
 
-from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.tool_dispatch import CoachToolDispatchService
@@ -58,7 +57,6 @@ class CoachStructuredToolExecutionService:
         key_values: KeyValueRepository,
         clarification: CoachClarificationService,
         training_patch: CoachTrainingPatchService,
-        duplicate_inspector: DuplicateInspector,
         proposal_creation: CoachProposalCreationService,
         tool_dispatch: CoachToolDispatchService,
         profile_mutation_coordinator: Any,
@@ -71,7 +69,6 @@ class CoachStructuredToolExecutionService:
         self._key_values = key_values
         self._clarification = clarification
         self._training_patch = training_patch
-        self._duplicate_inspector = duplicate_inspector
         self._proposal_creation = proposal_creation
         self._tool_dispatch = tool_dispatch
 
@@ -111,7 +108,6 @@ class CoachStructuredToolExecutionService:
         local_transaction = name not in {
             "start_provider_refresh",
             "apply_adaptive_replan",
-            "delete_duplicate_intervals_activity",
             *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
         }
         lock = self._database_lock if local_transaction else nullcontext()
@@ -143,9 +139,6 @@ class CoachStructuredToolExecutionService:
                     session_csrf_hash=session_csrf_hash,
                 )
                 return {**proposal, "ok": True, "status": "approval_required"}
-            if name == "inspect_activity_duplicates":
-                duplicate = self._duplicate_inspector.latest()
-                return {"ok": True, "duplicate": duplicate}
             if (
                 action.get("intent") == "remote_sync"
                 and (action.get("request") or {}).get("remote_write") is True

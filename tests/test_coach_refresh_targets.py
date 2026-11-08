@@ -227,7 +227,7 @@ class CoachRefreshDispatchTests(unittest.TestCase):
         self.intervals = Mock()
 
     def test_non_waiting_mock_refresh_enqueues_a_coach_job(self) -> None:
-        service = ProviderRefreshCommandService(self.queue, self.intervals, -1)
+        service = ProviderRefreshCommandService(self.queue, {})
 
         result = service.start(ACME_ID, {"days": 14, "_wait_for_completion": False})
 
@@ -250,8 +250,6 @@ class CoachRefreshDispatchTests(unittest.TestCase):
         }
         service = ProviderRefreshCommandService(
             self.queue,
-            self.intervals,
-            -1,
             synchronous_refreshes={ACME_ID: adapter},
         )
         cancel_event = threading.Event()
@@ -264,7 +262,7 @@ class CoachRefreshDispatchTests(unittest.TestCase):
         self.queue.enqueue.assert_not_called()
 
     def test_waiting_refresh_without_adapter_is_rejected(self) -> None:
-        service = ProviderRefreshCommandService(self.queue, self.intervals, -1)
+        service = ProviderRefreshCommandService(self.queue, {})
 
         with self.assertRaises(AppError) as raised:
             service.start(ACME_ID, {"days": 14, "_wait_for_completion": True})

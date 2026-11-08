@@ -8,9 +8,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from backend.activities.activity_reference import ActivityReferences
-from backend.activities.duplicate_inspection import DuplicateInspector
-from backend.activities.duplicate_service import DuplicateActivityService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_execution import CoachProposalExecutionService
 from backend.coach.proposal_read import (
@@ -24,14 +21,12 @@ from backend.history.undo_service import HistoryUndoService
 @dataclass(frozen=True)
 class ProposalPersistence:
     database_manager: Callable[[], DatabaseManager]
-    duplicate_inspector: Callable[[], DuplicateInspector]
     nutrition_diary_service: Callable[[], Any]
     nutrition_meal_library_service: Callable[[], Any]
 
 
 @dataclass(frozen=True)
 class ProposalExecutionOwners:
-    duplicate_activity_service: Callable[[], DuplicateActivityService]
     history_undo_service: Callable[[], HistoryUndoService]
     intervals_client_factory: Callable[[], Any]
     maintenance_gate: Callable[[], Any]
@@ -63,12 +58,10 @@ class CoachProposalAssembly:
         execution = dependencies.execution
         clock = dependencies.clock
         self._database_manager = persistence.database_manager
-        self._duplicate_inspector = persistence.duplicate_inspector
         self._nutrition_diary_service = persistence.nutrition_diary_service
         self._nutrition_meal_library_service = (
             persistence.nutrition_meal_library_service
         )
-        self._duplicate_activity_service = execution.duplicate_activity_service
         self._history_undo_service = execution.history_undo_service
         self._intervals_client_factory = execution.intervals_client_factory
         self._maintenance_gate = execution.maintenance_gate
@@ -84,13 +77,11 @@ class CoachProposalAssembly:
         manager = self._database_manager()
         return CoachProposalCreationService(
             manager,
-            self._duplicate_inspector(),
             now=self._now,
             utc_now=self._utc_now,
             uuid_factory=self._uuid_factory,
             nutrition_diary_service=self._nutrition_diary_service,
             nutrition_meal_library_service=self._nutrition_meal_library_service,
-            references=ActivityReferences(manager),
         )
 
     def confirmation_service(self) -> CoachProposalConfirmationService:
@@ -99,7 +90,6 @@ class CoachProposalAssembly:
     def execution_service(self) -> CoachProposalExecutionService:
         return CoachProposalExecutionService(
             self._database_manager(),
-            self._duplicate_activity_service(),
             self._history_undo_service(),
             self._intervals_client_factory,
             self._maintenance_gate(),

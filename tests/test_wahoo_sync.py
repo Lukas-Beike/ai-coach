@@ -102,6 +102,15 @@ class ThresholdSyncTests(WahooSyncCase):
         self.assertEqual([], self.stored_kinds())
         self.assertEqual(1, len(self._activity_rows()))
 
+    def test_a_successful_read_clears_the_general_sync_error(self) -> None:
+        self.grant()
+        with self.database.unit_of_work() as db:
+            self.key_values.set(db, "last_sync_error", "stale failure")
+
+        self.service.sync()
+
+        self.assertFalse(self._value("last_sync_error"))
+
     def test_a_forbidden_power_zones_read_is_non_fatal_and_keeps_the_workouts(
         self,
     ) -> None:

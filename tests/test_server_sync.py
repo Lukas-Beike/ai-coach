@@ -15,6 +15,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
+import intervals_compaction
+import remote_reconcilers
 from garmin_support import read_garmin, save_garmin
 from performance_day_support import snapshot_metrics
 from server_test_support import (
@@ -39,22 +41,12 @@ from backend.planning import workouts as planning_workouts
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import executor as sync_executor
-from backend.sync import garmin_payload_metrics, garmin_service, intervals_compaction
-from backend.sync import intervals_assembly as intervals_assembly_module
-from backend.sync import provider_resync_assembly as provider_resync_assembly_module
+from backend.sync import garmin_payload_metrics, garmin_service
 from backend.sync import queue as sync_queue
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.authority import PlanningAuthorityService
-from backend.sync.garmin_activity_duplicates import (
-    garmin_activity_duplicates_intervals,
-    intervals_cycling_activities_match,
-)
-from backend.sync.intervals import IntervalsSnapshotReader, IntervalsSyncService
-from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
-from backend.sync.library import WorkoutLibraryRefreshService, WorkoutLibrarySyncService
-from backend.sync.performance import PerformanceRefreshFollowupService
+from backend.sync.library import WorkoutLibrarySyncService
 from backend.sync.plan_commands import PlanPushCommandService
-from backend.sync.selected import SelectedWorkoutSyncService
 
 
 class ServerSyncTests(ServerTestCase):
@@ -215,9 +207,63 @@ class ServerSyncTests(ServerTestCase):
         coach_stop.assert_called_once_with()
         coach_join.assert_called_once_with(timeout=5)
 
+    def test_persisted_intervals_ingest_jobs_are_retired_unrun(self):
+        now = "2026-11-07T10:00:00+00:00"
+        ids = []
+        with server.database_manager().unit_of_work() as db:
+            for index, job_type in enumerate(
+                (
+                    "refresh",
+                    "performance_refresh",
+                    "activity_details",
+                    "historical_backfill",
+                )
+            ):
+                job_id = f"legacy-{index}"
+                ids.append(job_id)
+                db.execute(
+                    "INSERT INTO sync_jobs(id, provider, type, status, payload, requested_by, "
+                    "attempts, progress_total, progress_completed, available_at, created_at, "
+                    "updated_at) VALUES (?, 'intervals', ?, ?, '{}', 'scheduler', 0, 1, 0, ?, ?, ?)",
+                    (
+                        job_id,
+                        job_type,
+                        "running" if index == 3 else "queued",
+                        now,
+                        now,
+                        now,
+                    ),
+                )
+                db.execute(
+                    "INSERT INTO sync_job_items(id, job_id, item_key, operation, payload_hash, "
+                    "status, attempts, created_at, updated_at) "
+                    "VALUES (?, ?, 'job', 'refresh', 'h', ?, 0, ?, ?)",
+                    (
+                        f"{job_id}-0",
+                        job_id,
+                        "running" if index == 3 else "queued",
+                        now,
+                        now,
+                    ),
+                )
+        # The interrupted one is requeued by the restart recovery, like any other.
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().resume_interrupted(), 1)
+        executor = server.SYNC_JOB_EXECUTION.executor()
+        with patch.object(
+            sync_executor.SyncJobExecutor, "execute", side_effect=AssertionError("ran")
+        ):
+            for _ in ids:
+                claimed = server.SYNC_JOB_QUEUE.store().claim()
+                self.assertIsNotNone(claimed)
+                executor.run(claimed)
+        for job_id in ids:
+            state = server.SYNC_JOB_QUEUE.service().state(job_id)
+            self.assertEqual(state["status"], "completed", job_id)
+            self.assertIsNone(state["error_class"])
+
     def test_persistent_sync_job_claim_resume_retry_and_completion(self):
         job = server.SYNC_JOB_QUEUE.service().enqueue(
-            "intervals", "refresh", {"days": 7}, requested_by="user"
+            "garmin", "refresh", {"days": 7}, requested_by="user"
         )
         self.assertEqual(job["status"], "queued")
         self.assertEqual(job["progress"], {"completed": 0, "total": 1})
@@ -394,139 +440,6 @@ class ServerSyncTests(ServerTestCase):
 
         self.assertEqual(error.exception.reason, "intent_scope_denied")
         enqueue.assert_not_called()
-
-    def test_new_intervals_job_types_execute_only_their_targeted_operation(self):
-        performance_job = {
-            "id": "job-performance",
-            "provider": "intervals",
-            "type": "performance_refresh",
-            "payload": json.dumps({"reason": "Coach request"}),
-        }
-        competition_job = {
-            "id": "job-competition",
-            "provider": "intervals",
-            "type": "competition_push",
-            "payload": json.dumps({"reason": "Coach request", "approval_manifest": []}),
-        }
-        performance_service = Mock()
-        performance_service.refresh.return_value = {"status": "ok"}
-        competition_service = Mock()
-        competition_service.sync.return_value = {"status": "ok", "pushed": 1}
-        with (
-            patch.object(
-                intervals_assembly_module,
-                "PerformanceRefreshService",
-                return_value=performance_service,
-            ),
-            patch.object(
-                provider_resync_assembly_module,
-                "CompetitionSyncService",
-                return_value=competition_service,
-            ),
-        ):
-            self.assertEqual(
-                server.SYNC_JOB_EXECUTION.executor().execute(performance_job)["status"],
-                "ok",
-            )
-            self.assertEqual(
-                server.SYNC_JOB_EXECUTION.executor().execute(competition_job)["pushed"],
-                1,
-            )
-        performance_service.refresh.assert_called_once_with()
-        competition_service.sync.assert_called_once_with(
-            reason="Coach request", push_local=True, expected_manifest=[]
-        )
-
-    def test_normalized_intervals_job_type_dispatches_targeted_operation(self):
-        refresh_job = {
-            "id": "job-normalized-performance",
-            "provider": "intervals",
-            "type": " PERFORMANCE_REFRESH ",
-            "payload": json.dumps({"reason": "Coach request"}),
-        }
-        performance_service = Mock()
-        performance_service.refresh.return_value = {"status": "ok"}
-        with (
-            patch.object(
-                intervals_assembly_module,
-                "PerformanceRefreshService",
-                return_value=performance_service,
-            ),
-            patch.object(
-                IntervalsSyncService,
-                "sync",
-                side_effect=AssertionError("normalized job fell through to full sync"),
-            ),
-        ):
-            self.assertEqual(
-                server.SYNC_JOB_EXECUTION.executor().execute(refresh_job)["status"],
-                "ok",
-            )
-        performance_service.refresh.assert_called_once_with()
-
-    def test_intervals_job_delegates_performance_follow_up_to_common_sync_path(self):
-        refresh_job = {
-            "id": "job-refresh",
-            "provider": "intervals",
-            "type": "refresh",
-            "payload": json.dumps(
-                {"days": 90, "reason": "tägliche automatische Aktualisierung"}
-            ),
-        }
-        competition_service = Mock()
-        competition_service.sync.return_value = {"status": "ok"}
-        with (
-            patch.object(
-                IntervalsSyncService, "sync", return_value={"status": "ok"}
-            ) as sync,
-            patch.object(
-                provider_resync_assembly_module,
-                "CompetitionSyncService",
-                return_value=competition_service,
-            ),
-            patch.object(
-                sync_queue.SyncJobQueueService,
-                "enqueue",
-                return_value={"id": "job-performance-follow-up"},
-            ) as enqueue,
-        ):
-            result = server.SYNC_JOB_EXECUTION.executor().execute(refresh_job)
-        self.assertEqual(result["status"], "ok")
-        sync.assert_called_once()
-        enqueue.assert_not_called()
-
-    def test_sync_intervals_queues_performance_follow_up_for_current_refresh(self):
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ),
-            patch.object(
-                WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}
-            ),
-            patch.object(
-                PerformanceRefreshFollowupService,
-                "enqueue_after_sync",
-                return_value={"id": "job-performance-follow-up"},
-            ) as enqueue,
-            patch.object(PerformanceRefreshFollowupService, "wait") as wait,
-        ):
-            result = server.INTERVALS_SYNC.sync_service().sync(
-                "startup", activity_days=90, wait_for_performance=True
-            )
-        self.assertEqual(
-            result["performance_refresh_job_id"], "job-performance-follow-up"
-        )
-        enqueue.assert_called_once_with("startup")
-        wait.assert_called_once_with("job-performance-follow-up", cancel_event=None)
 
     def test_apply_result_deduplicates_changed_ids_for_sync(self):
         planned = server.PLANNING_DATA.planned_unit().create(
@@ -715,54 +628,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(status["state_versions"], {"activities": "v1"})
         self.assertNotIn("activities", json.dumps(status["message"]))
 
-    def test_daily_sync_markers_are_separate_per_provider(self):
-        local_day = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
-        markers = server.SYNC_PERSISTENCE.daily_markers()
-        markers.mark("intervals", local_day)
-        self.assertFalse(markers.is_due("intervals", local_day))
-        self.assertTrue(markers.is_due("intervals", local_day + timedelta(hours=1)))
-        self.assertTrue(markers.is_due("garmin", local_day))
-        self.assertTrue(markers.is_due("calendar", local_day))
-        with patch.object(server.ATHLETE_CLOCK, "now", return_value=local_day):
-            server.SYNC_JOB_QUEUE.service().enqueue(
-                "calendar", "refresh", {}, requested_by="scheduler"
-            )
-        self.assertFalse(markers.is_due("calendar", local_day))
-        self.assertTrue(markers.is_due("calendar", local_day + timedelta(hours=1)))
-
-    def test_daily_sync_marker_module_is_dependency_light(self):
-        from backend.sync.daily import (
-            daily_sync_is_due,
-            mark_daily_sync,
-            mark_daily_sync_attempt,
-        )
-
-        values = {}
-        current = datetime(2026, 3, 30, 0, 30, tzinfo=UTC)
-
-        self.assertTrue(daily_sync_is_due("intervals", current, get_value=values.get))
-        mark_daily_sync("intervals", current, set_value=values.__setitem__)
-        self.assertEqual(values["sync_intervals_last_success_at"], current.isoformat())
-        self.assertFalse(daily_sync_is_due("intervals", current, get_value=values.get))
-        self.assertTrue(
-            daily_sync_is_due(
-                "intervals", current + timedelta(hours=1), get_value=values.get
-            )
-        )
-        mark_daily_sync_attempt(
-            "intervals", current + timedelta(hours=2), set_value=values.__setitem__
-        )
-        self.assertFalse(
-            daily_sync_is_due(
-                "intervals", current + timedelta(hours=2), get_value=values.get
-            )
-        )
-        self.assertTrue(
-            daily_sync_is_due(
-                "intervals", current + timedelta(hours=3), get_value=values.get
-            )
-        )
-
     def test_daily_sync_scheduler_uses_local_provider_markers(self):
         import inspect
 
@@ -777,7 +642,7 @@ class ServerSyncTests(ServerTestCase):
         # tests/test_daily_sync_scheduler.py.
         self.assertEqual(
             DEFAULT_PROVIDER_REGISTRY.daily_marker_ids(),
-            frozenset({"calendar", "garmin", "intervals", "wahoo"}),
+            frozenset({"calendar", "garmin", "wahoo"}),
         )
         self.assertNotIn("import server", module_source)
         self.assertNotIn("from server", module_source)
@@ -990,67 +855,8 @@ class ServerSyncTests(ServerTestCase):
         # with the Intervals.icu 280 W.
         self.assertEqual(comparison["average"], 300)
 
-    def test_existing_snapshot_uses_configured_intervals_window(self):
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
-            {
-                "synced_at": "2026-08-28T08:00:00+00:00",
-                "athlete": {},
-                "recent_activities": [{"id": "old"}],
-                "recent_wellness": [],
-                "upcoming_calendar": [],
-            }
-        )
-        calls = []
-
-        def fake_get(path, params=None):
-            calls.append((path, params or {}))
-            if path.endswith("/activities"):
-                return [{"id": "new", "start_date_local": "2026-08-29T08:00:00"}]
-            if path.endswith("/wellness"):
-                return []
-            if path.endswith("/events"):
-                return []
-            return {}
-
-        with patch.object(
-            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-        ):
-            reader = server.INTERVALS_SYNC.snapshot_reader()
-            with patch.object(reader._api_client, "get", side_effect=fake_get):
-                snapshot = reader.fetch_snapshot(activity_days=90)
-        activity_call = next(
-            params for path, params in calls if path.endswith("/activities")
-        )
-        self.assertEqual(
-            (
-                date.fromisoformat(activity_call["newest"])
-                - date.fromisoformat(activity_call["oldest"])
-            ).days,
-            89,
-        )
-        event_call = next(params for path, params in calls if path.endswith("/events"))
-        self.assertEqual(
-            date.fromisoformat(event_call["oldest"]),
-            server.ATHLETE_CLOCK.now().date()
-            - timedelta(days=server.PLANNED_CALENDAR_HISTORY_DAYS),
-        )
-        self.assertEqual(
-            date.fromisoformat(event_call["newest"]),
-            server.ATHLETE_CLOCK.now().date()
-            + timedelta(days=server.PLANNED_CALENDAR_FUTURE_DAYS),
-        )
-        self.assertEqual(
-            snapshot["provider_sync"]["calendar_window"]["start"], event_call["oldest"]
-        )
-        self.assertEqual(
-            snapshot["provider_sync"]["calendar_window"]["end"], event_call["newest"]
-        )
-        self.assertEqual(
-            {item["id"] for item in snapshot["recent_activities"]}, {"old", "new"}
-        )
-
     def test_synced_library_template_must_be_archived_instead_of_deleted(self):
-        entry = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
+        entry = remote_reconcilers.library_reconciler(server).reconcile(
             [
                 {
                     "id": "remote-1",
@@ -1399,37 +1205,6 @@ class ServerSyncTests(ServerTestCase):
             client.get_paged_collection("/athlete/0/activities", {}, "activities")
         self.assertEqual(raised.exception.status, 502)
 
-    def test_intervals_snapshot_exposes_complete_page_metadata(self):
-        with patch.object(
-            server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-        ):
-            reader = server.INTERVALS_SYNC.snapshot_reader()
-            with patch.object(
-                reader._api_client,
-                "get",
-                side_effect=[
-                    [{"id": "activity-1", "start_date_local": "2026-08-31T08:00:00"}],
-                    [{"id": "2026-08-31"}],
-                    [],
-                    {"id": "athlete-1"},
-                    {"secs": [], "curves": []},
-                ],
-            ):
-                snapshot = reader.fetch_snapshot(activity_days=1)
-        self.assertTrue(
-            snapshot["provider_sync"]["pagination"]["activities"]["complete"]
-        )
-        self.assertEqual(
-            snapshot["provider_sync"]["pagination"]["activities"]["records"], 1
-        )
-        self.assertTrue(snapshot["provider_sync"]["pagination"]["events"]["complete"])
-        self.assertEqual(
-            snapshot["raw_provider_data"]["activities"][0]["id"], "activity-1"
-        )
-        self.assertEqual(
-            snapshot["raw_provider_data"]["wellness"][0]["id"], "2026-08-31"
-        )
-
     def test_plan_push_job_requires_bounded_selected_hashed_entries(self):
         local_id = str(uuid.uuid4())
         entry = {"library_workout_id": local_id, "expected_payload_hash": "a" * 64}
@@ -1479,34 +1254,17 @@ class ServerSyncTests(ServerTestCase):
         self.assertFalse(preview["snapshot_truncated"])
         self.assertTrue(preview["projection"]["within_total_budget"])
 
-    def test_activity_sync_defaults_cover_twelve_weeks_and_preserve_saved_choices(self):
-        repository = server.SYNC_PERSISTENCE.state_repository()
-        for provider in ("intervals", "garmin"):
-            self.assertEqual(
-                repository.sync_period(
-                    provider, server.SYNC_PERIOD_DEFAULTS, server.ALL_SYNC_DAYS
-                ),
-                84,
-            )
-            repository.set_sync_period(provider, 14, server.ALL_SYNC_DAYS)
-            self.assertEqual(
-                repository.sync_period(
-                    provider, server.SYNC_PERIOD_DEFAULTS, server.ALL_SYNC_DAYS
-                ),
-                14,
-            )
-
     def test_sync_period_supports_all_available_data_marker(self):
         from backend.sync.windows import split_date_windows
 
         repository = server.SYNC_PERSISTENCE.state_repository()
         self.assertEqual(
-            repository.set_sync_period("intervals", -1, server.ALL_SYNC_DAYS),
+            repository.set_sync_period("garmin", -1, server.ALL_SYNC_DAYS),
             -1,
         )
         self.assertEqual(
             repository.sync_period(
-                "intervals", server.SYNC_PERIOD_DEFAULTS, server.ALL_SYNC_DAYS
+                "garmin", server.SYNC_PERIOD_DEFAULTS, server.ALL_SYNC_DAYS
             ),
             -1,
         )
@@ -1561,463 +1319,6 @@ class ServerSyncTests(ServerTestCase):
                 all_days=-1,
             )
 
-    def test_sync_intervals_uses_saved_period_when_not_explicitly_given(self):
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        server.SYNC_PERSISTENCE.state_repository().set_sync_period(
-            "intervals", 65, server.ALL_SYNC_DAYS
-        )
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ) as fetch_snapshot,
-            patch.object(
-                WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}
-            ),
-            patch.object(
-                server.MODEL_TRANSPORT, "openai_responses_client"
-            ) as openai_client,
-        ):
-            result = server.INTERVALS_SYNC.sync_service().sync("test")
-        fetch_snapshot.assert_called_once_with(activity_days=65)
-        openai_client.assert_not_called()
-        self.assertEqual(result["activity_days"], 65)
-        self.assertEqual(
-            result["window_end"], server.ATHLETE_CLOCK.now().date().isoformat()
-        )
-
-    def test_sync_intervals_passes_cancellation_to_snapshot_fetch(self):
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        cancel_event = threading.Event()
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ) as fetch_snapshot,
-            patch.object(
-                WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}
-            ) as refresh_library,
-        ):
-            server.INTERVALS_SYNC.sync_service().sync(
-                "cancellable", activity_days=42, cancel_event=cancel_event
-            )
-        fetch_snapshot.assert_called_once_with(
-            activity_days=42, retain_days=84, cancel_event=cancel_event
-        )
-        refresh_library.assert_called_once_with(
-            reason="Initialer Intervals.icu-Sync (cancellable)",
-            cancel_event=cancel_event,
-        )
-
-    def test_sync_intervals_reraises_library_import_cancellation(self):
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        cancel_event = threading.Event()
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        cancellation = server.AppError(499, "abgebrochen", reason="chat_cancelled")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ),
-            patch.object(
-                WorkoutLibraryRefreshService, "refresh", side_effect=cancellation
-            ),
-            self.assertRaises(server.AppError) as raised,
-        ):
-            server.INTERVALS_SYNC.sync_service().sync(
-                "cancellable-library",
-                activity_days=42,
-                cancel_event=cancel_event,
-            )
-        self.assertEqual(raised.exception.reason, "chat_cancelled")
-        self.assertFalse(server.key_value_service().get("last_library_sync_error"))
-
-    def test_sync_intervals_persists_activity_coverage_with_snapshot(self):
-        snapshot = {
-            "synced_at": "new",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        server.key_value_service().set("last_sync_activity_days", "7")
-        cancellation = server.AppError(499, "abgebrochen", reason="chat_cancelled")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ),
-            patch.object(
-                WorkoutLibraryRefreshService, "refresh", side_effect=cancellation
-            ),
-            self.assertRaises(server.AppError),
-        ):
-            server.INTERVALS_SYNC.sync_service().sync(
-                "cancellable-library",
-                activity_days=42,
-                cancel_event=threading.Event(),
-            )
-        self.assertEqual(server.key_value_service().get("last_sync_at"), "new")
-        self.assertEqual(
-            server.key_value_service().get("last_sync_activity_days"), "42"
-        )
-
-    def test_cancelled_intervals_sync_is_recorded_as_skipped(self):
-        cancel_event = threading.Event()
-        cancel_event.set()
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
-            with self.assertRaises(server.AppError) as raised:
-                server.INTERVALS_SYNC.sync_service().sync(
-                    "cancelled", activity_days=42, cancel_event=cancel_event
-                )
-            freshness = {
-                (item["provider"], item["area"]): item
-                for item in server.PROVIDER_SYNC.freshness_service().current(
-                    profile=server.ATHLETE_DATA.profile().get(),
-                    garmin_has_core_error=bool(
-                        server.GARMIN_ASSEMBLY.sync_state_service().core_error_entries()
-                    ),
-                    garmin_tokenstore_exists=Path(
-                        server.CONFIG.garmin_tokenstore
-                    ).exists(),
-                )
-            }
-        self.assertEqual(raised.exception.reason, "chat_cancelled")
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            row = db.execute(
-                "SELECT status, phase, error_code FROM provider_refresh_history "
-                "WHERE provider='intervals' AND area='activities' ORDER BY started_at DESC LIMIT 1"
-            ).fetchone()
-        self.assertEqual(row["status"], "skipped")
-        self.assertEqual(row["phase"], "cancelled")
-        self.assertIsNone(row["error_code"])
-        self.assertEqual(
-            freshness[("intervals", "activities")]["state"], "never_loaded"
-        )
-
-    def test_initial_intervals_sync_copies_remote_library_to_empty_local_library(self):
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        remote = [
-            {
-                "id": "remote-template-1",
-                "name": "Remote Vorlage",
-                "type": "Run",
-                "description": "- 30m 60% locker",
-                "moving_time": 1800,
-            }
-        ]
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ),
-            patch.object(
-                intervals_client_module.IntervalsClient,
-                "get_workout_library",
-                return_value=remote,
-            ) as get_library,
-        ):
-            result = server.INTERVALS_SYNC.sync_service().sync(
-                "initial", activity_days=42
-            )
-
-        get_library.assert_called_once_with()
-        library = server.PLANNING_DATA.workout_library().list()
-        self.assertEqual(len(library), 1)
-        self.assertEqual(library[0]["external_id"], "remote-template-1")
-        self.assertEqual(library[0]["name"], "Remote Vorlage")
-        self.assertEqual(result["library"], 1)
-        self.assertEqual(result["library_imported"], 1)
-        self.assertIsNone(result["library_error"])
-
-    def test_intervals_sync_imports_future_planning_only_once(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
-        first_snapshot = {
-            "synced_at": "first",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [
-                {
-                    "id": "initial-plan",
-                    "category": "WORKOUT",
-                    "type": "Ride",
-                    "name": "Initiale Planung",
-                    "start_date_local": tomorrow + "T08:00:00",
-                    "moving_time": 1800,
-                }
-            ],
-        }
-        second_snapshot = {
-            **first_snapshot,
-            "synced_at": "second",
-            "upcoming_calendar": [
-                {
-                    **first_snapshot["upcoming_calendar"][0],
-                    "id": "later-remote-plan",
-                    "name": "Spätere Remote-Planung",
-                }
-            ],
-        }
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader,
-                "fetch_snapshot",
-                side_effect=[first_snapshot, second_snapshot],
-            ),
-            patch.object(
-                WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}
-            ),
-        ):
-            first = server.INTERVALS_SYNC.sync_service().sync(
-                "initial", activity_days=42
-            )
-            second = server.INTERVALS_SYNC.sync_service().sync(
-                "later", activity_days=42
-            )
-
-        self.assertEqual(first["planned_import"]["imported"], 1)
-        self.assertEqual(second["planned_import"]["imported"], 0)
-        planned = server.PLANNING_DATA.planned_unit().list()
-        self.assertEqual([item["name"] for item in planned], ["Initiale Planung"])
-        self.assertEqual(
-            server.key_value_service().get("planned_units_initial_import_at"), "first"
-        )
-
-    def test_intervals_sync_imports_remote_templates_alongside_local_library(self):
-        local = server.PLANNING_DATA.workout_library().create_local_entry(
-            {
-                "sport": "Ride",
-                "name": "Lokale Vorlage",
-                "description": "- 20m 60% locker",
-                "duration_minutes": 20,
-            }
-        )
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ),
-            patch.object(
-                intervals_client_module.IntervalsClient,
-                "get_workout_library",
-                return_value=[
-                    {
-                        "id": "remote-template-2",
-                        "name": "Remote Vorlage",
-                        "type": "Ride",
-                        "description": "- 30m Z2",
-                        "moving_time": 1800,
-                    }
-                ],
-            ) as get_library,
-        ):
-            result = server.INTERVALS_SYNC.sync_service().sync(
-                "existing", activity_days=42
-            )
-
-        get_library.assert_called_once_with()
-        self.assertEqual(result["library"], 2)
-        self.assertEqual(result["library_imported"], 1)
-        library = server.PLANNING_DATA.workout_library().list()
-        self.assertEqual(len(library), 2)
-        self.assertIn(local["id"], {item["id"] for item in library})
-        self.assertEqual(
-            next(item for item in library if item["name"] == "Remote Vorlage")[
-                "external_id"
-            ],
-            "remote-template-2",
-        )
-
-    def test_sync_intervals_does_not_run_library_push(self):
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ),
-            patch.object(
-                SelectedWorkoutSyncService,
-                "sync",
-                return_value={
-                    "status": "partial",
-                    "workouts": 1,
-                    "local_errors": ["upload failed"],
-                },
-            ) as library_sync,
-            patch.object(
-                WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}
-            ),
-        ):
-            result = server.INTERVALS_SYNC.sync_service().sync("test", activity_days=42)
-        library_sync.assert_not_called()
-        self.assertEqual(result["status"], "ok")
-        self.assertIsNone(result["library_error"])
-
-    def test_startup_sync_contract_rejects_remote_mutations(self):
-        recorder, client = self._prepare_remote_contract_fixture()
-        with (
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
-            ),
-        ):
-            server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals", "refresh", {"days": 7, "reason": "startup"}
-            )
-            server.SYNC_JOB_EXECUTION.executor().run(
-                server.SYNC_JOB_QUEUE.store().claim()
-            )
-        self.assertEqual(recorder.mutations, [])
-
-    def test_daily_sync_contract_rejects_remote_mutations(self):
-        recorder, client = self._prepare_remote_contract_fixture()
-        with (
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
-            ),
-        ):
-            server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals", "refresh", {"days": 7, "reason": "daily"}
-            )
-            server.SYNC_JOB_EXECUTION.executor().run(
-                server.SYNC_JOB_QUEUE.store().claim()
-            )
-        self.assertEqual(recorder.mutations, [])
-
-    def test_startup_sync_competition_contract_rejects_remote_mutations(self):
-        recorder, client = self._prepare_competition_contract_fixture()
-        with (
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
-            ),
-        ):
-            server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals", "refresh", {"days": 7, "reason": "startup"}
-            )
-            server.SYNC_JOB_EXECUTION.executor().run(
-                server.SYNC_JOB_QUEUE.store().claim()
-            )
-        self.assertEqual(recorder.mutations, [])
-
-    def test_daily_sync_competition_contract_rejects_remote_mutations(self):
-        recorder, client = self._prepare_competition_contract_fixture()
-        with (
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
-            ),
-        ):
-            server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals", "refresh", {"days": 7, "reason": "daily"}
-            )
-            server.SYNC_JOB_EXECUTION.executor().run(
-                server.SYNC_JOB_QUEUE.store().claim()
-            )
-        self.assertEqual(recorder.mutations, [])
-
-    def test_manual_activity_sync_contract_rejects_remote_mutations(self):
-        recorder, client = self._prepare_remote_contract_fixture()
-        with (
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
-            ),
-        ):
-            server.INTERVALS_SYNC.sync_service().sync("activity", activity_days=7)
-        self.assertEqual(recorder.mutations, [])
-
-    def test_full_resync_contract_rejects_remote_mutations(self):
-        recorder, client = self._prepare_remote_contract_fixture()
-        with (
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
-            ),
-        ):
-            server.PROVIDER_RESYNC.full_resync_service().resync("intervals")
-        self.assertEqual(recorder.mutations, [])
-
     def test_explicit_competition_sync_records_create_change_and_delete_contract(self):
         event_date = (
             _local_datetime.now().astimezone().date() + timedelta(days=30)
@@ -2044,7 +1345,7 @@ class ServerSyncTests(ServerTestCase):
             ),
         ):
             created = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "explicit approval", push_local=True
+                "explicit approval",
             )
             server.PLANNING_DATA.competition().save(
                 {
@@ -2056,188 +1357,12 @@ class ServerSyncTests(ServerTestCase):
             )
             server.ATHLETE_DATA.context().save({}, [])
             deleted = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "explicit approval", push_local=True
+                "explicit approval",
             )
         self.assertEqual(created["pushed"], 1)
         self.assertEqual(deleted["deleted_remote"], 1)
         self.assertEqual(
             [call["method"] for call in recorder.mutations], ["POST", "DELETE"]
-        )
-
-    def test_local_sync_error_and_remote_missing_entries_are_not_retried_by_read_sync(
-        self,
-    ):
-        recorder = IntervalsRequestRecorder()
-        entries = [
-            server.PLANNING_DATA.workout_library().create_local_entry(
-                {
-                    "sport": "Ride",
-                    "name": state,
-                    "description": "- 20m Z2",
-                    "duration_minutes": 20,
-                }
-            )
-            for state in ("local", "sync_error", "remote_missing")
-        ]
-        for entry, state in zip(entries[1:], ("sync_error", "remote_missing")):
-            server.WORKOUT_LIBRARY_SYNC.sync_state_service().update(
-                entry["id"], state, "fake failure"
-            )
-        client = RecordedIntervalsClient(recorder)
-        with (
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=client.snapshot
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", return_value=client
-            ),
-        ):
-            server.INTERVALS_SYNC.sync_service().sync("read-only", activity_days=1)
-        self.assertEqual(recorder.mutations, [])
-
-    def test_full_intervals_resync_preserves_local_library_and_never_remote_data(self):
-        server.ATHLETE_DATA.context().save(
-            {},
-            [
-                {
-                    "name": "Old local race",
-                    "event_date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=30)
-                    ).isoformat(),
-                }
-            ],
-        )
-        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
-            [
-                {
-                    "id": "old-workout",
-                    "name": "Local template",
-                    "type": "Ride",
-                    "description": "- 30m Z2",
-                    "planned_duration_s": 1800,
-                }
-            ]
-        )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.execute(
-                "INSERT INTO snapshots(payload, created_at) VALUES (?, ?)",
-                (json.dumps({"synced_at": "old"}), "old"),
-            )
-            db.execute(
-                "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) VALUES (?, ?, ?, ?)",
-                ("tombstone", "remote-event", "remote-external", "old"),
-            )
-        remote_race = {
-            "id": "remote-event",
-            "category": "RACE_A",
-            "start_date_local": (
-                _local_datetime.now().astimezone().date() + timedelta(days=45)
-            ).isoformat()
-            + "T08:00:00",
-            "type": "Ride",
-            "name": "Cloud race",
-        }
-        deleted = []
-        new_snapshot = {
-            "synced_at": "new",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-
-        class FakeIntervalsClient:
-            def get_workout_library(self):
-                return []
-
-            def fetch_competition_events(self):
-                return [remote_race]
-
-            def upsert_competition_events(self, events):
-                if events:
-                    raise AssertionError(
-                        "A full resync must not push local competition data."
-                    )
-                return []
-
-            def bulk_delete_events(self, identifiers):
-                deleted.extend(identifiers)
-
-        with (
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=new_snapshot
-            ),
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-            patch.object(
-                SelectedWorkoutSyncService, "sync", return_value={"workouts": 0}
-            ),
-        ):
-            result = server.PROVIDER_RESYNC.full_resync_service().resync("intervals")
-
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(deleted, [])
-        self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"],
-            "new",
-        )
-        self.assertEqual(
-            {
-                competition["name"]
-                for competition in server.PLANNING_DATA.competition().list()
-            },
-            {"Old local race"},
-        )
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            self.assertEqual(
-                db.execute("SELECT COUNT(*) AS count FROM workout_library").fetchone()[
-                    "count"
-                ],
-                1,
-            )
-            self.assertEqual(
-                db.execute(
-                    "SELECT COUNT(*) AS count FROM competition_sync_tombstones"
-                ).fetchone()["count"],
-                1,
-            )
-        self.assertEqual(
-            server.PLANNING_DATA.workout_library().list()[0]["external_id"],
-            "old-workout",
-        )
-
-    def test_full_intervals_resync_keeps_last_snapshot_on_provider_failure(self):
-        old_snapshot = {
-            "synced_at": "old",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(old_snapshot)
-
-        with (
-            patch.object(
-                IntervalsSnapshotReader,
-                "fetch_snapshot",
-                side_effect=RuntimeError("provider unavailable"),
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-            self.assertRaises(RuntimeError),
-        ):
-            server.PROVIDER_RESYNC.full_resync_service().resync("intervals")
-        self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"],
-            "old",
         )
 
     def test_full_garmin_resync_keeps_last_snapshot_on_provider_failure(self):
@@ -2353,10 +1478,10 @@ class ServerSyncTests(ServerTestCase):
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", push_local=True
+                "test",
             )
             second = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", push_local=True
+                "test",
             )
 
         self.assertEqual(result["pushed"], 1)
@@ -2369,119 +1494,6 @@ class ServerSyncTests(ServerTestCase):
         synced = server.PLANNING_DATA.competition().list()[0]
         self.assertEqual(synced["intervals_event_id"], "12345")
         self.assertEqual(synced["sync_dirty"], 0)
-
-    def test_competition_sync_marks_dirty_identity_match_as_conflict(self):
-        event_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=60)
-        ).isoformat()
-        server.ATHLETE_DATA.context().save(
-            {},
-            [
-                {
-                    "name": "Existing Race",
-                    "event_date": event_date,
-                    "priority": "A",
-                    "sport": "Cycling",
-                }
-            ],
-        )
-        pushed = []
-
-        class FakeIntervalsClient:
-            def fetch_competition_events(self):
-                return [
-                    {
-                        "id": 54321,
-                        "category": "RACE_A",
-                        "start_date_local": event_date + "T08:00:00",
-                        "type": "Ride",
-                        "name": "Existing Race",
-                    }
-                ]
-
-            def upsert_competition_events(self, events):
-                pushed.extend(events)
-                return []
-
-            def bulk_delete_events(self, identifiers):
-                return 0
-
-        with (
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-        ):
-            result = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", push_local=True
-            )
-
-        self.assertEqual(result["pushed"], 0)
-        self.assertEqual(result["conflicts"], 1)
-        self.assertEqual(result["imported"], 0)
-        self.assertEqual(pushed, [])
-        competition = server.PLANNING_DATA.competition().list()[0]
-        self.assertIsNone(competition["intervals_event_id"])
-        self.assertEqual(competition["sync_dirty"], 1)
-        self.assertEqual(competition["sync_state"], "conflict")
-        self.assertEqual(
-            json.loads(competition["sync_conflict"])["remote"]["name"], "Existing Race"
-        )
-
-    def test_competition_sync_imports_remote_race_events(self):
-        event_date = (
-            _local_datetime.now().astimezone().date() + timedelta(days=45)
-        ).isoformat()
-
-        class FakeIntervalsClient:
-            def fetch_competition_events(self):
-                return [
-                    {
-                        "id": 777,
-                        "category": "RACE_B",
-                        "start_date_local": event_date + "T08:00:00",
-                        "type": "Run",
-                        "name": "Remote Half Marathon",
-                        "description": "Ziel unter zwei Stunden",
-                    },
-                    {
-                        "id": 778,
-                        "category": "RACE_C",
-                        "start_date_local": event_date + "T09:00:00",
-                        "type": "Swim",
-                        "name": "Unsupported Swim Race",
-                    },
-                ]
-
-            def upsert_competition_events(self, events):
-                return []
-
-            def bulk_delete_events(self, identifiers):
-                return 0
-
-        with (
-            patch.object(
-                server.PROVIDER_TRANSPORT, "intervals_client", FakeIntervalsClient
-            ),
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-        ):
-            result = server.PROVIDER_RESYNC.competition_sync_service().sync("test")
-
-        self.assertEqual(result["imported"], 1)
-        competition = server.PLANNING_DATA.competition().list()[0]
-        self.assertEqual(competition["name"], "Remote Half Marathon")
-        self.assertEqual(competition["event_date"], event_date)
-        self.assertEqual(competition["intervals_event_id"], "777")
-        self.assertEqual(competition["sync_dirty"], 0)
-
-        # Saving the profile after an import must retain the provider link.
-        server.ATHLETE_DATA.context().save({}, [competition])
-        saved_again = server.PLANNING_DATA.competition().list()[0]
-        self.assertEqual(saved_again["intervals_event_id"], "777")
 
     def test_competition_sync_skips_unsupported_local_sports(self):
         event_date = (
@@ -2610,82 +1622,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertNotIn("activity_eftp_watts", estimates)
         self.assertEqual(estimates["activity_configured_ftp_watts"], 300)
 
-    def test_garmin_near_duplicate_is_skipped_in_favour_of_intervals_activity(self):
-        garmin = {
-            "activityId": 1,
-            "activityType": "running",
-            "activityName": "Morning Run",
-            "startTimeLocal": "2026-08-29T07:05:00",
-            "duration": 3600,
-            "distance": 9900,
-        }
-        intervals = [
-            {
-                "type": "Run",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 10000,
-            }
-        ]
-        self.assertTrue(garmin_activity_duplicates_intervals(garmin, intervals))
-
-    def test_intervals_duplicate_requires_matching_start_duration_and_distance(self):
-        wahoo = {
-            "id": "wahoo",
-            "type": "Ride",
-            "source": "Wahoo",
-            "start_date_local": "2026-08-29T07:00:00",
-            "moving_time": 7200,
-            "distance": 60000,
-        }
-        garmin = {
-            "id": "garmin",
-            "type": "Ride",
-            "source": "Garmin",
-            "start_date_local": "2026-08-29T07:05:00",
-            "moving_time": 7200,
-            "distance": 80000,
-        }
-        self.assertFalse(intervals_cycling_activities_match(wahoo, garmin))
-
-    def test_sync_intervals_waits_for_active_sync_and_uses_its_new_snapshot(self):
-        server.key_value_service().set("last_sync_at", "old-sync")
-        INTERVALS_SYNC_LOCK.acquire()
-        previous_snapshot_read = threading.Event()
-        service = server.INTERVALS_SYNC.sync_service()
-        status = service._status
-        original_get_value = status.get
-
-        def get_value_after_read(key):
-            value = original_get_value(key)
-            if key == "last_sync_at":
-                previous_snapshot_read.set()
-            return value
-
-        def finish_active_sync():
-            if not previous_snapshot_read.wait(2):
-                INTERVALS_SYNC_LOCK.release()
-                return
-            server.key_value_service().set("last_sync_at", "new-sync")
-            INTERVALS_SYNC_LOCK.release()
-
-        worker = threading.Thread(target=finish_active_sync)
-        worker.start()
-        try:
-            with patch.object(status, "get", side_effect=get_value_after_read):
-                result = service.sync(
-                    "latest activity test",
-                    activity_days=7,
-                    wait_for_existing=True,
-                )
-        finally:
-            worker.join(timeout=2)
-            if INTERVALS_SYNC_LOCK.locked():
-                INTERVALS_SYNC_LOCK.release()
-        self.assertEqual(result["status"], "ok")
-        self.assertTrue(result["waited_for_existing"])
-        self.assertEqual(result["synced_at"], "new-sync")
-
     def test_intervals_validation_error_includes_safe_provider_detail(self):
         error_body = json.dumps({"error": {"message": "Invalid workout type"}}).encode(
             "utf-8"
@@ -2714,61 +1650,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(raised.exception.status, 502)
         self.assertIn("422", raised.exception.message)
         self.assertIn("Invalid workout type", raised.exception.message)
-
-    def test_sync_logs_end_to_end_operation_id_without_athlete_content(self):
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        operation_id = "operation-test-026"
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        server.observability.configure_logging(
-            server.LOGGER, server.DATA_DIR, server.LOG_PATH, server.REDACTOR
-        )
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ),
-            patch.object(
-                intervals_client_module.IntervalsClient,
-                "get_workout_library",
-                return_value=[],
-            ),
-        ):
-            server.INTERVALS_SYNC.sync_service().sync(
-                "manual", activity_days=1, operation_id=operation_id
-            )
-        for handler in server.LOGGER.handlers:
-            handler.flush()
-        entries = server.DIAGNOSTICS_ASSEMBLY.recent_log_entries_service().list(200)
-        correlated = [
-            entry
-            for entry in entries
-            if entry.get("context", {}).get("operation_id") == operation_id
-        ]
-        events = {entry.get("event") for entry in correlated}
-        self.assertTrue(
-            {"operation_started", "operation_completed", "operation_count"}.issubset(
-                events
-            )
-        )
-        for entry in correlated:
-            context = entry.get("context", {})
-            self.assertIn(context.get("trigger"), {"manual", "background"})
-            self.assertNotIn("athlete", json.dumps(entry).casefold())
-
-    def test_garmin_sync_persists_fatal_error_status(self):
-        config = replace(
-            server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json"
-        )
-        with patch.object(server, "CONFIG", config), self.assertRaises(server.AppError):
-            server.GARMIN_ASSEMBLY.sync_service().sync()
-        state = server.GARMIN_ASSEMBLY.projection_service().public_state()
-        self.assertTrue(state["last_error"])
 
     def test_selected_library_sync_is_exact_and_reports_per_object(self):
         first = server.PLANNING_DATA.workout_library().create_local_entry(
@@ -2814,6 +1695,63 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(
             [call.args[0] for call in sync_entry.call_args_list],
             [first["id"], second["id"]],
+        )
+
+    def test_garmin_sync_persists_fatal_error_status(self):
+        config = replace(
+            server.CONFIG, garmin_fixture_path="missing-garmin-fixture.json"
+        )
+        with patch.object(server, "CONFIG", config), self.assertRaises(server.AppError):
+            server.GARMIN_ASSEMBLY.sync_service().sync()
+        state = server.GARMIN_ASSEMBLY.projection_service().public_state()
+        self.assertTrue(state["last_error"])
+
+    def test_daily_sync_markers_are_separate_per_provider(self):
+        local_day = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
+        markers = server.SYNC_PERSISTENCE.daily_markers()
+        markers.mark("wahoo", local_day)
+        self.assertFalse(markers.is_due("wahoo", local_day))
+        self.assertTrue(markers.is_due("wahoo", local_day + timedelta(hours=1)))
+        self.assertTrue(markers.is_due("garmin", local_day))
+        self.assertTrue(markers.is_due("calendar", local_day))
+        with patch.object(server.ATHLETE_CLOCK, "now", return_value=local_day):
+            server.SYNC_JOB_QUEUE.service().enqueue(
+                "calendar", "refresh", {}, requested_by="scheduler"
+            )
+        self.assertFalse(markers.is_due("calendar", local_day))
+        self.assertTrue(markers.is_due("calendar", local_day + timedelta(hours=1)))
+
+    def test_daily_sync_marker_module_is_dependency_light(self):
+        from backend.sync.daily import (
+            daily_sync_is_due,
+            mark_daily_sync,
+            mark_daily_sync_attempt,
+        )
+
+        values = {}
+        current = datetime(2026, 3, 30, 0, 30, tzinfo=UTC)
+
+        self.assertTrue(daily_sync_is_due("wahoo", current, get_value=values.get))
+        mark_daily_sync("wahoo", current, set_value=values.__setitem__)
+        self.assertEqual(values["sync_wahoo_last_success_at"], current.isoformat())
+        self.assertFalse(daily_sync_is_due("wahoo", current, get_value=values.get))
+        self.assertTrue(
+            daily_sync_is_due(
+                "wahoo", current + timedelta(hours=1), get_value=values.get
+            )
+        )
+        mark_daily_sync_attempt(
+            "wahoo", current + timedelta(hours=2), set_value=values.__setitem__
+        )
+        self.assertFalse(
+            daily_sync_is_due(
+                "wahoo", current + timedelta(hours=2), get_value=values.get
+            )
+        )
+        self.assertTrue(
+            daily_sync_is_due(
+                "wahoo", current + timedelta(hours=3), get_value=values.get
+            )
         )
 
 

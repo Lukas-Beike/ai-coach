@@ -3,8 +3,8 @@
 Provider routes, their not-configured messages and their period rules come from
 the provider registry. The registry is read once per registry into a single
 route table (``SyncRouteSurface``), so a request only looks its path up. The
-performance refresh, the job queue and job resolution are not provider routes
-and stay explicit in this module.
+job queue and job resolution are not provider routes and stay explicit in this
+module.
 """
 
 from __future__ import annotations
@@ -18,15 +18,12 @@ from typing import Any, cast
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.sync.full_resync import FullProviderResyncService
-from backend.sync.intervals_ingest import ONE_OFF_DAYS
-from backend.sync.performance import PerformanceRefreshService
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.state import SyncStateRepository
 
 SYNC_JOB_RESOLVE_RE = re.compile(r"^/api/sync/jobs/([0-9a-f-]+)/resolve$")
 SYNC_JOBS_PATH = "/api/sync/jobs"
-PERFORMANCE_REFRESH_PATH = "/api/performance/refresh"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +65,6 @@ def _not_configured_messages(registry: ProviderRegistry) -> dict[str, str]:
 def _build_path_routes(registry: ProviderRegistry) -> dict[str, _PathRoute]:
     routes: dict[str, _PathRoute] = {
         SYNC_JOBS_PATH: _PathRoute(fixed_body=True),
-        PERFORMANCE_REFRESH_PATH: _PathRoute(),
     }
     for descriptor in registry.all():
         manual = descriptor.manual_sync
@@ -153,9 +149,7 @@ _FULL_RESYNC_PATHS = {
     provider_id: path
     for path, provider_id in DEFAULT_PROVIDER_REGISTRY.full_resync_routes()
 }
-SYNC_PATH = _MANUAL_PATHS[ProviderId.INTERVALS]
 GARMIN_SYNC_PATH = _MANUAL_PATHS[ProviderId.GARMIN]
-INTERVALS_FULL_RESYNC_PATH = _FULL_RESYNC_PATHS[ProviderId.INTERVALS]
 GARMIN_FULL_RESYNC_PATH = _FULL_RESYNC_PATHS[ProviderId.GARMIN]
 
 
@@ -166,7 +160,6 @@ class SyncCommandEndpoint:
         self,
         queue: SyncJobQueueService,
         state: SyncStateRepository,
-        performance: PerformanceRefreshService,
         full_resync: FullProviderResyncService,
         operation_id_factory: Callable[[], str],
         period_defaults: Mapping[str, int],
@@ -176,7 +169,6 @@ class SyncCommandEndpoint:
     ) -> None:
         self._queue = queue
         self._state = state
-        self._performance = performance
         self._full_resync = full_resync
         self._operation_id_factory = operation_id_factory
         self._period_defaults = period_defaults
@@ -205,8 +197,6 @@ class SyncCommandEndpoint:
             return self._enqueue_job(payload)
         if match := SYNC_JOB_RESOLVE_RE.match(path):
             return 200, self._queue.resolve(match.group(1), payload)
-        if path == PERFORMANCE_REFRESH_PATH:
-            return 200, self._performance.refresh()
         route = self._surface.route(path)
         if route is not None and route.manual is not None:
             manual = route.manual
@@ -263,14 +253,6 @@ class SyncCommandEndpoint:
     ) -> tuple[int, dict[str, Any]]:
         self._require_provider_configured(provider_id)
         fixed = dict(fixed_payload)
-        if isinstance(payload, dict) and payload.get("one_off") is True:
-            # A one-off read leaves the athlete's stored sync period alone.
-            return 202, self._queue.enqueue(
-                provider_id,
-                "refresh",
-                {"days": ONE_OFF_DAYS, "one_off": True, **fixed},
-                requested_by="user",
-            )
         if not uses_sync_period:
             return 202, self._queue.enqueue(
                 provider_id, "refresh", fixed, requested_by="user"

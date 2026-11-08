@@ -2,6 +2,8 @@ import unittest
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from intervals_detail_refresh import normalize_streams
+
 from backend.canonical.activity_detail import (
     MAX_LAPS,
     ActivityLapSet,
@@ -30,7 +32,6 @@ from backend.providers.intervals_activity_detail_mapping import (
 from backend.providers.intervals_activity_detail_projection import detailed_activity
 from backend.providers.intervals_activity_fields import activity_detail_laps
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
-from backend.sync.activity_details import normalize_streams
 
 ID = "9001"
 RETRIEVED = datetime(2026, 10, 18, 8, 0, tzinfo=UTC)
