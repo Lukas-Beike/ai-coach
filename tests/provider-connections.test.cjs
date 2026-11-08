@@ -14,6 +14,7 @@ const {
 } = require("../public/provider-connections.js");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/provider-connections.js"), "utf8");
+const connectionStatusSource = fs.readFileSync(path.join(__dirname, "../public/connection-status.js"), "utf8");
 
 // Loads the real provider-connections.js into a vm context. Every element is created on
 // demand, so each test reads the same DOM state the renderer wrote. The API stub records
@@ -22,7 +23,7 @@ function loadProviderConnections() {
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) {
-      elements.set(id, { id, value: "", textContent: "", className: "", hidden: false, disabled: false, addEventListener() {}, replaceChildren() {} });
+      elements.set(id, { id, value: "", textContent: "", className: "", dataset: {}, hidden: false, disabled: false, addEventListener() {}, replaceChildren() {} });
     }
     return elements.get(id);
   };
@@ -35,6 +36,7 @@ function loadProviderConnections() {
   let loadedData = {};
   const context = {
     $: (selector) => element(selector.replace(/^#/, "")),
+    document: { querySelector: (selector) => element(selector.replace(/^#/, "")), querySelectorAll: () => [] },
     api: (requestPath, options = {}) => {
       calls.push({ path: requestPath, method: options.method || "GET", body: options.body });
       return apiHandler(requestPath, options);
@@ -55,6 +57,7 @@ function loadProviderConnections() {
     loadProviderChecks: async () => { providerCheckCalls.push("load"); },
   };
   vm.createContext(context);
+  vm.runInContext(connectionStatusSource, context);
   vm.runInContext(source, context);
   const fn = (name) => vm.runInContext(name, context);
   return {
@@ -368,15 +371,17 @@ test("Yazio status is passive and explicit check renders a safe result", async (
   const harness = loadProviderConnections();
   harness.setApi(async (url) => url.endsWith("/status") ? { status: "unchecked" } : { status: "success", checked_at: "2026-01-01T00:00:00Z" });
   await harness.fn("loadYazioStatus")();
-  assert.equal(harness.element("yazioConnectionStatus").textContent, "Noch nicht geprüft");
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Nicht geprüft");
+  assert.equal(harness.element("yazioConnectionDetail").textContent, "Noch nicht geprüft");
   assert.equal(harness.calls[0].method, "GET");
   await harness.fn("checkYazioConnection")();
   assert.equal(harness.calls[1].method, "POST");
-  assert.equal(harness.element("yazioConnectionStatus").textContent, "Anmeldung erfolgreich");
-  assert.match(harness.element("yazioConnectionDetail").textContent, /Geprüft:/);
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Verbunden");
+  assert.match(harness.element("yazioConnectionDetail").textContent, /Anmeldung erfolgreich · Geprüft:/);
   harness.setApi(async () => { throw Error("synthetic secret"); });
   await harness.fn("checkYazioConnection")();
-  assert.equal(harness.element("yazioConnectionStatus").textContent, "Status nicht verfügbar");
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Nicht geprüft");
+  assert.equal(harness.element("yazioConnectionDetail").textContent, "Status nicht verfügbar");
 });
 
 function deferred() {
@@ -395,7 +400,7 @@ test("Yazio ignores out-of-order status GET and overlapping checks", async () =>
   await newerGet;
   requests[0].resolve({ status: "success" });
   await oldGet;
-  assert.equal(harness.element("yazioConnectionStatus").textContent, "Noch nicht geprüft");
+  assert.equal(harness.element("yazioConnectionDetail").textContent, "Noch nicht geprüft");
 
   const first = harness.fn("checkYazioConnection")();
   const second = harness.fn("checkYazioConnection")();
@@ -404,7 +409,8 @@ test("Yazio ignores out-of-order status GET and overlapping checks", async () =>
   assert.equal(harness.element("yazioCheckButton").disabled, true);
   requests[3].resolve({ status: "auth_failed" });
   await second;
-  assert.match(harness.element("yazioConnectionStatus").textContent, /abgelehnt/);
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Fehler");
+  assert.match(harness.element("yazioConnectionDetail").textContent, /abgelehnt/);
   assert.equal(harness.element("yazioCheckButton").disabled, false);
 });
 
@@ -416,7 +422,7 @@ test("a pending passive status cannot overwrite a newer explicit check", async (
   await harness.fn("checkYazioConnection")();
   oldStatus.resolve({ status: "unchecked" });
   await pending;
-  assert.equal(harness.element("yazioConnectionStatus").textContent, "Anmeldung erfolgreich");
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Verbunden");
 });
 
 test("credential changes invalidate pending GET and POST status results", async () => {
@@ -434,9 +440,9 @@ test("credential changes invalidate pending GET and POST status results", async 
     const saving = harness.fn("saveProviderCredentials")(event(), "yazio");
     pendingStatus.resolve({ status: "success" });
     await pending;
-    assert.notEqual(harness.element("yazioConnectionStatus").textContent, "Anmeldung erfolgreich");
+    assert.notEqual(harness.element("yazioConnectionStatus").textContent, "Verbunden");
     save.resolve({});
     await saving;
-    assert.equal(harness.element("yazioConnectionStatus").textContent, "Noch nicht geprüft");
+    assert.equal(harness.element("yazioConnectionDetail").textContent, "Noch nicht geprüft");
   }
 });

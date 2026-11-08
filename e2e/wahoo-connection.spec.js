@@ -28,7 +28,7 @@ async function openConnections(page, url = "/#more/connections") {
 
 test("@responsive Wahoo without server credentials explains the missing configuration", async ({ page }, testInfo) => {
   const card = await openConnections(page);
-  await expect(page.locator("#wahooConnectionStatus")).toHaveText("Nicht konfiguriert");
+  await expect(page.locator("#wahooConnectionStatus")).toHaveText("Nicht eingerichtet");
   await expect(page.locator("#wahooSetupHint")).toContainText("WAHOO_CLIENT_ID");
   await expect(page.locator("#wahooConnectButton")).toBeHidden();
   await expect(page.locator("#wahooDisconnectButton")).toBeHidden();
@@ -41,7 +41,7 @@ test("@responsive configured Wahoo offers Connect and follows the authorize URL"
   await page.route("**/api/wahoo/connect", (route) => route.fulfill({ json: { authorize_url: FAKE_AUTHORIZE_URL } }));
   await page.route("https://wahoo.example.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>fake wahoo</title>" }));
   const card = await openConnections(page);
-  await expect(page.locator("#wahooConnectionStatus")).toHaveText("Nicht verbunden");
+  await expect(page.locator("#wahooConnectionStatus")).toHaveText("Nicht eingerichtet");
   await expect(page.locator("#wahooSetupHint")).toBeHidden();
   await expect(page.locator("#wahooDisconnectButton")).toBeHidden();
   await expect(page.locator("#wahooSyncButton")).toBeHidden();
@@ -57,7 +57,8 @@ test("@responsive a rejected Wahoo token asks for a reconnect", async ({ page })
     provider_freshness: [...(body.provider_freshness || []), { provider: "wahoo", label: "Wahoo", area: "activities", state: "error", error_code: "auth_required", configured: true }],
   }));
   await openConnections(page);
-  await expect(page.locator("#wahooConnectionStatus")).toHaveText("Erneute Verbindung erforderlich");
+  await expect(page.locator("#wahooConnectionStatus")).toHaveText("Fehler");
+  await expect(page.locator("#wahooConnectionDetail")).toContainText("Erneute Verbindung erforderlich");
   await expect(page.locator("#wahooConnectButton")).toHaveText("Wahoo erneut verbinden");
 });
 
@@ -74,7 +75,7 @@ test("@responsive connected Wahoo shows its label everywhere and can be disconne
   const card = await openConnections(page);
   await expect(page.locator("#wahooConnectionStatus")).toHaveText("Verbunden");
   await expect(page.locator("#wahooConnectionDetail")).toContainText("Verbunden seit");
-  await expect(page.locator("#connectionsSummary")).toContainText("Wahoo ✓");
+  await expect(page.locator("#connectionsSummary")).toContainText("verbunden");
   await expect(page.locator("#providerFreshnessTimeline")).toContainText("Wahoo");
   await expect(page.locator("#wahooConnectButton")).toBeHidden();
   await expect(card).not.toContainText("workouts_read");

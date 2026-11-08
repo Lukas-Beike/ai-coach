@@ -1,0 +1,107 @@
+const { test, expect } = require("@playwright/test");
+const AxeBuilder = require("@axe-core/playwright").default;
+const { contrastRatio } = require("./helpers/ui");
+const { expandConnections } = require("./helpers/connections");
+
+// #1788: touch-friendly sports chips, text status per connection, structured profile.
+
+async function openMore(page, segment) {
+  await page.goto(`/#more/${segment}`);
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.waitForFunction(() => state.initialStateLoaded);
+}
+
+test("@responsive sports are toggle chips of at least 44 px and need no hint", async ({ page }) => {
+  await openMore(page, "profile");
+  const chips = page.locator("#profileForm .chip");
+  await expect(chips).toHaveCount(6);
+  for (const chip of await chips.all()) expect((await chip.locator("span").boundingBox()).height).toBeGreaterThanOrEqual(44);
+  await expect(page.locator("#profileForm")).not.toContainText("Strg");
+  const running = chips.filter({ hasText: "Laufen" });
+  const box = running.locator("input");
+  const before = await box.isChecked();
+  await running.click();
+  expect(await box.isChecked()).toBe(!before);
+  await expect(page.locator("#profileDirtyIndicator")).toBeVisible();
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/profile") && response.request().method() === "PUT");
+  await page.getByRole("button", { name: "Athletenkontext speichern" }).click();
+  const request = (await saved).request().postDataJSON();
+  expect(request.sports.includes("Running")).toBe(!before);
+  await expect(page.locator(".save-clean")).toBeVisible();
+  await expect(page.locator("#profileDirtyIndicator")).toBeHidden();
+});
+
+test("@responsive the profile has four summarised sections and a save bar that stays in view", async ({ page }) => {
+  await openMore(page, "profile");
+  const sections = page.locator("#profileForm > details.profile-section");
+  await expect(sections).toHaveCount(4);
+  await expect(sections.first()).toHaveAttribute("open", "");
+  for (const summary of await sections.locator("> summary .collapsible-summary-meta").all()) expect((await summary.textContent()).trim()).not.toBe("");
+  await sections.evaluateAll((nodes) => nodes.forEach((node) => { node.open = true; }));
+  await page.getByLabel("Name", { exact: true }).fill("Fixture Athlete");
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const bar = page.locator(".save-bar");
+  await expect(bar).toBeInViewport({ ratio: 1 });
+  await expect(page.locator("#profileDirtyIndicator")).toHaveText("Ungespeichert");
+  const barBox = await bar.boundingBox();
+  const nav = page.locator(".bottom-nav");
+  if (await nav.isVisible()) expect(barBox.y + barBox.height).toBeLessThanOrEqual((await nav.boundingBox()).y);
+  for (const textarea of await page.locator("#profileForm textarea:visible").all()) {
+    expect(await textarea.evaluate((node) => getComputedStyle(node).resize)).toBe("none");
+  }
+});
+
+test("@responsive a closed profile section opens when it holds the invalid value", async ({ page }) => {
+  await openMore(page, "profile");
+  const sources = page.locator("#profileForm > details.profile-section").nth(3);
+  await expect(sources).not.toHaveAttribute("open", "");
+  await sources.evaluate((node) => { node.querySelector('[name="sleep_target_hours"]').value = "99"; });
+  await page.locator("#profileForm").evaluate((form) => form.dispatchEvent(new Event("input", { bubbles: true })));
+  await page.getByRole("button", { name: "Athletenkontext speichern" }).click();
+  await expect(sources).toHaveAttribute("open", "");
+});
+
+test("@responsive Mehr keeps its title and shows the active area in one row", async ({ page }) => {
+  for (const segment of ["profile", "connections", "operations"]) {
+    await openMore(page, segment);
+    const panel = page.locator(".panel.active");
+    await expect(panel.getByRole("heading", { level: 2 })).toHaveText("Mehr");
+    const nav = panel.locator(".more-segment-nav");
+    const active = nav.locator("a.active");
+    await expect(active).toHaveCount(1);
+    const colors = await active.evaluate((node) => ({ color: getComputedStyle(node).color, background: getComputedStyle(node).backgroundColor }));
+    expect(contrastRatio(colors.color, colors.background)).toBeGreaterThanOrEqual(4.5);
+    const navBox = await nav.boundingBox();
+    const activeBox = await active.boundingBox();
+    expect(activeBox.x).toBeGreaterThanOrEqual(navBox.x - 1);
+    expect(activeBox.x + activeBox.width).toBeLessThanOrEqual(navBox.x + navBox.width + 1);
+    if (page.viewportSize().width < 1100) expect(navBox.height).toBeLessThan(70);
+  }
+});
+
+test("@responsive every connection states its status in words and the header counts them", async ({ page }) => {
+  await openMore(page, "connections");
+  await expandConnections(page);
+  const chips = page.locator(".connection-cards .connection-chip");
+  await expect(chips).toHaveCount(7);
+  await expect(page.locator(".connection-cards .connection-chip:not([data-state])")).toHaveCount(0);
+  for (const chip of await chips.all()) expect(["Verbunden", "Nicht eingerichtet", "Fehler", "Nicht geprüft"]).toContain((await chip.textContent()).trim());
+  await expect(page.locator("#connectionsSummary")).toHaveText(/^(\d+ (verbunden|Fehler|nicht geprüft|nicht eingerichtet))( · \d+ (verbunden|Fehler|nicht geprüft|nicht eingerichtet))*$/);
+  const lines = page.locator("#garminSourceLines li");
+  await expect(lines).toHaveCount(2);
+  await expect(lines.nth(0)).toContainText("Personal API:");
+  await expect(lines.nth(1)).toContainText("SDK-Login:");
+});
+
+test("@responsive collapsible sections share one chevron and the page passes the contrast check", async ({ page }) => {
+  await openMore(page, "connections");
+  const summary = page.locator('details[data-more-segment-panel="connections"] > summary');
+  expect(await summary.evaluate((node) => getComputedStyle(node, "::after").content)).not.toBe("none");
+  expect(await summary.evaluate((node) => getComputedStyle(node).listStyleType)).toBe("none");
+  await expandConnections(page);
+  for (const segment of ["connections", "profile"]) {
+    await page.goto(`/#more/${segment}`);
+    const results = await new AxeBuilder({ page }).include(".panel.active").withTags(["wcag2a", "wcag2aa"]).analyze();
+    expect(results.violations, `${segment} accessibility violations`).toEqual([]);
+  }
+});
