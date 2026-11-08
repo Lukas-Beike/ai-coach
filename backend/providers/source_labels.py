@@ -50,6 +50,9 @@ class SourceView(StrEnum):
     SEASON_PREPARATION_ACTIVITY = "season_preparation_activity"  # activity rows
 
 
+# The providers whose recorded sessions the canonical analysis and charts read.
+SESSION_SOURCES_LABEL: Final = f"{GARMIN_LABEL}, {WAHOO_LABEL}"
+
 _INTERVALS_WELLNESS: Final = "Intervals.icu Wellness"
 _INTERVALS_GENERAL_THRESHOLD: Final = "Intervals.icu (allgemein)"
 _INTERVALS_RECORDED_WELLNESS: Final = "Intervals.icu recorded wellness"

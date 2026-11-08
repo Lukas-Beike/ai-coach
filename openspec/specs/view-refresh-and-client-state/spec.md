@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe device snapshots, session-scoped client state, view loading, explicit refresh, and sync-event/poll recovery at application revision `b8c911c9dda83a7920171916ace32681c0c38ba0`. A cached view is a device read snapshot, not evidence of current provider data or queued offline writes. Nutrition reads and provider refresh semantics are specified by `nutrition-diary-and-targets` and `nutrition-provider-sync`; shell/controls by `web-pwa-and-accessibility`. Source and existing tests were inspected; the handoff distinguishes actual bounded test execution from unexecuted browser scenarios.
+Describe device snapshots, session-scoped client state, view loading, explicit refresh, and sync-event/poll recovery at application revision `d1beefd77`. A cached view is a device read snapshot, not evidence of current provider data or queued offline writes. Nutrition reads and provider refresh semantics are specified by `nutrition-diary-and-targets` and `nutrition-provider-sync`; shell/controls by `web-pwa-and-accessibility`. Source and existing tests were inspected; the handoff distinguishes actual bounded test execution from unexecuted browser scenarios.
 
 ## Requirements
 
@@ -132,6 +132,10 @@ The client SHALL load expensive report/detail views when needed, cache appropria
 - **WHEN** an unchanged report path/state-version is requested again
 - **THEN** its cached or in-flight read can be reused; explicit invalidation permits a new read.
 
+#### Scenario: Slow or failed report read
+- **WHEN** a report read fails or exceeds its fifteen-second deadline
+- **THEN** the failure is shown as a retryable error instead of a permanent loading line, and the failed request is not kept in the report cache, so the retry reads again.
+
 #### Scenario: Close or replace details
 - **WHEN** an activity detail dialog or selected analysis view changes before its response arrives
 - **THEN** its obsolete generation cannot paint the newly selected detail/view.
@@ -140,7 +144,7 @@ The client SHALL load expensive report/detail views when needed, cache appropria
 - **WHEN** a local activity lacks provider detail
 - **THEN** the UI preserves available metadata/gaps and offers the explicit detail-refresh operation instead of hiding the activity or fetching provider detail just by opening it.
 
-Evidence: `public/analysis.js::requestAnalysisReport`, `public/analysis.js::clearAnalysisReportCache`, `public/activity-details.js::open`, `public/activity-analysis.js::render`; `tests/analysis-report-cache.test.cjs::training records are reused for the same state version until invalidated`, `e2e/analysis-on-demand.spec.js::@responsive equipment records load only on the equipment route and stay cached`, `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`. Cache and detail request implementation was inspected; browser behavior was not executed by this worker.
+Evidence: `public/analysis.js::requestAnalysisReport`, `public/analysis.js::clearAnalysisReportCache`, `public/activity-details.js::open`, `public/activity-analysis.js::render`, `public/components.js::DATA_LOAD_TIMEOUT_MS`; `tests/analysis-report-cache.test.cjs::training records are reused for the same state version until invalidated`, `e2e/data-states.spec.js::@responsive a hanging analysis read times out into the retry state`, `e2e/analysis-on-demand.spec.js::@responsive equipment records load only on the equipment route and stay cached`, `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`. Cache and detail request implementation was inspected; browser behavior was not executed by this worker.
 
 ### Requirement: Background updates coordinate events and polling
 The client SHALL use authenticated state events when available, coalesce changed-area reloads, reconnect with bounded backoff, and fall back to status polling when event delivery is unavailable or stale. Hidden/offline views SHALL release their active polling/event resources appropriately.

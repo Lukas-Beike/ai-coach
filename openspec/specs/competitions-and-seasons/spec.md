@@ -68,18 +68,18 @@ The system SHALL delete a locally selected competition under the applicable auth
 - **WHEN** an unlinked event is deleted or the requested ID does not exist
 - **THEN** an unlinked delete needs no remote tombstone, while a missing ID reports not-found without removing other events.
 
-#### Scenario: Read sync or failed remote delete
-- **WHEN** a provider read refresh occurs or a requested remote deletion fails
-- **THEN** it does not consume the local deletion intent as if remote deletion succeeded.
+#### Scenario: Failed remote delete
+- **WHEN** a requested remote deletion fails
+- **THEN** it does not consume the local deletion intent as if remote deletion succeeded and no upsert follows.
 
-Evidence: `backend/planning/competition_service.py:CompetitionService.delete`; `backend/athlete/context.py:AthleteContextService._record_removed_competition_tombstones`; `backend/sync/competitions.py:CompetitionSyncReconciler.clear_tombstones`; `tests/test_planning_competition_service.py:test_delete_creates_remote_tombstone_and_unlinks_public_candidate`; `tests/test_sync_competitions.py:test_read_only_sync_never_deletes_or_upserts_and_keeps_tombstones`, `tests/test_sync_competitions.py:test_failed_remote_delete_does_not_clear_tombstones_or_upsert`.
+Evidence: `backend/planning/competition_service.py:CompetitionService.delete`; `backend/athlete/context.py:AthleteContextService._record_removed_competition_tombstones`; `backend/sync/competitions.py:CompetitionSyncReconciler.clear_tombstones`; `tests/test_planning_competition_service.py:test_delete_creates_remote_tombstone_and_unlinks_public_candidate`; `tests/test_sync_competitions.py:test_failed_remote_delete_does_not_clear_tombstones_or_upsert`.
 
 ### Requirement: CS5 Explicit competition sync and conflict recovery
-The system SHALL keep remote pushes explicit, detect unsafe remote identity/missing-record cases, validate approval freshness, and offer deliberate keep-local/adopt-remote conflict resolution.
+The system SHALL keep remote pushes explicit and output-only (Intervals.icu receives competitions and is never a source of them), detect unsafe remote identity/missing-record cases, validate approval freshness, and offer deliberate keep-local/adopt-remote conflict resolution.
 
-#### Scenario: Read reconciliation
-- **WHEN** the existing competition sync runs without push authority
-- **THEN** it may reconcile/import supported clean remote records under its current policy, but never delete or upsert remote events or consume tombstones.
+#### Scenario: Output only, no import
+- **WHEN** a competition sync reads the remote events to match identities
+- **THEN** no remote event ever becomes a local competition and a clean local row never takes remote values; a clean linked row whose remote event is gone, or a dirty unlinked row that matches a remote event only by name and date, is marked as a conflict instead.
 
 #### Scenario: Named approved push
 - **WHEN** the athlete explicitly requests competition synchronization and approves its frozen manifest
@@ -89,7 +89,7 @@ The system SHALL keep remote pushes explicit, detect unsafe remote identity/miss
 - **WHEN** a stored conflict is resolved as keep_local or adopt_remote
 - **THEN** keep-local retains a local override for a later explicit push, while adopt-remote requires a valid remote event and updates the local record; invalid strategy, corrupt/missing conflict or unavailable remote data fails explicitly.
 
-Evidence: `backend/planning/competition_service.py:CompetitionService.resolve_conflict`; `backend/planning/competitions.py:competition_remote_match`, `backend/planning/competitions.py:competition_conflict_action`; `backend/sync/competitions.py:CompetitionSyncReconciler`; `tests/test_planning_competition_service.py:test_conflict_resolution_preserves_both_strategies`; `tests/test_sync_competitions.py:test_records_rejects_competition_changes_after_approval`, `tests/test_sync_competitions.py:test_dirty_remote_deviations_persist_identity_changed_and_missing_conflicts`, `tests/test_sync_competitions.py:test_optimistic_check_skips_competition_edited_after_capture`, `tests/test_sync_competitions.py:test_synced_local_row_is_updated_from_remote`.
+Evidence: `backend/planning/competition_service.py:CompetitionService.resolve_conflict`; `backend/planning/competitions.py:competition_remote_match`, `backend/planning/competitions.py:competition_conflict_action`; `backend/sync/competitions.py:CompetitionSyncReconciler`; `tests/test_planning_competition_service.py:test_conflict_resolution_preserves_both_strategies`; `tests/test_sync_competitions.py:test_records_rejects_competition_changes_after_approval`, `tests/test_sync_competitions.py:test_dirty_remote_deviations_persist_identity_changed_and_missing_conflicts`, `tests/test_sync_competitions.py:test_optimistic_check_skips_competition_edited_after_capture`, `tests/test_sync_competitions.py:test_clean_row_keeps_local_indoor_environment_for_the_same_remote_type`.
 
 ### Requirement: CS6 Deterministic season phases and next event
 The system SHALL derive a date-based season view from valid competition dates, sort it deterministically and identify the next nonpast event without claiming that phase alone proves preparation.

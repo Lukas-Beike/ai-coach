@@ -12,7 +12,10 @@ from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.wahoo_oauth import WahooOAuthClient
-from backend.sync.wahoo_connection import WahooConnectionService
+from backend.sync.wahoo_connection import (
+    WahooConnectionService,
+    WahooSecretRegistry,
+)
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,7 @@ class WahooConnectionInputs:
     database_lock: Callable[[], AbstractContextManager[Any]]
     key_values: KeyValueRepository
     utc_now: Callable[[], str]
+    secret_registry: WahooSecretRegistry | None = None
 
 
 class WahooConnectionAssembly:
@@ -46,5 +50,6 @@ class WahooConnectionAssembly:
                     database_lock=inputs.database_lock,
                     key_values=inputs.key_values,
                     utc_now=inputs.utc_now,
+                    secret_registry=inputs.secret_registry,
                 )
             return self._service

@@ -1,8 +1,10 @@
 # Synthetic provider wire fixtures
 
-These JSON files show the wire shapes that Intervals.icu and Garmin Connect
-deliver today, so provider compaction and collection code can be tested
-without a live account.
+These JSON files show the wire shapes of Garmin Connect and of stored
+Intervals.icu rows, so provider collection, compaction and canonical mapping
+code can be tested without a live account. Intervals.icu is an output target
+only and is not read any more (#1728); its files remain as inputs of the
+retired mapper that replays stored rows.
 
 ## Provenance and privacy
 
@@ -19,7 +21,9 @@ without a live account.
 ## Layout
 
 - `intervals/athlete.json`, `activities.json`, `wellness.json`, `events.json`:
-  the four Intervals.icu inputs to `backend.planning.context.compact_snapshot`.
+  the four Intervals.icu inputs to `compact_snapshot` in
+  `tests/intervals_compaction.py` (a test helper; no production code compacts
+  them).
   The activities include timestamps either side of the Europe/Berlin DST
   transitions (2026-03-29 and 2026-10-25).
 - `garmin/<section>.json`: one file per collected Garmin section. The section
@@ -30,7 +34,7 @@ without a live account.
 - `garmin/activity_detail/`: the per-activity detail parts, `details.json`
   (streams), `splits.json` (laps), `hr_zones.json` and `power_zones.json`. They
   live in a subdirectory on purpose: the non-recursive `garmin/*.json` check
-  would reject them. They feed `collect_garmin_activity_detail` shapes into
+  would reject them. They carry the `collect_garmin_activity_detail` shapes into
   `backend.providers.garmin_activity_detail_mapping`.
 
 - `garmin/personal/`: Personal API response shapes whose path or fields differ
@@ -42,8 +46,9 @@ without a live account.
 ## How the tests use them
 
 - `tests/test_provider_wire_fixtures.py` loads each file, feeds the Intervals
-  inputs through the real compaction, and feeds the Garmin files through
-  `collect_garmin_data` using an in-memory fake client. Responses are deep
+  inputs through the test compaction helper, and feeds the Garmin files through
+  `collect_garmin_data` using an in-memory fake client. Other tests read them
+  through `load_provider_fixture` in `tests/support.py`. Responses are deep
   copies, so the fixtures on disk are never mutated.
 - `tests/test_garmin_snapshot_writer_lock.py` does not use these fixtures. It
   checks that the Garmin sync and the Morning Body Battery gate share the one

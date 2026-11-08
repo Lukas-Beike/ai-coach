@@ -89,11 +89,11 @@ The system SHALL expose configured/read-only/running/last-sync/last-error/window
 Evidence: `backend/calendar/external.py:list_events`, `backend/calendar/external.py:list_events_in_window`, `backend/calendar/external.py:state`, `backend/sync/external_calendar.py:ExternalCalendarSyncService.sync`; `tests/test_calendar_external.py:test_window_query_is_not_capped_so_day_markers_see_late_events`, `tests/test_sync_external_calendar.py:test_missing_url_precedes_held_lock_and_preserves_existing_error`, `tests/test_sync_external_calendar.py:test_lock_competition_is_observed_without_provider_or_database_calls`.
 
 ### Requirement: Local authority and stored public-event projections
-The system SHALL compose local planned units, competitions, linked Intervals events, and relevant external constraints without losing local dirty/conflict state to a stale provider snapshot. External feed events SHALL remain read-only constraints.
+The system SHALL compose local planned units, competitions with their recorded Intervals.icu links, and relevant external constraints without reading Intervals.icu events and without losing local dirty/conflict state to a stale remote link. External feed events SHALL remain read-only constraints.
 
 #### Scenario: Local conflict and stale remote snapshot
-- **WHEN** a linked local unit is dirty or conflicted while its remote event is present
-- **THEN** calendar composition preserves local sync state and one linked representation rather than marking it clean merely from remote presence.
+- **WHEN** a linked local unit is dirty or conflicted while it carries a remote link
+- **THEN** calendar composition preserves local sync state and one linked representation rather than marking it clean merely from the link.
 
 #### Scenario: Stored candidate query
 - **WHEN** public-event candidates already exist in storage

@@ -87,6 +87,40 @@ def connection_status(config: Config, raw_tokens: str | None) -> dict[str, Any]:
     }
 
 
+class WahooSecretRegistry:
+    """Runtime-only Wahoo secret values for the log redactor.
+
+    Holds the stored access and refresh tokens (replaced whenever the stored
+    record changes) and the raw one-time login state until it is consumed.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._tokens: frozenset[str] = frozenset()
+        self._state: frozenset[str] = frozenset()
+
+    def values(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._tokens | self._state)
+
+    def replace_tokens(self, raw_tokens: str | None) -> None:
+        record = _decode_object(raw_tokens) or {}
+        found = frozenset(
+            token
+            for token in (
+                str(record.get(field) or "").strip()
+                for field in ("access_token", "refresh_token")
+            )
+            if token
+        )
+        with self._lock:
+            self._tokens = found
+
+    def hold_state(self, state: str | None) -> None:
+        with self._lock:
+            self._state = frozenset({state}) if state else frozenset()
+
+
 class WahooConnectionService:
     """Own the Wahoo OAuth connection lifecycle and its persisted tokens."""
 
@@ -100,6 +134,7 @@ class WahooConnectionService:
         key_values: KeyValueRepository,
         utc_now: Callable[[], str],
         token_factory: Callable[[], str] = lambda: secrets.token_urlsafe(32),
+        secret_registry: WahooSecretRegistry | None = None,
     ) -> None:
         self._config = config
         self._oauth = oauth
@@ -108,6 +143,7 @@ class WahooConnectionService:
         self._key_values = key_values
         self._utc_now = utc_now
         self._token_factory = token_factory
+        self._secret_registry = secret_registry or WahooSecretRegistry()
         # Wahoo rotates refresh tokens: two concurrent refreshes would spend the
         # same refresh token twice, so refreshing is serialized per process.
         self._refresh_lock = threading.Lock()
@@ -120,16 +156,27 @@ class WahooConnectionService:
 
     def _read(self, key: str) -> str | None:
         with self._database_manager().reader() as db:
-            return self._key_values.get(db, key)
+            raw = self._key_values.get(db, key)
+        # Every token read keeps the redactor aware of the live token values.
+        if key == WAHOO_TOKENS_KEY:
+            self._secret_registry.replace_tokens(raw)
+        return raw
 
     def _write(self, key: str, value: dict[str, Any]) -> None:
+        encoded = json.dumps(value, separators=(",", ":"))
         with self._database_lock(), self._database_manager().unit_of_work() as db:
-            self._key_values.set(db, key, json.dumps(value, separators=(",", ":")))
+            self._key_values.set(db, key, encoded)
+        if key == WAHOO_TOKENS_KEY:
+            self._secret_registry.replace_tokens(encoded)
 
     def _delete(self, *keys: str) -> None:
         with self._database_lock(), self._database_manager().unit_of_work() as db:
             for key in keys:
                 self._key_values.delete(db, key)
+        if WAHOO_TOKENS_KEY in keys:
+            self._secret_registry.replace_tokens(None)
+        if WAHOO_STATE_KEY in keys:
+            self._secret_registry.hold_state(None)
 
     def status(self) -> dict[str, Any]:
         return connection_status(self._config(), self._read(WAHOO_TOKENS_KEY))
@@ -151,6 +198,7 @@ class WahooConnectionService:
         ):
             raise AppError(400, INVALID_REDIRECT_MESSAGE, reason="invalid_redirect_uri")
         state = self._token_factory()
+        self._secret_registry.hold_state(state)
         expires_at = self._now() + STATE_TTL
         # Only the digest is stored; a newer login replaces any pending one.
         self._write(
@@ -177,6 +225,7 @@ class WahooConnectionService:
             # A foreign state must not be able to cancel the athlete's login.
             if matches or expired:
                 self._key_values.delete(db, WAHOO_STATE_KEY)
+                self._secret_registry.hold_state(None)
             return matches and not expired
 
     def complete_authorization(

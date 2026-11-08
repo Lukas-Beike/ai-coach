@@ -275,6 +275,6 @@ class GarminProjectionService:
                 )
             )
             context["scope"] = (
-                "Kein Intervals.icu-Snapshot vorhanden; Garmin-Leistungswerte und der aktuellste Recovery-Datensatz werden als Fallback verwendet."
+                "Garmin-Leistungswerte und der aktuellste Recovery-Datensatz."
             )
         return context

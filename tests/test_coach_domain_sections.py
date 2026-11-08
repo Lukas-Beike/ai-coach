@@ -202,9 +202,11 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
     def test_source_policy_texts_are_built_from_labels(self):
         fixture = _populated_fixture()
         policy = fixture.service.build()["source_policy"]
-        self.assertIn(_label(ProviderId.INTERVALS), policy["activities"])
+        self.assertIn(_label(ProviderId.GARMIN), policy["activities"])
+        self.assertIn(_label(ProviderId.WAHOO), policy["activities"])
         self.assertIn(_label(ProviderId.GARMIN), policy["recovery"])
-        self.assertIn(_label(ProviderId.INTERVALS), policy["current_performance"])
+        for text in policy.values():
+            self.assertNotIn("Intervals", text)
         self.assertEqual(
             policy["durable_profile"],
             "Vom Athleten bestätigte Werte, lokal in SQLite gespeichert",

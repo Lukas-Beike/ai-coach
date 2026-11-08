@@ -2,6 +2,13 @@
 
 Stand: 18. Oktober 2026. Status: bewertet, nicht implementiert.
 
+> Status check 2026-11-08 (English, body stays German): open idea, no Decisions
+> router or `/v1/decisions` call exists in the code. Only the measurement and
+> rule phase of the [plan](openai-decisions-coach-routing-plan.md) was built
+> (count-only `coach_context_reload` log, #1269; scenario fixture and context
+> selection rules, #1271). The measured gate result is not recorded in the
+> repository. Automatic model selection stays excluded (explicit selection).
+
 ## Empfehlung
 
 Die OpenAI Decisions API zunächst für die Auswahl des Coach-Kontextes evaluieren.
@@ -25,8 +32,9 @@ Quelle: [OpenAI Decisions Guide](https://developers.openai.com/api/docs/guides/d
 - `backend/coach/request_payload.py` verbindet Kontextauswahl und Responses-Payload.
 - `backend/coach/context.py` begrenzt Kontext und erhält Quelleninformationen.
   Fehlende Bereiche können über `read_coach_context` nachgeladen werden.
-- `backend/settings.py` bietet Luna als feste Modelloption an; ein zusätzliches
-  konfiguriertes Modell wird ebenfalls angeboten. Modell und Thinking Level
+- `backend/settings.py` bietet GPT-6 Luna, Sol, 6.1 Sol und Astra als feste
+  Modelloptionen an (Standard: Luna); ein zusätzliches konfiguriertes Modell wird
+  ebenfalls angeboten. Modell und Thinking Level
   sind explizite Einstellungen.
 - `backend/coach/chat_turn.py` berücksichtigt gespeicherte Turn-Einstellungen.
   `backend/coach/structured_tool_round.py` berechnet Kontext nach Tool-Aktionen

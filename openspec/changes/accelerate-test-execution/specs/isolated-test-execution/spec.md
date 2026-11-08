@@ -4,7 +4,7 @@
 
 Provide developers and CI with reproducible, isolated test execution that reduces avoidable setup and fixture work while retaining the selected functional, responsive, security, and persistence checks and their failure signals.
 
-The requirements below are proposed behavior; baseline source references do not claim that the new behavior is already implemented.
+Implemented by `scripts/run_browser_tests.py`, `scripts/run_sqlcipher_tests.py` (via `tests/run_sqlcipher_tests.ps1`), `scripts/browser_environment.json`, `e2e/browser_durations.json` and the `e2e` jobs of `.github/workflows/publish-container.yml`. Measured wall-time and hosted-runner goals are not yet verified; see the change tasks.
 
 ## ADDED Requirements
 
@@ -23,7 +23,7 @@ The test entry points SHALL expose explicit focused and complete selections. Com
 - **WHEN** an unknown project, invalid shard, or selection matching no tests is requested
 - **THEN** execution fails clearly rather than returning a successful empty run.
 
-Baseline evidence and verification owners: `playwright.config.cjs`, `tests/run_tests.py`, and `tests/browser-selection.test.cjs`.
+Evidence: `scripts/run_browser_tests.py`, `tests/run_tests.py`, `playwright.config.cjs`; `tests/browser-selection.test.cjs`, `tests/test_browser_runner.py::BrowserRunnerTests.test_invalid_and_zero_selection_fail`, `tests/test_browser_runner.py::BrowserRunnerTests.test_expected_identities_survive_spec_and_shard_filters`, `tests/test_browser_runner.py::BrowserRunnerTests.test_synthetic_identity_parity_across_all_projects_and_shards`, `tests/test_browser_runner.py::BrowserRunnerTests.test_list_does_not_start_containers_and_never_reports_passed`, `tests/test_browser_aggregation.py::BrowserAggregationTests.test_focused_or_wrong_matrix_cannot_claim_complete_validation`.
 
 ### Requirement: Prepared browser execution matches the locked toolchain
 Regular CI browser jobs SHALL use a prepared, immutable browser environment containing the browser and required system packages for the locked test-tool version. Preparation SHALL be distinct from ordinary test execution, and missing or incompatible tooling SHALL fail explicitly.
@@ -40,7 +40,7 @@ Regular CI browser jobs SHALL use a prepared, immutable browser environment cont
 - **WHEN** a local run lacks its required locked toolchain or application image
 - **THEN** it reports the missing prerequisite and does not silently use an unrelated cached executable or bypass encrypted application startup.
 
-Baseline evidence and verification owners: `.github/workflows/publish-container.yml` and `package-lock.json`; new compatibility checks are planned.
+Evidence: `scripts/browser_environment.json` (version and digest pin), the `Pull immutable prepared browser environment` step of `.github/workflows/publish-container.yml`, `package-lock.json`; `tests/test_browser_runner.py::BrowserRunnerTests.test_missing_or_mismatched_locked_toolchain_fails_without_fallback`, `tests/test_browser_runner.py::BrowserRunnerTests.test_prepared_compatibility_requires_declared_version_and_observed_revision`.
 
 ### Requirement: Concurrent invocations own disjoint resources
 Each concurrent invocation SHALL own distinct container and network names, loopback ports, authentication-state files, result directories, and coverage outputs. A run SHALL NOT read another invocation's session state or stop, overwrite, or remove resources it does not own.
@@ -57,7 +57,7 @@ Each concurrent invocation SHALL own distinct container and network names, loopb
 - **WHEN** an invocation is cancelled or startup fails after some resources were created
 - **THEN** its active children are stopped before cleanup and only its observed disposable resources are removed, without deleting persistent volumes or another run's evidence.
 
-Baseline evidence and verification owners: `e2e/auth.setup.js` and `playwright.config.cjs`; new concurrent-isolation checks are planned.
+Evidence: `e2e/auth.setup.js` and `playwright.config.cjs` (`E2E_AUTH_STATE_PATH`), `scripts/run_browser_tests.py`; `tests/test_browser_runner.py::BrowserRunnerTests.test_auth_and_output_paths_are_disjoint_and_private`, `tests/test_browser_runner.py::BrowserRunnerTests.test_ports_reserved_disjoint_and_collision_is_not_modified`, `tests/test_browser_runner.py::BrowserRunnerTests.test_container_name_collision_does_not_authorize_cleanup`, `tests/test_browser_runner.py::BrowserRunnerTests.test_partial_start_collects_cid_and_cleanup_only_observed_ids`, `tests/test_browser_runner.py::BrowserRunnerTests.test_cancellation_terminates_and_reaps_owned_process_group`.
 
 ### Requirement: Browser specs receive independent disposable state
 Every browser spec invocation SHALL start from fresh synthetic application state with mocked providers and authenticated SQLCipher startup. Prewarming SHALL preserve this isolation, stable networking during browser execution, and the existing non-root read-only fixture runtime boundary.
@@ -74,7 +74,7 @@ Every browser spec invocation SHALL start from fresh synthetic application state
 - **WHEN** a fixture does not become ready within the bounded readiness period
 - **THEN** the invocation fails with sanitized diagnostics and does not continue against an old or connected installation.
 
-Baseline evidence and verification owners: `e2e/fixture_runtime.py` and the existing workflow per-spec loop; lifecycle regressions include `tests/test_fixture_standard_data.py`.
+Evidence: `e2e/fixture_runtime.py`, `scripts/run_browser_tests.py`; `tests/test_browser_runner.py::BrowserRunnerTests.test_serial_and_two_lane_bounded_fresh_fixture_resources`, `tests/test_browser_runner.py::BrowserRunnerTests.test_readiness_is_bounded_and_cancelled_without_fallback`, `tests/test_browser_runner.py::BrowserRunnerTests.test_prepared_mounts_exclude_repository_root_live_data_and_socket`, `tests/test_fixture_standard_data.py`.
 
 ### Requirement: Browser scheduling is deterministic and bounded
 Browser scheduling SHALL keep each spec file intact, retain one worker within each spec invocation, and support an explicit bounded shard/process count. Given the same selection and timing input, the assignment SHALL be deterministic and SHALL include new specs without recorded durations.
@@ -91,7 +91,7 @@ Browser scheduling SHALL keep each spec file intact, retain one worker within ea
 - **WHEN** a local concurrency limit is configured
 - **THEN** the number of active invocations never exceeds that limit and independent processes retain separate fixtures and reports.
 
-Baseline evidence and verification owners: the workflow browser matrix and `tests/browser-selection.test.cjs`; duration-weighted browser assignment is proposed.
+Evidence: `e2e/browser_durations.json`, `scripts/run_browser_tests.py`, the `e2e` job matrix of `.github/workflows/publish-container.yml` (desktop in two shards, the four smaller projects in one); `tests/test_browser_runner.py::BrowserRunnerTests.test_lpt_frozen_median_new_files_and_ties`, `tests/test_browser_runner.py::BrowserRunnerTests.test_malformed_weights_rejected`, `tests/test_browser_runner.py::BrowserRunnerTests.test_serial_and_two_lane_bounded_fresh_fixture_resources`.
 
 ### Requirement: Local Python execution preserves class and coverage ownership
 Local Python execution SHALL reuse the existing class-preserving shard assignment with an explicit bounded process count. Complete container validation SHALL use the current application build, isolated temporary data, and the existing SQLCipher path; each coverage shard SHALL have an independent output.
@@ -108,7 +108,7 @@ Local Python execution SHALL reuse the existing class-preserving shard assignmen
 - **WHEN** all Python shards finish
 - **THEN** their coverage outputs can be combined without overwriting one another and missing or failed shards cannot produce complete successful evidence.
 
-Baseline evidence and verification owners: `tests/run_tests.py`, `tests/run_sqlcipher_tests.ps1`, and `tests/test_ci_contracts.py`.
+Evidence: `tests/run_tests.py`, `tests/run_sqlcipher_tests.ps1`, `scripts/run_sqlcipher_tests.py`; `tests/test_local_test_execution.py::SupervisorTests.test_bounded_serial_default_and_invalid_workers`, `tests/test_local_test_execution.py::SupervisorTests.test_class_partition_validation_rejects_duplicate_missing_and_split`, `tests/test_local_test_execution.py::SupervisorTests.test_build_once_current_image_disjoint_shards_and_incremental_results`, `tests/test_local_test_execution.py::SupervisorTests.test_coverage_requires_exactly_one_nonempty_file_for_every_shard`, `tests/test_local_test_execution.py::SupervisorTests.test_nonzero_missing_and_suite_error_cannot_pass`, `tests/test_ci_contracts.py`.
 
 ### Requirement: Smaller fixtures retain the tested domain behavior
 Fixture optimization SHALL preserve each existing scenario's relevant records, expected results, and state isolation. Specialized cases SHALL retain their upgrade, restart, idempotence, and weekday coverage; complete-demo checks SHALL continue to exercise complete synthetic demo construction.
@@ -125,7 +125,7 @@ Fixture optimization SHALL preserve each existing scenario's relevant records, e
 - **WHEN** that case mutates its prepared data
 - **THEN** later cases start with independent state rather than inheriting a shared mutable fixture.
 
-Baseline evidence and verification owners: `e2e/fixture_runtime.py` and `tests/test_fixture_standard_data.py`.
+Evidence: `e2e/fixture_runtime.py::seed_fixture_planning_calendar`; `tests/test_fixture_standard_data.py::StandardFixtureStagingTests.test_staged_plan_never_collides_with_seeded_units_on_any_weekday`, `tests/test_fixture_standard_data.py::StandardFixtureSeedLifecycleTests`.
 
 ### Requirement: Execution evidence survives interruption without exposing sessions
 Every launched invocation SHALL persist its selection, revision, environment identity, phase timings, and final or interrupted status outside live application storage. Failed or interrupted runs SHALL remain distinguishable from passing runs, and reports intended for CI publication SHALL exclude credentials, authentication state, and session-bearing traces.
@@ -142,7 +142,7 @@ Every launched invocation SHALL persist its selection, revision, environment ide
 - **WHEN** CI publishes diagnostic artifacts
 - **THEN** the artifact selection excludes authentication-state files, credentials, and session-bearing traces even for newly added shards.
 
-Baseline evidence and verification owners: the workflow artifact exclusions and `playwright.config.cjs`; durable per-invocation summaries require new tests.
+Evidence: `scripts/run_browser_tests.py` (`manifest.json`), the `Upload browser run summaries` and `Upload browser failure artifacts` steps of `.github/workflows/publish-container.yml`, `.github/scripts/aggregate_browser_results.py`; `tests/test_browser_runner.py::BrowserRunnerTests.test_manifest_exists_before_the_first_tool_child`, `tests/test_browser_runner.py::BrowserRunnerTests.test_cleanup_exception_retains_original_child_failure`, `tests/test_browser_runner.py::BrowserRunnerTests.test_cleanup_exception_retains_interruption`, `tests/test_browser_runner.py::BrowserRunnerTests.test_failed_child_survives_cleanup_failure_and_does_not_save_raw_output`, `tests/test_browser_aggregation.py::BrowserAggregationTests.test_failed_interrupted_and_pending_results_cannot_pass`.
 
 ### Requirement: Performance comparisons retain their provenance
 Performance comparisons SHALL distinguish setup, fixture, authentication, test execution, queue delay where available, and summed runner time. They SHALL identify the source/environment and cold or warm state, and SHALL NOT classify a timing target as a correctness failure or substitute local timings for hosted critical-path evidence.
@@ -159,4 +159,4 @@ Performance comparisons SHALL distinguish setup, fixture, authentication, test e
 - **WHEN** a benchmark lacks Docker, a browser, SQLCipher support, or a recoverable terminal result
 - **THEN** that evidence is reported as blocked, not run, or unverified rather than successful.
 
-Baseline evidence and verification owners: `README.md`, `tests/test_durations.json`, and the hosted run evidence recorded in the change design; expanded phase comparisons are proposed.
+Evidence: the `Measuring validation performance` section of `README.md`, the phase timings in each run `manifest.json`, `tests/test_durations.json`. No comparable local browser baseline or five hosted runs have been recorded, so the goals are unverified (tasks 1.2, 7.2, 7.3).

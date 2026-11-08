@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe the athlete's local nutrition diary, nutrient completeness, expenditure comparisons, and body-history presentation. This is a brownfield baseline at application revision `b8c911c9dda83a7920171916ace32681c0c38ba0` (setup revision `6f942515acbb018f3a0b8ffdac148ce888b32a0a`). Evidence below is source/test inspection unless execution is recorded separately. The inspected nutrition flow has no saved calorie/macro target or adaptive-target calculation; its running-day expenditure projection is not a target. Food definitions belong to `food-catalog-and-meal-library`, external writes to `nutrition-provider-sync`, and loading to `view-refresh-and-client-state`.
+Describe the athlete's local nutrition diary, nutrient completeness, expenditure comparisons, and body-history presentation. Re-validated against application revision `d1beefd77`. Evidence below is source/test inspection unless execution is recorded separately. The inspected nutrition flow has no saved calorie/macro target or adaptive-target calculation; its running-day expenditure projection is not a target. Food definitions belong to `food-catalog-and-meal-library`, external writes to `nutrition-provider-sync`, and loading to `view-refresh-and-client-state`.
 
 ## Requirements
 
@@ -77,6 +77,31 @@ The system SHALL update or delete the identified local meal, preserve omitted co
 - **THEN** the service rejects it and retains the valid local state.
 
 Evidence: `backend/nutrition/diary.py::NutritionDiaryService.correct_meal`, `backend/nutrition/diary.py::NutritionDiaryService.delete_meal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`; `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_an_added_product_restores_the_previous_meal`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_preserves_omitted_fields_and_marks_old_and_new_days_pending`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_correct_meal_rejects_empty_invalid_or_missing_target`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_deleting_last_synced_entry_keeps_empty_date_pending`. Shared history/undo authorization is owned by the history and Coach contracts.
+
+### Requirement: Diary changes are recorded and undoable
+The system SHALL record every diary create, correction, added product and deletion as a `nutrition_entry` change in change history, with the audit-projected fields of the entry, and SHALL let the shared undo restore the recorded state only while the entry still matches the state the change produced. A restored entry SHALL mark its date pending for a later explicit export. A Coach turn whose applied writes are all diary tools SHALL be undoable as a whole.
+
+#### Scenario: Undo a logged meal
+- **WHEN** the athlete undoes the change that logged a meal
+- **THEN** the entry is removed and its date is marked pending again.
+
+#### Scenario: Undo an added product
+- **WHEN** the athlete undoes the change that added a saved product to a logged meal
+- **THEN** the meal returns to its previous values and its date is marked pending.
+
+#### Scenario: Undo a correction or deletion
+- **WHEN** the athlete undoes a correction or a deletion
+- **THEN** the entry returns with its earlier values, source and nutrient basis, including its composite ingredient snapshots, and local sync state.
+
+#### Scenario: Entry edited after the change
+- **WHEN** an entry was edited again after the change being undone
+- **THEN** the undo is refused with a conflict and the later edit stays.
+
+#### Scenario: Coach turn receipt
+- **WHEN** a Coach turn saved, updated or deleted diary entries or logged a saved meal
+- **THEN** its change summary is marked undoable.
+
+Evidence: `backend/nutrition/diary.py::NutritionDiaryService._create`, `backend/nutrition/diary.py::NutritionDiaryService._update`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`, `backend/nutrition/diary.py::NutritionDiaryService.delete_meal`, `backend/nutrition/diary.py::NutritionDiaryService.restore_in_transaction`, `backend/history/undo_service.py::HistoryUndoService`, `backend/coach/change_receipts.py::_FULLY_TRACKED_TOOLS`; `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_a_logged_meal_removes_it`, `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_a_correction_restores_the_previous_values`, `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_an_added_product_restores_the_previous_meal`, `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_of_a_delete_brings_the_entry_back_after_a_sync`, `tests/test_nutrition_history.py::NutritionHistoryTests.test_undo_is_refused_after_a_later_edit`, `tests/test_nutrition_history.py::NutritionHistoryTests.test_a_coach_turn_that_logs_meals_is_undoable`.
 
 ### Requirement: Daily macro completeness is distinct from known subtotals
 The system SHALL sum calories and counts for recorded meals while preserving unknown macronutrients as unknown. It SHALL expose known macro subtotals and the number of entries with incomplete macros rather than treating omitted values as zero.
@@ -220,3 +245,24 @@ The diary SHALL subtly color complete macro totals outside athlete-specific dail
 - **THEN** the affected comparison is not colored and no missing value is assumed.
 
 Evidence: `backend/nutrition/macro_ranges.py`, `backend/http_api/nutrition.py`, `public/nutrition.js`; `tests/test_nutrition_macro_ranges.py`, `tests/test_nutrition_api_and_sync.py`, `tests/nutrition-macro-ranges.test.cjs`, `e2e/nutrition-macro-ranges.spec.js`.
+
+### Requirement: Nutrition history shows average daily calorie balance
+The nutrition history SHALL show a signed average daily calorie balance alongside the total balance for both the 14-day and 12-week views, with the count of days used and the period's day count.
+
+#### Scenario: Complete deficit period
+- **WHEN** all 14 days have intake and expenditure and their total balance is -4,468 kcal
+- **THEN** the total remains visible and the average displays -319 kcal per day with coverage of 14 of 14 days.
+
+#### Scenario: Partial period
+- **WHEN** only some days have both intake and expenditure in either period
+- **THEN** the average is the sum of those paired daily balances divided by their count, and its coverage identifies the paired days out of 14 or 84.
+
+#### Scenario: Surplus or balanced period
+- **WHEN** the paired-day total is positive or zero
+- **THEN** the average retains the positive sign for a surplus or displays zero for a balanced period.
+
+#### Scenario: No paired days
+- **WHEN** no day has both intake and expenditure
+- **THEN** the average is shown as unavailable with zero coverage, rather than as zero.
+
+Evidence: `backend/nutrition/sync_status.py::NutritionSyncStatusService.get_week_summary` supplies the paired balance sum and count (`balance_kcal`, `balance_days`); `public/nutrition.js::renderNutritionWeek` derives and displays the signed average beside the total. `tests/nutrition-history.test.cjs::history displays daily balance from paired days alongside the total` covers the complete, partial, surplus, balanced, rounding-to-zero and no-paired-day cases; `e2e/nutrition-week.spec.js::@responsive nutrition week shows coverage, signed balance and missing days without fueling` and `e2e/nutrition-week.spec.js::@responsive nutrition gaps keep expenditure visible without inventing intake` cover the rendered tiles at all viewports; `tests/test_nutrition_garmin_expenditure.py::NutritionGarminExpenditureTests.test_week_uses_closed_days_and_only_paired_values_for_balance` covers the paired-day summary.

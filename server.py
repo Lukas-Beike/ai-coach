@@ -443,6 +443,7 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutSyncAssembly,
 )
 from backend.sync.state import SyncStateRepository
+from backend.sync.wahoo_connection import WahooSecretRegistry
 from backend.sync.wahoo_connection_assembly import (
     WahooConnectionAssembly,
     WahooConnectionInputs,
@@ -504,11 +505,13 @@ CONFIG_GENERATION = 0
 
 LOGGER = logging.getLogger("intervals_coach")
 GARMIN_SECRET_REGISTRY = GarminSecretRegistry()
+WAHOO_SECRET_REGISTRY = WahooSecretRegistry()
 # Environment secrets stay redacted while a stored credential overrides them.
 REDACTOR = observability.Redactor(
     lambda: CONFIG,
     extra_secrets=lambda: (
         *GARMIN_SECRET_REGISTRY.values(),
+        *WAHOO_SECRET_REGISTRY.values(),
         *observability.config_secret_values(ENV_CONFIG),
     ),
 )
@@ -1177,6 +1180,7 @@ WAHOO_CONNECTION = WahooConnectionAssembly(
         database_lock=lambda: DB_LOCK,
         key_values=KEY_VALUE_REPOSITORY,
         utc_now=runtime_clock.utc_now,
+        secret_registry=WAHOO_SECRET_REGISTRY,
     )
 )
 # The thresholds every outbound export sends (Intervals.icu metrics, Wahoo plan

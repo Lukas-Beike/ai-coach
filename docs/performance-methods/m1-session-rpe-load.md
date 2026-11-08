@@ -109,14 +109,13 @@ endurance athlete.
 
 | Rule | Value | Tag | Rationale |
 | --- | --- | --- | --- |
-| Rating scale range | 0 to 10 | source | CR-10 scale used in R1; enforced in `backend/activities/feedback.py:47-48`. |
-| Rating step | 0.5 | product assumption | Existing UI input step in `public/activity-details.js`; R1 does not specify half steps. |
+| Rating scale range | 0 to 10 | source | CR-10 scale used in R1; enforced in `backend/activities/feedback.py` (`session_rpe` validation). |
+| Rating step | 0.5 | product assumption | Existing UI input step in `public/activity-details.js` (RPE select); R1 does not specify half steps. |
 | Collection time | about 30 min after session end | source | R1 protocol; R2 after cool-down. Not enforced; unknown times stay marked. |
 | Duration unit | minutes | source | R1 uses minutes for 30/60/90-min bouts. |
 | Duration includes warm-up and cool-down | yes | product assumption | R1 text read does not say; R2 rated sessions including warm-up and cool-down. Decided to match the rated whole session. |
-| Fallback rating source | Garmin `directWorkoutRpe` / 10, then Intervals `icu_rpe`, only without local rating | product assumption | Decision D3 on #1406, precedence local -> Garmin from #1724 (Intervals.icu ingest becomes dormant, #1728); keeps provider value labelled and separate. |
-| Existing ATL reconstruction decay (not M1) | exp(-1/7) per day | product assumption | `backend/performance/load.py:121`; fitness-fatigue form from R17, the 7-day constant is not individually validated. Applies to imported load, never to AU. |
-| Existing scenario model constants (not M1) | 42 and 7 days | product assumption | `backend/planning/season_preparation.py:260` and `:478-479`; R17 model form, parameters not validated for this athlete. |
+| Fallback rating source | Garmin `directWorkoutRpe` / 10, then Intervals `icu_rpe`, only without local rating | product assumption | Decision D3 on #1406, precedence local -> Garmin from #1724 (the Intervals.icu ingest is removed, #1728/#1819; only an `icu_rpe` stored earlier is read); keeps provider value labelled and separate. |
+| Existing scenario model constants (not M1) | 42 and 7 days | product assumption | `backend/planning/season_preparation.py` (`load_scenarios` parameters `ctl_days` and `atl_days`, and the exponential steps in the same module); R17 model form, parameters not validated for this athlete. |
 | Long interruption mark | elapsed − moving > 15 min or > 20 % of elapsed | product assumption | Science review 2026-11-07 (#1770), athlete decision; not a published value. A café stop on a long ride is marked, short traffic stops are not. |
 | Sports exempt from the mark | strength, yoga | product assumption | Athlete decision 2026-11-07 (#1770): rests between sets are part of the rated session. |
 | Duplicate session matching | start within 30 min, duration within max(120 s, 10 %), distance within max(500 m, 10 %) | product assumption | Existing canonical session bundling in `bundle_sessions`; not a scientific rule. |

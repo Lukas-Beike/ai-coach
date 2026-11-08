@@ -21,9 +21,10 @@ finds nothing to read: a rated or already read Garmin record is not selected.
 An activity whose read is skipped (a client error) or fails three runs in a row is
 kept in the state (its id, never in diagnostics) and not selected again; an
 activity without a stored raw Garmin row is kept out the same way and counted
-separately. The chain is only finished for good once the Garmin and Intervals.icu
-historical chains reached the floor; before that it parks and the startup
-scheduler queues it again. The Garmin lock is held per read and per write only.
+separately. The chain is only finished for good once the Garmin historical
+chain reached the floor (Intervals.icu is not read, so its chain never counts);
+before that it parks and the startup scheduler queues it again. The Garmin lock
+is held per read and per write only.
 """
 
 from __future__ import annotations

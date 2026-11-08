@@ -24,7 +24,7 @@ from backend.canonical.activity_summary import summary_is_indoor
 from backend.performance.grade_adjustment import grade_adjusted, grade_stream
 from backend.performance.power_profile import METHOD_ID, METHOD_VERSION
 from backend.performance.session_analysis import _samples
-from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
+from backend.providers.source_labels import SESSION_SOURCES_LABEL
 
 # v2: treadmill and virtual runs are flat and never grade-adjusted.
 METHOD: Final = "pace-at-heart-rate-v2"
@@ -95,7 +95,7 @@ def _bins(
 
 
 def pace_at_heart_rate(
-    activity: Mapping[str, Any], *, source_label: str = INTERVALS_LABEL
+    activity: Mapping[str, Any], *, source_label: str = SESSION_SOURCES_LABEL
 ) -> dict[str, Any]:
     """Heart-rate bins of one run, or why it gives none (unknown, never zero)."""
     base = {

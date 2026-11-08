@@ -8,7 +8,7 @@ from typing import Any
 
 from backend.canonical.activity_summary import summary_is_indoor
 from backend.performance.grade_adjustment import grade_adjusted_speeds, grade_stream
-from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
+from backend.providers.source_labels import SESSION_SOURCES_LABEL
 
 TARGET_BASIS_FTP_KEY = "ftp"
 
@@ -95,7 +95,7 @@ def interval_quality(
     activity: dict[str, Any],
     targets: dict[str, Any] | None,
     *,
-    source_label: str = INTERVALS_LABEL,
+    source_label: str = SESSION_SOURCES_LABEL,
 ) -> dict[str, Any]:
     base = {
         "method": METHOD,
@@ -174,7 +174,7 @@ def _aerobic_output(
 
 
 def aerobic_analysis(
-    activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
+    activity: dict[str, Any], *, source_label: str = SESSION_SOURCES_LABEL
 ) -> dict[str, Any]:
     base = {
         "method": METHOD,

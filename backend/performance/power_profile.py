@@ -7,7 +7,7 @@ from typing import Any, Final
 
 from backend.canonical.activity_summary import summary_is_indoor
 from backend.performance.session_analysis import _number
-from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
+from backend.providers.source_labels import SESSION_SOURCES_LABEL
 
 # 180/420/720 s are the 3/7/12-min efforts of the CP/CS field protocols; cycling
 # CP also fits the 1200 s effort (M4 card 4).
@@ -28,7 +28,7 @@ type WindowCheck = Callable[[int, int, float], bool]
 
 
 def power_profile(
-    activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
+    activity: dict[str, Any], *, source_label: str = SESSION_SOURCES_LABEL
 ) -> dict[str, Any]:
     base = {
         "method": METHOD_ID,
@@ -66,7 +66,7 @@ def power_profile(
 
 
 def running_profile(
-    activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
+    activity: dict[str, Any], *, source_label: str = SESSION_SOURCES_LABEL
 ) -> dict[str, Any]:
     """Return observed running speed and distance efforts with exact coverage."""
     base = {

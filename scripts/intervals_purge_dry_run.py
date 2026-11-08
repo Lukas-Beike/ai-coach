@@ -16,7 +16,7 @@ Run it on a disposable copy only, in a container without network access::
     docker run --rm --network ai-coach-dry-run -e APP_PASSWORD \\
       -v "<copy directory>:/copy" \\
       -v "<repository>/scripts/intervals_purge_dry_run.py:/app/scripts/intervals_purge_dry_run.py:ro" \\
-      ai-coach:local python -m scripts.intervals_purge_dry_run /copy/intervals-coach.db
+      pacecraft:local python -m scripts.intervals_purge_dry_run /copy/intervals-coach.db
 
 ``-e APP_PASSWORD`` passes the variable from the calling shell without writing
 its value on the command line. The copy directory must be writable for SQLite's

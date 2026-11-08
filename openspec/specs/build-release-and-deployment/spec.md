@@ -96,7 +96,12 @@ The daily-release workflow SHALL prepare version changes through release-version
 - **WHEN** the relevant source has an existing release-test run
 - **THEN** the workflow does not dispatch a duplicate test solely because a check context is absent
 
-Evidence: `.github/workflows/daily-release.yml`. Tests: `tests/test_release_events.py::test_open_pr_dispatches_release_test`; `tests/test_release_events.py::test_existing_tests_do_not_dispatch_again`; `tests/test_release_events.py::test_unmerged_version_test_defers_without_waiting_or_mutating`; `tests/test_release_events.py::test_pending_promotion_has_a_same_tree_duplicate_guard`.
+#### Scenario: Version choice
+- **WHEN** the process computes the next version
+- **THEN** it increments the patch of APP_VERSION unless a manual dispatch names a MAJOR.MINOR.PATCH version, which must be greater than the latest release and cannot be chosen while a different APP_VERSION still awaits promotion
+- **AND** a merged version branch must match the merged APP_VERSION, and commits that only set the application version do not count as releasable changes
+
+Evidence: `.github/workflows/daily-release.yml` (`prepare-version`: `version_is_greater`, `count_releaseable_commits`). Tests: `tests/test_release_events.py::test_open_pr_dispatches_release_test`; `tests/test_release_events.py::test_existing_tests_do_not_dispatch_again`; `tests/test_release_events.py::test_unmerged_version_test_defers_without_waiting_or_mutating`; `tests/test_release_events.py::test_pending_promotion_has_a_same_tree_duplicate_guard`.
 
 ### Requirement: Signed digest publication
 
@@ -105,6 +110,10 @@ The publication workflow SHALL sign and verify the built image digest, attach co
 #### Scenario: Verified image built
 - **WHEN** all required source/tests/quality/browser conditions succeed
 - **THEN** the publication job pushes version/SHA tags, signs the resulting digest and verifies the signing identity
+
+#### Scenario: Image name follows the repository
+- **WHEN** the image metadata is extracted
+- **THEN** the image is `ghcr.io/<repository>`, which is `ghcr.io/lukas-beike/pacecraft` since the repository rename (#1796), tagged with the release version and the full source SHA
 
 #### Scenario: Older release publication races
 - **WHEN** the requested tag is no longer the repository's latest release

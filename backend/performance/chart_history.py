@@ -13,8 +13,7 @@ from backend.performance.display_sources import preferred_providers
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.providers.garmin_health_mapping import GARMIN_LABEL
-
-INTERVALS_SOURCE = "Intervals.icu"
+from backend.providers.source_labels import SESSION_SOURCES_LABEL
 
 METRIC_KEYS = (
     "cycling_ftp_watts",
@@ -148,7 +147,7 @@ def analysis_history(
         },
         "daily_activity": _daily_activity_history(load_dates, garmin_canonical),
         "training_time": {
-            "source": INTERVALS_SOURCE,
+            "source": SESSION_SOURCES_LABEL,
             "start": load_dates[0],
             "end": load_dates[-1],
             "points": _training_time_history(activities, load_dates),

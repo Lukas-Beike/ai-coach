@@ -83,19 +83,19 @@ The system SHALL support read-only loading of named local Coach context sections
 Evidence: `backend/coach/read_tools.py:CoachReadToolService._read_coach_context`; `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService`; `tests/test_coach_context_reduction.py:test_detail_read_bounds_output_and_rejects_unknown_sections`; `tests/test_coach_context_selection.py:test_rephrased_requests_offer_required_registered_tools`.
 
 ### Requirement: CP5 Saved provider evidence and honest freshness
-The system SHALL build ordinary Coach context from saved provider observations and local planning, retain available source/sync metadata, and read cached weather without causing an unconditional provider refresh. The `activities` section SHALL report the activity sync time as `synced_at` and `source.synced_at`, read in the same snapshot as the rows (null without coverage), and SHALL label its source with the providers of its sessions.
+The system SHALL build ordinary Coach context from saved Garmin, Wahoo and local data, retain available source/sync metadata, and read cached weather without causing an unconditional provider refresh. Intervals.icu is an output target and is never read as a source. The `activities` section SHALL report the activity sync time as `synced_at` and `source.synced_at`, read in the same snapshot as the rows (null without coverage), and SHALL label its source with the providers of its sessions.
 
 #### Scenario: Ordinary context read
 - **WHEN** the athlete sends an ordinary Coach message
 - **THEN** context assembly reads saved data and weather with refresh disabled rather than issuing provider calls for every message.
 
-#### Scenario: Missing Intervals snapshot
-- **WHEN** the saved Intervals snapshot is empty
-- **THEN** the context permits the implemented Garmin performance fallback while keeping provider recovery separate and unavailable evidence explicit.
+#### Scenario: No stored Intervals.icu sync
+- **WHEN** the canonical provider coverage holds no Intervals.icu sync, which is the case after the #1728 purge
+- **THEN** the recovery section requests Garmin's performance values beside the recovery records, keeps provider recovery separate and keeps unavailable evidence explicit.
 
 #### Scenario: Recovery section from canonical records
 - **WHEN** the Coach recovery section is built
-- **THEN** sleep, HRV, resting HR and readiness each show the latest canonical Garmin record of the last 14 days (`date` plus neutral fields such as `sleep_seconds`, `sleep_score`, the night values `avg_spo2_pct`, `lowest_spo2_pct`, `avg_respiration_brpm` and `avg_sleeping_hr_bpm`, `last_night_avg_ms`, `weekly_avg_ms`, `resting_hr_bpm`, `score`, and the provider status codes `status` and `level`; the sleep record adds `night_means` with each night value's mean and night count over those 14 days), Body Battery the stored morning record, and the sync time, window, freshness and errors come from the Garmin sync status, read in the same read transaction as the records; the raw Garmin view is not read, and the Garmin performance fallback is requested only when the canonical provider coverage holds no Intervals.icu sync.
+- **THEN** sleep, HRV, resting HR and readiness each show the latest canonical Garmin record of the last 14 days (`date` plus neutral fields such as `sleep_seconds`, `sleep_score`, the night values `avg_spo2_pct`, `lowest_spo2_pct`, `avg_respiration_brpm` and `avg_sleeping_hr_bpm`, `last_night_avg_ms`, `weekly_avg_ms`, `resting_hr_bpm`, `score`, and the provider status codes `status` and `level`; the sleep record adds `night_means` with each night value's mean and night count over those 14 days), Body Battery the stored morning record, and the sync time, window, freshness and errors come from the Garmin sync status, read in the same read transaction as the records; the raw Garmin view is not read, and Garmin's performance values are requested only when the canonical provider coverage holds no Intervals.icu sync.
 
 #### Scenario: Local calendar planning
 - **WHEN** context combines planned units, competitions and external calendar entries
@@ -105,7 +105,7 @@ The system SHALL build ordinary Coach context from saved provider observations a
 - **WHEN** the context includes the activities section and canonical coverage stores a current Garmin or Wahoo activity fetch time
 - **THEN** the section's `synced_at` and `source.synced_at` equal that time regardless of the stored snapshot's `synced_at` or of a duplicate deletion, and are null when no coverage is stored.
 
-Evidence: `backend/coach/context.py:CoachStructuredContextService.build`, `backend/coach/context.py:CoachPlanningContextReader.calendar`, `backend/coach/context.py:CoachPlanningContextReader.external_calendar`, `backend/coach/context.py:CoachPerformanceContextReader.current_performance`, `backend/coach/context.py:CoachIntervalsContextService.project`; `tests/test_coach_structured_context.py:test_build_uses_snapshot_fallback_and_projects_safe_provider_context`, `tests/test_coach_structured_context.py:test_explicit_snapshot_is_used_without_fallback_and_empty_snapshot_enables_garmin_fallback`. Per-metric provenance is owned by performance/provider capabilities; this requirement does not assert that every legacy section label identifies every canonical provider correctly. The activity sync time is the activity sync time (the oldest current activity fetch of Garmin and Wahoo in the canonical provider coverage; a provider fetched more than 14 days before the newest one is left out, Intervals.icu copies never count); `source.providers` lists the providers of the sessions' primary and per-value sources (`tests/test_coach_domain_sections.py:test_activities_source_block_comes_first_and_names_the_session_sources`, `tests/test_activity_sync_time.py`).
+Evidence: `backend/coach/context.py:CoachStructuredContextService.build`, `backend/coach/context.py:CoachPlanningContextReader.calendar`, `backend/coach/context.py:CoachPlanningContextReader.external_calendar`, `backend/coach/context.py:CoachPerformanceContextReader.current_performance`, `backend/coach/context.py:CoachIntervalsContextService.project`; `tests/test_coach_structured_context.py:test_build_uses_snapshot_fallback_and_projects_safe_provider_context`. Per-metric provenance is owned by performance/provider capabilities; this requirement does not assert that every legacy section label identifies every canonical provider correctly. The activity sync time is the activity sync time (the oldest current activity fetch of Garmin and Wahoo in the canonical provider coverage; a provider fetched more than 14 days before the newest one is left out, Intervals.icu copies never count; `backend/activities/sync_time.py:activities_synced_at`); `source.providers` lists the providers of the sessions' primary and per-value sources (`tests/test_coach_domain_sections.py:test_activities_source_block_comes_first_and_names_the_session_sources`, `tests/test_activity_sync_time.py`).
 
 ### Requirement: CP6 Explicit provider refresh and current results
 The system SHALL route a requested provider update through the existing provider refresh owners, distinguish queued work from completed refreshed data, and use refreshed local context before the subsequent model response where the provider contract waits for completion.
@@ -159,7 +159,7 @@ The system SHALL provide read-only tools for exact local records and determinist
 - **WHEN** `get_training_report` requests the `block_review` section alone (default: the last 4 whole weeks; `start` and `days` 28, 42, 56 or 84 choose another period; `since_last_test` starts on the Monday of the last completed local test unit's week with the shortest of 28, 56 or 84 days reaching today, else 56 days, and `last_test` names that day or null)
 - **THEN** it receives a read-only, descriptive comparison of planned and completed volume and compliance per sport, the completed intensity distribution against `training_model`, key sessions by session focus (threshold, vo2max, long, leg strength; derived focus counted), the CTL/mean-max trend, pace at a fixed 10 bpm heart-rate band (steady runs after a 10-minute warm-up, flat samples within 3 % slope, grade-adjusted where a slope or altitude stream exists, earlier versus later half per environment; hilly, trail, no-heart-rate or terrain-unknown runs and fewer than two usable sessions in the block or a half without one stay `not_covered`, never zero), session-RPE per week, check-in score shifts, bounded athlete feedback notes as untrusted text and at most four deterministic `lessons` with evidence strength; unknown data adds no lesson and `planning_brief.lessons` carries the same lessons for plan requests.
 
-Evidence: `backend/planning/block_review.py:block_review`; `tests/test_block_review.py`; `backend/performance/comparable_sessions.py:equal_effort_trend`, `tests/test_comparable_sessions.py:EqualEffortTrendTests`; `backend/performance/pace_at_hr.py:pace_at_heart_rate_trend`; `tests/test_pace_at_hr.py`; `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `backend/coach/read_tools.py:CoachReadToolService._execute_domain_read`; `backend/coach/tool_schemas.py` (`get_training_report`); `backend/coach/context.py:coach_performance_projection`; `tests/test_coach_read_tools.py:test_dispatches_every_read_tool_and_projects_existing_shapes`, `tests/test_coach_read_tools.py:test_invalid_limits_keep_bad_request_reason`; `tests/test_coach_tool_coverage.py:test_training_report_returns_same_local_facts_without_mutation`; `tests/test_coach_activity_read_tools.py:test_detail_uses_local_sources_and_keeps_sanitized_detail_projection`, `tests/test_coach_activity_read_tools.py:test_report_can_select_comparisons_and_rejects_unknown_section`, `tests/test_coach_activity_read_tools.py:test_report_can_select_body_history_and_sleep_timing_variability`; `backend/performance/progress_report.py:weekly_progress`; `tests/test_weekly_progress.py`; `tests/test_personal_recovery_coach_cases.py`, `tests/test_performance_coach_ui_parity.py`.
+Evidence: `backend/planning/block_review.py:block_review`; `tests/test_block_review.py`; `backend/performance/comparable_sessions.py:equal_effort_trend`, `tests/test_comparable_sessions.py:EqualEffortTrendTests`; `backend/performance/pace_at_hr.py:pace_at_heart_rate_trend`; `tests/test_pace_at_hr.py`; `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `backend/coach/read_tools.py:CoachReadToolService._execute_domain_read`; `backend/coach/tool_schemas.py` (`get_training_report`); `backend/coach/context.py:coach_performance_projection`; `tests/test_coach_read_tools.py:test_dispatches_every_read_tool_and_projects_existing_shapes`, `tests/test_coach_read_tools.py:test_invalid_limits_keep_bad_request_reason`; `tests/test_coach_tool_coverage.py:test_training_report_returns_same_local_facts_without_mutation`; `tests/test_coach_activity_read_tools.py:test_detail_returns_the_v1_document_with_its_envelope`, `tests/test_coach_activity_read_tools.py:test_report_can_select_comparisons_and_rejects_unknown_section`, `tests/test_coach_activity_read_tools.py:test_report_can_select_body_history_and_sleep_timing_variability`; `backend/performance/progress_report.py:weekly_progress`; `tests/test_weekly_progress.py`; `tests/test_personal_recovery_coach_cases.py`, `tests/test_performance_coach_ui_parity.py`.
 
 ### Requirement: CP8 External text is evidence only
 The system SHALL isolate provider, calendar, attachment and stored product text as untrusted context data, prevent it from reproducing context fence delimiters, and keep credentials and raw transport payloads out of the Coach projection.
@@ -196,11 +196,11 @@ The system SHALL expose an authenticated bounded preview of the Coach context an
 Evidence: `backend/http_api/athlete_get.py:AthleteGetRoutes.handle`; `backend/coach/context.py:CoachContextPreviewService.preview`; `tests/test_coach_context_preview.py:test_preview_layout_snapshot_last_message_and_read_calls`, `tests/test_coach_context_preview.py:test_projection_bounds_and_privacy`, `tests/test_coach_context_preview.py:test_conversation_preview_documents_responses_chain`.
 
 ### Requirement: Coach activity context uses neutral activity summaries
-The Coach context SHALL list recent activities from the neutral activity summaries of every provider, one per session, with the local session id, canonical sport and environment, neutral value keys, `load_model` and source labels, and SHALL NOT expose provider field names or type names. For Intervals.icu-only data the values and source labels SHALL stay as before.
+The Coach context SHALL list recent activities from the neutral activity summaries of every provider, one per session, with the local session id, canonical sport and environment, neutral value keys, `load_model` and source labels, and SHALL NOT expose provider field names or type names.
 
-#### Scenario: Intervals.icu-only parity
-- **WHEN** the Coach context is built from Intervals.icu-only synthetic activities
-- **THEN** each activity's values, the per-sport rollups and the source labels equal the former context, under the neutral keys.
+#### Scenario: Unchanged values and labels
+- **WHEN** the Coach context is built from synthetic activity summaries
+- **THEN** each activity's values, the per-sport rollups and the source labels equal the former raw-row context, under the neutral keys; summaries of retired Intervals.icu rows keep their values and `Intervals.icu` label until the #1728 purge has removed them.
 
 #### Scenario: Garmin-only session
 - **WHEN** a recent session has only a Garmin Connect record
@@ -231,11 +231,11 @@ The planning brief SHALL summarize daily busy minutes from external events witho
 Evidence: `backend/planning/calendar_load.py:busy_minutes`, `backend/planning/plan_guard_service.py:PlanGuardService.brief`; `tests/test_calendar_planning.py:test_busy_minutes_union_and_midnight`.
 
 ### Requirement: Coach and plan share the resolved thresholds
-The system SHALL give the Coach context the same current FTP, threshold heart rate and maximum heart rate that plan zones and planned loads use on that day, resolved by one source policy. The Coach thresholds SHALL name the FTP source and, when another source holds a different current FTP, list it as an alternative with a conflict flag.
+The system SHALL give the Coach context the same current FTP, threshold heart rate and maximum heart rate that plan zones and planned loads use on that day, resolved by one source policy (local zone configuration, then Garmin, then Wahoo; Intervals.icu is never a source). The Coach thresholds SHALL name the FTP source and, when another source holds a different current FTP, list it as an alternative with a conflict flag.
 
-#### Scenario: Garmin and Intervals.icu FTP differ
-- **WHEN** Garmin reports 280 W, the Intervals.icu setting is 265 W and no local zone configuration applies
-- **THEN** `thresholds.ftp_w` is 265 with `ftp_source` Intervals.icu, `ftp_alternatives` lists Garmin 280 W, `ftp_conflict` is true, and planned loads and zones use 265 W.
+#### Scenario: Garmin and Wahoo FTP differ
+- **WHEN** Garmin reports 280 W, Wahoo holds 265 W and no local zone configuration applies
+- **THEN** `thresholds.ftp_w` is 280 with `ftp_source` Garmin Connect, `ftp_alternatives` lists Wahoo 265 W, `ftp_conflict` is true, and planned loads and zones use 280 W; an Intervals.icu value is ignored.
 
 #### Scenario: Local zone configuration
 - **WHEN** the athlete has a confirmed local power zone configuration in effect today
@@ -243,19 +243,19 @@ The system SHALL give the Coach context the same current FTP, threshold heart ra
 
 Detailed contract: the plan playbook tells the Coach to use these thresholds for targets and to name a flagged conflict once. Each current metric with other current sources carries `alternatives` (value, source label, provider id) and `conflict`.
 
-Evidence: `backend/performance/current_metrics.py:coach_thresholds`, `backend/performance/canonical_current.py:read_current_inputs`, `backend/planning/load_checks.py:load_thresholds`, `backend/coach/playbooks.py:_THRESHOLDS`; `tests/test_current_thresholds.py:CoachAndPlanParityTests`.
+Evidence: `backend/performance/current_metrics.py:coach_thresholds`, `backend/performance/canonical_current.py:read_current_inputs`, `backend/planning/load_checks.py:load_thresholds`, `backend/coach/playbooks.py:_THRESHOLDS`; `tests/test_current_thresholds.py:CoachAndPlanParityTests`, `tests/test_current_thresholds.py:ResolverTests.test_ftp_conflict_keeps_both_values_visible`.
 
 ### Requirement: Subjective ratings carry scale, direction and source
-The system SHALL give every subjective rating that reaches the Coach (Intervals.icu wellness fatigue, soreness, stress and mood, activity RPE and feel, check-in and activity feedback scores) with its scale, direction and athlete-entered source. Same-named ratings of different scales SHALL never be presented as comparable numbers.
+The system SHALL give every subjective rating that reaches the Coach (activity RPE and feel from Garmin or retired Intervals.icu rows, check-in and activity feedback scores) with its scale, direction and athlete-entered source. Same-named ratings of different scales SHALL never be presented as comparable numbers. The Intervals.icu 1–4 wellness ratings (fatigue, soreness, stress, mood) are no Coach input any more (#1728).
 
-#### Scenario: Same-named soreness from two scales
-- **WHEN** the context carries Intervals.icu soreness 3 in `current_performance.recovery` and check-in soreness 3 in `local_feedback`
-- **THEN** Coach rule 8h names 1–4 (higher is worse, Intervals.icu, athlete-entered) for the first and 0–10 (higher is worse, local check-in) for the second and forbids comparing or averaging them.
+#### Scenario: Ratings of different scales
+- **WHEN** the context carries an activity `feel` (1–5, 1 = best) or `rpe` (1–10) from a provider and check-in soreness or stress (0–10, higher is worse) in `local_feedback`
+- **THEN** Coach rule 8h names each field's scale, direction and source and forbids comparing or averaging ratings of different scales; it names no Intervals.icu rating.
 
 #### Scenario: Activity detail ratings
 - **WHEN** `get_activity_details` serves a session
 - **THEN** it carries no Intervals.icu RPE or feel from the provider summary row (#1685); the athlete's own rating stays in `activity_feedback` with its local scale.
 
-Detailed contract: ratings keep the entered number; each field's scale is fixed by where it was entered and resolved at read time from `backend/canonical/rating_scales.py`, so stored rows need no replay. The legend is constant, so it is rule 8h of the fixed Coach prompt instead of per-turn context; tests check the rule against those scales. Session-RPE load entries name their `rpe_scale` (local 0–10 or Intervals.icu 1–10) and keep their values.
+Detailed contract: ratings keep the entered number; each field's scale is fixed by where it was entered and resolved at read time from `backend/canonical/rating_scales.py`, so stored rows need no replay. The legend is constant, so it is rule 8h of the fixed Coach prompt instead of per-turn context; tests check the rule against those scales. Session-RPE load entries name their `rpe_scale` (local 0–10 or a provider scale) and keep their values. The Intervals.icu wellness scale table in `backend/canonical/rating_scales.py` remains for retired rows.
 
 Evidence: `backend/canonical/rating_scales.py:RatingScale`, `backend/performance/session_rpe_load.py:session_load`, `backend/coach/prompt.py:COACH_PROMPT`; `tests/test_subjective_rating_scales.py`.

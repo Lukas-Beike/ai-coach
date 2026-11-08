@@ -24,7 +24,8 @@ class ExportedSourceConstantTests(unittest.TestCase):
 
     def test_season_preparation_activity_source_is_unchanged(self):
         self.assertEqual(
-            "Intervals.icu recorded activities", season_preparation.ACTIVITY_SOURCE
+            "Garmin Connect, Wahoo recorded activities",
+            season_preparation.ACTIVITY_SOURCE,
         )
 
     def test_current_metrics_source_constants_are_unchanged(self):
@@ -43,7 +44,6 @@ class ExportedSourceConstantTests(unittest.TestCase):
 
 
 class EmittedSourceOutputTests(unittest.TestCase):
-
     def test_season_preparation_basis_names_the_local_curve(self):
         # Since #1726 the basis is yesterday's local fitness (M7), never
         # Intervals.icu recorded wellness.

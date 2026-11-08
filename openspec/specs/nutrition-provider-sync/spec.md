@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe explicit local-diary export to Intervals.icu and scoped Garmin nutrition refreshes at application revision `b8c911c9dda83a7920171916ace32681c0c38ba0`. Requirements document inspected implementation and tests, not a completed live-provider conformance run. Local diary and totals are specified by `nutrition-diary-and-targets`; client request races by `view-refresh-and-client-state`. Local revision checks do not establish remote compare-and-swap protection against independent Intervals edits.
+Describe explicit local-diary export to Intervals.icu and scoped Garmin nutrition refreshes re-validated against application revision `d1beefd77`. Requirements document inspected implementation and tests, not a completed live-provider conformance run. Local diary and totals are specified by `nutrition-diary-and-targets`; client request races by `view-refresh-and-client-state`. Local revision checks do not establish remote compare-and-swap protection against independent Intervals edits.
 
 ## Requirements
 

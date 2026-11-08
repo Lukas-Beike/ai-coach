@@ -25,6 +25,7 @@ from backend.sync.wahoo_connection import (
     WAHOO_STATE_KEY,
     WAHOO_TOKENS_KEY,
     WahooConnectionService,
+    WahooSecretRegistry,
     connection_status,
 )
 
@@ -163,7 +164,9 @@ class WahooConnectionServiceTests(unittest.TestCase):
         self.service = self.make_service(lambda: self.config)
 
     def make_service(self, config):
+        self.secrets = WahooSecretRegistry()
         return WahooConnectionService(
+            secret_registry=self.secrets,
             config=config,
             oauth=lambda: WahooOAuthClient(config, self.request),
             database_manager=lambda: FakeManager(),
@@ -377,6 +380,32 @@ class WahooConnectionServiceTests(unittest.TestCase):
         config = make_config()
         for raw in (None, "", "not-json", "[]", json.dumps({"access_token": "x"})):
             self.assertFalse(connection_status(config, raw)["connected"])
+
+    def test_the_redactor_registry_follows_tokens_and_login_state(self):
+        self.service.start_authorization()
+        self.assertEqual(self.secrets.values(), ("state-0",))
+        self.assertEqual(
+            self.service.complete_authorization("code-1", "state-0"), "connected"
+        )
+        self.assertEqual(set(self.secrets.values()), {"access-1", "refresh-1"})
+        self.request.return_value = grant_payload(
+            access="access-2", refresh="refresh-2"
+        )
+        self.clock.now = NOW + timedelta(hours=2)
+        self.service.access_token()
+        self.assertEqual(set(self.secrets.values()), {"access-2", "refresh-2"})
+        self.service.start_authorization()
+        self.assertEqual(
+            set(self.secrets.values()), {"access-2", "refresh-2", "state-1"}
+        )
+        self.service.disconnect()
+        self.assertEqual(self.secrets.values(), ())
+
+    def test_expired_login_state_leaves_the_redactor_registry(self):
+        self.service.start_authorization()
+        self.clock.now = NOW + STATE_TTL + timedelta(seconds=1)
+        self.service.complete_authorization("code", "state-0")
+        self.assertEqual(self.secrets.values(), ())
 
     def test_secret_keys_cover_tokens_and_state(self):
         self.assertEqual(WAHOO_SECRET_KEYS, {WAHOO_TOKENS_KEY, WAHOO_STATE_KEY})

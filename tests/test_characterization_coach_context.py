@@ -768,7 +768,7 @@ class GarminCoachContextFallbackProvenanceTests(unittest.TestCase):
         self.assertEqual(ftp["note"], "Garmin Connect FTP")
         self.assertEqual(ftp["freshness"], "current")
         self.assertEqual(ftp["measurement_status"], "today")
-        self.assertIn("Kein Intervals.icu-Snapshot", result["scope"])
+        self.assertIn("Garmin-Leistungswerte", result["scope"])
 
 
 def _eighty_four_day_wellness() -> list[dict[str, Any]]:
