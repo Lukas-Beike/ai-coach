@@ -17,10 +17,11 @@ test("@responsive nutrition overview shows consumed sugar and salt with honest m
   mode = "partial";
   await page.reload();
   await expect(sugar).toHaveText("6.2 gZucker · unvollständig");
-  await expect(salt).toHaveText("– gSalz");
+  await expect(salt).toHaveText("nicht erfasstSalz");
+  await expect(salt.locator("strong.value-missing")).toHaveCount(1);
   mode = "empty";
   await page.reload();
-  await expect(sugar).toHaveText("– gZucker");
-  await expect(salt).toHaveText("– gSalz");
+  await expect(sugar).toHaveText("nicht erfasstZucker");
+  await expect(salt).toHaveText("nicht erfasstSalz");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
