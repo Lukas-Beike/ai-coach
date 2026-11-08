@@ -232,15 +232,26 @@ Detailed contract: Feedback SHALL remain separate from provider measurements and
 Evidence: `backend/activities/feedback.py:normalize_activity_feedback`, `backend/activities/feedback.py:ActivityFeedbackService.save`, `backend/activities/feedback.py:ActivityFeedbackService.save_coach`; `tests/test_activity_feedback.py:test_rpe_only_preserves_notes_and_explicit_clear_deletes`, `tests/test_activity_feedback.py:test_coach_save_requires_known_snapshot_activity_and_accepts_aliases`, `tests/test_activity_feedback.py:test_for_activity_ids_queries_in_bounded_chunks`. Served load: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.session_rpe_load`; `tests/test_detail_envelope.py:test_save_response_load_matches_the_served_detail_load`, `tests/test_http_feedback_post.py:test_activity_feedback_save_returns_the_session_load`, `tests/test_http_history_undo_post_routes.py:test_feedback_undo_returns_the_session_load_of_the_named_activity`, and `e2e/activity-details.spec.js`.
 
 ### Requirement: Athlete marking of the session purpose
-The system SHALL let the athlete mark a completed session as training, race, commute, warm-up or cool-down on the feedback of the session, in the activity details and through the Coach tool `save_activity_feedback` (`purpose`, null removes the marking). The marking is stored with the feedback rows of the session, so it shares their receipts, undo and merge groups, is kept when other feedback fields are omitted or deleted (the Coach tool `delete_activity_feedback` clears notes, RPE and deviation reason only), and applies to every row of a group. A marked purpose SHALL win over the provider event type and over the competition hint on every read of the activity summaries (detail document, Coach, curve and critical-power candidates, planned-session matching, race results). A marked race SHALL be linked to the stored competition of its day like a provider race; any other marking, training included, SHALL keep the session out of the race hint and remove its competition link, and a session marked training SHALL also keep the other sessions of that competition's day and sport from taking the hint. An activity that cannot be assigned to exactly one session SHALL be refused a marking. Commute, warm-up and cool-down sessions SHALL stay out of bests, mean-maximal curves, critical-power efforts and planned-session matching. Undo SHALL restore the previous marking and, because the link is derived on read, the previous competition link.
+The system SHALL let the athlete mark a completed session as training, race, commute, warm-up or cool-down in the activity details and through the Coach tool `save_activity_feedback` (`purpose`, null removes it). The marking SHALL be stored with the feedback rows of the session, so receipts, undo and merge groups apply, and SHALL win over the provider event type and the competition hint on every read of the activity summaries.
 
 #### Scenario: Training overrides a race
 - **WHEN** the athlete marks a Garmin race or a hint-linked session as training
-- **THEN** the summaries report purpose training from the athlete, and the competition link is gone.
+- **THEN** the summaries report purpose training from the athlete, the competition link is gone, and no other session of that day and sport takes the hint.
+
+#### Scenario: Marked race
+- **WHEN** the athlete marks a session as race
+- **THEN** it is linked to the stored competition of its day like a provider race.
+
+#### Scenario: Commute, warm-up and cool-down
+- **WHEN** a session is marked commute, warm-up or cool-down
+- **THEN** it stays out of bests, mean-maximal curves, critical-power efforts and planned-session matching.
 
 #### Scenario: Undo restores the previous purpose
 - **WHEN** the athlete undoes the marking
 - **THEN** the previous marking, or the Garmin purpose and the competition hint, is served again.
+
+#### Scenario: Feedback delete and unassignable activity
+- **WHEN** the feedback is deleted, including by the Coach tool `delete_activity_feedback`, **THEN** the marking stays; **WHEN** the activity cannot be assigned to exactly one session, **THEN** a marking is refused.
 
 Evidence: `backend/activities/feedback.py:session_purpose_marks`, `backend/activities/session_purpose.py:with_marked_purposes`; `tests/test_feedback_purpose.py`, `tests/test_session_purpose.py:SelectorMarkedPurposeTests`, `e2e/activity-details.spec.js`.
 
