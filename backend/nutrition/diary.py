@@ -356,9 +356,9 @@ class NutritionDiaryService:
                 },
             }
             self._set_composite_totals(entry)
-            updated = self._nutrition_repository.update(
+            updated = self._update(
                 db,
-                clean_id,
+                existing,
                 normalize_nutrition_entry(entry, local_now_factory=self._local_now)
                 | {"id": clean_id},
             )
