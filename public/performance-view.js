@@ -321,7 +321,9 @@ function renderCurrentPerformance(metrics, history, status = []) {
     table.append(body);
     grid.append(table);
   }
-  if (!grid.childElementCount) grid.append(reportNode("p", "Noch keine aktuellen Leistungswerte.", "empty"));
+  // A status message (e.g. a failed read) keeps the section visible.
+  root.dataset.analysisEmpty = String(!grid.childElementCount && !status.length);
+  if (!grid.childElementCount) grid.append(reportNode("p", "Noch keine aktuellen Leistungswerte.", "muted"));
   root.append(grid);
   makeAnalysisSectionCollapsible(root, "current-performance");
 }
@@ -342,8 +344,9 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   const predictions = racePredictionRows(values);
   root.hidden = false;
   root.append(reportNode("h4", "Laufprognosen"));
+  root.dataset.analysisEmpty = String(!predictions.length);
   if (!predictions.length) {
-    root.append(reportNode("p", racePredictionEmptyReason(values), "empty"));
+    root.append(reportNode("p", racePredictionEmptyReason(values), "muted"));
   } else {
     const table = reportNode("table", null, "race-predictions-table");
     const head = reportNode("thead");

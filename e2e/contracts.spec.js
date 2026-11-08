@@ -747,7 +747,6 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   }));
   await expect(charts.locator("svg")).toHaveCount(0);
   await expect(charts.locator(".empty").filter({ hasText: "Noch keine datierten Werte im Zeitraum vorhanden." })).toHaveCount(0);
-  await expect(charts.locator('[data-analysis-section="development-Lauf"]').locator("..").locator("p.empty", { hasText: "Keine Daten" })).toHaveText("Keine Daten: Schwellenpace, VO₂max · Schätzung, Lauf-Belastbarkeit");
-  await expect(charts.locator('[data-analysis-section="development-Rad"]').locator("..").locator("p.empty", { hasText: "Keine Daten" })).toHaveText("Keine Daten: Leistungsschwelle · FTP, VO₂max · Schätzung");
+  await expect(charts).not.toContainText("Keine Daten");
   await expect(charts.locator("#performancePredictions")).toHaveText(predictionsText);
 });

@@ -79,12 +79,13 @@ test("@responsive standard demo shows one compact race table and sport-specific 
   await expect(powerProfile.locator("tbody td")).toHaveText(Array.from({ length: 5 }, () => /^\d+(?:,\d+)? W$/));
   await expect(cycling.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
   await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg']")).toHaveCount(1);
-  await expect(running).toContainText("Lauf-Belastbarkeit");
+  await expect(running).not.toContainText("Keine Daten");
   await expect(running.locator("#performancePredictions")).toHaveCount(1);
   await expect(running.locator(".analysis-group-title")).toHaveText("Laufen");
   await expect(cycling.locator(".analysis-group-title")).toHaveText("Rad");
   const endurance = page.locator("#performanceEnduranceCharts");
-  await expect(endurance).toContainText("Ausdauer-Score");
+  // The demo has no endurance score, so the section stays empty and hidden (#1783).
+  await expect(endurance).toBeHidden();
   expect(await endurance.evaluate((element) => element.previousElementSibling.id)).toBe("currentPerformance");
   for (const group of [running, cycling]) {
     const title = await group.locator(".analysis-group-title").boundingBox();
@@ -639,7 +640,7 @@ test("@responsive legend info buttons are at least 44x44 and never overlap each 
   }
 });
 
-test("@responsive empty performance charts are omitted and listed once as missing data", async ({ page }) => {
+test("@responsive empty performance charts are omitted without a missing-data list", async ({ page }) => {
   await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-08", load: { points: [] }, metrics: {
     cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }],
     run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: null }, { date: "2026-09-08", value: null }] }],
@@ -647,10 +648,7 @@ test("@responsive empty performance charts are omitted and listed once as missin
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator("svg")).toHaveCount(1);
   await expect(root.getByRole("heading", { name: "Schwellenpace", exact: true })).toHaveCount(0);
-  const missing = root.locator("p.empty", { hasText: "Keine Daten:" });
-  await expect(missing).toHaveCount(2);
-  await expect(missing.first()).toContainText("Schwellenpace");
-  await expect(root.locator("p.empty", { hasText: "Keine Daten:" }).filter({ hasText: "FTP" })).toHaveCount(0);
+  await expect(root).not.toContainText("Keine Daten");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
