@@ -252,6 +252,25 @@ def _best_running_distance(
             for index, (_, _, valid) in enumerate(rates)
         ]
     )
+    best = _fastest_distance_window(times, rates, distances, run_end, target, flat)
+    return {
+        "distance_meters": target,
+        "seconds": round(best[0], 2) if best else None,
+        "start_seconds": best[1] if best else None,
+        "coverage": 1.0 if best else None,
+        "status": "ok" if best else "unknown",
+    }
+
+
+def _fastest_distance_window(
+    times: list,
+    rates: list,
+    distances: list,
+    run_end: list[int],
+    target: int,
+    flat: WindowCheck,
+) -> tuple[float, Any] | None:
+    """The shortest time over ``target`` metres and its start, among flat windows."""
     best = None
     for start in range(len(times) - 1):
         if not rates[start][2] or distances[start] is None:
@@ -263,13 +282,7 @@ def _best_running_distance(
             continue
         if flat(start, candidate[1], target):
             best = (candidate[0], times[start])
-    return {
-        "distance_meters": target,
-        "seconds": round(best[0], 2) if best else None,
-        "start_seconds": best[1] if best else None,
-        "coverage": 1.0 if best else None,
-        "status": "ok" if best else "unknown",
-    }
+    return best
 
 
 def _valid_run_ends(valid: list[bool]) -> list[int]:
