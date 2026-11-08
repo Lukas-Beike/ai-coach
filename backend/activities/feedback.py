@@ -421,6 +421,12 @@ class ActivityFeedbackService:
             ).get(key)
             groups = self._groups(db)
             group_key = _save_group_key(db, key, origin, groups)
+            if value.get("purpose") not in (None, "") and group_key[0] != "session":
+                raise AppError(
+                    409,
+                    "Die Aktivität lässt sich keiner Einheit eindeutig zuordnen; "
+                    "die Art der Einheit kann nicht markiert werden.",
+                )
             group = groups.get(group_key) or []
             if len(group) >= change_history.MAX_FEEDBACK_GROUP_ROWS:
                 raise AppError(
@@ -458,16 +464,15 @@ class ActivityFeedbackService:
                 provider=reference.provider if own_row else None,
                 session_id=origin if own_row else None,
             )
-            if existing.get("purpose") != feedback.get("purpose"):
-                # A marking applies to the whole group, not to the shown row only.
-                for row in group:
-                    if row["activity_id"] not in {
-                        feedback["activity_id"],
-                        existing["activity_id"],
-                    }:
-                        self._feedback_repository.set_purpose(
-                            db, row["activity_id"], feedback.get("purpose")
-                        )
+            # One marking applies to the whole group, not to the shown row only.
+            for row in group:
+                if row["activity_id"] not in {
+                    feedback["activity_id"],
+                    existing["activity_id"],
+                } and row.get("purpose") != feedback.get("purpose"):
+                    self._feedback_repository.set_purpose(
+                        db, row["activity_id"], feedback.get("purpose")
+                    )
             after_groups = self._groups(db)
             saved_key = _group_containing(
                 after_groups, feedback["activity_id"], group_key
@@ -592,7 +597,7 @@ class ActivityFeedbackService:
     def context(self) -> dict[str, Any]:
         return {
             "recent": self.list(),
-            "scope": "Only athlete-entered notes, session RPE and deviation reasons about completed activities; this feedback is separate from daily check-ins and provider values.",
+            "scope": "Only athlete-entered notes, session RPE, deviation reasons and the session purpose marking about completed activities; a marking wins over the provider event type and the race hint; this feedback is separate from daily check-ins and provider values.",
         }
 
     def attach_to_activities(self, activities: Any) -> builtins.list[dict[str, Any]]:

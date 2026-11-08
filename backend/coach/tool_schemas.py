@@ -797,7 +797,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "delete_activity_feedback",
-            "Delete the local feedback record for one completed activity. activity_id accepts the local ID (act_...) or the provider activity ID.",
+            "Delete the notes, session RPE and deviation reason of one completed activity. The athlete's purpose marking stays; remove it with save_activity_feedback and purpose null. activity_id accepts the local ID (act_...) or the provider activity ID.",
             {"activity_id": {"type": "string"}},
         ),
         _canonical_coach_tool(

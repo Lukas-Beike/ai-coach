@@ -16,7 +16,9 @@ cool-down is never a candidate. A session links to at most one competition.
 The athlete's own marking (``with_marked_purposes``) wins over both sources: a
 marked session keeps its marked purpose, a marked race counts like a provider
 race, and any other marking, training included, takes the session out of the
-race hint and removes its competition link.
+race hint and removes its competition link; a session marked training also
+takes the hint away from the other sessions of that competition's day and sport,
+which only a provider or marked race can get.
 """
 
 from __future__ import annotations
@@ -162,6 +164,14 @@ def _match(
         # the nearest race not yet linked.
         free = [index for index in races if index not in linked]
         return min(free, key=lambda i: _rank(summaries[i], start)) if free else None
+    if any(
+        summaries[index].get("purpose_marked")
+        and summaries[index].get("purpose") == ActivityPurpose.TRAINING.value
+        for index in days.get((day, stored.sport.value), ())
+    ):
+        # The athlete said that a session of this day was no race: no other
+        # session is guessed in its place.
+        return None
     planned = _number(competition.get("planned_duration_s"))
     plausible = [
         index

@@ -182,6 +182,31 @@ class FeedbackPurposeTests(FeedbackSessionFixture):
             self.service.save_coach(GARMIN_ID, {"notes": ""})
         self.assertEqual(empty.exception.status, 400)
 
+    def test_a_stale_hidden_marking_is_cleared_with_the_next_edit(self) -> None:
+        session = merged_session_id(self)
+        self.store_legacy(
+            INTERVALS_ID, "Old", "2026-09-20T10:00:00+00:00", session=session
+        )
+        self.store_legacy(
+            GARMIN_ID, "New", "2026-09-20T11:00:00+00:00", session=session
+        )
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_feedback SET purpose = 'race' WHERE activity_id = ?",
+                (INTERVALS_ID,),
+            )
+
+        self.service.save(GARMIN_ID, {"notes": "Edited"})
+
+        self.assertEqual([row["purpose"] for row in stored_rows(self)], [None, None])
+
+    def test_an_activity_without_a_session_cannot_be_marked(self) -> None:
+        with self.assertRaises(AppError) as caught:
+            self.service.save("unknown-id", {"purpose": "commute"})
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(stored_rows(self), [])
+
     def test_a_row_without_a_session_marks_no_session(self) -> None:
         with self.manager.unit_of_work() as db:
             db.execute(

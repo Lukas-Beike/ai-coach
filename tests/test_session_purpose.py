@@ -377,6 +377,47 @@ class MarkedPurposeTests(unittest.TestCase):
         self.assertEqual(result[1]["purpose"], "race")
         self.assertEqual(result[1]["sources"]["purpose"], MARKED_SOURCE_LABEL)
 
+    def test_training_leaves_no_other_session_to_take_the_hint(self) -> None:
+        marked = _summary("act_a", "2026-10-11T10:00:00")
+        other = _summary("act_b", "2026-10-11T12:00:00")
+
+        result = with_competitions(
+            with_marked_purposes([marked, other], {"act_a": "training"}),
+            [_competition()],
+        )
+
+        self.assertEqual(result[0]["purpose"], "training")
+        self.assertNotIn("competition_id", result[0])
+        self.assertNotIn("purpose", result[1])
+        self.assertNotIn("competition_id", result[1])
+
+    def test_only_training_withholds_the_hint_from_the_day(self) -> None:
+        for purpose in ("warmup", "cooldown", "commute"):
+            with self.subTest(purpose=purpose):
+                marked = _summary("act_a", "2026-10-11T09:00:00", duration=900.0)
+                race = _summary("act_b", "2026-10-11T10:00:00")
+
+                result = with_competitions(
+                    with_marked_purposes([marked, race], {"act_a": purpose}),
+                    [_competition()],
+                )
+
+                self.assertEqual(result[1]["competition_id"], "c-1")
+
+    def test_a_marked_race_beats_a_training_mark_on_the_same_day(self) -> None:
+        first = _summary("act_a", "2026-10-11T09:00:00")
+        second = _summary("act_b", "2026-10-11T10:00:00")
+
+        result = with_competitions(
+            with_marked_purposes(
+                [first, second], {"act_a": "training", "act_b": "race"}
+            ),
+            [_competition()],
+        )
+
+        self.assertNotIn("competition_id", result[0])
+        self.assertEqual(result[1]["competition_id"], "c-1")
+
     def test_a_marked_race_without_a_competition_stays_a_race(self) -> None:
         run = _summary("act_a", "2026-10-11T10:00:00")
 

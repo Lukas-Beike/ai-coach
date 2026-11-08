@@ -141,7 +141,7 @@ class PublicBootstrapService:
                 },
                 "activity_feedback": {
                     "recent": [],
-                    "scope": "Only athlete-entered notes, session RPE and deviation reasons about completed activities; this feedback is separate from daily check-ins and provider values.",
+                    "scope": "Only athlete-entered notes, session RPE, deviation reasons and the session purpose marking about completed activities; a marking wins over the provider event type and the race hint; this feedback is separate from daily check-ins and provider values.",
                 },
                 "planning": deps.planning_state(
                     deps.competition_service().list(),
