@@ -81,6 +81,7 @@ def map_garmin_status_codes(
     retrieved_at: datetime,
 ) -> tuple[CategoricalObservation, ...]:
     """Return the status codes of one stored element of a Garmin section."""
+    fields: tuple[str, ...]
     if section == HRV_SECTION:
         domain, fields = CategoricalDomain.HRV_STATUS, _HRV_STATUS_FIELDS
         rows = _rows(element)
