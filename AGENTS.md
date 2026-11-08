@@ -27,6 +27,8 @@ Use [README.md](README.md) for setup and operational commands.
 - Keep one current Coach/API/persistence contract and the supported migrations.
   Preserve restart, backup/restore, provider sync, and editing existing records.
   Reject unknown/newer schemas without deletion, reset, or partial modification.
+  Named exception: the athlete's confirmed local data purge also deletes the
+  recovery copies and the purge marker file beside the database.
 
 ## Important boundaries
 

@@ -20,7 +20,7 @@ import unittest
 import zipfile
 from contextlib import contextmanager
 from dataclasses import fields, replace
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -47,7 +47,6 @@ from backend.diagnostics.report import (
     DiagnosticReportService,
 )
 from backend.observability import Redactor, config_secret_values, configure_logging
-from backend.privacy import PrivacyDataExportDependencies, PrivacyDataExportService
 from backend.provider_credentials import (
     CREDENTIAL_KV_KEYS,
     GARMIN_TOKENS_KEY,
@@ -353,34 +352,6 @@ class PrivacyExportSecretTests(SecretFixture):
         state = json.loads(blobs["application_state.json"])
         self.assertFalse(set(state) & CREDENTIAL_KV_KEYS)
         self.assertNotIn(PERSONAL_KEY_EXPIRES_FIELD, json.dumps(state))
-
-    def test_the_json_privacy_projection_holds_no_secret(self):
-        service = PrivacyDataExportService(
-            PrivacyDataExportDependencies(
-                database_manager=_Manager(self.db),
-                key_value_repository=self.key_values,
-                profile_service=Mock(get=Mock(return_value={})),
-                workout_library_service=Mock(list=Mock(return_value=[])),
-                competition_service=Mock(list=Mock(return_value=[])),
-                training_plan_service=Mock(list=Mock(return_value=[])),
-                checkin_service=Mock(context=Mock(return_value={})),
-                activity_feedback_service=Mock(context=Mock(return_value={})),
-                adaptive_preview_service=Mock(
-                    latest_preview=Mock(return_value=None),
-                    status=Mock(return_value={}),
-                ),
-                external_calendar_reader=Mock(list_events=Mock(return_value=[])),
-                local_now=lambda: datetime(2026, 10, 1, 8, tzinfo=UTC),
-                utc_now=lambda: STAMP,
-            )
-        )
-        with patch("backend.privacy.planning_season.planning_state", return_value={}):
-            exported = service.export()
-        self.assertEqual(
-            scan(json.dumps(exported, default=str).encode()),
-            [],
-        )
-        self.assertFalse(set(exported["application_state"]) & CREDENTIAL_KV_KEYS)
 
 
 class DiagnosticsAndLogSecretTests(SecretFixture):

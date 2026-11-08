@@ -38,17 +38,12 @@ class PrivacyAssemblyTests(unittest.TestCase):
             dependencies=PrivacyAssembly.Inputs(
                 athlete=PrivacyAthleteSources(
                     profile_service=Mock(return_value=profile),
-                    checkin_service=Mock(return_value=Mock()),
-                    activity_feedback_service=Mock(return_value=Mock()),
                 ),
                 planning=PrivacyPlanningSources(
-                    workout_library_service=Mock(return_value=Mock()),
                     competition_service=Mock(return_value=competition),
-                    training_plan_service=Mock(return_value=Mock()),
                 ),
                 context=PrivacyContextSources(
                     adaptive_preview_service=Mock(return_value=preview),
-                    external_calendar_reader=Mock(return_value=Mock()),
                 ),
                 clock=PrivacyClock(local_now=Mock(), utc_now=Mock()),
                 state=PrivacyStateDependencies(
@@ -77,7 +72,6 @@ class PrivacyAssemblyTests(unittest.TestCase):
         active.update(lock=replacement_lock, gate=replacement_gate)
         first = assembly.archive_export_service()
         second = assembly.archive_export_service()
-        exported = assembly.data_export_service()
 
         self.assertIsNot(first, second)
         self.assertIs(first._database_manager, manager)
@@ -85,12 +79,17 @@ class PrivacyAssemblyTests(unittest.TestCase):
         self.assertIs(first._profile, profile)
         self.assertIs(first._competitions, competition)
         self.assertIs(first._adaptive_preview, preview)
-        self.assertIs(exported._dependencies.database_manager, manager)
-        self.assertFalse(hasattr(exported._dependencies, "database_lock"))
         deletion = assembly.delete_service()
         self.assertIs(deletion._dependencies.database_lock, replacement_lock)
         self.assertIs(deletion._dependencies.maintenance_gate, replacement_gate)
-        self.assertIs(exported._dependencies.key_value_repository, key_values)
+
+
+class PrivacyModuleBoundaryTests(unittest.TestCase):
+    def test_privacy_module_has_no_server_dependency(self) -> None:
+        import backend.privacy as privacy_module
+
+        source = Path(privacy_module.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("import server", source)
 
 
 class BackupAssemblyTests(unittest.TestCase):

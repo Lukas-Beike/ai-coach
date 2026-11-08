@@ -852,19 +852,14 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
     dependencies=PrivacyAssembly.Inputs(
         athlete=PrivacyAthleteSources(
             profile_service=ATHLETE_DATA.profile,
-            checkin_service=ATHLETE_DATA.checkin,
-            activity_feedback_service=ATHLETE_DATA.activity_feedback,
         ),
         planning=PrivacyPlanningSources(
-            workout_library_service=PLANNING_DATA.workout_library,
             competition_service=PLANNING_DATA.competition,
-            training_plan_service=PLANNING_DATA.training_plan,
         ),
         context=PrivacyContextSources(
             adaptive_preview_service=lambda: (
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
-            external_calendar_reader=lambda: EXTERNAL_CALENDAR.reader(),
         ),
         clock=PrivacyClock(
             local_now=lambda: ATHLETE_CLOCK.now(),

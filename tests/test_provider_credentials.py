@@ -15,7 +15,6 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import cast
 
-from backend import privacy
 from backend import provider_credentials as credentials_module
 from backend.backup import export
 from backend.config import load_config
@@ -340,9 +339,8 @@ class ProviderCredentialTests(unittest.TestCase):
             ),
         )
 
-    def test_export_and_privacy_share_the_credential_key_set(self):
+    def test_export_uses_the_credential_key_set(self):
         self.assertIs(export.CREDENTIAL_KV_KEYS, CREDENTIAL_KV_KEYS)
-        self.assertIs(privacy.CREDENTIAL_KV_KEYS, CREDENTIAL_KV_KEYS)
         self.assertIs(credentials_module.CREDENTIAL_KV_KEYS, CREDENTIAL_KV_KEYS)
 
     def test_route_returns_status_only_and_delegates_to_service(self):

@@ -576,6 +576,15 @@ class ServerDatabaseTests(ServerTestCase):
             worker.join(5)
             httpd.server_close()
 
+    def privacy_archive(self):
+        path = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+        self.addCleanup(path.unlink, missing_ok=True)
+        return zipfile.ZipFile(path)
+
+    @staticmethod
+    def archive_lines(archive, name):
+        return [json.loads(line) for line in archive.read(name).splitlines() if line]
+
     def test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials(
         self,
     ):
@@ -616,24 +625,22 @@ class ServerDatabaseTests(ServerTestCase):
                     None,
                 ),
             )
-        exported = server.PRIVACY_ASSEMBLY.data_export_service().export()
-        self.assertTrue(
-            any(
-                item.get("name") == "Archived template"
-                for item in exported["workout_library"]
-            )
-        )
-        self.assertEqual(exported["garmin_snapshot"]["source"], "Garmin")
-        self.assertEqual(exported["weather_cache"]["query"], "Berlin")
-        self.assertEqual(
-            exported["application_state"]["calendar_display"]["future_weeks"], 6
-        )
-        self.assertEqual(
-            exported["competition_sync_tombstones"][0]["external_id"], "external-1"
-        )
-        self.assertEqual(exported["plan_adjustments"][0]["id"], "adjustment-1")
-        self.assertNotIn("sessions", exported)
-        export_text = json.dumps(exported, ensure_ascii=False)
+        with self.privacy_archive() as archive:
+            names = set(archive.namelist())
+            library = self.archive_lines(archive, "workout_library.jsonl")
+            garmin = json.loads(archive.read("garmin_snapshot.json"))
+            weather = json.loads(archive.read("weather_cache.json"))
+            state = json.loads(archive.read("application_state.json"))
+            tombstones = self.archive_lines(archive, "competition_sync_tombstones.jsonl")
+            adjustments = self.archive_lines(archive, "plan_adjustments.jsonl")
+            export_text = b"".join(archive.read(name) for name in names).decode("utf-8")
+        self.assertTrue(any(item.get("name") == "Archived template" for item in library))
+        self.assertEqual(garmin["source"], "Garmin")
+        self.assertEqual(weather["query"], "Berlin")
+        self.assertEqual(state["calendar_display"]["future_weeks"], 6)
+        self.assertEqual(tombstones[0]["external_id"], "external-1")
+        self.assertEqual(adjustments[0]["id"], "adjustment-1")
+        self.assertNotIn("sessions.jsonl", names)
         self.assertNotIn("test-openai-key", export_text)
         self.assertNotIn("test-intervals-key", export_text)
         self.assertNotIn("test-password-123", export_text)
@@ -650,26 +657,29 @@ class ServerDatabaseTests(ServerTestCase):
         server.key_value_service().set("job_running", "true")
         server.key_value_service().set("job_status", "done")
 
-        exported = server.PRIVACY_ASSEMBLY.data_export_service().export()
+        with self.privacy_archive() as archive:
+            state = json.loads(archive.read("application_state.json"))
+            garmin = json.loads(archive.read("garmin_snapshot.json"))
+            weather = json.loads(archive.read("weather_cache.json"))
 
-        self.assertNotIn("profile", exported["application_state"])
-        self.assertNotIn("garmin_snapshot", exported["application_state"])
-        self.assertNotIn(weather_cache.CACHE_KEY, exported["application_state"])
-        self.assertNotIn("job_running", exported["application_state"])
-        self.assertNotIn("job_status", exported["application_state"])
-        self.assertEqual(exported["application_state"]["ordinary_state"], "{")
-        self.assertEqual(exported["garmin_snapshot"], {"activities": []})
-        self.assertEqual(exported["weather_cache"], {})
+        self.assertNotIn("profile", state)
+        self.assertNotIn("garmin_snapshot", state)
+        self.assertNotIn(weather_cache.CACHE_KEY, state)
+        self.assertNotIn("job_running", state)
+        self.assertNotIn("job_status", state)
+        self.assertEqual(state["ordinary_state"], "{")
+        self.assertEqual(garmin, {"activities": []})
+        self.assertEqual(weather, {})
 
     def test_privacy_json_projection_uses_composed_local_clock(self):
         fixed_local_time = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
         with patch.object(
             server.ATHLETE_CLOCK, "now", return_value=fixed_local_time
-        ) as local_clock:
-            exported = server.PRIVACY_ASSEMBLY.data_export_service().export()
+        ) as local_clock, self.privacy_archive() as archive:
+            planning = json.loads(archive.read("planning.json"))
 
-        self.assertEqual(exported["planning"]["season"]["as_of"], "2026-01-02")
-        self.assertGreaterEqual(local_clock.call_count, 2)
+        self.assertEqual(planning["season"]["as_of"], "2026-01-02")
+        self.assertGreaterEqual(local_clock.call_count, 1)
 
     def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(
         self,
@@ -701,7 +711,7 @@ class ServerDatabaseTests(ServerTestCase):
                 names = set(archive.namelist())
                 manifest = json.loads(archive.read("manifest.json"))
                 self.assertEqual(manifest["format"], "intervals-coach-privacy-export")
-                self.assertEqual(manifest["format_version"], 13)
+                self.assertEqual(manifest["format_version"], 14)
                 self.assertEqual(manifest["status"], "complete")
                 self.assertIn("snapshots.jsonl", names)
                 self.assertIn("remote_links.jsonl", names)
@@ -1029,7 +1039,8 @@ class ServerDatabaseTests(ServerTestCase):
         preview = server.PRIVACY_ASSEMBLY.delete_service().preview()
         self.assertEqual(
             {item["id"] for item in preview["categories"]},
-            {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE},
+            {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE}
+            | {privacy_module.RECOVERY_COPIES_CATEGORY},
         )
         self.assertEqual(preview["confirmation_text"], "LOKALE DATEN LÖSCHEN")
         self.assertTrue(preview["remote_untouched"])
@@ -1044,7 +1055,8 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertTrue(result["local_data_deleted"])
         self.assertEqual(
             set(result["deleted_categories"]),
-            {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE},
+            {item[0] for item in privacy_module.PRIVACY_DELETE_SCOPE}
+            | {privacy_module.RECOVERY_COPIES_CATEGORY},
         )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             for table in expected_tables - {"kv"}:

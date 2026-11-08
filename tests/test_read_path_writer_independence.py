@@ -12,6 +12,7 @@ import sys
 import threading
 import traceback
 import unittest
+import zipfile
 from collections.abc import Callable
 from datetime import date
 from typing import Any
@@ -107,6 +108,15 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
                 if key not in {"exported_at", "generated_at"}
             }
 
+        def archive_files(*names: str) -> dict[str, bytes]:
+            # The archive stamps its own generation time; its collections are stable.
+            path = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    return {name: archive.read(name) for name in names}
+            finally:
+                path.unlink()
+
         def without_process_measurements(payload: dict[str, Any]) -> dict[str, Any]:
             # Live process memory counters change between any two reports.
             runtime = {
@@ -179,8 +189,8 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
             "privacy_preview": lambda: (
                 server.PRIVACY_ASSEMBLY.delete_service().preview()
             ),
-            "privacy_export": lambda: without_clock(
-                server.PRIVACY_ASSEMBLY.data_export_service().export()
+            "privacy_export": lambda: archive_files(
+                "profile.json", "athlete_checkins.jsonl"
             ),
             "diagnostic_report": lambda: without_process_measurements(
                 server.DIAGNOSTICS_ASSEMBLY.report_service().report()
