@@ -1056,7 +1056,6 @@ const COACH_RECEIPT_LABELS = {
   resolve_training_sync_conflict: "Synchronisierungsentscheidung gespeichert",
   start_intervals_plan_sync: "Intervals-Synchronisierung beauftragt",
   push_strength_to_garmin: "Garmin-Krafteinheiten beauftragt",
-  delete_duplicate_intervals_activity: "Garmin-Duplikat gelöscht",
 };
 const SYNC_JOB_RECEIPT_LABELS = {
   queued: "Synchronisierung beauftragt", running: "Synchronisierung läuft",
@@ -1434,7 +1433,7 @@ function renderCoachActionReview() {
   const root = $("#coachActionReview");
   const content = $("#coachActionReviewContent");
   if (!root || !content) return;
-  const proposals = (state.coachActionProposals || []).filter((proposal) => ["undo_change", "delete_duplicate_intervals_activity", "remote_coach_write", "local_coach_write"].includes(proposal.action_type));
+  const proposals = (state.coachActionProposals || []).filter((proposal) => ["undo_change", "remote_coach_write", "local_coach_write"].includes(proposal.action_type));
   content.replaceChildren(...proposals.map(coachActionCard));
   root.hidden = proposals.length === 0;
   $("#coachActionReviewTitle").textContent = "Aktion prüfen";
@@ -1449,11 +1448,6 @@ function coachActionReceipt(proposal, result) {
         : { message: "Die Mahlzeitvorlage wurde lokal gespeichert.", title: "Mahlzeitvorlage gespeichert", details: ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"] };
     }
     if (undo) return { message: "Die lokale Änderung wurde zurückgenommen.", title: "Änderung zurückgenommen" };
-    if (duplicateDelete) return {
-      message: "Garmin-Duplikat aus Intervals.icu gelöscht; die Wahoo-Aktivität bleibt erhalten.",
-      title: "Duplikat gelöscht",
-      details: ["Garmin-Duplikat in Intervals.icu gelöscht; Wahoo bleibt kanonisch"],
-    };
     if (remoteWrite) {
       const queued = ["queued", "running"].includes(result.status)
         || Boolean(result.sync_job_id || result.sync_job_ids?.length);
@@ -1464,15 +1458,14 @@ function coachActionReceipt(proposal, result) {
     return { message: `${result.local_planned} Einheit(en) lokal geplant.` };
   }
   const undo = proposal.action_type === "undo_change";
-  const duplicateDelete = proposal.action_type === "delete_duplicate_intervals_activity";
   const remoteWrite = proposal.action_type === "remote_coach_write";
   const localWrite = proposal.action_type === "local_coach_write";
   const nutritionProductWrite = localWrite && proposal.object_ids?.operation === "save_nutrition_product";
   let { message, title, details = ["Keine implizite Remote-Änderung"] } = content();
-  if (!duplicateDelete && result.sync_job_ids?.length) details = result.sync_job_ids.map((id) => `Syncjob ${id} eingereiht`);
-  else if (!duplicateDelete && result.sync_job_id) details = [`Syncjob ${result.sync_job_id} eingereiht`];
+  if (result.sync_job_ids?.length) details = result.sync_job_ids.map((id) => `Syncjob ${id} eingereiht`);
+  else if (result.sync_job_id) details = [`Syncjob ${result.sync_job_id} eingereiht`];
   else if (remoteWrite) details = ["Freigegebene Remote-Änderung direkt ausgeführt"];
-  return { title, message, details, duplicateDelete, undo, remoteWrite, localWrite, nutritionProductWrite };
+  return { title, message, details, undo, remoteWrite, localWrite, nutritionProductWrite };
 }
 
 // A 4xx answer proves the server did not run the action; anything else after execute was sent may have run it.
@@ -1528,7 +1521,7 @@ async function executeCoachActionProposal(proposal, button) {
     addCoachReceipt(receipt);
     toast(receipt.message);
     if (state.route === originalRoute) await showCoachReceiptArea(receipt);
-    await load("/api/bootstrap?local=1", receipt.duplicateDelete ? ["plan", "performance"] : ["plan", "library", "profile", "feedback"]);
+    await load("/api/bootstrap?local=1", ["plan", "library", "profile", "feedback"]);
   } catch (error) {
     if (executeSent && !executeResponded && !isHttpClientRejection(error)) lockUnknownCoachActionOutcome(proposal, error);
     else rejectCoachActionProposal(proposal, button, error);
@@ -1538,7 +1531,7 @@ async function executeCoachActionProposal(proposal, button) {
 async function showCoachReceiptArea(receipt) {
   if (receipt.nutritionProductWrite) await AppRouter.navigate("nutrition/products", { historyMode: "push" });
   else if (receipt.localWrite) await AppRouter.navigate("nutrition/diary", { historyMode: "push" });
-  else if (!receipt.duplicateDelete && !receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
+  else if (!receipt.undo && !receipt.remoteWrite) await AppRouter.navigate("plan", { historyMode: "push" });
 }
 
 // The action may have run; keep the button locked until the server state is known.

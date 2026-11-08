@@ -13,8 +13,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-# ``<database>.<label>-<timestamp>-<id>`` as written by the restore service and
-# ``DatabaseBackupService.write_recovery_copy``.
+# ``<database>.<label>-<timestamp>-<id>`` as written by the restore service and,
+# in release 2.0.0, by the Intervals.icu purge (removed; its copies stay on disk).
 _COPY_LABELS = r"(?:pre-restore|pre-intervals-purge-v\d+)"
 _MARKER_PATTERN = re.compile(r"intervals-purge-v\d+\.done")
 

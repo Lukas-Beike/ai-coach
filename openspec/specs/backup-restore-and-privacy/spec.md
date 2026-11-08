@@ -169,7 +169,7 @@ Local privacy deletion SHALL require the exact backend confirmation text before 
 - **THEN** earlier table deletes roll back rather than reporting successful erasure
 
 #### Scenario: Recovery copies beside the database
-- **WHEN** restores or the Intervals.icu purge saved database recovery copies and a purge marker file in the data directory
+- **WHEN** restores or the Intervals.icu purge of release 2.0.0 saved database recovery copies and a purge marker file in the data directory
 - **THEN** the preview counts them, the confirmed erasure deletes them after the transaction commits, and a copy that cannot be removed is reported without failing the erasure
 
 Evidence: `backend/privacy.py::PrivacyDeleteService.preview`; `backend/privacy.py::PrivacyDeleteService.delete`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`; `backend/backup/recovery_copies.py::RecoveryCopies`. Tests: `tests/test_data_safety_coverage.py::DataKindDeleteTests`; `tests/test_privacy_provider_data.py::test_preview_counts_remote_links_by_owning_group`; `tests/test_privacy_delete_confirmation.py::test_missing_or_wrong_confirmation_fails_before_any_dependency_access`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`; `tests/test_server_database.py::test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure`.
@@ -202,16 +202,3 @@ Restore SHALL reject backups with schema versions older than v21 (releases befor
 
 Evidence: `backend/backup/restore_validation.py`; `tests/test_database_restore_validation.py::test_validate_rejects_a_pre_v21_backup_by_release_without_modifying_it`.
 
-### Requirement: Recovery copy before destructive maintenance
-
-Before a data maintenance step deletes stored records, the system SHALL write a consistent, encrypted copy of the database through the backup snapshot path, without the download size limit, to `<database>.<label>-<timestamp>-<id>` beside it. A later attempt of the same version SHALL reuse it, the startup cleanup of staging files SHALL keep it, and a failed copy SHALL stop the maintenance step before any change.
-
-#### Scenario: Intervals.icu purge
-- **WHEN** the Intervals.icu purge becomes due
-- **THEN** the copy with every Intervals.icu row is written first, then the purge runs.
-
-#### Scenario: Restored pre-purge copy
-- **WHEN** a backup or recovery copy from before the purge is restored beside the purge marker file
-- **THEN** the purge does not run again automatically and the ingest stays off.
-
-Evidence: `backend/backup/database.py:DatabaseBackupService.write_recovery_copy`, `backend/backup/staging_sweep.py`, `backend/sync/intervals_ingest.py:PURGE_MARKER_FILE`; `tests/test_intervals_purge.py::test_recovery_copy_is_written_before_anything_is_deleted`, `tests/test_intervals_purge.py::test_a_restored_pre_purge_copy_is_not_purged_again`.

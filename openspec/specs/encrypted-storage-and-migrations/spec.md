@@ -160,17 +160,3 @@ The v22 to v23 step SHALL add `activity_feedback.purpose` (NULL for every existi
 - **THEN** every feedback row and every other table survive with no marking, a marking can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
 
 Evidence: `backend/db/migrations.py:_upgrade_v22_to_v23`; `tests/test_db_feedback_purpose_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
-
-### Requirement: Versioned data maintenance after an upgrade
-
-A data maintenance step that deletes stored records without a schema change, such as the Intervals.icu ingest purge, SHALL run once per version behind a completion marker, after an encrypted recovery copy, inside one writer transaction, and SHALL be provable on a populated released v21 database upgraded to the current schema.
-
-#### Scenario: Populated v21 database
-- **WHEN** a populated v21 database is upgraded and the purge runs, fails midway or the application restarts
-- **THEN** athlete data is re-keyed, a failure rolls back to the upgraded state without the marker, and a restart repeats nothing.
-
-#### Scenario: Dry run on a copy
-- **WHEN** the dry-run script runs on a copy of the database
-- **THEN** it upgrades and purges inside one transaction, prints counts only, rolls back, and the file's hash is unchanged.
-
-Evidence: `backend/sync/intervals_purge.py`, `scripts/intervals_purge_dry_run.py`; `tests/test_intervals_purge.py`.

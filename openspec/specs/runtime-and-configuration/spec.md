@@ -48,7 +48,7 @@ Evidence: `backend/config.py::validated_openai_base_url`; `backend/provider_cred
 
 ### Requirement: Ordered startup and durable-work recovery
 
-Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, start workers/canonical backfill (which also runs the one-time maintenance steps once its rating backfill is finished), enqueue configured startup refreshes and start daily scheduling before serving the main loop.
+Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, start workers/canonical backfill, enqueue configured startup refreshes and start daily scheduling before serving the main loop.
 
 
 #### Scenario: Normal start

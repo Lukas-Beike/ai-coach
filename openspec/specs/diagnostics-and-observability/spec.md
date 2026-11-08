@@ -85,21 +85,21 @@ Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `back
 
 ### Requirement: Content-free migration and method state in the report
 
-The diagnostic report SHALL include the state of the Garmin rating backfill, the one-time Intervals.icu ingest purge and the local method passes as counts and state words only, and a failing read of the rating backfill or purge state SHALL report that section as `unavailable` without failing the report.
+The diagnostic report SHALL include the state of the Garmin rating backfill and the local method passes as counts and state words only, and a failing read of the rating backfill state SHALL report that section as `unavailable` without failing the report.
 
-#### Scenario: Rating backfill and purge state
+#### Scenario: Rating backfill state
 - **WHEN** the report is generated
-- **THEN** `rating_backfill` carries candidate, backfilled, skipped and already-rated counts with its cursor phase and finished flag, and `intervals_purge` carries a state word (`waiting_for_rating_backfill`, `pending`, `done` or `done_restored`), the purge version and, once done, the purge counts
+- **THEN** `rating_backfill` carries candidate, backfilled, skipped and already-rated counts with its cursor phase and finished flag
 
 #### Scenario: Local method passes
 - **WHEN** the report is generated
 - **THEN** `local_load`, `session_metrics` and `session_analysis` each carry the status, method version and counts of their last pass, never ids, dates, names or values
 
 #### Scenario: Failing section
-- **WHEN** reading the rating backfill or purge state fails
+- **WHEN** reading the rating backfill state fails
 - **THEN** that section reports `{"status": "unavailable"}` and the rest of the report is still returned
 
-Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `backend/diagnostics/rating_backfill.py::summarize_rating_backfill`; `backend/diagnostics/intervals_purge.py::summarize_intervals_purge`; `backend/sync/intervals_purge.py::purge_status`; `backend/sync/local_load.py::summarize_local_load`; `backend/sync/session_metrics.py::summarize_session_metrics`; `backend/sync/session_analysis_stage.py::summarize_session_analysis`. Tests: `tests/test_garmin_rating_backfill.py::DiagnosticsTests::test_the_section_carries_counts_only`; `tests/test_intervals_purge.py::IntervalsPurgeTests::test_gate_waits_for_the_rating_backfill_and_runs_once`; `tests/test_intervals_purge.py::IntervalsPurgeTests::test_diagnostics_report_unavailable_on_a_failing_read`; `tests/test_diagnostic_report.py::test_report_shape_counts_redaction_and_privacy`.
+Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `backend/diagnostics/rating_backfill.py::summarize_rating_backfill`; `backend/sync/local_load.py::summarize_local_load`; `backend/sync/session_metrics.py::summarize_session_metrics`; `backend/sync/session_analysis_stage.py::summarize_session_analysis`. Tests: `tests/test_garmin_rating_backfill.py::DiagnosticsTests::test_the_section_carries_counts_only`; `tests/test_diagnostic_report.py::test_report_shape_counts_redaction_and_privacy`.
 
 ### Requirement: Sanitized log preview and download
 

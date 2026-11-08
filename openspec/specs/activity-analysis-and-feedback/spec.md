@@ -330,12 +330,6 @@ Merge, provider deletion, restart and backup/restore SHALL preserve athlete feed
 - **WHEN** a provider copy is marked deleted
 - **THEN** stored athlete feedback remains intact and reachable through its canonical session/history.
 
-#### Scenario: Intervals.icu purge
-- **WHEN** the one-time #1728 purge removes the stored Intervals.icu activities
-- **THEN** feedback and equipment assignments of an Intervals.icu session move to the live Garmin or Wahoo session that survives it, keyed by that session id; the newest row wins against rows already stored for the survivor and the others are dropped and counted; data of a session without a survivor is dropped and counted; the recorded feedback changes of those sessions become non-undoable. This is the named exception to preserving all athlete data.
-
-Evidence: `backend/sync/intervals_purge.py:run_purge`.
-
 #### Scenario: Existing save and Coach contracts
 - **WHEN** feedback is saved or undone through the supported API or an athlete-started Coach turn
 - **THEN** existing partial-edit, validation, authorization, receipt and undo behavior remains available.
@@ -402,6 +396,6 @@ Freshness checks outside the sync owner SHALL read current summary fingerprints 
 - **WHEN** the port reads fingerprints for every stored Intervals.icu activity of a populated fixture and for a Garmin record
 - **THEN** each Intervals.icu value equals `summary_fingerprint` of its stored row and the Garmin value equals its record's payload hash, so no stored detail, analysis or profile becomes stale.
 
-Intervals.icu activities are tombstoned and their rows deleted by the #1728 purge; the Intervals.icu branch of the port remains until the purge has run in production.
+Intervals.icu activities were tombstoned and their rows deleted by the #1728 purge of release 2.0.0; the Intervals.icu branch of the port stays for rows of a database restored from an earlier release.
 
 Evidence: `backend/sync/canonical_table_reader.py:CanonicalTableReader.summary_fingerprints`; `tests/test_activity_canonical_reads.py:test_fingerprints_keep_the_stored_values`, `tests/test_canonical_detail_reader.py:CanonicalDetailStatusTests`.

@@ -7,20 +7,14 @@ import os
 import shutil
 import tempfile
 import time
-import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
-
-# A recovery copy is a local file copy of the whole database: generous enough for
-# a large database on slow storage.
-RECOVERY_TIME_LIMIT_SECONDS = 3600
 
 
 @dataclass(frozen=True)
@@ -67,9 +61,9 @@ class DatabaseBackupService:
     def _first_row_value(row: Any) -> Any:
         return next(iter(row.values())) if isinstance(row, Mapping) else row[0]
 
-    def _snapshot(self, deadline: float, *, capped: bool = True) -> Path:
-        """Copy the database; an uncapped copy (a recovery copy) has no size limit."""
-        maximum_bytes = self._config.maximum_bytes if capped else None
+    def _snapshot(self, deadline: float) -> Path:
+        """Copy the database within the configured size limit."""
+        maximum_bytes = self._config.maximum_bytes
         if not self._config.database_path.is_file():
             raise AppError(503, "Der Backup-Speicher ist nicht verfügbar.")
         snapshot = None
@@ -188,29 +182,6 @@ class DatabaseBackupService:
                 raise AppError(
                     500, "Die Datenbank konnte nicht als Backup gelesen werden."
                 ) from exc
-
-    def write_recovery_copy(
-        self, label: str, *, time_limit_seconds: int = RECOVERY_TIME_LIMIT_SECONDS
-    ) -> str:
-        """Keep a consistent, encrypted copy of the database beside it; return its name.
-
-        The copy is taken like a backup download snapshot (same key, integrity
-        check), renamed to ``<database>.<label>-<timestamp>-<id>`` in the data
-        directory, which the startup sweep of staging files never removes. A
-        recovery copy has no size cap and a local-copy time limit, so a large
-        database is never skipped; the free-space reserve still applies.
-        """
-        deadline = self._config.monotonic() + time_limit_seconds
-        snapshot = self._snapshot(deadline, capped=False)
-        try:
-            name = (
-                f"{self._config.database_path.name}.{label}-"
-                f"{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex}"
-            )
-            os.replace(snapshot, self._config.data_dir / name)
-        finally:
-            snapshot.unlink(missing_ok=True)
-        return name
 
     @contextmanager
     def stream_file(self) -> Iterator[tuple[Path, float]]:

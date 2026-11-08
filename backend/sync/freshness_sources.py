@@ -30,8 +30,6 @@ WEATHER_CACHE_KEY = weather_cache.CACHE_KEY
 WEATHER_FAILURE_KEY = weather_cache.FAILURE_KEY
 GARMIN_CORE_ERROR_SIGNAL = "garmin_has_core_error"
 GARMIN_TOKENSTORE_SIGNAL = "garmin_tokenstore_exists"
-# The retired ingest flag; the purge of the stored Intervals.icu data clears it.
-INTERVALS_RUNNING_FLAG = "sync_running"
 
 
 def _stored_source(

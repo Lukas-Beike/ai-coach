@@ -85,7 +85,6 @@ from backend.privacy import (
     PrivacyDeleteService,
 )
 from backend.provider_credentials import CREDENTIAL_KV_KEYS
-from backend.sync import intervals_ingest
 
 STAMP = "2026-10-01T08:00:00+00:00"
 SENTINEL_NOTE = "synthetic-note-sentinel"
@@ -479,8 +478,8 @@ class DataKindFixture(unittest.TestCase):
             "garmin_metric_export_fields", json.dumps(["weight", "threshold_hr"])
         )
         self.kv_set("garmin_metric_export_enabled", "true")
-        self.kv_set(intervals_ingest.PURGE_STATE_KEY, json.dumps({"status": "done"}))
-        self.kv_set(intervals_ingest.INGEST_ENABLED_KEY, "0")
+        self.kv_set("intervals_purge_state", json.dumps({"status": "done"}))
+        self.kv_set("intervals_ingest_enabled", "0")
         self.kv_set("garmin_rating_backfill_state", json.dumps({"status": "finished"}))
         self.kv_set("local_load_state", json.dumps({"stage": "local_load"}))
         self.kv_set("session_metrics_state", json.dumps({"stage": "metrics"}))
@@ -782,10 +781,7 @@ class DataKindDeleteTests(DataKindFixture):
                     self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
                 )
         keys = {row[0] for row in self.db.execute("SELECT key FROM kv")}
-        # The erased database is marked as purged so no new recovery copy is saved.
-        self.assertEqual(
-            keys, {"profile", "garmin_tokenstore_state", "intervals_purge_state"}
-        )
+        self.assertEqual(keys, {"profile", "garmin_tokenstore_state"})
         profile = json.loads(
             self.db.execute("SELECT value FROM kv WHERE key = 'profile'").fetchone()[0]
         )

@@ -25,8 +25,8 @@ server by `POST /api/wahoo/connect`.
 
 Activity routes accept the local session ID (`act_...`) or the provider activity
 ID of one of the session's records, as long as that ID names one session. The
-Intervals.icu ingest store is removed (#1728); its activity IDs stop resolving
-once the purge has deleted their records.
+Intervals.icu ingest store was removed by the #1728 purge of release 2.0.0; its
+activity IDs no longer resolve.
 
 - `GET /api/activities` items carry the local session `id` and `record_ids`
   (provider to provider activity ID). `GET /api/activities/{id}` serves the
