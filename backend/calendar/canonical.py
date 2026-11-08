@@ -7,12 +7,20 @@ from backend.athlete.local_date import LocalDate
 ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 
 
+def _event_date(entry: dict[str, Any]) -> str:
+    try:
+        return LocalDate.parse(entry.get("date")).isoformat()
+    except TypeError, ValueError:
+        return ""
+
+
+def _starts_at_local(entry: dict[str, Any], event_date: str) -> str | None:
+    fallback = event_date + ISO_MIDNIGHT_SUFFIX if event_date else ""
+    return str(entry.get("starts_at_local") or fallback)[:40] or None
+
+
 def _canonical_local_event(entry: dict[str, Any]) -> dict[str, Any]:
     local_id = str(entry.get("id") or entry.get("local_id") or "")
-    try:
-        event_date = LocalDate.parse(entry.get("date")).isoformat()
-    except TypeError, ValueError:
-        event_date = ""
     remote_id = str(entry.get("remote_event_id") or "")
     remote_external_id = str(entry.get("remote_event_external_id") or "")
     return {
@@ -25,11 +33,7 @@ def _canonical_local_event(entry: dict[str, Any]) -> dict[str, Any]:
         "remote_library_id": str(entry.get("external_id") or "") or None,
         "external_id": remote_external_id or None,
         "category": "WORKOUT",
-        "starts_at_local": str(
-            entry.get("starts_at_local")
-            or (event_date + ISO_MIDNIGHT_SUFFIX if event_date else "")
-        )[:40]
-        or None,
+        "starts_at_local": _starts_at_local(entry, _event_date(entry)),
         "is_local": True,
         "is_remote": False,
         "sync_source": "local",

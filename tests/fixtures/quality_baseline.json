@@ -32,12 +32,6 @@
     },
     {
       "tool": "ruff",
-      "path": "backend/activities/activity_reference.py",
-      "code": "ARG002",
-      "message_sha256": "27df9efb118324e481ac94ec7804cdabdab900381dffd49144b00ea63f600e6f"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/sync/wahoo_workout_export.py",
       "code": "ARG002",
       "message_sha256": "2cbf185736ec7ea40d9f3da7d5e0f7a6820e08f1e867f6720ed185e5d81bec86"
