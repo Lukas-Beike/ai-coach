@@ -218,7 +218,7 @@ def _keyword_candidates(unit: Mapping[str, Any], sport: Sport) -> list[str]:
             return [named]
         found = [f for f, rx in _COMPILED["strength"] if rx.search(text)]
         if "legs" in found and "upper" in found:
-            return ["full_body", *(f for f in found if f not in {"legs", "upper"})]
+            return ["full_body"]
         return found
     return [f for f, rx in _COMPILED["endurance"] if rx.search(text)]
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import uuid
 from collections.abc import Callable
@@ -150,7 +151,7 @@ class WorkoutLibraryPlanService:
                     "target": source.get("target") or "AUTO",
                     # The template's focus and strength structure stay with the unit.
                     **{
-                        key: source[key]
+                        key: copy.deepcopy(source[key])
                         for key in FOCUS_KEYS
                         if source.get(key) is not None
                     },

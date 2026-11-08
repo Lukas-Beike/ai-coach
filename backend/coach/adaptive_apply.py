@@ -129,5 +129,10 @@ class CoachAdaptiveApplyService:
         with self._database_lock, self._database_manager.unit_of_work():
             before = guard.findings()
             applied = self._illness_sync.apply_local(adjustment_id)
-            notes = guard.verify(before, accepted if isinstance(accepted, list) else [])
+            # The replan moves or shortens existing units and cannot name a focus.
+            notes = guard.verify(
+                before,
+                accepted if isinstance(accepted, list) else [],
+                waived=("focus_missing",),
+            )
         return applied, notes

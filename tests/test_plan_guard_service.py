@@ -492,6 +492,21 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.run_tool("apply_training_changes")
         self.assertEqual(1, self.stored())
 
+    def test_waived_codes_neither_block_nor_report(self) -> None:
+        self.illness = ""
+        self.units = [
+            {
+                "local_id": "r",
+                "date": "2026-11-07",
+                "sport": "run",
+                "name": "Lockerer Lauf",
+                "planned_duration_s": 2700,
+            }
+        ]
+        with self.assertRaises(PlanCheckError):
+            self.guard.verify([], [])
+        self.assertEqual([], self.guard.verify([], [], waived=("focus_missing",)))
+
     def test_unchecked_tools_skip_the_guard(self) -> None:
         self.guard = Mock()
         self.run_tool("save_checkin")

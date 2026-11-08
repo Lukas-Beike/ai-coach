@@ -57,6 +57,7 @@ class SessionFocusBackfillTests(unittest.TestCase):
             )
         self.revisions = PlanningRevisionService(PlanningStateRepository(), lambda: NOW)
         self.counter = 0
+        self.published: list[str] = []
 
         def new_id() -> uuid.UUID:
             self.counter += 1
@@ -96,6 +97,8 @@ class SessionFocusBackfillTests(unittest.TestCase):
             database_manager=lambda: self.manager,
             history_undo=lambda: self.undo_service,
             database_lock=threading.RLock(),
+            maintenance_gate=MaintenanceGate(),
+            publish_change=lambda: self.published.append("changed"),
         )
 
     def create(self, **overrides: object) -> str:
@@ -189,11 +192,42 @@ class SessionFocusBackfillTests(unittest.TestCase):
         self.assertEqual(before_history + 3, self.history_count())
         state = self.state()
         self.assertEqual("complete", state["status"])
-        self.assertEqual({"focus": 2, "intensity": 2, "undecided": 2}, state["counts"])
+        self.assertEqual(
+            {"focus": 2, "intensity": 2, "undecided": 2, "skipped": 0},
+            state["counts"],
+        )
+        self.assertEqual(["changed"], self.published)
         with self.manager.reader() as db:
             summary = summarize_session_focus_backfill(self.key_values, db)
         self.assertEqual("complete", summary["status"])
         self.assertNotIn("changes", summary)
+
+    def test_a_refused_unit_is_skipped_and_retried_on_the_next_pass(self) -> None:
+        refused = self.create()
+        fine = self.create(name="Lockerer Ride", sport="Ride")
+        real_update = self.units.update
+
+        def update(local_id, values, **kwargs):
+            if local_id == refused:
+                raise AppError(409, "Terminkonflikt.", reason="plan_date_conflict")
+            return real_update(local_id, values, **kwargs)
+
+        self.stage._update_unit = update
+        self.run_stage()
+
+        self.assertNotIn("session_focus", self.payload(refused))
+        self.assertEqual("easy", self.payload(fine)["session_focus"])
+        state = self.state()
+        self.assertEqual("incomplete", state["status"])
+        self.assertEqual(1, state["counts"]["skipped"])
+
+        # The conflict is gone: the next pass fills it and keeps the first change.
+        self.stage._update_unit = real_update
+        self.run_stage()
+        self.assertEqual("easy", self.payload(refused)["session_focus"])
+        self.assertEqual("complete", self.state()["status"])
+        self.assertEqual(2, len(self.state()["changes"]))
+        self.assertEqual(2, self.stage.undo()["restored"])
 
     def test_a_second_run_changes_nothing(self) -> None:
         self.create()

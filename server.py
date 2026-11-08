@@ -2082,6 +2082,10 @@ SESSION_FOCUS_BACKFILL = SessionFocusBackfill(
     database_manager=database_manager,
     history_undo=HISTORY.undo_service,
     database_lock=DB_LOCK,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    publish_change=lambda: runtime_events.STATE_EVENT_BUFFER.publish(
+        "coach", {"status": "changed"}
+    ),
 )
 
 CANONICAL_BACKFILL = build_canonical_backfill(

@@ -445,6 +445,11 @@ class UnambiguousValuesTests(unittest.TestCase):
         # Legs plus upper body is the one defined full-body case.
         mixed = unit("WeightTraining", name="Kniebeuge und Bankdrücken", description="")
         self.assertEqual(unambiguous_values(mixed), {"session_focus": "full_body"})
+        # The chip shows full body for legs plus upper plus core as well.
+        triple = unit(
+            "WeightTraining", name="Kniebeuge, Bankdrücken, Plank", description=""
+        )
+        self.assertEqual(unambiguous_values(triple), {"session_focus": "full_body"})
         # Two unrelated groups, or two intensities, stay a suggestion.
         for name in ("Beine und Core", "Kniebeuge leicht bis schwer"):
             with self.subTest(name):

@@ -33,13 +33,16 @@ from backend.planning.session_focus import (
     unambiguous_values,
 )
 from backend.planning.sport import planned_sport_environment
+from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import BatchReport
 
 STAGE: Final = "session_focus_backfill"
 STATE_KEY: Final = "session_focus_backfill_state"
 # Bump to run the step once more after the derivation rules change.
 VERSION: Final = 1
-MAX_UNITS: Final = 2000
+# The repository never returns more future units than this; every plan check
+# sees the same window.
+MAX_UNITS: Final = 1000
 _ESTIMATED = frozenset({Sport.RUN, Sport.RIDE})
 
 
@@ -60,6 +63,8 @@ class SessionFocusBackfill:
         database_manager: Callable[[], Any],
         history_undo: Callable[[], HistoryUndoService],
         database_lock: threading.RLock,
+        maintenance_gate: MaintenanceGate,
+        publish_change: Callable[[], None],
     ) -> None:
         self._key_values = key_values
         self._clock = clock
@@ -70,27 +75,36 @@ class SessionFocusBackfill:
         self._database_manager = database_manager
         self._history_undo = history_undo
         self._database_lock = database_lock
+        self._maintenance_gate = maintenance_gate
+        self._publish_change = publish_change
 
     def run_batch(self, db: Any) -> BatchReport:
         """Fill every eligible future unit in the caller's transaction, once."""
         state = _load_state(self._key_values, db)
         if state.get("version") == VERSION and state.get("status") == "complete":
             return BatchReport(items=0, done=True)
-        counts = {"focus": 0, "intensity": 0, "undecided": 0}
+        counts = {"focus": 0, "intensity": 0, "undecided": 0, "skipped": 0}
         estimate = self._estimator()
+        units = self._future_units(MAX_UNITS)
         with change_history.collect_changes() as changes:
-            for unit in self._future_units(MAX_UNITS):
+            for unit in units:
                 self._fill(db, unit, estimate, counts)
         if changes:
             self._bump(db)
+            self._database_manager().after_commit(self._publish_change)
+        # Earlier passes stay undoable together with this one.
+        kept = [] if state.get("undone_at") else list(state.get("changes") or [])
+        # A unit the calendar checks refused is tried again on the next pass.
+        complete = not counts["skipped"]
         self._save(
             db,
             {
                 "version": VERSION,
-                "status": "complete",
+                "status": "complete" if complete else "incomplete",
                 "completed_at": self._clock(),
                 "counts": counts,
-                "changes": changes,
+                "truncated": len(units) >= MAX_UNITS,
+                "changes": [*kept, *changes],
             },
         )
         return BatchReport(items=len(changes), done=True)
@@ -107,13 +121,18 @@ class SessionFocusBackfill:
             unit, estimate(unit) if sport in _ESTIMATED else None
         )
         if values:
-            self._update_unit(
-                str(unit.get("local_id") or unit.get("id")),
-                values,
-                skip_calendar_conflict=True,
-                bump_planning_revision=False,
-                db=db,
-            )
+            try:
+                self._update_unit(
+                    str(unit.get("local_id") or unit.get("id")),
+                    values,
+                    skip_calendar_conflict=True,
+                    bump_planning_revision=False,
+                    db=db,
+                )
+            except AppError:
+                # Refused before any write (calendar markers, pending refresh).
+                counts["skipped"] += 1
+                return
             counts["focus"] += FOCUS_KEY in values
             counts["intensity"] += len(values) - (FOCUS_KEY in values)
         if allowed_foci(sport) and FOCUS_KEY not in values and not unit.get(FOCUS_KEY):
@@ -132,6 +151,7 @@ class SessionFocusBackfill:
         """Restore every unit the backfill changed, or none of them."""
         history_undo = self._history_undo()
         with (
+            self._maintenance_gate.operation(),
             history_undo.profile_mutation_coordinator,
             self._database_lock,
             self._database_manager().unit_of_work() as db,
@@ -144,6 +164,7 @@ class SessionFocusBackfill:
                 raise AppError(409, "Der Backfill wurde bereits zurückgenommen.")
             history_undo.apply_many(db, changes)
             self._save(db, {**state, "undone_at": self._clock()})
+            self._database_manager().after_commit(self._publish_change)
         return {
             "status": "undone",
             "restored": len(changes),
@@ -162,6 +183,7 @@ def summarize_state(state: Mapping[str, Any]) -> dict[str, Any]:
         "status": state.get("status", "pending"),
         "version": state.get("version"),
         "counts": counts if isinstance(counts, dict) else {},
+        "truncated": bool(state.get("truncated")),
         "undone": bool(state.get("undone_at")),
     }
 
