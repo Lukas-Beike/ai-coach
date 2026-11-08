@@ -193,6 +193,24 @@ class StrengthSummaryTests(unittest.TestCase):
         self.assertIs(select_strength_sets([wahoo, file_sets]), file_sets)
         self.assertIsNone(select_strength_sets([]))
 
+    def test_provider_order_is_explicit_with_intervals_last(self) -> None:
+        def file_set(provider: ProviderId, activity: str) -> Any:
+            return stored(
+                set_list(
+                    SQUAT_SESSION,
+                    source=StrengthSetSource.FIT_SET_MESSAGES,
+                    provider=provider,
+                    activity=activity,
+                ),
+                provider=provider.value,
+            )
+
+        garmin = file_set(ProviderId.GARMIN, "g1")
+        wahoo = file_set(ProviderId.WAHOO, "w1")
+        intervals = file_set(ProviderId.INTERVALS, "a-first-by-name")
+        self.assertIs(select_strength_sets([intervals, wahoo, garmin]), garmin)
+        self.assertIs(select_strength_sets([intervals, wahoo]), wahoo)
+
 
 class PlanComparisonTests(unittest.TestCase):
     def summary(self) -> dict[str, Any]:

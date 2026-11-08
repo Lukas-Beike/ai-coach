@@ -216,6 +216,13 @@ class FitFileFramingTests(unittest.TestCase):
         ):
             fit_messages(builder.build())
 
+    def test_message_cap_admits_the_longest_stored_stream(self):
+        # A file with as many record messages as a session may store as stream
+        # points must not be rejected before the stream limit applies.
+        from backend.canonical.activity_detail import MAX_STREAM_POINTS
+
+        self.assertGreater(fit_file.MAX_FIT_MESSAGES, MAX_STREAM_POINTS)
+
     def test_table_crc_matches_the_bitwise_reference(self):
         rng = random.Random(1989)
         for length in (0, 1, 2, 12, 14, 255):

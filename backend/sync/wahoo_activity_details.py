@@ -2,7 +2,7 @@
 
 After a Wahoo sync, each workout of the window with a download link and an
 active activity record is fetched once per summary hash. Its FIT file is mapped
-with Wahoo provenance and stored as stream, lap and zone sets. Failed and empty
+with Wahoo provenance and stored as stream, lap and strength-set details. Failed and empty
 downloads are counted per summary hash and stop after a bounded number of
 attempts. The download link is never stored, logged or returned, and nothing is
 written to Wahoo.

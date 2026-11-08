@@ -688,7 +688,6 @@ class SharedProviderPrecedenceTests(unittest.TestCase):
 
     def test_every_ranking_follows_the_shared_precedence(self) -> None:
         from backend.activities import (
-            activity_summary,
             canonical_sessions,
             detail_contract,
             detail_merge,
@@ -702,13 +701,10 @@ class SharedProviderPrecedenceTests(unittest.TestCase):
         self.assertEqual(
             list(PROVIDER_PRECEDENCE), list(detail_contract._PROVIDER_ORDER)
         )
-        for ranks in (
-            activity_summary._PROVIDER_RANK,
-            canonical_sessions._LEAD_PROVIDER_RANK,
-        ):
-            self.assertEqual(
-                list(PROVIDER_PRECEDENCE), sorted(ranks, key=ranks.__getitem__)
-            )
+        ranks = canonical_sessions._LEAD_PROVIDER_RANK
+        self.assertEqual(
+            list(PROVIDER_PRECEDENCE), sorted(ranks, key=ranks.__getitem__)
+        )
         self.assertEqual(
             [provider.value for provider in PROVIDER_PRECEDENCE],
             sorted(

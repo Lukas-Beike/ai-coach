@@ -82,8 +82,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_nineteen(self) -> None:
-        self.assertEqual(19, MAPPER_VERSION)
+    def test_mapper_version_is_twenty(self) -> None:
+        self.assertEqual(20, MAPPER_VERSION)
 
     def test_strength_duration_is_the_whole_session_not_the_active_timer(
         self,
@@ -1095,6 +1095,13 @@ class ZoneEffectAndExtremeTests(unittest.TestCase):
 
         assert record is not None
         self.assertEqual(85.0, record.avg_cadence)
+
+    def test_zero_bike_cadence_without_a_run_cadence_is_no_cadence(self) -> None:
+        record, issues = _one(averageBikingCadenceInRevPerMinute=0)
+
+        self.assertEqual((), issues)
+        assert record is not None
+        self.assertIsNone(record.avg_cadence)
 
     def test_one_invalid_zone_drops_the_distribution_with_one_issue(self) -> None:
         record, issues = _one(hrTimeInZone_1=60, hrTimeInZone_2="x")

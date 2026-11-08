@@ -34,6 +34,7 @@ from backend.canonical.activity_detail import (
 )
 from backend.canonical.vocabulary import (
     ExerciseCategory,
+    ProviderId,
     StrengthSetSource,
     StrengthSetType,
 )
@@ -69,6 +70,15 @@ NEUTRAL_CATEGORIES: Final = frozenset(
     }
 )
 MAX_EXERCISES: Final = 20
+# Strength is recorded on the Garmin watch, so Garmin's file sets lead Wahoo's;
+# output-only Intervals.icu ranks last. (Streams, laps and zones follow the
+# session order instead, Wahoo first.)
+_PROVIDER_RANK: Final = {
+    provider.value: rank
+    for rank, provider in enumerate(
+        (ProviderId.GARMIN, ProviderId.WAHOO, ProviderId.INTERVALS)
+    )
+}
 STRENGTH_KEY: Final = "strength_sets"
 
 
@@ -87,7 +97,7 @@ def strength_rank(item: StoredDetailSet) -> tuple[Any, ...]:
     detail = _detail(item)
     return (
         detail.source is not StrengthSetSource.GARMIN_EXERCISE_SETS,
-        item.provider,
+        _PROVIDER_RANK.get(item.provider, len(_PROVIDER_RANK)),
         item.provider_activity_id,
     )
 

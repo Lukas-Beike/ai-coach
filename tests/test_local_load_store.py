@@ -497,4 +497,4 @@ class RefreshAfterJobTests(unittest.TestCase):
         hook = refresh_after_job(lambda: calls.append(True))
         for provider in ("intervals", "garmin", "wahoo", "weather", "calendar"):
             hook({"provider": provider})
-        self.assertEqual(calls, [True, True, True])
+        self.assertEqual(calls, [True, True])

@@ -1847,9 +1847,42 @@ class MorningReadinessTests(unittest.TestCase):
                 self.assertEqual([code.code for code in codes], ["HIGH"])
 
 
+class PersonalApiShapeTests(unittest.TestCase):
+    """Keys the Personal API and the SDK's own response models use (#1826)."""
+
+    def test_the_personal_hrv_status_key_is_a_status_code(self) -> None:
+        # Observed Personal summary: ``status`` inside the day's summary row.
+        row = {"calendarDate": DAY, "lastNightAvg": 57, "status": "BALANCED"}
+        codes = map_garmin_status_codes(
+            "hrv", [row], source_record_id="hrv", retrieved_at=RETRIEVED_AT
+        )
+        self.assertEqual(
+            [(c.code, c.observed_on.isoformat()) for c in codes], [("BALANCED", DAY)]
+        )
+
+    def test_the_sdk_hrv_status_key_still_wins_when_both_are_present(self) -> None:
+        row = {"calendarDate": DAY, "hrvStatus": "UNBALANCED", "status": "BALANCED"}
+        codes = map_garmin_status_codes(
+            "hrv", row, source_record_id="hrv", retrieved_at=RETRIEVED_AT
+        )
+        self.assertEqual([c.code for c in codes], ["UNBALANCED"])
+
+    def test_a_body_battery_day_keyed_date_keeps_its_totals(self) -> None:
+        # The SDK's BodyBatteryEntry names the day ``date``, not ``calendarDate``.
+        result = _map({"body_battery": [{"date": DAY, "charged": 70, "drained": 40}]})
+        self.assertEqual(
+            [row[:3] for row in _rows(result)],
+            [
+                ("body_battery_charged", 70.0, DAY),
+                ("body_battery_drained", 40.0, DAY),
+            ],
+        )
+        self.assertEqual(result.issues, ())
+
+
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 18)
+        self.assertEqual(MAPPER_VERSION, 19)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):

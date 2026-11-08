@@ -19,7 +19,9 @@ type _FitField = tuple[int, int, int]
 type _FitDefinition = tuple[int, int, list[_FitField], list[_FitField]]
 type FitMessage = tuple[int, dict[int, object]]
 
-MAX_FIT_MESSAGES: Final = 100_000
+# The most data messages one file may hold: the longest stream a session stores
+# (172,800 record messages) plus laps, events, sets and the like.
+MAX_FIT_MESSAGES: Final = 200_000
 FIT_SIGNATURE: Final = b".FIT"
 FIT_EPOCH: Final = datetime(1989, 12, 31, tzinfo=UTC)
 _UNSUPPORTED_FIT_BASE_TYPE: Final = "Unsupported FIT base type"

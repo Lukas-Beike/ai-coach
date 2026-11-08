@@ -21,7 +21,6 @@ ACTIVITY_START_LOCAL: Final = "startTimeLocal"
 WEEKLY_HRV_AVERAGE, WEEKLY_AVERAGE = GARMIN_HRV_WEEKLY_ALIASES
 RESTING_HEART_RATE: Final = "restingHeartRate"
 READINESS_SCORE: Final = "trainingReadinessScore"
-VO2_MAX_VALUE: Final = "vO2MaxValue"
 WEIGHT_KG: Final = "weightKg"
 SLEEP_SECONDS: Final = "sleepTimeSeconds"
 HRV_NIGHT_AVERAGE: Final = "lastNightAvg"
