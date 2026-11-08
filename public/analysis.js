@@ -901,7 +901,11 @@ function appendLocalFitnessChart(report, loadRoot, loadMissing, start, end) {
   });
   const unloaded = days.reduce((sum, day) => sum + (day.sessions_without_load || 0), 0);
   const unloadedNote = unloaded === 1 ? "1 Einheit ohne TSS" : `${unloaded} Einheiten ohne TSS`;
-  const chart = collectAnalysisChart(loadMissing, title, series, "TSS/Tag", start, end, unloaded ? unloadedNote : "", { calendarWeeks: weekly, caption: analysisBasisCaption("TSS/Tag", weekly, "state") });
+  const incompletePercent = Math.round((Number(report.incomplete_share) || 0) * 100);
+  const notes = [];
+  if (unloaded) notes.push(unloadedNote);
+  if (incompletePercent > 0) notes.push(`${incompletePercent} % der Tage unvollständig`);
+  const chart = collectAnalysisChart(loadMissing, title, series, "TSS/Tag", start, end, notes.join(" · "), { calendarWeeks: weekly, caption: analysisBasisCaption("TSS/Tag", weekly, "state") });
   if (chart) loadRoot.append(chart);
 }
 

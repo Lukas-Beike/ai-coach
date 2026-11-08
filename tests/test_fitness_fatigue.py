@@ -98,6 +98,9 @@ class LocalFitnessFatigueTests(unittest.TestCase):
         self.assertEqual(row["sessions_without_load"], 1)
         self.assertEqual(row["session_rpe_au_without_load"], 270.0)
         self.assertEqual(marked["sessions_without_load"], 1)
+        self.assertEqual(marked["incomplete_days"], 1)
+        self.assertEqual(marked["incomplete_share"], 0.01)
+        self.assertEqual((plain["incomplete_days"], plain["incomplete_share"]), (0, 0))
 
     def test_day_with_only_unloaded_sessions_counts_zero(self) -> None:
         loads = {day(0): 100.0}
