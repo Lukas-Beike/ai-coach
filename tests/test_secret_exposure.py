@@ -237,7 +237,7 @@ class SecretFixture(unittest.TestCase):
         )
         self.db.commit()
 
-    def redactor(self) -> Redactor:
+    def _redactor(self) -> Redactor:
         wahoo = WahooSecretRegistry()
         wahoo.replace_tokens(self.key_values.get(self.db, WAHOO_TOKENS_KEY))
         wahoo.hold_state(SENTINELS["wahoo_oauth_state"])
@@ -389,7 +389,7 @@ class DiagnosticsAndLogSecretTests(SecretFixture):
         logger = logging.getLogger(f"synthetic.secret.{id(self)}")
         logger.handlers.clear()
         self.addCleanup(self.close_handlers, logger)
-        configure_logging(logger, self.root, log_path, self.redactor(), stream=stream)
+        configure_logging(logger, self.root, log_path, self._redactor(), stream=stream)
         for name, value in SENTINELS.items():
             if name in NOT_REGISTERED_WITH_THE_REDACTOR:
                 continue
@@ -419,14 +419,14 @@ class DiagnosticsAndLogSecretTests(SecretFixture):
         self.assertEqual(scan(stream.getvalue().encode()), [])
 
     def test_wahoo_tokens_are_redacted_from_logs(self):
-        redactor = self.redactor()
+        redactor = self._redactor()
         for name in ("wahoo_access_token", "wahoo_oauth_state"):
             text = redactor.redact_text(f"provider said {SENTINELS[name]}")
             self.assertEqual(scan(text.encode()), [], name)
 
     def test_the_diagnostics_report_and_its_log_projection_hold_no_secret(self):
         log_path, _stream = self.log_everywhere()
-        redactor = self.redactor()
+        redactor = self._redactor()
         values = {
             "last_sync_at": "sync-time",
             "last_sync_error": f"failed with {SENTINELS['openai_api_key']}",

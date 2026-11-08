@@ -436,7 +436,7 @@ class DataKindFixture(unittest.TestCase):
             now=STAMP,
         )
 
-    def seed_everything(self) -> None:
+    def _seed_everything(self) -> None:
         self.seed_session()
         self.seed_derived_observations()
         self.seed_garmin_rating()
@@ -493,7 +493,7 @@ class DataKindFixture(unittest.TestCase):
             mutation_coordinator=threading.RLock(),
         )
 
-    def export_archive(self) -> zipfile.ZipFile:
+    def _export_archive(self) -> zipfile.ZipFile:
         config = PrivacyArchiveExportConfig(
             data_dir=self.root,
             database_path=self.database_path,
@@ -522,7 +522,7 @@ class DataKindFixture(unittest.TestCase):
         self.addCleanup(archive.close)
         return archive
 
-    def delete_service(self) -> PrivacyDeleteService:
+    def _delete_service(self) -> PrivacyDeleteService:
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
                 database_manager=_Manager(self.db),
@@ -572,7 +572,7 @@ class CoverageGuardTests(DataKindFixture):
             if member.endswith(".jsonl")
         }
         self.assertEqual(jsonl, set(PRIVACY_EXPORT_JSONL_FILES))
-        archive = self.export_archive()
+        archive = self._export_archive()
         names = set(archive.namelist())
         for members in EXPORTED_TABLE_MEMBERS.values():
             self.assertLessEqual(set(members), names)
@@ -675,8 +675,8 @@ class CoverageGuardTests(DataKindFixture):
 
 class DataKindExportTests(DataKindFixture):
     def test_every_new_data_kind_reaches_the_privacy_export(self):
-        self.seed_everything()
-        archive = self.export_archive()
+        self._seed_everything()
+        archive = self._export_archive()
         observations = self.lines(archive, "observations.jsonl")
         self.assertEqual(
             {
@@ -756,7 +756,7 @@ class DataKindExportTests(DataKindFixture):
 
 class DataKindDeleteTests(DataKindFixture):
     def test_the_privacy_delete_removes_every_new_data_kind(self):
-        self.seed_everything()
+        self._seed_everything()
         tables = {
             table: self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             for table in CURRENT_DATABASE_SCHEMA
@@ -772,7 +772,7 @@ class DataKindDeleteTests(DataKindFixture):
             "provider_sync_cursors",
         ):
             self.assertGreater(tables[table], 0, table)
-        result = self.delete_service().delete(PRIVACY_DELETE_CONFIRMATION_TEXT)
+        result = self._delete_service().delete(PRIVACY_DELETE_CONFIRMATION_TEXT)
         self.assertTrue(result["local_data_deleted"])
         for table in set(CURRENT_DATABASE_SCHEMA) - {"kv"}:
             with self.subTest(table=table):
@@ -789,8 +789,8 @@ class DataKindDeleteTests(DataKindFixture):
     def test_the_privacy_preview_counts_every_remote_link_kind_it_deletes(self):
         # The metric-export link (entity kind "observation") is deleted with the
         # others and counted under the provider data group.
-        self.seed_everything()
-        preview = self.delete_service().preview()
+        self._seed_everything()
+        preview = self._delete_service().preview()
         counted = {item["id"]: item["records"] for item in preview["categories"]}
         links = self.db.execute("SELECT COUNT(*) FROM remote_links").fetchone()[0]
         self.assertEqual(links, 3)
@@ -810,7 +810,7 @@ class DataKindDeleteTests(DataKindFixture):
         )
         self.assertEqual(counted["provider_data"], provider_rows + observation_links)
         self.assertEqual(
-            self.delete_service().delete(PRIVACY_DELETE_CONFIRMATION_TEXT)[
+            self._delete_service().delete(PRIVACY_DELETE_CONFIRMATION_TEXT)[
                 "deleted_categories"
             ]["provider_data"],
             counted["provider_data"],
@@ -822,7 +822,7 @@ class DataKindDeleteTests(DataKindFixture):
 
 class BackupRestoreRoundTripTests(DataKindFixture):
     def test_backup_restore_keeps_every_table_row_for_row(self):
-        self.seed_everything()
+        self._seed_everything()
         self.db.execute(
             "INSERT INTO sessions(token_hash, csrf_hash, expires_at, created_at, "
             "last_seen) VALUES ('t', 'c', 9e12, ?, ?)",
