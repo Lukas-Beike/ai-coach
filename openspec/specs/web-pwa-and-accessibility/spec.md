@@ -329,3 +329,20 @@ The client SHALL offer confirmation only for current confirmable proposals, pres
 - **THEN** the proposal remains locked as unknown until reconciliation confirms consumed or still-confirmable state; a failed reconciliation does not unlock it for duplicate execution.
 
 Evidence: `public/coach.js::coachActionButtons`, `public/coach.js::executeCoachActionProposal`, `public/coach.js::reconcileCoachActionProposal`, `public/components.js::createActionReceipt`; `e2e/contracts.spec.js::only current pending proposals expose an explicit confirmation action`, `tests/frontend-write-safety.test.cjs::a 409 rejection after execute was sent is a known failure and unlocks the proposal`, `tests/frontend-write-safety.test.cjs::a lost execute response keeps the action locked and is not reported as a failed confirmation`, `tests/frontend-write-safety.test.cjs::a failed reconcile keeps the unknown-outcome lock`.
+
+### Requirement: Derived values are marked and controls stay reachable
+The client SHALL mark every derived or estimated value with one "Schätzung" chip and name each dashed line. Interactive controls on the analysis and nutrition routes SHALL keep a 44 px hit area and every text/background pair SHALL meet WCAG AA in both themes. Desktop (>= 1100 px) SHALL use a 15-16 px text size, bounded form fields and two charts per row.
+
+#### Scenario: Estimates and predictions
+- **WHEN** a derived value (VO2max, race predictions, CP/CS, load, fitness/fatigue/form, heart-rate drift, projected daily expenditure) is shown
+- **THEN** it carries the chip, race predictions are whole minutes, and a dashed line is named in the legend or a line key.
+
+#### Scenario: Hit areas and contrast
+- **WHEN** the analysis or nutrition routes render in the light theme
+- **THEN** info buttons and summaries measure at least 44 px and axe reports no violation; zone percentages use neutral text with the colour on a swatch.
+
+#### Scenario: Nutrition overview
+- **WHEN** the diary, the history or the product tab renders
+- **THEN** calories form one hero tile above one macro row, runs of days without data collapse to one row, and the product tab has one primary action.
+
+Evidence: `public/components.js::createEstimateChip`, `public/performance-view.js::predictionTime`, `public/analysis.js::appendAnalysisLineKey`, `public/nutrition.js::nutritionChartRows`, `tests/test_css_design_tokens.py::test_training_focus_percentages_use_neutral_text_in_both_themes`, `e2e/estimates-targets.spec.js`.

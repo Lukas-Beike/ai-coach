@@ -51,6 +51,6 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
   await expect(page.locator('#cyclingPowerProfile [data-power-duration="60"]')).toContainText("420 W");
   await expect(page.locator("#cyclingPowerProfile thead th")).toHaveText(["Dauer", "Leistung"]);
   await expect(page.locator("#cyclingPowerProfile [data-power-profile-gap]")).toHaveText("Für 3 von 14 Radeinheiten fehlen vollständige Messreihen; die Bestwerte können höher liegen.");
-  await expect(page.locator("#cyclingPowerProfile [data-critical-power]")).toHaveText("Experimentelle CP/CS-Schätzung (28 Tage): Rad outdoor CP 250 W · W′ 18 kJ (unsicher) · 1× Wettkampf · Rad indoor — · Lauf CS 4,12 m/s · D′ 200 m (unsicher)");
+  await expect(page.locator("#cyclingPowerProfile [data-critical-power]")).toHaveText("Schätzung Experimentell · CP/CS (28 Tage): Rad outdoor CP 250 W · W′ 18 kJ (unsicher) · 1× Wettkampf · Rad indoor — · Lauf CS 4,12 m/s · D′ 200 m (unsicher)");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });

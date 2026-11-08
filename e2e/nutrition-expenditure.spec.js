@@ -21,10 +21,11 @@ test("@responsive nutrition projects today's expenditure from persisted Garmin d
 
   await page.goto("/#nutrition/diary");
   const expenditure = page.locator("#nutritionExpenditure");
-  await expect(expenditure).toContainText("Prognose Tagesverbrauch (abgeleitet)");
+  await expect(expenditure).toContainText("Prognose Tagesverbrauch");
+  await expect(expenditure.locator(".estimate-chip")).toHaveText("Schätzung");
   await expect(expenditure).toContainText("1.968 kcal");
   await expect(expenditure).toContainText("1.960 kcal");
-  await expect(expenditure.locator(".nutrition-total").filter({ hasText: "Prognose Tagesverbrauch (abgeleitet)" })).toHaveAttribute("title", /eigene Schätzung/);
+  await expect(expenditure.locator(".nutrition-total").filter({ hasText: "Prognose Tagesverbrauch" })).toHaveAttribute("title", /eigene Schätzung/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -103,7 +104,7 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
   await expect(totals).toContainText("Grundumsatz (vorläufig)");
   await expect(totals).toContainText("600 kcal");
   await expect(totals).toContainText("1.500 kcal");
-  await expect(totals).toContainText("Prognose Tagesverbrauch (abgeleitet)");
+  await expect(totals).toContainText("Prognose Tagesverbrauch");
   await expect(totals).toContainText("2.350 kcal");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
