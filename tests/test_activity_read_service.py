@@ -14,7 +14,6 @@ from activity_row_support import (
 from canonical_detail_support import add_session_record, open_manager
 
 from backend.activities.activity_reference import ActivityReferences
-from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.activity_summary import stored_activity_key
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
@@ -111,18 +110,6 @@ class _DatedRows(FixedActivityRows):
         )
 
 
-class _FailedDetails:
-    def failures(self, activity_ids):
-        ids = set(activity_ids)
-        note = {
-            "message": "Detaildaten fehlerhaft.",
-            "summary_sha256": summary_fingerprint(
-                {"id": "old", "type": "Run", "start_date_local": "2026-09-18T08:00:00"}
-            ),
-        }
-        return {"old": note} if "old" in ids else {}
-
-
 class ActivityReadServiceTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -149,7 +136,7 @@ class ActivityReadServiceTests(unittest.TestCase):
             **kwargs,
         )
 
-    def service(self, detail_store=None, fetched_at=None):
+    def service(self, fetched_at=None):
         snapshot = {
             "synced_at": "2026-09-20T08:00:00+00:00",
             "athlete": {},
@@ -182,16 +169,7 @@ class ActivityReadServiceTests(unittest.TestCase):
             _Manager(),
             rows,
             _Feedback(),
-            detail_store,
             canonical=canonical_source(rows, _Manager, fetched_at=fetched_at),
-        )
-
-    def test_page_names_no_intervals_detail_failure(self):
-        # Intervals.icu details are never served (#1685), so a stored failure
-        # note marks no listed session.
-        page = self.service(_FailedDetails()).page(today=date(2026, 9, 20))
-        self.assertFalse(
-            [item for item in page["activities"] if "detail_error" in item]
         )
 
     def test_page_filters_orders_attaches_feedback_and_uses_cursor(self):

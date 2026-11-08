@@ -15,6 +15,11 @@ from datetime import UTC, date, datetime
 from itertools import pairwise
 from typing import Any
 
+from intervals_wellness_stub import (
+    map_intervals_athlete_thresholds,
+)
+from intervals_zone_stub import map_intervals_zone_configurations
+
 from backend.activities.zone_settings import (
     HR_ZONE_LIMITS,
     PACE_ZONE_LIMITS,
@@ -25,10 +30,6 @@ from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation
 from backend.canonical.sports import classify_sport_text
 from backend.canonical.vocabulary import Environment, MetricKind, Sport
-from backend.providers.intervals_wellness_mapping import (
-    map_intervals_athlete_thresholds,
-)
-from backend.providers.intervals_zone_mapping import map_intervals_zone_configurations
 
 RETRIEVED_AT = datetime(2026, 10, 11, 6, tzinfo=UTC)
 _MIN_ZONES = 3

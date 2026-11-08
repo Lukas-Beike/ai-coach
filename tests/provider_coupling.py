@@ -205,14 +205,6 @@ _LEGACY_LABEL = (
     "legacy-label: view still emits or compares the label itself; move it to "
     "backend/providers/source_labels.py"
 )
-_DETAIL_RETIREMENT = (
-    "retirement: owns the scan of the retired kv activity_detail: records that "
-    "the sync backfill and retirement jobs drain"
-)
-_SUMMARY_FINGERPRINT = (
-    "mapping: summary_fingerprint hashes the stored provider activity summary, "
-    "excluding the later-added zone-time keys, to detect stale details"
-)
 _MORNING_OWNER = (
     "owner: the morning refresh fetches through garmin_morning and keeps only its "
     "refresh bookkeeping in the Garmin state view; values are derived observations"
@@ -220,10 +212,6 @@ _MORNING_OWNER = (
 # repository-relative path -> (reason, field-name modules it may still import).
 # A new module in an allowlisted file fails the guard as well.
 _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
-    "backend/activities/detail_store.py": (
-        _SUMMARY_FINGERPRINT,
-        ("intervals_performance_fields",),
-    ),
     "backend/performance/morning_battery_service.py": (
         _MORNING_OWNER,
         ("garmin_morning",),
@@ -244,7 +232,6 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/backup/export.py"): _BACKUP,
     (RULE_SOURCE_LABEL, "backend/athlete/equipment.py"): _LEGACY_LABEL,
     (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,
-    (RULE_LEGACY_READ, "backend/activities/detail_store.py"): _DETAIL_RETIREMENT,
     (RULE_LEGACY_READ, "backend/athlete/equipment.py"): _SYNC_STATUS,
     (RULE_LEGACY_READ, "backend/nutrition/sync_status.py"): _SYNC_STATUS,
     (RULE_LEGACY_READ, "backend/performance/morning_battery_service.py"): (

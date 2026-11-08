@@ -26,7 +26,6 @@ from backend.activities.activity_reference import (
     ActivityReferences,
     NoActivityReferences,
 )
-from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.feedback import ActivityFeedbackService
 from backend.athlete.equipment import EquipmentService
 from backend.canonical.records import ActivityRecord, Provenance
@@ -238,7 +237,6 @@ class ActivityCallerResolutionTests(_Fixture):
                 list=Mock(return_value=[]),
                 for_activity_ids=Mock(return_value=[]),
             ),
-            ActivityDetailStore(self.manager),
             references=ActivityReferences(self.manager),
             canonical=canonical_source(FixedActivityRows([raw]), lambda: self.manager),
             session_records=CanonicalTableReader().session_activities,

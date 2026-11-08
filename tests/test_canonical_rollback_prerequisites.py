@@ -30,7 +30,6 @@ from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
     coverage_key,
     garmin_payload_coverage,
-    intervals_snapshot_coverage,
     wahoo_payload_coverage,
 )
 from backend.sync.canonical_read_selector import PENDING_READER, CanonicalReadSelector
@@ -55,8 +54,6 @@ def performance_response() -> dict[str, Any]:
     }
 
 
-
-
 class PersistedCoverageTests(CanonicalReadFixture):
     def selector(self) -> CanonicalReadSelector:
         return make_selector(self)
@@ -65,9 +62,6 @@ class PersistedCoverageTests(CanonicalReadFixture):
         use = zone or ZONE
         coverage = CanonicalCoverageStore(self.key_values)
         with self.manager.unit_of_work() as db:
-            coverage.persist(
-                db, intervals_snapshot_coverage(self.intervals, zone=use), zone=use
-            )
             coverage.persist(
                 db, garmin_payload_coverage(self.garmin, zone=use), zone=use
             )
@@ -78,11 +72,8 @@ class PersistedCoverageTests(CanonicalReadFixture):
         self.intervals["synced_at"] = synced_at
 
     def summaries(self) -> tuple[Any, ...]:
-        """The Intervals.icu and Garmin summaries ``store`` persists."""
-        return (
-            intervals_snapshot_coverage(self.intervals, zone=ZONE),
-            garmin_payload_coverage(self.garmin, zone=ZONE),
-        )
+        """The Garmin summary ``store`` persists."""
+        return (garmin_payload_coverage(self.garmin, zone=ZONE),)
 
     def test_without_persisted_data_coverage_is_empty(self) -> None:
         self.assertEqual(self.read(self.selector().coverage), ())
@@ -97,18 +88,17 @@ class PersistedCoverageTests(CanonicalReadFixture):
         self.assertEqual(self.read(self.selector().coverage), expected)
 
     def test_a_provider_without_a_summary_is_omitted(self) -> None:
-        intervals, _garmin = self.summaries()
+        (garmin,) = self.summaries()
         coverage = CanonicalCoverageStore(self.key_values)
         with self.manager.unit_of_work() as db:
-            coverage.persist(db, intervals, zone=ZONE)
+            coverage.persist(db, garmin, zone=ZONE)
 
-        self.assertEqual(self.read(self.selector().coverage), (intervals,))
+        self.assertEqual(self.read(self.selector().coverage), (garmin,))
         self.assertIsNone(
-            self.read(self.key_values.get, coverage_key(ProviderId.GARMIN))
+            self.read(self.key_values.get, coverage_key(ProviderId.WAHOO))
         )
 
     def test_outdated_or_corrupt_summaries_are_ignored(self) -> None:
-        _intervals, garmin = self.summaries()
         self.store()
         self.strip_snapshot_inputs()
 
@@ -123,13 +113,11 @@ class PersistedCoverageTests(CanonicalReadFixture):
         self.zone = ZONE
 
         with self.manager.unit_of_work() as db:
-            self.key_values.set(db, coverage_key(ProviderId.INTERVALS), "{not json")
-        self.assertEqual(self.read(self.selector().coverage), (garmin,))
+            self.key_values.set(db, coverage_key(ProviderId.GARMIN), "{not json")
+        self.assertEqual(self.read(self.selector().coverage), ())
 
     def test_only_the_ingested_providers_are_consulted(self) -> None:
-        self.assertEqual(
-            CANONICAL_COVERAGE_PROVIDERS, (ProviderId.INTERVALS, ProviderId.GARMIN)
-        )
+        self.assertEqual(CANONICAL_COVERAGE_PROVIDERS, (ProviderId.GARMIN,))
         expected = self.summaries()
         self.store()
         self.strip_snapshot_inputs()
@@ -171,12 +159,12 @@ class PersistedCoverageTests(CanonicalReadFixture):
 
         self.assertEqual(result, (*expected, wahoo))
         with self.manager.unit_of_work() as db:
-            self.key_values.set(db, coverage_key(ProviderId.INTERVALS), "{not json")
-        self.assertEqual(self.read(self.selector().coverage), (expected[1], wahoo))
+            self.key_values.set(db, coverage_key(ProviderId.GARMIN), "{not json")
+        self.assertEqual(self.read(self.selector().coverage), (wahoo,))
 
     def test_persisted_value_holds_counts_only(self) -> None:
         self.store()
-        text = self.read(self.key_values.get, coverage_key(ProviderId.INTERVALS))
+        text = self.read(self.key_values.get, coverage_key(ProviderId.GARMIN))
         data = json.loads(text)
         self.assertEqual(
             set(data),

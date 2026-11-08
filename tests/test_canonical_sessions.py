@@ -18,6 +18,8 @@ from typing import Any
 from unittest import mock
 from zoneinfo import ZoneInfo
 
+from intervals_activity_stub import map_intervals_activities
+
 from backend.activities import canonical_sessions
 from backend.activities.canonical_sessions import (
     ActivitySession,
@@ -35,7 +37,6 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.providers.garmin_activity_mapping import map_garmin_activities
-from backend.providers.intervals_activity_mapping import map_intervals_activities
 
 BERLIN = ZoneInfo("Europe/Berlin")
 RETRIEVED_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
@@ -315,8 +316,6 @@ class GarminIntervalsPairTests(unittest.TestCase):
         )
 
 
-
-
 class WahooGarminRideTests(unittest.TestCase):
     """Two Intervals rides: a Wahoo recording and a Garmin copy of it."""
 
@@ -362,7 +361,6 @@ class WahooGarminRideTests(unittest.TestCase):
         self.assert_wahoo_pair(_wahoo(), _garmin_copy(type="Run"), False)
         self.assert_wahoo_pair(_wahoo(type="Run"), _garmin_copy(), False)
 
-
     def test_zero_canonical_duration_never_matches(self) -> None:
         # The mappers never produce a zero duration, so build the record directly.
         sessions = _bundle(
@@ -393,7 +391,6 @@ class FixtureParityTests(unittest.TestCase):
         self.intervals_rows = _load_fixture("intervals", "activities.json")
         self.garmin_rows = _load_fixture("garmin", "activities.json")
 
-
     def test_intervals_fixture_alone_has_no_duplicates(self) -> None:
         sessions = _bundle(_map_intervals(self.intervals_rows))
         self.assertEqual(len(self.intervals_rows), len(sessions))
@@ -423,7 +420,9 @@ class FixtureParityTests(unittest.TestCase):
         self.assertFalse(_canonical_garmin_duplicate(garmin_run, before))
         self.assertTrue(_canonical_garmin_duplicate(garmin_run, after))
 
-    def test_fixture_ride_recorded_twice_bundles_under_the_wahoo_recording(self) -> None:
+    def test_fixture_ride_recorded_twice_bundles_under_the_wahoo_recording(
+        self,
+    ) -> None:
         ride = next(row for row in self.intervals_rows if row["id"] == "i-act-001")
         wahoo = dict(ride, id="w-1", device_name="Wahoo ELEMNT")
         copy = dict(
@@ -438,8 +437,6 @@ class FixtureParityTests(unittest.TestCase):
         self.assertEqual(1, len(sessions))
         self.assertEqual("w-1", sessions[0].primary.activity_id)
         self.assertEqual(["g-1"], [d.activity_id for d in sessions[0].duplicates])
-
-
 
 
 def _intervals_copy_of(upstream: str, **fields: Any) -> dict[str, Any]:
@@ -581,8 +578,6 @@ class ExactLinkTests(unittest.TestCase):
         self.assertIsNone(record.external_ref)
         (record,) = _map_intervals([_intervals_copy_of("1")])
         self.assertEqual(ExternalRef(ProviderId.GARMIN, "1"), record.external_ref)
-
-
 
 
 class PublicCopyMatchTests(unittest.TestCase):

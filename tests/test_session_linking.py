@@ -568,11 +568,14 @@ class ReadersUnchangedTests(LinkingCase):
         self._ingest_all_three()
         with self.manager.reader() as db:
             rows = canonical_store.active_activity_rows(db)
-            texts = canonical_store.active_activity_payload_texts(
-                db,
-                provider=ProviderId.INTERVALS.value,
-                record_kind=ACTIVITY_RECORD_KIND,
-            )
+            texts = [
+                row["payload"]
+                for row in db.execute(
+                    "SELECT payload FROM provider_records WHERE provider = ? "
+                    "AND record_kind = ? AND state = 'active'",
+                    (ProviderId.INTERVALS.value, ACTIVITY_RECORD_KIND),
+                )
+            ]
         self.assertEqual(
             sorted((row["provider"], row["provider_activity_id"]) for row in rows),
             [

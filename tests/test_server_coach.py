@@ -592,9 +592,6 @@ class ServerCoachTests(ServerTestCase):
             compact_coach_activity,
             compact_coach_local_planned_workouts,
         )
-        from backend.providers.intervals_activity_detail_projection import (
-            detailed_activity,
-        )
 
         select = lambda value, fields: {
             key: value[key] for key in fields if key in value
@@ -624,23 +621,6 @@ class ServerCoachTests(ServerTestCase):
             ),
             100,
         )
-        detail = detailed_activity(
-            {
-                "id": "provider-id",
-                "average_watts": 245,
-                "icu_weighted_avg_watts": 300,
-                "provider_extra": "must not pass",
-                "streams": {"watts": list(range(2505)), "latlng": [[1, 2]]},
-            }
-        )
-        self.assertEqual(detail["average_watts"], 245)
-        self.assertEqual(detail["icu_weighted_avg_watts"], 300)
-        self.assertEqual(len(detail["streams"]["watts"]), 2000)
-        self.assertEqual(detail["streams"]["watts"][0], 0)
-        self.assertEqual(detail["streams"]["watts"][-1], 2504)
-        self.assertNotIn("id", detail)
-        self.assertNotIn("provider_extra", detail)
-        self.assertNotIn("latlng", detail["streams"])
 
     def test_coach_activity_feedback_is_persisted_and_attached_to_activity(self):
         store_canonical_snapshot(

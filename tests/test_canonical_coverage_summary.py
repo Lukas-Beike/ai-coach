@@ -13,16 +13,14 @@ from datetime import date, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_plan_stub import intervals_snapshot_coverage
 from support import garmin_payload_fixture, intervals_snapshot_fixture
 
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.mapping import IssueReason
 from backend.canonical.vocabulary import ProviderId
 from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
-from backend.sync.canonical_coverage_store import (
-    garmin_payload_coverage,
-    intervals_snapshot_coverage,
-)
+from backend.sync.canonical_coverage_store import garmin_payload_coverage
 
 NEWEST = date(2026, 10, 11)
 FAKE_DB: Any = object()

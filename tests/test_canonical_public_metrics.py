@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+from intervals_compaction import ACTIVITY_FIELDS
+
 from backend.canonical.public_metrics import (
     neutral_activity,
     neutral_activity_metrics,
@@ -9,7 +11,6 @@ from backend.canonical.public_metrics import (
     neutral_calendar_entry,
     neutral_calendar_state,
 )
-from backend.providers.intervals_activity_fields import ACTIVITY_FIELDS
 
 # Keys of the compact activity row that are already generic and stay.
 GENERIC_ACTIVITY_KEYS = frozenset(

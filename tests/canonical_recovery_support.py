@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from activity_row_support import summaries_of_rows
+from intervals_wellness_stub import map_intervals_wellness
 
 from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import MetricValue, Observation, Provenance
@@ -25,7 +26,6 @@ from backend.performance.canonical_recovery import (
 )
 from backend.performance.local_tss import DatedThresholds, LocalLoad, session_loads
 from backend.providers.garmin_health_mapping import map_garmin_health
-from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.providers.sleep_period_mapping import map_sleep_periods
 from backend.sync.local_load import with_local_loads
 
@@ -213,6 +213,7 @@ def recovery_only_inputs(
     from dataclasses import replace
 
     from canonical_daily_health_support import mapped_health
+    from intervals_plan_stub import project_intervals_snapshot
     from performance_day_support import (
         garmin_metrics_from_payload,
         snapshot_retrieved_at,
@@ -222,7 +223,6 @@ def recovery_only_inputs(
         CanonicalPerformanceInputs,
         read_performance_inputs,
     )
-    from backend.providers.snapshot_projection import project_intervals_snapshot
 
     inputs = CanonicalPerformanceInputs(
         recovery=mapped_recovery_inputs(

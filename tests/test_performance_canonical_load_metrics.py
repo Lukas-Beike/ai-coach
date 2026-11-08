@@ -22,6 +22,7 @@ from canonical_recovery_support import (
     NoActivityRows,
     SnapshotActivityRows,
 )
+from intervals_plan_stub import project_intervals_snapshot
 from performance_day_support import snapshot_metrics
 
 from backend.canonical.records import FORM_METHOD, FORM_METHOD_VERSION, Observation
@@ -36,7 +37,6 @@ from backend.performance.canonical_inputs import (
 from backend.performance.chart_history import analysis_history
 from backend.performance.context import current_performance_context
 from backend.performance.freshness import GarminSyncStatus
-from backend.providers.snapshot_projection import project_intervals_snapshot
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 DAY = date(2026, 9, 20)

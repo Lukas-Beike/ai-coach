@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_wellness_stub import map_intervals_wellness
+
 from backend.canonical.records import (
     FORM_METHOD,
     FORM_METHOD_VERSION,
@@ -46,7 +48,6 @@ from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
     current_observation_mapper_versions,
 )
-from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 RETRIEVED_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
@@ -78,7 +79,7 @@ def provenance(
     context: MeasurementContext = UNKNOWN_CONTEXT,
 ) -> Provenance:
     return Provenance(
-        provider=ProviderId.INTERVALS,
+        provider=ProviderId.GARMIN,
         source_kind=source_kind,
         source_record_id="2026-10-11",
         recorded_by=RecordingOrigin.UNKNOWN,
@@ -303,7 +304,7 @@ class ObservationStoreFixture(unittest.TestCase):
         self.db.execute("PRAGMA foreign_keys = ON")
         initialize_schema(self.db)
         self.db.commit()
-        self.version = current_observation_mapper_versions()["intervals"]
+        self.version = current_observation_mapper_versions()["garmin"]
         self.reader = CanonicalTableReader()
 
     def write(self, record: Observation) -> WriteOutcome:
@@ -416,7 +417,7 @@ class ObservationMetadataStoreTests(ObservationStoreFixture):
                 FORM_METHOD_VERSION,
                 fingerprint_inputs(
                     {
-                        "unversioned_row": "intervals",
+                        "unversioned_row": "garmin",
                         "source_record_id": "2026-10-11",
                         "observed_on": "2026-10-11",
                         "value": -8.33,

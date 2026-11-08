@@ -7,15 +7,33 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from backend.canonical.vocabulary import ProviderId
+from intervals_plan_stub import intervals_ingest_plan
+
+from backend.canonical.vocabulary import ProviderId, StreamChannel
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
-from backend.providers.canonical_plans import intervals_snapshot_ingest_plan
 from backend.sync.canonical_ingest import ingest_plan
 
 NOW = "2026-10-18T08:00:00+00:00"
 ZONE = ZoneInfo("Europe/Berlin")
 INTERVALS = ProviderId.INTERVALS.value
+# The canonical channel of each legacy stream key the tests store.
+STREAM_KEY_CHANNELS = {
+    "time": StreamChannel.TIME_S,
+    "distance": StreamChannel.DISTANCE_M,
+    "altitude": StreamChannel.ALTITUDE_M,
+    "grade_smooth": StreamChannel.GRADE_PCT,
+    "grade": StreamChannel.GRADE_PCT,
+    "velocity_smooth": StreamChannel.SPEED_MPS,
+    "velocity": StreamChannel.SPEED_MPS,
+    "speed": StreamChannel.SPEED_MPS,
+    "watts": StreamChannel.POWER_W,
+    "power": StreamChannel.POWER_W,
+    "heartrate": StreamChannel.HEART_RATE_BPM,
+    "cadence": StreamChannel.CADENCE_RPM,
+    "temperature": StreamChannel.TEMPERATURE_C,
+    "moving": StreamChannel.MOVING,
+}
 
 
 def open_manager(directory: str | Path, name: str = "detail.db") -> DatabaseManager:
@@ -54,7 +72,11 @@ def seed_intervals_activity(
     with manager.unit_of_work() as db:
         ingest_plan(
             db,
-            intervals_snapshot_ingest_plan(snapshot, zone=ZONE),
+            intervals_ingest_plan(
+                snapshot["raw_provider_data"],
+                zone=ZONE,
+                retrieved_at=datetime.fromisoformat(NOW),
+            ),
             retrieved_at=datetime.fromisoformat(NOW),
             deletion_window=None,
             zone=ZONE,
@@ -146,9 +168,6 @@ def add_garmin_copy(
         StreamResolution,
     )
     from backend.db.activity_detail_store import replace_detail_set
-    from backend.providers.intervals_activity_detail_mapping import (
-        STREAM_KEY_CHANNELS,
-    )
 
     garmin_id = f"garmin-{intervals_id}"
     provenance = Provenance(

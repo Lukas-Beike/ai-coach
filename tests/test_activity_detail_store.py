@@ -35,12 +35,9 @@ from backend.db import row_factory
 from backend.db.activity_detail_store import (
     analysis_rows_for,
     decode_series,
-    detail_origins,
     detail_sets_for,
     detail_sets_for_session,
     encode_series,
-    refill_lap_metrics,
-    remove_detail_sets,
     replace_detail_set,
     save_analysis,
     stream_export_rows,
@@ -122,7 +119,8 @@ def zone_set(activity_id="i1", provider=INTERVALS):
 class ActivityDetailTypeTests(unittest.TestCase):
     def test_clean_series_replaces_unusable_points_with_gaps(self):
         values, rejected = clean_series(
-            StreamChannel.HEART_RATE_BPM, [120, None, True, "x", float("nan"), 9999, 10**400]
+            StreamChannel.HEART_RATE_BPM,
+            [120, None, True, "x", float("nan"), 9999, 10**400],
         )
         self.assertEqual(values, (120.0, None, None, None, None, None, None))
         self.assertEqual(rejected, 5)
@@ -217,7 +215,10 @@ class StreamCodecTests(unittest.TestCase):
             ("text", 2),
         )
         for data, count in cases:
-            with self.subTest(count=count, size=len(data)), self.assertRaises(ValueError):
+            with (
+                self.subTest(count=count, size=len(data)),
+                self.assertRaises(ValueError),
+            ):
                 decode_series(data, count)
 
     def test_decode_rejects_a_valid_count_that_disagrees_with_the_gaps(self):
@@ -340,7 +341,9 @@ class ActivityDetailStoreTests(unittest.TestCase):
             [(item.provider, item.activity_id) for item in stored],
             [("garmin", "act_2"), ("intervals", "act_1")],
         )
-        self.assertEqual(detail_sets_for_session(self.db, "act_2")[0].provider, "garmin")
+        self.assertEqual(
+            detail_sets_for_session(self.db, "act_2")[0].provider, "garmin"
+        )
 
     def test_tombstoned_records_and_sessions_hide_details_without_deleting(self):
         self.store(stream_set())
@@ -360,7 +363,9 @@ class ActivityDetailStoreTests(unittest.TestCase):
         )
         with self.assertLogs("intervals_coach", "WARNING") as logs:
             stored = detail_sets_for(self.db, "intervals", "i1")
-        self.assertEqual([item.detail.kind for item in stored], [ActivityDetailKind.LAPS])
+        self.assertEqual(
+            [item.detail.kind for item in stored], [ActivityDetailKind.LAPS]
+        )
         (record,) = logs.records
         self.assertEqual(record.event, "activity_detail_unreadable")
         self.assertEqual(
@@ -387,98 +392,13 @@ class ActivityDetailStoreTests(unittest.TestCase):
         self.store(lap_set())
         self.store(zone_set())
         self.db.execute("DELETE FROM activity_detail_sets")
-        for table in ("activity_stream_channels", "activity_laps", "activity_zone_times"):
+        for table in (
+            "activity_stream_channels",
+            "activity_laps",
+            "activity_zone_times",
+        ):
             with self.subTest(table=table):
                 self.assertEqual(self.count(table), 0)
-
-    def test_remove_detail_sets_keeps_only_the_requested_kinds(self):
-        self.store(stream_set())
-        self.store(lap_set())
-        self.store(zone_set())
-        removed = remove_detail_sets(
-            self.db, "intervals", "i1", keep={ActivityDetailKind.LAPS}
-        )
-        self.assertEqual(removed, 2)
-        (stored,) = detail_sets_for(self.db, "intervals", "i1")
-        self.assertIs(stored.detail.kind, ActivityDetailKind.LAPS)
-        self.assertEqual(self.count("activity_stream_channels"), 0)
-        self.assertEqual(self.count("activity_zone_times"), 0)
-        self.assertEqual(self.count("activity_laps"), 2)
-
-    def test_remove_detail_sets_leaves_other_provider_activities_alone(self):
-        self.add_record(GARMIN, "g1", "act_1")
-        self.store(stream_set())
-        self.store(stream_set("g1", GARMIN))
-        self.assertEqual(remove_detail_sets(self.db, "intervals", "i1", keep=()), 1)
-        (stored,) = detail_sets_for_session(self.db, "act_1")
-        self.assertEqual(
-            (stored.provider, stored.provider_activity_id), ("garmin", "g1")
-        )
-        self.assertEqual(self.count("activity_stream_channels"), 3)
-
-    def test_detail_origins_lists_the_origins_of_stored_sets(self):
-        self.assertEqual(detail_origins(self.db, "intervals", "i1"), set())
-        self.store(stream_set())
-        self.store(
-            dataclasses.replace(lap_set(), origin=ActivityDetailOrigin.LEGACY_BACKFILL)
-        )
-        self.assertEqual(
-            detail_origins(self.db, "intervals", "i1"), {"fetch", "legacy_backfill"}
-        )
-
-    def lap_set_row(self):
-        return dict(
-            self.db.execute(
-                "SELECT mapper_version, origin, summary_sha256, content_sha256, "
-                "fetched_at, created_at, updated_at FROM activity_detail_sets "
-                "WHERE detail_kind = 'laps'"
-            ).fetchone()
-        )
-
-    def test_refill_fills_only_missing_lap_metrics_and_rehashes(self):
-        self.store(lap_set())
-        before = self.lap_set_row()
-        filled = refill_lap_metrics(
-            self.db,
-            "intervals",
-            "i1",
-            {
-                0: {"max_speed_mps": 9.0, "avg_hr": 999.0},
-                1: {"max_speed_mps": 99.0},
-                7: {"max_speed_mps": 5.0},
-            },
-            now=LATER,
-        )
-        self.assertEqual(1, filled)
-        (stored,) = detail_sets_for(self.db, "intervals", "i1")
-        warmup, work = stored.detail.laps
-        self.assertEqual((9.0, 120.0), (warmup.max_speed_mps, warmup.avg_hr))
-        self.assertEqual(11.5, work.max_speed_mps)
-        after = self.lap_set_row()
-        self.assertNotEqual(before["content_sha256"], after["content_sha256"])
-        self.assertEqual(LATER, after["updated_at"])
-        for column in ("mapper_version", "origin", "summary_sha256", "fetched_at"):
-            self.assertEqual(before[column], after[column])
-        # The new hash equals the hash of storing the refilled set directly.
-        refilled = dataclasses.replace(
-            lap_set(),
-            laps=(dataclasses.replace(lap_set().laps[0], max_speed_mps=9.0), work),
-        )
-        self.assertIs(self.store(refilled, now=LATER), WriteOutcome.UNCHANGED)
-
-    def test_refill_without_missing_metrics_changes_nothing(self):
-        self.store(lap_set())
-        before = self.lap_set_row()
-        self.assertEqual(
-            0,
-            refill_lap_metrics(
-                self.db, "intervals", "i1", {1: {"max_speed_mps": 1.0}}, now=LATER
-            ),
-        )
-        self.assertEqual(0, refill_lap_metrics(self.db, "intervals", "i2", {0: {}}, now=LATER))
-        self.assertEqual(before, self.lap_set_row())
-        with self.assertRaises(ValueError):
-            refill_lap_metrics(self.db, "intervals", "i1", {0: {"name": 1.0}}, now=LATER)
 
     def test_set_columns_must_match_their_detail_kind(self):
         insert = (
@@ -498,7 +418,16 @@ class ActivityDetailStoreTests(unittest.TestCase):
             with self.subTest(kind=kind), self.assertRaises(sqlite3.IntegrityError):
                 self.db.execute(
                     insert,
-                    (kind, resolution, lap_source, boundary, DIGEST, STAMP, STAMP, STAMP),
+                    (
+                        kind,
+                        resolution,
+                        lap_source,
+                        boundary,
+                        DIGEST,
+                        STAMP,
+                        STAMP,
+                        STAMP,
+                    ),
                 )
 
     def test_analysis_is_stored_once_per_visible_session(self):

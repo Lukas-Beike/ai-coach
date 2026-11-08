@@ -3,8 +3,9 @@
 These JSON files show the wire shapes of Garmin Connect and of stored
 Intervals.icu rows, so provider collection, compaction and canonical mapping
 code can be tested without a live account. Intervals.icu is an output target
-only and is not read any more (#1728); its files remain as inputs of the
-retired mapper that replays stored rows.
+only and is not read or mapped by the application; its files are inputs of the
+test-only builders (`tests/intervals_*_stub.py`) that give provider-neutral tests
+Intervals.icu-shaped records next to Garmin and Wahoo ones.
 
 ## Provenance and privacy
 

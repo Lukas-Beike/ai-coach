@@ -5,7 +5,6 @@ from copy import deepcopy
 from datetime import datetime
 
 from backend.activities.identity import activity_datetime, activity_kind
-from backend.providers.intervals_activity_fields import intervals_activity_device_source
 
 
 class ActivityDatetimeTests(unittest.TestCase):
@@ -53,35 +52,6 @@ class ActivityKindTests(unittest.TestCase):
                 self.assertEqual(activity_kind(activity), expected)
 
 
-class ActivityDeviceSourceTests(unittest.TestCase):
-    def test_explicit_provenance_and_wahoo_priority(self) -> None:
-        self.assertIsNone(intervals_activity_device_source(None))
-        self.assertEqual(
-            intervals_activity_device_source({"source": "GARMIN"}), "garmin"
-        )
-        self.assertEqual(
-            intervals_activity_device_source({"device_name": "Wahoo ELEMNT"}),
-            "wahoo",
-        )
-        self.assertEqual(
-            intervals_activity_device_source(
-                {"source": "Garmin", "external_id": "wahoo-123"}
-            ),
-            "wahoo",
-        )
-        self.assertIsNone(
-            intervals_activity_device_source({"name": "Wahoo", "device": "Garmin"})
-        )
-
-    def test_manual_source_has_no_device_even_with_brand_text(self) -> None:
-        for activity in (
-            {"source": "MANUAL", "device_name": "Garmin Forerunner"},
-            {"source": " manual ", "device_name": "Wahoo ELEMNT"},
-        ):
-            with self.subTest(activity=activity):
-                self.assertIsNone(intervals_activity_device_source(activity))
-
-
 class ActivityInputImmutabilityTests(unittest.TestCase):
     def test_identity_helpers_do_not_mutate_input(self) -> None:
         activity = {
@@ -93,7 +63,6 @@ class ActivityInputImmutabilityTests(unittest.TestCase):
         }
         original = deepcopy(activity)
         activity_kind(activity)
-        intervals_activity_device_source(activity)
         self.assertEqual(activity, original)
 
 

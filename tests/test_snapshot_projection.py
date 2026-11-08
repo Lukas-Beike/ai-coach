@@ -3,20 +3,17 @@
 from __future__ import annotations
 
 import unittest
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from support import (
     PROVIDER_SYNCED_TEXT,
     garmin_payload_fixture,
-    intervals_snapshot_fixture,
-    load_provider_fixture,
 )
 
 from backend.canonical.mapping import IssueReason, MappingResult
 from backend.providers.snapshot_projection import (
     project_garmin_snapshot,
-    project_intervals_snapshot,
     stored_retrieved_at,
 )
 
@@ -63,70 +60,6 @@ class StoredRetrievedAtTests(unittest.TestCase):
                 self.assertIsNone(stored_retrieved_at(record, zone=BERLIN))
 
 
-class IntervalsProjectionTests(unittest.TestCase):
-    def test_non_mapping_snapshot_projects_to_empty_results(self) -> None:
-        snapshots: tuple[object, ...] = (None, [], "text", 3)
-        for snapshot in snapshots:
-            with self.subTest(snapshot=snapshot):
-                activities, observations = project_intervals_snapshot(
-                    snapshot, zone=BERLIN, retrieved_at=SYNCED_AT
-                )
-                self.assertEqual(activities, MappingResult())
-                self.assertEqual(observations, MappingResult())
-
-    def test_wrong_section_types_report_one_issue_each(self) -> None:
-        snapshot: dict[str, object] = {
-            "recent_activities": "text",
-            "recent_wellness": None,
-            "athlete": [],
-        }
-
-        activities, observations = project_intervals_snapshot(
-            snapshot, zone=BERLIN, retrieved_at=SYNCED_AT
-        )
-
-        self.assertEqual(activities.records, ())
-        self.assertEqual(observations.records, ())
-        self.assertEqual(len(activities.issues), 1)
-        self.assertEqual(len(observations.issues), 2)
-        for issue in (*activities.issues, *observations.issues):
-            self.assertEqual(issue.reason, IssueReason.INVALID_TYPE)
-
-    def test_athlete_thresholds_are_dated_on_retrieved_local_date(self) -> None:
-        # 00:30 on 10 October in Berlin is still 9 October in UTC.
-        retrieved_at = datetime(2026, 10, 9, 22, 30, tzinfo=UTC)
-
-        _, observations = project_intervals_snapshot(
-            {"athlete": load_provider_fixture("intervals/athlete.json")},
-            zone=BERLIN,
-            retrieved_at=retrieved_at,
-        )
-
-        self.assertTrue(observations.records)
-        self.assertEqual(
-            {observation.observed_on for observation in observations.records},
-            {date(2026, 10, 10)},
-        )
-
-    def test_wellness_and_athlete_observations_are_merged_in_order(self) -> None:
-        snapshot = intervals_snapshot_fixture()
-        wellness_only = {"recent_wellness": snapshot["recent_wellness"]}
-        athlete_only = {"athlete": snapshot["athlete"]}
-
-        _, merged = project_intervals_snapshot(
-            snapshot, zone=BERLIN, retrieved_at=SYNCED_AT
-        )
-        _, wellness = project_intervals_snapshot(
-            wellness_only, zone=BERLIN, retrieved_at=SYNCED_AT
-        )
-        _, athlete = project_intervals_snapshot(
-            athlete_only, zone=BERLIN, retrieved_at=SYNCED_AT
-        )
-
-        self.assertEqual(merged.records, wellness.records + athlete.records)
-        self.assertEqual(merged.issues, ())
-
-
 class GarminProjectionTests(unittest.TestCase):
     def test_non_mapping_payload_projects_to_empty_results(self) -> None:
         payloads: tuple[object, ...] = (None, [], "text", 3)
@@ -168,15 +101,6 @@ class MalformedInputTests(unittest.TestCase):
     def test_garbage_documents_and_sections_never_raise(self) -> None:
         for garbage in GARBAGE_VALUES:
             with self.subTest(garbage=garbage):
-                intervals = project_intervals_snapshot(
-                    {
-                        "recent_activities": garbage,
-                        "recent_wellness": garbage,
-                        "athlete": garbage,
-                    },
-                    zone=BERLIN,
-                    retrieved_at=SYNCED_AT,
-                )
                 garmin = project_garmin_snapshot(
                     {
                         "activities": garbage,
@@ -188,32 +112,12 @@ class MalformedInputTests(unittest.TestCase):
                     zone=BERLIN,
                     retrieved_at=SYNCED_AT,
                 )
-                for activities, observations in (intervals, garmin):
-                    self.assertIsInstance(activities, MappingResult)
-                    self.assertIsInstance(observations, MappingResult)
-                self.assertIsInstance(
-                    project_intervals_snapshot(
-                        garbage, zone=BERLIN, retrieved_at=SYNCED_AT
-                    )[0],
-                    MappingResult,
-                )
+                activities, observations = garmin
+                self.assertIsInstance(activities, MappingResult)
+                self.assertIsInstance(observations, MappingResult)
                 self.assertIsInstance(
                     project_garmin_snapshot(
                         garbage, zone=BERLIN, retrieved_at=SYNCED_AT
                     )[1],
                     MappingResult,
                 )
-
-    def test_malformed_rows_become_counted_issues_not_records(self) -> None:
-        snapshot = {
-            "recent_activities": [None, 3, {"start_date_local": 5}],
-            "recent_wellness": [None, "row", {"id": 7}],
-        }
-
-        activities, observations = project_intervals_snapshot(
-            snapshot, zone=BERLIN, retrieved_at=SYNCED_AT
-        )
-
-        self.assertEqual(activities.records, ())
-        self.assertEqual(observations.records, ())
-        self.assertTrue(activities.issues)

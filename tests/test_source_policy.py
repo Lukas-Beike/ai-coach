@@ -17,6 +17,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import recovery_inputs
+from intervals_wellness_stub import (
+    map_intervals_athlete_thresholds,
+    map_intervals_wellness,
+)
 from performance_day_support import snapshot_metrics
 
 from backend.canonical.records import MetricValue, Observation, Provenance
@@ -40,10 +44,6 @@ from backend.performance.source_policy import (
     source_order,
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
-from backend.providers.intervals_wellness_mapping import (
-    map_intervals_athlete_thresholds,
-    map_intervals_wellness,
-)
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 GARMIN = ProviderId.GARMIN
