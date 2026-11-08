@@ -131,7 +131,6 @@ class WahooSyncAssembly:
             source=WahooStreamSource(
                 client=self.client,
                 download=download_wahoo_fit,
-                gate=inputs.resync_gate,
             ),
             mapping=WahooStreamMapping(),
             database_manager=inputs.database_manager,
@@ -141,6 +140,7 @@ class WahooSyncAssembly:
             configured=self.sync_service().configured,
             earliest_date=inputs.history_earliest_date,
             batch_limit=WAHOO_BATCH_LIMIT,
+            operation=inputs.resync_gate.operation,
         )
 
     def workout_export(self) -> WahooWorkoutExport:

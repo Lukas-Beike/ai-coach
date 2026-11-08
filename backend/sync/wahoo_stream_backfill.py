@@ -28,7 +28,6 @@ from backend.providers.garmin_rating_history import (
 from backend.providers.wahoo_activity_mapping import wahoo_workout_id
 from backend.providers.wahoo_client import WahooWorkoutFetch
 from backend.providers.wahoo_fit_download import WahooFitUnavailable, wahoo_fit_url
-from backend.sync.gates import ProviderResyncGate
 from backend.sync.stream_backfill import (
     FileHandler,
     Guard,
@@ -39,7 +38,7 @@ from backend.sync.wahoo_activity_details import wahoo_fit_provenance
 
 # Files per job. The listing is read again for each job, so the batch is larger
 # than Garmin's; the CDN downloads are paced.
-WAHOO_BATCH_LIMIT: Final = 40
+WAHOO_BATCH_LIMIT: Final = 100
 # Pages of 50 workouts: far more than the athlete's whole Wahoo history.
 HISTORY_WORKOUT_PAGES: Final = 200
 DOWNLOAD_DELAY_SECONDS: Final = 1.0
@@ -61,13 +60,11 @@ class WahooStreamSource:
         *,
         client: Callable[[], WahooWorkoutLister],
         download: Callable[[str], bytes],
-        gate: ProviderResyncGate,
         sleep: Callable[[float], None] = time.sleep,
         delay_seconds: float = DOWNLOAD_DELAY_SECONDS,
     ) -> None:
         self._client = client
         self._download = download
-        self._gate = gate
         self._sleep = sleep
         self._delay_seconds = delay_seconds
 
@@ -78,33 +75,30 @@ class WahooStreamSource:
         on_skip: SkipHandler,
         guard: Guard,  # noqa: ARG002 - writes take the service's own lock
     ) -> None:
-        # A running full resync rejects the work before any state changes.
-        with self._gate.operation():
-            fetch = self._client().list_workouts(
-                since=_oldest(batch) - timedelta(days=1),
-                until=_newest(batch) + timedelta(days=1),
-                max_pages=HISTORY_WORKOUT_PAGES,
-            )
-            links = _links(fetch.workouts)
-            # Only a complete listing vouches that a missing workout is gone.
-            complete = not (fetch.truncated or fetch.skipped)
-            downloads = 0
-            for item in batch:
-                identifier = item.provider_activity_id
-                if identifier not in links:
-                    if complete:
-                        on_file(identifier, None)
-                    else:
-                        on_skip(identifier)
-                    continue
-                url = links[identifier]
-                if url is None:
+        fetch = self._client().list_workouts(
+            since=_oldest(batch) - timedelta(days=1),
+            until=_newest(batch) + timedelta(days=1),
+            max_pages=HISTORY_WORKOUT_PAGES,
+        )
+        links = _links(fetch.workouts)
+        # Only a complete listing vouches that a missing workout is gone; with an
+        # incomplete one the workout stays a candidate and is not marked.
+        complete = not (fetch.truncated or fetch.skipped)
+        downloads = 0
+        for item in batch:
+            identifier = item.provider_activity_id
+            if identifier not in links:
+                if complete:
                     on_file(identifier, None)
-                    continue
-                if downloads:
-                    self._sleep(self._delay_seconds)
-                downloads += 1
-                self._download_one(identifier, url, on_file, on_skip)
+                continue
+            url = links[identifier]
+            if url is None:
+                on_file(identifier, None)
+                continue
+            if downloads:
+                self._sleep(self._delay_seconds)
+            downloads += 1
+            self._download_one(identifier, url, on_file, on_skip)
 
     def _download_one(
         self, identifier: str, url: str, on_file: FileHandler, on_skip: SkipHandler

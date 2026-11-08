@@ -349,14 +349,11 @@ class GarminSyncJobOwner:
 
     def _rating_backfill(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Run one rating backfill batch (newest first; stored ratings only)."""
-        if self._rating_backfill_service is None:
-            raise AppError(503, "Der Bewertungs-Backfill ist nicht verfügbar.")
-        if not self._rating_backfill_service.available():
-            # Fixture mode: no remote read, no cursor move, no continuation.
-            return {"status": "ok", "reason": "not_configured", "window_records": 0}
-        end_date = payload.get("end_date")
-        end = date.fromisoformat(iso_date_prefix(str(end_date))) if end_date else None
-        return self._rating_backfill_service.backfill(end)
+        return run_end_date_backfill(
+            self._rating_backfill_service,
+            payload,
+            "Der Bewertungs-Backfill ist nicht verfügbar.",
+        )
 
     def _sync_days(self, job_type: str) -> int:
         """Return the default window: backfills use the automatic refresh span."""
@@ -373,34 +370,39 @@ class GarminWellnessBackfill(Protocol):
     def backfill(self, days: int, end: date) -> dict[str, Any]: ...
 
 
-class GarminRatingBackfill(Protocol):
-    """Backfills the watch ratings of one batch of past activities."""
+class EndDateBackfill(Protocol):
+    """Backfills one batch of past activities, newest first, up to an end day."""
 
     def available(self) -> bool: ...
 
     def backfill(self, end: date | None) -> dict[str, Any]: ...
 
 
-class StreamBackfill(Protocol):
-    """Backfills the FIT streams of one batch of past activities."""
-
-    def available(self) -> bool: ...
-
-    def backfill(self, end: date | None) -> dict[str, Any]: ...
+GarminRatingBackfill = EndDateBackfill
+StreamBackfill = EndDateBackfill
 
 
-def run_stream_backfill(
-    service: StreamBackfill | None, payload: Mapping[str, Any]
+def run_end_date_backfill(
+    service: EndDateBackfill | None, payload: Mapping[str, Any], unavailable: str
 ) -> dict[str, Any]:
-    """Run one stream backfill batch (newest first); its chain keeps the cursor."""
+    """Run one batch; the chain keeps its cursor and continuation itself."""
     if service is None:
-        raise AppError(503, "Der Stream-Backfill ist nicht verfügbar.")
+        raise AppError(503, unavailable)
     if not service.available():
         # Fixture mode: no remote read, no cursor move, no continuation.
         return {"status": "ok", "reason": "not_configured", "window_records": 0}
     end_date = payload.get("end_date")
     end = date.fromisoformat(iso_date_prefix(str(end_date))) if end_date else None
     return service.backfill(end)
+
+
+def run_stream_backfill(
+    service: StreamBackfill | None, payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Run one stream backfill batch (newest first)."""
+    return run_end_date_backfill(
+        service, payload, "Der Stream-Backfill ist nicht verfügbar."
+    )
 
 
 class CalendarWeatherSyncJobOwner:

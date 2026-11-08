@@ -142,7 +142,7 @@ The system SHALL re-fetch the original FIT files of past Garmin (Personal API) a
 
 #### Scenario: A file is missing, empty or fails
 - **WHEN** the provider holds no file, the file holds no sensor records, a download fails three runs or answers with a client error
-- **THEN** only that record is counted and kept out of later runs, the rest of the batch goes on, and a job without `end_date` lets failed records retry.
+- **THEN** only that record is counted and kept out of later runs, the rest of the batch goes on, and queuing a finished chain again without `end_date` lets failed records retry.
 
 #### Scenario: Rate limit or rejected key
 - **WHEN** the provider limits the requests or Garmin rejects the Personal API key

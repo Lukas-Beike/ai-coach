@@ -434,9 +434,9 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         ),
         # plan_push is the explicit library export; backend/sync/jobs.py checks it.
         # stream_backfill re-fetches the FIT streams of past workouts
-        # (backend/sync/stream_backfill.py); its continuation carries ``end_date``.
+        # (backend/sync/stream_backfill.py).
         job_types=frozenset({"refresh", "plan_push", "stream_backfill"}),
-        refresh_fields=frozenset({"days", "reason", "end_date"}),
+        refresh_fields=frozenset({"days", "reason"}),
         default_sync_days=_WAHOO_DEFAULT_SYNC_DAYS,
         # Ranked after every earlier provider in the daily, startup and Coach order.
         schedule=SchedulePolicy(daily_rank=4, startup_rank=4, daily_marker=True),

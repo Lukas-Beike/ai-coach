@@ -528,7 +528,7 @@ def _normalize_refresh_job(
     # A backfill chain carries its count of consecutive empty chunks in the job.
     allowed = registry.refresh_fields(provider_value)
     if historical:
-        allowed = allowed | {"empty_chunks"}
+        allowed = allowed | {"empty_chunks", "end_date"}
     if set(values) - allowed:
         raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
 

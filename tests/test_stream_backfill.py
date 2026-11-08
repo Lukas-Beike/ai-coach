@@ -60,6 +60,7 @@ from backend.sync.gates import ProviderResyncGate
 from backend.sync.jobs import (
     STREAM_BACKFILL,
     STREAM_HISTORY_CURSOR,
+    JobValidationError,
     normalize_sync_job_request,
 )
 from backend.sync.refresh import sync_job_error_class
@@ -350,7 +351,6 @@ def wahoo_service(
         source=WahooStreamSource(
             client=lambda: lister,
             download=downloads,
-            gate=ProviderResyncGate(WAHOO),
             sleep=sleeps.append,
         ),
         mapping=WahooStreamMapping(),
@@ -361,6 +361,7 @@ def wahoo_service(
         configured=lambda: True,
         earliest_date=FLOOR,
         batch_limit=batch_limit,
+        operation=ProviderResyncGate(WAHOO).operation,
     )
     return service, lister, downloads
 
@@ -526,13 +527,14 @@ class WahooBackfillTests(unittest.TestCase):
         )
 
         for _ in range(FAILURE_LIMIT):
+            # Every retry of the first batch carries no end day: counts persist.
             with self.assertRaises(AppError) as raised:
-                service.backfill(None if _ == 0 else date(2026, 11, 3))
+                service.backfill(None)
             self.assertEqual(503, raised.exception.status)
         self.assertFalse(full_streams(env, "2"))
         self.assertEqual(["1"], state_of(env, WAHOO)["skipped_ids"])
 
-        result = service.backfill(date(2026, 11, 3))
+        result = service.backfill(None)
 
         # The failing file no longer blocks the rest.
         self.assertEqual(1, result["stored"])
@@ -581,7 +583,38 @@ class WahooBackfillTests(unittest.TestCase):
 
         result = service.backfill(None)
 
-        self.assertEqual((0, 1), (result["no_file"], result["skipped"]))
+        # The workout is neither marked nor skipped: it stays a candidate.
+        self.assertEqual((0, 0, 1), (result["no_file"], result["skipped"], 1))
+        self.assertEqual(
+            1,
+            stream_backfill_counts(env.db, env.key_values, WAHOO, FLOOR)["candidates"],
+        )
+
+    def test_a_file_that_cannot_be_stored_is_skipped_after_three_runs(self) -> None:
+        env = self.env
+        seed(env, WAHOO, 1, date(2026, 11, 3))
+        seed(env, WAHOO, 2, date(2026, 11, 2))
+        service, _lister, _downloads = wahoo_service(
+            env, [wahoo_row(1), wahoo_row(2)], {1: fit_bytes(), 2: fit_bytes()}
+        )
+        mapping: Any = service._mapping
+        original = mapping.map
+
+        def broken(candidate: StreamCandidate, data: bytes, at: datetime) -> Any:
+            if candidate.provider_activity_id == "1":
+                raise ValueError("synthetic")
+            return original(candidate, data, at)
+
+        mapping.map = broken
+
+        for _ in range(FAILURE_LIMIT):
+            with self.assertRaises(AppError):
+                service.backfill(None)
+        result = service.backfill(None)
+
+        self.assertEqual(["1"], state_of(env, WAHOO)["skipped_ids"])
+        self.assertEqual(1, result["stored"])
+        self.assertTrue(full_streams(env, "2"))
 
     def test_a_file_without_sensor_records_is_marked_and_replaces_nothing(
         self,
@@ -668,6 +701,10 @@ class WahooBackfillTests(unittest.TestCase):
         )
 
         self.assertEqual("2026-11-03", envelope["payload"]["end_date"])
+        with self.assertRaises(JobValidationError):
+            normalize_sync_job_request(
+                WAHOO, "refresh", {"end_date": "2026-11-03"}, all_sync_days=-1
+            )
 
 
 class GarminBackfillTests(unittest.TestCase):

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Final, Protocol
@@ -207,6 +207,7 @@ class StreamBackfillService:
         configured: Callable[[], bool],
         earliest_date: date,
         batch_limit: int,
+        operation: Callable[[], AbstractContextManager[Any]] = nullcontext,
     ) -> None:
         self._provider = provider
         self._source = source
@@ -218,6 +219,7 @@ class StreamBackfillService:
         self._configured = configured
         self._earliest_date = earliest_date
         self._batch_limit = batch_limit
+        self._operation = operation
 
     def available(self) -> bool:
         """Return whether a real provider read is configured (never in fixture mode)."""
@@ -235,10 +237,17 @@ class StreamBackfillService:
             raise AppError(
                 503, "Der Anbieter ist nicht konfiguriert.", reason="not_configured"
             )
+        # A running full resync rejects the work before any state changes.
+        with self._operation():
+            return self._backfill(end)
+
+    def _backfill(self, end: date | None) -> dict[str, Any]:
         with self._database_manager().reader() as db:
             state = _read_state(self._key_values, db, self._provider)
-            if end is None:
-                # A fresh chain lets records that failed before try again.
+            cursor = read_cursor(db, self._provider, STREAM_HISTORY_CURSOR)
+            if end is None and _at_floor(cursor.get("cursor"), self._earliest_date):
+                # A rerun of a finished chain lets records that failed before try
+                # again; a retry of a first batch keeps its failure counts.
                 state["skipped_ids"] = []
                 state["failures"] = {}
             selection = select_stream_candidates(
@@ -313,7 +322,14 @@ class StreamBackfillService:
         if data is None:
             outcome.no_file.append(identifier)
             return
-        result = self._store(candidate, data)
+        try:
+            result = self._store(candidate, data)
+        except AppError:
+            raise
+        except Exception:  # noqa: BLE001 - counted like a failed download.
+            # A file that cannot be mapped or stored must not block the chain
+            # for ever: the third failing run skips it.
+            raise RatingReadStopped(FAILED, identifier) from None
         if result == STORED:
             outcome.stored.append(identifier)
         elif result == NO_STREAMS:
@@ -444,6 +460,11 @@ def _excluded(state: Mapping[str, Any]) -> frozenset[str]:
         | frozenset(state["no_stream_ids"])
         | frozenset(state["skipped_ids"])
     )
+
+
+def _at_floor(cursor: object, floor: date) -> bool:
+    """Whether a stored cursor marks a finished chain."""
+    return bool(cursor) and str(cursor) <= floor.isoformat()
 
 
 def _next_end(oldest: str | None) -> str | None:
