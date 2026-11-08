@@ -197,7 +197,9 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
-            inputs = read_performance_inputs(selector, db, as_of=TODAY)
+            inputs = read_performance_inputs(
+                selector, db, activity_reader=selector, as_of=TODAY
+            )
         self.assertIsNotNone(inputs)
         assert inputs is not None
         legacy = current_performance_context(

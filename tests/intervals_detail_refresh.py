@@ -32,7 +32,6 @@ from backend.providers.intervals_activity_fields import (
     ACTIVITY_DETAIL_STREAM_TYPES,
     activity_detail_laps,
 )
-from backend.runtime.ports import ActivityRowAndSummaryReader
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,
@@ -83,7 +82,7 @@ class ActivityDetailRefreshService:
         *,
         api_client: Any,
         database_manager: Any,
-        row_reader: ActivityRowAndSummaryReader,
+        row_reader: Any,
         store: ActivityDetailStore,
         utc_now: Callable[[], str],
         configured: bool,

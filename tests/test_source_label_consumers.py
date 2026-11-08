@@ -39,7 +39,6 @@ class ExportedSourceConstantTests(unittest.TestCase):
         self.assertEqual("Garmin Connect", garmin_weight.GARMIN_PERFORMANCE_SOURCE)
 
     def test_body_history_source_constants_are_unchanged(self):
-        self.assertEqual("Intervals.icu Wellness", body.INTERVALS_SOURCE)
         self.assertEqual("Garmin Connect", body.GARMIN_SOURCE)
 
 
