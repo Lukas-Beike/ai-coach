@@ -27,9 +27,13 @@
     const max = Math.max(...points.map((point) => point[1]));
     const start = points[0][0];
     const duration = Math.max(1, points.at(-1)[0] - start);
-    const y = (value) => top + (max - value) / Math.max(1, max - min) * (height - top - bottom);
+    // A near-constant series keeps an axis span of at least 5 % of its level (1 unit minimum) and stays a line.
+    const level = (max + min) / 2;
+    const axisSpan = Math.max(max - min, 1, Math.abs(level) * 0.05);
+    const axisMax = level + axisSpan / 2;
+    const y = (value) => top + (axisMax - value) / axisSpan * (height - top - bottom);
     const x = (time) => left + (time - start) / duration * (width - left - right);
-    const ticks = max === min ? [min] : [max, (max + min) / 2, min];
+    const ticks = [axisMax, level, level - axisSpan / 2];
     ticks.forEach((value) => {
       const line = document.createElementNS(SVG_NS, "line"); line.setAttribute("x1", String(left)); line.setAttribute("x2", String(width - right)); line.setAttribute("y1", String(y(value))); line.setAttribute("y2", String(y(value))); line.setAttribute("class", "activity-gridline"); svg.append(line);
       const tick = document.createElementNS(SVG_NS, "text"); tick.setAttribute("x", String(left - 8)); tick.setAttribute("y", String(y(value) + 4)); tick.setAttribute("text-anchor", "end"); tick.textContent = Number(value).toLocaleString("de-DE", { maximumFractionDigits: 1 }); svg.append(tick);
@@ -279,19 +283,42 @@
     content.append(node("p", values.join(" · ")));
   }
 
+  const COVERAGE_LABELS = { power_w: "Leistung", heart_rate_bpm: "Herzfrequenz", speed_mps: "Geschwindigkeit", altitude_m: "Höhe", distance_m: "Distanz", grade_pct: "Steigung", cadence_rpm: "Kadenz", temperature_c: "Temperatur" };
+
+  // Per provider: the load state and the data coverage, with readable channel names.
+  function providerFacts(entry) {
+    const label = entry.label || entry.provider;
+    const facts = [node("p", entry.fetched_at ? `${label} · Detaildaten geladen: ${formatTime(entry.fetched_at)}` : `${label} · Detaildaten wurden noch nicht geladen.`, "muted")];
+    const coverage = Object.entries(entry.coverage || {}).map(([name, value]) => `${COVERAGE_LABELS[name] || name}: ${value?.valid_points} von ${value?.points}`);
+    if (coverage.length) facts.push(node("p", `Datenabdeckung ${label} · ${coverage.join(" · ")} Messwerten`, "muted"));
+    return facts;
+  }
+
+  // Warnings and load errors stay visible; the provenance is one muted source line with the details folded away.
   // Each contributing provider reports its own load state; provider text is shown as plain text only.
   function providerNotes(payload) {
     const detail = payload?.detail_data || {};
+    const providers = detail.providers || [];
     const notes = [];
-    for (const entry of detail.providers || []) {
+    const facts = [];
+    const loaded = providers.filter((entry) => entry.fetched_at);
+    if (providers.length) {
+      const latest = loaded.map((entry) => entry.fetched_at).sort().at(-1);
+      notes.push(node("p", loaded.length ? `Quelle: ${loaded.map((entry) => entry.label || entry.provider).join(", ")} · Stand ${formatTime(latest)}` : "Detaildaten noch nicht geladen", "muted"));
+    }
+    for (const entry of providers) {
       const label = entry.label || entry.provider;
-      notes.push(node("p", entry.fetched_at ? `${label} · Detaildaten geladen: ${formatTime(entry.fetched_at)}` : `${label} · Detaildaten wurden noch nicht geladen.`, "muted"));
       if (entry.stale) notes.push(node("p", `${label}: Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten vor einer neuen Bewertung.`, "muted"));
       if (entry.load_error?.message) notes.push(node("p", `${label}: ${entry.load_error.message} Automatischer Ladeversuch: ${formatTime(entry.load_error.observed_at)}`, "activity-analysis-error"));
-      const coverage = Object.entries(entry.coverage || {}).map(([name, value]) => `${name}: ${value?.valid_points}/${value?.points} Messwerte`);
-      if (coverage.length) notes.push(node("p", `Datenabdeckung ${label} · ${coverage.join(" · ")}`, "muted"));
+      facts.push(...providerFacts(entry));
     }
+    // The simplified-charts note changes how the charts read, so it stays outside the folded details.
     if (detail.display_sampled) notes.push(node("p", "Diagramme vereinfacht dargestellt", "muted"));
+    if (facts.length) {
+      const details = node("details", null, "provenance-details");
+      details.append(node("summary", "Herkunft im Detail"), ...facts);
+      notes.push(details);
+    }
     return notes;
   }
 

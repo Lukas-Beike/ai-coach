@@ -130,6 +130,20 @@ function providerJobErrorDetail(job) {
   return actionable?.error_detail || job?.error_detail || "";
 }
 
+// Calendar refresh: reloads the local calendar and also runs the shared calendar sync when one is set up.
+function bindPlanRefresh() {
+  const refresh = AppViewRefresh.create({
+    api: (path, options) => (path === "local" ? Promise.resolve({ status: "local" }) : api(path, options)),
+    waitForJob: (...args) => waitForSyncJob(...args),
+    getRoute: () => state.route,
+    getRequest: () => ({ path: state.data?.external_calendar?.configured ? "/api/external-calendar/sync" : "local", body: {} }),
+    reload: () => load(),
+    button: $("#planRefreshButton"),
+    status: $("#planRefreshStatus"),
+  });
+  $("#planRefreshButton").addEventListener("click", () => void refresh());
+}
+
 async function waitForSyncJob(jobId) {
   if (!jobId) return { status: "unknown" };
   for (let attempt = 0; attempt < 180; attempt += 1) {

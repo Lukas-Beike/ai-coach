@@ -41,6 +41,7 @@ document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEvent
 document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", () => restoreDialogFocus(dialog)));
 
 $("#loginForm").addEventListener("submit", login);
+$("#loginPasswordToggle").addEventListener("click", toggleLoginPassword);
 installLoginDialogGuards();
 setupCoachEvents();
 $("#appearanceSelect").addEventListener("change", (event) => {
@@ -55,6 +56,7 @@ document.addEventListener("click", (event) => {
 });
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 bindExternalCalendar(syncExternalCalendar);
+bindPlanRefresh();
 $("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#yazioCheckButton").addEventListener("click", checkYazioConnection);
 bindProviderChecks();

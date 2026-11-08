@@ -346,3 +346,20 @@ The client SHALL mark every derived or estimated value with one "Schätzung" chi
 - **THEN** calories form one hero tile above one macro row, runs of days without data collapse to one row, and the product tab has one primary action.
 
 Evidence: `public/components.js::createEstimateChip`, `public/performance-view.js::predictionTime`, `public/analysis.js::appendAnalysisLineKey`, `public/nutrition.js::nutritionChartRows`, `tests/test_css_design_tokens.py::test_training_focus_percentages_use_neutral_text_in_both_themes`, `e2e/estimates-targets.spec.js`.
+
+### Requirement: Selection, sources and axes read consistently
+The client SHALL fill the selected tab or range with one accent style everywhere, show the app name, a password toggle and an invalid-field border on the login, and show a meal source only when it differs from the manual local default. Charts SHALL keep a minimum axis span, draw a flat series as a line and space tick labels evenly, naming weeks "Woche ab". Session detail SHALL show one muted source line with the provenance folded away.
+
+#### Scenario: Selection and login
+- **WHEN** a segment tab, a range switch or the main navigation shows its active entry, or the login rejects a password
+- **THEN** tabs and range switch share one filled accent style, the active navigation entry is filled, and the password field gets a red border with `aria-invalid`.
+
+#### Scenario: Flat series and weekly axes
+- **WHEN** a session series is constant or a weekly chart renders
+- **THEN** the axis spans at least 5 % of the level and the series is a line; weekly charts name "Woche ab" and label evenly spaced weeks.
+
+#### Scenario: Source lines
+- **WHEN** a diary entry is manual and local, or a session carries provider data
+- **THEN** the entry shows no source line, and the session shows one muted "Quelle" line with the provenance details folded.
+
+Evidence: `public/analysis.js::appendAnalysisDateTicks`, `public/activity-analysis.js::chartRange`, `public/activity-details.js::providerNotes`, `public/nutrition.js::nutritionCard`, `public/auth.js::setLoginError`, `e2e/ux-polish.spec.js`.
