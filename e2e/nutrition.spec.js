@@ -9,7 +9,8 @@ test("@responsive nutrition diary and saved meals remain read-only and preserve 
   await expect(page.locator("#appShell")).toBeVisible();
   await expect(page.locator("#nutritionStatus")).not.toContainText("wird geladen");
   await expect(page.locator("#nutritionEntries .nutrition-card")).toHaveCount(0);
-  await expect(page.locator("#nutritionTotals")).toContainText("– kcal");
+  await expect(page.locator("#nutritionTotals strong.value-missing")).toHaveCount(6);
+  await expect(page.locator("#nutritionTotals strong.value-missing").first()).toHaveText("nicht erfasst");
   await expect(page.locator('[data-nutrition-segment="meals"], #nutritionMeals, #nutritionTemplates')).toHaveCount(0);
   await expect(page.locator("#nutritionDefine, #nutritionLog, #trainingFueling")).toHaveCount(0);
   const send = async (text) => {

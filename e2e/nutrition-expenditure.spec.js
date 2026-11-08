@@ -124,7 +124,7 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
   releaseResponse();
   await expect(expenditure).toContainText("keine Garmin-Verbrauchsdaten");
   await expect(expenditure.locator("#nutritionExpenditureDate")).toBeEmpty();
-  await expect(expenditure).toContainText("Nicht verfügbar");
+  await expect(expenditure.locator("strong.value-missing").first()).toHaveText("nicht erfasst");
 
   responseMode = "error";
   await page.evaluate(() => loadNutrition());

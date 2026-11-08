@@ -115,10 +115,10 @@ test("analysisHasData is true only when a series holds a valid finite point", ()
   assert.equal(analysisValidPoint({ value: Infinity }), false);
 });
 
-test("an analysis chart without data is omitted and its title is listed once as missing", () => {
-  const { analysisChart, collectAnalysisChart, analysisMissingDataNote } = loadFunctions(
+test("an analysis chart without data is omitted and its title is collected once as missing", () => {
+  const { analysisChart, collectAnalysisChart } = loadFunctions(
     "analysis.js",
-    ["analysisValidPoint", "analysisHasData", "analysisAxisCaption", "analysisChart", "collectAnalysisChart", "analysisMissingDataNote"],
+    ["analysisValidPoint", "analysisHasData", "analysisAxisCaption", "analysisChart", "collectAnalysisChart"],
     {
       reportNode: (tag, text, className) => ({ tag, text, className }),
     },
@@ -130,8 +130,55 @@ test("an analysis chart without data is omitted and its title is listed once as 
   assert.equal(collectAnalysisChart(missing, "Ruhepuls", empty, "bpm", "2026-10-01", "2026-10-17", ""), null);
   assert.equal(collectAnalysisChart(missing, "HRV", [], "ms", "2026-10-01", "2026-10-17", ""), null);
   assert.deepEqual(Array.from(missing), ["Ruhepuls", "HRV"]);
-  assert.deepEqual({ ...analysisMissingDataNote(missing) }, { tag: "p", text: "Keine Daten: Ruhepuls, HRV", className: "empty" });
-  assert.equal(analysisMissingDataNote([]), null, "nothing missing renders no line");
+});
+
+test("an analysis segment is empty only when every content container reports no data", () => {
+  const markers = {};
+  const { analysisSegmentEmpty } = loadFunctions("analysis.js", ["analysisSegmentEmpty"], {
+    ANALYSIS_SEGMENT_CONTENT: { load: ["focus", "charts"], sessions: ["list"] },
+    document: { getElementById: (id) => (id in markers ? { dataset: { analysisEmpty: markers[id] } } : { dataset: {} }) },
+  });
+  assert.equal(analysisSegmentEmpty("load"), false, "unrendered containers are not empty");
+  Object.assign(markers, { focus: "true", charts: "loading" });
+  assert.equal(analysisSegmentEmpty("load"), false, "a loading container keeps the segment");
+  markers.charts = "failed";
+  assert.equal(analysisSegmentEmpty("load"), false, "a failed container shows its retry");
+  markers.charts = "true";
+  assert.equal(analysisSegmentEmpty("load"), true);
+  markers.list = "false";
+  assert.equal(analysisSegmentEmpty("sessions"), false);
+});
+
+test("the analysis empty card offers one action that depends on the connected sources", () => {
+  const reportNode = (tag, text, className) => ({ tag, text, className, listeners: [], addEventListener(type) { this.listeners.push(type); } });
+  const state = { data: {} };
+  const { analysisEmptyCard, analysisDataSourceConnected } = loadFunctions("analysis.js", ["analysisDataSourceConnected", "analysisSegmentPeriod", "analysisEmptyCard"], {
+    state, reportNode, analysisRefresh() {}, analysisHistoryPeriod: "twelveWeeks", recoveryHistoryPeriod: "fortnight",
+    ANALYSIS_EMPTY_TITLES: { load: "Noch keine Belastungsdaten", recovery: "Noch keine Erholungsdaten" },
+    createEmptyState: (title, cause, action) => ({ title, cause, action }),
+  });
+  const offline = analysisEmptyCard("load");
+  assert.deepEqual([offline.title, offline.cause, offline.action.tag, offline.action.text, offline.action.href], ["Noch keine Belastungsdaten", "Garmin oder Wahoo ist nicht verbunden.", "a", "Anbindung einrichten", "#more/connections"]);
+  state.data = { garmin: { configured: false }, wahoo: { connected: true } };
+  assert.equal(analysisDataSourceConnected(state.data), true);
+  const connected = analysisEmptyCard("load");
+  assert.deepEqual([connected.cause, connected.action.tag, connected.action.text, connected.action.listeners.length], ["Noch keine Daten abgeglichen.", "button", "Jetzt abgleichen", 1]);
+  // An empty 14-day window may hide older data, so it offers the 12-week view instead of a sync.
+  const shortWindow = analysisEmptyCard("recovery");
+  assert.deepEqual([shortWindow.title, shortWindow.cause, shortWindow.action.text], ["Noch keine Erholungsdaten", "Keine Daten in den letzten 14 Tagen.", "12 Wochen anzeigen"]);
+  state.data = {};
+  assert.equal(analysisEmptyCard("recovery").action.text, "Anbindung einrichten", "without a source the period does not matter");
+  assert.equal(analysisDataSourceConnected({ garmin: { configured: true } }), true);
+  assert.equal(analysisDataSourceConnected({ garmin: { configured: false }, wahoo: { connected: false } }), false);
+});
+
+test("the power profile counts only measured durations as values", () => {
+  const { cyclingPowerProfileHasValues } = loadFunctions("analysis.js", ["cyclingPowerProfilePoint", "cyclingPowerProfileHasValues"], {
+    CYCLING_POWER_PROFILE_DURATIONS: [[5, "5 Sekunden"], [60, "1 Minute"]],
+  });
+  assert.equal(cyclingPowerProfileHasValues({}), false);
+  assert.equal(cyclingPowerProfileHasValues({ windows: { 90: { power: [{ duration_seconds: 5, status: "missing", watts: null }] } } }), false);
+  assert.equal(cyclingPowerProfileHasValues({ windows: { 90: { power: [{ duration_seconds: 60, status: "ok", watts: 300 }] } } }), true);
 });
 
 test("a filled analysis chart is kept and is not listed as missing", () => {
@@ -175,7 +222,7 @@ test("body overview falls back to Garmin when the profile fat is absent", () => 
     isPreferredSource: (item, preferred) => item.source_provider === preferred,
     analysisValidPoint: (point) => point.value != null, dateLabel: (v) => v,
     analysisValue: (v, unit) => `${v} ${unit}`, analysisPeriodControls: () => makeNode("nav"),
-    bodyHistoryPeriod: "twelveWeeks", bodyMetricChart: () => null, analysisMissingDataNote: () => makeNode("p"),
+    bodyHistoryPeriod: "twelveWeeks", bodyMetricChart: () => null,
   });
   const point = { date: "2026-10-10", value: 16 };
   const body = { preferred_providers: { body_fat_pct: "garmin" }, windows: { "12w": { start: "2026-10-01", end: "2026-10-15", metrics: { body_fat_pct: [{ source_provider: "garmin", points: [point] }] } } } };
@@ -197,7 +244,7 @@ test("performance status shows only the server's status text", () => {
 });
 
 test("current performance shows the status lines below its heading", () => {
-  const root = { children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
+  const root = { dataset: {}, children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
   const reportNode = (tag, text, className) => ({ tag, text, className, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
   const { renderCurrentPerformance } = loadFunctions("performance-view.js", ["currentPerformanceValues", "renderCurrentPerformance"], {
     document: { getElementById: () => root },
@@ -209,8 +256,10 @@ test("current performance shows the status lines below its heading", () => {
   });
   renderCurrentPerformance({}, undefined, ["Daten werden vorbereitet"]);
   assert.deepEqual(root.children.slice(0, 2).map((node) => [node.tag, node.text]), [["h3", "Aktuelle Leistungswerte"], ["p", "Daten werden vorbereitet"]]);
+  assert.equal(root.dataset.analysisEmpty, "false", "a status line keeps the section visible");
   renderCurrentPerformance({}, undefined);
   assert.equal(root.children.filter((node) => node.text === "Daten werden vorbereitet").length, 0);
+  assert.equal(root.dataset.analysisEmpty, "true");
 });
 
 test("weekly daily-activity mean averages known days and keeps empty weeks as gaps", () => {

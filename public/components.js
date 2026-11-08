@@ -40,6 +40,46 @@ function createEmptyState(title, description, action = null) {
   return root;
 }
 
+// Loading, failed and absent data look different (#1783): a busy line, a warning card
+// with one retry action, and a muted "nicht erfasst" value.
+const DATA_LOAD_TIMEOUT_MS = 15_000;
+
+function createLoadingState(text) {
+  const root = document.createElement("p");
+  root.className = "loading-state";
+  root.setAttribute("role", "status");
+  root.setAttribute("aria-busy", "true");
+  root.textContent = text;
+  return root;
+}
+
+function createErrorState(message, onRetry) {
+  const root = document.createElement("div");
+  root.className = "error-state";
+  root.setAttribute("role", "alert");
+  const heading = document.createElement("strong");
+  heading.textContent = "Konnte nicht geladen werden.";
+  root.append(heading);
+  if (message) {
+    const copy = document.createElement("span");
+    copy.textContent = message;
+    root.append(copy);
+  }
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "secondary-button";
+  retry.textContent = "Erneut versuchen";
+  retry.addEventListener("click", () => { retry.disabled = true; onRetry(); }, { once: true });
+  root.append(retry);
+  return root;
+}
+
+function markValueMissing(element, text = "nicht erfasst") {
+  element.textContent = text;
+  element.classList.add("value-missing");
+  return element;
+}
+
 function createSkeletonStack(rows = 3) {
   const root = document.createElement("div");
   root.className = "skeleton-stack";

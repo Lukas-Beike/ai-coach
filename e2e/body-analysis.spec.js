@@ -83,7 +83,7 @@ test("@responsive Body plots measurements and W/kg appears only in the cycling t
   await expect(overview.locator("td")).toHaveText(["—", "—"]);
   await expect(root.locator("circle[data-series]")).toHaveCount(0);
   await expect(root.locator("[data-body-metric]")).toHaveCount(0);
-  await expect(root.locator("p.empty")).toHaveText("Keine Daten: Gewicht, Körperfett");
+  await expect(root).not.toContainText("Keine Daten");
   expect(await new AxeBuilder({ page }).include("#bodyAnalysisCharts").analyze()).toEqual(expect.objectContaining({ violations: [] }));
   await expect(root.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
   await page.evaluate(() => { location.hash = "#analysis/performance"; });
@@ -118,7 +118,7 @@ test("@responsive Body keeps old measurements dated and long gaps empty", async 
   await expect(root.locator("[data-body-metric='weight_kg'] circle[data-series='0']")).toHaveCount(2);
   await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("[data-body-metric]")).toHaveCount(0);
-  await expect(root.locator("p.empty")).toHaveText("Keine Daten: Gewicht, Körperfett");
+  await expect(root).not.toContainText("Keine Daten");
   await expect(root.locator("[data-body-overview] th small")).toHaveText(["14.08.2026", "14.08.2026"]);
 });
 

@@ -12,7 +12,10 @@ const TRAINING_RECORDS = "/api/analysis/training-records";
 function createContext(calls) {
   const context = vm.createContext({
     state: { data: { state_versions: { training: 1 } } },
-    api: async (requestPath) => {
+    DATA_LOAD_TIMEOUT_MS: 15_000,
+    api: async (requestPath, options) => {
+      // Analysis reports time out into a retry state instead of a permanent loading line (#1783).
+      assert.equal(options?.timeoutMs, 15_000);
       calls.push(requestPath);
       return { path: requestPath, call: calls.length };
     },

@@ -258,6 +258,16 @@ button { cursor: pointer; }
 .segmented-control > .active { color: var(--ink); background: var(--accent-soft); }
 .empty-state { display: grid; gap: 8px; place-items: center; min-height: 132px; padding: var(--space-5); border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); color: var(--muted); text-align: center; }
 .empty-state strong { color: var(--ink); font-size: 20px; }
+.empty-state .push-button { min-height: 44px; }
+.loading-state { display: flex; align-items: center; gap: 10px; margin: 0; padding: var(--space-3) 0; color: var(--muted); }
+.loading-state::before { flex: 0 0 auto; width: 14px; height: 14px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; content: ""; animation: loading-spin 900ms linear infinite; }
+@keyframes loading-spin { to { transform: rotate(360deg); } }
+.error-state { display: grid; gap: 8px; justify-items: start; padding: var(--space-4); border: 1px solid var(--danger-border); border-radius: var(--radius-lg); background: var(--danger-surface); }
+.error-state strong { color: var(--ink); }
+.error-state span { color: var(--muted); overflow-wrap: anywhere; }
+.value-missing { color: var(--muted); font-weight: 400; font-style: italic; }
+strong.value-missing, .nutrition-total strong.value-missing { font-size: 1rem; }
+#analysisEmptyState { margin-top: var(--space-4); }
 .skeleton { min-height: 14px; border-radius: 999px; background: linear-gradient(90deg, var(--surface-raised), var(--line-strong), var(--surface-raised)); background-size: 220% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
 .action-receipt, .sync-progress { display: grid; gap: 8px; padding: var(--space-3); border: 1px solid var(--accent-border); border-radius: var(--radius-md); background: var(--accent-wash); }
 .sync-progress { border-color: var(--sync-border); background: var(--sync-surface); }

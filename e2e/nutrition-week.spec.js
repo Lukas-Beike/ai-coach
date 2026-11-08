@@ -27,11 +27,11 @@ test("@responsive nutrition week shows coverage, signed balance and missing days
   const intake = week.locator(".nutrition-total").filter({ hasText: "Ø Aufnahme" });
   await expect(intake).toContainText("2.200 kcal");
   await expect(intake).toContainText("6 von 14 Tagen");
-  await expect(week.locator(".nutrition-total").filter({ hasText: "Ø Fett" })).toContainText("Nicht verfügbar");
+  await expect(week.locator(".nutrition-total").filter({ hasText: "Ø Fett" }).locator("strong.value-missing")).toHaveText("nicht erfasst");
   const sugar = week.locator(".nutrition-total").filter({ hasText: "Ø Zucker" });
   await expect(sugar).toContainText("25 g");
   await expect(sugar).toContainText("3 von 14 Tagen");
-  await expect(week.locator(".nutrition-total").filter({ hasText: "Ø Salz" })).toContainText("Nicht verfügbar");
+  await expect(week.locator(".nutrition-total").filter({ hasText: "Ø Salz" }).locator("strong.value-missing")).toHaveText("nicht erfasst");
   await expect(week.locator(".nutrition-week-chart-day")).toHaveCount(14);
   await expect(week.locator(".nutrition-week-chart-day").first()).toContainText("2.200 kcal");
   await expect(week.locator(".nutrition-week-chart-track.is-missing")).toHaveCount(17);

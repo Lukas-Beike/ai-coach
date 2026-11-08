@@ -358,15 +358,15 @@
 
   async function loadPanel(panel, summary) {
     const epoch = list.epoch;
-    panel.replaceChildren(node("p", "Analyse wird geladen …", "muted"));
+    panel.replaceChildren(createLoadingState("Analyse wird geladen …"));
     let payload;
     try {
-      payload = await api(`/api/activities/${encodeURIComponent(String(summary.id))}`);
+      payload = await api(`/api/activities/${encodeURIComponent(String(summary.id))}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
     } catch (error) {
       if (epoch !== list.epoch || !panel.isConnected) return;
       // The list row's summary still renders when the detail document cannot be read.
       renderPanel(panel, summary, null, epoch);
-      panel.prepend(node("p", error.message, "muted"));
+      panel.prepend(createErrorState(error.message, () => void loadPanel(panel, summary)));
       return;
     }
     if (epoch === list.epoch && panel.isConnected) renderPanel(panel, summary, payload, epoch);
@@ -431,22 +431,29 @@
   async function load() {
     const root = document.getElementById("activityAnalysis");
     if (!root) return;
-    if (!root.childElementCount) root.append(node("p", "Einheiten werden geladen …", "muted"));
+    if (!root.querySelector(".activity-analysis-list")) {
+      root.dataset.analysisEmpty = "loading";
+      root.replaceChildren(createLoadingState("Einheiten werden geladen …"));
+    }
     try {
-      const payload = await api(`/api/activities?limit=${PAGE_SIZE}`);
+      const payload = await api(`/api/activities?limit=${PAGE_SIZE}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
       const key = `${payload.snapshot_synced_at}|${(payload.activities || []).map((activity) => activity.id).join(",")}`;
       // An unchanged sync keeps opened sessions and loaded pages in place.
       if (key === list.key && root.querySelector(".activity-analysis-list")) return;
       list = { key, cursor: null, epoch: list.epoch + 1 };
       const items = node("div", null, "activity-analysis-list");
       root.replaceChildren(items);
-      if (!payload.activities?.length) items.append(node("p", "Noch keine abgeschlossenen Einheiten synchronisiert.", "muted"));
+      // No sessions: the analysis view shows its one empty card instead of the list (#1783).
+      root.dataset.analysisEmpty = String(!payload.activities?.length);
       appendPage(root, payload);
     } catch (error) {
       if (error?.name === "AbortError") return;
       // A failed refresh keeps an already rendered list.
       if (root.querySelector(".activity-analysis-list")) return;
-      root.replaceChildren(node("p", error.message, "muted"));
+      root.dataset.analysisEmpty = "failed";
+      root.replaceChildren(createErrorState(error.message, () => void render()));
+    } finally {
+      renderAnalysisSegmentsIfActive();
     }
   }
 
