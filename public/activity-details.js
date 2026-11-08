@@ -457,7 +457,9 @@
   function renderAerobic(payload, content) {
     const aerobic = payload.analysis?.aerobic;
     if (aerobic) {
-      content.append(node("h3", "Herzfrequenzdrift"));
+      const driftHeading = node("h3", "Herzfrequenzdrift");
+      driftHeading.append(" ", createEstimateChip());
+      content.append(driftHeading);
       let description = aerobic.reason;
       if (aerobic.status === "ok") {
         const longSession = aerobic.long_session ? " · lange Einheit" : "";

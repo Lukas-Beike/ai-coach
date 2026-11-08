@@ -32,9 +32,11 @@ test("@responsive nutrition week shows coverage, signed balance and missing days
   await expect(sugar).toContainText("25 g");
   await expect(sugar).toContainText("3 von 14 Tagen");
   await expect(week.locator(".nutrition-total").filter({ hasText: "Ø Salz" }).locator("strong.value-missing")).toHaveText("nicht erfasst");
-  await expect(week.locator(".nutrition-week-chart-day")).toHaveCount(14);
+  // Six days with values and one row for the eight following days without data.
+  await expect(week.locator(".nutrition-week-chart-day")).toHaveCount(7);
+  await expect(week.locator(".nutrition-week-chart-day.is-empty")).toHaveText(/28\.09–05\.10\s*keine Daten/);
   await expect(week.locator(".nutrition-week-chart-day").first()).toContainText("2.200 kcal");
-  await expect(week.locator(".nutrition-week-chart-track.is-missing")).toHaveCount(17);
+  await expect(week.locator(".nutrition-week-chart-track.is-missing")).toHaveCount(1);
   await week.getByText("Tageswerte anzeigen", { exact: true }).click();
   await expect(week.locator("tbody tr")).toHaveCount(14);
   await expect(week.locator("tbody tr").last().locator("td")).toHaveText(["–", "–", "–"]);
@@ -50,7 +52,7 @@ test("@responsive nutrition week shows coverage, signed balance and missing days
   // A failed refresh keeps the last loaded week on this device and says so.
   await expect(week).toContainText("Gespeicherter Stand. Aktualisierung fehlgeschlagen");
   await expect(week).toContainText("+500 kcal");
-  await expect(week.locator(".nutrition-week-chart-day")).toHaveCount(14);
+  await expect(week.locator(".nutrition-week-chart-day")).toHaveCount(7);
   await page.evaluate(() => localStorage.removeItem("coach-view-cache"));
   await page.locator('[data-nutrition-segment="diary"]').click();
   await page.locator('[data-nutrition-segment="week"]').click();
@@ -63,22 +65,21 @@ test("@responsive nutrition week shows coverage, signed balance and missing days
 test("@responsive nutrition history switches between 14 days and 12 weeks", async ({ page }) => {
   await page.goto("/#nutrition/week");
   const root = page.locator("#nutritionWeek");
-  await expect(root.locator(".nutrition-week-chart-day")).toHaveCount(14);
+  await expect(root.locator("#nutritionWeekChartHeading")).toHaveText("Tagesverlauf");
   await expect(root.getByRole("button", { name: "Letzte 14 Tage", exact: true })).toHaveAttribute("aria-pressed", "true");
   await root.getByRole("button", { name: "12 Wochen", exact: true }).click();
   await expect(root.locator("#nutritionWeekHeading")).toHaveText("Letzte 12 Wochen");
-  await expect(root.locator(".nutrition-week-chart-day")).toHaveCount(12);
   await expect(root.locator("#nutritionWeekChartHeading")).toHaveText("Wochendurchschnitte");
   await expect(root.locator("#nutritionWeekStatus")).toContainText("84 Tagen");
   await root.getByText("Tageswerte anzeigen", { exact: true }).click();
   await expect(root.locator("tbody tr")).toHaveCount(84);
   await page.reload();
-  await expect(root.locator(".nutrition-week-chart-day")).toHaveCount(14);
+  await expect(root.locator("#nutritionWeekChartHeading")).toHaveText("Tagesverlauf");
   await root.getByRole("button", { name: "12 Wochen", exact: true }).click();
-  await expect(root.locator(".nutrition-week-chart-day")).toHaveCount(12);
+  await expect(root.locator("#nutritionWeekChartHeading")).toHaveText("Wochendurchschnitte");
   await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("#nutritionWeekHeading")).toHaveText("Letzte 14 Tage");
-  await expect(root.locator(".nutrition-week-chart-day")).toHaveCount(14);
+  await expect(root.locator("#nutritionWeekChartHeading")).toHaveText("Tagesverlauf");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

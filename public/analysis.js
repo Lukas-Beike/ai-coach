@@ -108,11 +108,13 @@ function bindAnalysisPopover(button, info) {
 }
 
 function analysisChart(title, series, unit, start, end, note, {
-  sparse = false, zeroCentered = false, showLegend = true, calendarWeeks = false, caption = analysisAxisCaption(unit),
+  sparse = false, zeroCentered = false, showLegend = true, calendarWeeks = false, caption = analysisAxisCaption(unit), estimate = false,
 } = {}) {
   if (!analysisHasData(series)) return null;
   const section = reportNode("section", null, "analysis-chart-card");
-  section.append(reportNode("h3", title));
+  const heading = reportNode("h3", title);
+  if (estimate) heading.append(" ", createEstimateChip());
+  section.append(heading);
   const valid = analysisValidPoint;
 
   const legend = reportNode("ul", null, "analysis-chart-legend");
@@ -120,6 +122,7 @@ function analysisChart(title, series, unit, start, end, note, {
     const latest = analysisLatestPoint(item);
     const entry = reportNode("li");
     entry.dataset.color = String(item.color ?? index);
+    entry.dataset.line = analysisLineStyle(item, index);
     const label = item.legendLabel || item.label;
     const button = reportNode("button", label, "analysis-legend-info");
     button.type = "button";
@@ -145,6 +148,7 @@ function analysisChart(title, series, unit, start, end, note, {
     legend.append(entry);
   });
   if (showLegend) section.append(legend);
+  else appendAnalysisLineKey(section, series);
 
   if (!series.some(analysisPlottable)) {
     section.append(reportNode("p", "Ein einzelner Messwert zeigt noch keinen Verlauf; mindestens zwei datierte Werte sind erforderlich.", "empty"));
@@ -166,6 +170,21 @@ function analysisChart(title, series, unit, start, end, note, {
   appendAnalysisReferenceNotes(section, series, unit);
   appendAnalysisTable(section, title, series, unit, caption);
   return section;
+}
+
+// A bar series is solid; a line is dashed when the series says so or by its position (see appendAnalysisSeries).
+function analysisLineStyle(item, index) {
+  if (item.bars) return "solid";
+  return item.line || (index ? "dashed" : "solid");
+}
+
+// Without a legend, a dashed line is named once under the heading.
+function appendAnalysisLineKey(section, series) {
+  const dashed = series.filter((item, index) => analysisLineStyle(item, index) === "dashed" && item.points.filter(analysisValidPoint).length >= 2);
+  if (!dashed.length) return;
+  const key = reportNode("p", null, "analysis-line-key");
+  key.append(reportNode("span", null, "analysis-line-key-swatch"), ` Gestrichelt: ${dashed.map((item) => item.legendLabel || item.label).join(", ")}`);
+  section.append(key);
 }
 
 function analysisChange(delta, unit) {
@@ -259,7 +278,10 @@ function analysisPlotScales(series, start, end, { unit = "", zeroCentered = fals
   if (analysisCountUnit(unit)) step = Math.max(1, step);
   const min = series.some((item) => item.bars) ? 0 : Math.floor((low - padding) / step) * step;
   const max = Math.ceil((high + padding) / step) * step;
-  const chartWidth = globalThis.innerWidth < 600 ? Math.max(220, globalThis.innerWidth - 80) : 680;
+  // Wide screens place two charts per row, so the plot is drawn at the column width and keeps its text size.
+  let chartWidth = 680;
+  if (globalThis.innerWidth < 600) chartWidth = Math.max(220, globalThis.innerWidth - 80);
+  else if (globalThis.innerWidth >= 1100) chartWidth = 460;
   const chartRight = chartWidth - 24;
   const x = (date) => 60 + ((Date.parse(date) - Date.parse(start)) / Math.max(86400000, Date.parse(end) - Date.parse(start))) * (chartRight - 60);
   const y = unit === "s/km" ? (value) => 30 + (Number(value) - min) / (max - min) * 130 : (value) => 160 - (Number(value) - min) / (max - min) * 130;
@@ -446,7 +468,7 @@ function appendAnalysisSeries(svg, series, unit, scales, zeroCentered, caption) 
     const path = appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCentered, labels, obstacles });
     const readings = item.points.filter(analysisValidPoint);
     if (!item.bars && readings.length >= 2) {
-      svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": item.line || (index ? "dashed" : "solid") }));
+      svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": analysisLineStyle(item, index) }));
       obstacles.push(...analysisLineObstacles(readings, scales));
     }
   });
@@ -574,7 +596,7 @@ function analysisChartGroup(title, charts, series, note) {
   heading.append(reportNode("span", title, "analysis-group-title"));
   heading.className = "analysis-group-heading";
   if (series?.length) {
-    const help = reportNode("button", "i", "analysis-legend-info");
+    const help = reportNode("button", "i", "analysis-legend-info analysis-info-icon");
     help.type = "button"; help.setAttribute("aria-label", `${title}: Informationen`);
     const info = reportNode("div", null, "analysis-info-tooltip");
     info.id = `group-info-${++analysisInfoId}`;
@@ -590,7 +612,7 @@ function analysisChartGroup(title, charts, series, note) {
   charts.forEach((chart) => {
     chart.classList.remove("analysis-chart-card"); chart.classList.add("analysis-subchart");
     const heading = chart.querySelector("h3");
-    const subheading = reportNode("h4", heading.textContent); heading.replaceWith(subheading);
+    const subheading = reportNode("h4"); subheading.append(...heading.childNodes); heading.replaceWith(subheading);
     group.append(chart);
   });
   return group;
@@ -687,7 +709,8 @@ function criticalPowerLine(result) {
     const races = (fit.efforts || []).filter((effort) => effort.effort_context === "race").length;
     return races ? `${value} · ${races}× Wettkampf` : value;
   });
-  const line = reportNode("p", `Experimentelle CP/CS-Schätzung (${estimate.window_days} Tage): ${parts.join(" · ")}`, "analysis-reference-note");
+  const line = reportNode("p", null, "analysis-reference-note");
+  line.append(createEstimateChip(), ` Experimentell · CP/CS (${estimate.window_days} Tage): ${parts.join(" · ")}`);
   line.dataset.criticalPower = "true";
   line.title = estimate.scope || "";
   return line;
@@ -829,7 +852,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   for (const [sport, title, primaryUnit] of [["Lauf", "Laufen", "s/km"], ["Rad", "Rad", "W"]]) {
     const sportSeries = performanceSeries.filter((item) => item.label.startsWith(sport));
     const missing = [];
-    const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max · Schätzung"]].map(([unit, metric]) => collectAnalysisChart(missing, metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W", calendarWeeks: true })).filter(Boolean);
+    const charts = [[primaryUnit, primaryUnit === "W" ? "Leistungsschwelle · FTP" : "Schwellenpace"], ["ml/kg/min", "VO₂max"]].map(([unit, metric]) => collectAnalysisChart(missing, metric, sportSeries.filter((item) => item.unit === unit), unit, performanceStart, end, "", { compactInfo: true, sparse: true, includeCoverage: false, showLegend: unit === "W", calendarWeeks: true, estimate: unit === "ml/kg/min" })).filter(Boolean);
     if (sport === "Lauf") {
       const extra = document.createDocumentFragment();
       renderProviderMetrics({ running_tolerance: history.provider_metrics?.running_tolerance }, extra, performanceStart, end, missing);
@@ -884,7 +907,7 @@ function appendSessionRpeLoadChart(report, loadRoot, loadMissing, start, end) {
   const weekly = analysisHistoryPeriod === "twelveWeeks";
   const points = days.map((day) => ({ date: day.date, value: day.value }));
   const series = [{ label: weekly ? "Session-RPE-Last pro Woche" : "Session-RPE-Last pro Tag", legendLabel: "Session-RPE-Last", source, unit: "AU", color: 2, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, points: weekly ? analysisWeeklySumPoints(points, start, end) : points }];
-  const chart = analysisChart(`Session-RPE-Last · ${rated}/${total} bewertet`, series, "AU", start, end, `${source}: RPE × Gesamtdauer je Einheit.`, { calendarWeeks: weekly, caption: analysisBasisCaption("AU", weekly, "sum") });
+  const chart = analysisChart(`Session-RPE-Last · ${rated}/${total} bewertet`, series, "AU", start, end, `${source}: RPE × Gesamtdauer je Einheit.`, { calendarWeeks: weekly, caption: analysisBasisCaption("AU", weekly, "sum"), estimate: true });
   if (!chart) { loadMissing.push("Session-RPE-Last"); return; }
   chart.querySelector(".analysis-chart-legend")?.remove();
   loadRoot.append(chart);
@@ -902,7 +925,7 @@ function appendSmoothedLoadChart(report, rpeReport, loadRoot, loadMissing, start
     return { label, legendLabel: label, source, unit: "AU", color, connected: true, cadenceDays: weekly ? 7 : 1,
       points: weekly ? analysisWeeklyLastPoints(points, start, end) : points, currentPoint: points.findLast(analysisValidPoint) };
   });
-  const chart = collectAnalysisChart(loadMissing, "Kurz-/Langzeitbelastung", series, "AU", start, end, "", { calendarWeeks: weekly, caption: analysisBasisCaption("AU", weekly, "state") });
+  const chart = collectAnalysisChart(loadMissing, "Kurz-/Langzeitbelastung", series, "AU", start, end, "", { calendarWeeks: weekly, caption: analysisBasisCaption("AU", weekly, "state"), estimate: true });
   if (chart) loadRoot.append(chart);
 }
 
@@ -924,7 +947,7 @@ function appendLocalFitnessChart(report, loadRoot, loadMissing, start, end) {
   const notes = [];
   if (unloaded) notes.push(unloadedNote);
   if (incompletePercent > 0) notes.push(`${incompletePercent} % der Tage unvollständig`);
-  const chart = collectAnalysisChart(loadMissing, title, series, "TSS/Tag", start, end, notes.join(" · "), { calendarWeeks: weekly, caption: analysisBasisCaption("TSS/Tag", weekly, "state") });
+  const chart = collectAnalysisChart(loadMissing, title, series, "TSS/Tag", start, end, notes.join(" · "), { calendarWeeks: weekly, caption: analysisBasisCaption("TSS/Tag", weekly, "state"), estimate: true });
   if (chart) loadRoot.append(chart);
 }
 
@@ -1490,7 +1513,7 @@ function renderTrainingFocus(report) {
   if (!report) { root.append(reportNode("p", "Noch keine Trainingsdaten vorhanden.", "muted")); renderAnalysisSegmentsIfActive(); return; }
 
   const categories = [["low_aerobic", "Leicht aerob"], ["high_aerobic", "Hoch aerob"], ["anaerobic", "Anaerob"]];
-  const info = reportNode("button", "i", "analysis-legend-info");
+  const info = reportNode("button", "i", "analysis-legend-info analysis-info-icon");
   info.type = "button"; info.setAttribute("aria-label", "Trainingsfokus: Informationen");
   const explanation = reportNode("div", `${trainingFocusPeriodLabel(report)}: ${dateLabel(report.start)} bis ${dateLabel(report.end)}. ${report.coverage?.known_sessions ?? 0} erfasste Garmin-Einheiten im Zeitraum${report.coverage?.observed_start && report.coverage?.observed_end ? ` · erfasste Daten ${dateLabel(report.coverage.observed_start)} bis ${dateLabel(report.coverage.observed_end)}` : ""}. Garmin: aufgezeichnete Belastung nach der Hauptwirkung der Einheit (Training Effect). Keine aus Zonen abgeleitete Einteilung und nicht Garmins separat berechnete Load-Focus-Metrik. ${report.unclassified_sessions || 0} Einheiten ohne bekannte Wirkung oder Belastung bleiben ausgeschlossen.`, "analysis-info-tooltip"); // NOSONAR
   explanation.id = `focus-info-${++analysisInfoId}`;
@@ -1640,7 +1663,7 @@ function analysisWeeklyLastPoints(points, start, end) {
 function trainingFocusDistribution(title, readings, unit, info) {
   const section = reportNode("section", null, "analysis-chart-card training-focus-distribution");
   const heading = reportNode("h4", title);
-  const help = reportNode("button", "i", "analysis-legend-info");
+  const help = reportNode("button", "i", "analysis-legend-info analysis-info-icon");
   help.type = "button"; help.setAttribute("aria-label", `${title}: Informationen`);
   const tooltip = reportNode("div", info, "analysis-info-tooltip");
   tooltip.id = `focus-info-${++analysisInfoId}`; tooltip.setAttribute("popover", "auto"); tooltip.setAttribute("role", "tooltip");

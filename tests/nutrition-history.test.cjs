@@ -41,7 +41,8 @@ test("history displays daily balance from paired days alongside the total", () =
   const valueStart = source.indexOf("function nutritionWeekValue(");
   const valueEnd = source.indexOf("function renderNutritionHistoryPeriod(", valueStart);
   const markValueMissing = (node, text = "nicht erfasst") => { node.textContent = text; node.missing = true; return node; };
-  const ctx = vm.createContext({ document, markValueMissing, nutritionExpenditureDate: (date) => date, AppFormat: { number: (value) => Math.round(value).toLocaleString("de-DE") } });
+  const setValueWithUnit = (node, text) => { node.textContent = text; };
+  const ctx = vm.createContext({ document, markValueMissing, setValueWithUnit, nutritionExpenditureDate: (date) => date, AppFormat: { number: (value) => Math.round(value).toLocaleString("de-DE") } });
   vm.runInContext(source.slice(valueStart, valueEnd) + source.slice(renderStart, renderEnd) + "}\n", ctx);
   for (const [count, balance, paired, expected] of [[14, -4468, 14, "-319 kcal"], [84, -600, 3, "-200 kcal"], [14, 300, 3, "+100 kcal"], [14, 3, 14, "0 kcal"], [14, -5, 14, "0 kcal"], [14, -7, 14, "-1 kcal"], [14, 0, 2, "0 kcal"], [84, null, 0, "nicht erfasst"]]) {
     const averages = Object.fromEntries(["intake_kcal", "expenditure_kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "salt_g"].map((key) => [key, { value: null, days: 0 }]));
