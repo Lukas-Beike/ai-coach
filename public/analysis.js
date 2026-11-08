@@ -717,8 +717,10 @@ async function renderCyclingPowerProfile() {
       gap.dataset.powerProfileGap = "true";
       root.append(gap);
     }
-    // The running CS estimate does not need cycling power, so it stays without a profile.
-    const criticalPower = criticalPowerLine(result);
+    // The running CS estimate does not need cycling power, so it stays without a profile;
+    // a line of only missing estimates is dropped there.
+    const hasEstimate = (result?.critical_power?.fits || []).some((fit) => fit.status === "ok");
+    const criticalPower = hasValues || hasEstimate ? criticalPowerLine(result) : null;
     if (criticalPower) root.append(criticalPower);
     root.dataset.analysisEmpty = String(!hasValues && !criticalPower);
     renderAnalysisSegmentsIfActive();
