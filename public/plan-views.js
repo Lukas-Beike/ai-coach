@@ -11,6 +11,12 @@
 
 globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets, plannedPushTargetLabel, plannedGarminBlockedText });
 
+// One explicit plan_push job for one entry, carrying the hash it was shown with.
+async function runPlanPush(provider, entryId, payloadHash) {
+  const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entryId, expected_payload_hash: payloadHash }] } }) });
+  return globalThis.waitForSyncJob(job.id);
+}
+
 // What one successful push delivered: Garmin gets the structured workout,
 // Intervals.icu gets strength only as a calendar note.
 function plannedPushTargetLabel(provider, entry, ids = {}) {
@@ -1030,8 +1036,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const reached = [];
       for (const provider of targets) {
         try {
-          const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }] } }) });
-          const done = await globalThis.waitForSyncJob(job.id);
+          const done = await runPlanPush(provider, entry.local_id, entry.payload_hash);
           if (done.status === "completed") reached.push(plannedPushTargetLabel(provider, entry, ids));
           else failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
         } catch (error) {
@@ -1423,8 +1428,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       button.disabled = true;
       let failure = "";
       try {
-        const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider: providerIds().wahoo, type: "plan_push", payload: { entries: [{ library_workout_id: workout.id, expected_payload_hash: wahoo.payload_hash }] } }) });
-        const done = await globalThis.waitForSyncJob(job.id);
+        const done = await runPlanPush(providerIds().wahoo, workout.id, wahoo.payload_hash);
         if (done.status !== "completed") failure = globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen";
       } catch (error) {
         failure = error.message;

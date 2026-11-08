@@ -1,17 +1,12 @@
 const { test, expect } = require("@playwright/test");
+const { stubSyncJobs } = require("./helpers/sync-jobs");
 
 const HASH = "a".repeat(64);
 
 test("@responsive a changed Wahoo library workout offers the explicit send", async ({ page, request }) => {
   test.setTimeout(180_000);
   expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
-  const posted = [];
-  // The fixture never contacts a provider: answer the job queue and its poll here.
-  await page.route("**/api/sync/jobs", async (route) => {
-    posted.push(JSON.parse(route.request().postData() || "{}"));
-    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ id: `job-${posted.length}`, status: "queued" }) });
-  });
-  await page.route("**/api/sync/jobs/job-*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ id: "job", status: "completed", items: [] }) }));
+  const posted = await stubSyncJobs(page);
   // The fixture has no Wahoo link; mark the first template changed and the second synced.
   await page.route("**/api/library*", async (route) => {
     const response = await route.fetch();
