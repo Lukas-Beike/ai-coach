@@ -367,7 +367,16 @@ Planned units and library templates SHALL carry an optional local session focus,
 - **WHEN** a unit with a focus is exported to Intervals.icu
 - **THEN** the event payload is unchanged; the focus stays local.
 
-Evidence: `backend/planning/session_focus.py`; `tests/test_session_focus.py`, `e2e/session-focus.spec.js`.
+#### Scenario: Required focus
+- **WHEN** a Coach write creates, moves or changes a run or ride unit without a focus
+- **THEN** the plan check `focus_missing` blocks it like `strength_incomplete`, cannot be accepted away, and never blocks an unrelated write because of an untouched older unit; sports without a focus vocabulary are exempt.
+
+#### Scenario: One-time backfill of future units
+- **WHEN** the application starts and the versioned focus backfill has not run
+- **THEN** every future, non-archived unit without a focus (and every strength unit without an intensity) receives the derived value only if its sources agree: steps and text do not contradict, exactly one keyword group matches, and the strength intensity comes from the structure or from exactly one named level; contested units, past units and sports without a focus vocabulary stay untouched, no exercise structure is invented, the sync state is kept and no provider is written.
+- **AND** the changes are recorded in the change history and in the step's state (counts and change references only, reported by diagnostics), and `POST /api/change-history/undo-focus-backfill` restores all of them in one transaction, or none when a unit was edited since; a second run changes nothing.
+
+Evidence: `backend/planning/session_focus.py`, `backend/sync/session_focus_backfill.py`; `tests/test_session_focus.py`, `tests/test_session_focus_backfill.py`, `e2e/session-focus.spec.js`.
 
 ### Requirement: Structured strength units
 Strength units and templates SHALL carry an optional local `strength_structure` (at most 12 exercises with name, sets, reps, optional kg, %1RM, RPE or RIR (one relative load), rest, up to 5 warm-up sets with reps and optional kg, a short note and an optional Garmin catalogue exercise) in the payload, validated server-side with `invalid_strength_structure`; free text stays the fallback for units that have none.
@@ -384,7 +393,7 @@ Strength units and templates SHALL carry an optional local `strength_structure` 
 - **WHEN** a structured unit is exported to Intervals.icu on an explicit sync
 - **THEN** only the readable description is sent, as a note event, and nothing implicit is written.
 
-Evidence: `backend/planning/strength_structure.py`, `backend/planning/session_focus.py`, `backend/planning/planned_unit_service.py:PlannedUnitService.assign_garmin_exercise`, `backend/http_api/planned_unit_focus_post.py`, `backend/planning/push_state.py:unmapped_exercises`, `backend/planning/plan_checks.py:strength_incomplete`; `tests/test_strength_structure.py`, `tests/test_planning_push_state.py`, `tests/test_plan_guard_service.py`.
+Evidence: `backend/planning/strength_structure.py`, `backend/planning/session_focus.py`, `backend/planning/planned_unit_service.py:PlannedUnitService.assign_garmin_exercise`, `backend/http_api/planned_unit_focus_post.py`, `backend/planning/push_state.py:unmapped_exercises`, `backend/planning/plan_checks.py:strength_incomplete`, `backend/planning/plan_checks.py:focus_missing`; `tests/test_strength_structure.py`, `tests/test_planning_push_state.py`, `tests/test_plan_guard_service.py`.
 
 ### Requirement: Wahoo sync state of library workouts
 The system SHALL show, for each library workout already delivered to Wahoo as a plan, whether Wahoo holds its current content (`synced` or `changed`), by comparing the plan the workout would be sent as now with the baseline stored by the last export. The read SHALL write nothing and contact no provider.

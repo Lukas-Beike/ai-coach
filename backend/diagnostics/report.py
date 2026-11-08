@@ -50,6 +50,7 @@ from backend.sync.garmin_projection_service import GarminProjectionService
 from backend.sync.library import WorkoutLibrarySyncStateService
 from backend.sync.local_load import summarize_local_load
 from backend.sync.session_analysis_stage import summarize_session_analysis
+from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.state import SyncStateRepository
 
@@ -227,6 +228,9 @@ class DiagnosticReportService:
                 ),
                 "session_metrics": summarize_session_metrics(deps.key_values, db),
                 "session_analysis": summarize_session_analysis(deps.key_values, db),
+                "session_focus_backfill": summarize_session_focus_backfill(
+                    deps.key_values, db
+                ),
                 "logs": deps.recent_logs.list(),
                 "debug_capture": {
                     **diagnostic_capture_status,

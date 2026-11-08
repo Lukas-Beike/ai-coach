@@ -43,13 +43,13 @@ def _canonical_coach_tool(
 
 
 _FOCUS_DESCRIPTION = (
-    "Art der Einheit, set for every new unit. Run: "
+    "Art der Einheit, required for every run, ride and strength unit you create, move or change (the server rejects one without it). Run: "
     + ", ".join(ENDURANCE_FOCI)
     + ". Ride: "
     + ", ".join(RIDE_FOCI)
     + ". Strength: "
     + ", ".join(STRENGTH_FOCI)
-    + ". Null only for sports without focus."
+    + ". Null only for sports without a focus (e.g. swim)."
 )
 SESSION_FOCUS_SCHEMA: dict[str, Any] = {
     "type": ["string", "null"],

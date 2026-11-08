@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import tzinfo
 from typing import Any
@@ -12,7 +12,10 @@ from backend.performance.session_rpe_load import FeedbackLookup
 from backend.performance.source_policy import NO_PREFERENCES
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import DEFAULT_BATCH_SIZE, CanonicalBackfill
-from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
+from backend.sync.canonical_backfill_worker import (
+    BackfillStage,
+    CanonicalBackfillWorker,
+)
 from backend.sync.local_load import LocalLoadStage, Preferences
 from backend.sync.session_analysis_stage import PlannedUnits, SessionAnalysisStage
 from backend.sync.session_metrics import SessionMetricsStage
@@ -39,6 +42,7 @@ def build_canonical_backfill(
     session_feedback: FeedbackLookup | None = None,
     planned_units: PlannedUnits = list,
     athlete_sex: Callable[[Any], str | None] = lambda _db: None,
+    extra_followups: Sequence[BackfillStage] = (),
 ) -> CanonicalBackfillAssembly:
     backfill = CanonicalBackfill(
         key_values=key_values,
@@ -76,6 +80,8 @@ def build_canonical_backfill(
             local_load,
             session_metrics,
             session_analysis,
+            # Last, so a failing extra stage never blocks the canonical ones.
+            *extra_followups,
         ),
     )
     return CanonicalBackfillAssembly(

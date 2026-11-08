@@ -219,6 +219,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                             "local_id": local_id,
                             "action": "update",
                             "sport": "Run",
+                            "session_focus": "easy",
                             "description": "- 75m Z1 HR",
                             "expected_payload_hash": self.selection(local_id)[
                                 "expected_payload_hash"

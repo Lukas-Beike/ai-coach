@@ -81,6 +81,8 @@ class DialogueHarness:
             workout["strength_structure"] = [{"name": "Rudern", "sets": 3, "reps": 10}]
             workout["session_focus"] = "upper"
             workout["strength_intensity"] = "moderate"
+        elif sport in {"Run", "Ride"}:
+            workout["session_focus"] = "easy"
         return workout
 
     def request(
@@ -1424,7 +1426,6 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         enqueue.assert_not_called()
         self.assertEqual(result["status"], "failed")
 
-
     def test_idempotent_client_turn_does_not_repeat_effect(self):
         steps = [
             lambda _: self.call(
@@ -1918,7 +1919,6 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 "SELECT payload FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)
             ).fetchone()
         self.assertEqual(len(json.loads(job["payload"])["entries"]), 1)
-
 
     def test_sync_followup_failure_distinguishes_coach_interruption_and_keeps_job(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(

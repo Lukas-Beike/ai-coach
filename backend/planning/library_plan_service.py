@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.errors import (
     CORRUPT_LIBRARY_ERROR,
     INVALID_LIBRARY_ID_ERROR,
@@ -147,6 +148,12 @@ class WorkoutLibraryPlanService:
                         5, round(float(source.get("planned_duration_s") or 300) / 60)
                     ),
                     "target": source.get("target") or "AUTO",
+                    # The template's focus and strength structure stay with the unit.
+                    **{
+                        key: source[key]
+                        for key in FOCUS_KEYS
+                        if source.get(key) is not None
+                    },
                     "source": "library",
                     "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",
                 },

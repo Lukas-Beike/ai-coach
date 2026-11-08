@@ -33,6 +33,7 @@ from backend.planning.plan_guard_service import (
     recent_illness,
 )
 from backend.planning.planned_unit_load import estimate_planned_unit
+from backend.planning.sport import planned_sport_environment
 
 TODAY = date(2026, 11, 2)
 
@@ -71,6 +72,7 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.completed: list[dict[str, Any]] = []
         self.published: list[str] = []
         self.write_units: list[dict[str, Any]] | None = None
+        self.default_focus = True
         # A reported illness makes the hard pair a blocking finding.
         self.illness = "Fieber"
         self.guard = PlanGuardService(
@@ -101,7 +103,19 @@ class PlanGuardWriteTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             db.execute("INSERT INTO synthetic_writes VALUES (?)", (name,))
         self.manager.after_commit(lambda: self.published.append(name))
-        self.units = self.write_units if self.write_units is not None else hard_pair()
+        written = self.write_units if self.write_units is not None else hard_pair()
+        # Run and ride units carry the focus a Coach write now has to name.
+        self.units = [
+            {
+                **unit,
+                "session_focus": "threshold" if plan_checks.is_hard(unit) else "easy",
+            }
+            if self.default_focus
+            and planned_sport_environment(unit)[0] in {Sport.RUN, Sport.RIDE}
+            and "session_focus" not in unit
+            else unit
+            for unit in written
+        ]
         self.seen_arguments = arguments
         return {"ok": True, "status": "applied"}
 
@@ -434,6 +448,46 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.units, self.write_units = (
             [free_text],
             [free_text, {**complete, "local_id": "c"}],
+        )
+        self.run_tool("apply_training_changes")
+        self.assertEqual(1, self.stored())
+
+    def test_coach_run_and_ride_units_need_a_session_focus(self) -> None:
+        self.illness = ""
+        self.default_focus = False
+        run = {
+            "local_id": "r",
+            "date": "2026-11-04",
+            "sport": "run",
+            "name": "Lockerer Lauf",
+            "planned_duration_s": 2700,
+        }
+        cases = {
+            "new run": ([], [run]),
+            "moved run": ([run], [{**run, "date": "2026-11-07"}]),
+            "new ride": ([], [{**run, "local_id": "b", "sport": "ride"}]),
+            "blank focus": ([], [{**run, "session_focus": " "}]),
+        }
+        for label, (before, after) in cases.items():
+            with self.subTest(label):
+                self.units, self.write_units = list(before), after
+                with self.assertRaises(PlanCheckError) as raised:
+                    # Data, not a training deviation: it can never be accepted.
+                    self.run_tool(
+                        "apply_training_changes", accept_plan_findings=["illness_hard"]
+                    )
+                self.assertEqual(
+                    ["focus_missing"],
+                    [item["code"] for item in raised.exception.findings],
+                )
+                self.assertIn("session_focus", raised.exception.findings[0]["message"])
+                self.assertEqual(0, self.stored())
+        # With a focus the write saves; an untouched older unit without one and a
+        # sport without a focus vocabulary do not block an unrelated write.
+        swim = {**run, "local_id": "w", "sport": "swim"}
+        self.units, self.write_units = (
+            [run],
+            [run, swim, {**run, "local_id": "c", "session_focus": "easy"}],
         )
         self.run_tool("apply_training_changes")
         self.assertEqual(1, self.stored())

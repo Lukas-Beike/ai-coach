@@ -465,6 +465,7 @@ class PlanGuardService:
                 self._training_model(), self._planned_weeks(units, today, completed)
             ),
             *plan_checks.strength_incomplete(units),
+            *plan_checks.focus_missing(units),
         ]
 
     def _reported_illness(self) -> str:

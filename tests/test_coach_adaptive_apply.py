@@ -180,6 +180,7 @@ class AdaptiveApplyPlanGuardTests(unittest.TestCase):
                 "sport": "run",
                 "planned_duration_s": 3600,
                 "planned_intensity": 0.9,
+                "session_focus": "threshold",
             },
             {
                 "local_id": "b",
@@ -187,6 +188,7 @@ class AdaptiveApplyPlanGuardTests(unittest.TestCase):
                 "sport": "ride",
                 "planned_duration_s": 3600,
                 "description": "Z5 intervals",
+                "session_focus": "vo2max",
             },
         ]
         return {"status": "applied"}

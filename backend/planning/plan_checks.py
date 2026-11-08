@@ -59,7 +59,12 @@ from backend.planning import (
     strength_structure,
     weekly_plan_checks,
 )
-from backend.planning.session_focus import FOCUS_KEY, INTENSITY_KEY, session_focus
+from backend.planning.session_focus import (
+    FOCUS_KEY,
+    INTENSITY_KEY,
+    allowed_foci,
+    session_focus,
+)
 from backend.planning.sport import planned_sport_environment
 
 ALL_DAY_EVENT = "all_day_event"
@@ -73,6 +78,7 @@ FINDING_CODES = (
     "missing_taper",
     "illness_hard",
     "strength_incomplete",
+    "focus_missing",
     "intensity_distribution",
     leg_strength.BEFORE_KEY,
     leg_strength.FREQUENCY,
@@ -85,9 +91,10 @@ FINDING_CODES = (
 # evidence is strong but the 20 % floor is a local choice, not a proven limit.
 BLOCKING_CODES = ("illness_hard",)
 # Data the Coach must write, not a training rule: a strength unit it creates,
-# moves or changes needs its structure, focus and intensity. It blocks like the
-# health rule but can never be accepted, so it is not in BLOCKING_CODES.
-REQUIRED_CODES = ("strength_incomplete",)
+# moves or changes needs its structure, focus and intensity, any other unit with
+# a focus vocabulary (run, ride) its focus. It blocks like the health rule but
+# can never be accepted, so it is not in BLOCKING_CODES.
+REQUIRED_CODES = ("strength_incomplete", "focus_missing")
 EVIDENCE = {
     "run_spike": "observational, moderate (Frandsen 2025)",
     "load_spike": load_checks.LOAD_EVIDENCE,
@@ -98,6 +105,7 @@ EVIDENCE = {
     "missing_taper": "meta-analysis, strong (Bosquet 2007); 20 % floor is a local choice",
     "illness_hard": "medical caution",
     "strength_incomplete": "data completeness for the watch and the plan checks",
+    "focus_missing": "data completeness for the plan checks and the calendar",
     "intensity_distribution": "practice-based reference ranges; pyramidal/polarized after Seiler 2010, Stoeggl & Sperlich 2014",
     leg_strength.BEFORE_KEY: "limited, residual fatigue after lower-body resistance training (Doma et al.)",
     leg_strength.FREQUENCY: "Ronnestad & Mujika 2014, Blagrove 2018 (2x/week build, 1x/week maintenance); thresholds practice-based",
@@ -115,6 +123,7 @@ _RULE_TEXT = {
     "missing_taper": "final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
     "illness_hard": "hard or 90+ minute session within 3 days of a reported illness.",
     "strength_incomplete": "a strength unit the Coach created, moved or changed without strength_structure, session_focus and strength_intensity.",
+    "focus_missing": "a run or ride unit the Coach created, moved or changed without session_focus.",
     "intensity_distribution": "planned low/moderate/high time of a week clearly outside the training model's reference range (unknown time is uncovered, strength excluded).",
     leg_strength.BEFORE_KEY: "moderate or heavy leg strength less than about 24 h before a hard run or ride or the week's long one.",
     leg_strength.FREQUENCY: "more than 3 leg strength sessions or more than 2 heavy ones in a week, or none in a plan of 2+ weeks when strength is expected.",
@@ -436,6 +445,16 @@ def _missing_strength_fields(unit: Mapping[str, Any]) -> list[str]:
     return missing
 
 
+def _content_digest(unit: Mapping[str, Any], keys: Sequence[str]) -> str:
+    content = json.dumps(
+        {key: unit.get(key) for key in keys},
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+
 def strength_incomplete(units: Sequence[Mapping[str, Any]]) -> list[dict]:
     """One finding per incomplete strength unit, keyed by its content.
 
@@ -452,12 +471,6 @@ def strength_incomplete(units: Sequence[Mapping[str, Any]]) -> list[dict]:
         missing = _missing_strength_fields(unit)
         if not missing:
             continue
-        content = json.dumps(
-            {key: unit.get(key) for key in _STRENGTH_CONTENT},
-            sort_keys=True,
-            ensure_ascii=False,
-            default=str,
-        )
         findings.append(
             _finding(
                 "strength_incomplete",
@@ -471,7 +484,50 @@ def strength_incomplete(units: Sequence[Mapping[str, Any]]) -> list[dict]:
                 {
                     "name": str(unit.get("name") or ""),
                     "missing": missing,
-                    "content": hashlib.sha256(content.encode("utf-8")).hexdigest()[:16],
+                    "content": _content_digest(unit, _STRENGTH_CONTENT),
+                },
+            )
+        )
+    return findings
+
+
+_FOCUS_CONTENT = (
+    "name",
+    "description",
+    "date",
+    "starts_at_local",
+    "duration_minutes",
+    "planned_duration_s",
+    "target",
+    FOCUS_KEY,
+)
+# Units with a focus vocabulary other than strength, which has its own check.
+_FOCUS_SPORTS = frozenset({Sport.RUN, Sport.RIDE})
+
+
+def focus_missing(units: Sequence[Mapping[str, Any]]) -> list[dict]:
+    """One finding per run or ride unit without a stored ``session_focus``.
+
+    Keyed by content like ``strength_incomplete``: a Coach write that creates,
+    moves or edits the unit is a new finding, an untouched older unit never
+    blocks an unrelated write. Sports without a focus vocabulary are exempt.
+    """
+    findings = []
+    for unit in units:
+        sport = planned_sport_environment(unit)[0]
+        if sport not in _FOCUS_SPORTS or str(unit.get(FOCUS_KEY) or "").strip():
+            continue
+        findings.append(
+            _finding(
+                "focus_missing",
+                [unit],
+                "Unit without session_focus: set the type of the session ("
+                + ", ".join(allowed_foci(sport))
+                + ") on every unit you create, move or change.",
+                {
+                    "name": str(unit.get("name") or ""),
+                    "sport": sport.value,
+                    "content": _content_digest(unit, _FOCUS_CONTENT),
                 },
             )
         )
@@ -628,7 +684,7 @@ def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
     if finding["code"] == "weekly_load_rise":
         evidence = finding["evidence"]
         return (finding["code"], evidence["sport"], evidence["week_start"])
-    if finding["code"] == "strength_incomplete":
+    if finding["code"] in {"strength_incomplete", "focus_missing"}:
         evidence = finding["evidence"]
         return (finding["code"], tuple(finding["local_ids"]), evidence["content"])
     if finding["code"] == "load_unknown":

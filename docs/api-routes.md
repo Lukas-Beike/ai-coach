@@ -80,6 +80,7 @@ activity IDs no longer resolve.
 | POST | `/api/external-calendar/sync`, `/api/weather/sync`, `/api/analysis/refresh`, `/api/nutrition/refresh` | Queue or run a targeted refresh | CSRF |
 | POST | `/api/analysis/scenarios` | Project a training scenario without saving it | CSRF |
 | POST | `/api/change-history/undo/preview`, `/api/change-history/undo`, `/api/change-history/undo-turn` | Preview or apply an undo, or undo one Coach turn | CSRF |
+| POST | `/api/change-history/undo-focus-backfill` | Restore every unit the one-time session focus backfill changed, or none | CSRF |
 | POST | `/api/privacy/delete`, `/api/privacy/restore` | Delete or restore privacy data | CSRF |
 | POST | `/api/logs/delete`, `/api/diagnostics/delete` | Clear diagnostics data | CSRF |
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |

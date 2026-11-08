@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend import change_history
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import RemoteEntityKind, Sport
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, AppError
@@ -264,6 +265,12 @@ class WorkoutLibraryService:
                 "description": workout.get("description") or "",
                 "duration_minutes": duration,
                 "target": workout.get("target") or "AUTO",
+                # The focus and structure the Coach wrote stay with the template.
+                **{
+                    key: workout[key]
+                    for key in FOCUS_KEYS
+                    if workout.get(key) is not None
+                },
                 "source": "coach",
             }
         )
