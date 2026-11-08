@@ -98,7 +98,7 @@ class _DatedRows(FixedActivityRows):
         self.starts = []
         self.units = []
 
-    def intervals_activity_payloads(self, db, *, start=None, end=None, limit=None):
+    def raw_rows(self, db, *, start=None, end=None, limit=None):
         return tuple(self.rows)
 
     def activity_summaries(self, db, *, start=None, end=None, limit=None):

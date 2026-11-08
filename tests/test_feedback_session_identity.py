@@ -335,7 +335,6 @@ class FeedbackSessionTests(FeedbackSessionFixture):
         self.service.save(INTERVALS_ID, {"notes": ""})
         self.assertEqual((self.service.list(), stored_rows(self)), ([], []))
 
-
     def test_local_feedback_never_takes_the_provider_rpe(self) -> None:
         self.service.save(INTERVALS_ID, {"notes": "No RPE given"})
         (effective,) = self.service.list()
@@ -400,7 +399,6 @@ class ReportFeedbackTests(FeedbackSessionFixture):
             record_ids={"intervals": INTERVALS_ID},
         )
         return TrainingReportReadService(
-            read_synced_at=lambda _db: None,
             read_plan=lambda: None,
             read_checkins=list,
             read_feedback=self.service.for_activity_ids,

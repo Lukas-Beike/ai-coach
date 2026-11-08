@@ -1,5 +1,6 @@
 import copy
 import unittest
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 from canonical_recovery_support import (
@@ -11,6 +12,7 @@ from performance_day_support import canonical_from_snapshot
 
 from backend.canonical.coverage import ProviderCoverage
 from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.performance.canonical_body import CanonicalBodyInputs
 from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
     PENDING_PERFORMANCE_INPUTS,
@@ -237,11 +239,18 @@ class PerformanceContextTests(unittest.TestCase):
             ],
             "recent_activities": [None, "bad", {"type": "Unknown"}],
         }
+        # A Garmin weight makes the context available.
+        canonical = replace(
+            canonical_from_snapshot(snapshot, date(2026, 9, 20)),
+            body=CanonicalBodyInputs(
+                garmin_weight_kg={date(2026, 9, 20): 70.0}, garmin_body_fat_pct={}
+            ),
+        )
         result = current_performance_context(
             GarminSyncStatus.from_state({}),
             {},
             date(2026, 9, 20),
-            canonical=canonical_from_snapshot(snapshot, date(2026, 9, 20)),
+            canonical=canonical,
         )
 
         self.assertTrue(result["available"])
@@ -336,7 +345,6 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual(result["personal_recovery"]["baselines"], [])
         self.assertEqual(result["training_focus"]["classified_sessions"], 0)
 
-
     def test_inputs_without_provider_values_are_unavailable(self):
         today = date(2026, 9, 20)
         nothing = CanonicalPerformanceInputs(activities=())
@@ -352,9 +360,12 @@ class PerformanceContextTests(unittest.TestCase):
         # The context names the activity sync time of the canonical coverage (the
         # one reports use too), never an Intervals.icu snapshot (#1728).
         today = date(2026, 9, 20)
-        snapshot = {"recent_wellness": [{"id": today.isoformat(), "weight": 70}]}
-        canonical = canonical_from_snapshot(snapshot, today)
-        assert canonical is not None
+        canonical = replace(
+            canonical_from_snapshot({}, today),
+            body=CanonicalBodyInputs(
+                garmin_weight_kg={today: 70.0}, garmin_body_fat_pct={}
+            ),
+        )
         coverage = _ProviderCoverage(datetime(2026, 9, 20, 8, tzinfo=UTC))
         source = CanonicalPerformanceSource(
             database_manager=lambda: None,

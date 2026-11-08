@@ -197,7 +197,9 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
-            inputs = read_performance_inputs(selector, db, as_of=TODAY)
+            inputs = read_performance_inputs(
+                selector, db, activity_reader=selector, as_of=TODAY
+            )
         self.assertIsNotNone(inputs)
         assert inputs is not None
         legacy = current_performance_context(
@@ -334,14 +336,8 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         def activity_summaries(self, _db, *, start=None, end=None, limit=None):
             return ()
 
-        def intervals_activity_payloads(self, _db, *, start=None, end=None, limit=None):
-            return ()
-
         def summary_fingerprints(self, _db, _keys):
             return {}
-
-        def intervals_summary_row(self, _db, _provider_activity_id):
-            return None
 
     def _stored(self, day: date) -> ObservationStub:
         return ObservationStub((_wahoo_ftp_on(250, day), _wahoo_weight_on(78.5, day)))

@@ -87,17 +87,11 @@ class _ActivityCase(CanonicalReadFixture):
             _Feedback(),
         )
 
-
     def ids(self, rows: Any) -> set[str]:
         return {str(row["id"]) for row in rows}
 
 
 class DuplicateRemovalTests(_ActivityCase):
-
-
-
-
-
     def test_mark_activity_deleted_reports_whether_anything_changed(self) -> None:
         populate(self)
         kwargs = {
@@ -197,14 +191,20 @@ class PendingAndTableReadTests(_ActivityCase):
         )
 
 
-
 class SessionListFreshnessTests(_ActivityCase):
     def test_fingerprints_keep_the_stored_values(self) -> None:
         """Intervals keeps summary_fingerprint of its row, others the payload hash."""
         populate(self)
         selector = make_selector(self)
         with self.manager.reader() as db:
-            rows = selector.intervals_activity_payloads(db)
+            rows = [
+                json.loads(text)
+                for text in canonical_store.active_activity_payload_texts(
+                    db,
+                    provider=ProviderId.INTERVALS.value,
+                    record_kind=ACTIVITY_RECORD_KIND,
+                )
+            ]
             keys = [("intervals", str(row["id"])) for row in rows]
             keys += [("garmin", "910002"), ("intervals", "missing")]
             current = selector.summary_fingerprints(db, keys)
@@ -260,6 +260,3 @@ class SnapshotWithoutCanonicalSectionsTests(_ActivityCase):
 
         self.assertEqual(service.page(today=TODAY)["activities"], expected_page)
         self.assertEqual(service.recent(today=TODAY)["activities"], expected_recent)
-
-
-

@@ -154,7 +154,7 @@ def project_planning_calendar(
     ``sport_thresholds`` (``CanonicalCurrentInputs.zone_thresholds``) and the default
     limits.
     """
-    canonical_planned = canonical.canonical_planned_workouts([], local_planned)
+    canonical_planned = canonical.canonical_planned_workouts(local_planned)
     compliance_planned, planning_compliance = (
         calendar_projection.planning_compliance_state(
             canonical_planned, activities, today

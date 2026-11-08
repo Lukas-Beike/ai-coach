@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Final, Literal
 
-from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.canonical.vocabulary import ProviderId
 
 HigherIs = Literal["better", "worse", "harder"]
 
@@ -65,29 +65,6 @@ class RatingScale:
         return f"{text} ({self.minimum} {low} … {self.maximum} {high})"
 
 
-_STRAIN_LABELS: Final = {1: "niedrig", 2: "mittel", 3: "hoch", 4: "extrem"}
-
-# Intervals.icu wellness ratings run 1..4, 1 good and 4 bad, mood included.
-INTERVALS_WELLNESS_SCALES: Final[Mapping[MetricKind, RatingScale]] = MappingProxyType(
-    {
-        MetricKind.SUBJECTIVE_FATIGUE: RatingScale(
-            "intervals_fatigue_1_4", 1, 4, "worse", _STRAIN_LABELS
-        ),
-        MetricKind.SUBJECTIVE_SORENESS: RatingScale(
-            "intervals_soreness_1_4", 1, 4, "worse", _STRAIN_LABELS
-        ),
-        MetricKind.SUBJECTIVE_STRESS: RatingScale(
-            "intervals_stress_1_4", 1, 4, "worse", _STRAIN_LABELS
-        ),
-        MetricKind.SUBJECTIVE_MOOD: RatingScale(
-            "intervals_mood_1_4",
-            1,
-            4,
-            "worse",
-            {1: "super", 2: "gut", 3: "okay", 4: "mies"},
-        ),
-    }
-)
 # Intervals.icu activity feel runs 1 strong .. 5 weak; its RPE runs 1..10.
 INTERVALS_FEEL_SCALE: Final = RatingScale(
     "intervals_feel_1_5",

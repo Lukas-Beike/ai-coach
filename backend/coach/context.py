@@ -685,13 +685,10 @@ class CoachPerformanceContextReader:
             )
         )
 
-    def recovery(
-        self, canonical: CanonicalPerformanceInputs | None = None
-    ) -> dict[str, Any]:
+    def recovery(self) -> dict[str, Any]:
         """The Garmin recovery section, with Garmin's performance values."""
         projection = self._garmin_projection_service.coach_context(
-            include_performance=canonical is None
-            or canonical.intervals_synced_at is None
+            include_performance=True
         )
         return {
             "source": _section_source(ProviderId.GARMIN, projection.get("synced_at")),
@@ -886,7 +883,7 @@ class CoachStructuredContextService:
             "current_performance": self._current_performance(performance_inputs)
             if "current_performance" in included
             else None,
-            "recovery": self._performance_reader.recovery(performance_inputs)
+            "recovery": self._performance_reader.recovery()
             if "recovery" in included
             else None,
             "weather": weather,

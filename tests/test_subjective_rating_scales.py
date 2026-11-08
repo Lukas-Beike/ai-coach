@@ -9,12 +9,10 @@ from backend.canonical.rating_scales import (
     GARMIN_RPE_SCALE,
     INTERVALS_FEEL_SCALE,
     INTERVALS_RPE_SCALE,
-    INTERVALS_WELLNESS_SCALES,
     LOCAL_CHECKIN_SCALES,
     LOCAL_SESSION_RPE_SCALE,
     RatingScale,
 )
-from backend.canonical.vocabulary import MetricKind
 from backend.coach.context import COACH_ACTIVITY_FIELDS
 from backend.coach.prompt import COACH_PROMPT
 from backend.performance.session_rpe_load import session_load
@@ -28,27 +26,14 @@ class RatingScaleTests(unittest.TestCase):
         self.assertEqual("schwach", INTERVALS_FEEL_SCALE.label(5))
         self.assertEqual(1.0, INTERVALS_FEEL_SCALE.normalized(5))
 
-    def test_intervals_mood_and_checkin_stress_both_point_to_worse(self) -> None:
-        mood = INTERVALS_WELLNESS_SCALES[MetricKind.SUBJECTIVE_MOOD]
+    def test_checkin_stress_points_to_worse(self) -> None:
         stress = LOCAL_CHECKIN_SCALES["stress"]
-        self.assertEqual("mies", mood.label(4))
-        self.assertEqual(1.0, mood.normalized(4))
         self.assertAlmostEqual(0.8, stress.normalized(8))
-        self.assertNotEqual(mood.scale_id, stress.scale_id)
 
     def test_higher_motivation_is_better(self) -> None:
         motivation = LOCAL_CHECKIN_SCALES["motivation"]
         self.assertEqual(0.0, motivation.normalized(10))
         self.assertEqual(1.0, motivation.normalized(0))
-
-    def test_every_intervals_wellness_rating_runs_one_to_four_higher_worse(
-        self,
-    ) -> None:
-        for kind in INTERVALS_WELLNESS_SCALES:
-            scale = INTERVALS_WELLNESS_SCALES[kind]
-            self.assertEqual(
-                (1, 4, "worse"), (scale.minimum, scale.maximum, scale.higher_is)
-            )
 
     def test_rejects_values_and_labels_outside_the_scale(self) -> None:
         with self.assertRaises(ValueError):
@@ -72,10 +57,6 @@ class CoachRuleTests(unittest.TestCase):
     RULE = COACH_PROMPT[COACH_PROMPT.index("8h. ") :].splitlines()[0]
 
     def test_rule_names_the_garmin_scales_with_best_at_one(self) -> None:
-        wellness = list(INTERVALS_WELLNESS_SCALES.values())
-        self.assertEqual(
-            {("1–4", "worse")}, {(_range(s), s.higher_is) for s in wellness}
-        )
         # The Intervals.icu ratings are no Coach input any more (#1728).
         self.assertNotIn("recovery fatigue/soreness/stress/mood", self.RULE)
         self.assertNotIn("Intervals", self.RULE)

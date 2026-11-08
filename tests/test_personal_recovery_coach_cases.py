@@ -23,7 +23,7 @@ from test_athlete_checkins import FakeManager
 
 from backend.athlete.checkins import CheckinService
 from backend.canonical.records import MeasurementContext
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.coach.context import (
     CoachPerformanceContextReader,
     CoachPlanningContextReader,
@@ -77,7 +77,7 @@ def _coach_context(wellness: list[dict[str, Any]], checkins: CheckinService) -> 
     garmin_payload = Mock()
     garmin_payload.sync_status.return_value = GarminSyncStatus()
     reader = _StoredRecoveryReader(
-        recovery_only_inputs({}, wellness),
+        recovery_only_inputs({}, wellness, wellness_provider=ProviderId.GARMIN),
         profile,
         garmin_payload,
         Mock(),
@@ -131,10 +131,9 @@ class RecoveryCoachCases(unittest.TestCase):
                 for day in range(3)
             ]
         }
-        view = _coach_view(_wellness(30), garmin)
+        view = _coach_view([], garmin)
         series = {item["source_provider"]: item for item in _baselines(view, "hrv")}
-        self.assertEqual({"intervals", "garmin"}, set(series))
-        self.assertEqual("ok", series["intervals"]["status"])
+        self.assertEqual({"garmin"}, set(series))
         self.assertEqual(
             ("insufficient_data", 2),
             (series["garmin"]["status"], series["garmin"]["nights"]),
@@ -221,7 +220,7 @@ class RecoveryCoachCases(unittest.TestCase):
 
 
 def _sleep_view(hours: list[float | None], profile: dict[str, Any]) -> dict[str, Any]:
-    """Coach view of Intervals sleep: ``hours[0]`` is today, None a missing night."""
+    """Coach view of daily sleep rows: ``hours[0]`` is today, None a missing night."""
     wellness = [
         {"id": (TODAY - timedelta(days=index)).isoformat(), "sleepSecs": hour * 3600}
         for index, hour in enumerate(hours)
@@ -260,7 +259,7 @@ class SleepCoachCases(unittest.TestCase):
             [6.5, 7.0, None, 8.5, 6.0, 7.5, 7.0], {"sleep_target_hours": "8"}
         )
         (sleep,) = _baselines(view, "sleep")
-        self.assertEqual(("Intervals.icu", 6.5), (sleep["source"], sleep["value"]))
+        self.assertEqual(("Garmin Connect", 6.5), (sleep["source"], sleep["value"]))
         self.assertIn("Schätzung des jeweiligen Geräts", view["note"])
         self.assertEqual(8.0, view["sleep_target_hours"])
         (shortfall,) = view["sleep_deficits"]

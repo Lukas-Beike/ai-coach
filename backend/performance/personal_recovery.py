@@ -34,10 +34,6 @@ from backend.providers.source_labels import SourceView, provider_label
 # The measurement is the method, so RMSSD and SDNN form separate,
 # never mixed, baselines.
 _SERIES: Final = {
-    (ProviderId.INTERVALS, MetricKind.SLEEP_DURATION): ("sleep", "duration", 3600),
-    (ProviderId.INTERVALS, MetricKind.RESTING_HR): ("resting_hr", "resting", 1),
-    (ProviderId.INTERVALS, MetricKind.HRV_RMSSD): ("hrv", "RMSSD", 1),
-    (ProviderId.INTERVALS, MetricKind.HRV_SDNN): ("hrv", "SDNN", 1),
     (ProviderId.GARMIN, MetricKind.SLEEP_DURATION): (
         "sleep",
         "duration",
@@ -246,8 +242,8 @@ def _baseline(
         )
     else:
         baseline["reason"] = _reason(current=current, changed=changed_on is not None)
-    # The seven-day ln(RMSSD) comparison (#1772) reads local-method providers only.
-    if (metric, field) == ("hrv", "RMSSD") and provider is not ProviderId.INTERVALS:
+    # The seven-day ln(RMSSD) comparison (#1772).
+    if (metric, field) == ("hrv", "RMSSD"):
         baseline["rolling"] = rolling_lnrmssd(
             records,
             observed,
@@ -364,7 +360,6 @@ def sleep_timing_variability(
 
 
 _PERIOD_SOURCES: Final = {
-    ProviderId.INTERVALS: "Intervals.icu",
     ProviderId.GARMIN: "Garmin Connect",
 }
 

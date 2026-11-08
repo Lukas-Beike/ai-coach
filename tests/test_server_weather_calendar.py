@@ -56,8 +56,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(endpoint.state(), {"configured": True})
         weather.state.assert_called_once_with(refresh=True)
 
-
-
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = runtime_clock.utc_now()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
@@ -217,7 +215,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertTrue(weather["configured"])
         self.assertTrue(weather["loading"])
 
-
     def test_weather_failure_uses_exponential_negative_cache_until_forced(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
         forecast = {
@@ -240,7 +237,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertIn("noch nicht erneut", second["error"])
         self.assertEqual(forced["fetched_at"], forecast["fetched_at"])
         self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
-
 
     def test_coach_context_reads_weather_cache_without_refreshing_it(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
@@ -376,7 +372,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertNotIn("import_public_calendar", backend)
         self.assertNotIn("renderExternalCalendarMarker", app)
 
-
     def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
         tomorrow = (
             _local_datetime.now().astimezone().date() + timedelta(days=1)
@@ -445,9 +440,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 "no_intensity_requested"
             ]
         )
-
-
-
 
     def test_external_calendar_event_reduces_hard_or_long_local_draft_only_in_preview(
         self,
@@ -678,7 +670,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         )
         self.assertIsInstance(result["planning_compliance"], list)
 
-    def test_canonical_planning_view_merges_sources_and_exposes_identity(self):
+    def test_canonical_planning_view_exposes_local_identity(self):
         tomorrow = (
             _local_datetime.now().astimezone().date() + timedelta(days=1)
         ).isoformat()
@@ -693,37 +685,13 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 "rationale": "Test",
             }
         )
-        remote = {
-            "id": "remote-event-1",
-            "external_id": "intervals-coach-library-1",
-            "category": "WORKOUT",
-            "type": "Ride",
-            "name": "Lokales Tempo",
-            "start_date_local": tomorrow + "T07:00:00",
-            "moving_time": 1800,
-        }
-        independent = {
-            "id": "remote-event-2",
-            "category": "WORKOUT",
-            "type": "Run",
-            "name": "Remote Lauf",
-            "start_date_local": tomorrow + "T08:00:00",
-            "moving_time": 1200,
-        }
-        view = calendar_canonical.canonical_planned_workouts(
-            [remote, independent], [local]
-        )
-        self.assertEqual(len(view), 3)
+        view = calendar_canonical.canonical_planned_workouts([local])
+        self.assertEqual(len(view), 1)
         local_row = next(row for row in view if row.get("local_id") == local["id"])
         self.assertEqual(local_row["sync_source"], "local")
         self.assertEqual(local_row["sync_status"], "local")
         self.assertFalse(local_row["is_remote"])
         self.assertIsNone(local_row["remote_id"])
-        remote_row = next(
-            row for row in view if row.get("remote_id") == "remote-event-2"
-        )
-        self.assertEqual(remote_row["sync_source"], "intervals")
-        self.assertFalse(remote_row["is_local"])
 
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             payload = json.loads(
@@ -737,11 +705,11 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 (json.dumps(payload), local["id"]),
             )
         merged = calendar_canonical.canonical_planned_workouts(
-            [remote, independent], server.PLANNING_DATA.planned_unit().list()
+            server.PLANNING_DATA.planned_unit().list()
         )
-        joined = next(row for row in merged if row.get("local_id") == local["id"])
-        self.assertEqual(joined["sync_source"], "local+intervals")
-        self.assertEqual(joined["remote_id"], "remote-event-1")
+        linked = next(row for row in merged if row.get("local_id") == local["id"])
+        self.assertEqual(linked["sync_source"], "local")
+        self.assertEqual(linked["remote_id"], "remote-event-1")
         self.assertEqual(
             sum(row.get("remote_id") == "remote-event-1" for row in merged), 1
         )
@@ -1104,7 +1072,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
         tomorrow = (
             _local_datetime.now().astimezone().date() + timedelta(days=1)
         ).isoformat()
-        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+        snapshot_seed.save_snapshot(
+            server.SYNC_PERSISTENCE.state_repository(),
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -1117,7 +1086,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                         "start_date_local": tomorrow + "T09:00:00",
                     }
                 ],
-            }
+            },
         )
         result = server.PLANNING_WORKFLOWS.workout_library_plan_service().apply(
             [

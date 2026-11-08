@@ -164,7 +164,6 @@ class CoachUiParityTests(unittest.TestCase):
             records=Mock(),
             profiles=profiles,
             report=TrainingReportReadService(
-                read_synced_at=Mock(),
                 read_plan=lambda: None,
                 read_checkins=list,
                 read_feedback=lambda keys: [],
@@ -294,10 +293,7 @@ class CoachUiParityTests(unittest.TestCase):
             for row in coach["baselines"]
             if row["metric"] == "hrv"
         )
-        self.assertEqual(
-            [("garmin", "RMSSD", "insufficient_data"), ("intervals", "RMSSD", "ok")],
-            statuses,
-        )
+        self.assertEqual([("garmin", "RMSSD", "insufficient_data")], statuses)
         for key in ("method", "as_of", "note", "sleep_deficits", "sleep_target_hours"):
             self.assertEqual(coach[key], ui[key], key)
 

@@ -124,7 +124,7 @@ class ParityTests(unittest.TestCase):
         dates = {p["date"] for p in result["points_84"] if p.get("wake_at")}
         self.assertNotIn((TODAY - timedelta(days=3)).isoformat(), dates)
 
-    def test_overlapping_providers_stay_separate(self) -> None:
+    def test_intervals_nights_beside_garmin_are_no_series(self) -> None:
         ends = nights(20)
         result = self.assert_parity(
             [garmin_night(end, 8, nested=True) for end in ends],
@@ -133,7 +133,7 @@ class ParityTests(unittest.TestCase):
         )
         self.assertEqual(
             sorted(series["source"] for series in result["series"]),
-            ["Garmin Connect", "Intervals.icu"],
+            ["Garmin Connect"],
         )
 
     def test_no_intervals_is_insufficient_data(self) -> None:

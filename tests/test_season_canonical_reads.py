@@ -42,7 +42,6 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
         source = self._source(selector)
         with self.manager.unit_of_work() as db:
             return season_preparation(
-                snapshot.get("synced_at"),
                 [EVENT],
                 TODAY,
                 ZONE,
@@ -58,7 +57,6 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
         with self.manager.unit_of_work() as db:
             inputs = read_season_load_inputs(source, db, today=today, timezone=ZONE)
             return load_scenarios(
-                snapshot.get("synced_at"),
                 {},
                 today,
                 {"end": "2026-10-20"},

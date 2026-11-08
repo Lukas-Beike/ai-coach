@@ -20,7 +20,6 @@ from zoneinfo import ZoneInfo
 import intervals_compaction as intervals_fixture
 
 from backend.activities.activity_summary import activity_summaries
-from backend.activities.session_linking import garmin_activity_matches
 from backend.athlete.equipment import EquipmentService
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository
@@ -342,89 +341,6 @@ class CanonicalGearParityTests(unittest.TestCase):
         )
 
 
-class CanonicalDuplicatePairTests(unittest.TestCase):
-    """A Garmin gear ride links every Intervals.icu ride the duplicate rule pairs.
-
-    Two Intervals.icu recordings match the Garmin ride; bundling gives the Garmin
-    record to one of them, the pairwise rule still pairs both, as the stored
-    matches of the raw view did.
-    """
-
-    def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "pairs.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
-        self.rows = [intervals_row("i1"), intervals_row("i2")]
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
-            intervals_fixture.ingest_intervals_partial_snapshot(
-                db,
-                {"synced_at": SYNCED, "raw_provider_data": {"activities": self.rows}},
-                zone=ZONE,
-            )
-            GarminSnapshotWriter(
-                KeyValueRepository(lambda: SYNCED), lambda: ZONE
-            ).write(
-                db,
-                {
-                    "synced_at": SYNCED,
-                    "activities": [garmin_activity(910)],
-                    "source_freshness": {"gear": {"freshness": "current"}},
-                    "gear": [
-                        {
-                            "gearUUID": "g1",
-                            "gearName": "Road bike",
-                            "gearTypeName": "Bike",
-                            "stats": {"totalDistance": 50000},
-                            "activity_ids": ["910"],
-                        }
-                    ],
-                },
-            )
-
-    def service(self, matcher: Any) -> EquipmentService:
-        return EquipmentService(
-            self.manager,
-            lambda: stored_summaries(self.manager),
-            lambda: date(2026, 10, 2),
-            lambda: "2026-10-02T12:00:00Z",
-            gear_reader=CanonicalTableReader(),
-            match_activities=matcher,
-        )
-
-    def links(self, service: EquipmentService) -> set[str]:
-        with self.manager.reader() as db:
-            from backend.db import garmin_store
-
-            service.sync_garmin_snapshot(garmin_store.read_state(db))
-        return {row["activity_id"] for row in service.read()["assignments"]}
-
-    def test_the_pairwise_rule_pairs_both_recordings(self) -> None:
-        with self.manager.reader() as db:
-            matches = garmin_activity_matches(db, ["910"], ["i1", "i2"], zone=ZONE)
-            sessions = canonical_store.provider_activity_sessions(
-                db, "intervals", ["i1", "i2"]
-            )
-        self.assertEqual(matches, {"910": {"i1", "i2"}})
-        # Bundling kept the two recordings in separate sessions.
-        self.assertNotEqual(sessions["i1"], sessions["i2"])
-
-    def test_gear_links_every_paired_recording(self) -> None:
-        def matcher(db: Any, garmin_ids: Any, intervals_ids: Any) -> Any:
-            return garmin_activity_matches(db, garmin_ids, intervals_ids, zone=ZONE)
-
-        self.assertEqual(
-            self.links(self.service(matcher)),
-            {session_of(self.manager, "i1"), session_of(self.manager, "i2")},
-        )
-
-    def test_without_the_pairs_only_the_bundled_session_links(self) -> None:
-        self.assertEqual(len(self.links(self.service(None))), 1)
-
-
 def wahoo_summary(identifier: str, day: str = "2026-09-10") -> dict[str, Any]:
     """A session summary that holds only a Wahoo record."""
     return {
@@ -535,7 +451,6 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         usage = self.usage("Road bike")
         self.assertEqual(usage["assigned_sessions"], 2)
         self.assertEqual(usage["hours"], 1.5)
-
 
     def test_a_second_bundled_intervals_id_names_the_session_for_assign(self) -> None:
         with self.manager.reader() as db:
@@ -742,54 +657,6 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         self.store_assignment("i1", None, SYNCED)
 
         self.assertEqual(self.usage("Road bike")["assigned_sessions"], 1)
-
-    def test_garmin_gear_links_an_intervals_copy_named_by_its_external_id(
-        self,
-    ) -> None:
-        """An older Garmin ride outside the Garmin window exists only in Intervals.icu."""
-        with self.manager.unit_of_work() as db:
-            intervals_fixture.ingest_intervals_partial_snapshot(
-                db,
-                {
-                    "synced_at": SYNCED,
-                    "raw_provider_data": {
-                        "activities": [
-                            {
-                                **intervals_row("i-old"),
-                                "start_date_local": "2026-06-01T07:00:00",
-                                "source": "GARMIN_CONNECT",
-                                "external_id": "700",
-                            }
-                        ]
-                    },
-                },
-                zone=ZONE,
-            )
-            GarminSnapshotWriter(
-                KeyValueRepository(lambda: SYNCED), lambda: ZONE
-            ).write(
-                db,
-                {
-                    "synced_at": SYNCED,
-                    "activities": [garmin_activity(910)],
-                    "source_freshness": {"gear": {"freshness": "current"}},
-                    "gear": [
-                        {
-                            "gearUUID": "g1",
-                            "gearName": "Road bike",
-                            "gearTypeName": "Bike",
-                            "stats": {"totalDistance": 50000},
-                            "activity_ids": ["910", "700"],
-                        }
-                    ],
-                },
-            )
-        with self.manager.reader() as db:
-            from backend.db import garmin_store
-
-            self.service.sync_garmin_snapshot(garmin_store.read_state(db))
-        links = {row["activity_id"] for row in self.service.read()["assignments"]}
-        self.assertIn(session_of(self.manager, "i-old"), links)
 
 
 if __name__ == "__main__":

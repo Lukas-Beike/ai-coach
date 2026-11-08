@@ -44,22 +44,10 @@ def bounded(
 
 
 class _RowFingerprints:
-    """Serve fingerprints and single rows from ``activity_rows``, as the tables do."""
+    """Serve fingerprints from the held rows, as the tables do."""
 
-    def intervals_activity_payloads(self, db: Any) -> tuple[dict[str, Any], ...]:
+    def raw_rows(self, db: Any) -> tuple[dict[str, Any], ...]:
         raise NotImplementedError
-
-    def intervals_summary_row(
-        self, db: Any, provider_activity_id: str
-    ) -> dict[str, Any] | None:
-        return next(
-            (
-                row
-                for row in self.intervals_activity_payloads(db)
-                if str(row.get("id")) == provider_activity_id
-            ),
-            None,
-        )
 
     def summary_fingerprints(
         self, db: Any, keys: Iterable[tuple[str, str]]
@@ -67,7 +55,7 @@ class _RowFingerprints:
         wanted = set(keys)
         return {
             key: summary_fingerprint(row)
-            for row in self.intervals_activity_payloads(db)
+            for row in self.raw_rows(db)
             if (key := (ProviderId.INTERVALS.value, str(row.get("id")))) in wanted
         }
 
@@ -78,7 +66,7 @@ class SnapshotActivityRows(_RowFingerprints):
     def __init__(self, snapshot_reader: Any) -> None:
         self._snapshot_reader = snapshot_reader
 
-    def intervals_activity_payloads(
+    def raw_rows(
         self,
         db: Any,
         *,
@@ -97,7 +85,7 @@ class SnapshotActivityRows(_RowFingerprints):
         end: date | None = None,
         limit: int | None = None,
     ) -> tuple[ActivitySummary, ...]:
-        return bounded(summaries_of_rows(self.intervals_activity_payloads(db)), start, end, limit)
+        return bounded(summaries_of_rows(self.raw_rows(db)), start, end, limit)
 
 
 class FixedActivityRows(_RowFingerprints):
@@ -106,7 +94,7 @@ class FixedActivityRows(_RowFingerprints):
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         self.rows = tuple(rows or ())
 
-    def intervals_activity_payloads(
+    def raw_rows(
         self,
         db: Any,
         *,

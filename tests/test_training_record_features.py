@@ -52,8 +52,8 @@ class MemoryManager:
         """Store a Garmin payload the way the sync does: one row per section element.
 
         The gear also becomes canonical gear items and links, which equipment reads.
-        The payload's ``activity_matches`` stand in for the duplicate pairs the app
-        computes from canonical activity records (``match_activities``).
+        The payload's ``activity_matches`` stand in for the canonical session of
+        each Garmin activity (``gear_sessions``).
         """
         if "activity_matches" in snapshot:
             self.matches = {}
@@ -92,11 +92,13 @@ class MemoryManager:
                 replace=True,
             )
 
-    def match_activities(self, db, garmin_ids, intervals_ids):
+    def gear_sessions(self, db, listed):
+        """The session of each listed Garmin activity: the first matched row's."""
         return {
-            garmin_id: self.matches[garmin_id] & set(intervals_ids)
+            str(garmin_id): "act_" + min(self.matches[str(garmin_id)])
+            for garmin_ids in listed.values()
             for garmin_id in garmin_ids
-            if garmin_id in self.matches
+            if str(garmin_id) in self.matches
         }
 
     def unit_of_work(self):
@@ -400,6 +402,12 @@ class TrainingRecordFeatureTests(unittest.TestCase):
 
     def setUp(self):
         self.manager = MemoryManager()
+        sessions = patch(
+            "backend.athlete.equipment._gear_sessions",
+            side_effect=self.manager.gear_sessions,
+        )
+        sessions.start()
+        self.addCleanup(sessions.stop)
 
     def tearDown(self):
         self.manager.connection.close()
@@ -478,7 +486,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
             gear_reader=CanonicalTableReader(),
-            match_activities=self.manager.match_activities,
         )
 
     @staticmethod

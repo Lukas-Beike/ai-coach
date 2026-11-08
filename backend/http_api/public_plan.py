@@ -92,7 +92,7 @@ class PublicPlanStateService:
             # it is its own step; the read below never waits for the writer.
             with manager.read_snapshot():
                 canonical_planned = calendar_canonical.canonical_planned_workouts(
-                    [], self._planned_units.list(500)
+                    self._planned_units.list(500)
                 )
             weather = self._weather.state(canonical_planned, refresh=True)
             if weather.pop("_refreshed", False):
@@ -121,9 +121,7 @@ class PublicPlanStateService:
     def _read(self, weather: dict[str, Any] | None, db: Any) -> dict[str, Any]:
         sync_metadata = self._sync_state.sync_metadata(db)
         local_planned = self._planned_units.list(500, push_state=True)
-        canonical_planned = calendar_canonical.canonical_planned_workouts(
-            [], local_planned
-        )
+        canonical_planned = calendar_canonical.canonical_planned_workouts(local_planned)
         activities = self._activity_rows.compact() if self._activity_rows else []
         activities = self._activity_feedback.attach_to_activities(activities[:1000])
         if weather is None:

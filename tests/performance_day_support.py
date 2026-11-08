@@ -30,37 +30,16 @@ from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     read_garmin_state,
 )
-from backend.performance.wellness_days import WellnessDay
 from backend.providers.garmin_activity_mapping import (
     map_garmin_activities,
     merge_training_load_rows,
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.intervals_activity_mapping import map_intervals_activities
-from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.providers.snapshot_projection import project_intervals_snapshot
 
 UTC_ZONE = ZoneInfo("UTC")
 SYNCED_AT = datetime(2026, 10, 12, 8, tzinfo=UTC)
-
-
-def days_from_rows(rows: list[dict[str, Any]]) -> tuple[WellnessDay, ...]:
-    mapped = map_intervals_wellness(rows, retrieved_at=SYNCED_AT)
-    by_day: dict[Any, dict[MetricKind, Observation]] = {}
-    for observation in mapped.records:
-        if (
-            observation.sport is None
-            and observation.provenance.source_record_id
-            == observation.observed_on.isoformat()
-        ):
-            by_day.setdefault(observation.observed_on, {})[observation.kind] = (
-                observation
-            )
-    return tuple(WellnessDay(day, by_day[day]) for day in sorted(by_day))
-
-
-def latest_day(rows: list[dict[str, Any]]) -> WellnessDay | None:
-    return max(days_from_rows(rows), key=lambda item: item.day, default=None)
 
 
 class StubReader:
@@ -247,15 +226,6 @@ def snapshot_activity_summaries(
     return intervals_activity_summaries(snapshot.get("recent_activities") or [])
 
 
-def snapshot_coverage_time(snapshot: Any) -> str | None:
-    """The Intervals.icu coverage time a sync of the snapshot stores, if any."""
-    try:
-        synced = datetime.fromisoformat(str((snapshot or {}).get("synced_at") or ""))
-    except ValueError:
-        return None
-    return synced.isoformat() if synced.tzinfo is not None else None
-
-
 def snapshot_retrieved_at(
     snapshot: dict[str, Any], default: datetime = SYNCED_AT
 ) -> datetime:
@@ -283,10 +253,7 @@ def canonical_from_snapshot(snapshot: dict[str, Any], as_of: date):
         activity_reader=ActivityReader(),
         as_of=as_of,
     )
-    if inputs is None:
-        return None
-    # The sync stores its fetch time with the canonical coverage (#1416).
-    return replace(inputs, intervals_synced_at=snapshot_coverage_time(snapshot))
+    return inputs
 
 
 def garmin_metrics_from_payload(

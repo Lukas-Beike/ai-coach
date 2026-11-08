@@ -196,7 +196,6 @@ class GarminProjectionServiceTests(unittest.TestCase):
             redactor=redactor,
             local_now=lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
             canonical=GarminCanonicalSources(
-                activity_rows=lambda: object(),
                 observations=lambda: _MappedObservations(snapshot or {}),
                 activity_summaries=lambda: _Summaries(summaries),
             ),

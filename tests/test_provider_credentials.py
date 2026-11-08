@@ -102,24 +102,14 @@ class ProviderCredentialTests(unittest.TestCase):
         ).fetchone()
         return row["value"] if row else None
 
-    def test_athlete_change_is_rejected_while_intervals_data_exists(self):
-        # Without Intervals data the athlete may change freely.
+    def test_athlete_id_can_change_and_be_cleared(self):
+        # Intervals.icu is an output target: no stored ingest data ties the id.
         self.service.update({"intervals_athlete_id": "i111"})
-        self.connection.execute(
-            "INSERT INTO provider_sync_cursors VALUES ('intervals')"
-        )
-        self.connection.commit()
-        for change in (
-            {"intervals_athlete_id": "i222"},
-            {"intervals_athlete_id": None},
-        ):
-            with self.assertRaises(AppError) as rejected:
-                self.service.update(change)
-            self.assertEqual(rejected.exception.status, 409)
         self.assertEqual(self.holder["config"].intervals_athlete_id, "i111")
-        # The same athlete and other fields still save.
-        self.service.update({"intervals_athlete_id": " i111 ", "openai_api_key": "k2"})
-        self.assertEqual(self.holder["config"].openai_api_key, "k2")
+        self.service.update({"intervals_athlete_id": "i222"})
+        self.assertEqual(self.holder["config"].intervals_athlete_id, "i222")
+        self.service.update({"intervals_athlete_id": None})
+        self.assertNotIn("i222", self.holder["config"].intervals_athlete_id)
 
     def test_stored_value_overrides_env_and_clearing_restores_env(self):
         self.service.update({"openai_api_key": "db-openai-key"})

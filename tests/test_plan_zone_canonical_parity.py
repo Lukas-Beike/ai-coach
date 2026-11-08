@@ -80,7 +80,9 @@ class PlanZoneParityTests(CanonicalReadFixture):
     def _thresholds(self) -> tuple:
         """The thresholds the state prelude's canonical current inputs carry."""
         selector = make_selector(self)
-        source = CanonicalPerformanceSource(lambda: self.manager, lambda: selector)
+        source = CanonicalPerformanceSource(
+            lambda: self.manager, lambda: selector, activity_summaries=lambda: selector
+        )
         with self.manager.reader() as db:
             inputs = inputs_for_snapshot(source, db, as_of=date(2026, 10, 11))
             direct = read_zone_thresholds(

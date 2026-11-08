@@ -7,7 +7,6 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
-from backend.activities.sync_time import intervals_synced_at
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.diagnostics.readiness_probe import ReadinessProbeService
 from backend.http_api.analysis import AnalysisRoutes
@@ -315,12 +314,6 @@ def _profile_text(profile_service: Any, key: str) -> str:
     return str(profile_service().get().get(key) or "")
 
 
-def _report_synced_at(canonical: Any, db: Any) -> str | None:
-    """The Intervals.icu sync time of the canonical coverage, for reports and season."""
-    coverage = None if canonical.coverage is None else canonical.coverage()
-    return intervals_synced_at(coverage, db)
-
-
 class HttpApiAssembly:
     """Own eager HTTP route composition and lazy request-handler creation."""
 
@@ -501,7 +494,6 @@ class HttpApiAssembly:
 
         def training_report_services() -> TrainingReportServices:
             canonical = public.canonical_performance_source()
-            report_synced_at = partial(_report_synced_at, canonical)
             records = TrainingRecordsService(
                 database_manager=database_manager(),
                 read_equipment=lambda: (
@@ -521,7 +513,6 @@ class HttpApiAssembly:
                 local_today, canonical=canonical, curves=power_curves
             )
             report_read = TrainingReportReadService(
-                read_synced_at=report_synced_at,
                 read_plan=report_plan,
                 read_checkins=report_checkins,
                 read_feedback=report_feedback,
@@ -551,7 +542,6 @@ class HttpApiAssembly:
                     canonical=canonical,
                 ),
                 season=TrainingSeasonReadService(
-                    read_synced_at=report_synced_at,
                     read_competitions=lambda: competition_service().list(100),
                     read_observations=records.observations,
                     today=local_today,

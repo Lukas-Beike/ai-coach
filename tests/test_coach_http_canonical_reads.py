@@ -187,22 +187,6 @@ class CompactActivityTests(CanonicalContextReadCase):
             self.assertEqual(source.compact(db), source.compact())
 
 
-class ActivityRowLimitTests(CanonicalContextReadCase):
-    def _limited(self, selector: Any, _snapshot: dict[str, Any]) -> tuple[Any, Any]:
-        with self.manager.reader() as db:
-            return (
-                selector.intervals_activity_payloads(db),
-                selector.intervals_activity_payloads(db, limit=1),
-            )
-
-    def test_limit_keeps_the_leading_rows_of_the_tables(self) -> None:
-        pending, (full, limited) = self._pending_and_tables(self._limited)
-
-        self.assertEqual(pending, ((), ()))
-        self.assertGreater(len(full), 1)
-        self.assertEqual(limited, full[:1])
-
-
 class CoachActivitiesContextTests(CanonicalContextReadCase):
     def _activities(self, selector: Any, snapshot: dict[str, Any]) -> dict[str, Any]:
         reader = CoachPerformanceContextReader(

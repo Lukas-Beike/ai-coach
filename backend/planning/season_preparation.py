@@ -35,7 +35,6 @@ PLANNED_LOAD_ESTIMATE_SOURCE = (
 
 
 def season_preparation(
-    synced_at: str | None,
     competitions: list[dict[str, Any]],
     today: date,
     timezone: str = "UTC",
@@ -47,7 +46,6 @@ def season_preparation(
 
     ``activity_summaries`` returns the activity summaries around the given
     inclusive local dates; it is called once for the span of all event windows.
-    ``synced_at`` is the canonical activity sync time.
     """
     result = season_plan_summary(competitions, today)
     windows = [_evidence_window(event, today) for event in result["events"]]
@@ -121,7 +119,6 @@ def season_preparation(
     return {
         **result,
         "method": "season-observed-training-v1",
-        "observed_at": synced_at,
         "timezone": timezone,
     }
 
@@ -254,7 +251,6 @@ def _specificity_evidence(
 
 
 def load_scenarios(
-    synced_at: str | None,
     plan: dict[str, Any],
     today: date,
     values: dict[str, Any],
@@ -264,8 +260,7 @@ def load_scenarios(
     """Model the load curves of the current plan and one explicit alternative.
 
     ``inputs`` carries yesterday's local fitness and fatigue (M7) and today's
-    completed activities, read by ``read_season_load_inputs``; ``synced_at`` is
-    the canonical sync time.
+    completed activities, read by ``read_season_load_inputs``.
     """
     end, scale, taper = _scenario_values(values, today)
     ctl, atl = number(inputs.ctl), number(inputs.atl)
@@ -284,7 +279,6 @@ def load_scenarios(
         "input_sha256": hashlib.sha256(
             json.dumps(
                 {
-                    "snapshot": synced_at,
                     "basis": basis,
                     "completed_today": completed_today,
                     "plan": plan,

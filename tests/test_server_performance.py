@@ -69,9 +69,6 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(load["totals"]["value"], 300.0)
         self.assertIsNotNone(load["computed_at"])
 
-
-
-
     def test_garmin_coach_context_keeps_only_latest_recovery_records(self):
         latest = server.ATHLETE_CLOCK.now().date() - timedelta(days=1)
         earlier = latest - timedelta(days=1)
@@ -814,7 +811,7 @@ class ServerPerformanceTests(ServerTestCase):
         performance = _current_performance_context(snapshot)
         # #1726: the Intervals-anchored actual ATL mixed sources and is gone.
         self.assertNotIn("actual_load", performance)
-        self.assertNotIn("fatigue_atl_actual", performance["comparisons"])
+        self.assertNotIn("fatigue_atl_actual", performance.get("comparisons", {}))
 
     def test_performance_reads_sport_settings_and_wellness_aliases(self):
         today = _local_datetime.now().astimezone().date().isoformat()
@@ -923,11 +920,6 @@ class ServerPerformanceTests(ServerTestCase):
         )["metrics"]["height_cm"]
         # The Intervals.icu athlete height is no source; the profile's stands.
         self.assertEqual(metric["value"], 181)
-
-
-
-
-
 
 
 if __name__ == "__main__":

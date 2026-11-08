@@ -87,7 +87,6 @@ from backend.canonical.vocabulary import (
 __all__ = [
     "ActivitySession",
     "bundle_sessions",
-    "garmin_duplicates_intervals",
     "wahoo_garmin_copy_match",
 ]
 
@@ -136,20 +135,6 @@ def wahoo_garmin_copy_match(
     caller decides which records are Wahoo- and Garmin-recorded Intervals.icu rides.
     """
     return _wahoo_copy_cost(_entry(wahoo, zone), _entry(copy, zone)) is not None
-
-
-def garmin_duplicates_intervals(
-    garmin: ActivityRecord, intervals: ActivityRecord, *, zone: tzinfo
-) -> bool:
-    """Return True when the pairwise Garmin-versus-Intervals.icu duplicate rule holds.
-
-    This is the rule alone, with the elapsed-time alternative, as the sync's raw
-    duplicate check applies it; it ignores which session either record joined.
-    """
-    cost = _garmin_intervals_cost(
-        _entry(garmin, zone), _entry(intervals, zone), elapsed=True
-    )
-    return cost is not None
 
 
 def _entry(record: ActivityRecord, zone: tzinfo) -> _Entry:

@@ -56,7 +56,7 @@ Daily rules (`DAILY_RULES`) exist for `sleep_duration`, `sleep_score`, `hrv_rmss
 
 | Scale id | Range | Direction | Entered at |
 |---|---|---|---|
-| `intervals_fatigue_1_4`, `intervals_soreness_1_4`, `intervals_stress_1_4`, `intervals_mood_1_4` | 1 to 4 | higher is worse (mood: 1 super … 4 mies) | Intervals.icu wellness ratings (`INTERVALS_WELLNESS_SCALES`, retired ingest) |
+| `intervals_fatigue_1_4`, `intervals_soreness_1_4`, `intervals_stress_1_4`, `intervals_mood_1_4` | 1 to 4 | higher is worse (mood: 1 super … 4 mies) | Intervals.icu wellness ratings (retired ingest) |
 | `intervals_rpe_1_10`, `intervals_feel_1_5` | 1 to 10, 1 to 5 | rpe harder; feel 1 strong … 5 weak | Intervals.icu activity |
 | `garmin_rpe_1_10`, `garmin_feel_1_5` | 1 to 10, 1 to 5 | rpe harder; feel 1 very strong … 5 very weak | Garmin watch; the mapper converts the watch's RPE 10..100 and feel 0..100 into these |
 | `local_rpe_0_10`, `local_soreness_0_10`, `local_stress_0_10`, `local_motivation_0_10` | 0 to 10 | RPE harder, soreness and stress worse, motivation better | The app's daily check-in and activity feedback (`LOCAL_CHECKIN_SCALES`) |

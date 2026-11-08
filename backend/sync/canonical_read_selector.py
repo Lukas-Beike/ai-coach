@@ -11,11 +11,6 @@ selector serves the tables through a reader that returns each observation at the
 newest version stored for it, so nothing vanishes. Once the re-projection
 completes, only observations at the current mapper version are served.
 
-Raw activity rows (``intervals_activity_payloads``) follow the same decision as ``activities``.
-A stored Intervals.icu snapshot that lists activities only in compact form (from a
-release before ``raw_provider_data``) cannot be backfilled; its activities stay
-missing from the tables until the stored Intervals.icu data is purged.
-
 Tables keep serving after a sync, because the ingest writes each new snapshot
 into the tables in the same transaction. While the tables serve, the stored
 snapshot omits the activity sections the tables hold (``canonical_sections``
@@ -66,7 +61,6 @@ from backend.performance.session_metrics_reads import (
 from backend.performance.zone_time_reads import read_zone_times, with_zone_times
 from backend.runtime.ports import (
     ActivityReader,
-    ActivityRowReader,
     ActivitySummaryReader,
     CanonicalReader,
     ObservationSourceSelector,
@@ -110,17 +104,6 @@ class _PendingReader:
         del db, provider, low, high
         return ()
 
-    def intervals_activity_payloads(
-        self,
-        db: Any,
-        *,
-        start: date | None = None,
-        end: date | None = None,
-        limit: int | None = None,
-    ) -> tuple[dict[str, Any], ...]:
-        del db, start, end, limit
-        return ()
-
     def activity_sessions(
         self,
         db: Any,
@@ -137,12 +120,6 @@ class _PendingReader:
     ) -> dict[ProviderActivityKey, str]:
         del db, keys
         return {}
-
-    def intervals_summary_row(
-        self, db: Any, provider_activity_id: str
-    ) -> dict[str, Any] | None:
-        del db, provider_activity_id
-        return None
 
     def observations(
         self,
@@ -176,7 +153,6 @@ PENDING_READER: Final[CanonicalReader] = _PendingReader()
 
 class CanonicalReadSelector(
     ActivityReader,
-    ActivityRowReader,
     ActivitySummaryReader,
     ObservationSourceSelector,
     ProviderCoverageReader,
@@ -217,30 +193,11 @@ class CanonicalReadSelector(
     ) -> tuple[tuple[Sport, float, date], ...]:
         return self._source(db).activity_max_hr(db, provider, low=low, high=high)
 
-    def intervals_activity_payloads(
-        self,
-        db: Any,
-        *,
-        start: date | None = None,
-        end: date | None = None,
-        limit: int | None = None,
-    ) -> tuple[dict[str, Any], ...]:
-        """Return raw activity rows from the same source as ``activities``."""
-        return self._source(db).intervals_activity_payloads(
-            db, start=start, end=end, limit=limit
-        )
-
     def summary_fingerprints(
         self, db: Any, keys: Iterable[ProviderActivityKey]
     ) -> dict[ProviderActivityKey, str]:
         """Return current summary fingerprints from the serving source."""
         return self._source(db).summary_fingerprints(db, keys)
-
-    def intervals_summary_row(
-        self, db: Any, provider_activity_id: str
-    ) -> dict[str, Any] | None:
-        """Return one stored Intervals.icu payload from the serving source."""
-        return self._source(db).intervals_summary_row(db, provider_activity_id)
 
     def activity_summaries(
         self,

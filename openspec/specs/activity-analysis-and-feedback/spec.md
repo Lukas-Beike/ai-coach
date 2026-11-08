@@ -405,12 +405,3 @@ Freshness checks outside the sync owner SHALL read current summary fingerprints 
 Intervals.icu activities are tombstoned and their rows deleted by the #1728 purge; the Intervals.icu branch of the port remains until the purge has run in production.
 
 Evidence: `backend/sync/canonical_table_reader.py:CanonicalTableReader.summary_fingerprints`; `tests/test_activity_canonical_reads.py:test_fingerprints_keep_the_stored_values`, `tests/test_canonical_detail_reader.py:CanonicalDetailStatusTests`.
-
-### Requirement: Raw Intervals.icu payloads stay with the sync owner
-Only `backend/sync/` SHALL read stored raw Intervals.icu activity payloads (`intervals_activity_payloads`, for the detail fetch and snapshot restore); other consumers SHALL read session summaries or the `summary_fingerprints` port. No production code calls the raw `intervals_activity_payloads` or `intervals_summary_row` ports any more; they remain for tests until the #1728 purge has run in production.
-
-#### Scenario: Consumer outside sync
-- **WHEN** a module outside `backend/sync/` calls `intervals_activity_payloads`
-- **THEN** the guard test fails.
-
-Evidence: `tests/test_provider_coupling_guard.py:RawPayloadReadGuardTests`.

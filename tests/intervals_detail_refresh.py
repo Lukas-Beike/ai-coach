@@ -18,10 +18,6 @@ from urllib.parse import quote
 
 from intervals_detail_fingerprints import intervals_detail_fingerprints
 
-from backend.activities.activity_reference import (
-    ActivityReferenceResolver,
-    NoActivityReferences,
-)
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
 from backend.errors import AppError, public_error_contract
@@ -36,7 +32,6 @@ from backend.providers.intervals_activity_fields import (
     ACTIVITY_DETAIL_STREAM_TYPES,
     activity_detail_laps,
 )
-from backend.runtime.ports import ActivityRowAndSummaryReader
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,
@@ -87,11 +82,10 @@ class ActivityDetailRefreshService:
         *,
         api_client: Any,
         database_manager: Any,
-        row_reader: ActivityRowAndSummaryReader,
+        row_reader: Any,
         store: ActivityDetailStore,
         utc_now: Callable[[], str],
         configured: bool,
-        references: ActivityReferenceResolver | None = None,
         canonical: CanonicalDetailWriter,
         local_date: Callable[[], str] | None = None,
         ingest_enabled: Callable[[], bool] = lambda: True,
@@ -103,18 +97,13 @@ class ActivityDetailRefreshService:
         self._store = store
         self._utc_now = utc_now
         self._configured = configured
-        self._references = NoActivityReferences() if references is None else references
         self._canonical = canonical
         self._local_date = local_date
 
     def refresh(self, activity_id: str) -> dict[str, Any]:
-        activity_id = normalize_activity_id(
-            self._references.provider_reference(
-                normalize_activity_id(activity_id)
-            ).activity_id
-        )
+        activity_id = normalize_activity_id(activity_id)
         with self._database_manager.unit_of_work() as db:
-            rows = self._row_reader.intervals_activity_payloads(db)
+            rows = self._row_reader.raw_rows(db)
             summary = next(
                 (row for row in rows if str(row.get("id")) == activity_id),
                 None,
@@ -218,7 +207,7 @@ class ActivityDetailRefreshService:
         if not self._configured or not self._ingest_enabled():
             return {"fetched": 0, "failed": 0}
         with self._database_manager.unit_of_work() as db:
-            rows = self._row_reader.intervals_activity_payloads(db)
+            rows = self._row_reader.raw_rows(db)
         newest = sorted(
             (row for row in rows if row.get("id")),
             key=lambda row: str(row.get("start_date_local") or ""),

@@ -15,6 +15,7 @@ from backend.activities.feedback import (
     normalize_activity_feedback,
 )
 from backend.canonical.vocabulary import ProviderId
+from backend.db import canonical_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
@@ -288,7 +289,10 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         service = ActivityFeedbackService(
             self.manager, self.feedback_repository, references=references
         )
-        intervals_session = references.local_ids(["i-1"])["i-1"]
+        with self.manager.reader() as db:
+            intervals_session = canonical_store.activity_local_ids(
+                db, ProviderId.INTERVALS.value, ["i-1"]
+            )["i-1"]
 
         # Intervals id, its local id, a Garmin-only local id and provider id:
         # every one is stored under the live session id.

@@ -39,7 +39,6 @@ class ExportedSourceConstantTests(unittest.TestCase):
         self.assertEqual("Garmin Connect", garmin_weight.GARMIN_PERFORMANCE_SOURCE)
 
     def test_body_history_source_constants_are_unchanged(self):
-        self.assertEqual("Intervals.icu Wellness", body.INTERVALS_SOURCE)
         self.assertEqual("Garmin Connect", body.GARMIN_SOURCE)
 
 
@@ -51,6 +50,6 @@ class EmittedSourceOutputTests(unittest.TestCase):
             basis_day=date(2026, 10, 1), ctl=50.0, atl=60.0, completed_today=()
         )
         result = season_preparation.load_scenarios(
-            None, {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
+            {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
         )
         self.assertEqual("Lokal berechnet (M7)", result["basis"]["source"])
