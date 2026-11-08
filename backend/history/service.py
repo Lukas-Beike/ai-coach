@@ -19,12 +19,14 @@ class ChangeHistoryService:
         zone_service: Any | None = None,
         feedback_service: Any | None = None,
         session_corrections: Any | None = None,
+        nutrition_diary: Any | None = None,
     ):
         self._database_manager = database_manager
         self._profile_repository = profile_repository
         self._zone_service = zone_service
         self._feedback_service = feedback_service
         self._session_corrections = session_corrections
+        self._nutrition_diary = nutrition_diary
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         # Retention is enforced on read in SQL; recording a change prunes rows.
@@ -57,6 +59,8 @@ class ChangeHistoryService:
             entity_type == "activity_session" and self._session_corrections is not None
         ):
             return self._session_corrections.current(db, entity_id)
+        elif entity_type == "nutrition_entry" and self._nutrition_diary is not None:
+            return self._nutrition_diary.current(db, entity_id)
         else:
             value = self._current_record(db, entity_type, entity_id)
         return value, change_history.audit_projection(entity_type, value)
@@ -96,14 +100,9 @@ class ChangeHistoryService:
             raise AppError(
                 409, "Diese Änderung kann nicht erneut zurückgenommen werden."
             )
-        # Rows recorded before schema version 16 name planning fields with their
-        # former keys; the restore target uses the current ones.
-        target = change_history.current_audit_fields(
-            str(row.get("entity_type") or ""),
-            {
-                field: change.get("before")
-                for field, change in fields.items()
-                if isinstance(change, dict) and "before" in change
-            },
-        )
+        target = {
+            field: change.get("before")
+            for field, change in fields.items()
+            if isinstance(change, dict) and "before" in change
+        }
         return target, target

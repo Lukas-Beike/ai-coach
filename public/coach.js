@@ -498,9 +498,11 @@ async function recoverChatRequestFailure(error, context) {
     scheduleChatStatusPoll(0);
     return "recovering";
   }
-  if (!cancelled) toast(error.message, true);
   scheduleChatStatusPoll(0);
   await loadChatHistoryFresh();
+  // A failed turn is shown at its own message with a retry; the toast is for the rest.
+  const shownInline = (state.data?.messages || []).some((entry) => entry.coach_failed && entry.client_turn_id === clientTurnId);
+  if (!cancelled && !shownInline) toast(error.message, true);
   invalidateContextPreview();
   return false;
 }
@@ -1162,7 +1164,8 @@ function updateChatComposerVisibility() {
     state.chatUnseenContent = false;
   }
   if (jump) {
-    jump.hidden = syncing || nearBottom || !$("#messages")?.childElementCount || !active;
+    const messages = $("#messages");
+    jump.hidden = syncing || nearBottom || !messages?.childElementCount || messages.classList.contains("has-empty-state") || !active;
     updateChatJumpLabel(jump);
   }
 }
@@ -1238,6 +1241,11 @@ function chatScrollMovedUp(kind, position) {
   if (position >= anchor - CHAT_UPWARD_SCROLL_PX) return false;
   chatScrollAnchors[kind] = position;
   return true;
+}
+
+// Returning to the chat starts a fresh comparison: the browser may clamp the offset the previous panel left, which is no reader gesture.
+function resetChatWindowScrollAnchor() {
+  chatScrollAnchors.window = null;
 }
 
 function scrollWindowForChat(top) {
@@ -1771,7 +1779,7 @@ function messageActionButton(icon, label) {
   return button;
 }
 
-function renderMessageNode(message) {
+function renderMessageNode(message, latest = false) {
   const node = document.createElement("div");
   node.className = `message ${message.role}`;
   if (message.id != null) node.dataset.messageId = String(message.id);
@@ -1785,6 +1793,7 @@ function renderMessageNode(message) {
     }
   }
   appendMessageRetry(node, message);
+  appendFailedTurnRetry(node, message, latest);
   appendMessageChanges(node, message);
   const actions = document.createElement("div");
   actions.className = "message-actions";
@@ -1817,10 +1826,14 @@ function appendMessageChanges(node, message) {
   const changes = message.role === "assistant" ? message.coach_changes : null;
   if (!Array.isArray(changes?.labels) || !changes.labels.length) return;
   const line = document.createElement("div");
-  line.className = "message-changes";
+  line.className = `message-changes${changes.undone_at ? " is-undone" : ""}`;
+  const icon = document.createElement("span");
+  icon.className = "message-changes-icon";
+  icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${changes.undone_at ? "M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" : "m5 12 5 5 9-10"}"></path></svg>`;
   const text = document.createElement("span");
-  text.textContent = `${changes.undone_at ? "Zurückgenommen" : "Geändert"}: ${changes.labels.join(" · ")}`;
-  line.append(text);
+  text.className = "message-changes-text";
+  text.textContent = changes.undone_at ? `Zurückgenommen: ${changes.labels.join(" · ")}` : changes.labels.join(" · ");
+  line.append(icon, text);
   if (changes.undoable && !changes.undone_at && message.client_turn_id) {
     const undo = document.createElement("button");
     undo.type = "button";
@@ -1891,6 +1904,53 @@ async function undoCoachTurn(clientTurnId, button) {
   }
 }
 
+// The newest reply of a failed turn offers to send the athlete's text again as a new turn.
+function appendFailedTurnRetry(node, message, latest) {
+  if (message.role !== "assistant" || !message.coach_failed || !latest || !message.client_turn_id) return;
+  const request = (state.data?.messages || []).find((entry) => entry.role === "user" && entry.client_turn_id === message.client_turn_id);
+  // Attachments are not kept after a turn, so only a text request can be sent again.
+  if (!request?.content || messageAttachmentLabel(request.attachment_names)) return;
+  node.classList.add("is-failed");
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "secondary-button message-retry";
+  retry.textContent = "Erneut senden";
+  retry.addEventListener("click", () => resendChatText(String(request.content), message.coach_request_kind));
+  node.append(retry);
+}
+
+// Sends a text (with its quick-action kind) through the normal composer path while keeping the athlete's draft.
+function resendChatText(text, requestKind = null) {
+  const input = $("#messageInput");
+  if (!input) return;
+  const draft = input.value;
+  const draftKind = input.dataset.requestKind;
+  const attachments = state.chatAttachments || [];
+  state.chatAttachments = [];
+  input.value = text;
+  if (requestKind) input.dataset.requestKind = requestKind;
+  else delete input.dataset.requestKind;
+  input.dispatchEvent(new Event("input"));
+  $("#chatForm").requestSubmit();
+  input.value = draft;
+  if (draftKind) input.dataset.requestKind = draftKind;
+  else delete input.dataset.requestKind;
+  state.chatAttachments = [...attachments, ...(state.chatAttachments || [])];
+  renderChatAttachments();
+  resizeChatInput(input);
+  state.chatDraftDirty = Boolean(draft.trim()) || state.chatAttachments.length > 0;
+  updateChatControls();
+}
+
+function profileSetupButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary-button";
+  button.textContent = "Profil ausfüllen";
+  button.addEventListener("click", () => resendChatText("Hilf mir, mein Profil und meine Ziele auszufüllen."));
+  return button;
+}
+
 function appendChatStream(root, streamVisible) {
   const phase = state.chatRequest?.phase;
   if (!streamVisible) return false;
@@ -1906,7 +1966,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   const appShellLoading = Boolean($("#appShell")?.classList.contains("is-loading"));
   const visibleMessages = messages || [];
   const signature = JSON.stringify([
-    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error, message.coach_changes || null]),
+    visibleMessages.map((message) => [message.id || null, message.created_at || null, message.role, message.content, message.attachment_names, message.error, message.coach_changes || null, Boolean(message.coach_failed)]),
     appShellLoading, state.data?.messages_next_cursor, state.chatStreamText, state.chatServerOperationId,
     state.chatResponseStarted, state.chatRequest?.phase || null, state.chatRequest?.responseMessageId || null,
     state.chatRequest?.responseMessageReceived || false,
@@ -1926,9 +1986,9 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   root.replaceChildren();
   appendHistoryPageButton(root, "chat");
   if (!visibleMessages.length && !state.chatRequest && !state.chatQueue.length) {
-    root.append(appShellLoading ? createSkeletonStack(4) : createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest."));
+    root.append(appShellLoading ? createSkeletonStack(4) : createEmptyState("Dein Coach ist bereit", null, profileSetupButton()));
   }
-  visibleMessages.forEach((message) => root.append(renderMessageNode(message)));
+  visibleMessages.forEach((message, index) => root.append(renderMessageNode(message, index === visibleMessages.length - 1)));
   state.chatQueue.forEach((entry, index) => root.append(createPendingMessage(entry, index)));
   const persistedResponse = Boolean(
     state.chatRequest?.responseMessageReceived

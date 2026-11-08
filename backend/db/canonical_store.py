@@ -1116,14 +1116,16 @@ def derived_observation_rows(
 ) -> list[dict[str, Any]]:
     """Return the active local derived observations of ``method``.
 
-    Each row has its natural key, metric, value, sport, observed day, owner
-    (the canonical session id) and the parsed ``derivation`` details. Local
+    Each row has its natural key, metric, value, sport, observed day and instant,
+    owner (the canonical session id, or the night of a morning value) and the
+    parsed ``derivation`` details. Local
     derived rows carry no provider, so provider reads never return them.
     ``owners`` limits the rows to those owner ids; None returns every row.
     """
     sql = (
-        "SELECT natural_key, metric, value, sport, observed_on, owner_record_id, "
-        "details FROM observations WHERE provider IS NULL AND method = ? "
+        "SELECT natural_key, metric, value, sport, observed_on, observed_at, "
+        "owner_record_id, details FROM observations WHERE provider IS NULL "
+        "AND method = ? "
         "AND source_kind = ? AND state = ?"
     )
     params: tuple[object, ...] = (
@@ -1155,17 +1157,32 @@ def derived_observation_rows(
 
 
 def retire_derived_observations(
-    db: Any, method: str, *, keep: Collection[str], now: str
+    db: Any,
+    method: str,
+    *,
+    keep: Collection[str],
+    now: str,
+    owner: str | None = None,
 ) -> int:
-    """Retire active local derived rows of ``method`` whose key is not in ``keep``."""
+    """Retire active local derived rows of ``method`` whose key is not in ``keep``.
+
+    ``owner`` limits the retirement to that owner's rows; None covers every row.
+    """
+    sql = (
+        "SELECT natural_key FROM observations WHERE provider IS NULL "
+        "AND method = ? AND source_kind = ? AND state = ?"
+    )
+    params: tuple[object, ...] = (
+        method,
+        SourceKind.DERIVED.value,
+        ProjectionState.ACTIVE.value,
+    )
+    if owner is not None:
+        sql += " AND owner_record_id = ?"
+        params = (*params, owner)
     stale = [
         row["natural_key"]
-        for row in _fetch_all(
-            db,
-            "SELECT natural_key FROM observations WHERE provider IS NULL "
-            "AND method = ? AND source_kind = ? AND state = ?",
-            (method, SourceKind.DERIVED.value, ProjectionState.ACTIVE.value),
-        )
+        for row in _fetch_all(db, sql, params)
         if row["natural_key"] not in keep
     ]
     for start in range(0, len(stale), _RETIRE_BATCH):
@@ -1332,6 +1349,41 @@ def mark_placeholder_deleted(
         now=now,
     )
     return True
+
+
+def tombstone_provider_activities(
+    db: Any, provider: str, *, record_kind: str, now: str
+) -> int:
+    """Tombstone every stored activity of one provider, with its raw record and session.
+
+    Each record that is not deleted yet, or whose session is not, takes the
+    deletion path of a removed activity, oldest first: a deleted surviving
+    session hands its aliases to a new survivor and keeps it as
+    ``merged_into_retained``, so its id still resolves. Returns the number of
+    records passed.
+    """
+    rows = _fetch_all(
+        db,
+        "SELECT r.provider_activity_id, r.activity_id FROM activity_records AS r "
+        "LEFT JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.provider = ? AND (r.state <> ? OR s.state <> ?) "
+        "ORDER BY r.started_at, r.provider_activity_id",
+        (
+            provider,
+            ActivityRecordState.DELETED.value,
+            ActivitySessionState.DELETED.value,
+        ),
+    )
+    for row in rows:
+        _delete_activity(
+            db,
+            provider,
+            record_kind=record_kind,
+            provider_activity_id=row["provider_activity_id"],
+            activity_id=row["activity_id"],
+            now=now,
+        )
+    return len(rows)
 
 
 def _delete_activity(
@@ -1993,7 +2045,7 @@ def activity_sessions_by_ids(
         for row in _fetch_all(
             db,
             "SELECT activity_id, primary_provider, primary_provider_activity_id, "
-            "state, merged_into FROM activity_sessions "
+            "state, merged_into, merged_into_retained FROM activity_sessions "
             f"WHERE activity_id IN ({_placeholders(chunk)})",
             tuple(chunk),
         ):
@@ -2465,6 +2517,38 @@ def merge_candidate_rows(
             ActivityRecordState.ACTIVE.value,
         ),
     )
+
+
+def session_legacy_keys(db: Any, session_ids: Sequence[str]) -> dict[str, list[str]]:
+    """Map each session to the other ids athlete data may be stored under.
+
+    Those are the provider activity ids of the records of the session and of every
+    alias that merged into it (through ``merged_into`` or, for a deleted alias,
+    ``merged_into_retained``, in any record state), and the alias session ids.
+    Unknown sessions are absent; ids are sorted.
+    """
+    found: dict[str, set[str]] = {}
+    for chunk in _chunked(session_ids):
+        for row in _fetch_all(
+            db,
+            "WITH RECURSIVE family(root, activity_id, depth) AS ("
+            "SELECT activity_id, activity_id, 0 FROM activity_sessions "
+            f"WHERE activity_id IN ({_placeholders(chunk)}) "
+            "UNION ALL "
+            "SELECT family.root, alias.activity_id, family.depth + 1 "
+            "FROM activity_sessions AS alias JOIN family "
+            "ON COALESCE(alias.merged_into, alias.merged_into_retained) "
+            "= family.activity_id WHERE family.depth < ?) "
+            "SELECT family.root AS root, family.activity_id AS other FROM family "
+            "UNION "
+            "SELECT family.root, records.provider_activity_id "
+            "FROM family JOIN activity_records AS records "
+            "ON records.activity_id = family.activity_id",
+            (*chunk, _MAX_MERGE_HOPS),
+        ):
+            if row["other"] != row["root"]:
+                found.setdefault(str(row["root"]), set()).add(str(row["other"]))
+    return {root: sorted(ids) for root, ids in found.items()}
 
 
 def feedback_origin_sessions(

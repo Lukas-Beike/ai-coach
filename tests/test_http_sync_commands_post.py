@@ -45,10 +45,10 @@ class SyncCommandPostRouteTests(unittest.TestCase):
             order.append("endpoint")
             return endpoint
 
-        SyncCommandPostRoute(make_endpoint).handle(handler, "/api/sync")
+        SyncCommandPostRoute(make_endpoint).handle(handler, "/api/garmin/sync")
 
         self.assertEqual(order, ["body", "endpoint"])
-        endpoint.execute.assert_called_once_with("/api/sync", {"days": 7})
+        endpoint.execute.assert_called_once_with("/api/garmin/sync", {"days": 7})
 
 
 if __name__ == "__main__":

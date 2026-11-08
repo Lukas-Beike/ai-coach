@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from backend.db.migrations import migrate_schema
+from backend.db.migrations import OlderSchemaError, migrate_schema
 from backend.errors import AppError
 
 
@@ -77,6 +77,13 @@ class DatabaseRestoreValidationService:
             connection.execute("PRAGMA foreign_keys = ON")
             try:
                 self._config.migrate_schema(connection)
+            except OlderSchemaError as error:
+                raise AppError(
+                    400,
+                    "Das Backup stammt aus einem Release vor 1.13.41 (Schema älter "
+                    "als 21) und kann nicht mehr wiederhergestellt werden. Bitte "
+                    "das Backup zuerst mit Release 1.13.44 öffnen und neu sichern.",
+                ) from error
             except RuntimeError as error:
                 raise AppError(
                     400, "Das Backup entspricht keinem unterstützten Datenbankschema."

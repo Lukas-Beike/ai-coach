@@ -4,16 +4,17 @@ import unittest
 from copy import deepcopy
 from datetime import date
 
+from intervals_compaction import (
+    compact_snapshot,
+    compact_sport_settings,
+    compact_wellness_sport_info,
+)
+
 from backend.planning.context import (
     build_daily_planning_context,
     external_calendar_event_dates,
     local_calendar_library_entries,
     selected,
-)
-from backend.sync.intervals_compaction import (
-    compact_snapshot,
-    compact_sport_settings,
-    compact_wellness_sport_info,
 )
 
 

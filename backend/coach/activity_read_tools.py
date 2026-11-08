@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Final
 
 from backend.activities.session_purpose import summary_is_not_training
+from backend.activities.strength_sets import plan_comparison
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
@@ -30,10 +31,17 @@ from backend.planning import leg_strength
 from backend.planning.sport import planned_sport_environment
 from backend.sync.garmin import GarminPayloadService
 
-# Per-field source labels and zone-time arrays stay in get_activity_details;
-# the list keeps each session's scalar values and its primary source label.
+# Per-field source labels, zone-time arrays and executed strength sets stay in
+# get_activity_details; the list keeps each session's scalar values and its
+# primary source label.
 _LIST_OMITTED_KEYS: Final = frozenset(
-    {"sources", "power_zone_times", "heart_rate_zone_times", "pace_zone_times"}
+    {
+        "sources",
+        "power_zone_times",
+        "heart_rate_zone_times",
+        "pace_zone_times",
+        "strength_sets",
+    }
 )
 
 
@@ -225,6 +233,9 @@ class CoachActivityReadToolService:
             )
             if targets is not None:
                 result["planned_targets"] = targets
+            strength = _strength_plan(detail, session, result.get("focus"), around)
+            if strength is not None:
+                result["strength_plan"] = strength
         return result
 
     def _session_checks(
@@ -421,6 +432,28 @@ def _matched_unit(
         and planned_sport_environment(unit)[0].value == session.get("sport")
     ]
     return same[0] if len(same) == 1 else None
+
+
+def _strength_plan(
+    detail: Mapping[str, Any],
+    session: Mapping[str, Any],
+    focus: Any,
+    around: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Executed strength sets against the matched unit's ``strength_structure``."""
+    executed = detail.get("strength_sets")
+    if session.get("sport") != "strength" or not isinstance(executed, dict):
+        return None
+    unit = _matched_unit(session, focus, around)
+    structure = None if unit is None else unit.get("strength_structure")
+    if not isinstance(structure, list):
+        return None
+    comparison = plan_comparison(
+        [item for item in structure if isinstance(item, dict)], executed
+    )
+    if comparison is None:
+        return None
+    return {**comparison, "planned_unit_id": unit.get("id") if unit else None}
 
 
 def _unavailable() -> dict[str, Any]:

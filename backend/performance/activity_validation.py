@@ -137,7 +137,6 @@ def bounded_performance_metric(key: str, value: Any) -> float | int | None:
         "running_vo2max_ml_kg_min": (10, 100),
         "cycling_vo2max_ml_kg_min": (10, 100),
         "run_threshold_pace_seconds_per_km": (120, 1800),
-        "run_zone2_pace_seconds_per_km": (120, 1800),
         "run_threshold_hr_bpm": (80, 230),
         "bike_threshold_hr_bpm": (80, 230),
         "run_5k_seconds": (1, 86400),
@@ -195,7 +194,6 @@ def activity_validation_details(
             (
                 "running_vo2max_ml_kg_min",
                 "run_threshold_pace_seconds_per_km",
-                "run_zone2_pace_seconds_per_km",
                 "run_threshold_hr_bpm",
                 "run_5k_seconds",
                 "run_10k_seconds",

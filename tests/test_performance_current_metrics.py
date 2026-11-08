@@ -5,9 +5,6 @@ from datetime import UTC, date, datetime
 from performance_day_support import snapshot_metrics
 
 from backend.performance.canonical_current import CanonicalCurrentInputs
-from backend.performance.current_metrics import (
-    PROVIDER_INTERVALS_NAME,
-)
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
 from backend.providers.wahoo_threshold_mapping import (
     map_wahoo_power_zones,
@@ -40,7 +37,7 @@ def empty_garmin(**overrides):
 
 
 class CurrentPerformanceMetricsTests(unittest.TestCase):
-    def test_general_maximum_hr_prefers_garmin_before_comparing_sports(self):
+    def test_general_maximum_hr_is_garmins_and_ignores_the_intervals_setting(self):
         snapshot = {
             "athlete": {
                 "sport_settings": [
@@ -53,7 +50,7 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             (187, None, 187),
             (None, 185, 185),
             (187, 185, 187),
-            (None, None, 200),
+            (None, None, None),
         ):
             with self.subTest(running=running, cycling=cycling):
                 garmin = empty_garmin(
@@ -72,8 +69,7 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
                 selected = snapshot_metrics(snapshot, {}, garmin)["max_hr_bpm"]
                 self.assertEqual(selected["value"], expected)
                 self.assertEqual(
-                    selected["source_provider"],
-                    "garmin" if running or cycling else "intervals",
+                    selected["source_provider"], "garmin" if expected else None
                 )
 
     def test_garmin_priority_and_metric_shape(self):
@@ -118,32 +114,21 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             garmin,
         )
         # Garmin's dated measurement wins the recency rule (#1668); the undated
-        # Intervals and profile weights stay alternatives.
+        # profile weight stays an alternative. The Intervals weight is no source.
         weight = dict(result["weight_kg"])
         alternatives = weight.pop("alternatives")
         self.assertTrue(weight.pop("conflict"))
         self.assertEqual(weight, garmin["weight_kg"])
-        self.assertEqual([item["value"] for item in alternatives], [75, 80])
-        # The athlete-maintained Intervals FTP precedes Garmin's (#1668); Garmin's
-        # max HR precedes the Intervals setting, which stays as an alternative.
-        self.assertEqual(result["cycling_ftp_watts"]["value"], 250)
-        self.assertEqual(
-            result["cycling_ftp_watts"]["alternatives"][0]["value"],
-            garmin["cycling_ftp_watts"]["value"],
-        )
-        self.assertEqual(
-            {
-                key: result["cycling_max_hr_bpm"][key]
-                for key in garmin["cycling_max_hr_bpm"]
-            },
-            garmin["cycling_max_hr_bpm"],
-        )
-        self.assertEqual(result["cycling_max_hr_bpm"]["alternatives"][0]["value"], 180)
+        self.assertEqual([item["value"] for item in alternatives], [80])
+        # Garmin's FTP and max HR are the values; the Intervals settings are not
+        # alternatives.
+        self.assertEqual(result["cycling_ftp_watts"], garmin["cycling_ftp_watts"])
+        self.assertEqual(result["cycling_max_hr_bpm"], garmin["cycling_max_hr_bpm"])
         self.assertEqual(
             result["cycling_vo2max_ml_kg_min"], garmin["cycling_vo2max_ml_kg_min"]
         )
 
-    def test_intervals_wellness_athlete_profile_fallbacks(self):
+    def test_intervals_settings_give_no_current_value_but_the_profile_does(self):
         snapshot = {
             "athlete": {
                 "weight": 78,
@@ -157,6 +142,7 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
                         "eftp": 260,
                         "lthr": 160,
                         "vo2max": 52,
+                        "zone2_pace": 5.0,
                     },
                     {
                         "types": ["Laufen"],
@@ -169,21 +155,13 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             },
             "recent_wellness": [
                 {
-                    "id": "2026-08-30",
-                    "sportInfo": [{"types": ["Ride"], "ftp": 255, "eFTP": 265}],
-                },
-                {
                     "id": "2026-08-31",
-                    "sport_info": [
-                        {"types": ["Ride"], "ftp": 256, "eFTP": 266},
-                        {"types": ["Run"], "lthr": 166},
-                    ],
+                    "weight": 79,
+                    "bodyFat": 19,
+                    "sport_info": [{"types": ["Ride"], "ftp": 256, "eFTP": 266}],
                 },
             ],
-            "recent_activities": [
-                {"type": "Ride", "start_date_local": "2026-08-30", "icu_eftp": 270},
-                {"type": "Ride", "start_date_local": "2026-08-31", "icu_eftp": 275},
-            ],
+            "recent_activities": [],
         }
         result = snapshot_metrics(
             snapshot,
@@ -191,12 +169,21 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             empty_garmin(),
             canonical=wahoo_canonical(),
         )
-        self.assertEqual(result["weight_kg"]["value"], 78)
-        self.assertEqual(result["body_fat_pct"]["value"], 18)
-        self.assertEqual(result["height_cm"]["value"], 180)
-        self.assertEqual(result["cycling_ftp_watts"]["value"], 250)
-        self.assertEqual(result["run_threshold_watts"]["value"], 280)
-        self.assertEqual(result["run_threshold_hr_bpm"]["value"], 165)
+        self.assertEqual(result["weight_kg"]["value"], 80)
+        self.assertEqual(result["weight_kg"]["source"], "Manuell")
+        self.assertEqual(result["body_fat_pct"]["value"], 20)
+        self.assertEqual(result["height_cm"]["value"], 170)
+        for key in (
+            "cycling_ftp_watts",
+            "run_threshold_watts",
+            "run_threshold_hr_bpm",
+            "bike_threshold_hr_bpm",
+            "run_threshold_pace_seconds_per_km",
+            "cycling_vo2max_ml_kg_min",
+            "running_vo2max_ml_kg_min",
+        ):
+            self.assertIsNone(result[key]["value"], key)
+        self.assertNotIn("run_zone2_pace_seconds_per_km", result)
 
     def test_stored_eftp_is_not_a_current_metric(self):
         # Since #1727 the stored athlete, wellness and activity eFTP is not read.
@@ -217,11 +204,10 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             ],
         }
         result = snapshot_metrics(snapshot, {}, empty_garmin())
-        self.assertEqual(result["cycling_ftp_watts"]["value"], 300)
-        self.assertEqual(result["cycling_ftp_watts"]["source"], PROVIDER_INTERVALS_NAME)
+        self.assertIsNone(result["cycling_ftp_watts"]["value"])
         self.assertNotIn("cycling_eftp_watts", result)
 
-    def test_max_hr_activity_fallback_by_canonical_sport(self):
+    def test_intervals_summaries_are_no_max_hr_activity_fallback(self):
         # Canonical: the mapper classifies the Intervals.icu type, so the former raw
         # sport/activityName aliases ("Radfahren", "Laufen") and the maxHeartRate
         # key no longer reach the summaries; the type decides the sport.
@@ -250,11 +236,12 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             ],
         }
         result = snapshot_metrics(snapshot, {}, empty_garmin())
-        self.assertEqual(result["cycling_max_hr_bpm"]["value"], 181)
-        self.assertEqual(result["running_max_hr_bpm"]["value"], 191)
-        self.assertEqual(result["cycling_max_hr_bpm"]["source"], "Intervals.icu")
+        # #1686: Intervals.icu summaries no longer serve the activity fallback.
+        self.assertIsNone(result["cycling_max_hr_bpm"]["value"])
+        self.assertIsNone(result["running_max_hr_bpm"]["value"])
+        self.assertIsNone(result["cycling_max_hr_bpm"]["source"])
 
-    def test_threshold_zone2_and_prediction_metrics(self):
+    def test_thresholds_and_vo2max_come_from_garmin_only(self):
         snapshot = {
             "athlete": {
                 "sport_settings": [
@@ -271,11 +258,27 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             "recent_wellness": [],
             "recent_activities": [],
         }
-        result = snapshot_metrics(snapshot, {}, empty_garmin())
-        self.assertEqual(result["run_threshold_pace_seconds_per_km"]["value"], 250)
-        self.assertEqual(result["run_zone2_pace_seconds_per_km"]["value"], 200)
-        self.assertEqual(result["bike_threshold_hr_bpm"]["value"], 160)
-        self.assertEqual(result["running_vo2max_ml_kg_min"]["value"], 48)
+        garmin = empty_garmin(
+            run_threshold_pace_seconds_per_km={
+                "value": 240,
+                "unit": "s/km",
+                "source": "Garmin Connect",
+                "source_provider": "garmin",
+                "note": "",
+            },
+            running_vo2max_ml_kg_min={
+                "value": 55,
+                "unit": "ml/kg/min",
+                "source": "Garmin Connect",
+                "note": "",
+            },
+        )
+        result = snapshot_metrics(snapshot, {}, garmin)
+        self.assertIsNone(result["bike_threshold_hr_bpm"]["value"])
+        self.assertIsNone(result["run_threshold_hr_bpm"]["value"])
+        self.assertEqual(result["running_vo2max_ml_kg_min"]["value"], 55)
+        self.assertIsNone(result["cycling_vo2max_ml_kg_min"]["value"])
+        self.assertNotIn("run_zone2_pace_seconds_per_km", result)
         self.assertEqual(result["run_5k_seconds"]["value"], None)
 
     def test_invalid_values_and_inputs_are_not_mutated(self):
@@ -294,7 +297,7 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
         result = snapshot_metrics(snapshot, profile, garmin)
         self.assertEqual(result["weight_kg"]["value"], 72)
         self.assertEqual(result["body_fat_pct"]["value"], 20)
-        self.assertEqual(result["run_threshold_pace_seconds_per_km"]["value"], 10000)
+        self.assertIsNone(result["run_threshold_pace_seconds_per_km"]["value"])
         self.assertEqual((snapshot, profile, garmin), before)
 
 
@@ -326,17 +329,7 @@ def wahoo_canonical(*, ftp=None, weight=None):
             retrieved_at=RETRIEVED,
         )
         wahoo_weight = profile.records[0]
-    return CanonicalCurrentInputs(
-        bike_threshold_hr=(),
-        run_threshold_hr=(),
-        athlete_threshold_hr=None,
-        cycling_vo2max=(),
-        running_vo2max=(),
-        wellness_weight=None,
-        athlete_weight=None,
-        wahoo_ftp=wahoo_ftp,
-        wahoo_weight=wahoo_weight,
-    )
+    return CanonicalCurrentInputs(wahoo_ftp=wahoo_ftp, wahoo_weight=wahoo_weight)
 
 
 def snapshot_with(athlete=None):
@@ -348,7 +341,7 @@ def snapshot_with(athlete=None):
 
 
 class WahooFallbackPrecedenceTests(unittest.TestCase):
-    def test_wahoo_ftp_fills_in_only_when_intervals_has_no_ftp(self):
+    def test_wahoo_ftp_is_used_when_garmin_has_none(self):
         result = snapshot_metrics(
             snapshot_with(), {}, empty_garmin(), canonical=wahoo_canonical(ftp=250)
         )
@@ -358,17 +351,18 @@ class WahooFallbackPrecedenceTests(unittest.TestCase):
         self.assertEqual(WAHOO_LABEL, ftp["source"])
         self.assertEqual("wahoo", ftp["source_provider"])
 
-    def test_intervals_ftp_beats_wahoo_ftp(self):
+    def test_wahoo_ftp_beats_an_intervals_ftp(self):
         snapshot = snapshot_with({"sport_settings": [{"types": ["Ride"], "ftp": 240}]})
 
         result = snapshot_metrics(
             snapshot, {}, empty_garmin(), canonical=wahoo_canonical(ftp=300)
         )
 
-        self.assertEqual(240, result["cycling_ftp_watts"]["value"])
-        self.assertEqual(PROVIDER_INTERVALS_NAME, result["cycling_ftp_watts"]["source"])
+        self.assertEqual(300, result["cycling_ftp_watts"]["value"])
+        self.assertEqual("wahoo", result["cycling_ftp_watts"]["source_provider"])
+        self.assertNotIn("alternatives", result["cycling_ftp_watts"])
 
-    def test_intervals_ftp_beats_garmin_and_wahoo_ftp(self):
+    def test_garmin_ftp_beats_wahoo_ftp_and_intervals_is_ignored(self):
         garmin = empty_garmin(
             cycling_ftp_watts={
                 "value": 302,
@@ -383,11 +377,14 @@ class WahooFallbackPrecedenceTests(unittest.TestCase):
             snapshot, {}, garmin, canonical=wahoo_canonical(ftp=300)
         )
 
-        self.assertEqual(240, result["cycling_ftp_watts"]["value"])
-        result = snapshot_metrics(
-            snapshot_with(), {}, garmin, canonical=wahoo_canonical(ftp=300)
-        )
         self.assertEqual(302, result["cycling_ftp_watts"]["value"])
+        self.assertEqual(
+            [300],
+            [item["value"] for item in result["cycling_ftp_watts"]["alternatives"]],
+        )
+        without_wahoo = snapshot_metrics(snapshot, {}, garmin)
+        self.assertEqual(302, without_wahoo["cycling_ftp_watts"]["value"])
+        self.assertNotIn("alternatives", without_wahoo["cycling_ftp_watts"])
 
     def test_manual_profile_weight_beats_wahoo_weight(self):
         result = snapshot_metrics(
@@ -412,7 +409,7 @@ class WahooFallbackPrecedenceTests(unittest.TestCase):
         self.assertEqual(WAHOO_LABEL, result["weight_kg"]["source"])
         self.assertEqual("wahoo", result["weight_kg"]["source_provider"])
 
-    def test_intervals_weight_beats_wahoo_weight(self):
+    def test_an_intervals_weight_is_no_source(self):
         result = snapshot_metrics(
             snapshot_with({"weight": 77}),
             {},
@@ -420,8 +417,8 @@ class WahooFallbackPrecedenceTests(unittest.TestCase):
             canonical=wahoo_canonical(weight=78.5),
         )
 
-        self.assertEqual(77, result["weight_kg"]["value"])
-        self.assertEqual(PROVIDER_INTERVALS_NAME, result["weight_kg"]["source"])
+        self.assertEqual(78.5, result["weight_kg"]["value"])
+        self.assertEqual("wahoo", result["weight_kg"]["source_provider"])
 
 
 if __name__ == "__main__":

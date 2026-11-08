@@ -11,7 +11,6 @@ from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
-from backend.sync.intervals_ingest import INGEST_ENABLED_KEY, ingest_enabled_value
 from backend.sync.intervals_state import latest_library_timestamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import connection_status
@@ -42,12 +41,9 @@ class PublicBootstrapDependencies:
     adaptive_replan_preview_service: Callable[[], Any]
     external_calendar_sync_service: Callable[[], Any]
     external_calendar_window_days: int
-    planned_calendar_history_days: int
-    planned_calendar_future_days: int
     garmin_projection_service: Callable[[], Any]
     diagnostic_capture: Any
     intervals_public_state: Callable[..., Any]
-    intervals_sync_lock: Any
     workout_library_sync_running: Callable[[], bool]
     workout_library_sync_state_service: Callable[[], Any]
     full_provider_resync_service: Callable[[], Any]
@@ -77,7 +73,6 @@ class PublicBootstrapService:
         # the shared database lock. A hidden write fails on the query-only
         # connection instead of racing.
         with deps.database_manager().read_snapshot() as db:
-            sync_metadata = deps.sync_state_repository().sync_metadata(db)
             local_planned = deps.planned_unit_service().list(250, push_state=True)
             competitions = deps.competition_service().list(limit=100)
             relevant_external = deps.external_calendar_reader().list_events(
@@ -165,28 +160,13 @@ class PublicBootstrapService:
                 "diagnostic_capture": deps.diagnostic_capture.status(),
                 ProviderId.INTERVALS.value: deps.intervals_public_state(
                     configured=bool(deps.config.intervals_api_key),
-                    running=deps.intervals_sync_lock.locked()
-                    or deps.workout_library_sync_running(),
-                    status=deps.key_values.get_in_transaction(db, "sync_status")
-                    or None,
-                    last_sync_at=deps.key_values.get_in_transaction(db, "last_sync_at"),
-                    last_sync_error=deps.key_values.get_in_transaction(
-                        db, "last_sync_error"
-                    )
-                    or None,
+                    running=deps.workout_library_sync_running(),
                     last_library_sync_at=_library_activity_at(deps, db),
                     last_library_sync_error=deps.key_values.get_in_transaction(
                         db, "last_library_sync_error"
                     )
                     or None,
-                    pagination_value=deps.key_values.get_in_transaction(
-                        db, "last_sync_pagination"
-                    ),
-                    snapshot=sync_metadata,
                     library_sync_state=deps.workout_library_sync_state_service().summary(),
-                    today=deps.local_date(),
-                    history_days=deps.planned_calendar_history_days,
-                    future_days=deps.planned_calendar_future_days,
                 ),
                 "provider_freshness": freshness,
                 "provider_states": bootstrap_provider_states(freshness),
@@ -233,9 +213,6 @@ class PublicBootstrapService:
                         )
                         for provider_id in registry.sync_period_defaults()
                     },
-                    INGEST_ENABLED_KEY: ingest_enabled_value(
-                        deps.key_values.get_in_transaction(db, INGEST_ENABLED_KEY)
-                    ),
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {
@@ -254,19 +231,6 @@ class PublicBootstrapService:
                         db, "competition_sync_status"
                     )
                     or None,
-                },
-                "performance_refresh": {
-                    "last_refresh_at": deps.key_values.get_in_transaction(
-                        db, "last_performance_refresh_at"
-                    ),
-                    "last_error": deps.key_values.get_in_transaction(
-                        db, "last_performance_error"
-                    )
-                    or None,
-                    "running": deps.key_values.get_in_transaction(
-                        db, "performance_refresh_running"
-                    )
-                    == "1",
                 },
                 "morning_checkin": deps.morning_checkin_state_service().state(),
                 "coach_quick_actions": deps.coach_quick_actions_service().state(),

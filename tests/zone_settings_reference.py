@@ -133,5 +133,5 @@ def canonical_zone_settings(
         configurations,
         sport,
         environment,
-        fallback=ZoneSettings.from_thresholds(thresholds, sport, environment),
+        fallback=ZoneSettings.from_thresholds(thresholds, sport),
     )

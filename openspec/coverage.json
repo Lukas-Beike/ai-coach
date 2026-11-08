@@ -120,14 +120,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/activities/detail_analysis_reads.py",
-      "capabilities": [
-        "activity-ingestion-and-storage",
-        "activity-analysis-and-feedback"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/activities/detail_contract.py",
       "capabilities": [
         "activity-ingestion-and-storage",
@@ -153,30 +145,6 @@
     },
     {
       "path": "backend/activities/detail_store.py",
-      "capabilities": [
-        "activity-ingestion-and-storage",
-        "activity-analysis-and-feedback"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/activities/detail_summary_metrics.py",
-      "capabilities": [
-        "activity-ingestion-and-storage",
-        "activity-analysis-and-feedback"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/activities/duplicate_inspection.py",
-      "capabilities": [
-        "activity-ingestion-and-storage",
-        "activity-analysis-and-feedback"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/activities/duplicate_service.py",
       "capabilities": [
         "activity-ingestion-and-storage",
         "activity-analysis-and-feedback"
@@ -1401,14 +1369,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/db/activity_detail_fingerprints.py",
-      "capabilities": [
-        "encrypted-storage-and-migrations",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/db/activity_detail_store.py",
       "capabilities": [
         "encrypted-storage-and-migrations",
@@ -1426,14 +1386,6 @@
     },
     {
       "path": "backend/db/canonical_store.py",
-      "capabilities": [
-        "encrypted-storage-and-migrations",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/db/garmin_items_migration.py",
       "capabilities": [
         "encrypted-storage-and-migrations",
         "activity-ingestion-and-storage"
@@ -1738,13 +1690,6 @@
       "capabilities": [
         "coach-conversation",
         "coach-tool-authority"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/http_api/compact_activity_rows.py",
-      "capabilities": [
-        "activity-analysis-and-feedback"
       ],
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
@@ -2313,28 +2258,7 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/performance/canonical_personal_recovery.py",
-      "capabilities": [
-        "performance-and-readiness"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/performance/canonical_recovery.py",
-      "capabilities": [
-        "performance-and-readiness"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/performance/canonical_recovery_averages.py",
-      "capabilities": [
-        "performance-and-readiness"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/performance/canonical_sections.py",
       "capabilities": [
         "performance-and-readiness"
       ],
@@ -2404,13 +2328,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/performance/garmin_metric_history.py",
-      "capabilities": [
-        "performance-and-readiness"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/performance/garmin_metrics.py",
       "capabilities": [
         "performance-and-readiness"
@@ -2432,20 +2349,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/performance/garmin_weight.py",
-      "capabilities": [
-        "performance-and-readiness"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/performance/history.py",
-      "capabilities": [
-        "performance-and-readiness"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/performance/load.py",
       "capabilities": [
         "performance-and-readiness"
@@ -2454,13 +2357,6 @@
     },
     {
       "path": "backend/performance/load_context.py",
-      "capabilities": [
-        "performance-and-readiness"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/performance/max_hr.py",
       "capabilities": [
         "performance-and-readiness"
       ],
@@ -3410,15 +3306,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/sync/activity_details.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/sync/adaptive.py",
       "capabilities": [
         "sync-jobs-and-scheduling",
@@ -3429,15 +3316,6 @@
     },
     {
       "path": "backend/sync/analysis_refresh.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/sync/analysis_sessions.py",
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",
@@ -3501,24 +3379,6 @@
     },
     {
       "path": "backend/sync/canonical_ingest.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/sync/canonical_projection.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/sync/canonical_projection_assembly.py",
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",
@@ -3744,24 +3604,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/sync/intervals.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/sync/intervals_assembly.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/sync/intervals_lock.py",
       "capabilities": [
         "sync-jobs-and-scheduling",
@@ -3871,15 +3713,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/sync/performance.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/sync/persistence_assembly.py",
       "capabilities": [
         "sync-jobs-and-scheduling",
@@ -3936,15 +3769,6 @@
     },
     {
       "path": "backend/sync/planned_unit_assembly.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/sync/planned_units.py",
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",
@@ -4073,15 +3897,6 @@
     },
     {
       "path": "backend/sync/snapshot_reader.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/sync/snapshot_storage.py",
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",
@@ -5158,16 +4973,6 @@
       ]
     },
     {
-      "path_literal": "/api/intervals/full-resync",
-      "owners": [
-        "backend/providers/descriptors.py:332"
-      ],
-      "capabilities": [
-        "provider-connections",
-        "sync-jobs-and-scheduling"
-      ]
-    },
-    {
       "path_literal": "/api/library",
       "owners": [
         "backend/http_api/planning_get.py:31"
@@ -5343,16 +5148,6 @@
       ]
     },
     {
-      "path_literal": "/api/performance/refresh",
-      "owners": [
-        "backend/http_api/sync_commands.py:28"
-      ],
-      "capabilities": [
-        "performance-and-readiness",
-        "sync-jobs-and-scheduling"
-      ]
-    },
-    {
       "path_literal": "/api/plan",
       "owners": [
         "backend/http_api/planning_get.py:31",
@@ -5440,18 +5235,6 @@
       ]
     },
     {
-      "path_literal": "/api/settings/activity-detail-floor",
-      "owners": [
-        "backend/http_api/athlete_get.py:46",
-        "backend/http_api/athlete_get.py:60",
-        "backend/http_api/settings_put.py:29"
-      ],
-      "capabilities": [
-        "activity-ingestion-and-storage",
-        "view-refresh-and-client-state"
-      ]
-    },
-    {
       "path_literal": "/api/settings/calendar-display",
       "owners": [
         "backend/http_api/settings_put.py:27"
@@ -5507,16 +5290,6 @@
       "capabilities": [
         "runtime-and-configuration",
         "view-refresh-and-client-state"
-      ]
-    },
-    {
-      "path_literal": "/api/sync",
-      "owners": [
-        "backend/providers/descriptors.py:327"
-      ],
-      "capabilities": [
-        "provider-connections",
-        "sync-jobs-and-scheduling"
       ]
     },
     {
@@ -5875,26 +5648,6 @@
       ]
     },
     {
-      "name": "delete_duplicate_intervals_activity",
-      "source": "backend/coach/tool_schemas.py:826",
-      "capabilities": [
-        "activity-analysis-and-feedback",
-        "coach-tool-authority"
-      ],
-      "dialogue_exposure": "canonical_and_dialogue",
-      "read_only": false,
-      "requirements": [
-        {
-          "capability": "coach-tool-authority",
-          "requirement": "CA5 Named remote synchronization and explicit proposals"
-        },
-        {
-          "capability": "coach-tool-authority",
-          "requirement": "CA6 Session-bound immutable approval contents"
-        }
-      ]
-    },
-    {
       "name": "delete_nutrition_entry",
       "source": "backend/coach/tool_schemas.py:969",
       "capabilities": [
@@ -5985,22 +5738,6 @@
         {
           "capability": "competitions-and-seasons",
           "requirement": "CS7 Observed competition preparation with explicit unknowns"
-        }
-      ]
-    },
-    {
-      "name": "inspect_activity_duplicates",
-      "source": "backend/coach/tool_registry.py:110",
-      "capabilities": [
-        "activity-analysis-and-feedback",
-        "coach-tool-authority"
-      ],
-      "dialogue_exposure": "dialogue_only",
-      "read_only": true,
-      "requirements": [
-        {
-          "capability": "coach-tool-authority",
-          "requirement": "CA5 Named remote synchronization and explicit proposals"
         }
       ]
     },
@@ -6303,22 +6040,6 @@
         {
           "capability": "training-library",
           "requirement": "TL6 Bounded library browsing and revision-bound plan enumeration"
-        }
-      ]
-    },
-    {
-      "name": "refresh_current_performance",
-      "source": "backend/coach/tool_schemas.py:720",
-      "capabilities": [
-        "performance-and-readiness",
-        "coach-tool-authority"
-      ],
-      "dialogue_exposure": "canonical_and_dialogue",
-      "read_only": false,
-      "requirements": [
-        {
-          "capability": "coach-context-and-provenance",
-          "requirement": "CP6 Explicit provider refresh and current results"
         }
       ]
     },

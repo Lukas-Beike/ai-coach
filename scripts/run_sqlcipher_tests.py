@@ -776,7 +776,7 @@ class Supervisor:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image", default="ai-coach:local")
+    parser.add_argument("--image", default="pacecraft:local")
     parser.add_argument(
         "--workers",
         type=int,

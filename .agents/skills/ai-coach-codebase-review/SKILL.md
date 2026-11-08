@@ -1,6 +1,6 @@
 ---
 name: ai-coach-codebase-review
-description: Review the complete Intervals Coach repository, not just a pull-request diff, with Coach-first behavior and natural-language tool use as central product criteria alongside correctness, security, privacy, data integrity, provider sync, PWA, deployment, tests, and maintainability. Use for a full ai-coach codebase audit; do not use for ordinary change-scoped PR reviews.
+description: Review the complete Pacecraft repository, not just a pull-request diff, with Coach-first behavior and natural-language tool use as central product criteria alongside correctness, security, privacy, data integrity, provider sync, PWA, deployment, tests, and maintainability. Use for a full ai-coach codebase audit; do not use for ordinary change-scoped PR reviews.
 ---
 
 # AI Coach full codebase review

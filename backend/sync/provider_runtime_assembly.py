@@ -28,7 +28,7 @@ from backend.providers.descriptors import (
     WAHOO_ID,
     WEATHER_ID,
 )
-from backend.sync.commands import GarminSynchronousRefresh, IntervalsSynchronousRefresh
+from backend.sync.commands import GarminSynchronousRefresh, WahooSynchronousRefresh
 from backend.sync.execution_assembly import (
     CalendarWeatherJobDependencies,
     GarminJobDependencies,
@@ -46,17 +46,10 @@ from backend.sync.executor import (
     IntervalsJobAdapter,
     WahooJobAdapter,
 )
-from backend.sync.freshness_sources import (
-    DEFAULT_FRESHNESS_SOURCES,
-    intervals_running_probe,
-)
+from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
-from backend.sync.provider_resync_assembly import (
-    GarminFullResync,
-    IntervalsFullResync,
-    WahooFullResync,
-)
+from backend.sync.provider_resync_assembly import GarminFullResync, WahooFullResync
 from backend.sync.provider_runtime import (
     ProviderJobOwner,
     ProviderRuntimeBinding,
@@ -65,10 +58,8 @@ from backend.sync.provider_runtime import (
 from backend.sync.schedule_policies import (
     CalendarSchedulePolicy,
     GarminSchedulePolicy,
-    IntervalsSchedulePolicy,
     WahooSchedulePolicy,
     WeatherSchedulePolicy,
-    intervals_busy,
 )
 from backend.sync.wahoo_plan_push import WahooPlanPushService
 from backend.sync.wahoo_sync import WahooSyncService
@@ -92,7 +83,6 @@ class ProviderRuntimeDependencies:
     database_manager: Callable[[], DatabaseManager]
     key_values: KeyValueRepository
     database_lock: Any
-    intervals_sync_lock: Callable[[], Any]
     garmin_resync_gate: ProviderResyncGate
     garmin_automatic_sync_days: int
     historical: HistoricalSyncDependencies
@@ -103,74 +93,22 @@ class ProviderRuntimeDependencies:
     wahoo: WahooRuntimeDependencies
 
 
-def _stored_value(deps: ProviderRuntimeDependencies) -> Callable[[str], Any]:
-    """Read one key-value setting through a short reader connection."""
-
-    def get_value(key: str) -> Any:
-        with deps.database_manager().reader() as db:
-            return deps.key_values.get(db, key)
-
-    return get_value
-
-
-def _intervals_running_probe(deps: ProviderRuntimeDependencies) -> Callable[[], bool]:
-    """Resolve the Intervals.icu sync lock when the probe runs, not when built."""
-    get_value = _stored_value(deps)
-
-    def running() -> bool:
-        return intervals_running_probe(deps.intervals_sync_lock(), get_value)()
-
-    return running
-
-
 def intervals_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
-    """Bind the Intervals.icu job routing, schedule, resync and status probe."""
+    """Bind the Intervals.icu output job routing: plan, competition and nutrition."""
     intervals = deps.intervals
-    gate = intervals.resync_gate
-    all_sync_days = deps.historical.all_sync_days
 
     def job_owner() -> ProviderJobOwner:
-        historical_sync = build_historical_owner(deps.historical, deps.state)
-        nutrition_sync_service = intervals.nutrition_sync_service()
         return IntervalsJobAdapter(
-            jobs=build_intervals_owner(historical_sync, intervals),
-            nutrition_sync_service=nutrition_sync_service,
+            jobs=build_intervals_owner(intervals),
+            nutrition_sync_service=intervals.nutrition_sync_service(),
         )
-
-    def schedule() -> IntervalsSchedulePolicy:
-        return IntervalsSchedulePolicy(
-            enabled=bool(deps.config().intervals_api_key),
-            sync_state=deps.state.sync_state_repository(),
-            sync_period_defaults=deps.historical.sync_period_defaults,
-            all_sync_days=all_sync_days,
-            blocked_by=lambda: intervals_busy(
-                deps.database_manager(), deps.key_values, deps.database_lock, gate
-            ),
-        )
-
-    def full_resync() -> IntervalsFullResync:
-        return IntervalsFullResync(
-            config=deps.config(),
-            intervals_service=intervals.sync_service(),
-            competition_service=intervals.competition_sync_service(),
-            gate=gate,
-            all_sync_days=all_sync_days,
-            ingest_enabled=intervals.ingest_enabled,
-        )
-
-    def synchronous_refresh() -> IntervalsSynchronousRefresh:
-        return IntervalsSynchronousRefresh(intervals.sync_service(), all_sync_days)
 
     return ProviderRuntimeBinding(
         provider_id=INTERVALS_ID,
         job_owner=job_owner,
         configured=lambda: bool(deps.config().intervals_api_key),
-        gate=gate,
-        schedule=schedule,
+        gate=intervals.resync_gate,
         freshness=DEFAULT_FRESHNESS_SOURCES[INTERVALS_ID],
-        full_resync=full_resync,
-        synchronous_refresh=synchronous_refresh,
-        running_probe=_intervals_running_probe(deps),
     )
 
 
@@ -246,6 +184,16 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
             sync_service=wahoo.sync_service(), all_sync_days=all_sync_days
         )
 
+    def synchronous_refresh() -> WahooSynchronousRefresh:
+        state = deps.state.sync_state_repository()
+        return WahooSynchronousRefresh(
+            wahoo.sync_service(),
+            all_sync_days,
+            stored_days=lambda: state.sync_period(
+                WAHOO_ID, deps.historical.sync_period_defaults, all_sync_days
+            ),
+        )
+
     return ProviderRuntimeBinding(
         provider_id=WAHOO_ID,
         job_owner=job_owner,
@@ -254,6 +202,7 @@ def wahoo_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
         schedule=schedule,
         freshness=DEFAULT_FRESHNESS_SOURCES[WAHOO_ID],
         full_resync=full_resync,
+        synchronous_refresh=synchronous_refresh,
         running_probe=lambda: wahoo.sync_service().running(),
     )
 

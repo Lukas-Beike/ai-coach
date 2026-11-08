@@ -151,7 +151,7 @@ def _calendar_feed_request(url: str, *, app_version: str) -> tuple[str, int, byt
             f"GET {request_target} HTTP/1.1\r\n"
             f"Host: {host_header}\r\n"
             "Accept: text/calendar, text/plain;q=0.9\r\n"
-            f"User-Agent: IntervalsCoach/{app_version}\r\n"
+            f"User-Agent: Pacecraft/{app_version}\r\n"
             "Connection: close\r\n\r\n"
         ).encode("ascii")
     except UnicodeError as exc:

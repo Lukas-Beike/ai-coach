@@ -14,9 +14,7 @@ completes, only observations at the current mapper version are served.
 Raw activity rows (``intervals_activity_payloads``) follow the same decision as ``activities``.
 A stored Intervals.icu snapshot that lists activities only in compact form (from a
 release before ``raw_provider_data``) cannot be backfilled; its activities stay
-missing from the tables until the full read-only Intervals.icu reload returns raw
-rows for them. An incremental sync keeps the older compact rows next to its raw
-window. ``activities_need_refresh`` reports that gap.
+missing from the tables until the stored Intervals.icu data is purged.
 
 Tables keep serving after a sync, because the ingest writes each new snapshot
 into the tables in the same transaction. While the tables serve, the stored
@@ -43,6 +41,10 @@ from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.activities.session_purpose import with_competitions
+from backend.activities.strength_sets import (
+    strength_summaries,
+    with_strength_summaries,
+)
 from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.domain_records import (
@@ -57,6 +59,7 @@ from backend.performance.session_metrics_reads import (
     stored_session_metrics,
     with_session_metrics,
 )
+from backend.performance.zone_time_reads import read_zone_times, with_zone_times
 from backend.runtime.ports import (
     ActivityReader,
     ActivityRowReader,
@@ -177,8 +180,7 @@ class CanonicalReadSelector(
     """Serves reads from the tables once the backfill completed once, else nothing.
 
     ``zone`` returns the athlete's time zone, the one the backfill stores with its
-    state. ``compact_only`` returns True when a compact activity row of the stored
-    Intervals.icu snapshot has no raw counterpart.
+    state.
     """
 
     def __init__(
@@ -188,12 +190,10 @@ class CanonicalReadSelector(
         reprojecting_table: CanonicalReader,
         key_values: KeyValueRepository,
         zone: Callable[[Any], tzinfo],
-        compact_only: Callable[[Any], bool],
         competitions: CompetitionRepository,
     ) -> None:
         self._zone = zone
         self._competitions = competitions
-        self._compact_only = compact_only
         self._table = table
         self._reprojecting_table = reprojecting_table
         self._key_values = key_values
@@ -238,14 +238,6 @@ class CanonicalReadSelector(
         """Return one stored Intervals.icu payload from the serving source."""
         return self._source(db).intervals_summary_row(db, provider_activity_id)
 
-    def activities_need_refresh(self, db: Any) -> bool:
-        """Return True while a stored compact activity row has no raw counterpart.
-
-        Those activities never reach the tables; the full read-only Intervals.icu
-        reload that returns their raw rows closes the gap.
-        """
-        return self._compact_only(db)
-
     def activity_summaries(
         self,
         db: Any,
@@ -259,6 +251,8 @@ class CanonicalReadSelector(
         ``training_load`` and ``intensity`` are the stored local load (card M6);
         stored competitions mark and link their races (``with_competitions``).
         EF, VI, work and decoupling are the stored local session metrics (card M8).
+        Zone times are the stored local ones where a session has them (#1743).
+        ``strength_sets`` summarizes the executed strength sets of the session.
         """
         source = self._source(db)
         summaries = activity_summaries(
@@ -267,9 +261,18 @@ class CanonicalReadSelector(
             limit=limit,
         )
         ids = [summary["id"] for summary in summaries]
-        loaded = with_session_metrics(
-            with_local_loads(summaries, stored_local_loads(db, ids)),
-            stored_session_metrics(db, ids),
+        loaded = with_strength_summaries(
+            with_zone_times(
+                with_session_metrics(
+                    with_local_loads(summaries, stored_local_loads(db, ids)),
+                    stored_session_metrics(db, ids),
+                ),
+                read_zone_times(db, ids),
+            ),
+            strength_summaries(
+                db,
+                [row["id"] for row in summaries if row.get("sport") == Sport.STRENGTH],
+            ),
         )
         days = sorted(filter(None, (summary_local_date(row) for row in loaded)))
         if not days:

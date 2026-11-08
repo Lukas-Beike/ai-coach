@@ -11,18 +11,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import snapshot_seed
 from canonical_detail_support import seed_intervals_activity
-from duplicate_support import mark_tables_serving
+from support import mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
 from backend.planning import library as planning_library
 from backend.providers import http as provider_http
-from backend.providers import intervals_client as intervals_client_module
 from backend.providers import openai as openai_provider
 from backend.sync.adaptive import IllnessPauseSyncService
-from backend.sync.intervals import IntervalsSyncService
 
 
 def covers(*cases):
@@ -61,7 +60,7 @@ REQUIRED_VARIANTS = {
     },
     "save_competition": {"create", "update"},
     "update_training_plan": {"update", "archive", "delete"},
-    "start_provider_refresh": {"intervals", "garmin", "calendar", "weather"},
+    "start_provider_refresh": {"garmin", "wahoo", "calendar", "weather"},
     "start_intervals_plan_sync": {"selected", "created", "all_pending"},
     "resolve_training_sync_conflict": {
         "keep_local",
@@ -250,7 +249,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "moving_time": 1800,
             "distance": 5000,
         }
-        server.SYNC_PERSISTENCE.state_repository().save_view(
+        snapshot_seed.save_view(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "recent_activities": [activity],
                 "recent_wellness": [],
@@ -711,74 +710,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(server.PLANNING_DATA.competition().list(), [])
         self.assertEqual(len(server.SYNC_JOB_QUEUE.service().list()), 1)
 
-    @covers(
-        "start_provider_refresh:intervals",
-        "start_provider_refresh:garmin",
-        "start_provider_refresh:calendar",
-        "start_provider_refresh:weather",
-        "refresh_current_performance:success",
-        "get_sync_job:success",
-    )
-    def test_provider_reads_and_job_status_use_correct_provider(self):
-        with patch.object(
-            IntervalsSyncService,
-            "sync",
-            return_value={"status": "ok", "activity_days": 7},
-        ) as sync:
-            result = self.run_tool(
-                "start_provider_refresh",
-                {"days": 7},
-                ["intervals_refresh"],
-                target="intervals",
-            )
-            self.assertEqual(result["status"], "completed")
-            sync.assert_called_once()
-            self.assertEqual(sync.call_args.kwargs["activity_days"], 7)
-        with (
-            patch(
-                "backend.sync.garmin_service.GarminSyncService.sync",
-                return_value={"status": "ok"},
-            ) as garmin_sync,
-            patch(
-                "backend.performance.morning_battery_service."
-                "MorningBodyBatteryService.refresh"
-            ),
-        ):
-            result = self.run_tool(
-                "start_provider_refresh",
-                {"days": 7},
-                ["garmin_refresh"],
-                target="garmin",
-            )
-            self.assertEqual(result["status"], "completed")
-            garmin_sync.assert_called_once()
-        for provider in ("calendar", "weather"):
-            result = self.run_tool(
-                "start_provider_refresh",
-                {},
-                [provider + "_refresh"],
-                target=provider,
-            )
-            job = self.run_tool("get_sync_job", {"job_id": result["sync_job_id"]})[
-                "job"
-            ]
-            self.assertEqual(
-                (job["provider"], job["type"], job["status"]),
-                (provider, "refresh", "queued"),
-            )
-        result = self.run_tool(
-            "refresh_current_performance", {}, ["intervals_refresh"], target="intervals"
-        )
-        self.assertEqual(
-            server.SYNC_JOB_QUEUE.service().state(result["sync_job_id"])["type"],
-            "performance_refresh",
-        )
-        self.assertTrue(
-            all(
-                job["type"] not in {"plan_push", "competition_push"}
-                for job in server.SYNC_JOB_QUEUE.service().list()
-            )
-        )
 
     @covers(
         "start_intervals_plan_sync:created",
@@ -1106,37 +1037,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 **{**common, "source": source},
             )
 
-    @covers("inspect_activity_duplicates:success")
-    def test_duplicate_inspection_returns_preview_without_deleting_provider_data(self):
-        common = {
-            "type": "Ride",
-            "start_date_local": "2026-09-06T10:00:00",
-            "moving_time": 3600,
-            "distance": 30000,
-        }
-        snapshot = {
-            "recent_activities": [
-                {**common, "id": "synthetic-wahoo", "source": "Wahoo"},
-                {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"},
-            ]
-        }
-        server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
-        self.seed_duplicate_pair(common)
-        result = self.run_tool(
-            "inspect_activity_duplicates",
-            message="Ist die letzte Radausfahrt doppelt vorhanden?",
-        )
-        self.assertIsNotNone(result["duplicate"])
-        self.assertEqual(result["duplicate"]["canonical_id"], "synthetic-wahoo")
-        self.assertNotIn("proposed_action", result)
-        self.assertNotIn("proposal", result)
-        self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
-                "recent_activities"
-            ],
-            snapshot["recent_activities"],
-        )
-        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
     @covers(
         "confirm_activity_session:success",
@@ -1185,38 +1085,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(merged["status"], "merged")
         self.assertEqual(len(sessions.bundle(first)["members"]), 2)
 
-    @covers("delete_duplicate_intervals_activity:success")
-    def test_delete_duplicate_intervals_activity(self):
-        common = {
-            "type": "Ride",
-            "start_date_local": "2026-09-06T10:00:00",
-            "moving_time": 3600,
-            "distance": 30000,
-        }
-        snapshot = {
-            "synced_at": "2026-09-06T12:00:00+00:00",
-            "recent_activities": [
-                {**common, "id": "synthetic-wahoo", "source": "Wahoo"},
-                {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"},
-            ],
-        }
-        server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
-        self.seed_duplicate_pair(common)
-        with patch.object(
-            intervals_client_module.IntervalsClient,
-            "delete_activity",
-            return_value=None,
-        ):
-            result = self.run_tool(
-                "delete_duplicate_intervals_activity",
-                {"duplicate_id": "synthetic-garmin", "canonical_id": "synthetic-wahoo"},
-                ["intervals_sync"],
-                target="intervals",
-                remote_write=True,
-                message="Lösche das Garmin-Duplikat für die Wahoo-Ausfahrt aus Intervals.",
-            )
-            self.assertTrue(result["ok"])
-            self.assertEqual(result["status"], "deleted")
 
     @covers("clarify_coach_request:success", "cancel_coach_request:success")
     def test_clarification_and_cancellation_preserve_athlete_data(self):
@@ -1255,6 +1123,62 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             json.loads(server.key_value_service().get("coach_pending_request"))
         )
         self.assertEqual(self.athlete_state(), before)
+
+    @covers(
+        "start_provider_refresh:garmin",
+        "start_provider_refresh:wahoo",
+        "start_provider_refresh:calendar",
+        "start_provider_refresh:weather",
+        "get_sync_job:success",
+    )
+    def test_provider_reads_and_job_status_use_correct_provider(self):
+        with (
+            patch(
+                "backend.sync.garmin_service.GarminSyncService.sync",
+                return_value={"status": "ok"},
+            ) as garmin_sync,
+            patch(
+                "backend.performance.morning_battery_service."
+                "MorningBodyBatteryService.refresh"
+            ),
+        ):
+            result = self.run_tool(
+                "start_provider_refresh",
+                {"days": 7},
+                ["garmin_refresh"],
+                target="garmin",
+            )
+            self.assertEqual(result["status"], "completed")
+            garmin_sync.assert_called_once()
+        with patch(
+            "backend.sync.wahoo_sync.WahooSyncService.sync",
+            return_value={"status": "ok"},
+        ) as wahoo_sync:
+            result = self.run_tool(
+                "start_provider_refresh", {}, ["wahoo_refresh"], target="wahoo"
+            )
+            self.assertEqual(result["status"], "completed")
+            wahoo_sync.assert_called_once()
+        for provider in ("calendar", "weather"):
+            result = self.run_tool(
+                "start_provider_refresh",
+                {},
+                [provider + "_refresh"],
+                target=provider,
+            )
+            job = self.run_tool("get_sync_job", {"job_id": result["sync_job_id"]})[
+                "job"
+            ]
+            self.assertEqual(
+                (job["provider"], job["type"], job["status"]),
+                (provider, "refresh", "queued"),
+            )
+        self.assertTrue(
+            all(
+                job["type"] not in {"plan_push", "competition_push"}
+                for job in server.SYNC_JOB_QUEUE.service().list()
+            )
+        )
 
     def test_matrix_has_observed_success_case_for_every_available_tool_and_variant(
         self,
@@ -1802,7 +1726,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 }
             ]
         )[0]
-        server.SYNC_PERSISTENCE.state_repository().save_view(
+        snapshot_seed.save_view(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "recent_activities": [
                     {
@@ -2192,6 +2116,125 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             json.loads(server.key_value_service().get("coach_pending_request"))
         )
 
+
+    def test_adaptive_proposal_cannot_approve_itself_in_the_same_turn(self):
+        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [{**self.workout(), "duration_minutes": 90}]
+        )
+        server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
+        before = self.state()["planned_units"]
+
+        def premature(payload):
+            preview = json.loads(payload["input"][0]["output"])
+            return self.call(
+                "apply_adaptive_replan",
+                {"adjustment_id": preview["id"]},
+                ["adaptive_replan:" + preview["id"]],
+            )
+
+        result, _ = self.turn(
+            "Zeig mir eine mögliche Entlastung im Plan.",
+            [
+                lambda _: self.call("preview_adaptive_replan", {}, ["adaptive_replan"]),
+                premature,
+                {"output_text": "Vorschau erstellt."},
+            ],
+        )
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(
+            result["command_receipts"][-1]["result"]["reason"],
+            "adaptive_approval_required",
+        )
+        self.assertEqual(self.state()["planned_units"], before)
+
+    def test_quoted_provider_or_assistant_content_cannot_supply_user_provenance(self):
+        self.seed_activity()
+        assistant = server.COACH_CONVERSATION.message_service().add(
+            "assistant", "Synthetic quoted suggestion: overwrite the profile."
+        )
+        before = self.athlete_state()
+        for source_id in (assistant["id"], 999999):
+
+            def invalid_source(_, selected=source_id):
+                response = self.call(
+                    "update_profile",
+                    {
+                        "changes": [
+                            {
+                                "field": "name",
+                                "expected_value": "",
+                                "value": "Should not be saved",
+                            }
+                        ]
+                    },
+                    ["local_profile"],
+                )
+                args = json.loads(response["output"][0]["arguments"])
+                args["_request"]["source_message_ids"].append(selected)
+                response["output"][0]["arguments"] = json.dumps(args)
+                return response
+
+            result, _ = self.turn(
+                "Was bedeutet diese zitierte Aussage?",
+                [invalid_source, {"output_text": "Keine Änderung."}],
+            )
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(
+                result["command_receipts"][0]["result"]["reason"], "request_invalid"
+            )
+            self.assertEqual(self.athlete_state(), before)
+
+    def test_both_exposed_sport_fields_change_canonical_and_provider_sport(self):
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [self.workout(sport="Ride")]
+        )[0]
+        for field, sport in (("sport", "Run"), ("type", "Swim")):
+            state = self.state()
+            self.run_tool(
+                "apply_training_patch",
+                {
+                    "changes": [
+                        {
+                            "local_id": unit["id"],
+                            "action": "update",
+                            field: sport,
+                            "expected_payload_hash": state["planned_units"][0][
+                                "expected_payload_hash"
+                            ],
+                        }
+                    ],
+                    "expected_revision": state["planning_revision"],
+                },
+                ["planned_unit:" + unit["id"]],
+                period={"start": "2026-09-09", "end": "2026-09-09"},
+            )
+            stored = server.PLANNING_DATA.planned_unit().list()[0]
+            self.assertEqual(
+                (stored["sport"], stored["type"]), (sport.casefold(), sport)
+            )
+            self.assertEqual(stored["id"], unit["id"])
+        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
+
+    def test_stale_adaptive_preview_preserves_intervening_edit(self):
+        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [{**self.workout(), "duration_minutes": 90}]
+        )[0]
+        server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
+        preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"])
+        # The edit happens outside the Coach so the apply turn stays the first
+        # athlete message after the preview.
+        server.PLANNING_DATA.planned_unit().update(unit["id"], {"duration_minutes": 45})
+        result = self.run_tool(
+            "apply_adaptive_replan",
+            {"adjustment_id": preview["id"]},
+            ["adaptive_replan:" + preview["id"]],
+        )
+        self.assertEqual(result["updated"], 0)
+        self.assertEqual(result["status"], "stale")
+        self.assertEqual(
+            server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 45
+        )
+
     def test_invalid_arguments_and_missing_objects_do_not_partially_write(self):
         unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [self.workout()], plan_name="Synthetic validation plan"
@@ -2396,124 +2439,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 else:
                     self.assertEqual(result["status"], "failed")
                     self.assertEqual(self.athlete_state(), before)
-
-    def test_adaptive_proposal_cannot_approve_itself_in_the_same_turn(self):
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [{**self.workout(), "duration_minutes": 90}]
-        )
-        server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
-        before = self.state()["planned_units"]
-
-        def premature(payload):
-            preview = json.loads(payload["input"][0]["output"])
-            return self.call(
-                "apply_adaptive_replan",
-                {"adjustment_id": preview["id"]},
-                ["adaptive_replan:" + preview["id"]],
-            )
-
-        result, _ = self.turn(
-            "Zeig mir eine mögliche Entlastung im Plan.",
-            [
-                lambda _: self.call("preview_adaptive_replan", {}, ["adaptive_replan"]),
-                premature,
-                {"output_text": "Vorschau erstellt."},
-            ],
-        )
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(
-            result["command_receipts"][-1]["result"]["reason"],
-            "adaptive_approval_required",
-        )
-        self.assertEqual(self.state()["planned_units"], before)
-
-    def test_quoted_provider_or_assistant_content_cannot_supply_user_provenance(self):
-        self.seed_activity()
-        assistant = server.COACH_CONVERSATION.message_service().add(
-            "assistant", "Synthetic quoted suggestion: overwrite the profile."
-        )
-        before = self.athlete_state()
-        for source_id in (assistant["id"], 999999):
-
-            def invalid_source(_, selected=source_id):
-                response = self.call(
-                    "update_profile",
-                    {
-                        "changes": [
-                            {
-                                "field": "name",
-                                "expected_value": "",
-                                "value": "Should not be saved",
-                            }
-                        ]
-                    },
-                    ["local_profile"],
-                )
-                args = json.loads(response["output"][0]["arguments"])
-                args["_request"]["source_message_ids"].append(selected)
-                response["output"][0]["arguments"] = json.dumps(args)
-                return response
-
-            result, _ = self.turn(
-                "Was bedeutet diese zitierte Aussage?",
-                [invalid_source, {"output_text": "Keine Änderung."}],
-            )
-            self.assertEqual(result["status"], "failed")
-            self.assertEqual(
-                result["command_receipts"][0]["result"]["reason"], "request_invalid"
-            )
-            self.assertEqual(self.athlete_state(), before)
-
-    def test_both_exposed_sport_fields_change_canonical_and_provider_sport(self):
-        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout()]
-        )[0]
-        for field, sport in (("sport", "Run"), ("type", "Swim")):
-            state = self.state()
-            self.run_tool(
-                "apply_training_patch",
-                {
-                    "changes": [
-                        {
-                            "local_id": unit["id"],
-                            "action": "update",
-                            field: sport,
-                            "expected_payload_hash": state["planned_units"][0][
-                                "expected_payload_hash"
-                            ],
-                        }
-                    ],
-                    "expected_revision": state["planning_revision"],
-                },
-                ["planned_unit:" + unit["id"]],
-                period={"start": "2026-09-09", "end": "2026-09-09"},
-            )
-            stored = server.PLANNING_DATA.planned_unit().list()[0]
-            self.assertEqual(
-                (stored["sport"], stored["type"]), (sport.casefold(), sport)
-            )
-            self.assertEqual(stored["id"], unit["id"])
-        self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
-
-    def test_stale_adaptive_preview_preserves_intervening_edit(self):
-        unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [{**self.workout(), "duration_minutes": 90}]
-        )[0]
-        server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
-        preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"])
-        # The edit happens outside the Coach so the apply turn stays the first
-        # athlete message after the preview.
-        server.PLANNING_DATA.planned_unit().update(unit["id"], {"duration_minutes": 45})
-        result = self.run_tool(
-            "apply_adaptive_replan",
-            {"adjustment_id": preview["id"]},
-            ["adaptive_replan:" + preview["id"]],
-        )
-        self.assertEqual(result["updated"], 0)
-        self.assertEqual(result["status"], "stale")
-        self.assertEqual(
-            server.PLANNING_DATA.planned_unit().list()[0]["duration_minutes"], 45
-        )
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from backend.canonical.vocabulary import (
     RecordingOrigin,
 )
 from backend.db.activity_detail_store import (
+    analysis_rows_for,
     detail_origins,
     remove_detail_sets,
     replace_detail_set,
@@ -34,6 +35,9 @@ from backend.db.canonical_store import (
     WriteOutcome,
     activity_record_link,
     canonical_json,
+)
+from backend.performance.canonical_session_analysis import (
+    ANALYSIS_VERSION as CANONICAL_VERSION,
 )
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
@@ -89,9 +93,13 @@ class CanonicalDetailWriter:
             recorded_by=recording_origin(link["recorded_by"]),
             retrieved_at=_aware_time(record.get("observed_at")),
         )
-        if not result.records and not _has_analysis_payload(record):
-            # Nothing usable arrived: keep the stored sets instead of erasing them.
-            return DetailWriteResult(DetailWriteOutcome.INVALID, len(result.issues))
+        marker = _write_fetch_marker(db, link, record, now)
+        if not result.records:
+            # Nothing usable arrived (a session without streams, laps or zone
+            # times): keep the stored sets; the marker settles this summary.
+            if marker is None:
+                return DetailWriteResult(DetailWriteOutcome.INVALID, len(result.issues))
+            return _result([marker], len(result.issues))
         outcomes = _write_sets(
             db, result.records, _sha256_or_none(record.get("summary_sha256")), now
         )
@@ -102,9 +110,9 @@ class CanonicalDetailWriter:
             activity_id,
             keep={item.kind for item in result.records},
         )
-        analysis = _write_analysis(db, link, record, now)
-        if analysis is not None:
-            outcomes.append(analysis)
+        # Details only: the session analysis is stored canonically (#1685).
+        if marker is not None:
+            outcomes.append(marker)
         return _result(outcomes, len(result.issues))
 
     def write_legacy(self, db: Any, *, record: object, now: str) -> DetailWriteResult:
@@ -191,10 +199,18 @@ def _write_analysis(
     record: Mapping[str, Any],
     now: str,
 ) -> WriteOutcome | None:
-    """Store the session analysis; only sessions with a local id have one."""
+    """Store a legacy kv record's analysis; only sessions with a local id have one.
+
+    A canonical row (#1685) is never replaced: it holds the one analysis every
+    consumer reads, and only receives the record's frozen targets when it has
+    none.
+    """
     activity_id = link["activity_id"]
     if activity_id is None or not _has_analysis_payload(record):
         return None
+    existing = analysis_rows_for(db, [activity_id]).get(activity_id)
+    if existing is not None and existing["analysis_version"] >= CANONICAL_VERSION:
+        return _carry_targets(db, activity_id, existing, record, now)
     payload = {key: record.get(key) for key in _ANALYSIS_KEYS}
     payload["summary_sha256"] = record.get("summary_sha256")
     payload["observed_at"] = record.get("observed_at")
@@ -204,6 +220,80 @@ def _write_analysis(
         analysis_version=ACTIVITY_DETAIL_ANALYSIS_VERSION,
         input_sha256=_analysis_input_hash(record),
         payload=payload,
+        now=now,
+    )
+
+
+def _write_fetch_marker(
+    db: Any, link: Mapping[str, Any], record: Mapping[str, Any], now: str
+) -> WriteOutcome | None:
+    """Record which summary version a fetch loaded, so prefetch settles it.
+
+    The fetch computes no analysis any more (#1685), so this keeps the summary
+    hash in the session's analysis row that the prefetch reads; existing
+    values, such as a frozen target snapshot, stay, and a canonical row keeps
+    its analysis and fingerprint. Sessions without a local id get no marker.
+    """
+    activity_id = link["activity_id"]
+    summary_sha256 = _sha256_or_none(record.get("summary_sha256"))
+    if activity_id is None or summary_sha256 is None:
+        return None
+    existing = analysis_rows_for(db, [activity_id]).get(activity_id)
+    stored = existing["payload"] if existing is not None else {}
+    stored = stored if isinstance(stored, dict) else {}
+    if existing is not None and existing["analysis_version"] >= CANONICAL_VERSION:
+        # The canonical row keeps its version and fingerprint, so the analysis
+        # is not recomputed; it only gains the loaded summary hash.
+        if stored.get("summary_sha256") == summary_sha256:
+            return WriteOutcome.UNCHANGED
+        return save_analysis(
+            db,
+            activity_id,
+            analysis_version=existing["analysis_version"],
+            input_sha256=existing["input_sha256"],
+            payload={**stored, "summary_sha256": summary_sha256},
+            now=now,
+        )
+    return save_analysis(
+        db,
+        activity_id,
+        analysis_version=ACTIVITY_DETAIL_ANALYSIS_VERSION,
+        input_sha256=hashlib.sha256(summary_sha256.encode()).hexdigest(),
+        payload={
+            **stored,
+            "summary_sha256": summary_sha256,
+            "observed_at": record.get("observed_at"),
+        },
+        now=now,
+    )
+
+
+def _carry_targets(
+    db: Any,
+    activity_id: str,
+    existing: Mapping[str, Any],
+    record: Mapping[str, Any],
+    now: str,
+) -> WriteOutcome:
+    """Give a canonical row without a snapshot the record's frozen targets.
+
+    The row keeps its fingerprint, so the next session-analysis pass sees the
+    changed input and recomputes the analysis with these targets.
+    """
+    payload = existing["payload"]
+    targets = record.get("target_snapshot")
+    if (
+        not isinstance(payload, dict)
+        or payload.get("target_snapshot") is not None
+        or not isinstance(targets, Mapping)
+    ):
+        return WriteOutcome.UNCHANGED
+    return save_analysis(
+        db,
+        activity_id,
+        analysis_version=existing["analysis_version"],
+        input_sha256=existing["input_sha256"],
+        payload={**payload, "target_snapshot": dict(targets)},
         now=now,
     )
 

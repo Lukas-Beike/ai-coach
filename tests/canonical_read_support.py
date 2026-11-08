@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_compaction import compact_snapshot
 from support import (
     PROVIDER_SYNCED_TEXT,
     garmin_payload_fixture,
@@ -25,9 +26,6 @@ from support import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
-from backend.providers.snapshot_projection import (
-    intervals_snapshot_has_unmatched_compact_rows,
-)
 from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
     CanonicalBackfill,
@@ -35,7 +33,6 @@ from backend.sync.canonical_backfill import (
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
-from backend.sync.intervals_compaction import compact_snapshot
 
 NOW = "2026-09-20T08:00:00+00:00"
 CLOCK_AT = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
@@ -130,9 +127,6 @@ def make_selector(case: CanonicalReadFixture) -> Any:
     return build_canonical_read(
         key_values=case.key_values,
         profile=FixtureProfile(case),
-        compact_only=lambda db: intervals_snapshot_has_unmatched_compact_rows(
-            case.intervals
-        ),
     )
 
 

@@ -27,23 +27,31 @@ PROVIDERS = frozenset(DEFAULT_PROVIDER_REGISTRY.ids())
 JOB_TYPES = frozenset(
     {
         "refresh",
-        "performance_refresh",
         "activity_details",
         "plan_push",
         "competition_push",
         "nutrition_sync",
         "historical_backfill",
         "wellness_backfill",
+        "rating_backfill",
     }
 )
 # Backfill chains and the sync-state cursor stream each one walks back.
 WELLNESS_BACKFILL = "wellness_backfill"
 WELLNESS_HISTORY_CURSOR = "wellness_history"
+RATING_BACKFILL = "rating_backfill"
+RATING_HISTORY_CURSOR = "rating_history"
 BACKFILL_CURSOR_STREAMS: dict[str, str] = {
     "historical_backfill": "historical",
     WELLNESS_BACKFILL: WELLNESS_HISTORY_CURSOR,
+    RATING_BACKFILL: RATING_HISTORY_CURSOR,
 }
 BACKFILL_JOB_TYPES = frozenset(BACKFILL_CURSOR_STREAMS)
+_BACKFILL_PROVIDER_MESSAGES = {
+    "historical_backfill": ("Historischer Backfill ist nur für Garmin zulässig."),
+    WELLNESS_BACKFILL: "Der Wellness-Backfill ist nur für Garmin zulässig.",
+    RATING_BACKFILL: "Der Bewertungs-Backfill ist nur für Garmin zulässig.",
+}
 # Built from the fixed type names above, never from request data.
 _BACKFILL_TYPES_SQL = "({})".format(
     ", ".join(f"'{job_type}'" for job_type in sorted(BACKFILL_JOB_TYPES))
@@ -271,11 +279,7 @@ def normalize_sync_job_request(
     if type_value in BACKFILL_JOB_TYPES and not registry.supports_job(
         provider_value, type_value
     ):
-        raise JobValidationError(
-            "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
-            if type_value == "historical_backfill"
-            else "Der Wellness-Backfill ist nur für Garmin zulässig."
-        )
+        raise JobValidationError(_BACKFILL_PROVIDER_MESSAGES[type_value])
     if type_value == "activity_details":
         normalized_payload = _normalize_activity_details_job(
             provider_value, values, registry
@@ -286,10 +290,6 @@ def normalize_sync_job_request(
         )
     elif type_value == "competition_push":
         normalized_payload = _normalize_competition_push_job(
-            provider_value, values, registry
-        )
-    elif type_value == "performance_refresh":
-        normalized_payload = _normalize_reason_only_job(
             provider_value, values, registry
         )
     elif type_value == "plan_push":
@@ -427,16 +427,6 @@ def _validate_nutrition_approval_hash(entry: dict[str, Any]) -> None:
         raise JobValidationError("Nutrition approval hash does not match its totals.")
 
 
-def _normalize_reason_only_job(
-    provider: str, values: dict[str, Any], registry: ProviderRegistry
-) -> dict[str, str]:
-    if not registry.supports_job(provider, "performance_refresh"):
-        raise JobValidationError("Dieser Job ist nur für Intervals.icu zulässig.")
-    if set(values) - {"reason"}:
-        raise JobValidationError(UNSUPPORTED_JOB_FIELDS_ERROR)
-    return {"reason": str(values.get("reason") or "job").strip()[:80] or "job"}
-
-
 def _normalize_competition_push_job(
     provider: str, values: dict[str, Any], registry: ProviderRegistry
 ) -> dict[str, Any]:
@@ -551,14 +541,6 @@ def _normalize_refresh_job(
         )
     if "force" in values:
         normalized_payload["force"] = _normalize_refresh_flag(values["force"], "force")
-    if "automatic" in values:
-        normalized_payload["automatic"] = _normalize_refresh_flag(
-            values["automatic"], "automatic"
-        )
-    if "one_off" in values:
-        normalized_payload["one_off"] = _normalize_refresh_flag(
-            values["one_off"], "one_off"
-        )
     if "end_date" in values:
         normalized_payload["end_date"] = _normalize_refresh_end_date(values["end_date"])
     if values.get("reason") is not None:
@@ -691,15 +673,6 @@ class SyncJobStore:
             ).fetchone()
             return row is not None
 
-    def pending_performance_job_id(self, provider: str) -> str | None:
-        with self._database_manager.reader() as db:
-            row = db.execute(
-                "SELECT id FROM sync_jobs WHERE provider=? AND type='performance_refresh' "
-                "AND status IN ('queued', 'running') ORDER BY created_at, id LIMIT 1",
-                (provider,),
-            ).fetchone()
-            return row["id"] if row else None
-
     def enqueue(
         self,
         envelope: Mapping[str, Any],
@@ -734,7 +707,7 @@ class SyncJobStore:
         job_id = str(self._uuid_factory())
 
         with self._database_manager.unit_of_work() as db:
-            if normalized["type"] == "performance_refresh" or (
+            if (
                 normalized["type"] in _COALESCED_TYPES
                 and requested in _COALESCED_REQUESTERS
             ):
@@ -804,13 +777,6 @@ class SyncJobStore:
                     "error_detail=NULL, updated_at=? WHERE job_id=? AND status='running'",
                     (now, job["id"]),
                 )
-            # No performance refresh survives a restart or restore, so a persisted
-            # running marker left by a crash is stale and must not stay "1".
-            db.execute(
-                "UPDATE kv SET value='0', updated_at=? "
-                "WHERE key='performance_refresh_running' AND value='1'",
-                (now,),
-            )
             # Callers run before the workers start or under the drained restore
             # gate, so no competition sync can be in flight either.
             db.execute(

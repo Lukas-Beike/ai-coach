@@ -234,7 +234,6 @@ class CharacterizationLoadContextTests(unittest.TestCase):
             set(result),
             {
                 "load",
-                "intervals_history",
                 "last_7",
                 "previous_7",
                 "last_30",
@@ -272,29 +271,6 @@ class CharacterizationLoadContextTests(unittest.TestCase):
         self.assertIsNotNone(load["ctl"])
         self.assertAlmostEqual(load["tsb"], round(load["ctl"] - load["atl"], 1), 1)
         self.assertIsNotNone(load["averages_7d"]["ctl"])
-
-    def test_intervals_values_stay_a_labelled_history_and_never_the_load(
-        self,
-    ) -> None:
-        result = performance_load_context(
-            [],
-            TODAY,
-            wellness_day=TODAY,
-            ctl=50.0,
-            atl=60.0,
-            form_by_day={TODAY: -10.0},
-        )
-        self.assertIsNone(result["load"]["ctl"])
-        self.assertEqual(
-            result["intervals_history"],
-            {
-                "as_of": TODAY.isoformat(),
-                "ctl": 50.0,
-                "atl": 60.0,
-                "tsb": -10.0,
-                "source": "Intervals.icu (gespeichert, nicht lokal)",
-            },
-        )
 
     def test_context_rollups_count_garmin_and_wahoo_copies_twice(self) -> None:
         # Quirk: the production caller passes raw recent_activities, so the load

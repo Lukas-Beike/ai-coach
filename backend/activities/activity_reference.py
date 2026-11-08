@@ -1,21 +1,19 @@
-"""Resolve local canonical and legacy provider activity references at the boundary.
+"""Resolve activity references at the boundary.
 
-A caller may send either a local canonical id (``act_...``) or the legacy
-Intervals.icu provider id. Resolution happens once, at the entry point, and
-yields the provider id that every stored key and provider request uses. The
-mapping is one-to-one with the ``local_activity_id`` that read surfaces report:
-each Intervals.icu-primary session resolves to its own provider id, including a
-duplicate session, so feedback keyed by either id stays reachable.
+A caller may send a local canonical id (``act_...``), the id of a provider record
+or the id of an alias session. ``resolve_reference`` leads any of them to the live
+effective session id, following ``merged_into`` and, for an alias deleted with
+its survivor retained, ``merged_into_retained``. That session id is the one key
+feedback, equipment assignments and session metrics are stored under. A
+reference that leads to no live session passes through unchanged so each caller
+keeps its own not-found or validation response.
 
-A duplicate session whose own primary is not Intervals.icu is an alias created by
-session linking. It resolves through ``merged_into`` (following the chain, guarded
-against cycles) to the first Intervals.icu-primary session that is not deleted.
-
-A Garmin- or Wahoo-primary session that holds an active Intervals.icu record,
-merged in or as its own record, resolves to that record for detail, feedback and
-refresh reads (``resolve_reference``). Duplicate deletion keeps the strict
-``resolve``. Other sessions, deleted sessions and unknown ids pass through unchanged
-so each caller keeps its existing not-found or validation response.
+The provider calls (detail refresh) and the duplicate deletion still need the
+Intervals.icu record id of a session while that ingest data exists:
+``provider_reference`` finds it through a session's primary record, a merged
+Intervals.icu record or the survivor a deleted alias retained; the strict
+``resolve`` (duplicate deletion, detail jobs) uses the primary alone and passes
+deleted sessions through.
 """
 
 from __future__ import annotations
@@ -32,8 +30,8 @@ from backend.db import canonical_store
 class ActivityReference:
     """A resolved activity id and the provider that owns it, when known.
 
-    ``provider`` is None for an id that passed through unresolved, because the
-    caller did not name a provider and no local session confirmed one.
+    ``provider`` is set only for an Intervals.icu record id from
+    ``provider_reference``; a session id or an unresolved id carries None.
     """
 
     activity_id: Any
@@ -45,36 +43,60 @@ class ActivityReferenceResolver(Protocol):
 
     def resolve_reference(self, reference: Any) -> ActivityReference: ...
 
+    def provider_reference(self, reference: Any) -> ActivityReference: ...
+
     def local_ids(self, provider_activity_ids: Iterable[str]) -> dict[str, str]: ...
 
 
 class ActivityReferences(ActivityReferenceResolver):
-    """Resolve local activity ids through the canonical session rows."""
+    """Resolve activity references through the canonical session rows."""
 
     def __init__(self, database_manager: Any) -> None:
         self._database_manager = database_manager
 
     def resolve(self, reference: Any) -> Any:
-        """Return the Intervals.icu provider id for a local id, or the input unchanged."""
-        return self._resolve(reference, merged_copies=False).activity_id
+        """Return the Intervals.icu provider id of a primary session, or the input."""
+        return self._provider(reference, merged_copies=False).activity_id
+
+    def provider_reference(self, reference: Any) -> ActivityReference:
+        """Return the Intervals.icu record id of a session, merged copies included."""
+        return self._provider(reference, merged_copies=True)
 
     def resolve_reference(self, reference: Any) -> ActivityReference:
-        """Return the reference with its owning provider when a local session confirms it.
+        """Return the session a reference was written for, else the input.
 
-        Also resolves a Garmin- or Wahoo-primary session that holds an active
-        Intervals.icu record, so its detail, feedback and refresh share one key.
+        A provider record id leads to the session of that record, an ``act_`` id
+        stays as given, so athlete data is stored under the session it belongs
+        to and stays with it when a bundle is split. A deleted alias leads to
+        the live survivor it retained. Readers resolve merges themselves.
         """
-        return self._resolve(reference, merged_copies=True)
+        if not isinstance(reference, str) or not reference.strip():
+            return ActivityReference(reference)
+        text = reference.strip()
+        with self._database_manager.reader() as db:
+            # An id that names several records stays unresolved.
+            origin = canonical_store.feedback_origin_sessions(db, [(text, None)])
+            live = (
+                canonical_store.live_session_id(db, origin[text])
+                if text in origin
+                else None
+            )
+            state = (
+                canonical_store.activity_sessions_by_ids(db, [origin[text]])[
+                    origin[text]
+                ]["state"]
+                if live is not None
+                else None
+            )
+        if live is None:
+            return ActivityReference(reference)
+        deleted = state == ActivitySessionState.DELETED.value
+        return ActivityReference(live if deleted else origin[text])
 
-    def _resolve(self, reference: Any, *, merged_copies: bool) -> ActivityReference:
-        """Resolve one reference; ``merged_copies`` also accepts a merged record.
+    def _provider(self, reference: Any, *, merged_copies: bool) -> ActivityReference:
+        """Resolve a local ``act_`` id to its Intervals.icu record id.
 
-        Only local ``act_`` ids carry a provider. Raw provider ids (for example
-        the Intervals.icu id posted by the activity detail view) pass through
-        with provider None: mapping them would need a provider-id lookup that
-        the existing helpers do not offer for writes, and the stored key must
-        stay the id the client sent. Feedback written that way keeps NULL
-        provider until the client posts the local id.
+        Raw provider ids pass through with provider None.
         """
         if not isinstance(reference, str):
             return ActivityReference(reference)
@@ -82,7 +104,9 @@ class ActivityReferences(ActivityReferenceResolver):
         if not candidate.startswith(canonical_store.ACTIVITY_ID_PREFIX):
             return ActivityReference(reference)
         with self._database_manager.reader() as db:
-            provider_activity_id = _intervals_provider_activity_id(db, candidate)
+            provider_activity_id = _intervals_provider_activity_id(
+                db, candidate, follow_retained=merged_copies
+            )
             if provider_activity_id is None and merged_copies:
                 record = canonical_store.activity_record_for_session(
                     db, ProviderId.INTERVALS.value, candidate
@@ -104,23 +128,6 @@ class ActivityReferences(ActivityReferenceResolver):
             )
 
 
-DUPLICATE_ID_FIELDS: Final = ("canonical_id", "duplicate_id")
-
-
-def resolve_duplicate_ids(payload: Any, references: ActivityReferenceResolver) -> Any:
-    """Return a duplicate-deletion payload with both activity ids resolved."""
-    if not isinstance(payload, dict):
-        return payload
-    return {
-        **payload,
-        **{
-            key: references.resolve(payload[key])
-            for key in DUPLICATE_ID_FIELDS
-            if key in payload
-        },
-    }
-
-
 class NoActivityReferences(ActivityReferenceResolver):
     """Identity resolver for owners that are composed without a canonical store."""
 
@@ -130,6 +137,9 @@ class NoActivityReferences(ActivityReferenceResolver):
     def resolve_reference(self, reference: Any) -> ActivityReference:
         return ActivityReference(reference)
 
+    def provider_reference(self, reference: Any) -> ActivityReference:
+        return ActivityReference(reference)
+
     def local_ids(self, provider_activity_ids: Iterable[str]) -> dict[str, str]:
         return {}
 
@@ -137,16 +147,32 @@ class NoActivityReferences(ActivityReferenceResolver):
 _MAX_ALIAS_DEPTH: Final = 64
 
 
-def _intervals_provider_activity_id(db: Any, activity_id: str) -> str | None:
+def _intervals_provider_activity_id(
+    db: Any, activity_id: str, *, follow_retained: bool
+) -> str | None:
     seen: set[str] = set()
     current: str | None = activity_id
     while current is not None and current not in seen and len(seen) < _MAX_ALIAS_DEPTH:
         seen.add(current)
         session = canonical_store.activity_sessions_by_ids(db, [current]).get(current)
-        if session is None or session["state"] == ActivitySessionState.DELETED.value:
+        if session is None:
             return None
-        if session["primary_provider"] == ProviderId.INTERVALS.value:
+        if session["primary_provider"] == ProviderId.INTERVALS.value and (
+            session["state"] != ActivitySessionState.DELETED.value
+        ):
             return str(session["primary_provider_activity_id"])
-        merged_into = session["merged_into"]
-        current = str(merged_into) if merged_into else None
+        current = _next_alias(session, follow_retained=follow_retained)
     return None
+
+
+def _next_alias(session: Any, *, follow_retained: bool) -> str | None:
+    """The session an alias points at; a deleted one only keeps its retained target.
+
+    A deleted session leads nowhere unless ``follow_retained`` asks for the survivor
+    its deletion retained.
+    """
+    if session["state"] == ActivitySessionState.DELETED.value:
+        retained = session["merged_into_retained"] if follow_retained else None
+        return str(retained) if retained else None
+    merged_into = session["merged_into"]
+    return str(merged_into) if merged_into else None

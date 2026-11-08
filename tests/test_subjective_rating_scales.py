@@ -3,7 +3,6 @@
 import unittest
 from typing import Any, ClassVar
 
-from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.athlete.checkins import CHECKIN_SCORE_FIELDS
 from backend.canonical.rating_scales import (
     INTERVALS_FEEL_SCALE,
@@ -13,10 +12,9 @@ from backend.canonical.rating_scales import (
     LOCAL_SESSION_RPE_SCALE,
     RatingScale,
 )
-from backend.canonical.vocabulary import MetricKind, RecordingOrigin
+from backend.canonical.vocabulary import MetricKind
 from backend.coach.context import COACH_ACTIVITY_FIELDS
 from backend.coach.prompt import COACH_PROMPT
-from backend.performance.context import SUBJECTIVE_RATINGS
 from backend.performance.session_rpe_load import session_load
 from backend.planning.context import CHECKIN_FIELDS
 
@@ -44,7 +42,7 @@ class RatingScaleTests(unittest.TestCase):
     def test_every_intervals_wellness_rating_runs_one_to_four_higher_worse(
         self,
     ) -> None:
-        for kind in (kind for _key, kind in SUBJECTIVE_RATINGS):
+        for kind in INTERVALS_WELLNESS_SCALES:
             scale = INTERVALS_WELLNESS_SCALES[kind]
             self.assertEqual(
                 (1, 4, "worse"), (scale.minimum, scale.maximum, scale.higher_is)
@@ -72,17 +70,15 @@ class CoachRuleTests(unittest.TestCase):
     RULE = COACH_PROMPT[COACH_PROMPT.index("8h. ") :].splitlines()[0]
 
     def test_rule_names_the_intervals_scales_with_best_at_one(self) -> None:
-        wellness = [
-            INTERVALS_WELLNESS_SCALES[kind] for _key, kind in SUBJECTIVE_RATINGS
-        ]
+        wellness = list(INTERVALS_WELLNESS_SCALES.values())
         self.assertEqual(
             {("1–4", "worse")}, {(_range(s), s.higher_is) for s in wellness}
         )
-        keys = "/".join(key for key, _kind in SUBJECTIVE_RATINGS)
-        self.assertIn(f"Intervals.icu recovery {keys} 1–4", self.RULE)
+        # The Intervals.icu 1–4 recovery ratings are no Coach input any more (#1728).
+        self.assertNotIn("recovery fatigue/soreness/stress/mood", self.RULE)
         self.assertEqual("worse", INTERVALS_FEEL_SCALE.higher_is)
         self.assertIn(f"activity feel {_range(INTERVALS_FEEL_SCALE)}", self.RULE)
-        self.assertIn("run from 1 = best", self.RULE)
+        self.assertIn("runs from 1 = best", self.RULE)
         self.assertIn(f"activity rpe {_range(INTERVALS_RPE_SCALE)}", self.RULE)
 
     def test_rule_names_the_local_scales_and_directions(self) -> None:
@@ -110,33 +106,6 @@ class CoachRuleTests(unittest.TestCase):
             self.assertIn(field, self.RULE)
         self.assertIn("athlete-entered, not measured", self.RULE)
         self.assertIn("Never compare ratings of different scales", self.RULE)
-
-
-class DetailMetricTests(unittest.TestCase):
-    def test_rpe_and_feel_are_athlete_entered_with_their_scale(self) -> None:
-        metrics = intervals_summary_metrics(
-            {"icu_rpe": 7, "feel": 1, "calories": 500},
-            recorded_by=RecordingOrigin.GARMIN,
-        )
-        self.assertEqual("athlete_entered", metrics["rpe"]["source"]["kind"])
-        self.assertEqual("athlete_entered", metrics["feel"]["source"]["kind"])
-        self.assertEqual("measured", metrics["calories_kcal"]["source"]["kind"])
-        self.assertEqual(
-            "1–5, höher = schlechter (1 stark … 5 schwach)", metrics["feel"]["scale"]
-        )
-        self.assertEqual("stark", metrics["feel"]["rating_label"])
-        self.assertEqual(0.0, metrics["feel"]["normalized_0_1"])
-        self.assertIn("höher = härter", metrics["rpe"]["scale"])
-        self.assertNotIn("scale", metrics["calories_kcal"])
-        self.assertNotIn("rating_label", metrics["rpe"])
-
-    def test_off_scale_rating_keeps_value_and_scale_without_label(self) -> None:
-        metrics = intervals_summary_metrics(
-            {"feel": 0}, recorded_by=RecordingOrigin.GARMIN
-        )
-        self.assertEqual(0, metrics["feel"]["value"])
-        self.assertIn("scale", metrics["feel"])
-        self.assertNotIn("normalized_0_1", metrics["feel"])
 
 
 class SessionRpeScaleTests(unittest.TestCase):

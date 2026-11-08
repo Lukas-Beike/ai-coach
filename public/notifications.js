@@ -61,7 +61,7 @@ function notifyState(data) {
   const next = data.planning?.season?.next_event;
   if (next && next.days_until >= 0 && next.days_until <= 3) void showPwaNotification("Wettkampf steht bevor", { body: competitionCountdownText(next.days_until), tag: `competition:${next.id}` }, `competition:${next.id}:${next.event_date}`);
   const error = data.sync?.last_error || data.garmin_sync?.status?.includes("Fehler") && data.garmin_sync.status;
-  if (error) void showPwaNotification("Intervals Coach benötigt Aufmerksamkeit", { body: "Eine Synchronisation ist fehlgeschlagen. Details stehen in der App.", tag: "sync-error" }, `error:${error}`);
+  if (error) void showPwaNotification("Pacecraft benötigt Aufmerksamkeit", { body: "Eine Synchronisation ist fehlgeschlagen. Details stehen in der App.", tag: "sync-error" }, `error:${error}`);
 }
 
 function registerServiceWorker() {

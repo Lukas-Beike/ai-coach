@@ -589,6 +589,23 @@ class LocalZoneConfigurationTests(DomainStoreFixture):
         self.assertIs(WriteOutcome.UPDATED, upsert(self.db, changed, now=LATER))
         self.assertEqual((changed,), self.reader.zone_configurations(self.db))
 
+    def test_saving_a_local_configuration_dates_it_even_unchanged(self) -> None:
+        local = local_zone_configuration()
+        key = canonical_domain_store.zone_configuration_key(local)
+        upsert = canonical_domain_store.upsert_local_zone_configuration
+        upsert(self.db, local, now=NOW)
+        self.assertEqual(
+            {key: date(2026, 10, 20)},
+            canonical_domain_store.local_zone_saved_days(self.db),
+        )
+        self.assertIs(WriteOutcome.UNCHANGED, upsert(self.db, local, now=LATER))
+        self.assertEqual(
+            {key: date(2026, 10, 21)},
+            canonical_domain_store.local_zone_saved_days(self.db),
+        )
+        canonical_domain_store.retire_local_zone_configuration(self.db, key, now=LATER)
+        self.assertEqual({}, canonical_domain_store.local_zone_saved_days(self.db))
+
     def test_provider_configurations_are_not_local(self) -> None:
         with self.assertRaisesRegex(ValueError, "has no provider"):
             canonical_domain_store.upsert_local_zone_configuration(

@@ -65,7 +65,6 @@ class HttpTargetTests(unittest.TestCase):
         return SyncCommandEndpoint(
             self.queue,
             Mock(),
-            Mock(),
             full_resync,
             lambda: "operation-1",
             {"intervals": 90},

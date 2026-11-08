@@ -13,7 +13,8 @@ import unittest
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, patch
+from typing import Any
+from unittest.mock import Mock
 
 from activity_row_support import (
     FixedActivityRows,
@@ -24,10 +25,8 @@ from backend.activities.activity_reference import (
     ActivityReference,
     ActivityReferences,
     NoActivityReferences,
-    resolve_duplicate_ids,
 )
 from backend.activities.detail_store import ActivityDetailStore
-from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.athlete.equipment import EquipmentService
 from backend.canonical.records import ActivityRecord, Provenance
@@ -40,7 +39,6 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.db import DatabaseManager, canonical_store, row_factory
-from backend.db.activity_detail_store import detail_sets_for
 from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -48,10 +46,7 @@ from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.detail_envelope import DetailEnvelopeReader
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
-from backend.sync.activity_detail_canonical import CanonicalDetailWriter
-from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.queue import SyncJobQueueService
 
 TODAY = date(2026, 5, 4)
 STAMP = "2026-10-11T08:00:00+00:00"
@@ -146,20 +141,87 @@ class ActivityReferenceResolverTests(_Fixture):
         references = ActivityReferences(self.manager)
         self.assertEqual(
             ActivityReference("ride-merged", ProviderId.INTERVALS.value),
-            references.resolve_reference(garmin),
+            references.provider_reference(garmin),
         )
         # Duplicate deletion keeps the strict resolution of the survivor.
         self.assertEqual(garmin, references.resolve(garmin))
+        # Every other reference leads to the session id, never to a provider id.
+        self.assertEqual(
+            ActivityReference(garmin), references.resolve_reference(garmin)
+        )
 
-    def test_envelope_reads_feedback_keyed_by_the_merged_intervals_id(self) -> None:
+    def test_a_reference_resolves_to_the_session_it_names_not_the_survivor(
+        self,
+    ) -> None:
+        intervals = self.seed("ride-merged")
+        garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
+        self.merge(intervals, garmin)
+        references = ActivityReferences(self.manager)
+        for reference, session in (
+            (garmin, garmin),
+            ("garmin-survivor", garmin),
+            (intervals, intervals),
+            ("ride-merged", intervals),
+        ):
+            with self.subTest(reference):
+                self.assertEqual(
+                    ActivityReference(session), references.resolve_reference(reference)
+                )
+
+    def test_references_follow_the_survivor_a_deleted_alias_retained(self) -> None:
+        intervals = self.seed("ride-merged")
+        garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
+        self.merge(intervals, garmin)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_sessions SET state = 'deleted', merged_into = NULL, "
+                "merged_into_retained = ? WHERE activity_id = ?",
+                (garmin, intervals),
+            )
+        references = ActivityReferences(self.manager)
+        self.assertEqual(
+            ActivityReference(garmin), references.resolve_reference(intervals)
+        )
+        self.assertEqual(
+            ActivityReference("garmin-survivor"),
+            references.provider_reference("garmin-survivor"),
+        )
+
+    def test_a_deleted_alias_resolves_to_the_intervals_record_it_retained(self) -> None:
+        survivor = self.seed("ride-survivor")
+        alias = self.seed("garmin-alias", provider=ProviderId.GARMIN)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_sessions SET state = 'deleted', "
+                "merged_into_retained = ? WHERE activity_id = ?",
+                (survivor, alias),
+            )
+        references = ActivityReferences(self.manager)
+        self.assertEqual(
+            ActivityReference("ride-survivor", ProviderId.INTERVALS.value),
+            references.provider_reference(alias),
+        )
+        # The strict resolution keeps a deleted session unchanged.
+        self.assertEqual(alias, references.resolve(alias))
+
+    def test_unresolvable_references_pass_through(self) -> None:
+        local = self.seed("ride-1")
+        self.set_state(local, "deleted")
+        references = ActivityReferences(self.manager)
+        for reference in (local, "act_missing", "unknown-id", " ", 42, None):
+            with self.subTest(reference):
+                self.assertEqual(
+                    ActivityReference(reference),
+                    references.resolve_reference(reference),
+                )
+
+    def test_envelope_reads_feedback_keyed_by_the_session_id(self) -> None:
         intervals = self.seed("ride-merged")
         garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
         self.merge(intervals, garmin)
         feedback = Mock()
         feedback.for_activity_ids.side_effect = lambda ids, **_options: [
-            {"activity_id": key, "session_rpe": 6}
-            for key in ids
-            if key == "ride-merged"
+            {"activity_id": key, "session_rpe": 6} for key in ids if key == garmin
         ]
         envelope = DetailEnvelopeReader(
             feedback_service=feedback,
@@ -169,8 +231,33 @@ class ActivityReferenceResolverTests(_Fixture):
             summary=lambda: None,
         )
         with self.manager.reader() as db:
-            block = envelope(db, garmin, "ride-merged", None)
+            block = envelope(db, garmin)
         self.assertEqual(6, block["activity_feedback"]["session_rpe"])
+
+    def test_envelope_reads_equipment_of_the_live_session_for_a_merged_copy(
+        self,
+    ) -> None:
+        intervals = self.seed("ride-merged")
+        garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
+        self.merge(intervals, garmin)
+        feedback = Mock()
+        feedback.for_activity_ids.return_value = []
+        read: list[str] = []
+
+        def read_equipment(reference: str) -> dict[str, Any]:
+            read.append(reference)
+            return {}
+
+        envelope = DetailEnvelopeReader(
+            feedback_service=feedback,
+            read_equipment=read_equipment,
+            references=ActivityReferences(self.manager),
+            performance=dict,
+            summary=lambda: None,
+        )
+        with self.manager.reader() as db:
+            envelope(db, "ride-merged")
+        self.assertEqual([garmin], read)
 
     def test_garmin_primary_session_passes_through_unchanged(self) -> None:
         local = self.seed("garmin-1", provider=ProviderId.GARMIN)
@@ -208,25 +295,6 @@ class ActivityReferenceResolverTests(_Fixture):
         self.assertEqual({}, references.local_ids(["ride-1"]))
 
 
-class DuplicateIdResolutionTests(unittest.TestCase):
-    def test_resolves_only_present_duplicate_fields(self) -> None:
-        references = Mock()
-        references.resolve.side_effect = lambda value: f"resolved-{value}"
-
-        self.assertEqual(
-            resolve_duplicate_ids(
-                {"canonical_id": "act_a", "snapshot_synced_at": "t"}, references
-            ),
-            {"canonical_id": "resolved-act_a", "snapshot_synced_at": "t"},
-        )
-
-    def test_non_mapping_payload_is_returned_unchanged(self) -> None:
-        references = Mock()
-
-        self.assertIsNone(resolve_duplicate_ids(None, references))
-        references.resolve.assert_not_called()
-
-
 class ActivityCallerResolutionTests(_Fixture):
     def test_detail_resolves_local_id_and_reports_it(self) -> None:
         local = self.seed("ride-1")
@@ -260,7 +328,7 @@ class ActivityCallerResolutionTests(_Fixture):
                 self.assertEqual(local, result["session"]["activity_id"])
                 self.assertEqual(3600, result["metrics"]["duration_s"]["value"])
 
-    def test_feedback_is_stored_under_the_provider_id(self) -> None:
+    def test_feedback_is_stored_under_the_session_id(self) -> None:
         local = self.seed("ride-1")
         repository = Mock()
         repository.all.return_value = []
@@ -270,8 +338,9 @@ class ActivityCallerResolutionTests(_Fixture):
             references=ActivityReferences(self.manager),
         )
         service.save(local, {"session_rpe": 6})
-        self.assertEqual("ride-1", repository.upsert.call_args.args[1]["activity_id"])
+        self.assertEqual(local, repository.upsert.call_args.args[1]["activity_id"])
         self.assertEqual(local, repository.upsert.call_args.kwargs["session_id"])
+        self.assertIsNone(repository.upsert.call_args.kwargs["provider"])
 
     def test_coach_feedback_route_accepts_local_id(self) -> None:
         local = self.seed("ride-1")
@@ -289,7 +358,7 @@ class ActivityCallerResolutionTests(_Fixture):
         self.assertTrue(routes.handle(handler, f"/api/activities/{local}/feedback"))
         status, body = handler.send_json.call_args.args
         self.assertEqual(200, status)
-        self.assertEqual("ride-1", body["activity_feedback"]["activity_id"])
+        self.assertEqual(local, body["activity_feedback"]["activity_id"])
 
     def test_coach_feedback_route_keeps_not_found_for_unknown_local_id(self) -> None:
         service = ActivityFeedbackService(
@@ -329,111 +398,46 @@ class ActivityCallerResolutionTests(_Fixture):
         with self.assertRaises(AppError):
             service.assign({"activity_id": "act_missing", "equipment_id": "bike-1"})
 
-    def test_duplicate_delete_validates_resolved_provider_ids(self) -> None:
-        canonical = self.seed("wahoo-1")
-        duplicate = self.seed("garmin-1")
-        service = DuplicateActivityService(
-            self.manager,
-            Mock(latest=Mock(return_value=None)),
-            Mock(),
-            Mock(),
-            references=ActivityReferences(self.manager),
-        )
-        with (
-            patch(
-                "backend.activities.duplicate_service.validate_duplicate_delete",
-                side_effect=RuntimeError("stop after resolution"),
-            ) as validate,
-            self.assertRaises(RuntimeError),
-        ):
-            service.delete(
-                {"canonical_id": canonical, "duplicate_id": duplicate},
-                intervals_client=Mock(),
-            )
-        self.assertEqual(
-            {"canonical_id": "wahoo-1", "duplicate_id": "garmin-1"},
-            validate.call_args.args[0],
-        )
-
-    def test_activity_detail_job_is_stored_under_the_provider_id(self) -> None:
-        local = self.seed("ride-1")
-        store = MagicMock()
-        store.enqueue.return_value = ({"id": "job-1"}, True)
-        service = SyncJobQueueService(
-            store,
-            Mock(),
-            MagicMock(),
-            Mock(),
-            7,
-            Mock(),
-            references=ActivityReferences(self.manager),
-        )
-        with (
-            patch(
-                "backend.sync.queue.normalize_sync_job_request",
-                side_effect=RuntimeError("stop after resolution"),
-            ) as normalize,
-            self.assertRaises(RuntimeError),
-        ):
-            service.enqueue(
-                "intervals",
-                "activity_details",
-                {"activity_id": local},
-            )
-        self.assertEqual({"activity_id": "ride-1"}, normalize.call_args.args[2])
-
-    def test_detail_refresh_fetches_the_provider_activity(self) -> None:
-        local = self.seed("ride-1")
-        api = Mock()
-        api.get.side_effect = [
-            {"id": "ride-1", "name": "Synthetic ride"},
-            [
-                {"type": "time", "data": [0, 1, 2]},
-                {"type": "watts", "data": [200, 210, 220]},
-            ],
-        ]
-        service = ActivityDetailRefreshService(
-            api_client=api,
-            database_manager=self.manager,
-            row_reader=FixedActivityRows([{"id": "ride-1"}]),
-            store=ActivityDetailStore(self.manager),
-            utc_now=lambda: "2026-10-02T08:00:00Z",
-            configured=True,
-            references=ActivityReferences(self.manager),
-            canonical=CanonicalDetailWriter(),
-        )
-        service.refresh(local)
-        self.assertEqual("/activity/ride-1", api.get.call_args_list[0].args[0])
-        with self.manager.reader() as db:
-            self.assertTrue(detail_sets_for(db, "intervals", "ride-1"))
 
 
-class ActivityFeedbackProviderColumnTests(_Fixture):
-    """Feedback rows record the provider of the resolved activity reference."""
 
-    def _service(self, activities: list[dict[str, object]] | None = None):
+
+class ActivityFeedbackKeyTests(_Fixture):
+    """Feedback rows are keyed by the live session id and carry no provider."""
+
+    def _service(self):
         return ActivityFeedbackService(
             self.manager,
             ActivityFeedbackRepository(lambda: STAMP),
             references=ActivityReferences(self.manager),
         )
 
-    def _provider_of(self, activity_id: str):
+    def _rows(self):
         with self.manager.unit_of_work() as db:
-            row = db.execute(
-                "SELECT provider FROM activity_feedback WHERE activity_id = ?",
-                (activity_id,),
-            ).fetchone()
-        return row["provider"]
+            return db.execute(
+                "SELECT activity_id, provider, session_id FROM activity_feedback "
+                "ORDER BY activity_id"
+            ).fetchall()
 
-    def test_local_id_records_the_intervals_provider(self) -> None:
+    def test_local_id_is_stored_under_the_session_id_without_a_provider(self) -> None:
         local = self.seed("ride-1")
         self._service().save(local, {"session_rpe": 6})
-        self.assertEqual("intervals", self._provider_of("ride-1"))
+        self.assertEqual(
+            [(local, None, local)],
+            [tuple(row.values()) for row in self._rows()],
+        )
+
+    def test_a_provider_id_is_stored_under_the_session_id_too(self) -> None:
+        local = self.seed("ride-1")
+        self._service().save("ride-1", {"session_rpe": 6})
+        self.assertEqual([local], [row["activity_id"] for row in self._rows()])
 
     def test_unresolved_id_records_no_provider(self) -> None:
         self._service().save("ride-unknown", {"notes": "passthrough"})
-        self.assertIsNone(self._provider_of("ride-unknown"))
+        self.assertEqual(
+            [("ride-unknown", None, None)],
+            [tuple(row.values()) for row in self._rows()],
+        )
 
     def test_null_reference_resolver_records_no_provider(self) -> None:
         service = ActivityFeedbackService(
@@ -442,21 +446,24 @@ class ActivityFeedbackProviderColumnTests(_Fixture):
             references=NoActivityReferences(),
         )
         service.save("ride-1", {"notes": "no resolver"})
-        self.assertIsNone(self._provider_of("ride-1"))
+        self.assertEqual(
+            [("ride-1", None)],
+            [(row["activity_id"], row["provider"]) for row in self._rows()],
+        )
 
-    def test_update_without_resolved_provider_keeps_existing_provider(self) -> None:
+    def test_a_later_edit_by_provider_id_updates_the_same_row(self) -> None:
         local = self.seed("ride-1")
         service = self._service()
         service.save(local, {"session_rpe": 5})
         service.save("ride-1", {"notes": "later edit by provider id"})
-        self.assertEqual("intervals", self._provider_of("ride-1"))
+        self.assertEqual([local], [row["activity_id"] for row in self._rows()])
+        self.assertEqual(5, service.list()[0]["session_rpe"])
 
-    def test_coach_save_records_the_intervals_provider(self) -> None:
+    def test_coach_save_is_stored_under_the_session_id(self) -> None:
         local = self.seed("ride-1")
-        service = self._service([{"id": "ride-1"}])
-        result = service.save_coach(local, {"session_rpe": 4})
-        self.assertEqual("ride-1", result["activity_feedback"]["activity_id"])
-        self.assertEqual("intervals", self._provider_of("ride-1"))
+        result = self._service().save_coach(local, {"session_rpe": 4})
+        self.assertEqual(local, result["activity_feedback"]["activity_id"])
+        self.assertEqual([local], [row["activity_id"] for row in self._rows()])
 
     def test_api_feedback_json_keeps_the_released_keys(self) -> None:
         local = self.seed("ride-1")

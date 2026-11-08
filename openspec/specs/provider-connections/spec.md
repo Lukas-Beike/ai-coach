@@ -22,17 +22,17 @@ Detailed contract: The current training registry contains no direct Polar, COROS
 Evidence: `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/canonical/vocabulary.py:ProviderId`, `backend/canonical/vocabulary.py:RecordingOrigin`; `tests/test_provider_registry.py:test_capabilities_are_assigned_per_provider`, `tests/test_wahoo_connection.py:test_configured_only_with_all_three_values`.
 
 ### Requirement: Intervals server configuration and requests
-The system SHALL keep the Intervals API key and athlete identifier in server-side configuration, construct authenticated read/write transports there, URL-encode provider identifiers, and reject unconfigured sync work before enqueueing. Read sync SHALL fetch provider data without treating API availability as permission to perform remote mutations. Remote writes SHALL enter their explicit domain use cases.
+The system SHALL keep the Intervals API key and athlete identifier in server-side configuration, construct the authenticated transport there, URL-encode provider identifiers, and reject unconfigured sync work before enqueueing. Intervals.icu is an output target: the system SHALL NOT read its activities, wellness or events, and remote writes SHALL enter their explicit domain use cases.
 
 #### Scenario: Missing Intervals key
-- **WHEN** an athlete requests Intervals synchronization without configured access
-- **THEN** a safe configuration error is returned before lock acquisition or remote access.
+- **WHEN** an athlete requests an Intervals.icu synchronization without configured access
+- **THEN** a safe configuration error is returned before remote access.
 
-#### Scenario: Normal import
-- **WHEN** Intervals credentials permit reading activities, wellness, and events
-- **THEN** the importer reads them without uploading local workouts, competition edits, or other pending local changes merely because import ran.
+#### Scenario: Output only
+- **WHEN** Intervals credentials are configured
+- **THEN** no activity, wellness or athlete read runs; only an explicit push or its read-back reaches Intervals.icu.
 
-Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_sync_intervals_flow.py:test_missing_api_key_fails_before_lock_and_provider_io`, `tests/test_sync_full_resync.py:test_intervals_and_competitions_share_operation_and_never_push`.
+Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_sync_full_resync.py:test_intervals_and_competitions_share_operation_and_never_push`.
 
 ### Requirement: Garmin login and MFA
 The system SHALL support authenticated Garmin login with an optional MFA continuation, bounded text/code validation, an expiring pending MFA slot, and a bounded rejection count. A newer login, cancellation, or disconnect SHALL supersede the old generation so an in-flight old login cannot store a connection later. Provider errors SHALL be mapped to safe application errors rather than exposing SDK messages or login values.

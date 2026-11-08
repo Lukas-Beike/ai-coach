@@ -39,13 +39,12 @@ from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRe
 # Provider-level rejection text per job type, as the live validators raise it.
 # Type-level errors (unknown job type, field errors) are not listed here.
 PROVIDER_REJECTIONS = {
-    "historical_backfill": (
-        "Historischer Backfill ist nur für Intervals.icu und Garmin zulässig."
-    ),
+    "refresh": "Unsupported job type.",
+    "historical_backfill": "Historischer Backfill ist nur für Garmin zulässig.",
     "wellness_backfill": "Der Wellness-Backfill ist nur für Garmin zulässig.",
+    "rating_backfill": "Der Bewertungs-Backfill ist nur für Garmin zulässig.",
     "activity_details": "Ungültiger Aktivitätsdetailauftrag.",
     "nutrition_sync": "Ungültiger Ernährungssynchronisierungsauftrag.",
-    "performance_refresh": "Dieser Job ist nur für Intervals.icu zulässig.",
     "competition_push": "Dieser Job ist nur für Intervals.icu zulässig.",
     "plan_push": "Plan-Push-Jobs sind nur für Intervals.icu, Wahoo und Garmin zulässig.",
 }
@@ -306,14 +305,14 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
         self.assertEqual(self.normalize("calendar", "refresh")["payload"], {})
         self.assert_invalid("weather", "refresh", {"days": 7}, "Felder")
         self.assert_invalid(
-            "intervals", "refresh", {"end_date": "not-a-date"}, "Backfill-Enddatum"
+            "garmin", "refresh", {"end_date": "not-a-date"}, "Backfill-Enddatum"
         )
 
     def test_sync_days_accepts_sentinel_and_bounds_regular_ranges(self):
         for value, expected in ((-1, -1), ("-1", -1), (1, 1), (3660, 3660)):
             with self.subTest(value=value):
                 self.assertEqual(
-                    self.normalize("intervals", "refresh", {"days": value})["payload"][
+                    self.normalize("garmin", "refresh", {"days": value})["payload"][
                         "days"
                     ],
                     expected,
@@ -324,7 +323,7 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
             (3661, "Synchronisationszeitraum ist zu groß"),
         ):
             with self.subTest(value=value):
-                self.assert_invalid("intervals", "refresh", {"days": value}, message)
+                self.assert_invalid("garmin", "refresh", {"days": value}, message)
 
     def test_enforced_period_limit_follows_the_provider_descriptor(self):
         def enforced(provider, days):
@@ -337,8 +336,8 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
             )["payload"]["days"]
 
         for provider, accepted, rejected in (
-            ("intervals", 365, 366),
             ("garmin", 90, 91),
+            ("wahoo", 90, 91),
         ):
             with self.subTest(provider=provider):
                 self.assertEqual(enforced(provider, accepted), accepted)
@@ -354,7 +353,7 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
 
     def test_refresh_validation_order_and_omitted_reason(self):
         self.assert_invalid(
-            "intervals",
+            "garmin",
             "refresh",
             {"days": "invalid", "unsupported": True},
             "Der Job enthält nicht unterstützte Felder",
@@ -366,7 +365,7 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
 
     def test_empty_chunk_counter_is_accepted_only_for_historical_jobs(self):
         payload = {"days": 90, "end_date": "2026-06-03", "empty_chunks": "1"}
-        for provider in ("intervals", "garmin"):
+        for provider in ("garmin", "garmin"):
             with self.subTest(provider=provider):
                 self.assertEqual(
                     self.normalize(provider, "historical_backfill", payload)["payload"],
@@ -376,7 +375,7 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
         for invalid in (-1, 101, "x", None):
             with self.subTest(value=invalid):
                 self.assert_invalid(
-                    "intervals",
+                    "garmin",
                     "historical_backfill",
                     {"empty_chunks": invalid},
                     "Backfill-Leerzähler",
@@ -397,21 +396,15 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
         self.assert_invalid(
             "weather", "refresh", {"force": "true"}, "force muss ein Boolean"
         )
-        self.assertIs(
-            self.normalize("intervals", "refresh", {"automatic": True})["payload"][
-                "automatic"
-            ],
-            True,
-        )
-        self.assert_invalid(
-            "intervals", "refresh", {"automatic": 1}, "automatic muss ein Boolean"
-        )
         self.assert_invalid(
             "garmin", "refresh", {"automatic": True}, UNSUPPORTED_JOB_FIELDS_ERROR
         )
+        self.assert_invalid(
+            "garmin", "refresh", {"one_off": True}, UNSUPPORTED_JOB_FIELDS_ERROR
+        )
 
     def test_historical_backfill_is_limited_to_activity_providers(self):
-        for provider in ("intervals", "garmin"):
+        for provider in ("garmin", "garmin"):
             with self.subTest(provider=provider):
                 result = self.normalize(provider, "historical_backfill", {"days": -1})
                 self.assertEqual(result["provider"], provider)
@@ -424,32 +417,6 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
                     "Historischer Backfill ist nur",
                 )
 
-    def test_performance_and_competition_jobs_are_intervals_only(self):
-        for job_type in ("performance_refresh", "competition_push"):
-            with self.subTest(job_type=job_type):
-                payload = {"reason": "  sync  "}
-                if job_type == "competition_push":
-                    payload["approval_manifest"] = []
-                expected = {"reason": "sync"}
-                if job_type == "competition_push":
-                    expected["approval_manifest"] = []
-                self.assertEqual(
-                    self.normalize("intervals", job_type, payload)["payload"],
-                    expected,
-                )
-                self.assert_invalid(
-                    "garmin", job_type, {}, "Dieser Job ist nur für Intervals.icu"
-                )
-                invalid_payload = {"days": 7}
-                if job_type == "competition_push":
-                    invalid_payload["approval_manifest"] = []
-                self.assert_invalid("intervals", job_type, invalid_payload, "Felder")
-        self.assertEqual(
-            self.normalize("intervals", "performance_refresh", {"reason": " "})[
-                "payload"
-            ],
-            {"reason": "job"},
-        )
 
     def test_competition_push_preserves_a_bounded_approval_manifest(self):
         entry = {"type": "competition", "id": "race-1", "sha256": "a" * 64}
@@ -694,24 +661,6 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertNotIn(job["id"], " ".join(captured.output))
         self.assertEqual(self.store.state(job["id"])["status"], "queued")
 
-    def test_read_list_active_and_pending_performance_job(self):
-        performance, created = self.enqueue(
-            "intervals", "performance_refresh", {"reason": "manual"}
-        )
-        self.assertTrue(created)
-        self.current_now = "2026-09-20T12:00:01+00:00"
-        weather, _ = self.enqueue("weather", "refresh", {"force": True})
-        self.assertEqual(self.store.state("missing"), None)
-        self.assertEqual(
-            self.store.state(performance["id"])["payload"], {"reason": "manual"}
-        )
-        self.assertEqual([job["id"] for job in self.store.list(1)], [weather["id"]])
-        self.assertTrue(self.store.active("weather", "refresh"))
-        self.assertFalse(self.store.active("calendar", "refresh"))
-        self.assertEqual(
-            self.store.pending_performance_job_id("intervals"), performance["id"]
-        )
-        self.assertIsNone(self.store.pending_performance_job_id("garmin"))
 
     def test_all_read_methods_reuse_an_outer_unit_of_work_connection(self):
         manager = DatabaseManager(
@@ -729,7 +678,6 @@ class SyncJobStoreTests(unittest.TestCase):
             self.assertIsNone(store.state("missing"))
             self.assertEqual(store.list(10), [])
             self.assertFalse(store.active("garmin", "refresh"))
-            self.assertIsNone(store.pending_performance_job_id("intervals"))
             self.assertEqual(connect.call_count, 1)
 
     def test_enqueue_persists_compact_utf8_payload_and_server_hash_contract(self):
@@ -798,26 +746,6 @@ class SyncJobStoreTests(unittest.TestCase):
                 [{"item_key": "one", "operation": "read"}],
             )
 
-    def test_performance_refresh_enqueue_is_single_flight(self):
-        from threading import Barrier
-
-        barrier = Barrier(2)
-
-        def enqueue(reason):
-            barrier.wait()
-            return self.enqueue("intervals", "performance_refresh", {"reason": reason})
-
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            first, second = list(pool.map(enqueue, ("first", "second")))
-        self.assertEqual(first[0]["id"], second[0]["id"])
-        self.assertEqual(sorted([first[1], second[1]]), [False, True])
-        with self.manager.reader() as db:
-            self.assertEqual(
-                db.execute(
-                    "SELECT COUNT(*) FROM sync_jobs WHERE type='performance_refresh'"
-                ).fetchone()[0],
-                1,
-            )
 
     def test_claim_is_conditional_and_increments_job_and_item_once(self):
         job, _ = self.enqueue(operations=[{"item_key": "one", "operation": "read"}])
@@ -1038,29 +966,14 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(states, ["failed", "failed"])
         self.assertEqual(snapshot["status"], "failed")
 
-    def test_resume_interrupted_resets_stale_performance_running_marker(self):
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) VALUES "
-                "('performance_refresh_running', '1', ?), ('other', '1', ?)",
-                (self.now, self.now),
-            )
-        self.store.resume_interrupted()
-        with self.manager.unit_of_work() as db:
-            values = {
-                row["key"]: row["value"]
-                for row in db.execute("SELECT key, value FROM kv").fetchall()
-            }
-        self.assertEqual(values, {"performance_refresh_running": "0", "other": "1"})
 
     def test_resume_interrupted_resets_stale_competition_sync_markers(self):
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO kv(key, value, updated_at) VALUES "
                 "('competition_sync_running', '1', ?), "
-                "('competition_sync_status', 'Zielwettkämpfe werden synchronisiert…', ?), "
-                "('performance_refresh_running', '1', ?)",
-                (self.now, self.now, self.now),
+                "('competition_sync_status', 'Zielwettkämpfe werden synchronisiert…', ?)",
+                (self.now, self.now),
             )
         self.store.resume_interrupted()
         with self.manager.unit_of_work() as db:
@@ -1073,7 +986,6 @@ class SyncJobStoreTests(unittest.TestCase):
             {
                 "competition_sync_running": "0",
                 "competition_sync_status": "",
-                "performance_refresh_running": "0",
             },
         )
 
@@ -1083,7 +995,7 @@ class SyncJobStoreTests(unittest.TestCase):
             ("historical_backfill", {"days": 30}),
         ):
             first, created = self.store.enqueue(
-                {"provider": "intervals", "type": job_type, "payload": payload},
+                {"provider": "garmin", "type": job_type, "payload": payload},
                 "scheduler",
                 None,
                 None,
@@ -1091,7 +1003,7 @@ class SyncJobStoreTests(unittest.TestCase):
             self.assertTrue(created)
             for requester in ("scheduler", "startup"):
                 again, created = self.store.enqueue(
-                    {"provider": "intervals", "type": job_type, "payload": payload},
+                    {"provider": "garmin", "type": job_type, "payload": payload},
                     requester,
                     None,
                     None,
@@ -1099,7 +1011,7 @@ class SyncJobStoreTests(unittest.TestCase):
                 self.assertFalse(created)
                 self.assertEqual(again["id"], first["id"])
             manual, created = self.store.enqueue(
-                {"provider": "intervals", "type": job_type, "payload": payload},
+                {"provider": "garmin", "type": job_type, "payload": payload},
                 "user",
                 None,
                 None,
@@ -1118,7 +1030,7 @@ class SyncJobStoreTests(unittest.TestCase):
             def enqueue(index, job_type=job_type, payload=payload, barrier=barrier):
                 barrier.wait(timeout=5)
                 return self.store.enqueue(
-                    {"provider": "intervals", "type": job_type, "payload": payload},
+                    {"provider": "garmin", "type": job_type, "payload": payload},
                     "scheduler" if index % 2 else "startup",
                     None,
                     None,
@@ -1132,7 +1044,7 @@ class SyncJobStoreTests(unittest.TestCase):
             with self.manager.unit_of_work() as db:
                 count = db.execute(
                     "SELECT COUNT(*) AS count FROM sync_jobs WHERE provider=? AND type=?",
-                    ("intervals", job_type),
+                    ("garmin", job_type),
                 ).fetchone()["count"]
             self.assertEqual(count, 1)
 
@@ -1167,7 +1079,7 @@ class SyncJobStoreTests(unittest.TestCase):
         self.current_now = "2026-09-20T12:05:00+00:00"
         self.store.enqueue(
             {
-                "provider": "intervals",
+                "provider": "garmin",
                 "type": "historical_backfill",
                 "payload": {"days": 30, "end_date": "2025-12-01"},
             },
@@ -1177,10 +1089,10 @@ class SyncJobStoreTests(unittest.TestCase):
         )
 
         found = self.store.has_backfill_continuation
-        self.assertTrue(found("intervals", "2025-12-01", self.now))
-        self.assertFalse(found("intervals", "2025-11-01", self.now))
-        self.assertFalse(found("garmin", "2025-12-01", self.now))
-        self.assertFalse(found("intervals", "2025-12-01", "2026-09-20T12:06:00+00:00"))
+        self.assertTrue(found("garmin", "2025-12-01", self.now))
+        self.assertFalse(found("garmin", "2025-11-01", self.now))
+        self.assertFalse(found("wahoo", "2025-12-01", self.now))
+        self.assertFalse(found("garmin", "2025-12-01", "2026-09-20T12:06:00+00:00"))
 
     def test_concurrent_scheduler_enqueues_create_a_single_job(self):
         def enqueue_once(_):
@@ -1350,7 +1262,11 @@ class RegistryValidatorParityTests(unittest.TestCase):
         self.assertEqual(PROVIDERS, frozenset(DEFAULT_PROVIDER_REGISTRY.ids()))
         for provider in DEFAULT_PROVIDER_REGISTRY.ids():
             with self.subTest(provider=provider):
-                validate_job_request(provider, "refresh", {})
+                if DEFAULT_PROVIDER_REGISTRY.supports_job(provider, "refresh"):
+                    validate_job_request(provider, "refresh", {})
+                else:
+                    with self.assertRaisesRegex(JobValidationError, "Unsupported job"):
+                        validate_job_request(provider, "refresh", {})
         with self.assertRaisesRegex(JobValidationError, "Unsupported provider"):
             validate_job_request("unregistered", "refresh", {})
 
@@ -1376,6 +1292,8 @@ class RegistryValidatorParityTests(unittest.TestCase):
             "force": False,
         }
         for provider in DEFAULT_PROVIDER_REGISTRY.ids():
+            if not DEFAULT_PROVIDER_REGISTRY.supports_job(provider, "refresh"):
+                continue
             allowed = DEFAULT_PROVIDER_REGISTRY.refresh_fields(provider)
             for field, value in probes.items():
                 with self.subTest(provider=provider, field=field):
@@ -1419,6 +1337,8 @@ class TestOnlyProviderValidationTests(unittest.TestCase):
             UNSUPPORTED_JOB_FIELDS_ERROR,
         )
         for job_type, message in PROVIDER_REJECTIONS.items():
+            if job_type == "refresh":
+                continue
             with self.subTest(job_type=job_type):
                 self.assertEqual(
                     _probe_message(ACME_ID, job_type, self.registry), message

@@ -13,10 +13,11 @@ from canonical_detail_support import (
     open_manager,
     seed_intervals_activity,
 )
+from intervals_detail_refresh import ActivityDetailRefreshService, save_prefetch_floor
 
 from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.vocabulary import LapKind
-from backend.db.activity_detail_store import detail_sets_for
+from backend.db.activity_detail_store import detail_sets_for, save_analysis
 from backend.db.repositories import KeyValueRepository
 from backend.providers.intervals_activity_detail_projection import _downsample_series
 from backend.runtime.maintenance import MaintenanceGate
@@ -26,7 +27,6 @@ from backend.sync.activity_detail_retirement import (
     STATE_KEY,
     ActivityDetailRetirement,
 )
-from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
@@ -144,7 +144,28 @@ class RetirementTestCase(unittest.TestCase):
         ).refresh(activity_id)
         record = writer.records[activity_id]
         legacy_detail_kv.save(self.manager, activity_id, record)
-        return record
+        # The earlier release also stored the session analysis of the load.
+        stored = legacy_detail_kv.get(self.manager, activity_id) or {}
+        with self.manager.unit_of_work() as db:
+            session_id = db.execute(
+                "SELECT activity_id FROM activity_records WHERE provider = 'intervals' "
+                "AND provider_activity_id = ?",
+                (activity_id,),
+            ).fetchone()["activity_id"]
+            save_analysis(
+                db,
+                session_id,
+                analysis_version=2,
+                input_sha256="0" * 64,
+                payload={
+                    "target_snapshot": stored.get("target_snapshot"),
+                    "session_analysis": stored.get("session_analysis"),
+                    "calendar_profile": stored.get("calendar_profile"),
+                    "summary_sha256": stored.get("summary_sha256"),
+                },
+                now=NOW,
+            )
+        return stored
 
     def save_record(self, record):
         legacy_detail_kv.save(self.manager, record["activity_id"], record)
@@ -203,7 +224,7 @@ class RetiredRecordTests(RetirementTestCase):
     def test_proven_record_is_deleted_and_other_keys_are_kept(self):
         record = self.load("9201")
         self.store.save_failure("9299", "0" * 64, "Synthetic note", NOW)
-        self.store.save_prefetch_floor("2026-10-01T00:00:00", NOW)
+        save_prefetch_floor(self.store, "2026-10-01T00:00:00", NOW)
         canonical = canonical_snapshot(self.manager)
         kept = [
             row
@@ -397,8 +418,37 @@ class KeptRecordTests(RetirementTestCase):
         self.changed("9311", change)
         self.assert_kept("analysis_mismatch", "9311")
 
+    def canonical_row(self, targets):
+        """Replace the stored analysis by a canonical (version 3) row (#1685)."""
+        self.execute(
+            "UPDATE activity_detail_analysis SET analysis_version = 3, payload = ?",
+            (json.dumps({"target_snapshot": targets, "session_analysis": None}),),
+        )
+
+    def test_canonical_row_with_the_same_targets_proves_the_record(self):
+        targets = {"steps": [], "basis": {"ftp": 250}}
+        self.changed("9314", lambda record: record.update(target_snapshot=targets))
+        self.canonical_row(targets)
+        self.assertEqual(1, self.run_to_completion()["retired"])
+        self.assertIsNone(self.kv_record("9314"))
+
+    def test_canonical_row_with_other_targets_keeps_the_record(self):
+        self.changed(
+            "9315",
+            lambda record: record.update(
+                target_snapshot={"steps": [], "basis": {"ftp": 250}}
+            ),
+        )
+        self.canonical_row({"steps": [], "basis": {"ftp": 1}})
+        self.assert_kept("analysis_mismatch", "9315")
+
     def test_analysis_missing_from_the_canonical_tables(self):
-        self.load("9312")
+        self.changed(
+            "9312",
+            lambda record: record.update(
+                target_snapshot={"steps": [], "basis": {"ftp": 250}}
+            ),
+        )
         self.execute("DELETE FROM activity_detail_analysis")
         self.assert_kept("analysis_mismatch", "9312")
 

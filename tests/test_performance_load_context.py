@@ -1,4 +1,4 @@
-"""Load context: rollups, local fitness (M7) and the labelled Intervals history."""
+"""Load context: rollups and local fitness (M7); no Intervals.icu history."""
 
 import copy
 import unittest
@@ -43,9 +43,7 @@ class PerformanceLoadContextTests(unittest.TestCase):
         self.assertEqual(result["previous_30"]["sessions"], 2)
 
     def test_load_is_the_latest_local_day(self):
-        canonical = CanonicalPerformanceInputs(
-            wellness_day=None, ctl=None, atl=None, local_load_days=_loads(150)
-        )
+        canonical = CanonicalPerformanceInputs(local_load_days=_loads(150))
         load = _context(canonical=canonical)["load"]
         self.assertEqual(load["id"], TODAY.isoformat())
         self.assertEqual(load["source"], "Lokal berechnet (M7)")
@@ -59,9 +57,7 @@ class PerformanceLoadContextTests(unittest.TestCase):
         self.assertNotIn("ramp_rate", load)
 
     def test_averages_cover_the_last_seven_days(self):
-        canonical = CanonicalPerformanceInputs(
-            wellness_day=None, ctl=None, atl=None, local_load_days=_loads(150)
-        )
+        canonical = CanonicalPerformanceInputs(local_load_days=_loads(150))
         load = _context(canonical=canonical)["load"]
         self.assertIsNotNone(load["averages_7d"]["ctl"])
         self.assertLessEqual(load["averages_7d"]["ctl"], load["ctl"])
@@ -72,38 +68,15 @@ class PerformanceLoadContextTests(unittest.TestCase):
         self.assertEqual(load["reason"], "no_load")
         self.assertEqual(load["averages_7d"], {"ctl": None, "atl": None, "tsb": None})
 
-    def test_intervals_values_never_enter_the_load(self):
-        canonical = CanonicalPerformanceInputs(
-            wellness_day=TODAY,
-            ctl=58.4,
-            atl=60.0,
-            form_by_day={TODAY: -1.6},
-        )
-        result = _context(canonical=canonical)
+    def test_the_inputs_hold_no_intervals_load_and_the_context_no_history(self):
+        result = _context(canonical=CanonicalPerformanceInputs())
         self.assertIsNone(result["load"]["ctl"])
-        self.assertEqual(
-            result["intervals_history"],
-            {
-                "as_of": TODAY.isoformat(),
-                "ctl": 58.4,
-                "atl": 60.0,
-                "tsb": -1.6,
-                "source": "Intervals.icu (gespeichert, nicht lokal)",
-            },
-        )
-
-    def test_intervals_history_is_absent_without_stored_values(self):
-        for canonical in (
-            EMPTY_PERFORMANCE_INPUTS,
-            CanonicalPerformanceInputs(wellness_day=TODAY, ctl=None, atl=None),
-        ):
-            with self.subTest(canonical=canonical):
-                self.assertIsNone(_context(canonical=canonical)["intervals_history"])
+        self.assertNotIn("intervals_history", result)
+        for name in ("wellness_day", "ctl", "atl", "form_by_day"):
+            self.assertFalse(hasattr(CanonicalPerformanceInputs(), name), name)
 
     def test_unloaded_sessions_mark_the_incomplete_days(self):
-        canonical = CanonicalPerformanceInputs(
-            wellness_day=None, ctl=None, atl=None, local_load_days=_loads(150)
-        )
+        canonical = CanonicalPerformanceInputs(local_load_days=_loads(150))
         strength = {
             "id": "gym",
             "sport": "strength",
@@ -117,12 +90,7 @@ class PerformanceLoadContextTests(unittest.TestCase):
         activities = [{"started_at_local": TODAY.isoformat(), "training_load": 20}]
         loads = _loads(10)
         before = copy.deepcopy((activities, loads))
-        _context(
-            activities,
-            CanonicalPerformanceInputs(
-                wellness_day=None, ctl=None, atl=None, local_load_days=loads
-            ),
-        )
+        _context(activities, CanonicalPerformanceInputs(local_load_days=loads))
         self.assertEqual((activities, loads), before)
 
 

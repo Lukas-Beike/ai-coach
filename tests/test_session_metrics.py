@@ -120,6 +120,20 @@ class SessionMetricsTests(unittest.TestCase):
             {"basis": "power_stream", "coverage": 1.0},
         )
 
+    def test_run_work_names_the_running_power_model(self) -> None:
+        # Card M8 v3: run work is the output of a device model, ride work is not.
+        run = session_metrics(
+            {**_ride(energy_kj=500.0), "sport": "run"}, None, FINGERPRINT
+        )
+        self.assertEqual(
+            {"basis": "device_total", "power_model": "running_power_model"},
+            run.details[MetricKind.MECHANICAL_WORK],
+        )
+        ride = session_metrics(_ride(energy_kj=500.0), None, FINGERPRINT)
+        self.assertEqual(
+            {"basis": "device_total"}, ride.details[MetricKind.MECHANICAL_WORK]
+        )
+
     def test_work_needs_power_coverage(self) -> None:
         # A 20-second gap every 20 seconds leaves half the moving time uncovered.
         times = tuple(float(second) for second in range(0, SECONDS, 20))
@@ -142,8 +156,14 @@ class SessionMetricsTests(unittest.TestCase):
         self.assertAlmostEqual(
             result.values[MetricKind.AEROBIC_DECOUPLING], expected, places=1
         )
+        details = result.details[MetricKind.AEROBIC_DECOUPLING]
+        self.assertEqual(details["sensor"], "watts")
+        # Card M8 v3: named apart from the session EF (NP / average HR).
+        self.assertNotIn("efficiency", details)
+        self.assertAlmostEqual(details["steady_output_per_hr"], 400 / 285, places=3)
         self.assertEqual(
-            result.details[MetricKind.AEROBIC_DECOUPLING]["sensor"], "watts"
+            [round(200 / 140, 4), round(200 / 145, 4)],
+            [round(half["output_per_hr"], 4) for half in details["halves"]],
         )
 
     def test_fingerprint_follows_inputs(self) -> None:
@@ -161,13 +181,15 @@ class SessionMetricsTests(unittest.TestCase):
             self.assertNotEqual(base, other)
 
 
-def _store_streams(db: Any, provider_activity_id: str) -> None:
+def _store_streams(
+    db: Any, provider_activity_id: str, *, provider: ProviderId = ProviderId.GARMIN
+) -> None:
     replace_detail_set(
         db,
         ActivityStreamSet(
             provider_activity_id=provider_activity_id,
             provenance=Provenance(
-                provider=ProviderId.GARMIN,
+                provider=provider,
                 source_kind=SourceKind.PROVIDER_REPORTED,
                 source_record_id=None,
                 recorded_by=RecordingOrigin.GARMIN,
@@ -290,6 +312,16 @@ class SessionMetricsStageTests(unittest.TestCase):
         self.assertEqual(state["counts"]["retired"], 1)  # its EF row
         with self.manager.reader() as db:
             self.assertEqual(set(stored_session_metrics(db)), {"act_g1"})
+
+    def test_intervals_streams_are_not_read(self) -> None:
+        # Athlete decision 2026-11-07 (#1685): only Garmin, Wahoo and local data.
+        add_session_record(self.manager, ProviderId.INTERVALS, "i1", "act_g1")
+        with self.manager.unit_of_work() as db:
+            _store_streams(db, "i1", provider=ProviderId.INTERVALS)
+        self._run()
+        summary = self._served()
+        self.assertNotIn("work_kj", summary)
+        self.assertNotIn("decoupling_pct", summary)
 
     def test_session_without_values_is_not_recomputed(self) -> None:
         add_session_record(self.manager, ProviderId.GARMIN, "g2", "act_g2", sport="run")

@@ -57,7 +57,7 @@ class _Snapshots:
 
 class _Feedback:
     def __init__(self):
-        self.rows = [{"activity_id": "new", "notes": "good"}]
+        self.rows = [{"activity_id": "act_new", "notes": "good"}]
 
     def list(self, _limit=100):
         return self.rows
@@ -186,23 +186,12 @@ class ActivityReadServiceTests(unittest.TestCase):
             canonical=canonical_source(rows, _Manager, fetched_at=fetched_at),
         )
 
-    def test_page_keeps_activities_with_failed_details_and_names_the_error(self):
+    def test_page_names_no_intervals_detail_failure(self):
+        # Intervals.icu details are never served (#1685), so a stored failure
+        # note marks no listed session.
         page = self.service(_FailedDetails()).page(today=date(2026, 9, 20))
-        self.assertEqual(
-            {"act_new": None, "act_old": "Detaildaten fehlerhaft."},
-            {item["id"]: item["detail_error"] for item in page["activities"]},
-        )
-
-    def test_page_hides_a_failure_note_of_an_older_summary_version(self):
-        class _OlderNote:
-            def failures(self, activity_ids):
-                note = {"message": "Detaildaten fehlerhaft.", "summary_sha256": "x"}
-                return {"old": note} if "old" in set(activity_ids) else {}
-
-        page = self.service(_OlderNote()).page(today=date(2026, 9, 20))
-        self.assertEqual(
-            {"act_new": None, "act_old": None},
-            {item["id"]: item["detail_error"] for item in page["activities"]},
+        self.assertFalse(
+            [item for item in page["activities"] if "detail_error" in item]
         )
 
     def test_page_filters_orders_attaches_feedback_and_uses_cursor(self):
@@ -282,8 +271,8 @@ class ActivityReadServiceTests(unittest.TestCase):
         old = service.detail(
             "old", garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=today
         )
-        # The current summary row of the old activity fills its summary scalars.
-        self.assertEqual(3.1, old["metrics"]["avg_speed_mps"]["value"])
+        # The Intervals.icu summary row is never read for scalars (#1685).
+        self.assertNotIn("avg_speed_mps", old["metrics"])
         self.assertTrue(old["activity_validation"]["available"])
         self.assertEqual([date(2025, 9, 21), date(2025, 9, 21), None], rows.starts)
         # The full-history lookup shares the read snapshot of the windowed read.
@@ -340,7 +329,7 @@ class ActivityReadServiceTests(unittest.TestCase):
         self.assertIsNone(service.page(today=date(2026, 9, 20))["snapshot_synced_at"])
         self.assertIsNone(service.recent(today=date(2026, 9, 20))["snapshot_synced_at"])
 
-    def test_detail_finds_the_summary_row_without_snapshot_activities(self):
+    def test_detail_reads_no_provider_summary_row_without_snapshot_activities(self):
         snapshot = {"synced_at": "2026-09-20T08:00:00+00:00", "athlete": {}}
         rows = _DatedRows(
             [
@@ -363,7 +352,8 @@ class ActivityReadServiceTests(unittest.TestCase):
             today=date(2026, 9, 20),
         )
 
-        self.assertEqual(3.3, result["metrics"]["avg_speed_mps"]["value"])
+        self.assertEqual("act_new", result["session"]["activity_id"])
+        self.assertNotIn("avg_speed_mps", result["metrics"])
 
     def test_detail_service_requires_a_canonical_source(self):
         with self.assertRaises(TypeError):

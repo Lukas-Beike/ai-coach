@@ -117,20 +117,6 @@ class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             assembly.export_port(ProviderId.GARMIN)
 
-    def test_refresh_composes_library_and_remote_reconciliation_owners(self):
-        callbacks = self._callbacks()
-        assembly = self._assembly(callbacks)
-
-        with patch.object(
-            assembly_module, "WorkoutLibraryRefreshService"
-        ) as refresh_type:
-            refresh = assembly.refresh_service()
-
-        self.assertIsNotNone(refresh)
-        self.assertEqual(refresh_type.call_args.args[0], "current config")
-        self.assertEqual(refresh_type.call_args.args[4], "local library")
-        self._assert_deferred_intervals_port(refresh_type.call_args.args[2], callbacks)
-        self.assertEqual(callbacks["workout_library_service"].call_count, 1)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 ---
 name: ai-coach-codex-security
-description: Run a requested local Codex Security review with ChatGPT authentication and triage its findings against Intervals Coach security boundaries.
+description: Run a requested local Codex Security review with ChatGPT authentication and triage its findings against Pacecraft security boundaries.
 ---
 
 Use for an explicitly requested Codex Security scan or security review of a code change. This is a local workflow; do not add GitHub Actions integration or require an API key.

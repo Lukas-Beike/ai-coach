@@ -16,7 +16,6 @@ from backend.athlete.profile import timezone_name
 from backend.canonical.local_time import local_date
 from backend.canonical.records import ActivityRecord
 from backend.errors import AppError
-from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_detail import (
     CanonicalDetailReader,
     RefreshableProviders,
@@ -37,6 +36,12 @@ from backend.performance.detail_envelope import (
     feedback_session_load,
 )
 from backend.performance.freshness import GarminSyncStatus
+from backend.performance.local_tss import THRESHOLD_KINDS
+from backend.performance.session_zones import (
+    dated_thresholds,
+    own_configurations,
+    zone_settings_for,
+)
 
 
 class ActivityAnalysisReadService(ActivityReadService):
@@ -172,12 +177,6 @@ class ActivityAnalysisReadService(ActivityReadService):
 
         summary_reader = self._canonical.activity_summary_reader()
 
-        def summary_row(db: Any, provider_activity_id: str) -> dict | None:
-            # The stored Intervals.icu row behind the detail's summary metrics.
-            if summary_reader is None:
-                return None
-            return summary_reader.intervals_summary_row(db, provider_activity_id)
-
         @functools.cache
         def requested_summary() -> ActivitySummary | None:
             return _find_summary(load_inputs(normalized_id), normalized_id)
@@ -196,11 +195,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         reader = CanonicalDetailReader(
             self._session_records,
             refreshable=self._refreshable,
-            summary_row=summary_row,
             fingerprints=summary_reader,
-            failures=None
-            if self._detail_store is None
-            else self._detail_store.failures,
             envelope=DetailEnvelopeReader(
                 feedback_service=self._feedback_service,
                 read_equipment=self._read_equipment,
@@ -242,30 +237,32 @@ def _session_zone_settings(
 ) -> Callable[[Any, ActivityRecord], ZoneSettings]:
     """The zones in effect for a session's sport, environment and local day.
 
-    Local configurations first, then provider configurations, then the plan-zone
-    thresholds of that day with the default limits, as planned units use them.
+    The resolver of the stored report zone times (``session_zones``, #1743), so
+    the detail view counts the same seconds as the reports.
     """
 
     def read(db: Any, record: ActivityRecord) -> ZoneSettings:
-        day = local_date(record.started_at, zone)
         reader = resolve_reader(source.observation_reader(), db)
-        thresholds = read_zone_thresholds(
-            reader, db, as_of=day, preferences=source.preferences_in(db)
-        )
-        configurations = (
+        configurations = own_configurations(
             reader.zone_configurations(db)
             if isinstance(reader, ZoneConfigurationSource)
             else ()
         )
-        # The zones of planning's resolve_thresholds, without importing planning.
-        return ZoneSettings.from_configurations(
+        thresholds = dated_thresholds(
+            [
+                item
+                for kind in THRESHOLD_KINDS
+                for item in reader.observations(db, kind)
+            ],
             configurations,
+            source.preferences_in(db),
+        )
+        return zone_settings_for(
             record.sport,
             record.environment,
-            day,
-            fallback=ZoneSettings.from_thresholds(
-                thresholds, record.sport, record.environment
-            ),
+            local_date(record.started_at, zone),
+            thresholds,
+            configurations,
         )
 
     return read

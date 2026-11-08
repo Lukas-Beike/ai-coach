@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from intervals_detail_refresh import normalize_streams
+
 from backend.activities.detail_merge import (
     ChannelChoice,
     DetailCandidate,
@@ -44,7 +46,6 @@ from backend.providers.intervals_activity_detail_mapping import (
 from backend.providers.intervals_activity_detail_projection import detailed_activity
 from backend.providers.intervals_activity_fields import activity_detail_laps
 from backend.providers.intervals_activity_mapping import intervals_analysis_sport
-from backend.sync.activity_details import normalize_streams
 
 RETRIEVED = datetime(2026, 10, 19, 8, 0, tzinfo=UTC)
 STARTED = datetime(2026, 10, 19, 7, 0, tzinfo=UTC)
@@ -97,6 +98,10 @@ def run_streams() -> list[dict[str, Any]]:
             "data": [3.0 + (index % 5) / 100 for index in range(2701)],
         },
         {"type": "distance", "data": [index * 3.0 for index in range(2701)]},
+        # Outdoor running bests need altitude since card M4 v4 (#1773).
+        {"type": "altitude", "data": [120.0] * 2701},
+        # Outdoor run decoupling needs a grade since card M8 v2 (#1770).
+        {"type": "grade_smooth", "data": [(index % 3) - 1.0 for index in range(2701)]},
         {"type": "heartrate", "data": [140 + index / 200 for index in range(2701)]},
         {"type": "moving", "data": [True] * 2701},
     ]
@@ -262,7 +267,6 @@ class GoldenParityTests(unittest.TestCase):
             record(Sport.RIDE),
             merged.streams,
             merged.laps,
-            decoupling=projected.get("decoupling"),
         )
         targets = {
             "steps": [{"kind": "power", "target": "100%", "duration": 600}] * 3,
@@ -384,7 +388,6 @@ class AnalysisInputMappingTests(unittest.TestCase):
         self.assertEqual({}, adapted.activity["streams"])
         self.assertEqual([], adapted.activity["laps"])
         self.assertEqual("Intervals.icu", adapted.source_label)
-        self.assertIsNone(adapted.activity["decoupling"])
 
     def test_laps_keep_offsets_in_lap_order(self) -> None:
         lap_set = ActivityLapSet(
@@ -479,9 +482,9 @@ class AnalysisInputMappingTests(unittest.TestCase):
             adapted.activity["laps"],
         )
 
-    def test_decoupling_is_passed_through(self) -> None:
-        adapted = analysis_input(record(Sport.RIDE), None, None, decoupling=4.5)
-        self.assertEqual(4.5, adapted.activity["decoupling"])
+    def test_no_provider_decoupling_is_an_input(self) -> None:
+        adapted = analysis_input(record(Sport.RIDE), None, None)
+        self.assertNotIn("decoupling", adapted.activity)
 
 
 class SourceLabelTests(unittest.TestCase):
@@ -553,7 +556,7 @@ class SourceLabelTests(unittest.TestCase):
         adapted = analysis_input(record(Sport.RIDE), merged_detail.streams, None)
         result = aerobic_analysis(adapted.activity, source_label="Wahoo")
         self.assertEqual("derived from Wahoo original streams", result["source"])
-        self.assertEqual("Intervals.icu", result["provider_decoupling"]["source"])
+        self.assertNotIn("provider_decoupling", result)
 
 
 class NonMutationTests(unittest.TestCase):

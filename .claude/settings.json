@@ -13,11 +13,13 @@
       "Read(//**/.env.*.local)",
       "Read(./data/**)",
       "Read(//**/ai-coach/data/**)",
+      "Read(//**/pacecraft/data/**)",
       "Edit(//**/.env)",
       "Edit(//**/.env.local)",
       "Edit(//**/.env.*.local)",
       "Edit(./data/**)",
-      "Edit(//**/ai-coach/data/**)"
+      "Edit(//**/ai-coach/data/**)",
+      "Edit(//**/pacecraft/data/**)"
     ]
   },
   "hooks": {

@@ -40,6 +40,9 @@ from backend.providers.intervals_workouts import (  # noqa: F401
     DERIVED_WORKOUT_KEYS,
     INTERVALS_DEFAULT_WORKOUT_TYPE,
     INTERVALS_ENDURANCE_WORKOUT_TYPES,
+    INTERVALS_EVENT_CATEGORY,
+    INTERVALS_NOTE_CATEGORY,
+    INTERVALS_STRENGTH_TYPE,
     INTERVALS_WORKOUT_SPORTS,
     INTERVALS_WORKOUT_TYPES,
     intervals_event_payload,
@@ -96,7 +99,31 @@ def validate_intervals_workout_result(
 ) -> None:
     """A saved provider resource is only synced after its parsed structure agrees."""
     expected_sport = intervals_record_type(workout)
-    if not isinstance(remote, dict) or remote.get("type") != expected_sport:
+    if not isinstance(remote, dict):
+        raise AppError(
+            502,
+            "Intervals.icu hat die Sportart nicht korrekt bestätigt.",
+            reason="intervals_workout_sport_mismatch",
+        )
+    if "category" in remote:
+        # A calendar event: strength must come back as a note, so Intervals.icu
+        # never forwards it to Garmin as one unnamed step.
+        expected_category = (
+            INTERVALS_NOTE_CATEGORY
+            if expected_sport == INTERVALS_STRENGTH_TYPE
+            else INTERVALS_EVENT_CATEGORY
+        )
+        if remote.get("category") != expected_category:
+            raise AppError(
+                502,
+                "Intervals.icu hat die Kalenderkategorie nicht korrekt bestätigt.",
+                reason="intervals_workout_category_mismatch",
+            )
+    # Intervals.icu may keep no type on a note; its category is checked above.
+    note_without_type = remote.get("category") == INTERVALS_NOTE_CATEGORY and not (
+        remote.get("type")
+    )
+    if remote.get("type") != expected_sport and not note_without_type:
         raise AppError(
             502,
             "Intervals.icu hat die Sportart nicht korrekt bestätigt.",

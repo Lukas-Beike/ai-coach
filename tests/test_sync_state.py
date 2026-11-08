@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
+import snapshot_seed
 from provider_runtime_fakes import ACME_ID, acme_descriptor
 
 from backend.db import DatabaseManager, row_factory
@@ -162,66 +162,11 @@ class SyncStateRepositoryTests(unittest.TestCase):
             self.assertIsNone(self.repository.latest_snapshot())
             self.assertEqual(self.backend.connect_count, connect_count)
 
-    def test_latest_and_save_snapshot_full_and_performance_state(self):
+    def test_latest_snapshot_returns_the_stored_payload(self):
         self.assertIsNone(self.repository.latest_snapshot())
-        full = {"synced_at": "2026-09-20T10:00:00+00:00", "athlete": {"id": "fake"}}
-        self.repository.save_snapshot(full, activity_days=45)
-        self.assertEqual(self.repository.latest_snapshot(), full)
-        with self.database_manager.reader() as db:
-            self.assertEqual(self.key_values.get(db, "last_sync_at"), full["synced_at"])
-            self.assertEqual(self.key_values.get(db, "last_sync_error"), "")
-            self.assertEqual(self.key_values.get(db, "last_sync_activity_days"), "45")
-
-        performance = {
-            "synced_at": "2026-09-20T11:00:00+00:00",
-            "athlete": {"id": "fake"},
-        }
-        self.repository.save_snapshot(performance, update_full_sync=False)
-        self.assertEqual(self.repository.latest_snapshot(), performance)
-        with self.database_manager.reader() as db:
-            self.assertEqual(self.key_values.get(db, "last_sync_at"), full["synced_at"])
-            self.assertEqual(
-                self.key_values.get(db, "last_performance_refresh_at"),
-                performance["synced_at"],
-            )
-            rows = db.execute("SELECT payload FROM snapshots ORDER BY id").fetchall()
-        self.assertEqual(
-            [json.loads(row["payload"]) for row in rows], [full, performance]
-        )
-
-    def test_snapshot_save_rolls_back_when_status_update_fails(self):
-        class FailingKeyValues(KeyValueRepository):
-            def set(self, db, key, value):
-                if key == "last_sync_error":
-                    raise RuntimeError("forced status write failure")
-                super().set(db, key, value)
-
-        failing_repository = self.make_repository(FailingKeyValues(lambda: NOW))
-        with self.assertRaisesRegex(RuntimeError, "forced status write failure"):
-            failing_repository.save_snapshot(
-                {"synced_at": NOW, "athlete": {"id": "fake"}}, activity_days=7
-            )
-        self.assertIsNone(self.repository.latest_snapshot())
-        with self.database_manager.reader() as db:
-            for key in ("last_sync_at", "last_sync_error", "last_sync_activity_days"):
-                self.assertIsNone(self.key_values.get(db, key))
-
-    def test_save_view_preserves_sync_status_markers(self):
-        full = {"synced_at": "2026-09-20T10:00:00+00:00", "athlete": {"id": "fake"}}
-        self.repository.save_snapshot(full, activity_days=45)
-
-        view = {"recent_activities": [{"id": "local-view"}]}
-        self.repository.save_view(view)
-
-        self.assertEqual(self.repository.latest_snapshot(), view)
-        with self.database_manager.reader() as db:
-            self.assertEqual(self.key_values.get(db, "last_sync_at"), full["synced_at"])
-            self.assertEqual(self.key_values.get(db, "last_sync_activity_days"), "45")
-            rows = db.execute(
-                "SELECT payload, created_at FROM snapshots ORDER BY id"
-            ).fetchall()
-        self.assertEqual(json.loads(rows[-1]["payload"]), view)
-        self.assertEqual(rows[-1]["created_at"], NOW)
+        snapshot = {"synced_at": NOW, "athlete": {"id": "fake"}}
+        snapshot_seed.save_snapshot(self.repository, snapshot)
+        self.assertEqual(self.repository.latest_snapshot(), snapshot)
 
 
 if __name__ == "__main__":

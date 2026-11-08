@@ -7,11 +7,13 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import DatabaseManager, row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.schema import initialize_schema
+from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.push_state import (
     attach_push_state,
     garmin_baselines,
@@ -148,6 +150,64 @@ class PushStateTests(unittest.TestCase):
             [{"local_id": "s5", "payload": unmapped, "sync_state": "synced"}]
         )
         self.assertEqual({"intervals": False}, projected[0]["push_pending"])
+        self.assertEqual({"garmin": "unmapped"}, projected[0]["push_blocked"])
+
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
+    def test_a_confirmed_exercise_is_remembered_for_other_units(self) -> None:
+        confirmed: dict[str, Any] = {
+            **STRENGTH,
+            "strength_structure": [
+                {
+                    "name": "Kabelrudern eng",
+                    "sets": 3,
+                    "reps": 10,
+                    "garmin_exercise": "V-grip Cable Row",
+                    "garmin_pair": {"category": "ROW", "exercise": "V_GRIP_CABLE_ROW"},
+                }
+            ],
+        }
+        later = {
+            **STRENGTH,
+            "date": "2026-11-16",
+            "strength_structure": [{"name": "Kabelrudern  eng", "sets": 4, "reps": 8}],
+        }
+        with self.manager.unit_of_work() as db:
+            wrong = {
+                **confirmed,
+                "strength_structure": [
+                    {
+                        **confirmed["strength_structure"][0],
+                        "garmin_exercise": "Seated Cable Row",
+                        "garmin_pair": {
+                            "category": "ROW",
+                            "exercise": "SEATED_CABLE_ROW",
+                        },
+                    }
+                ],
+            }
+            for local_id, payload, tombstone in (
+                ("c1", confirmed, 0),
+                # A deleted or archived unit's confirmation does not count.
+                ("c2", {**wrong, "local_deleted": True}, 0),
+                ("c3", {**wrong, "archived": True}, 0),
+                ("c4", wrong, 1),
+            ):
+                db.execute(
+                    "INSERT INTO planned_units(id, local_id, payload, tombstone, "
+                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (local_id, local_id, json.dumps(payload), tombstone, "t", local_id),
+                )
+        with self.manager.reader() as db:
+            remembered = remembered_exercises(db)
+        self.assertEqual(["kabelruderneng"], list(remembered))
+        self.assertEqual("V-grip Cable Row", remembered["kabelruderneng"].name)
+        rows = [{"local_id": "l1", "payload": json.dumps(later), "sync_state": "local"}]
+        pairs = [(row, json.loads(row["payload"])) for row in rows]
+        attach_push_state(pairs, {}, remembered)
+        self.assertTrue(pairs[0][1]["push_pending"]["garmin"])
+        self.assertEqual({}, pairs[0][1]["push_blocked"])
+        attach_push_state(pairs, {})
+        self.assertEqual({"garmin": "unmapped"}, pairs[0][1]["push_blocked"])
 
     def test_an_invalid_structure_offers_no_garmin_push(self) -> None:
         invalid = json.dumps({**STRENGTH, "strength_structure": [{"name": ""}]})
@@ -155,6 +215,25 @@ class PushStateTests(unittest.TestCase):
             [{"local_id": "s3", "payload": invalid, "sync_state": "synced"}]
         )
         self.assertEqual({"intervals": False}, projected[0]["push_pending"])
+        self.assertEqual({"garmin": "no_structure"}, projected[0]["push_blocked"])
+
+    def test_free_text_strength_says_why_garmin_is_blocked(self) -> None:
+        free_text = json.dumps(
+            {
+                "sport": "WeightTraining",
+                "date": "2026-11-09",
+                "description": "Face Pulls: 4 Sätze",
+            }
+        )
+        projected = self.project(
+            [
+                {"local_id": "s6", "payload": free_text, "sync_state": "local"},
+                {"local_id": "r1", "payload": json.dumps(RIDE), "sync_state": "local"},
+            ]
+        )
+        self.assertEqual({"intervals": True}, projected[0]["push_pending"])
+        self.assertEqual({"garmin": "no_structure"}, projected[0]["push_blocked"])
+        self.assertEqual({}, projected[1]["push_blocked"])
 
     def test_conflicts_and_strength_without_structure_offer_nothing_extra(self) -> None:
         bare = json.dumps({**STRENGTH, "strength_structure": None})

@@ -79,12 +79,13 @@ test("@responsive standard demo shows one compact race table and sport-specific 
   await expect(powerProfile.locator("tbody td")).toHaveText(Array.from({ length: 5 }, () => /^\d+(?:,\d+)? W$/));
   await expect(cycling.locator("[data-body-metric='cycling_w_per_kg']")).toHaveCount(0);
   await expect(page.locator("#currentPerformance [data-metric='cycling_w_per_kg']")).toHaveCount(1);
-  await expect(running).toContainText("Lauf-Belastbarkeit");
+  await expect(running).not.toContainText("Keine Daten");
   await expect(running.locator("#performancePredictions")).toHaveCount(1);
   await expect(running.locator(".analysis-group-title")).toHaveText("Laufen");
   await expect(cycling.locator(".analysis-group-title")).toHaveText("Rad");
   const endurance = page.locator("#performanceEnduranceCharts");
-  await expect(endurance).toContainText("Ausdauer-Score");
+  // The demo has no endurance score, so the section stays empty and hidden (#1783).
+  await expect(endurance).toBeHidden();
   expect(await endurance.evaluate((element) => element.previousElementSibling.id)).toBe("currentPerformance");
   for (const group of [running, cycling]) {
     const title = await group.locator(".analysis-group-title").boundingBox();
@@ -163,7 +164,8 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
       { metric: "sleep", source: "Garmin Connect", measurement: "duration", observed_at: "2026-10-01", nights: 1,
         history: [{ date: "2026-09-30", value: 7 }, { date: "2026-10-01", value: 11 }] },
       { metric: "hrv", source: "Garmin Connect", measurement: "RMSSD", observed_at: "2026-10-01", nights: 28,
-        status: "ok", lower: 50, upper: 60, position: "within", continuity: "unknown", context_changed_on: null, history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
+        status: "ok", lower: 50, upper: 60, position: "within", continuity: "unknown", context_changed_on: null,
+        rolling: { method: "rolling-lnrmssd-v1", status: "provisional", window_nights: 3, mean_ms: 55.2, lower_ms: 53, upper_ms: 62.2, position: "within", cv_pct: 2.5 }, history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
       { metric: "resting_hr", source: "Intervals.icu", measurement: "resting", observed_at: "2026-10-01", nights: 1,
         status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", continuity: "known", context_changed_on: "2026-09-30", history: [{ date: "2026-10-01", value: 48 }] },
     ],
@@ -182,7 +184,7 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(info).toContainText("Im Bereich deiner früheren Werte · 50 ms–60 ms");
   await expect(info).toContainText("Vergleich mit 28 früheren Nächten.");
   await expect(info).toContainText("Mindestens 14 frühere passende Nächte erforderlich.");
-  await expect(info).toContainText("Vergleich mit 28 früheren Nächten. Messkontext unbekannt.");
+  await expect(info).toContainText("Vergleich mit 28 früheren Nächten. Messkontext unbekannt. 7-Tage-Mittel 55,2 ms (3 Nächte) · in deinem Bereich 53 ms–62,2 ms · Schwankung 2,5 % · vorläufig.");
   await expect(info).toContainText(/Messkontext geändert am 30\.09\.2026\./);
   await expect(info).toContainText("Durchschnitt der angezeigten Werte");
   await page.keyboard.press("Escape");
@@ -234,53 +236,99 @@ test("@responsive recovery comparison band is neutral and keeps series contrast 
   }
 });
 
+// Value labels never touch a mark, the line, an axis text or another label, and stay inside the chart (#1782).
+async function chartLabelCollisions(svg) {
+  return svg.evaluate((element) => {
+    const rect = (node) => { const box = node.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom }; };
+    const hit = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const labels = [...element.querySelectorAll(".analysis-point-value[data-value-series]")].map(rect);
+    const marks = [...element.querySelectorAll("rect.analysis-series-bar, rect.recovery-sleep-bar, circle[data-series], .analysis-axis-unit, .analysis-value-tick, .analysis-date-tick")].map(rect);
+    for (const path of element.querySelectorAll("path[data-series]")) {
+      const matrix = path.getScreenCTM();
+      for (let at = 0; at <= path.getTotalLength(); at += 2) {
+        const point = path.getPointAtLength(at).matrixTransform(matrix);
+        marks.push({ left: point.x - .5, right: point.x + .5, top: point.y - .5, bottom: point.y + .5 });
+      }
+    }
+    const frame = rect(element);
+    return {
+      labels: labels.length,
+      outside: labels.filter((box) => box.left < frame.left || box.right > frame.right || box.top < frame.top || box.bottom > frame.bottom).length,
+      onMarks: labels.filter((box) => marks.some((mark) => hit(box, mark))).length,
+      onLabels: labels.filter((box, index) => labels.slice(index + 1).some((other) => hit(box, other))).length,
+    };
+  });
+}
+
 test("@responsive Garmin acute load switches fourteen days and twelve weeks with real gaps", async ({ page }) => {
   const points = Array.from({ length: 90 }, (_, index) => ({ date: new Date(Date.UTC(2026, 6, 3 + index)).toISOString().slice(0, 10), value: index >= 38 && index <= 44 ? null : 300 + index }));
   await performanceFixture(page, { history: { start: points[0].date, end: points.at(-1).date, load: { source: "Garmin Connect", points }, training_time: { source: "Intervals.icu", points: points.map((point) => ({ ...point, value: point.value == null ? null : 1 })) }, metrics: {} } }, "load");
   const loadRoot = page.locator("#analysisLoadCharts");
   await expect(loadRoot.locator("svg")).toHaveCount(2);
   const root = loadRoot.locator(".analysis-chart-card").first();
+  // Acute load is a rolling state: one line with dots, no bars (#1782).
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
-  await expect(root.locator("rect.analysis-series-bar")).toHaveCount(11);
-  await expect(root.locator(".analysis-point-value[data-value-series]")).toHaveCount(11);
+  await expect(root.locator("rect.analysis-series-bar")).toHaveCount(0);
+  await expect(root.locator(".analysis-axis-unit")).toHaveText("Belastungspunkte · Wochenstand");
   expect(await root.locator(".analysis-date-tick").allTextContents()).toEqual(expect.arrayContaining([expect.stringMatching(/^\d{2}\.\d{2}$/)]));
   await expect(root).not.toContainText("KW ");
   await expect(root.locator("path[data-series='0']")).toHaveAttribute("d", /M.*L/);
   await expect(root).not.toContainText("Fitness");
+  const time = loadRoot.locator(".analysis-chart-card").nth(1);
+  await expect(time.locator("rect.analysis-series-bar")).toHaveCount(11);
+  await expect(time.locator("circle[data-series], path[data-series]")).toHaveCount(0);
+  await expect(time.locator(".analysis-axis-unit")).toHaveText("h · Wochensumme");
   await page.locator("#analysisLoadPeriod").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(14);
-  for (const chart of await loadRoot.locator(".analysis-chart-card").all()) {
-    await expect(chart.locator(".analysis-point-value[data-value-series]")).toHaveCount(14);
-    const boxes = await chart.locator(".analysis-point-value[data-value-series]").evaluateAll((labels) => labels.map((label) => {
-      const box = label.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
-    }));
-    for (let index = 0; index < boxes.length; index++) {
-      const box = boxes[index];
-      expect(boxes.slice(index + 1).some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top)).toBe(false);
-    }
+  await expect(root.locator(".analysis-axis-unit")).toHaveText("Belastungspunkte · Tageswert");
+  for (const svg of await loadRoot.locator("svg").all()) {
+    const collisions = await chartLabelCollisions(svg);
+    expect(collisions.labels).toBeGreaterThan(0);
+    expect(collisions.labels).toBeLessThanOrEqual(4);
+    expect(collisions).toMatchObject({ outside: 0, onMarks: 0, onLabels: 0 });
   }
   await page.locator("#analysisLoadPeriod").getByRole("button", { name: "12 Wochen", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
-  for (const svg of await loadRoot.locator("svg").all()) {
-    const geometry = await svg.evaluate((element) => {
-      const dots = [...element.querySelectorAll("circle[data-series]")];
-      const bars = [...element.querySelectorAll("rect.analysis-series-bar")];
-      const path = element.querySelector("path[data-series]").getAttribute("d");
-      return { dots: dots.map((dot) => [Number(dot.getAttribute("cx")), Number(dot.getAttribute("cy"))]),
-        bars: bars.map((bar) => [Number(bar.getAttribute("x")) + Number(bar.getAttribute("width")) / 2, Number(bar.getAttribute("y"))]),
-        line: [...path.matchAll(/[ML](-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)].map((match) => [Number(match[1]), Number(match[2])]) };
-    });
-    expect(geometry.dots.length).toBeGreaterThan(0);
-    expect(geometry.bars.length).toBe(geometry.dots.length);
-    geometry.dots.forEach((dot, index) => {
-      expect(geometry.bars[index][0]).toBeCloseTo(dot[0], 4);
-      expect(geometry.bars[index][1]).toBeCloseTo(dot[1], 4);
-      expect(geometry.line[index][0]).toBeCloseTo(dot[0], 2);
-      expect(geometry.line[index][1]).toBeCloseTo(dot[1], 2);
-    });
-  }
+  const geometry = await root.locator("svg").evaluate((element) => {
+    const dots = [...element.querySelectorAll("circle[data-series]")].map((dot) => [Number(dot.getAttribute("cx")), Number(dot.getAttribute("cy"))]);
+    const path = element.querySelector("path[data-series]").getAttribute("d");
+    return { dots, line: [...path.matchAll(/[ML](-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)].map((match) => [Number(match[1]), Number(match[2])]) };
+  });
+  expect(geometry.line.length).toBe(geometry.dots.length);
+  geometry.dots.forEach((dot, index) => {
+    expect(geometry.line[index][0]).toBeCloseTo(dot[0], 2);
+    expect(geometry.line[index][1]).toBeCloseTo(dot[1], 2);
+  });
+  for (const svg of await loadRoot.locator("svg").all()) expect(await chartLabelCollisions(svg)).toMatchObject({ outside: 0, onMarks: 0, onLabels: 0 });
   expect((await new AxeBuilder({ page }).include("#analysisLoadCharts").analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("@responsive steps and floors show per-day units, whole numbers and the plotted basis", async ({ page }) => {
+  await performanceFixture(page, (performance) => {
+    const end = performance.history.end;
+    const days = Array.from({ length: 84 }, (_, index) => {
+      const date = new Date(`${end}T12:00:00Z`);
+      date.setUTCDate(date.getUTCDate() - 83 + index);
+      return date.toISOString().slice(0, 10);
+    });
+    return { history: { ...performance.history, daily_activity: {
+      source: "Garmin Connect",
+      steps: days.map((date, index) => ({ date, value: 6000 + (index % 7) * 700 + 0.4 })),
+      floors: days.map((date, index) => ({ date, value: 5 + (index % 4) * 1.5 })),
+    } } };
+  }, "load");
+  const group = page.locator("#analysisLoadCharts .analysis-chart-stack").filter({ hasText: "Alltagsaktivität" });
+  const steps = group.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: /^Schritte · Ø [\d.]+ pro Tag$/ }) });
+  const floors = group.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: /^Stockwerke · Ø \d+ pro Tag$/ }) });
+  await expect(steps.locator(".analysis-axis-unit")).toHaveText("Schritte/Tag · Wochenmittel");
+  await expect(floors.locator(".analysis-axis-unit")).toHaveText("Stockwerke/Tag · Wochenmittel");
+  await expect(group).not.toContainText("Belastungspunkte");
+  for (const chart of [steps, floors]) {
+    const values = [...await chart.locator(".analysis-point-value, .analysis-value-tick").allTextContents()];
+    for (const value of values) expect(value).toMatch(/^[\d.]+$/);
+    expect(await chartLabelCollisions(chart.locator("svg"))).toMatchObject({ outside: 0, onMarks: 0, onLabels: 0 });
+  }
 });
 
 test("@responsive sparse performance shows measurements and the current value line", async ({ page }) => {
@@ -489,7 +537,7 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
     personal_recovery: {
       as_of: "2026-10-01", sleep_target_hours: null, baselines: [], sleep_deficits: [],
       regularity: {
-        method: "sleep-timing-variability-v2", timezone: "Europe/Berlin", status: "provisional", series: [{
+        method: "sleep-timing-variability-v3", timezone: "Europe/Berlin", status: "provisional", series: [{
           source: "Garmin Connect", method: "sleepStartTimestampGMT/sleepEndTimestampGMT", status: "provisional",
           coverage: { baseline_nights: 14, required_nights: 14 },
           points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5, onset_deviation_minutes: 15, wake_deviation_minutes: 10 }, { date: "2026-09-30" }],
@@ -537,7 +585,7 @@ test("@responsive missing race predictions explain the reason instead of an empt
   const predictions = page.locator("#performancePredictions");
   await expect(predictions).toBeVisible();
   await expect(predictions.getByRole("heading", { name: "Laufprognosen" })).toBeVisible();
-  await expect(predictions).toContainText("Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Intervals.icu oder Garmin.");
+  await expect(predictions).toContainText("Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Garmin oder Wahoo.");
   await expect(predictions.locator("table")).toHaveCount(0);
   await expect(predictions).not.toContainText("Gewicht");
 });
@@ -592,7 +640,7 @@ test("@responsive legend info buttons are at least 44x44 and never overlap each 
   }
 });
 
-test("@responsive empty performance charts are omitted and listed once as missing data", async ({ page }) => {
+test("@responsive empty performance charts are omitted without a missing-data list", async ({ page }) => {
   await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-08", load: { points: [] }, metrics: {
     cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }],
     run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: null }, { date: "2026-09-08", value: null }] }],
@@ -600,10 +648,7 @@ test("@responsive empty performance charts are omitted and listed once as missin
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator("svg")).toHaveCount(1);
   await expect(root.getByRole("heading", { name: "Schwellenpace", exact: true })).toHaveCount(0);
-  const missing = root.locator("p.empty", { hasText: "Keine Daten:" });
-  await expect(missing).toHaveCount(2);
-  await expect(missing.first()).toContainText("Schwellenpace");
-  await expect(root.locator("p.empty", { hasText: "Keine Daten:" }).filter({ hasText: "FTP" })).toHaveCount(0);
+  await expect(root).not.toContainText("Keine Daten");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -626,11 +671,12 @@ test("@responsive load tab draws the local fitness, fatigue and form chart", asy
       return { date: date.toISOString().slice(0, 10), state: "loaded", load: 60, fitness: 50 + index / 10, fatigue: 55, form: index / 10 - 5 };
     });
     days[20] = { ...days[20], state: "incomplete", sessions_without_load: 1, session_rpe_au_without_load: 270 };
-    return { history: { ...performance.history, local_fitness_fatigue: { status: "estimate", days } } };
+    return { history: { ...performance.history, local_fitness_fatigue: { status: "estimate", incomplete_days: 1, incomplete_share: 0.036, days } } };
   }, "load");
   const chart = page.locator("#analysisLoadCharts .analysis-chart-card").filter({ has: page.getByRole("heading", { name: /^Fitness, Ermüdung, Form/ }) });
   await expect(chart).toBeVisible();
   await expect(chart).toContainText("1 Einheit ohne TSS");
+  await expect(chart).toContainText("4 % der Tage unvollständig");
   await expect(chart).toContainText("Lokal berechnet");
   await expect(chart).not.toContainText("Intervals");
 });

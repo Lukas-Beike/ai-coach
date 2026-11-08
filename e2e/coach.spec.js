@@ -120,6 +120,14 @@ for (const [scenario, prompt, message] of [
     await expect(failures).toHaveCount(previousFailures + 1);
     await expect(failures.last()).toBeVisible();
     await expect(page.locator("#coachWorking")).toHaveCount(0);
+    // The failure shows at its message with a retry, not in the global toast.
+    const retry = failures.last().getByRole("button", { name: "Erneut senden" });
+    await expect(retry).toBeVisible();
+    await expect(page.locator("#toast")).not.toContainText(message);
+    await retry.click();
+    await expect(failures).toHaveCount(previousFailures + 2);
+    await expect(page.locator("#coachWorking")).toHaveCount(0);
+    await expect(page.locator("#messages").getByRole("button", { name: "Erneut senden" })).toHaveCount(1);
     await page.locator("#messageInput").fill("Neue Frage nach dem Anbieterfehler");
     await expect(page.locator("#sendButton")).toBeEnabled();
     await page.locator("#messageInput").fill("");
@@ -128,6 +136,7 @@ for (const [scenario, prompt, message] of [
     await expect(page.locator("#appShell")).toBeVisible();
     await expect(failures.last()).toBeVisible();
     await expect(failures.last()).toContainText(message);
+    await expect(failures.last().getByRole("button", { name: "Erneut senden" })).toBeVisible();
     await expectNoBrowserErrorsOrOverflow(page, browserErrors);
     await page.screenshot({ path: testInfo.outputPath(`openai-${scenario}-error.png`), fullPage: true });
   });

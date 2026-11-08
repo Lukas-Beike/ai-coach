@@ -240,9 +240,8 @@ class HttpPrivacyServices:
 class HttpSyncServices:
     job_queue: Callable[[], Any]
     state_repository: Callable[[], Any]
-    performance_refresh: Callable[[], Any]
-    analysis_sessions_refresh: Callable[[], Any]
     garmin_analysis_refresh: Callable[[], Any]
+    wahoo_sync: Callable[[], Any] | None
     full_resync: Callable[[], Any]
     period_defaults: Any
     all_sync_days: int
@@ -290,8 +289,6 @@ class HttpDomainRouteServices:
     provider_credentials: Any | None = None
     garmin_login: Callable[[], Any] | None = None
     connection_checks: Callable[[], Any] | None = None
-    intervals_ingest: Callable[[], Any] | None = None
-    resume_provider_schedule: Callable[[str], None] | None = None
 
 
 def _present(route: Any) -> tuple[Any, ...]:
@@ -408,9 +405,8 @@ class HttpApiAssembly:
         max_backup_bytes = privacy.max_backup_bytes
         sync_job_queue_service = sync.job_queue
         sync_state_repository = sync.state_repository
-        performance_refresh_service = sync.performance_refresh
-        analysis_sessions_refresh_service = sync.analysis_sessions_refresh
         garmin_analysis_refresh_service = sync.garmin_analysis_refresh
+        wahoo_sync_service = sync.wahoo_sync
         full_provider_resync_service = sync.full_resync
         sync_period_defaults = sync.period_defaults
         all_sync_days = sync.all_sync_days
@@ -482,8 +478,10 @@ class HttpApiAssembly:
         )
         report_plan = lambda: public_plan_state_service().read(local_only=True)
         report_checkins = lambda: checkin_service().list(365)
-        report_feedback = lambda: (
-            athlete.activity_feedback().list(500) if athlete.activity_feedback else []
+        report_feedback = lambda keys: (
+            athlete.activity_feedback().for_activity_ids(keys)
+            if athlete.activity_feedback
+            else []
         )
         report_timezone = lambda: str(profile_service().get().get("timezone") or "UTC")
         report_recovery = lambda: (
@@ -565,10 +563,9 @@ class HttpApiAssembly:
             session_auth_service,
             self.training_reports,
             lambda: AnalysisRefreshService(
-                performance_refresh_service,
-                analysis_sessions_refresh_service,
                 garmin_analysis_refresh_service,
                 local_today,
+                wahoo_sync_service,
             ),
         )
         self.history_undo_post_routes = HistoryUndoPostRoutes(
@@ -616,11 +613,7 @@ class HttpApiAssembly:
             session_auth_service,
             StateEventTransport(state_event_buffer),
         )
-        self.settings_put_routes = SettingsPutRoutes(
-            settings,
-            intervals_ingest=dependencies.domains.intervals_ingest,
-            resume_provider_schedule=dependencies.domains.resume_provider_schedule,
-        )
+        self.settings_put_routes = SettingsPutRoutes(settings)
         provider_credentials = dependencies.domains.provider_credentials
         self.credentials_put_routes = (
             CredentialsPutRoutes(provider_credentials) if provider_credentials else None
@@ -760,7 +753,6 @@ class HttpApiAssembly:
         self._handler_configuration = handler_configuration
         self._sync_job_queue_service = sync_job_queue_service
         self._sync_state_repository = sync_state_repository
-        self._performance_refresh_service = performance_refresh_service
         self._full_provider_resync_service = full_provider_resync_service
         self._sync_period_defaults = sync_period_defaults
         self._all_sync_days = all_sync_days
@@ -800,7 +792,6 @@ class HttpApiAssembly:
         return SyncCommandEndpoint(
             self._sync_job_queue_service(),
             self._sync_state_repository(),
-            self._performance_refresh_service(),
             self._full_provider_resync_service(),
             self._uuid_factory,
             self._sync_period_defaults,

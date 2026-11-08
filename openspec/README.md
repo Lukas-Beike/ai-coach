@@ -1,4 +1,4 @@
-# Intervals Coach behavior specifications
+# Pacecraft behavior specifications
 
 This baseline backfills the existing application at
 `b8c911c9dda83a7920171916ace32681c0c38ba0` (version 1.13.22, schema v13).

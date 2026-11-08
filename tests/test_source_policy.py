@@ -1,10 +1,10 @@
 """Source precedence rules, checked against the legacy performance readers.
 
-The parity classes feed the same raw provider data to the legacy readers and to
-the canonical mappers plus ``source_policy``, then compare the chosen values.
-Named deviation tests pin where the canonical path intentionally differs from
-the legacy output; each comment states why. Mapper gaps are pinned the same way
-and name the field the mapper does not observe yet.
+Intervals.icu is never a source (athlete decision 2026-11-07); the tests pin that
+its observations are ignored by every rule. The parity classes feed the same raw
+provider data to the legacy readers and to the canonical mappers plus
+``source_policy``, then compare the chosen values. Named deviation tests pin where
+the canonical path intentionally differs from the legacy output.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import recovery_inputs
-from performance_day_support import latest_day, snapshot_metrics
+from performance_day_support import snapshot_metrics
 
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
@@ -28,14 +28,11 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.performance.garmin_canonical import garmin_body
-from backend.performance.load_context import performance_load_context
 from backend.performance.recovery_context import performance_recovery_context
 from backend.performance.source_policy import (
     CURRENT_RULES,
     DAILY_RULES,
     Candidate,
-    family_providers,
-    intervals_relays_garmin,
     preferences_from_profile,
     resolve_candidates,
     select_current,
@@ -53,17 +50,13 @@ GARMIN = ProviderId.GARMIN
 
 
 def current_performance_metrics(snapshot, profile, garmin, **kwargs):
-    kwargs.setdefault(
-        "latest_wellness", latest_day(snapshot.get("recent_wellness", []))
-    )
     return snapshot_metrics(snapshot, profile, garmin, **kwargs)
 
 
 INTERVALS = ProviderId.INTERVALS
 BERLIN = ZoneInfo("Europe/Berlin")
 TODAY = date(2026, 5, 4)
-# The newest Intervals wellness row in WELLNESS_ROWS; callers pass it as
-# latest_wellness_day for wellness-derived kinds.
+# The newest Intervals wellness row in WELLNESS_ROWS.
 LATEST_DAY = date(2026, 5, 4)
 RETRIEVED_AT = datetime(2026, 5, 4, 10, 0, tzinfo=UTC)
 EARLY = datetime(2026, 5, 4, 6, 0, tzinfo=UTC)
@@ -84,8 +77,6 @@ CURRENT_KINDS = frozenset(
         MetricKind.THRESHOLD_PACE,
         MetricKind.MAX_HR,
         MetricKind.VO2MAX,
-        MetricKind.CTL,
-        MetricKind.ATL,
     }
 )
 DAILY_KINDS = frozenset(
@@ -149,76 +140,68 @@ def _wahoo_ftp(value: float, day: date = LATEST_DAY) -> Observation:
 
 
 class WahooLowestPriorityTests(unittest.TestCase):
-    """Wahoo FTP and weight only ever fill in after Garmin and Intervals."""
+    """Wahoo FTP and weight only ever fill in after Garmin."""
 
     def test_ftp_and_weight_orders_put_wahoo_last(self) -> None:
         self.assertEqual(
-            (INTERVALS, GARMIN, ProviderId.WAHOO), CURRENT_RULES[MetricKind.FTP].order
+            (GARMIN, ProviderId.WAHOO), CURRENT_RULES[MetricKind.FTP].order
         )
         self.assertEqual(
-            (GARMIN, INTERVALS, ProviderId.WAHOO),
-            CURRENT_RULES[MetricKind.WEIGHT].order,
+            (GARMIN, ProviderId.WAHOO), CURRENT_RULES[MetricKind.WEIGHT].order
         )
 
-    def test_wahoo_ftp_is_used_only_when_intervals_has_none(self) -> None:
-        only_wahoo = [_wahoo_ftp(250)]
+    def test_no_rule_orders_intervals(self) -> None:
+        for table in (CURRENT_RULES, DAILY_RULES):
+            for rule in table.values():
+                with self.subTest(kind=rule.kind):
+                    self.assertNotIn(INTERVALS, rule.order)
+                    self.assertFalse(
+                        any(item.provider is INTERVALS for item in rule.bounds)
+                    )
+                    self.assertFalse(
+                        any(item.provider is INTERVALS for item in rule.max_age)
+                    )
+
+    def test_garmin_ftp_wins_over_intervals_and_wahoo(self) -> None:
+        wahoo = _wahoo_ftp(250)
+        intervals = _obs(MetricKind.FTP, 240, LATEST_DAY, INTERVALS, sport=Sport.RIDE)
+        garmin = _obs(MetricKind.FTP, 302, LATEST_DAY, GARMIN, sport=Sport.RIDE)
+        self.assertEqual(
+            302,
+            _values(
+                select_current(
+                    [intervals, wahoo, garmin], MetricKind.FTP, sport=Sport.RIDE
+                )
+            ),
+        )
         self.assertEqual(
             250,
             _values(
-                select_current(
-                    only_wahoo,
-                    MetricKind.FTP,
-                    sport=Sport.RIDE,
-                    latest_wellness_day=LATEST_DAY,
-                )
+                select_current([intervals, wahoo], MetricKind.FTP, sport=Sport.RIDE)
             ),
         )
-        with_intervals = [
-            *only_wahoo,
-            _obs(MetricKind.FTP, 240, LATEST_DAY, INTERVALS, sport=Sport.RIDE),
-        ]
-        self.assertEqual(
-            240,
-            _values(
-                select_current(
-                    with_intervals,
-                    MetricKind.FTP,
-                    sport=Sport.RIDE,
-                    latest_wellness_day=LATEST_DAY,
-                )
-            ),
-        )
+        self.assertIsNone(select_current([intervals], MetricKind.FTP, sport=Sport.RIDE))
 
     def test_wahoo_ftp_outside_the_bounds_is_not_selected(self) -> None:
         self.assertIsNone(
-            select_current(
-                [_wahoo_ftp(800)],
-                MetricKind.FTP,
-                sport=Sport.RIDE,
-                latest_wellness_day=LATEST_DAY,
-            )
+            select_current([_wahoo_ftp(800)], MetricKind.FTP, sport=Sport.RIDE)
         )
 
-    def test_wahoo_weight_is_used_only_when_intervals_has_none(self) -> None:
+    def test_wahoo_weight_is_used_when_garmin_has_none(self) -> None:
         wahoo_weight = _obs(MetricKind.WEIGHT, 78.5, LATEST_DAY, ProviderId.WAHOO)
+        intervals_weight = _obs(MetricKind.WEIGHT, 77.0, LATEST_DAY, INTERVALS)
         self.assertEqual(
             78.5,
             _values(
-                select_current(
-                    [wahoo_weight],
-                    MetricKind.WEIGHT,
-                    latest_wellness_day=LATEST_DAY,
-                )
+                select_current([intervals_weight, wahoo_weight], MetricKind.WEIGHT)
             ),
         )
-        intervals_weight = _obs(MetricKind.WEIGHT, 77.0, LATEST_DAY, INTERVALS)
+        garmin_weight = _obs(MetricKind.WEIGHT, 80.0, LATEST_DAY, GARMIN)
         self.assertEqual(
-            77.0,
+            80.0,
             _values(
                 select_current(
-                    [wahoo_weight, intervals_weight],
-                    MetricKind.WEIGHT,
-                    latest_wellness_day=LATEST_DAY,
+                    [wahoo_weight, intervals_weight, garmin_weight], MetricKind.WEIGHT
                 )
             ),
         )
@@ -250,7 +233,6 @@ class WahooAgeLimitTests(unittest.TestCase):
                             [self._ftp_days_old(days)],
                             MetricKind.FTP,
                             sport=Sport.RIDE,
-                            latest_wellness_day=LATEST_DAY,
                             as_of=self.AS_OF,
                         )
                     ),
@@ -263,7 +245,6 @@ class WahooAgeLimitTests(unittest.TestCase):
                 select_current(
                     [self._weight_days_old(89)],
                     MetricKind.WEIGHT,
-                    latest_wellness_day=LATEST_DAY,
                     as_of=self.AS_OF,
                 )
             ),
@@ -272,40 +253,29 @@ class WahooAgeLimitTests(unittest.TestCase):
             select_current(
                 [self._weight_days_old(91)],
                 MetricKind.WEIGHT,
-                latest_wellness_day=LATEST_DAY,
                 as_of=self.AS_OF,
             )
         )
 
-    def test_stale_wahoo_value_stays_in_history_and_fresh_intervals_still_win(
+    def test_stale_wahoo_value_stays_in_history_and_fresh_garmin_still_wins(
         self,
     ) -> None:
         stale = self._ftp_days_old(120, value=300)
         observations = [
             stale,
-            _obs(MetricKind.FTP, 240, LATEST_DAY, INTERVALS, sport=Sport.RIDE),
+            _obs(MetricKind.FTP, 240, LATEST_DAY, GARMIN, sport=Sport.RIDE),
         ]
         self.assertEqual(
             240,
             _values(
                 select_current(
-                    observations,
-                    MetricKind.FTP,
-                    sport=Sport.RIDE,
-                    latest_wellness_day=LATEST_DAY,
-                    as_of=self.AS_OF,
+                    observations, MetricKind.FTP, sport=Sport.RIDE, as_of=self.AS_OF
                 )
             ),
         )
         self.assertIn(stale, observations)
         self.assertIsNone(
-            select_current(
-                [stale],
-                MetricKind.FTP,
-                sport=Sport.RIDE,
-                latest_wellness_day=LATEST_DAY,
-                as_of=self.AS_OF,
-            )
+            select_current([stale], MetricKind.FTP, sport=Sport.RIDE, as_of=self.AS_OF)
         )
 
     def test_without_as_of_no_age_limit_applies(self) -> None:
@@ -316,12 +286,11 @@ class WahooAgeLimitTests(unittest.TestCase):
                     [self._ftp_days_old(400)],
                     MetricKind.FTP,
                     sport=Sport.RIDE,
-                    latest_wellness_day=LATEST_DAY,
                 )
             ),
         )
 
-    def test_garmin_and_intervals_values_are_not_age_limited(self) -> None:
+    def test_garmin_weight_is_not_age_limited(self) -> None:
         old_garmin_weight = _obs(
             MetricKind.WEIGHT, 80.0, self.AS_OF - timedelta(days=400), GARMIN
         )
@@ -339,14 +308,10 @@ class WahooAgeLimitTests(unittest.TestCase):
         self.assertEqual(
             limited,
             {
-                MetricKind.FTP: [
-                    (INTERVALS, 30),
-                    (GARMIN, 180),
-                    (ProviderId.WAHOO, 90),
-                ],
+                MetricKind.FTP: [(GARMIN, 180), (ProviderId.WAHOO, 90)],
                 MetricKind.WEIGHT: [(ProviderId.WAHOO, 90)],
                 **{
-                    kind: [(INTERVALS, 30), (GARMIN, 180)]
+                    kind: [(GARMIN, 180)]
                     for kind in (
                         MetricKind.THRESHOLD_HR,
                         MetricKind.THRESHOLD_PACE,
@@ -384,25 +349,6 @@ class SourceRuleTableTests(unittest.TestCase):
                 self.assertEqual(rule.bounds, CURRENT_RULES[kind].bounds)
                 self.assertEqual(rule.order, CURRENT_RULES[kind].order)
 
-    def test_only_wellness_derived_kinds_are_latest_row_limited(self) -> None:
-        latest_row_kinds = {
-            kind for kind, rule in CURRENT_RULES.items() if rule.latest_intervals_row
-        }
-        self.assertEqual(
-            latest_row_kinds,
-            {
-                MetricKind.WEIGHT,
-                MetricKind.BODY_FAT,
-                MetricKind.RESTING_HR,
-                MetricKind.HRV_RMSSD,
-                MetricKind.SLEEP_DURATION,
-                MetricKind.SLEEP_SCORE,
-                MetricKind.READINESS,
-                MetricKind.CTL,
-                MetricKind.ATL,
-            },
-        )
-
     def test_unknown_or_unlisted_kinds_have_no_rule(self) -> None:
         for kind in (
             MetricKind.HRV_SDNN,
@@ -422,55 +368,19 @@ class CurrentSelectionTests(unittest.TestCase):
         chosen = select_current([intervals_new, garmin_old], MetricKind.WEIGHT)
 
         self.assertIs(chosen, garmin_old)
-        # The latest-row limit applies to Intervals only, never to Garmin.
-        self.assertIs(
-            select_current(
-                [intervals_new, garmin_old],
-                MetricKind.WEIGHT,
-                latest_wellness_day=LATEST_DAY,
-            ),
-            garmin_old,
-        )
 
-    def test_weight_uses_latest_intervals_row_without_garmin(self) -> None:
+    def test_weight_from_intervals_alone_is_none(self) -> None:
         older = _obs(MetricKind.WEIGHT, 80.0, date(2026, 5, 1))
         newer = _obs(MetricKind.WEIGHT, 81.0, TODAY)
 
-        chosen = select_current([older, newer], MetricKind.WEIGHT)
+        self.assertIsNone(select_current([older, newer], MetricKind.WEIGHT))
 
-        self.assertIs(chosen, newer)
-
-    def test_latest_wellness_day_excludes_older_intervals_for_wellness_kinds(
-        self,
-    ) -> None:
-        older = _obs(MetricKind.RESTING_HR, 55.0, date(2026, 5, 1))
-
-        self.assertIs(select_current([older], MetricKind.RESTING_HR), older)
-        self.assertIsNone(
-            select_current(
-                [older], MetricKind.RESTING_HR, latest_wellness_day=LATEST_DAY
-            )
-        )
-
-    def test_latest_wellness_day_does_not_limit_intervals_thresholds(self) -> None:
-        older_ftp = _obs(MetricKind.FTP, 250.0, date(2026, 5, 1), sport=Sport.RIDE)
-
-        self.assertIs(
-            select_current(
-                [older_ftp],
-                MetricKind.FTP,
-                sport=Sport.RIDE,
-                latest_wellness_day=LATEST_DAY,
-            ),
-            older_ftp,
-        )
-
-    def test_body_fat_reads_garmin_before_intervals(self) -> None:
+    def test_body_fat_reads_garmin_only(self) -> None:
         garmin = _obs(MetricKind.BODY_FAT, 12.0, TODAY, GARMIN)
         intervals = _obs(MetricKind.BODY_FAT, 14.0, date(2026, 5, 1))
 
-        self.assertIs(select_current([garmin], MetricKind.BODY_FAT), garmin)
         self.assertIs(select_current([garmin, intervals], MetricKind.BODY_FAT), garmin)
+        self.assertIsNone(select_current([intervals], MetricKind.BODY_FAT))
 
     def test_resting_hr_takes_newest_in_bounds_garmin_value(self) -> None:
         older_valid = _obs(MetricKind.RESTING_HR, 50.0, date(2026, 5, 2), GARMIN)
@@ -494,38 +404,20 @@ class CurrentSelectionTests(unittest.TestCase):
             with self.subTest(value=value):
                 garmin = _obs(MetricKind.RESTING_HR, value, TODAY, GARMIN)
                 intervals = _obs(MetricKind.RESTING_HR, 55.0, date(2026, 5, 1))
-                self.assertIs(
-                    select_current([garmin, intervals], MetricKind.RESTING_HR),
-                    intervals,
+                self.assertIsNone(
+                    select_current([garmin, intervals], MetricKind.RESTING_HR)
                 )
 
-    def test_resting_hr_intervals_fallback_without_a_latest_day_is_unrestricted(
-        self,
-    ) -> None:
-        old = _obs(MetricKind.RESTING_HR, 22.0, date(2025, 1, 1))
-
-        self.assertIs(select_current([old], MetricKind.RESTING_HR), old)
-
-    def test_hrv_bounds_are_inclusive_for_garmin_only(self) -> None:
+    def test_hrv_bounds_are_inclusive_for_garmin(self) -> None:
         for value in (1.0, 300.0):
             with self.subTest(value=value):
                 garmin = _obs(MetricKind.HRV_RMSSD, value, TODAY, GARMIN)
-                intervals = _obs(MetricKind.HRV_RMSSD, 60.0, date(2026, 5, 1))
-                self.assertIs(
-                    select_current([garmin, intervals], MetricKind.HRV_RMSSD), garmin
-                )
+                self.assertIs(select_current([garmin], MetricKind.HRV_RMSSD), garmin)
 
         for value in (0.5, 300.5):
             with self.subTest(value=value):
                 garmin = _obs(MetricKind.HRV_RMSSD, value, TODAY, GARMIN)
-                intervals = _obs(MetricKind.HRV_RMSSD, 60.0, date(2026, 5, 1))
-                self.assertIs(
-                    select_current([garmin, intervals], MetricKind.HRV_RMSSD),
-                    intervals,
-                )
-
-        unbounded = _obs(MetricKind.HRV_RMSSD, 400.0, TODAY)
-        self.assertIs(select_current([unbounded], MetricKind.HRV_RMSSD), unbounded)
+                self.assertIsNone(select_current([garmin], MetricKind.HRV_RMSSD))
 
     def test_sleep_duration_prefers_garmin_regardless_of_date(self) -> None:
         garmin_old = _obs(MetricKind.SLEEP_DURATION, 28_800.0, date(2026, 5, 1), GARMIN)
@@ -536,6 +428,14 @@ class CurrentSelectionTests(unittest.TestCase):
             garmin_old,
         )
 
+    def test_sleep_with_only_intervals_values_is_none(self) -> None:
+        duration = _obs(MetricKind.SLEEP_DURATION, 25_200.0, TODAY)
+        score = _obs(MetricKind.SLEEP_SCORE, 78.0, TODAY)
+
+        self.assertIsNone(select_current([duration], MetricKind.SLEEP_DURATION))
+        self.assertIsNone(select_current([score], MetricKind.SLEEP_SCORE))
+        self.assertEqual(select_daily([duration], MetricKind.SLEEP_DURATION), {})
+
     def test_sleep_score_prefers_in_bounds_garmin(self) -> None:
         garmin = _obs(MetricKind.SLEEP_SCORE, 85.0, TODAY, GARMIN)
         intervals = _obs(MetricKind.SLEEP_SCORE, 78.0, TODAY)
@@ -543,20 +443,18 @@ class CurrentSelectionTests(unittest.TestCase):
         self.assertIs(
             select_current([intervals, garmin], MetricKind.SLEEP_SCORE), garmin
         )
-        # The 0-100 bound is also enforced by Observation validation, so a
-        # Garmin score outside it cannot reach the policy; no separate case.
 
-    def test_readiness_prefers_intervals_even_when_garmin_is_newer(self) -> None:
+    def test_readiness_comes_from_garmin_even_when_intervals_is_older(self) -> None:
         intervals_old = _obs(MetricKind.READINESS, 66.0, date(2026, 5, 1))
         garmin_new = _obs(MetricKind.READINESS, 75.0, TODAY, GARMIN)
 
         self.assertIs(
             select_current([garmin_new, intervals_old], MetricKind.READINESS),
-            intervals_old,
+            garmin_new,
         )
-        self.assertIs(select_current([garmin_new], MetricKind.READINESS), garmin_new)
+        self.assertIsNone(select_current([intervals_old], MetricKind.READINESS))
 
-    def test_sport_specific_ftp_prefers_the_intervals_setting_per_sport(self) -> None:
+    def test_sport_specific_ftp_ignores_the_intervals_setting(self) -> None:
         garmin_ride = _obs(MetricKind.FTP, 302.0, TODAY, GARMIN, sport=Sport.RIDE)
         intervals_ride = _obs(MetricKind.FTP, 250.0, TODAY, sport=Sport.RIDE)
         intervals_run = _obs(MetricKind.FTP, 280.0, TODAY, sport=Sport.RUN)
@@ -564,19 +462,12 @@ class CurrentSelectionTests(unittest.TestCase):
 
         self.assertIs(
             select_current(observations, MetricKind.FTP, sport=Sport.RIDE),
-            intervals_ride,
-        )
-        self.assertIs(
-            select_current([garmin_ride], MetricKind.FTP, sport=Sport.RIDE),
             garmin_ride,
         )
-        self.assertIs(
-            select_current(observations, MetricKind.FTP, sport=Sport.RUN),
-            intervals_run,
-        )
+        self.assertIsNone(select_current(observations, MetricKind.FTP, sport=Sport.RUN))
 
     def test_sport_filter_excludes_other_sports_and_unsported_values(self) -> None:
-        run_only = _obs(MetricKind.THRESHOLD_HR, 170.0, TODAY, sport=Sport.RUN)
+        run_only = _obs(MetricKind.THRESHOLD_HR, 170.0, TODAY, GARMIN, sport=Sport.RUN)
 
         self.assertIsNone(
             select_current([run_only], MetricKind.THRESHOLD_HR, sport=Sport.RIDE)
@@ -587,18 +478,18 @@ class CurrentSelectionTests(unittest.TestCase):
         )
 
     def test_sport_scoped_kinds_refuse_a_sportless_query(self) -> None:
-        run_only = _obs(MetricKind.THRESHOLD_HR, 170.0, TODAY, sport=Sport.RUN)
+        run_only = _obs(MetricKind.THRESHOLD_HR, 170.0, TODAY, GARMIN, sport=Sport.RUN)
 
         with self.assertRaises(ValueError):
             select_current([run_only], MetricKind.THRESHOLD_HR, sport=None)
         # Sport-agnostic kinds still accept no sport.
-        weight = _obs(MetricKind.WEIGHT, 80.0, TODAY)
+        weight = _obs(MetricKind.WEIGHT, 80.0, TODAY, GARMIN)
         self.assertIs(select_current([weight], MetricKind.WEIGHT), weight)
 
     def test_garmin_values_outside_legacy_bounds_are_not_selected(self) -> None:
         low_ftp = _obs(MetricKind.FTP, 49.0, TODAY, GARMIN, sport=Sport.RIDE)
         high_ftp = _obs(MetricKind.FTP, 701.0, TODAY, GARMIN, sport=Sport.RIDE)
-        intervals = _obs(MetricKind.FTP, 250.0, date(2026, 5, 1), sport=Sport.RIDE)
+        wahoo = _wahoo_ftp(250.0)
         high_threshold = _obs(
             MetricKind.THRESHOLD_HR, 231.0, TODAY, GARMIN, sport=Sport.RUN
         )
@@ -606,9 +497,9 @@ class CurrentSelectionTests(unittest.TestCase):
 
         self.assertIs(
             select_current(
-                [low_ftp, high_ftp, intervals], MetricKind.FTP, sport=Sport.RIDE
+                [low_ftp, high_ftp, wahoo], MetricKind.FTP, sport=Sport.RIDE
             ),
-            intervals,
+            wahoo,
         )
         self.assertIsNone(
             select_current([high_threshold], MetricKind.THRESHOLD_HR, sport=Sport.RUN)
@@ -617,7 +508,7 @@ class CurrentSelectionTests(unittest.TestCase):
             select_current([high_vo2], MetricKind.VO2MAX, sport=Sport.RUN)
         )
 
-    def test_threshold_pace_and_max_hr_follow_garmin_then_intervals(self) -> None:
+    def test_threshold_pace_and_max_hr_are_garmin_only(self) -> None:
         intervals_pace = _obs(MetricKind.THRESHOLD_PACE, 4.0, TODAY, sport=Sport.RUN)
         garmin_pace = _obs(
             MetricKind.THRESHOLD_PACE, 4.2, TODAY, GARMIN, sport=Sport.RUN
@@ -632,9 +523,8 @@ class CurrentSelectionTests(unittest.TestCase):
             ),
             garmin_pace,
         )
-        self.assertIs(
-            select_current([intervals_max], MetricKind.MAX_HR, sport=Sport.RIDE),
-            intervals_max,
+        self.assertIsNone(
+            select_current([intervals_max], MetricKind.MAX_HR, sport=Sport.RIDE)
         )
 
     def test_vo2max_prefers_garmin_for_the_sport(self) -> None:
@@ -645,18 +535,30 @@ class CurrentSelectionTests(unittest.TestCase):
             select_current([intervals, garmin], MetricKind.VO2MAX, sport=Sport.RUN),
             garmin,
         )
+        self.assertIsNone(
+            select_current([intervals], MetricKind.VO2MAX, sport=Sport.RUN)
+        )
 
-    def test_load_is_intervals_only_and_latest(self) -> None:
-        garmin = _obs(MetricKind.CTL, 90.0, TODAY, GARMIN)
-        older = _obs(MetricKind.CTL, 58.0, date(2026, 5, 2))
-        latest = _obs(MetricKind.CTL, 60.0, TODAY)
+    def test_load_kinds_have_no_current_rule(self) -> None:
+        for kind in (MetricKind.CTL, MetricKind.ATL):
+            observation = _obs(kind, 60.0, TODAY)
+            self.assertNotIn(kind, CURRENT_RULES)
+            self.assertIsNone(select_current([observation], kind))
 
-        self.assertIs(select_current([garmin, older, latest], MetricKind.CTL), latest)
-        self.assertIsNone(select_current([garmin], MetricKind.ATL))
+    def test_garmin_thresholds_tie_keeps_the_last_input(self) -> None:
+        first = _obs(MetricKind.FTP, 250.0, TODAY, GARMIN, sport=Sport.RIDE)
+        second = _obs(MetricKind.FTP, 240.0, TODAY, GARMIN, sport=Sport.RIDE)
 
-    def test_intervals_thresholds_tie_keeps_the_first_input(self) -> None:
-        first = _obs(MetricKind.FTP, 250.0, TODAY, sport=Sport.RIDE)
-        second = _obs(MetricKind.FTP, 240.0, TODAY, sport=Sport.RIDE)
+        self.assertIs(
+            select_current([first, second], MetricKind.FTP, sport=Sport.RIDE), second
+        )
+        self.assertIs(
+            select_current([second, first], MetricKind.FTP, sport=Sport.RIDE), first
+        )
+
+    def test_wahoo_thresholds_tie_keeps_the_first_input(self) -> None:
+        first = _wahoo_ftp(250.0)
+        second = _wahoo_ftp(240.0)
 
         self.assertIs(
             select_current([first, second], MetricKind.FTP, sport=Sport.RIDE), first
@@ -710,25 +612,6 @@ class CurrentSelectionTests(unittest.TestCase):
         self.assertIsNone(select_current([estimate], MetricKind.READINESS))
 
 
-def _relay_days(
-    kind: MetricKind, *, garmin_gap: date | None = None, mismatches: int = 0
-) -> list[Observation]:
-    """Six days of equal Garmin and Intervals values ending on TODAY.
-
-    ``garmin_gap`` drops Garmin's value of that day; the first ``mismatches``
-    days get an Intervals value that differs by 10.
-    """
-    result: list[Observation] = []
-    for offset in range(6):
-        day = TODAY - timedelta(days=offset)
-        value = 50.0 + offset
-        intervals = value + (10.0 if offset < mismatches else 0.0)
-        result.append(_obs(kind, intervals, day))
-        if day != garmin_gap:
-            result.append(_obs(kind, value, day, GARMIN))
-    return result
-
-
 def _of(
     observations: list[Observation], kind: MetricKind, provider: ProviderId
 ) -> tuple[Observation, ...]:
@@ -737,67 +620,6 @@ def _of(
         for item in observations
         if item.kind is kind and item.provenance.provider is provider
     )
-
-
-class MethodFamilyTests(unittest.TestCase):
-    def test_equal_values_on_enough_days_are_a_relay(self) -> None:
-        self.assertTrue(
-            intervals_relays_garmin(
-                _relay_days(MetricKind.HRV_RMSSD), MetricKind.HRV_RMSSD
-            )
-        )
-        self.assertEqual(
-            family_providers(_relay_days(MetricKind.HRV_RMSSD), MetricKind.HRV_RMSSD),
-            (GARMIN, INTERVALS),
-        )
-
-    def test_one_mismatch_in_six_days_is_no_relay(self) -> None:
-        observations = _relay_days(MetricKind.HRV_RMSSD, mismatches=1)
-
-        self.assertFalse(intervals_relays_garmin(observations, MetricKind.HRV_RMSSD))
-        self.assertEqual(
-            family_providers(observations, MetricKind.HRV_RMSSD), (GARMIN,)
-        )
-
-    def test_too_few_overlapping_days_are_no_relay(self) -> None:
-        observations = _relay_days(MetricKind.RESTING_HR)[:8]
-
-        self.assertFalse(intervals_relays_garmin(observations, MetricKind.RESTING_HR))
-
-    def test_without_garmin_intervals_is_the_family(self) -> None:
-        intervals = _obs(MetricKind.SLEEP_SCORE, 80.0, TODAY)
-
-        self.assertEqual(
-            family_providers([intervals], MetricKind.SLEEP_SCORE), (INTERVALS,)
-        )
-        self.assertIs(select_current([intervals], MetricKind.SLEEP_SCORE), intervals)
-
-    def test_readiness_keeps_its_order(self) -> None:
-        self.assertEqual(
-            family_providers([], MetricKind.READINESS), (INTERVALS, GARMIN)
-        )
-
-    def test_a_newer_relay_value_is_current(self) -> None:
-        observations = _relay_days(MetricKind.RESTING_HR, garmin_gap=TODAY)
-
-        current = select_current(
-            observations, MetricKind.RESTING_HR, latest_wellness_day=TODAY
-        )
-
-        assert current is not None
-        self.assertIs(current.provenance.provider, INTERVALS)
-        self.assertEqual(current.observed_on, TODAY)
-
-    def test_a_non_relay_never_replaces_an_older_garmin_value(self) -> None:
-        garmin = _obs(MetricKind.HRV_RMSSD, 70.0, date(2026, 5, 1), GARMIN)
-        morning = _obs(MetricKind.HRV_RMSSD, 45.0, TODAY)
-
-        self.assertIs(
-            select_current(
-                [garmin, morning], MetricKind.HRV_RMSSD, latest_wellness_day=TODAY
-            ),
-            garmin,
-        )
 
 
 def _weight(
@@ -818,20 +640,17 @@ def _weight(
 class RecencyResolutionTests(unittest.TestCase):
     def test_the_newest_measurement_wins_across_sources(self) -> None:
         garmin = _weight(GARMIN, 72.0, date(2026, 5, 1), SourceKind.DEVICE_MEASURED)
-        intervals = _weight(INTERVALS, 71.0, TODAY)
+        profile = _weight(None, 71.0, TODAY)
 
-        resolved = resolve_candidates(
-            MetricKind.WEIGHT, (garmin, intervals), as_of=TODAY
-        )
+        resolved = resolve_candidates(MetricKind.WEIGHT, (garmin, profile), as_of=TODAY)
 
         assert resolved is not None
-        self.assertIs(resolved.winner, intervals)
+        self.assertIs(resolved.winner, profile)
         self.assertEqual(resolved.alternatives, (garmin,))
-        self.assertFalse(resolved.conflict)
 
-    def test_a_device_measurement_wins_within_one_day(self) -> None:
-        garmin = _weight(GARMIN, 72.0, date(2026, 5, 3), SourceKind.DEVICE_MEASURED)
-        intervals = _weight(INTERVALS, 70.0, TODAY)
+    def test_an_intervals_candidate_is_never_current(self) -> None:
+        garmin = _weight(GARMIN, 72.0, date(2026, 5, 1), SourceKind.DEVICE_MEASURED)
+        intervals = _weight(INTERVALS, 71.0, TODAY)
 
         resolved = resolve_candidates(
             MetricKind.WEIGHT, (intervals, garmin), as_of=TODAY
@@ -839,18 +658,29 @@ class RecencyResolutionTests(unittest.TestCase):
 
         assert resolved is not None
         self.assertIs(resolved.winner, garmin)
+        self.assertEqual(resolved.alternatives, ())
+        self.assertIsNone(
+            resolve_candidates(MetricKind.WEIGHT, (intervals,), as_of=TODAY)
+        )
+
+    def test_a_device_measurement_wins_within_one_day(self) -> None:
+        garmin = _weight(GARMIN, 72.0, date(2026, 5, 3), SourceKind.DEVICE_MEASURED)
+        wahoo = _weight(ProviderId.WAHOO, 70.0, TODAY)
+
+        resolved = resolve_candidates(MetricKind.WEIGHT, (wahoo, garmin), as_of=TODAY)
+
+        assert resolved is not None
+        self.assertIs(resolved.winner, garmin)
         self.assertTrue(resolved.conflict)
 
     def test_an_athlete_entry_yields_to_a_report_within_one_day(self) -> None:
         typed = _weight(None, 72.0, TODAY)
-        intervals = _weight(INTERVALS, 71.5, date(2026, 5, 3))
+        wahoo = _weight(ProviderId.WAHOO, 71.5, date(2026, 5, 3))
 
-        resolved = resolve_candidates(
-            MetricKind.WEIGHT, (typed, intervals), as_of=TODAY
-        )
+        resolved = resolve_candidates(MetricKind.WEIGHT, (typed, wahoo), as_of=TODAY)
 
         assert resolved is not None
-        self.assertIs(resolved.winner, intervals)
+        self.assertIs(resolved.winner, wahoo)
 
     def test_undated_values_are_fallbacks_in_order(self) -> None:
         wahoo = _weight(ProviderId.WAHOO, 74.0, None)
@@ -875,38 +705,40 @@ class PreferredSourceTests(unittest.TestCase):
             {
                 "preferred_source_hrv": "intervals",
                 "preferred_source_body": "wahoo",
+                "preferred_source_resting_hr": "garmin",
                 "preferred_source_sleep": "",
             }
         )
 
-        self.assertEqual(dict(preferences), {"hrv": INTERVALS})
+        self.assertEqual(dict(preferences), {"resting_hr": GARMIN})
 
-    def test_preferring_intervals_hrv_uses_only_the_other_method(self) -> None:
-        preferences = preferences_from_profile({"preferred_source_hrv": "intervals"})
-        observations = _relay_days(MetricKind.HRV_RMSSD)
+    def test_a_stored_intervals_preference_is_ignored_everywhere(self) -> None:
+        profile = {
+            "preferred_source_thresholds": "intervals",
+            "preferred_source_body": "intervals",
+            "preferred_source_hrv": "intervals",
+            "preferred_source_resting_hr": "intervals",
+            "preferred_source_sleep": "intervals",
+        }
+        preferences = preferences_from_profile(profile)
 
-        self.assertEqual(
-            family_providers(observations, MetricKind.HRV_RMSSD, preferences),
-            (INTERVALS,),
-        )
-        current = select_current(
-            observations,
-            MetricKind.HRV_RMSSD,
-            latest_wellness_day=TODAY,
-            preferences=preferences,
-        )
-        assert current is not None
-        self.assertIs(current.provenance.provider, INTERVALS)
-        daily = select_daily(observations, MetricKind.HRV_RMSSD, preferences)
-        self.assertEqual(
-            {item.provenance.provider for item in daily.values()}, {INTERVALS}
-        )
-        # Resting HR keeps its own default family.
-        self.assertEqual(
-            family_providers(
-                _relay_days(MetricKind.RESTING_HR), MetricKind.RESTING_HR, preferences
+        self.assertEqual(dict(preferences), {})
+        self.assertEqual(profile["preferred_source_hrv"], "intervals")
+        garmin = _obs(MetricKind.HRV_RMSSD, 60.0, TODAY, GARMIN)
+        intervals = _obs(MetricKind.HRV_RMSSD, 45.0, TODAY)
+        self.assertIs(
+            select_current(
+                [intervals, garmin], MetricKind.HRV_RMSSD, preferences=preferences
             ),
-            (GARMIN, INTERVALS),
+            garmin,
+        )
+        self.assertEqual(
+            source_order(MetricKind.FTP, Sport.RIDE, preferences),
+            (None, GARMIN, ProviderId.WAHOO),
+        )
+        self.assertEqual(
+            source_order(MetricKind.WEIGHT, preferences=preferences),
+            (GARMIN, None, ProviderId.WAHOO),
         )
 
     def test_preferring_garmin_never_falls_back_to_another_method(self) -> None:
@@ -917,42 +749,27 @@ class PreferredSourceTests(unittest.TestCase):
             select_current([intervals], MetricKind.SLEEP_SCORE, preferences=preferences)
         )
 
-    def test_a_body_preference_keeps_the_profile_value_behind_intervals(self) -> None:
+    def test_a_garmin_body_preference_keeps_the_profile_value_behind_garmin(
+        self,
+    ) -> None:
         preferences = preferences_from_profile({"preferred_source_body": "garmin"})
 
         self.assertEqual(
             source_order(MetricKind.WEIGHT, preferences=preferences),
-            (GARMIN, INTERVALS, None, ProviderId.WAHOO),
+            (GARMIN, None, ProviderId.WAHOO),
         )
-        preferences = preferences_from_profile({"preferred_source_body": "intervals"})
-        self.assertEqual(
-            source_order(MetricKind.WEIGHT, preferences=preferences),
-            (INTERVALS, GARMIN, None, ProviderId.WAHOO),
-        )
-        athlete = _weight(INTERVALS, 71.0, None)
-        profile = _weight(None, 73.0, None)
+        garmin = _weight(GARMIN, 72.0, date(2026, 4, 28), SourceKind.DEVICE_MEASURED)
+        profile = _weight(None, 73.0, TODAY)
         resolved = resolve_candidates(
-            MetricKind.WEIGHT, (profile, athlete), as_of=TODAY, preferences=preferences
+            MetricKind.WEIGHT, (profile, garmin), as_of=TODAY, preferences=preferences
         )
         assert resolved is not None
-        self.assertIs(resolved.winner, athlete)
-
-    def test_a_preferred_body_source_wins_over_a_newer_measurement(self) -> None:
-        preferences = preferences_from_profile({"preferred_source_body": "intervals"})
-        garmin = _weight(GARMIN, 72.0, TODAY, SourceKind.DEVICE_MEASURED)
-        intervals = _weight(INTERVALS, 71.0, date(2026, 4, 28))
-
-        resolved = resolve_candidates(
-            MetricKind.WEIGHT, (garmin, intervals), as_of=TODAY, preferences=preferences
-        )
-
-        assert resolved is not None
-        self.assertIs(resolved.winner, intervals)
-        self.assertEqual(resolved.alternatives, (garmin,))
+        self.assertIs(resolved.winner, garmin)
+        self.assertEqual(resolved.alternatives, (profile,))
 
 
 class DailySelectionTests(unittest.TestCase):
-    def test_another_method_never_fills_garmin_gaps(self) -> None:
+    def test_intervals_values_never_fill_garmin_gaps(self) -> None:
         intervals_same = _obs(MetricKind.SLEEP_DURATION, 25_200.0, TODAY)
         intervals_other = _obs(MetricKind.SLEEP_DURATION, 23_400.0, date(2026, 5, 3))
         garmin_same = _obs(MetricKind.SLEEP_DURATION, 28_800.0, TODAY, GARMIN)
@@ -963,27 +780,17 @@ class DailySelectionTests(unittest.TestCase):
 
         self.assertEqual(result, {TODAY: garmin_same})
 
-    def test_intervals_alone_is_its_own_family(self) -> None:
+    def test_intervals_alone_yields_no_days(self) -> None:
         intervals = _obs(MetricKind.HRV_RMSSD, 58.0, TODAY)
 
-        self.assertEqual(
-            select_daily([intervals], MetricKind.HRV_RMSSD), {TODAY: intervals}
-        )
-
-    def test_a_relay_fills_garmin_gaps(self) -> None:
-        relay = _relay_days(MetricKind.RESTING_HR, garmin_gap=TODAY)
-
-        result = select_daily(relay, MetricKind.RESTING_HR)
-
-        self.assertIs(result[TODAY].provenance.provider, INTERVALS)
-        self.assertIs(result[date(2026, 5, 3)].provenance.provider, GARMIN)
+        self.assertEqual(select_daily([intervals], MetricKind.HRV_RMSSD), {})
 
     def test_daily_rules_apply_the_current_bounds(self) -> None:
         implausible = _obs(MetricKind.RESTING_HR, 240.0, TODAY, GARMIN)
 
         self.assertEqual(select_daily([implausible], MetricKind.RESTING_HR), {})
 
-    def test_readiness_is_intervals_first_and_garmin_fills_gaps(self) -> None:
+    def test_readiness_is_garmin_only(self) -> None:
         intervals = _obs(MetricKind.READINESS, 71.0, TODAY)
         garmin_same = _obs(MetricKind.READINESS, 75.0, TODAY, GARMIN)
         garmin_gap = _obs(MetricKind.READINESS, 68.0, date(2026, 5, 3), GARMIN)
@@ -992,7 +799,7 @@ class DailySelectionTests(unittest.TestCase):
             [garmin_same, garmin_gap, intervals], MetricKind.READINESS
         )
 
-        self.assertEqual(_day_values(result), {TODAY: 71.0, date(2026, 5, 3): 68.0})
+        self.assertEqual(_day_values(result), {TODAY: 75.0, date(2026, 5, 3): 68.0})
 
     def test_same_day_garmin_daily_duplicates_keep_the_first_input(self) -> None:
         # The planning overwrite keeps the first same-day record and ignores
@@ -1098,25 +905,17 @@ def _mapped(
     return observations
 
 
-def _recovery_context(
-    observations: list[Observation], latest_day: date | None
-) -> dict[str, Any]:
+def _recovery_context(observations: list[Observation]) -> dict[str, Any]:
     """The recovery context over the same observations the policy ranks (#1411)."""
-    return performance_recovery_context(
-        recovery_inputs(observations, latest_wellness_day=latest_day), TODAY
-    )
+    return performance_recovery_context(recovery_inputs(observations), TODAY)
 
 
-def _latest_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    return max(rows, key=lambda row: str(row["id"]))
+class GarminSelectionTests(unittest.TestCase):
+    """Canonical selection over mapped data equals the readers' output.
 
-
-def _latest_day(rows: list[dict[str, Any]]) -> date:
-    return date.fromisoformat(str(_latest_row(rows)["id"]))
-
-
-class ParityWithLegacyReadersTests(unittest.TestCase):
-    """Canonical selection over mapped data equals the legacy readers' output."""
+    The fixture carries Intervals.icu wellness rows and an athlete record next to
+    Garmin's sections; the Intervals values never reach a selected value.
+    """
 
     def setUp(self) -> None:
         self.observations = _mapped(WELLNESS_ROWS, ATHLETE, GARMIN_SECTIONS)
@@ -1126,22 +925,14 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
             "recent_wellness": WELLNESS_ROWS,
             "recent_activities": [],
         }
-        self.legacy = current_performance_metrics(
+        self.current = current_performance_metrics(
             self.snapshot, {}, self.garmin_metrics
         )
 
     def pick(self, kind: MetricKind, sport: Sport | None = None) -> float | None:
-        """Select from the fixture data, as the caller does with the latest row."""
-        return _values(
-            select_current(
-                self.observations,
-                kind,
-                sport=sport,
-                latest_wellness_day=LATEST_DAY,
-            )
-        )
+        return _values(select_current(self.observations, kind, sport=sport))
 
-    def test_zero_garmin_sleep_score_is_kept_like_legacy(self) -> None:
+    def test_zero_garmin_sleep_score_is_kept(self) -> None:
         garmin = {
             "sleep": [
                 _garmin_record("2026-05-04", sleepTimeSeconds=28_800, sleepScore=0)
@@ -1149,20 +940,12 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         }
         observations = _mapped(WELLNESS_ROWS, None, garmin)
 
-        legacy = _recovery_context(observations, LATEST_DAY)
-        self.assertEqual(legacy["sleep_score"], 0)
+        self.assertEqual(_recovery_context(observations)["sleep_score"], 0)
         self.assertEqual(
-            _values(
-                select_current(
-                    observations,
-                    MetricKind.SLEEP_SCORE,
-                    latest_wellness_day=LATEST_DAY,
-                )
-            ),
-            0.0,
+            _values(select_current(observations, MetricKind.SLEEP_SCORE)), 0.0
         )
 
-    def test_garmin_heart_rate_zone_max_hr_matches_legacy_observation(self) -> None:
+    def test_garmin_heart_rate_zone_max_hr_is_the_current_value(self) -> None:
         garmin = {
             "heart_rate_zones": [
                 _garmin_record("2026-05-04", sport="CYCLING", maxHeartRateUsed=188)
@@ -1170,23 +953,24 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         }
         observations = _mapped(WELLNESS_ROWS, ATHLETE, garmin)
 
-        legacy = current_performance_metrics(
+        current = current_performance_metrics(
             self.snapshot, {}, garmin_payload_performance_metrics(garmin, TODAY)
         )
-        self.assertEqual(legacy["cycling_max_hr_bpm"]["value"], 188)
+        self.assertEqual(current["cycling_max_hr_bpm"]["value"], 188)
         self.assertEqual(
             _values(select_current(observations, MetricKind.MAX_HR, sport=Sport.RIDE)),
             188.0,
         )
 
-    def test_weight_is_garmin_newest_over_latest_wellness(self) -> None:
-        self.assertEqual(self.legacy["weight_kg"]["value"], 80.5)
-        self.assertEqual(self.legacy["weight_kg"]["source"], "Garmin Connect")
+    def test_weight_is_garmin_newest_over_the_wellness_rows(self) -> None:
+        self.assertEqual(self.current["weight_kg"]["value"], 80.5)
+        self.assertEqual(self.current["weight_kg"]["source"], "Garmin Connect")
+        self.assertNotIn("alternatives", self.current["weight_kg"])
         self.assertEqual(
-            self.pick(MetricKind.WEIGHT), self.legacy["weight_kg"]["value"]
+            self.pick(MetricKind.WEIGHT), self.current["weight_kg"]["value"]
         )
 
-    def test_body_fat_takes_the_newer_garmin_measurement(self) -> None:
+    def test_body_fat_takes_the_garmin_measurement_only(self) -> None:
         current = current_performance_metrics(
             self.snapshot,
             {},
@@ -1201,49 +985,38 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         )
 
         self.assertEqual(current["body_fat_pct"]["value"], 12)
-        self.assertEqual(current["body_fat_pct"]["alternatives"][0]["value"], 14)
+        self.assertNotIn("alternatives", current["body_fat_pct"])
         self.assertEqual(
             self.pick(MetricKind.BODY_FAT), current["body_fat_pct"]["value"]
         )
 
-    def test_cycling_ftp_is_the_sport_setting_before_garmin(self) -> None:
-        # Garmin's 302 W stays an alternative; the athlete-maintained setting wins.
-        self.assertEqual(self.legacy["cycling_ftp_watts"]["value"], 250)
-        self.assertEqual(
-            self.legacy["cycling_ftp_watts"]["alternatives"][0]["value"], 302
-        )
-        self.assertEqual(self.pick(MetricKind.FTP, Sport.RIDE), 250)
+    def test_cycling_ftp_with_intervals_and_garmin_present_is_garmins(self) -> None:
+        self.assertEqual(self.current["cycling_ftp_watts"]["value"], 302)
+        self.assertEqual(self.current["cycling_ftp_watts"]["source"], "Garmin Connect")
+        self.assertNotIn("alternatives", self.current["cycling_ftp_watts"])
+        self.assertEqual(self.pick(MetricKind.FTP, Sport.RIDE), 302)
 
+    def test_cycling_ftp_with_only_intervals_is_none(self) -> None:
         without_garmin = _mapped(WELLNESS_ROWS, ATHLETE, {})
-        legacy_without = current_performance_metrics(
-            self.snapshot,
-            {},
-            garmin_payload_performance_metrics({}, TODAY),
+        current = current_performance_metrics(
+            self.snapshot, {}, garmin_payload_performance_metrics({}, TODAY)
         )
-        self.assertEqual(legacy_without["cycling_ftp_watts"]["value"], 250)
-        self.assertEqual(
-            _values(
-                select_current(
-                    without_garmin,
-                    MetricKind.FTP,
-                    sport=Sport.RIDE,
-                    latest_wellness_day=LATEST_DAY,
-                )
-            ),
-            250,
+        self.assertIsNone(current["cycling_ftp_watts"]["value"])
+        self.assertIsNone(
+            select_current(without_garmin, MetricKind.FTP, sport=Sport.RIDE)
         )
 
     def test_cycling_ftp_is_date_blind_and_keeps_the_last_garmin_record(self) -> None:
-        # Legacy current FTP reads the last numeric input record and ignores dates,
-        # so the older-dated 300 wins because it comes last.
+        # Current FTP reads the last numeric input record and ignores dates, so the
+        # older-dated 300 wins because it comes last.
         garmin = {
             "cycling_ftp": [
                 _garmin_record("2026-05-04", functionalThresholdPower=302),
                 _garmin_record("2026-05-03", functionalThresholdPower=300),
             ]
         }
-        legacy = garmin_payload_performance_metrics(garmin, TODAY)
-        self.assertEqual(legacy["cycling_ftp_watts"]["value"], 300)
+        metrics = garmin_payload_performance_metrics(garmin, TODAY)
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
         self.assertEqual(
             _values(
                 select_current(
@@ -1261,8 +1034,8 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
             ]
         }
 
-        legacy = garmin_payload_performance_metrics(garmin, TODAY)
-        self.assertEqual(legacy["cycling_ftp_watts"]["value"], 260)
+        metrics = garmin_payload_performance_metrics(garmin, TODAY)
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 260)
         self.assertEqual(
             _values(
                 select_current(
@@ -1279,90 +1052,54 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
                 _garmin_record("2026-05-04", restingHeartRate=46),
             ]
         }
+        observations = _mapped(WELLNESS_ROWS, None, garmin)
 
-        legacy = _recovery_context(_mapped(WELLNESS_ROWS, None, garmin), LATEST_DAY)
-        self.assertEqual(legacy["resting_hr"], 46)
+        self.assertEqual(_recovery_context(observations)["resting_hr"], 46)
         self.assertEqual(
-            _values(
-                select_current(
-                    _mapped(WELLNESS_ROWS, None, garmin),
-                    MetricKind.RESTING_HR,
-                    latest_wellness_day=LATEST_DAY,
-                )
-            ),
-            46,
+            _values(select_current(observations, MetricKind.RESTING_HR)), 46
         )
 
-    def test_latest_row_without_the_field_gives_no_intervals_fallback(self) -> None:
-        # Legacy recovery reads only the latest wellness row, so an older row that
-        # has restingHR is never used. The policy matches once the caller passes
-        # the latest row date.
-        rows = [_wellness("2026-05-03", restingHR=47), _wellness("2026-05-04", hrv=60)]
-        observations = _mapped(rows, None, {})
+    def test_wellness_rows_alone_give_no_current_value(self) -> None:
+        observations = _mapped(WELLNESS_ROWS, None, {})
+        context = _recovery_context(observations)
 
-        legacy = _recovery_context(observations, _latest_day(rows))
-        self.assertIsNone(legacy["resting_hr"])
-        self.assertIsNone(
-            select_current(
-                observations,
-                MetricKind.RESTING_HR,
-                latest_wellness_day=_latest_day(rows),
-            )
+        for kind in (
+            MetricKind.RESTING_HR,
+            MetricKind.HRV_RMSSD,
+            MetricKind.SLEEP_DURATION,
+            MetricKind.SLEEP_SCORE,
+            MetricKind.READINESS,
+            MetricKind.WEIGHT,
+            MetricKind.BODY_FAT,
+        ):
+            with self.subTest(kind=kind):
+                self.assertIsNone(select_current(observations, kind))
+        self.assertIsNone(context["sleep_hours"])
+        self.assertIsNone(context["resting_hr"])
+        self.assertIsNone(context["hrv"])
+        self.assertIsNone(context["readiness"])
+        current = current_performance_metrics(
+            self.snapshot, {}, garmin_payload_performance_metrics({}, TODAY)
         )
+        self.assertIsNone(current["weight_kg"]["value"])
+        self.assertIsNone(current["body_fat_pct"]["value"])
 
-    def test_newest_row_without_weight_gives_no_intervals_fallback(self) -> None:
-        # Legacy current weight reads only the newest wellness row, so an older
-        # row's weight is not used when the newest row lacks it.
-        rows = [_wellness("2026-05-03", weight=80.0), _wellness("2026-05-04", hrv=60)]
-        observations = _mapped(rows, None, {})
-
-        legacy = current_performance_metrics(
-            {"athlete": {}, "recent_wellness": rows, "recent_activities": []},
-            {},
-            garmin_payload_performance_metrics({}, TODAY),
-        )
-        self.assertIsNone(legacy["weight_kg"]["value"])
-        self.assertIsNone(
-            select_current(
-                observations,
-                MetricKind.WEIGHT,
-                latest_wellness_day=_latest_day(rows),
-            )
-        )
-
-    def test_thresholds_follow_the_sport_settings(self) -> None:
-        self.assertEqual(self.legacy["bike_threshold_hr_bpm"]["value"], 165)
-        self.assertEqual(self.legacy["run_threshold_hr_bpm"]["value"], 170)
-        self.assertEqual(self.legacy["run_threshold_pace_seconds_per_km"]["value"], 250)
-        self.assertEqual(self.pick(MetricKind.THRESHOLD_HR, Sport.RIDE), 165)
-        self.assertEqual(self.pick(MetricKind.THRESHOLD_HR, Sport.RUN), 170)
-        pace = self.pick(MetricKind.THRESHOLD_PACE, Sport.RUN)
-        assert pace is not None
-        self.assertEqual(round(1000 / pace), 250)
-
-    def test_max_hr_is_the_sport_setting_value(self) -> None:
-        self.assertEqual(self.legacy["cycling_max_hr_bpm"]["value"], 185)
-        self.assertEqual(self.pick(MetricKind.MAX_HR, Sport.RIDE), 185)
-
-    def test_load_is_the_latest_intervals_row(self) -> None:
-        from backend.performance.canonical_inputs import CanonicalPerformanceInputs
-
-        # Since #1726 the stored Intervals.icu row is the labelled history.
-        history = performance_load_context(
-            [],
-            TODAY,
-            canonical=CanonicalPerformanceInputs(
-                wellness_day=LATEST_DAY, ctl=60.0, atl=55.0
-            ),
-            timezone="UTC",
-        )["intervals_history"]
-        self.assertEqual(history["ctl"], 60.0)
-        self.assertEqual(history["atl"], 55.0)
-        self.assertEqual(self.pick(MetricKind.CTL), 60.0)
-        self.assertEqual(self.pick(MetricKind.ATL), 55.0)
+    def test_intervals_sport_settings_are_not_thresholds(self) -> None:
+        for key in (
+            "bike_threshold_hr_bpm",
+            "run_threshold_hr_bpm",
+            "run_threshold_pace_seconds_per_km",
+            "cycling_max_hr_bpm",
+        ):
+            with self.subTest(key=key):
+                self.assertIsNone(self.current[key]["value"])
+        self.assertIsNone(self.pick(MetricKind.THRESHOLD_HR, Sport.RIDE))
+        self.assertIsNone(self.pick(MetricKind.THRESHOLD_HR, Sport.RUN))
+        self.assertIsNone(self.pick(MetricKind.THRESHOLD_PACE, Sport.RUN))
+        self.assertIsNone(self.pick(MetricKind.MAX_HR, Sport.RIDE))
 
     def test_recovery_context_matches_the_policy_for_each_metric(self) -> None:
-        recovery = _recovery_context(self.observations, LATEST_DAY)
+        recovery = _recovery_context(self.observations)
 
         self.assertEqual(recovery["sleep_hours"], 8.0)
         sleep_seconds = self.pick(MetricKind.SLEEP_DURATION)
@@ -1374,11 +1111,11 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         self.assertEqual(self.pick(MetricKind.RESTING_HR), recovery["resting_hr"])
         self.assertEqual(recovery["hrv"], 70)
         self.assertEqual(self.pick(MetricKind.HRV_RMSSD), recovery["hrv"])
-        self.assertEqual(recovery["readiness"], 71)
+        # Readiness is Garmin's 75; the Intervals row says 71.
+        self.assertEqual(recovery["readiness"], 75)
         self.assertEqual(self.pick(MetricKind.READINESS), recovery["readiness"])
 
-    def test_daily_policy_keeps_the_garmin_hrv_family(self) -> None:
-        # Intervals' 58 ms on 2026-05-03 is not a relay of Garmin's values.
+    def test_daily_policy_keeps_only_garmin_hrv_days(self) -> None:
         self.assertEqual(
             _day_values(select_daily(self.observations, MetricKind.HRV_RMSSD)),
             {date(2026, 5, 4): 70},
@@ -1403,22 +1140,14 @@ class IntentionalDeviationTests(unittest.TestCase):
 
     def test_sleep_score_is_chosen_independently_of_sleep_duration(self) -> None:
         # Resolved by #1411: the legacy reader dropped the whole Garmin sleep block
-        # when the Garmin record had no duration, so Intervals' score (78) was
-        # used. The recovery context now follows the policy and keeps Garmin's.
+        # when the Garmin record had no duration. The recovery context follows the
+        # policy and keeps Garmin's score.
         garmin = {"sleep": [_garmin_record("2026-05-04", sleepScore=85)]}
         observations = _mapped(WELLNESS_ROWS, None, garmin)
 
-        legacy = _recovery_context(observations, LATEST_DAY)
-        self.assertEqual(legacy["sleep_score"], 85)
+        self.assertEqual(_recovery_context(observations)["sleep_score"], 85)
         self.assertEqual(
-            _values(
-                select_current(
-                    observations,
-                    MetricKind.SLEEP_SCORE,
-                    latest_wellness_day=LATEST_DAY,
-                )
-            ),
-            85.0,
+            _values(select_current(observations, MetricKind.SLEEP_SCORE)), 85.0
         )
 
     def test_planning_ignores_the_weekly_hrv_average(self) -> None:
@@ -1432,15 +1161,12 @@ class IntentionalDeviationTests(unittest.TestCase):
 
     def test_planning_drops_garmin_values_that_the_mapper_rejects(self) -> None:
         # Deviation: the deleted legacy planning view (#1416) overwrote without a
-        # plausibility check. The canonical mapper rejects a 15 bpm resting HR,
-        # so the Intervals value stays for that day.
+        # plausibility check. The canonical mapper rejects a 15 bpm resting HR, and
+        # the Intervals value does not fill the day.
         garmin = {"resting_hr": [_garmin_record("2026-05-04", restingHeartRate=15)]}
         observations = _mapped(WELLNESS_ROWS, None, garmin)
 
-        self.assertEqual(
-            _day_values(select_daily(observations, MetricKind.RESTING_HR))[TODAY],
-            48.0,
-        )
+        self.assertNotIn(TODAY, select_daily(observations, MetricKind.RESTING_HR))
 
     def test_garmin_generic_vo2max_is_not_applied_to_a_sport_query(self) -> None:
         # Deviation: the legacy reader applies a generic Garmin VO2max to running.
@@ -1449,18 +1175,20 @@ class IntentionalDeviationTests(unittest.TestCase):
         garmin = {"max_metrics": {"generic": {"vo2MaxPreciseValue": 55.0}}}
         observations = _mapped([], None, garmin)
 
-        legacy = current_performance_metrics(
+        current = current_performance_metrics(
             {"athlete": {}, "recent_wellness": [], "recent_activities": []},
             {},
             garmin_payload_performance_metrics(garmin, TODAY),
         )
-        self.assertEqual(legacy["running_vo2max_ml_kg_min"]["value"], 55)
+        self.assertEqual(current["running_vo2max_ml_kg_min"]["value"], 55)
         self.assertIsNone(
             select_current(observations, MetricKind.VO2MAX, sport=Sport.RUN)
         )
 
-    def test_garmin_ftp_history_is_observed_but_legacy_ignores_it(self) -> None:
-        # Gap: the mapper observes cycling_ftp_history, but legacy current FTP reads
+    def test_garmin_ftp_history_is_observed_but_the_section_reader_ignores_it(
+        self,
+    ) -> None:
+        # Gap: the mapper observes cycling_ftp_history, but the current FTP reads
         # only the cycling_ftp section. Because FTP ranking is date-blind and keeps
         # the last Garmin input, the history record wins here by input position, not
         # by its later date. Pinned until the history mapping is reconciled.
@@ -1472,98 +1200,26 @@ class IntentionalDeviationTests(unittest.TestCase):
         }
         observations = _mapped([], None, garmin)
 
-        legacy = garmin_payload_performance_metrics(garmin, TODAY)
-        self.assertEqual(legacy["cycling_ftp_watts"]["value"], 302)
+        metrics = garmin_payload_performance_metrics(garmin, TODAY)
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
         self.assertEqual(
             _values(select_current(observations, MetricKind.FTP, sport=Sport.RIDE)),
             290,
         )
 
-    def test_athlete_level_weight_matches_the_legacy_fallback(self) -> None:
-        # Parity: the legacy weight chain reads the latest wellness weight first and
-        # the athlete weight only when that is missing. Athlete values are undated,
-        # so they rank below dated Intervals values, even on the same day.
-        cases: tuple[tuple[str, list[dict[str, Any]], float, float], ...] = (
-            ("no wellness rows", [], 81.0, 81.0),
-            (
-                "same-day wellness weight wins over the athlete weight",
-                [_wellness(LATEST_DAY.isoformat(), weight=81.0)],
-                80.0,
-                81.0,
-            ),
-            (
-                "newest row without weight falls back to the athlete weight",
-                [
-                    _wellness("2026-05-03", weight=79.0),
-                    _wellness("2026-05-04", restingHR=50),
-                ],
-                80.0,
-                80.0,
-            ),
+    def test_intervals_weight_and_sport_vo2max_give_no_current_value(self) -> None:
+        athlete = {"weight": 80.0, "sportSettings": [{"types": ["Ride"], "vo2max": 58}]}
+        observations = _mapped(
+            [_wellness(LATEST_DAY.isoformat(), weight=81.0)], athlete, {}
         )
-        for label, rows, athlete_weight, expected in cases:
-            with self.subTest(label):
-                athlete = {"weight": athlete_weight}
-                legacy = current_performance_metrics(
-                    {
-                        "athlete": athlete,
-                        "recent_wellness": rows,
-                        "recent_activities": [],
-                    },
-                    {},
-                    garmin_payload_performance_metrics({}, TODAY),
-                )
-                # The athlete observation is listed first to show that input order
-                # does not decide between an undated and a dated weight.
-                observations = [
-                    *map_intervals_athlete_thresholds(
-                        athlete, observed_on=TODAY, retrieved_at=RETRIEVED_AT
-                    ).records,
-                    *map_intervals_wellness(rows, retrieved_at=RETRIEVED_AT).records,
-                ]
-                latest = _latest_day(rows) if rows else None
-                self.assertEqual(legacy["weight_kg"]["value"], expected)
-                self.assertEqual(
-                    _values(
-                        select_current(
-                            observations,
-                            MetricKind.WEIGHT,
-                            latest_wellness_day=latest,
-                        )
-                    ),
-                    expected,
-                )
 
-    def test_sport_setting_vo2max_matches_the_legacy_reader(self) -> None:
-        # Parity: the sport-setting VO2max is selected for its own sport only.
-        athlete = {"sportSettings": [{"types": ["Ride"], "vo2max": 58}]}
-        observations = _mapped([], athlete, {})
-
-        legacy = current_performance_metrics(
-            {
-                "athlete": {"sport_settings": athlete["sportSettings"]},
-                "recent_wellness": [],
-                "recent_activities": [],
-            },
-            {},
-            garmin_payload_performance_metrics({}, TODAY),
-        )
-        self.assertEqual(legacy["cycling_vo2max_ml_kg_min"]["value"], 58)
-        self.assertEqual(
-            _values(select_current(observations, MetricKind.VO2MAX, sport=Sport.RIDE)),
-            58,
+        self.assertIsNone(select_current(observations, MetricKind.WEIGHT))
+        self.assertIsNone(
+            select_current(observations, MetricKind.VO2MAX, sport=Sport.RIDE)
         )
         self.assertIsNone(
             select_current(observations, MetricKind.VO2MAX, sport=Sport.RUN)
         )
-
-    @staticmethod
-    def snapshot_without_wellness() -> dict[str, Any]:
-        return {
-            "athlete": LEGACY_ATHLETE,
-            "recent_wellness": [],
-            "recent_activities": [],
-        }
 
 
 if __name__ == "__main__":

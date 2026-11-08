@@ -176,7 +176,6 @@ class WahooOrchestrationCase(WahooSyncCase):
             gate,
             self.queue,
             state_versions,
-            Mock(),
             running_probes={},
         )
 
@@ -201,19 +200,11 @@ class WahooOrchestrationCase(WahooSyncCase):
             self.queue,
             self.markers,
             Mock(),
-            self.database,
-            self.key_values,
-            threading.Lock(),
-            Mock(),
-            Mock(),
             self.gate,
             config=DailySyncSchedulerConfig(
                 calendar_url_enabled=False,
-                intervals_key_enabled=False,
                 garmin_automatic_sync_days=-1,
                 auto_update_label=AUTO_UPDATE_LABEL,
-                sync_period_defaults={},
-                all_sync_days=-1,
             ),
             schedule_policies={WAHOO_ID: self.policy},
             registry=REGISTRY,
@@ -227,10 +218,7 @@ class WahooOrchestrationCase(WahooSyncCase):
             Mock(),
             config=StartupSyncSchedulerConfig(
                 calendar_enabled=False,
-                intervals_enabled=False,
                 garmin_automatic_sync_days=-1,
-                sync_period_defaults={},
-                all_sync_days=-1,
                 sync_chunk_days=30,
                 sync_earliest_date=date(2026, 1, 1),
             ),

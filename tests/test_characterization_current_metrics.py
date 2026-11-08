@@ -1,8 +1,10 @@
 """Characterize current source precedence of ``current_performance_metrics``.
 
 Each synthetic snapshot runs through the Intervals.icu mappers and the canonical
-current read, so these tests are the parity reference of the former snapshot
-reader. Quirks are marked with a "Quirk:" comment and intended differences with
+current read. Intervals.icu is never a source of a current value (athlete decision
+2026-11-07), so its athlete settings, sport settings and wellness rows give no
+value; the tests pin that, and the Garmin, Wahoo and profile precedence beside it.
+Quirks are marked with a "Quirk:" comment and intended differences with
 "Canonical:". Note text is not asserted because it is not part of the precedence
 contract.
 """
@@ -11,7 +13,7 @@ import unittest
 from datetime import UTC, date, datetime
 from typing import Any
 
-from performance_day_support import latest_day, snapshot_metrics
+from performance_day_support import snapshot_metrics
 
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
@@ -24,9 +26,7 @@ from backend.sync.garmin_payload_metrics import garmin_payload_performance_metri
 
 TODAY = date(2026, 5, 4)
 GARMIN = "Garmin Connect"
-WELLNESS = "Intervals.icu Wellness"
 INTERVALS = "Intervals.icu"
-INTERVALS_GENERIC = "Intervals.icu (allgemein)"
 PROFILE = "Manuell"
 
 RACE_KEYS = (
@@ -34,6 +34,15 @@ RACE_KEYS = (
     "run_10k_seconds",
     "run_half_marathon_seconds",
     "run_marathon_seconds",
+)
+INTERVALS_ONLY_KEYS = (
+    "cycling_ftp_watts",
+    "run_threshold_watts",
+    "run_threshold_pace_seconds_per_km",
+    "bike_threshold_hr_bpm",
+    "run_threshold_hr_bpm",
+    "cycling_vo2max_ml_kg_min",
+    "running_vo2max_ml_kg_min",
 )
 
 
@@ -62,9 +71,6 @@ def _current(
         snapshot or _snapshot(),
         profile or {},
         garmin if garmin is not None else _garmin(),
-        latest_wellness=latest_day(
-            (snapshot or _snapshot()).get("recent_wellness", [])
-        ),
     )
 
 
@@ -110,30 +116,22 @@ def _garmin_body(kind: MetricKind, value: float, day: str) -> Observation:
 
 
 class BodyRecencyTests(unittest.TestCase):
-    """Weight and body fat take the most recent measurement (#1668)."""
+    """Weight and body fat take the most recent Garmin, profile or Wahoo value."""
 
     def _body(self, garmin_body: tuple[Observation, ...]) -> dict[str, Any]:
         snapshot = _snapshot(
             wellness=[_wellness("2026-05-03", weight=70.0, bodyFat=15.0)]
         )
-        return snapshot_metrics(
-            snapshot,
-            {},
-            _garmin(),
-            latest_wellness=latest_day(snapshot["recent_wellness"]),
-            garmin_body=garmin_body,
-        )
+        return snapshot_metrics(snapshot, {}, _garmin(), garmin_body=garmin_body)
 
-    def test_a_newer_intervals_measurement_beats_an_older_garmin_one(self) -> None:
+    def test_a_newer_intervals_measurement_does_not_beat_an_older_garmin_one(
+        self,
+    ) -> None:
         result = self._body((_garmin_body(MetricKind.WEIGHT, 72.0, "2026-04-30"),))
 
         weight = result["weight_kg"]
-        self.assertEqual(
-            (weight["value"], weight["source_provider"]), (70, "intervals")
-        )
-        self.assertEqual(weight["alternatives"][0]["value"], 72)
-        self.assertEqual(weight["alternatives"][0]["source_provider"], "garmin")
-        self.assertTrue(weight["conflict"])
+        self.assertEqual((weight["value"], weight["source_provider"]), (72, "garmin"))
+        self.assertNotIn("alternatives", weight)
 
     def test_a_garmin_device_measurement_wins_within_one_day(self) -> None:
         result = self._body(
@@ -145,14 +143,20 @@ class BodyRecencyTests(unittest.TestCase):
 
         self.assertEqual(result["weight_kg"]["value"], 70.5)
         self.assertEqual(result["weight_kg"]["source_provider"], "garmin")
-        self.assertFalse(result["weight_kg"]["conflict"])
+        self.assertNotIn("alternatives", result["weight_kg"])
         self.assertEqual(result["body_fat_pct"]["value"], 16)
         self.assertEqual(result["body_fat_pct"]["source_provider"], "garmin")
-        self.assertEqual(result["body_fat_pct"]["alternatives"][0]["value"], 15)
+        self.assertNotIn("alternatives", result["body_fat_pct"])
+
+    def test_the_intervals_rows_alone_give_neither_weight_nor_body_fat(self) -> None:
+        result = self._body(())
+
+        self.assertEqual(_pair(result["weight_kg"]), (None, None))
+        self.assertEqual(_pair(result["body_fat_pct"]), (None, None))
 
 
 class CurrentWeightChainTests(unittest.TestCase):
-    def test_garmin_weight_wins_over_intervals_and_profile(self) -> None:
+    def test_garmin_weight_wins_over_the_profile_and_ignores_intervals(self) -> None:
         garmin = _garmin({"weight": _garmin_weight("2026-05-03", 72800)})
         result = _current(
             _snapshot(
@@ -168,7 +172,7 @@ class CurrentWeightChainTests(unittest.TestCase):
         self.assertEqual(weight, garmin["weight_kg"])
         self.assertEqual(_pair(result["weight_kg"]), (72.8, GARMIN))
         self.assertEqual(result["weight_kg"]["unit"], "kg")
-        self.assertEqual([item["value"] for item in alternatives], [79, 81])
+        self.assertEqual([item["value"] for item in alternatives], [81])
 
     def test_garmin_latest_dated_weight_is_used_regardless_of_list_order(
         self,
@@ -194,15 +198,17 @@ class CurrentWeightChainTests(unittest.TestCase):
 
     def test_old_garmin_weight_still_wins_over_newer_wellness(self) -> None:
         # Quirk: Garmin weight is not compared by date with Intervals wellness,
-        # so a 2026-04-01 Garmin weight beats the 2026-05-03 wellness weight.
+        # so a 2026-04-01 Garmin weight beats the 2026-05-03 wellness weight; the
+        # wellness weight is no source at all.
         garmin = _garmin({"weight": _garmin_weight("2026-04-01", 71500)})
         result = _current(
             _snapshot(wellness=[_wellness("2026-05-03", weight=78)]),
             garmin=garmin,
         )
         self.assertEqual(_pair(result["weight_kg"]), (71.5, GARMIN))
+        self.assertNotIn("alternatives", result["weight_kg"])
 
-    def test_weight_falls_back_wellness_then_athlete_then_profile(self) -> None:
+    def test_weight_is_the_profile_value_without_garmin(self) -> None:
         cases = (
             (
                 "wellness",
@@ -210,69 +216,45 @@ class CurrentWeightChainTests(unittest.TestCase):
                     athlete={"weight": 80},
                     wellness=[_wellness("2026-05-03", weight=78)],
                 ),
-                (78, WELLNESS),
             ),
-            ("athlete", _snapshot(athlete={"weight": 80}), (80, INTERVALS)),
-            ("profile", _snapshot(), (81, PROFILE)),
+            ("athlete", _snapshot(athlete={"weight": 80})),
+            ("profile", _snapshot()),
         )
-        for name, snapshot, expected in cases:
+        for name, snapshot in cases:
             with self.subTest(source=name):
                 result = _current(snapshot, {"weight_kg": 81})
-                self.assertEqual(_pair(result["weight_kg"]), expected)
+                self.assertEqual(_pair(result["weight_kg"]), (81, PROFILE))
+                self.assertNotIn("alternatives", result["weight_kg"])
 
     def test_weight_is_empty_without_any_source(self) -> None:
         result = _current()
         self.assertEqual(_pair(result["weight_kg"]), (None, None))
         self.assertEqual(result["weight_kg"]["unit"], "kg")
 
-    def test_weight_accepts_comma_decimal_and_skips_invalid_wellness(self) -> None:
-        result = _current(
-            _snapshot(
-                athlete={"weight": 79},
-                wellness=[_wellness("2026-05-03", weight="78,5")],
-            )
-        )
-        self.assertEqual(_pair(result["weight_kg"]), (78.5, WELLNESS))
-
-        result = _current(
-            _snapshot(
-                athlete={"weight": 79},
-                wellness=[_wellness("2026-05-03", weight="invalid")],
-            )
-        )
-        self.assertEqual(_pair(result["weight_kg"]), (79, INTERVALS))
-
-    def test_latest_wellness_row_is_the_maximum_string_id(self) -> None:
-        rows = [
-            _wellness("2026-05-01", weight=80),
-            _wellness("2026-05-03", weight=78),
-            _wellness("2026-05-02", weight=79),
-        ]
-        result = _current(_snapshot(wellness=rows), {"weight_kg": 81})
-        self.assertEqual(_pair(result["weight_kg"]), (78, WELLNESS))
-
-    def test_unpadded_wellness_id_has_no_observation(self) -> None:
-        # Quirk: "2026-5-9" > "2026-05-10" as strings, so the unpadded id is
-        # treated as the latest row.
-        rows = [
-            _wellness("2026-05-10", weight=78),
-            _wellness("2026-5-9", weight=77),
-        ]
-        result = _current(_snapshot(wellness=rows))
-        self.assertEqual(_pair(result["weight_kg"]), (78, WELLNESS))
-
-    def test_snapshot_only_day_does_not_displace_an_observed_weight(self) -> None:
-        rows = [_wellness("2026-05-01", weight=80), _wellness("2026-05-02")]
-        result = _current(_snapshot(athlete={"weight": 79}, wellness=rows))
-        self.assertEqual(_pair(result["weight_kg"]), (80, WELLNESS))
-
-    def test_invalid_zero_wellness_weight_has_no_observation(self) -> None:
-        # Quirk: zero is accepted as a present value and beats the profile.
-        result = _current(
-            _snapshot(wellness=[_wellness("2026-05-03", weight=0)]),
-            {"weight_kg": 81},
-        )
-        self.assertEqual(_pair(result["weight_kg"]), (81, PROFILE))
+    def test_intervals_weight_alone_is_empty_in_every_form(self) -> None:
+        for name, snapshot in (
+            (
+                "comma decimal",
+                _snapshot(
+                    athlete={"weight": 79},
+                    wellness=[_wellness("2026-05-03", weight="78,5")],
+                ),
+            ),
+            (
+                "latest row of several",
+                _snapshot(
+                    wellness=[
+                        _wellness("2026-05-01", weight=80),
+                        _wellness("2026-05-03", weight=78),
+                        _wellness("2026-05-02", weight=79),
+                    ]
+                ),
+            ),
+            ("unpadded id", _snapshot(wellness=[_wellness("2026-5-9", weight=77)])),
+            ("zero", _snapshot(wellness=[_wellness("2026-05-03", weight=0)])),
+        ):
+            with self.subTest(name):
+                self.assertEqual(_pair(_current(snapshot)["weight_kg"]), (None, None))
 
 
 class CurrentBodyMetricTests(unittest.TestCase):
@@ -281,67 +263,49 @@ class CurrentBodyMetricTests(unittest.TestCase):
         result = _current(garmin=garmin)
         self.assertEqual(_pair(result["body_fat_pct"]), (None, None))
 
-    def test_body_fat_follows_wellness_athlete_then_profile(self) -> None:
+    def test_body_fat_is_the_profile_value_and_ignores_intervals(self) -> None:
         cases = (
             (
                 "wellness bodyFat",
                 _snapshot(wellness=[_wellness("2026-05-03", bodyFat=17)]),
-                (17, WELLNESS),
             ),
             (
                 "wellness body_fat",
                 _snapshot(wellness=[_wellness("2026-05-03", body_fat=16)]),
-                (16, WELLNESS),
             ),
-            (
-                "athlete bodyFat",
-                _snapshot(athlete={"bodyFat": 18}),
-                (18, INTERVALS),
-            ),
-            (
-                "athlete body_fat",
-                _snapshot(athlete={"body_fat": 19}),
-                (19, INTERVALS),
-            ),
-            ("profile", _snapshot(), (20, PROFILE)),
+            ("athlete bodyFat", _snapshot(athlete={"bodyFat": 18})),
+            ("athlete body_fat", _snapshot(athlete={"body_fat": 19})),
+            ("profile", _snapshot()),
         )
-        for name, snapshot, expected in cases:
+        for name, snapshot in cases:
             with self.subTest(source=name):
                 result = _current(snapshot, {"body_fat_pct": 20})
-                self.assertEqual(_pair(result["body_fat_pct"]), expected)
+                self.assertEqual(_pair(result["body_fat_pct"]), (20, PROFILE))
+                self.assertNotIn("alternatives", result["body_fat_pct"])
+                self.assertEqual(result["body_fat_pct"]["unit"], "%")
 
-    def test_body_fat_is_rounded_to_two_decimals_and_has_percent_unit(self) -> None:
+    def test_body_fat_from_intervals_alone_is_empty(self) -> None:
         result = _current(
             _snapshot(wellness=[_wellness("2026-05-03", bodyFat="18.426")])
         )
-        self.assertEqual(_pair(result["body_fat_pct"]), (18.43, WELLNESS))
+        self.assertEqual(_pair(result["body_fat_pct"]), (None, None))
         self.assertEqual(result["body_fat_pct"]["unit"], "%")
 
-    def test_height_is_converted_from_metres_to_centimetres(self) -> None:
-        cases = ((1.2, 120), (1.8, 180), (2.5, 250), ("1,75", 175), (180, 180))
-        for raw, expected in cases:
+    def test_intervals_height_is_no_source(self) -> None:
+        for raw in (1.2, 1.8, 2.5, "1,75", 180, 1.19, 2.51):
             with self.subTest(raw=raw):
                 result = _current(_snapshot(athlete={"height": raw}))
-                self.assertEqual(_pair(result["height_cm"]), (expected, INTERVALS))
+                self.assertEqual(_pair(result["height_cm"]), (None, None))
                 self.assertEqual(result["height_cm"]["unit"], "cm")
 
-    def test_height_outside_metre_band_is_out_of_bounds(self) -> None:
-        # Canonical: values just outside 1.2-2.5 are read as centimetres, which
-        # the 30-300 cm bounds reject (the snapshot reader reported them as cm).
-        for raw in (1.19, 2.51):
-            with self.subTest(raw=raw):
-                result = _current(_snapshot(athlete={"height": raw}))
-                self.assertIsNone(result["height_cm"]["value"])
-
-    def test_height_cm_key_wins_over_height_and_profile_is_fallback(self) -> None:
-        result = _current(_snapshot(athlete={"height_cm": 170, "height": 1.8}))
-        self.assertEqual(_pair(result["height_cm"]), (170, INTERVALS))
-
-        result = _current(_snapshot(athlete={"height": "nan"}), {"height_cm": 175})
+    def test_profile_height_is_the_only_height(self) -> None:
+        result = _current(
+            _snapshot(athlete={"height_cm": 170, "height": 1.8}), {"height_cm": 175}
+        )
         self.assertEqual(_pair(result["height_cm"]), (175, PROFILE))
 
     def test_profile_height_in_metres_is_converted_quirk(self) -> None:
-        # Quirk: the metre-to-cm conversion is also applied to the local profile.
+        # Quirk: the metre-to-cm conversion is applied to the local profile.
         result = _current(_snapshot(), {"height_cm": 1.75})
         self.assertEqual(_pair(result["height_cm"]), (175, PROFILE))
 
@@ -350,20 +314,16 @@ class CurrentBodyMetricTests(unittest.TestCase):
 
 
 class CurrentThresholdTests(unittest.TestCase):
-    def test_cycling_ftp_ride_setting_then_garmin(self) -> None:
-        # Canonical (#1668): the athlete-maintained Intervals FTP precedes Garmin's
-        # auto-detected FTP, which stays visible as a conflicting alternative.
+    def test_cycling_ftp_is_garmins_and_the_intervals_setting_is_ignored(self) -> None:
+        # Canonical (2026-11-07): Intervals.icu is never a source, so Garmin's
+        # auto-detected FTP is the value and no alternative is listed.
         garmin = _garmin({"cycling_ftp": {"functionalThresholdPower": 302}})
         result = _current(
             _snapshot(athlete={"sport_settings": [_setting("Ride", ftp=250)]}),
             garmin=garmin,
         )
-        self.assertEqual(_pair(result["cycling_ftp_watts"]), (250, INTERVALS))
-        self.assertEqual(
-            result["cycling_ftp_watts"]["alternatives"],
-            [{"value": 302, "source": GARMIN, "source_provider": "garmin"}],
-        )
-        self.assertTrue(result["cycling_ftp_watts"]["conflict"])
+        self.assertEqual(_pair(result["cycling_ftp_watts"]), (302, GARMIN))
+        self.assertNotIn("alternatives", result["cycling_ftp_watts"])
         self.assertEqual(
             _pair(_current(garmin=garmin)["cycling_ftp_watts"]), (302, GARMIN)
         )
@@ -376,72 +336,52 @@ class CurrentThresholdTests(unittest.TestCase):
                         {"cycling_ftp": {"functionalThresholdPower": invalid}}
                     ),
                 )
-                self.assertEqual(_pair(result["cycling_ftp_watts"]), (250, INTERVALS))
+                self.assertEqual(_pair(result["cycling_ftp_watts"]), (None, None))
 
+    def test_intervals_ftp_in_every_form_gives_no_cycling_ftp(self) -> None:
+        for name, snapshot in (
+            (
+                "ride setting",
+                _snapshot(athlete={"sport_settings": [_setting("Ride", ftp=250)]}),
+            ),
+            (
+                "indoor ftp",
+                _snapshot(
+                    athlete={
+                        "sport_settings": [_setting("Ride", ftp=250, indoor_ftp=240)]
+                    }
+                ),
+            ),
+            ("athlete icu_ftp", _snapshot(athlete={"icu_ftp": 240})),
+            (
+                "wellness sport info",
+                _snapshot(
+                    wellness=[
+                        _wellness(
+                            "2026-05-03", sport_info=[{"types": ["Ride"], "ftp": 255}]
+                        )
+                    ]
+                ),
+            ),
+            (
+                "first setting without value",
+                _snapshot(
+                    athlete={
+                        "icu_ftp": 240,
+                        "sport_settings": [_setting("Ride"), _setting("Rad", ftp=300)],
+                    }
+                ),
+            ),
+        ):
+            with self.subTest(name):
+                self.assertEqual(
+                    _pair(_current(snapshot)["cycling_ftp_watts"]), (None, None)
+                )
+
+    def test_run_threshold_watts_is_garmins_only(self) -> None:
         result = _current(
             _snapshot(
-                athlete={"sport_settings": [_setting("Ride", ftp=250, indoor_ftp=240)]}
-            )
-        )
-        self.assertEqual(_pair(result["cycling_ftp_watts"]), (250, INTERVALS))
-
-        result = _current(
-            _snapshot(
-                athlete={"sport_settings": [_setting("Ride", indoor_ftp=240)]},
-                wellness=[
-                    _wellness(
-                        "2026-05-03", sport_info=[{"types": ["Ride"], "ftp": 255}]
-                    )
-                ],
-            )
-        )
-        self.assertEqual(_pair(result["cycling_ftp_watts"]), (240, INTERVALS))
-
-    def test_wellness_sport_info_ftp_does_not_supply_cycling_ftp(self) -> None:
-        result = _current(
-            _snapshot(
-                wellness=[
-                    _wellness(
-                        "2026-05-03",
-                        sport_info=[{"types": ["Ride"], "ftp": 255}],
-                    )
-                ]
-            )
-        )
-        self.assertEqual(_pair(result["cycling_ftp_watts"]), (None, None))
-
-    def test_athlete_icu_ftp_is_last_cycling_fallback(self) -> None:
-        result = _current(_snapshot(athlete={"icu_ftp": 240}))
-        self.assertEqual(_pair(result["cycling_ftp_watts"]), (240, INTERVALS))
-
-    def test_first_matching_sport_setting_wins_even_without_value_quirk(self) -> None:
-        # Quirk: the first Ride-matching setting is used even when it has no FTP;
-        # a later "Rad" setting with FTP is ignored.
-        athlete = {
-            "icu_ftp": 240,
-            "sport_settings": [_setting("Ride"), _setting("Rad", ftp=300)],
-        }
-        result = _current(_snapshot(athlete=athlete))
-        self.assertEqual(_pair(result["cycling_ftp_watts"]), (240, INTERVALS))
-
-    def test_run_threshold_watts_never_uses_athlete_icu_ftp(self) -> None:
-        # Quirk: the athlete-level icu_ftp does not feed run threshold power.
-        result = _current(_snapshot(athlete={"icu_ftp": 240}))
-        self.assertEqual(_pair(result["run_threshold_watts"]), (None, None))
-
-        result = _current(
-            _snapshot(athlete={"sport_settings": [_setting("Run", ftp=280)]})
-        )
-        self.assertEqual(_pair(result["run_threshold_watts"]), (280, INTERVALS))
-
-        result = _current(
-            _snapshot(
-                wellness=[
-                    _wellness(
-                        "2026-05-03",
-                        sport_info=[{"types": ["Run"], "ftp": 285}],
-                    )
-                ]
+                athlete={"icu_ftp": 240, "sport_settings": [_setting("Run", ftp=280)]}
             )
         )
         self.assertEqual(_pair(result["run_threshold_watts"]), (None, None))
@@ -455,9 +395,8 @@ class CurrentThresholdTests(unittest.TestCase):
         )
         self.assertEqual(_pair(result["run_threshold_watts"]), (328, GARMIN))
 
-    def test_run_threshold_pace_converts_metres_per_second(self) -> None:
-        cases = ((4.0, 250), (3.5, 286))
-        for raw, expected in cases:
+    def test_run_threshold_pace_is_garmins_only(self) -> None:
+        for raw in (4.0, 3.5, 250, 20, -4.0, "4:27"):
             with self.subTest(raw=raw):
                 result = _current(
                     _snapshot(
@@ -467,42 +406,8 @@ class CurrentThresholdTests(unittest.TestCase):
                     )
                 )
                 self.assertEqual(
-                    result["run_threshold_pace_seconds_per_km"]["value"], expected
+                    _pair(result["run_threshold_pace_seconds_per_km"]), (None, None)
                 )
-
-    def test_run_threshold_pace_boundary_and_string_quirks(self) -> None:
-        # Canonical: values below 20 are m/s and 20 and above s/km; a pace faster
-        # than 15 m/s (about 66 s/km) is out of bounds, so 20 s/km has no value.
-        # Quirk: a "4:27" string is not parsed and yields no value.
-        # Quirk: negative values are rejected.
-        cases = ((20, None), (250, 250), (-4.0, None), ("4:27", None))
-        for raw, expected in cases:
-            with self.subTest(raw=raw):
-                result = _current(
-                    _snapshot(
-                        athlete={
-                            "sport_settings": [_setting("Run", threshold_pace=raw)]
-                        }
-                    )
-                )
-                self.assertEqual(
-                    result["run_threshold_pace_seconds_per_km"]["value"], expected
-                )
-
-    def test_run_threshold_pace_wellness_fallback_and_garmin_override(self) -> None:
-        result = _current(
-            _snapshot(
-                wellness=[
-                    _wellness(
-                        "2026-05-03",
-                        sport_info=[{"types": ["Run"], "threshold_pace": 4.0}],
-                    )
-                ]
-            )
-        )
-        self.assertEqual(
-            _pair(result["run_threshold_pace_seconds_per_km"]), (None, None)
-        )
 
         garmin = _garmin({"running_threshold": {"speedInMetersPerSecond": 4.0}})
         result = _current(
@@ -515,67 +420,21 @@ class CurrentThresholdTests(unittest.TestCase):
             _pair(result["run_threshold_pace_seconds_per_km"]), (250, GARMIN)
         )
 
-    def test_zone2_pace_aliases_and_wellness_fallback(self) -> None:
-        # Values below 20 are read as m/s; 5.0 m/s is converted to 200 s/km.
-        for key in (
-            "zone2_pace",
-            "zone_2_pace",
-            "z2_pace",
-            "pace_zone2",
-            "paceZone2",
-            "zone2Pace",
-        ):
+    def test_the_intervals_zone2_pace_is_no_current_metric(self) -> None:
+        for key in ("zone2_pace", "zone_2_pace", "z2_pace", "pace_zone2", "zone2Pace"):
             with self.subTest(key=key):
                 result = _current(
                     _snapshot(
                         athlete={"sport_settings": [_setting("Run", **{key: 5.0})]}
                     )
                 )
-                self.assertEqual(
-                    _pair(result["run_zone2_pace_seconds_per_km"]), (200, INTERVALS)
-                )
+                self.assertNotIn("run_zone2_pace_seconds_per_km", result)
 
-        result = _current(
-            _snapshot(
-                wellness=[
-                    _wellness(
-                        "2026-05-03",
-                        sport_info=[{"types": ["Run"], "zone2Pace": 300}],
-                    )
-                ]
-            )
-        )
-        self.assertEqual(_pair(result["run_zone2_pace_seconds_per_km"]), (None, None))
-
-    def test_zone2_pace_inclusive_second_bounds(self) -> None:
-        for value, expected in ((119, None), (120, 120), (1800, 1800), (1801, None)):
-            with self.subTest(value=value):
-                result = _current(
-                    _snapshot(
-                        athlete={"sport_settings": [_setting("Run", zone2_pace=value)]}
-                    )
-                )
-                self.assertEqual(
-                    result["run_zone2_pace_seconds_per_km"]["value"], expected
-                )
-
-    def test_threshold_hr_sport_then_generic_labels(self) -> None:
+    def test_threshold_hr_is_garmins_only(self) -> None:
         athlete = {"lthr": 165, "sport_settings": [_setting("Run", lthr=170)]}
-        result = _current(_snapshot(athlete=athlete))
-        self.assertEqual(_pair(result["run_threshold_hr_bpm"]), (170, INTERVALS))
-        self.assertEqual(
-            _pair(result["bike_threshold_hr_bpm"]), (165, INTERVALS_GENERIC)
-        )
-
-        result = _current(_snapshot(athlete={"lthr": 165}))
-        self.assertEqual(
-            _pair(result["bike_threshold_hr_bpm"]), (165, INTERVALS_GENERIC)
-        )
-        self.assertEqual(
-            _pair(result["run_threshold_hr_bpm"]), (165, INTERVALS_GENERIC)
-        )
-
-        result = _current(
+        for snapshot in (
+            _snapshot(athlete=athlete),
+            _snapshot(athlete={"lthr": 165}),
             _snapshot(
                 athlete={"sport_settings": [_setting("Ride", lthr=160)]},
                 wellness=[
@@ -584,13 +443,12 @@ class CurrentThresholdTests(unittest.TestCase):
                         sport_info=[{"types": ["Run"], "lthr": 166}],
                     )
                 ],
-            )
-        )
-        self.assertEqual(_pair(result["bike_threshold_hr_bpm"]), (160, INTERVALS))
-        self.assertEqual(_pair(result["run_threshold_hr_bpm"]), (None, None))
-
-        result = _current()
-        self.assertEqual(_pair(result["bike_threshold_hr_bpm"]), (None, None))
+            ),
+            _snapshot(),
+        ):
+            result = _current(snapshot)
+            self.assertEqual(_pair(result["bike_threshold_hr_bpm"]), (None, None))
+            self.assertEqual(_pair(result["run_threshold_hr_bpm"]), (None, None))
 
     def test_threshold_hr_garmin_override_uses_running_threshold(self) -> None:
         garmin = _garmin(
@@ -613,7 +471,7 @@ class CurrentThresholdTests(unittest.TestCase):
 
 
 class CurrentMaxHrTests(unittest.TestCase):
-    def test_sport_setting_max_hr_key_aliases(self) -> None:
+    def test_sport_setting_max_hr_is_no_source(self) -> None:
         for key in ("max_hr", "maxHR", "maxHeartRate", "max_heartrate"):
             with self.subTest(key=key):
                 result = _current(
@@ -621,7 +479,7 @@ class CurrentMaxHrTests(unittest.TestCase):
                         athlete={"sport_settings": [_setting("Ride", **{key: 190})]}
                     )
                 )
-                self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (190, INTERVALS))
+                self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (None, None))
 
     def test_out_of_range_setting_does_not_read_wellness_sport_info(self) -> None:
         result = _current(
@@ -637,7 +495,9 @@ class CurrentMaxHrTests(unittest.TestCase):
         )
         self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (None, None))
 
-    def test_activity_maximum_is_next_then_athlete_profile(self) -> None:
+    def test_activity_maximum_is_the_last_resort_and_the_athlete_max_hr_is_ignored(
+        self,
+    ) -> None:
         activities = [
             {
                 "id": "ride-1",
@@ -664,25 +524,25 @@ class CurrentMaxHrTests(unittest.TestCase):
                 "maxHR": 210,
             },
         ]
-        # Canonical (#1668): the athlete record's max HR is a configured value and
-        # precedes the activity maximum, which is only the last resort.
+        # The activity maximum is the activity's own recorded value, labelled by
+        # the provider whose summary reports it; the athlete's max HR is no source.
         result = _current(
             _snapshot(athlete={"max_hr": 200}, activities=activities),
         )
-        self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (200, INTERVALS))
-        result = _current(_snapshot(activities=activities))
-        self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (195, INTERVALS))
-        self.assertEqual(_pair(result["running_max_hr_bpm"]), (210, INTERVALS))
+        # Neither the Intervals.icu athlete max HR nor its activity summaries
+        # (#1686) serve the value any more.
+        self.assertIsNone(result["cycling_max_hr_bpm"]["value"])
+        self.assertIsNone(result["running_max_hr_bpm"]["value"])
 
         result = _current(_snapshot(athlete={"max_hr": 186}))
-        self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (186, INTERVALS))
+        self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (None, None))
 
     def test_athlete_max_hr_outside_range_is_ignored(self) -> None:
         result = _current(_snapshot(athlete={"max_hr": 300}))
         self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (None, None))
         self.assertEqual(_pair(result["running_max_hr_bpm"]), (None, None))
 
-    def test_garmin_profile_max_hr_overrides_intervals(self) -> None:
+    def test_garmin_profile_max_hr_is_the_value(self) -> None:
         garmin = _garmin(
             {
                 "heart_rate_zones": [
@@ -694,6 +554,7 @@ class CurrentMaxHrTests(unittest.TestCase):
         result = _current(_snapshot(athlete={"max_hr": 200}), garmin=garmin)
         self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (186, GARMIN))
         self.assertEqual(_pair(result["running_max_hr_bpm"]), (190, GARMIN))
+        self.assertNotIn("alternatives", result["cycling_max_hr_bpm"])
 
 
 class CurrentEftpTests(unittest.TestCase):
@@ -718,7 +579,7 @@ class CurrentEftpTests(unittest.TestCase):
 
 
 class CurrentVo2AndRacePredictionTests(unittest.TestCase):
-    def test_vo2max_cycling_garmin_then_ride_then_wellness_then_athlete(self) -> None:
+    def test_vo2max_cycling_is_garmins_only(self) -> None:
         garmin = _garmin({"max_metrics": [{"cycling": {"vo2MaxValue": 61.0}}]})
         result = _current(
             _snapshot(athlete={"sport_settings": [_setting("Ride", vo2max=52)]}),
@@ -726,12 +587,8 @@ class CurrentVo2AndRacePredictionTests(unittest.TestCase):
         )
         self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (61, GARMIN))
 
-        result = _current(
+        for snapshot in (
             _snapshot(athlete={"sport_settings": [_setting("Ride", vo2max=52)]}),
-        )
-        self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (52, INTERVALS))
-
-        result = _current(
             _snapshot(
                 wellness=[
                     _wellness(
@@ -739,11 +596,12 @@ class CurrentVo2AndRacePredictionTests(unittest.TestCase):
                         sport_info=[{"types": ["Ride"], "vo2_max": 51}],
                     )
                 ]
-            )
-        )
-        self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (None, None))
+            ),
+        ):
+            result = _current(snapshot)
+            self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (None, None))
 
-    def test_vo2max_running_uses_garmin_generic_then_intervals_running(self) -> None:
+    def test_vo2max_running_uses_garmin_generic_only(self) -> None:
         # Quirk: a Garmin "generic" VO2max is reported as the running value.
         garmin = _garmin({"max_metrics": {"generic": {"vo2MaxValue": 51.0}}})
         result = _current(
@@ -751,7 +609,7 @@ class CurrentVo2AndRacePredictionTests(unittest.TestCase):
             garmin=garmin,
         )
         self.assertEqual(_pair(result["running_vo2max_ml_kg_min"]), (51, GARMIN))
-        self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (52, INTERVALS))
+        self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (None, None))
 
         result = _current(
             _snapshot(
@@ -765,11 +623,10 @@ class CurrentVo2AndRacePredictionTests(unittest.TestCase):
         )
         self.assertEqual(_pair(result["running_vo2max_ml_kg_min"]), (None, None))
 
-    def test_generic_athlete_vo2max_applies_to_both_sports_quirk(self) -> None:
-        # Quirk: an athlete-level vo2max is used for cycling and for running.
+    def test_generic_athlete_vo2max_applies_to_neither_sport(self) -> None:
         result = _current(_snapshot(athlete={"vo2max": 55}))
-        self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (55, INTERVALS))
-        self.assertEqual(_pair(result["running_vo2max_ml_kg_min"]), (55, INTERVALS))
+        self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (None, None))
+        self.assertEqual(_pair(result["running_vo2max_ml_kg_min"]), (None, None))
         self.assertEqual(result["cycling_vo2max_ml_kg_min"]["unit"], "ml/kg/min")
 
     def test_race_predictions_come_only_from_garmin(self) -> None:
@@ -816,7 +673,6 @@ class CurrentResultShapeTests(unittest.TestCase):
                 "cycling_ftp_watts": "W",
                 "run_threshold_watts": "W",
                 "run_threshold_pace_seconds_per_km": "s/km",
-                "run_zone2_pace_seconds_per_km": "s/km",
                 "bike_threshold_hr_bpm": "bpm",
                 "run_threshold_hr_bpm": "bpm",
                 "cycling_max_hr_bpm": "bpm",
@@ -833,6 +689,27 @@ class CurrentResultShapeTests(unittest.TestCase):
         for key, metric in result.items():
             with self.subTest(key=key):
                 self.assertLessEqual({"value", "unit", "source", "note"}, set(metric))
+
+    def test_intervals_settings_give_no_value_for_any_threshold_metric(self) -> None:
+        result = _current(
+            _snapshot(
+                athlete={
+                    "icu_ftp": 240,
+                    "lthr": 165,
+                    "max_hr": 190,
+                    "vo2max": 55,
+                    "weight": 80,
+                    "sport_settings": [
+                        _setting("Ride", ftp=250, lthr=160, vo2max=52, max_hr=190),
+                        _setting("Run", ftp=280, lthr=170, threshold_pace=4.0),
+                    ],
+                }
+            )
+        )
+        for key in INTERVALS_ONLY_KEYS:
+            with self.subTest(key=key):
+                self.assertIsNone(result[key]["value"])
+                self.assertIsNone(result[key]["source"])
 
 
 if __name__ == "__main__":

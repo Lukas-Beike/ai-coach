@@ -1,65 +1,87 @@
-"""Bounded reads of compact Intervals activity analyses, newest first.
+"""Bounded reads of stored canonical session analyses, newest first.
 
-Rows come from ``activity_detail_analysis`` and are ordered by the observation
-instant, so rows in "Z" and "+00:00" notation compare correctly.
+Rows come from canonical ``activity_detail_analysis`` rows (#1685), keyed by the live
+session they belong to, and are ordered by the session start instant, so rows
+in "Z" and "+00:00" notation compare correctly. Rows of other versions are never read.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterable
 from typing import Any, Final
 
-from backend.canonical.vocabulary import (
-    ActivityRecordState,
-    ActivitySessionState,
-    ProviderId,
-)
+from backend.canonical.vocabulary import ActivitySessionState
 
-_INTERVALS: Final = ProviderId.INTERVALS.value
-
-_CANONICAL_SQL: Final = """
-    SELECT r.provider_activity_id AS id,
-        -- A stored null is kept; only a payload without the key uses the sets.
-        CASE WHEN json_type(a.payload, '$.summary_sha256') IS NOT NULL
-            THEN json_extract(a.payload, '$.summary_sha256')
-            ELSE (
-            SELECT d.summary_sha256 FROM activity_detail_sets AS d
-            WHERE d.provider = r.provider
-              AND d.provider_activity_id = r.provider_activity_id
-              AND d.summary_sha256 IS NOT NULL
-            ORDER BY d.fetched_at DESC LIMIT 1) END AS fingerprint,
-        COALESCE(json_extract(a.payload, '$.observed_at'), (
-            SELECT MAX(d.fetched_at) FROM activity_detail_sets AS d
-            WHERE d.provider = r.provider
-              AND d.provider_activity_id = r.provider_activity_id),
-            a.computed_at) AS observed_at,
+_CHUNK: Final = 500
+_SQL: Final = """
+    SELECT a.activity_id AS id,
+        json_extract(a.payload, '$.observed_at') AS observed_at,
+        json_extract(a.payload, '$.source') AS source,
         json_extract(a.payload, '$.calendar_profile') AS profile,
         json_extract(a.payload, '$.session_analysis.aerobic') AS aerobic,
         json_extract(a.payload, '$.session_analysis.power_profile') AS power_profile,
         json_extract(a.payload, '$.session_analysis.running_profile') AS running_profile,
         json_extract(a.payload, '$.target_snapshot') AS targets,
-        json_extract(a.payload, '$.session_analysis.interval_quality') AS interval_quality
+        json_extract(a.payload, '$.session_analysis.interval_quality') AS interval_quality,
+        julianday(s.started_at) AS instant
     FROM activity_detail_analysis AS a
-    JOIN activity_sessions AS s ON s.activity_id = a.activity_id AND s.state <> ?
-    JOIN activity_records AS r ON r.activity_id = a.activity_id
-        AND r.provider = ? AND r.state = ?
+    JOIN activity_sessions AS s ON s.activity_id = a.activity_id
+        AND s.state NOT IN (?, ?)
+    WHERE a.analysis_version = ?
+        AND json_type(a.payload, '$.session_analysis') = 'object'
+    ORDER BY instant DESC, id LIMIT ?
 """
 
 
-def _wrap(inner: str) -> str:
-    return (
-        f"SELECT *, julianday(observed_at) AS instant FROM ({inner}) "
-        "ORDER BY instant DESC, id LIMIT ?"
-    )
+def stored_zone_times(
+    db: Any, analysis_version: int, session_ids: Iterable[str]
+) -> dict[str, dict[str, Any]]:
+    """The stored report zone times of ``analysis_version`` rows, by session id."""
+    ids = list(dict.fromkeys(session_ids))
+    result: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(ids), _CHUNK):
+        chunk = ids[start : start + _CHUNK]
+        rows = db.execute(
+            "SELECT activity_id, json_extract(payload, '$.zone_times') AS zones "
+            "FROM activity_detail_analysis WHERE analysis_version = ? "
+            "AND json_type(payload, '$.zone_times') = 'object' "
+            f"AND activity_id IN ({', '.join('?' * len(chunk))})",
+            (analysis_version, *chunk),
+        ).fetchall()
+        for row in rows:
+            zones = json.loads(row["zones"])
+            if isinstance(zones, dict):
+                result[row["activity_id"]] = zones
+    return result
 
 
-def recent_intervals_analyses(db: Any, limit: int = 100) -> list[dict[str, Any]]:
-    """Newest canonical analyses of active Intervals activities in live sessions."""
+def stored_heart_rate_histogram(
+    db: Any, analysis_version: int, session_id: str
+) -> dict[str, Any] | None:
+    """The stored heart-rate histogram of one ``analysis_version`` row, if it has one."""
+    row = db.execute(
+        "SELECT json_extract(payload, '$.hr_histogram') AS histogram "
+        "FROM activity_detail_analysis WHERE analysis_version = ? "
+        "AND json_type(payload, '$.hr_histogram') = 'object' AND activity_id = ?",
+        (analysis_version, session_id),
+    ).fetchone()
+    if row is None:
+        return None
+    histogram = json.loads(row["histogram"])
+    return histogram if isinstance(histogram, dict) else None
+
+
+def recent_session_analyses(
+    db: Any, analysis_version: int, limit: int = 100
+) -> list[dict[str, Any]]:
+    """Newest stored canonical analyses of ``analysis_version`` of live sessions."""
     rows = db.execute(
-        _wrap(_CANONICAL_SQL),
+        _SQL,
         (
             ActivitySessionState.DELETED.value,
-            _INTERVALS,
-            ActivityRecordState.ACTIVE.value,
+            ActivitySessionState.DUPLICATE.value,
+            analysis_version,
             limit,
         ),
     ).fetchall()

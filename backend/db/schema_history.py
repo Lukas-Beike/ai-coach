@@ -19,35 +19,25 @@ from backend.db.schema import CURRENT_SCHEMA_VERSION
 
 type SchemaSignature = tuple[tuple[str, str, str, str], ...]
 
-# Schema version 16, release 1.13.32: the oldest supported schema.
-SHAPE_SCHEMA_V16: Final = "schema-v16"
-# Schema version 17: the canonical power curve.
-SHAPE_SCHEMA_V17: Final = "schema-v17"
-# Schema versions 18 and 19: feedback rating time; version 19 changed stored
-# planning metric keys only, so both versions share one table shape.
-SHAPE_SCHEMA_V18: Final = "schema-v18"
-# Schema version 20: favorite products.
-SHAPE_SCHEMA_V20: Final = "schema-v20"
+# Schema version 21, releases 1.13.41 to 1.13.44: the observation lifecycle and
+# the oldest supported schema.
+SHAPE_SCHEMA_V21: Final = "schema-v21"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
 RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
-    SHAPE_SCHEMA_V16: "3f68b3c7b91a0882c930e93acab9e560ebf9d53ae3fa9befe118fa8b4a633131",
-    SHAPE_SCHEMA_V17: "68d69b318f579be15d6bf15eeebccbffac66480296ffc46b876ac0858043c9ee",
-    SHAPE_SCHEMA_V18: "ad1f1d68b73dfc400e281bd5aed00798dfee0dfb11e2a177d8bdc1f3c1563bda",
-    SHAPE_SCHEMA_V20: "f745323256eb2a0670e31f776bc39adb0820b3a6f05fc085afb491b9644ca265",
+    SHAPE_SCHEMA_V21: "2d81edf3d70d6b81e3eb9b048fc9fefb0c9c4a70885c14cd9848fd18b0cd2052",
 }
+
+# Releases before 1.13.41 wrote lower versions; they are rejected unchanged.
+OLDEST_SUPPORTED_SCHEMA_VERSION: Final = 21
 
 # Stored PRAGMA user_version -> schema shapes that version is allowed to hold.
 # When CURRENT_SCHEMA_VERSION is bumped, first freeze the outgoing live shape
 # here (digest, fixture, lookup entry and upgrade step) so its databases stay
 # recognizable.
 ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
-    16: frozenset({SHAPE_SCHEMA_V16}),
-    17: frozenset({SHAPE_SCHEMA_V17}),
-    18: frozenset({SHAPE_SCHEMA_V18}),
-    19: frozenset({SHAPE_SCHEMA_V18}),
-    20: frozenset({SHAPE_SCHEMA_V20}),
+    21: frozenset({SHAPE_SCHEMA_V21}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

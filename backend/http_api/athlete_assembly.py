@@ -8,8 +8,6 @@ from datetime import UTC, tzinfo
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
-from backend.activities.duplicate_inspection import DuplicateInspector
-from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.session_corrections import SessionCorrectionService
 from backend.activities.session_linking import garmin_activity_matches
@@ -23,7 +21,6 @@ from backend.canonical.activity_summary import ActivitySummary
 from backend.performance.source_policy import PREFERENCE_PROFILE_FIELDS
 from backend.runtime.ports import ActivityRowAndSummaryReader, CanonicalTableServing
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.intervals_ingest import IntervalsIngestSwitch
 from backend.weather.cache import invalidate_for_location_change
 
 
@@ -52,6 +49,8 @@ class AthleteRuntime:
     load_inputs_changed: Callable[[], None] = lambda: None
     # A local zone change can change the thresholds exported to Intervals.icu.
     thresholds_changed: Callable[[], None] = lambda: None
+    # The stale-threshold and Garmin SDK warning shown with the zones (#1768).
+    threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None
 
 
 class AthleteDataAssembly:
@@ -89,6 +88,7 @@ class AthleteDataAssembly:
         self._read_planned_units = runtime.read_planned_units
         self._load_inputs_changed = runtime.load_inputs_changed
         self._thresholds_changed = runtime.thresholds_changed
+        self._threshold_warnings = runtime.threshold_warnings
 
     def activity_summaries(self) -> tuple[ActivitySummary, ...]:
         with self._database_manager().unit_of_work() as db:
@@ -119,6 +119,7 @@ class AthleteDataAssembly:
             CanonicalTableReader(),
             self._utc_now,
             on_change=self._zones_changed,
+            threshold_warnings=self._threshold_warnings,
         )
 
     def _zones_changed(self) -> None:
@@ -137,34 +138,12 @@ class AthleteDataAssembly:
         """The athlete's wall-clock zone from the saved profile."""
         return AthleteLocalClock(self.profile()).now().tzinfo or UTC
 
-    def duplicate_inspector(self) -> DuplicateInspector:
-        # Always the canonical tables, never the selector's snapshot projection,
-        # and only while the tables serve reads (see DuplicateInspector).
-        return DuplicateInspector(
-            self._database_manager(),
-            CanonicalTableReader(),
-            self._athlete_zone,
-            self._table_serving(),
-            IntervalsIngestSwitch(
-                self._database_manager(), self._key_value_repository
-            ).enabled,
-        )
-
     def session_corrections(self) -> SessionCorrectionService:
         return SessionCorrectionService(
             self._database_manager(),
             self._utc_now,
             self._event_buffer,
             on_change=self._load_inputs_changed,
-        )
-
-    def duplicate_activity(self) -> DuplicateActivityService:
-        return DuplicateActivityService(
-            self._database_manager(),
-            self.duplicate_inspector(),
-            self._utc_now,
-            self._event_buffer,
-            references=ActivityReferences(self._database_manager()),
         )
 
     def checkin(self) -> CheckinService:
@@ -190,12 +169,13 @@ class AthleteDataAssembly:
     ) -> None:
         """Invalidate location caches; a new preferred source changes local loads.
 
-        A new time zone moves the local day the stored loads are dated by (M6, M7).
+        A new time zone moves the local day the stored loads are dated by (M6, M7);
+        the sex chooses the M6 TRIMP constants.
         """
         invalidate_for_location_change(previous, current, **kwargs)
         if any(
             previous.get(field) != current.get(field)
-            for field in (*PREFERENCE_PROFILE_FIELDS.values(), "timezone")
+            for field in (*PREFERENCE_PROFILE_FIELDS.values(), "timezone", "sex")
         ):
             self._load_inputs_changed()
 

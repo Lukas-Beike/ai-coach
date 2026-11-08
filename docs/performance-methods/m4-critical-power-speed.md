@@ -1,12 +1,12 @@
 # M4 — Critical Power and Critical Speed
 
 - **Card:** M4
-- **Card version:** 2
-- **Method ID:** critical-power-speed v1 (`backend/performance/critical_power.py`)
-- **Status:** implemented as an experimental model estimate (#1431) on the local mean-maximal curve (#1430, `mean-max-curve` v1)
+- **Card version:** 4
+- **Method ID:** critical-power-speed v2 (`backend/performance/critical_power.py`)
+- **Status:** implemented as an experimental model estimate (#1431) on the local mean-maximal curve (#1430, `mean-max-curve` v2)
 - **Classification:** model estimate
 - **Literature checked:** 2026-10-24
-- **Review:** released 2026-11-02 (athlete)
+- **Review:** released 2026-11-08 (athlete)
 
 ## Target construct
 
@@ -25,15 +25,21 @@ FTP, lactate threshold, MLSS or an isolated anaerobic energy store (R3).
   looking at data; the power-versus-1/t fit is reported only as a
   sensitivity analysis.
 - Reference cases for tests: CP 250 W and W′ 18,000 J give 350 W at 180 s,
-  292.857142857 W at 420 s and 275 W at 720 s. CS 4 m/s and D′ 200 m give
-  920 m at 180 s, 1,880 m at 420 s and 3,080 m at 720 s. Both fits must
-  recover the parameters exactly.
+  292.857142857 W at 420 s, 275 W at 720 s and 265 W at 1,200 s. CS 4 m/s
+  and D′ 200 m give 920 m at 180 s, 1,880 m at 420 s and 3,080 m at 720 s.
+  Both fits must recover the parameters exactly.
+- Worked example (card 4): 330, 290, 275 and 262 W at 3, 7, 12 and 20 min
+  give CP 249.7 W and W′ 16,096 J; the card 3 fit on 3/7/12 min alone gives
+  CP 256.6 W and W′ 13,515 J. Adding the 20-min effort lowers CP and raises
+  W′, as R50 found for fits without efforts beyond 10-12 min.
 
 ## Sources
 
 R3 (model and physiology), R4 (cycling field CP from 3/7/12-min efforts),
 R5 (running CS field tests), R6 (3-min all-out test in cycling), R16 (CS from
-everyday training data, deferred to M5). Newer work: protocol choice changes CS
+everyday training data, deferred to M5), R50 (trial durations: CP overestimated
+without efforts of 12-20 min), R51 (CS/CP from habitual training valid, D′/W′
+only weakly agreeing). Newer work: protocol choice changes CS
 and D′ (Anderson et al. 2026, see README).
 
 ## Population and reference measurement
@@ -61,13 +67,28 @@ recreational marathon runners, no lab reference.
 - Inputs need real power for cycling and reliable time and distance for
   running. Record test intent, date, recovery, sensor, indoor/outdoor and
   conditions, or mark them unknown.
-- Implemented selection (v1): the best 180, 420 and 720 s of the last 28 days
-  from the mean-maximal curve, the training-file protocol of R4. Cycling is
+- Implemented selection (v2, card 4): cycling uses the best 180, 420, 720 and
+  1,200 s of the last 28 days from the mean-maximal curve: the training-file
+  protocol of R4 plus a 20-min effort, because CP is overestimated when only
+  efforts under 10-12 min enter the fit and fits with efforts of 12-20 min
+  agree with the lab criterion (R50). The 3/7/12-min fit is reported as a
+  sensitivity fit. Running keeps 180, 420 and 720 s (R5's 3-12 min range). Cycling is
   fitted separately for outdoor and indoor sessions; running uses outdoor runs
   only. Longest duration first, each pick is the best candidate from another
   session or at least 30 min after the end of every earlier pick of the same
   session. Test intent, sensor and calibration are reported as unknown; nothing
   is persisted and there is no schema change.
+- Every effort reports its context: `race` when the session is a race, else
+  `training` (card 4). Test intent stays unknown.
+- Running windows (`mean-max-curve` v2, card 4): an outdoor window counts only
+  when its net altitude change is at most 1 % of its distance; an outdoor
+  window without altitude at both ends does not count. Treadmill and virtual
+  runs are not checked. The same rule applies to the displayed running bests,
+  so a downhill stretch is never a best effort.
+- Power source (card 3, #1770): neither Garmin nor Wahoo delivers a signal
+  that tells measured from estimated cycling power, so estimated power cannot
+  be excluded automatically. Each cycling fit reports its power source as not
+  checked (`power_source: unchecked`); virtual rides stay in the indoor fit.
 
 ## Measurement error and uncertainty
 
@@ -85,7 +106,10 @@ R4's repeated-effort protocol overestimated CP systematically (interval entirely
 positive). R6: the 3-min all-out end power overestimates CP on average and its
 work above end power does not estimate W′ accurately; possible publication
 bias. R5 covers runners only and gives no pooled agreement. D′ is much less
-precise than CS (R16). No study validates this athlete's power meter or GPS.
+precise than CS (R16). W′ and D′ from everyday training agree only weakly with
+test values while CP and CS agree well (R51), so every fit marks its W′ or D′
+as much less reliable (`intercept_reliability: low`). No study validates this
+athlete's power meter or GPS.
 
 ## Deviations from the studied procedure
 
@@ -98,11 +122,14 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 
 ## Minimum data and stop rules
 
-- At least three differently long, suitably maximal efforts per sport and
-  protocol; two points give no goodness-of-fit check.
+- Four differently long, suitably maximal efforts for cycling (3, 7, 12 and
+  20 min) and three for running (3, 7 and 12 min); without all of them there
+  is no estimate. Two points give no goodness-of-fit check.
 - No numeric result for a non-identifiable fit, non-positive or implausible
-  parameters, incompatible conditions, estimated cycling power, running
-  power or unvalidated elevation correction.
+  parameters, incompatible conditions, running power or unvalidated
+  elevation correction. Estimated cycling power is excluded only where a
+  source marks it; Garmin and Wahoo mark none, so the cycling fit says its
+  power source is not checked.
 - Downsampled streams are excluded or labelled; only full-resolution streams
   feed the curve (#1430). Overlapping bests of one session share an
   `effort_group` and count as one effort.
@@ -114,8 +141,8 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 
 | Rule | Value | Tag | Rationale |
 | --- | --- | --- | --- |
-| Minimum efforts per fit | 3 | product assumption | Conservative release rule; two points allow no fit check. R5 names two as practical minimum and three as more precise. |
-| Cycling effort durations | about 180, 420 and 720 s | source | R4 3/7/12-min protocol. |
+| Minimum efforts per fit | 4 cycling, 3 running | product assumption | Conservative release rule; two points allow no fit check. R5 names two as practical minimum and three as more precise; cycling needs its 20-min effort (R50). |
+| Cycling effort durations | about 180, 420, 720 and 1,200 s | source | R4 3/7/12-min protocol plus a 20-min effort (R50); the 3/7/12-min fit is a sensitivity fit. |
 | Recovery between cycling efforts in one session | 30 min | source | R4 single-session protocol. |
 | Running trial durations | 3 to 12 min | source | R5 recommendation. |
 | Duration difference between running trials | at least 7 min | source | R5: shorter differences between trial durations failed validity criteria. Not a recovery time. |
@@ -123,18 +150,19 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 | Effort window | 28 days | product assumption | Shorter analysis window of the curve, closer to one physiological state than 90 days. |
 | Running sessions | outdoor only | product assumption | Treadmill speed and distance are not reliable without calibration. |
 | Maximum relative residual | 3 % of the observed work or distance per effort | product assumption | Fixed before real data; a larger misfit suggests a non-maximal or incompatible effort. |
-| Leave-one-out fits | every two-effort fit positive | product assumption | A non-positive parameter without one effort shows the estimate hinges on it. |
+| Running net altitude change | at most 1 % of the window distance (outdoor) | product assumption | Science review 2026-11-07; a downhill window inflates speed. Outdoor windows without altitude do not count. |
+| Leave-one-out fits | every fit without one effort positive | product assumption | A non-positive parameter without one effort shows the estimate hinges on it. |
 | Plausible cycling range | CP 50-600 W, W′ 1-50 kJ | product assumption | Outside these ranges a fit is treated as a data or effort error. |
 | Plausible running range | CS 1.5-7 m/s, D′ 10-500 m | product assumption | Outside these ranges a fit is treated as a data or effort error. |
-| Primary fit | work or distance on time | product assumption | Chosen in advance per #1431; other fit shown as sensitivity. |
+| Primary fit | work or distance on time | product assumption | Chosen in advance per #1431; the power-versus-1/t fit and, for cycling, the 3/7/12-min fit are shown as sensitivity. |
 | Curve cycling windows | 5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600 s | product assumption | `backend/performance/power_profile.py:POWER_DURATIONS`; 180/420/720 s follow R4, the rest are display windows. |
 | Curve running windows | 60, 180, 300, 420, 720, 1200 s; 1,000 and 5,000 m | product assumption | `backend/performance/power_profile.py:RUNNING_DURATIONS`, `RUNNING_DISTANCES`. |
 
 ## Allowed statements
 
-- "Model estimate from three efforts (3, 7, 12 min, March 2027): CP 262 W,
-  W′ 17 kJ; residuals and sensitivity shown."
-- "No CP estimate: only two suitable efforts in the selected period."
+- "Model estimate from four efforts (3, 7, 12, 20 min, March 2027): CP 262 W,
+  W′ 17 kJ (much less reliable than CP); residuals and sensitivity shown."
+- "No CP estimate: no independent 20-min effort in the selected period."
 - "Your best 20-minute power in this file was 281 W" (observed best effort,
   not a CP).
 
@@ -142,18 +170,24 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 
 - CP as FTP, lactate threshold, MLSS or a zone boundary, or automatic zone
   changes from CP (#1421).
-- W′ or D′ as a measured anaerobic capacity.
+- W′ or D′ as a measured anaerobic capacity, or as reliable as CP or CS.
 - Marathon or long-race predictions from the short-duration model.
 - "Scientifically validated" for this athlete's estimate, or validity claimed
   from a high R².
-- A CP from estimated power, running power or a 3-min all-out test.
+- A CP from running power or a 3-min all-out test.
+- Claiming the cycling power was checked as measured power.
 
 ## Open points
+
+- No provider marks estimated cycling power (such as Zwift virtual power
+  without a power meter); a power-meter check from FIT device data is not
+  built.
 
 - No comparison with published reference or controlled validation data yet;
   the estimate stays experimental (gate G4) and never feeds FTP or zones.
 - Athlete-marked protocol tests with recorded intent, sensor and calibration
-  are not stored; adding them needs a schema migration from v16.
+  are not stored; adding them needs a schema migration from v21, the current
+  baseline.
 - R4 participant count and recovery for its repeated-effort protocol were not
   reachable.
 - Passive CS from everyday runs (R16) stays deferred to M5.

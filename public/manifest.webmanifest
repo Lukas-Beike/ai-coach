@@ -1,7 +1,7 @@
 {
-  "name": "Intervals Coach",
-  "short_name": "Coach",
-  "description": "Dein privater Intervals.icu-Trainingscoach",
+  "name": "Pacecraft · AI Coach",
+  "short_name": "Pacecraft",
+  "description": "Dein privater KI-Trainingscoach",
   "id": "/",
   "start_url": "/",
   "scope": "/",

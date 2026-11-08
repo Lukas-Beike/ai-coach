@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferenceResolver
+from backend.db import canonical_store
 from backend.performance.activity_validation import activity_performance_validation
 from backend.performance.session_rpe_load import session_load
 
@@ -34,14 +35,11 @@ class DetailEnvelopeReader:
         self._performance = performance
         self._summary = summary
 
-    def __call__(
-        self,
-        _db: Any,
-        activity_id: str,
-        _provider_activity_id: str | None,
-        _raw_summary: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
+    def __call__(self, db: Any, activity_id: str) -> dict[str, Any]:
         reference = str(self._references.resolve_reference(activity_id).activity_id)
+        # Equipment is read per live session, so a merged copy's reference follows
+        # its merge to the session the assignments are listed under.
+        live = canonical_store.live_session_id(db, reference) or reference
         # The session's effective feedback, through the reference or, for
         # feedback saved before the merged record resolved, the requested id.
         ids = [reference, str(activity_id)]
@@ -59,7 +57,7 @@ class DetailEnvelopeReader:
             )
         return {
             "activity_feedback": feedback,
-            "equipment": activity_equipment(self._read_equipment(reference), reference),
+            "equipment": activity_equipment(self._read_equipment(live), live),
             "activity_validation": validation,
             "session_rpe_load": load,
         }

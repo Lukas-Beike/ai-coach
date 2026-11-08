@@ -9,7 +9,6 @@ from datetime import date
 from typing import Any
 
 from backend.performance import garmin_metrics, trends, wellness
-from backend.performance.wellness_days import WellnessDay
 
 VO2MAX_UNIT = "ml/kg/min"
 
@@ -58,20 +57,13 @@ def performance_trend_average(
     days: int,
     end_date: date,
     *,
-    wellness_days: tuple[WellnessDay, ...] = (),
     garmin_history: Mapping[str, Mapping[date, float]],
 ) -> float | None:
-    """Average a metric over ``days``.
-
-    Intervals trends read canonical days, Garmin trends the canonical Garmin
-    day history.
-    """
+    """Average a Garmin metric over ``days``; other sources have no history."""
     current_source = metrics.get(key, {}).get("source")
     if current_source == garmin_metrics.GARMIN_PERFORMANCE_SOURCE:
         return trends.garmin_history_average(key, days, end_date, garmin_history)
-    return trends.intervals_performance_average(
-        wellness_days, key, days, end_date
-    )
+    return None
 
 
 def _performance_trend(
@@ -81,18 +73,12 @@ def _performance_trend(
     today: date,
     higher_is_better: bool | None = True,
     *,
-    wellness_days: tuple[WellnessDay, ...] = (),
     garmin_history: Mapping[str, Mapping[date, float]],
 ) -> dict[str, Any] | None:
     return wellness.comparison_value(
         metrics.get(key, {}).get("value"),
         performance_trend_average(
-            metrics,
-            key,
-            30,
-            today,
-            wellness_days=wellness_days,
-            garmin_history=garmin_history,
+            metrics, key, 30, today, garmin_history=garmin_history
         ),
         unit,
         30,
@@ -104,7 +90,6 @@ def performance_comparisons(
     metrics: dict[str, dict[str, Any]],
     recovery: dict[str, Any],
     load_context: dict[str, Any],
-    wellness_days: tuple[WellnessDay, ...],
     today: date,
     *,
     garmin_history: Mapping[str, Mapping[date, float]],
@@ -123,7 +108,6 @@ def performance_comparisons(
             unit,
             today,
             higher_is_better,
-            wellness_days=wellness_days,
             garmin_history=garmin_history,
         )
 
@@ -134,7 +118,6 @@ def performance_comparisons(
             "readiness",
             30,
             today,
-            wellness_days=wellness_days,
             garmin_history=garmin_history,
         ),
         "",
@@ -192,9 +175,6 @@ def performance_comparisons(
         "run_threshold_watts_30d": trend("run_threshold_watts", "W"),
         "run_threshold_pace_seconds_per_km_30d": trend(
             "run_threshold_pace_seconds_per_km", "s/km", False
-        ),
-        "run_zone2_pace_seconds_per_km_30d": trend(
-            "run_zone2_pace_seconds_per_km", "s/km", False
         ),
         "run_threshold_hr_bpm_30d": trend("run_threshold_hr_bpm", "bpm"),
         "cycling_vo2max_ml_kg_min_30d": trend("cycling_vo2max_ml_kg_min", VO2MAX_UNIT),

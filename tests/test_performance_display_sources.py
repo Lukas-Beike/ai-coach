@@ -56,15 +56,17 @@ class PreferredDisplayTests(unittest.TestCase):
         payload = preferred_providers(
             preferences_from_profile(
                 {
-                    "preferred_source_hrv": "intervals",
-                    "preferred_source_body": "intervals",
+                    "preferred_source_hrv": "garmin",
+                    "preferred_source_body": "garmin",
+                    "preferred_source_resting_hr": "intervals",
                 }
             )
         )
 
-        self.assertEqual(payload["hrv"], ProviderId.INTERVALS.value)
-        self.assertEqual(payload["weight_kg"], ProviderId.INTERVALS.value)
-        self.assertEqual(payload["body_fat_pct"], ProviderId.INTERVALS.value)
+        self.assertEqual(payload["hrv"], ProviderId.GARMIN.value)
+        self.assertEqual(payload["weight_kg"], ProviderId.GARMIN.value)
+        self.assertEqual(payload["body_fat_pct"], ProviderId.GARMIN.value)
+        # A stored Intervals.icu preference is ignored.
         self.assertEqual(payload["resting_hr"], ProviderId.GARMIN.value)
         self.assertEqual(payload["cycling_ftp_watts"], ProviderId.GARMIN.value)
 

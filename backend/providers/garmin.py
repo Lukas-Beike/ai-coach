@@ -1336,16 +1336,50 @@ def collect_garmin_activity_detail(
     capability_allowed: CapabilityAllowed | None = None,
     capability_failure: CapabilityFailure | None = None,
     capability_success: CapabilitySuccess | None = None,
+    exercise_sets: bool = False,
 ) -> dict[str, Any]:
     """Collect one Garmin activity's detail parts, keeping each part that succeeds.
 
-    Every part is a separate call. A paused part is skipped without a call and
+    Every part is a separate call. ``exercise_sets`` adds the exercise-set part,
+    which the caller requests for strength activities only. A paused part is skipped without a call and
     its capability is listed in ``skipped``; a failed part is omitted from the
     result and recorded in ``errors`` after redaction. ``errors`` and ``skipped``
     are present only when at least one part failed or was skipped.
     """
     payload: dict[str, Any] = {"activity_id": activity_id, "errors": []}
     skipped: list[str] = []
+    parts = _activity_detail_parts(activity_id, exercise_sets=exercise_sets)
+    for capability, key, method_name, invoke in parts:
+        method = getattr(client, method_name, None)
+        if not callable(method):
+            # The Personal API serves no splits or zone times and the SDK no FIT
+            # file; a part no transport serves is absent, not incomplete.
+            continue
+        fetch = partial(invoke, method)
+        if capability_allowed is not None and not capability_allowed(capability):
+            skipped.append(capability)
+            continue
+        try:
+            payload[key] = external_call(
+                "garmin", capability, fetch, {"activity_id": activity_id}
+            )
+            if capability_success is not None:
+                capability_success(capability)
+        except Exception as exc:  # noqa: BLE001 - SDK errors vary; keep other parts and redact.
+            if capability_failure is not None:
+                capability_failure(capability, exc)
+            _add_error(payload, capability, exc, redact, warn)
+    if not payload["errors"]:
+        del payload["errors"]
+    if skipped:
+        payload["skipped"] = skipped
+    return payload
+
+
+def _activity_detail_parts(
+    activity_id: str, *, exercise_sets: bool
+) -> tuple[tuple[str, str, str, Callable[[Any], Any]], ...]:
+    """The detail parts to collect for one activity, in call order."""
     # (capability key, payload key, fetch). The capability key also names the
     # external call, matching ``_fetch_range``.
     parts: tuple[tuple[str, str, str, Callable[[Any], Any]], ...] = (
@@ -1383,31 +1417,17 @@ def collect_garmin_activity_detail(
             lambda method: method(activity_id),
         ),
     )
-    for capability, key, method_name, invoke in parts:
-        method = getattr(client, method_name, None)
-        if not callable(method):
-            # The Personal API serves no splits or zone times and the SDK no FIT
-            # file; a part no transport serves is absent, not incomplete.
-            continue
-        fetch = partial(invoke, method)
-        if capability_allowed is not None and not capability_allowed(capability):
-            skipped.append(capability)
-            continue
-        try:
-            payload[key] = external_call(
-                "garmin", capability, fetch, {"activity_id": activity_id}
-            )
-            if capability_success is not None:
-                capability_success(capability)
-        except Exception as exc:  # noqa: BLE001 - SDK errors vary; keep other parts and redact.
-            if capability_failure is not None:
-                capability_failure(capability, exc)
-            _add_error(payload, capability, exc, redact, warn)
-    if not payload["errors"]:
-        del payload["errors"]
-    if skipped:
-        payload["skipped"] = skipped
-    return payload
+    if exercise_sets:
+        # SDK only: the executed sets, including the athlete's Connect edits.
+        parts += (
+            (
+                "activity_exercise_sets",
+                "exercise_sets",
+                "get_activity_exercise_sets",
+                lambda method: method(activity_id),
+            ),
+        )
+    return parts
 
 
 def _validate_current_metrics(
@@ -1490,7 +1510,7 @@ def _collect_activity_ratings(
             if warn:
                 warn(ACTIVITY_RATINGS_SECTION, redact(str(exc))[:500], exc)
             break
-        row = _rating_row(value, activity_id, started)
+        row = rating_row(value, activity_id, started)
         if row is not None:
             ratings.append(row)
     if ratings:
@@ -1521,7 +1541,7 @@ def _rating_candidates(
     ][:MAX_ACTIVITY_RATING_READS]
 
 
-def _rating_row(value: Any, activity_id: str, started: str) -> dict[str, Any] | None:
+def rating_row(value: Any, activity_id: str, started: str) -> dict[str, Any] | None:
     """The stored rating row of one single-activity read, or None without a summary.
 
     Every key is present, so a rating cleared on the watch clears the stored one.

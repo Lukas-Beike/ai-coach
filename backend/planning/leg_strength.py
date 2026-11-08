@@ -4,9 +4,11 @@ Only the number and the intensity of leg strength sessions count. There is no
 tonnage, no per-exercise volume and no planned strength load, and strength stays
 out of the endurance low/moderate/high distribution and the weekly load notes.
 
-- Leg: the session focus first (``legs``, ``full_body`` and ``plyometrics`` are
-  leg, other foci not), whether set or keyword-derived (``session_focus``); no
-  focus means unknown.
+- Leg: for a completed session the categories of its executed strength sets
+  (any leg exercise is leg; only known non-leg exercises are not), else the
+  session focus (``legs``, ``full_body`` and ``plyometrics`` are leg, other foci
+  not), whether set or keyword-derived (``session_focus``); no focus means
+  unknown.
 - Intensity: the set strength intensity, else the planned intensity
   (heavy from 0.85, moderate from 0.70), else RPE (heavy from 8, moderate from
   6), else the text; otherwise unknown.
@@ -28,7 +30,12 @@ from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
 from backend.planning import running_week
 from backend.planning.season import target_phase
-from backend.planning.session_focus import SessionFocus, session_focus
+from backend.planning.session_focus import (
+    SessionFocus,
+    session_focus,
+    structure_intensity,
+    text_intensity,
+)
 from backend.planning.sport import planned_sport_environment
 
 BEFORE_KEY = "leg_strength_before_key_session"
@@ -46,14 +53,12 @@ MIN_PLAN_WEEKS = 2
 LONG_SESSION_S = 5400
 NOTE = (
     "Count and intensity of strength sessions only, no tonnage and no load. "
-    "Leg = legs, full body or plyometrics focus."
+    "Leg = executed leg exercises of a completed session, else a legs, full body "
+    "or plyometrics focus."
 )
 Predicate = Callable[[Mapping[str, Any]], bool]
 Draft = tuple[str, list[Mapping[str, Any]], str, dict[str, Any]]
 _ENDURANCE = frozenset({Sport.RUN, Sport.RIDE})
-_HEAVY = re.compile(r"\b(?:heavy|schwer|[1-6]\s*rm)\b", re.IGNORECASE)
-_MODERATE = re.compile(r"\b(?:moderate|moderat|mittel(?:schwer)?)\b", re.IGNORECASE)
-_LIGHT = re.compile(r"\b(?:light|leicht)\b", re.IGNORECASE)
 # A profile answer that says no strength is wanted.
 _NO_STRENGTH = re.compile(
     r"^\s*(?:-+\s*$|(?:kein\w*|nein|no|none|ohne|nicht)\b)", re.IGNORECASE
@@ -83,28 +88,20 @@ def _grade(value: float, heavy: float, moderate: float) -> str:
     return "moderate" if value >= moderate else "light"
 
 
-def _text_intensity(unit: Mapping[str, Any]) -> str | None:
-    text = f"{unit.get('name') or ''} {unit.get('description') or ''}"
-    for label, pattern in (
-        ("heavy", _HEAVY),
-        ("moderate", _MODERATE),
-        ("light", _LIGHT),
-    ):
-        if pattern.search(text):
-            return label
-    return None
-
-
 def _intensity(unit: Mapping[str, Any], focus: SessionFocus) -> str | None:
-    if focus.strength_intensity is not None:
+    """Set intensity, the structure's, the planned factor, RPE, then the text."""
+    if focus.intensity_origin == "set":
         return focus.strength_intensity
+    structured = structure_intensity(unit)
+    if structured is not None:
+        return structured
     factor = planned_intensity_factor(unit)
     if factor is not None:
         return _grade(factor, HEAVY_FACTOR, MODERATE_FACTOR)
     rpe = number(unit.get("rpe"))
     if rpe is not None:
         return _grade(rpe, HEAVY_RPE, MODERATE_RPE)
-    return _text_intensity(unit)
+    return text_intensity(unit)
 
 
 def classify(unit: Mapping[str, Any]) -> StrengthClass | None:
@@ -112,7 +109,11 @@ def classify(unit: Mapping[str, Any]) -> StrengthClass | None:
     if planned_sport_environment(unit)[0] is not Sport.STRENGTH:
         return None
     focus = session_focus(unit)
-    leg = None if focus.value is None else focus.is_leg_strength
+    executed = unit.get("executed_leg")
+    if isinstance(executed, bool):
+        leg: bool | None = executed
+    else:
+        leg = None if focus.value is None else focus.is_leg_strength
     return StrengthClass(leg, _intensity(unit, focus))
 
 
@@ -145,6 +146,7 @@ def completed_unit(row: Mapping[str, Any]) -> dict[str, Any]:
         "description": row.get("description"),
         "planned_intensity": row.get("intensity"),
         "rpe": row.get("rpe"),
+        "executed_leg": (row.get("strength_sets") or {}).get("leg"),
     }
 
 

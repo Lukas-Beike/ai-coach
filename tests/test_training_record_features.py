@@ -549,7 +549,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(item["usage"]["hours"], 0.5)
         self.assertEqual(item["usage"]["distance_km"], 50)
         links = {row["activity_id"]: row for row in service.read()["assignments"]}
-        self.assertEqual(set(links), {"i1"})
+        self.assertEqual(set(links), {"act_i1"})
         self.assertEqual({row["source"] for row in links.values()}, {"garmin_gear"})
 
     def test_explicit_assignment_and_unassignment_beat_the_garmin_link(self):
@@ -571,7 +571,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             row["activity_id"]: row.get("source")
             for row in service.read()["assignments"]
         }
-        self.assertEqual(sources, {"i1": None, "i2": None})
+        self.assertEqual(sources, {"act_i1": None, "act_i2": None})
 
     def test_activity_listed_for_several_main_items_links_to_each(self):
         rows = [self._ride("i1"), self._ride("i2")]
@@ -598,11 +598,11 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(
             pairs,
             {
-                ("i1", ids["g1"]),
-                ("i1", ids["g2"]),
-                ("i1", ids["g3"]),
-                ("i2", ids["g1"]),
-                ("i2", ids["g3"]),
+                ("act_i1", ids["g1"]),
+                ("act_i1", ids["g2"]),
+                ("act_i1", ids["g3"]),
+                ("act_i2", ids["g1"]),
+                ("act_i2", ids["g3"]),
             },
         )
 
@@ -625,9 +625,9 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         by_activity = {}
         for row in service.read()["assignments"]:
             by_activity.setdefault(row["activity_id"], []).append(row)
-        self.assertEqual(len(by_activity["i1"]), 1)
-        self.assertIsNone(by_activity["i1"][0].get("source"))
-        self.assertEqual(len(by_activity["i2"]), 2)
+        self.assertEqual(len(by_activity["act_i1"]), 1)
+        self.assertIsNone(by_activity["act_i1"][0].get("source"))
+        self.assertEqual(len(by_activity["act_i2"]), 2)
 
     def test_assignment_list_limit_keeps_activities_whole(self):
         rows = [self._ride("i1", day="2026-08-31"), self._ride("i2")]
@@ -642,15 +642,15 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         )
         with patch("backend.athlete.equipment.ASSIGNMENT_LIST_LIMIT", 3):
             listed = service.read()["assignments"]
-            targeted = service.read(activity_id="i2")["assignments"]
+            targeted = service.read(activity_id="act_i2")["assignments"]
             usage = {
                 item["garmin_uuid"]: item["usage"]["assigned_sessions"]
                 for item in service.read()["items"]
             }
         # The third row would split i2's gear, so the list stops after i1.
-        self.assertEqual([row["activity_id"] for row in listed], ["i1", "i1"])
+        self.assertEqual([row["activity_id"] for row in listed], ["act_i1", "act_i1"])
         ids = {items["g1"]["id"], items["g2"]["id"]}
-        self.assertEqual({row["activity_id"] for row in targeted}, {"i2"})
+        self.assertEqual({row["activity_id"] for row in targeted}, {"act_i2"})
         self.assertEqual({row["equipment_id"] for row in targeted}, ids)
         self.assertEqual(usage, {"g1": 2, "g2": 2})
 

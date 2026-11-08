@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId
@@ -26,8 +25,6 @@ COACH_SYNC_TOOL_NAMES = frozenset(
         "sync_nutrition",
         "resolve_training_sync_conflict",
         "start_provider_refresh",
-        "refresh_current_performance",
-        "delete_duplicate_intervals_activity",
     }
 )
 
@@ -44,8 +41,6 @@ class CoachSyncToolService:
         plan_repair: PlanRepairManifestService,
         plan_push: PlanPushCommandService,
         provider_refresh: ProviderRefreshCommandService,
-        duplicate_activity: Any | None = None,
-        intervals_client_factory: Callable[[], Any] | None = None,
         nutrition_diary: Any | None = None,
     ) -> None:
         self._queue = queue
@@ -55,8 +50,6 @@ class CoachSyncToolService:
         self._plan_repair = plan_repair
         self._plan_push = plan_push
         self._provider_refresh = provider_refresh
-        self._duplicate_activity = duplicate_activity
-        self._intervals_client_factory = intervals_client_factory
         self._nutrition_diary = nutrition_diary
 
     def execute(
@@ -87,10 +80,6 @@ class CoachSyncToolService:
             return self._start_provider_refresh(
                 arguments, intent, sync_job_ids, cancel_event
             )
-        if name == "refresh_current_performance":
-            return self._refresh_current_performance(arguments, intent, sync_job_ids)
-        if name == "delete_duplicate_intervals_activity":
-            return self._delete_duplicate_activity(arguments, intent)
         return None
 
     def _sync_nutrition(
@@ -160,26 +149,6 @@ class CoachSyncToolService:
         )
         if result.get("status") == "queued":
             sync_job_ids.append(result["sync_job_id"])
-        return result
-
-    def _refresh_current_performance(
-        self,
-        arguments: dict[str, Any],
-        intent: dict[str, Any],
-        sync_job_ids: list[str],
-    ) -> dict[str, Any]:
-        if (
-            "refresh_current_performance" not in authorized_operations(intent)
-            or intent.get("target_system") != ProviderId.INTERVALS
-        ):
-            raise AppError(
-                403,
-                "Die strukturierte Coach-Autorisierung erlaubt diesen Refresh nicht.",
-                reason="intent_scope_denied",
-            )
-        require_coach_scope(intent, "intervals_refresh")
-        result = self._provider_refresh.queue_performance_refresh(arguments)
-        sync_job_ids.append(result["sync_job_id"])
         return result
 
     def _start_plan_sync(
@@ -312,36 +281,3 @@ class CoachSyncToolService:
         result = self._conflicts.retry_job(job_id)
         sync_job_ids.append(job_id)
         return result
-
-    def _delete_duplicate_activity(
-        self, arguments: dict[str, Any], intent: dict[str, Any]
-    ) -> dict[str, Any]:
-        if (
-            "delete_duplicate_intervals_activity" not in authorized_operations(intent)
-            or intent.get("target_system") != ProviderId.INTERVALS
-        ):
-            raise AppError(
-                403,
-                "Die strukturierte Coach-Autorisierung erlaubt diesen Sync nicht.",
-                reason="intent_scope_denied",
-            )
-        require_coach_scope(intent, "intervals_sync")
-        if not self._duplicate_activity or not self._intervals_client_factory:
-            raise AppError(500, "Duplikat-Bereinigung ist nicht verfügbar.")
-        manifest = arguments.get("_approval_manifest")
-        if not isinstance(manifest, dict):
-            raise AppError(409, "Die freigegebene Duplikatvorschau fehlt.")
-        for field in ("canonical_id", "duplicate_id"):
-            requested = arguments.get(field)
-            if requested and str(requested) != str(manifest.get(field) or ""):
-                raise AppError(
-                    409, "Die freigegebene Duplikatvorschau stimmt nicht überein."
-                )
-        result = self._duplicate_activity.delete(
-            {
-                field: manifest[field]
-                for field in ("canonical_id", "duplicate_id", "snapshot_synced_at")
-            },
-            self._intervals_client_factory(),
-        )
-        return {"ok": True, **result}

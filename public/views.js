@@ -481,28 +481,16 @@ function intervalsConnectionState(data, configured) {
   };
 }
 
-function intervalsPaginationDetail(intervals) {
-  return Object.entries(intervals.pagination || {})
-    .filter(([, value]) => value && (Number(value.pages) > 1 || value.complete === false))
-    .map(([name, value]) => {
-      const completeness = value.complete === false ? " · unvollständig" : "";
-      return name + ": " + (value.records || 0) + " Datensätze auf " + (value.pages || 0) + " Seiten" + completeness;
-    })
-    .join(" · ");
-}
-
 function intervalsConnectionDetail(intervals) {
   const librarySync = intervals.library_sync || {};
   if (!intervals.configured) return "API-Schlüssel nicht konfiguriert";
-  if (intervals.state === "syncing") return intervals.status || "Intervals.icu wird synchronisiert.";
+  if (intervals.state === "syncing") return "Intervals.icu wird synchronisiert.";
   if (intervals.last_error) return intervals.last_error;
-  if (!(intervals.last_sync_at || librarySync.last_sync_at)) return "Noch keine Synchronisierung durchgeführt";
-  const updated = formatTime(intervals.last_sync_at || librarySync.last_sync_at);
+  if (!librarySync.last_sync_at) return "Noch keine Synchronisierung durchgeführt";
+  const updated = formatTime(librarySync.last_sync_at);
   const libraryCount = Number(librarySync.state?.synced || 0);
   const counts = libraryCount ? " · " + libraryCount + " Bibliothekseinheiten" : "";
-  const pagination = intervalsPaginationDetail(intervals);
-  const paginationSuffix = pagination ? " · " + pagination : "";
-  return "Letzte Aktualisierung: " + updated + counts + paginationSuffix;
+  return "Letzte Aktualisierung: " + updated + counts;
 }
 
 function renderIntervalsConnection(data, configured) {
@@ -554,13 +542,12 @@ function updateUnfocusedInput(selector, value) {
 }
 
 function renderSettingsSyncDayInputs(data) {
-  updateUnfocusedInput("#intervalsSyncDays", data.sync_settings?.intervals_days || 84);
   updateUnfocusedInput("#garminSyncDays", data.sync_settings?.garmin_days || 84);
 }
 
 function calendarHorizonText(data) {
   const window = data.planning_view?.provider_window || {};
-  if (window.start && window.end) return "Die Ansicht bleibt auf das lokal geladene Intervals.icu-Fenster " + window.start + " bis " + window.end + " begrenzt.";
+  if (window.start && window.end) return "Die Ansicht bleibt auf das lokal geladene Providerfenster " + window.start + " bis " + window.end + " begrenzt.";
   return "Die Ansicht wird auf das lokal geladene Providerfenster begrenzt.";
 }
 
@@ -581,47 +568,8 @@ function renderSettingsInputs(data) {
   renderCalendarDisplayInputs(data);
 }
 
-function intervalsSyncRunning(data, fullRunning) {
-  return Boolean(data.sync?.running || state.localSync.intervals || fullRunning);
-}
-
-function intervalsFullResyncText(fullResync, fullRunning) {
-  if (fullRunning && fullResync.status) return fullResync.status;
-  if (fullResync.last_error) return fullResync.last_error;
-  if (fullResync.last_resync_at) return "Letzter vollständiger Resync: " + formatTime(fullResync.last_resync_at);
-  return "Löscht nur lokale Intervals.icu-Daten; die Cloud bleibt unverändert.";
-}
-
-function renderIntervalsSyncControls(data, configured) {
-  const fullResync = data.provider_resync?.intervals || {};
-  const fullRunning = Boolean(fullResync.running || state.localSync.intervalsFull);
-  const syncRunning = intervalsSyncRunning(data, fullRunning);
-  const intervalsConfigured = Boolean(configured.intervals);
-  setProviderSetupHint("#intervalsSetupHint", intervalsConfigured);
-  const syncButton = $("#systemIntervalsSyncButton");
-  if (syncButton) {
-    syncButton.disabled = syncRunning || !intervalsConfigured;
-    syncButton.textContent = data.sync?.running || state.localSync.intervals ? "Synchronisierung läuft…" : intervalsSyncCaption();
-  }
-  const ingestEnabled = intervalsIngestEnabled();
-  const ingestToggle = $("#intervalsIngestToggle");
-  if (ingestToggle) {
-    ingestToggle.hidden = !intervalsConfigured;
-    ingestToggle.textContent = ingestEnabled ? "Einlesen ausschalten" : "Einlesen einschalten";
-  }
-  const period = $("#intervalsSyncDays")?.closest("label");
-  if (period) period.hidden = !ingestEnabled;
-  const fullButton = $("#systemIntervalsFullResyncButton");
-  if (fullButton) {
-    fullButton.hidden = !ingestEnabled;
-    fullButton.disabled = !intervalsConfigured || fullRunning || Boolean(data.sync?.running || state.localSync.intervals);
-    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
-  }
-  const status = $("#intervalsFullResyncStatus");
-  if (status) {
-    status.classList.toggle("error", Boolean(fullResync.last_error));
-    status.textContent = intervalsFullResyncText(fullResync, fullRunning);
-  }
+function renderIntervalsSyncControls(_data, configured) {
+  setProviderSetupHint("#intervalsSetupHint", Boolean(configured.intervals));
 }
 
 function renderGarminSyncControl(data) {

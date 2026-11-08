@@ -117,7 +117,7 @@ function ensureRouteData(route = state.route) {
   if (panelRoute === "plan") requested.push(...["plan", "library"].filter((area) => !state.loadedAreas.has(area) && !areaLoading(area)));
   if (requested.length) load("/api/bootstrap?local=1", requested);
   if (route === "more/equipment") void renderTrainingRecords();
-  if (route === "analysis/performance") void renderCyclingPowerProfile();
+  if (ANALYSIS_PERFORMANCE_ROUTES.has(route)) void renderCyclingPowerProfile();
   if (route === "analysis/sessions") void ActivityAnalysis.render();
 }
 
@@ -140,6 +140,7 @@ function renderActiveRoute(mainRoute, panelRoute) {
 
 function restoreRouteScroll(mainRoute, returningToChat, shouldFocusPlannedToday) {
   if (mainRoute === "coach") {
+    if (returningToChat) resetChatWindowScrollAnchor();
     // A reader who scrolled away before leaving returns to their position, not to the reply start.
     if (!state.chatFollowLatest) state.chatResponseScrollPending = false;
     if (state.chatResponseScrollPending) scrollChatToResponseStart();
@@ -312,9 +313,8 @@ function renderStatus(data) {
   // The setup state is shown by the page-wide setup banner on every tab, so the
   // status card only reports runtime problems.
   renderSetupBanner(missing);
-  const performanceRefresh = data.performance_refresh || {};
   const openaiStatus = data.usage?.status || {};
-  const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error || performanceRefresh.last_error
+  const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const statusCard = $("#statusCard");
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";

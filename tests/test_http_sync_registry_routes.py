@@ -15,10 +15,8 @@ from backend.errors import AppError, public_error_contract
 from backend.http_api.sync_commands import (
     GARMIN_FULL_RESYNC_PATH,
     GARMIN_SYNC_PATH,
-    INTERVALS_FULL_RESYNC_PATH,
     PROVIDER_NOT_CONFIGURED_MESSAGES,
     SYNC_BODY_PATHS,
-    SYNC_PATH,
     SYNC_POST_PATHS,
     SyncCommandEndpoint,
 )
@@ -53,9 +51,6 @@ NON_INTEGER_PERIOD_MESSAGE = "Der Synchronisationszeitraum muss eine ganze Zahl 
 PREVIOUS_POST_PATHS = frozenset(
     {
         "/api/sync/jobs",
-        "/api/sync",
-        "/api/intervals/full-resync",
-        "/api/performance/refresh",
         "/api/garmin/sync",
         "/api/external-calendar/sync",
         "/api/weather/sync",
@@ -67,9 +62,7 @@ PREVIOUS_POST_PATHS = frozenset(
 PREVIOUS_BODY_PATHS = frozenset(
     {
         "/api/sync/jobs",
-        "/api/sync",
         "/api/garmin/sync",
-        "/api/intervals/full-resync",
         "/api/garmin/full-resync",
         "/api/wahoo/full-resync",
     }
@@ -96,7 +89,6 @@ def _build(
     endpoint = SyncCommandEndpoint(
         queue,
         state,
-        performance,
         full_resync,
         lambda: "operation-1",
         {"intervals": 90, "garmin": 30},
@@ -128,9 +120,7 @@ class DerivedSyncTableTests(unittest.TestCase):
         self.assertEqual(PREVIOUS_BODY_PATHS, SYNC_BODY_PATHS)
 
     def test_module_path_exports_equal_previous_literals(self) -> None:
-        self.assertEqual("/api/sync", SYNC_PATH)
         self.assertEqual("/api/garmin/sync", GARMIN_SYNC_PATH)
-        self.assertEqual("/api/intervals/full-resync", INTERVALS_FULL_RESYNC_PATH)
         self.assertEqual("/api/garmin/full-resync", GARMIN_FULL_RESYNC_PATH)
 
     def test_not_configured_messages_are_byte_identical(self) -> None:
@@ -153,9 +143,8 @@ class DerivedSyncTableTests(unittest.TestCase):
 class DefaultRegistryDispatchTests(unittest.TestCase):
     def test_period_error_messages_are_byte_identical(self) -> None:
         cases = (
-            ("/api/sync", 366, INTERVALS_PERIOD_MESSAGE),
             ("/api/garmin/sync", 91, GARMIN_PERIOD_MESSAGE),
-            ("/api/sync", "abc", NON_INTEGER_PERIOD_MESSAGE),
+            ("/api/garmin/sync", "abc", NON_INTEGER_PERIOD_MESSAGE),
             ("/api/garmin/sync", None, NON_INTEGER_PERIOD_MESSAGE),
         )
         for path, days, expected in cases:
@@ -187,18 +176,6 @@ class DefaultRegistryDispatchTests(unittest.TestCase):
         )
         state.set_sync_period.assert_not_called()
 
-    def test_performance_refresh_and_full_resync_keep_status_codes(self) -> None:
-        endpoint, _, _, performance, full_resync = _build()
-        self.assertEqual(
-            (200, {"status": "refreshed"}), endpoint.execute("/api/performance/refresh")
-        )
-        performance.refresh.assert_called_once_with()
-        full_resync.resync.return_value = {"status": "ok"}
-        self.assertEqual(
-            (200, {"status": "ok"}),
-            endpoint.execute("/api/garmin/full-resync", {"confirm": "FULL_RESYNC"}),
-        )
-        full_resync.resync.assert_called_once_with("garmin", operation_id="operation-1")
 
     def test_job_route_validates_payload_shape_and_accepts_non_string_provider(
         self,
@@ -411,11 +388,11 @@ class InjectedRegistryPostRouteTests(unittest.TestCase):
 
         self.assertTrue(
             SyncCommandPostRoute(lambda: endpoint, registry=registry).handle(
-                handler, "/api/sync"
+                handler, "/api/garmin/sync"
             )
         )
         handler.read_json.assert_called_once_with()
-        endpoint.execute.assert_called_once_with("/api/sync", {"days": 3})
+        endpoint.execute.assert_called_once_with("/api/garmin/sync", {"days": 3})
 
 
 if __name__ == "__main__":

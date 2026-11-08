@@ -49,7 +49,7 @@ def _service(rows=(), plan=None, checkins=(), feedback=(), model="pyramidal"):
         read_synced_at=lambda _db: None,
         read_plan=lambda: plan,
         read_checkins=lambda: list(checkins),
-        read_feedback=lambda: list(feedback),
+        read_feedback=lambda keys: list(feedback),
         today=lambda: TODAY,
         load_scenarios=load_scenarios,
         season_source=_empty_season_source(),
@@ -74,10 +74,11 @@ def _run(key, day, **values):
 class BlockReviewTests(unittest.TestCase):
     def test_complete_block_compares_plan_with_records(self):
         zones = _zones(3000, 300, 300)
+        local = {"heart_rate_zone_times": "local"}
         rows = [
-            _run("a", "2026-09-01", heart_rate_zone_times=zones),
-            _run("b", "2026-09-08", heart_rate_zone_times=zones),
-            _run("c", "2026-09-19", heart_rate_zone_times=zones),
+            _run("a", "2026-09-01", heart_rate_zone_times=zones, zone_models=local),
+            _run("b", "2026-09-08", heart_rate_zone_times=zones, zone_models=local),
+            _run("c", "2026-09-19", heart_rate_zone_times=zones, zone_models=local),
         ]
         plan = {
             "training_calendar": [

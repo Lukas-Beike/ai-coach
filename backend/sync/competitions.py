@@ -96,26 +96,14 @@ class CompetitionSyncReconciler:
         self,
         plan: dict[str, Any],
         pushed: list[dict[str, Any]],
-        tombstones: list[dict[str, Any]],
         local_rows: list[dict[str, Any]],
         *,
-        push_local: bool,
         now: str,
     ) -> dict[str, Any]:
         indexes = self._remote_indexes(plan, pushed)
         with self._database_manager.unit_of_work() as db:
-            updated, conflicts = self._synchronize_existing(
-                db, local_rows, indexes, now, push_local
-            )
-            imported = self._import_remote_competitions(
-                db, indexes["remote_events"], tombstones, now
-            )
-        return {
-            "updated": updated,
-            "conflicts": conflicts,
-            "imported": imported,
-            "remote_events": indexes["remote_events"],
-        }
+            conflicts = self._synchronize_existing(db, local_rows, indexes, now)
+        return {"conflicts": conflicts, "remote_events": indexes["remote_events"]}
 
     @staticmethod
     def _remote_indexes(
@@ -196,7 +184,6 @@ class CompetitionSyncReconciler:
         identity_remote: dict[str, Any] | None,
         external_id: str,
         now: str,
-        push_local: bool,
     ) -> int:
         if identity_remote and not remote and row.get("sync_state") != "local_override":
             self._record_conflict(
@@ -209,21 +196,6 @@ class CompetitionSyncReconciler:
             )
             return 1
         remote = remote or identity_remote
-        if not push_local:
-            if remote:
-                self._record_conflict(
-                    db,
-                    row,
-                    now,
-                    planning_competitions.competition_conflict_payload(
-                        remote, "remote_changed", detected_at=now
-                    ),
-                )
-                return 1
-            if row.get("intervals_event_id"):
-                self._record_conflict(db, row, now, self._remote_missing_conflict(now))
-                return 1
-            return 0
         if not planning_competitions.supported_competition_sport(
             row.get("sport"), row.get("environment")
         ):
@@ -252,60 +224,16 @@ class CompetitionSyncReconciler:
         return 0
 
     def _reconcile_synced(
-        self,
-        db: Any,
-        row: dict[str, Any],
-        remote: dict[str, Any] | None,
-        external_id: str,
-        now: str,
-        push_local: bool,
-    ) -> tuple[int, int]:
-        if remote:
-            data = planning_competitions.remote_competition_data(remote)
-            if data:
-                environment, sport_detail = data["environment"], data["sport_detail"]
-                if _same_remote_sport(row, data):
-                    # The remote type cannot tell indoor from virtual, so a clean
-                    # row keeps the local environment and detail it already has.
-                    environment = row.get("environment")
-                    sport_detail = row.get("sport_detail")
-                db.execute(
-                    "UPDATE competitions SET name=?, event_date=?, starts_at_local=?, sport=?, "
-                    "environment=?, sport_detail=?, priority=?, category=?, distance=?, target=?, description=?, planned_duration_s=?, notes=?, "
-                    "intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', "
-                    "sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
-                    (
-                        data["name"],
-                        data["event_date"],
-                        data["starts_at_local"],
-                        data["sport"],
-                        environment,
-                        sport_detail,
-                        data["priority"],
-                        data["category"],
-                        data["distance"],
-                        data["target"],
-                        data["description"],
-                        data["planned_duration_s"],
-                        data["notes"],
-                        data["intervals_event_id"]
-                        or str(row.get("intervals_event_id") or "")
-                        or None,
-                        external_id,
-                        now,
-                        now,
-                        row["id"],
-                    ),
-                )
-                _REMOTE_LINKS.refresh_from_slots(
-                    db, RemoteEntityKind.COMPETITION, str(row["id"])
-                )
-                return 1, 0
-            return 0, 0
-        if row.get("intervals_event_id") and push_local:
+        self, db: Any, row: dict[str, Any], remote: dict[str, Any] | None, now: str
+    ) -> int:
+        """Flag a clean linked competition whose Intervals.icu event is gone.
+
+        Intervals.icu is output only, so a clean row never takes remote values.
+        """
+        if remote is None and row.get("intervals_event_id"):
             self._record_conflict(db, row, now, self._remote_missing_conflict(now))
-            return 0, 1
-        return 0, 0
+            return 1
+        return 0
 
     def _synchronize_existing(
         self,
@@ -313,9 +241,7 @@ class CompetitionSyncReconciler:
         local_rows: list[dict[str, Any]],
         indexes: dict[str, Any],
         now: str,
-        push_local: bool,
-    ) -> tuple[int, int]:
-        updated = 0
+    ) -> int:
         conflicts = 0
         for row in local_rows:
             current = db.execute(
@@ -327,21 +253,11 @@ class CompetitionSyncReconciler:
             external_id, remote, identity_remote = self._remote_match(row, indexes)
             if row.get("sync_dirty"):
                 conflicts += self._reconcile_dirty(
-                    db,
-                    row,
-                    remote,
-                    identity_remote,
-                    external_id,
-                    now,
-                    push_local,
+                    db, row, remote, identity_remote, external_id, now
                 )
             else:
-                changed, conflicted = self._reconcile_synced(
-                    db, row, remote, external_id, now, push_local
-                )
-                updated += changed
-                conflicts += conflicted
-        return updated, conflicts
+                conflicts += self._reconcile_synced(db, row, remote, now)
+        return conflicts
 
     @staticmethod
     def _prefer_remote_link(db: Any, row: dict[str, Any]) -> dict[str, Any]:
@@ -362,133 +278,6 @@ class CompetitionSyncReconciler:
                 row.get("external_id"),
             ),
         }
-
-    @staticmethod
-    def _remote_local_id(
-        remote: dict[str, Any],
-        data: dict[str, Any],
-        existing: dict[str, dict[str, Any]],
-    ) -> str | None:
-        external_id = str(remote.get("external_id") or "")
-        if external_id.startswith(planning_competitions.COMPETITION_EXTERNAL_PREFIX):
-            candidate = external_id[
-                len(planning_competitions.COMPETITION_EXTERNAL_PREFIX) :
-            ]
-            if candidate in existing:
-                return candidate
-        if remote.get("id") is not None:
-            remote_id = str(remote["id"])
-            linked = next(
-                (
-                    key
-                    for key, row in existing.items()
-                    if str(row.get("intervals_event_id") or "") == remote_id
-                ),
-                None,
-            )
-            if linked is not None:
-                return linked
-        remote_key = planning_competitions.competition_sync_key(data)
-        return next(
-            (
-                key
-                for key, row in existing.items()
-                if planning_competitions.competition_sync_key(row) == remote_key
-            ),
-            None,
-        )
-
-    @staticmethod
-    def _suppressed_identifiers(
-        db: Any, tombstones: list[dict[str, Any]]
-    ) -> tuple[set[str], set[str]]:
-        suppressed = tombstones + [
-            dict(row)
-            for row in db.execute(
-                "SELECT * FROM competition_sync_tombstones"
-            ).fetchall()
-        ]
-        return (
-            {
-                str(row["intervals_event_id"])
-                for row in suppressed
-                if row.get("intervals_event_id")
-            },
-            {str(row["external_id"]) for row in suppressed if row.get("external_id")},
-        )
-
-    def _import_remote_competitions(
-        self,
-        db: Any,
-        remote_events: list[dict[str, Any]],
-        tombstones: list[dict[str, Any]],
-        now: str,
-    ) -> int:
-        existing = {
-            str(row["id"]): dict(row)
-            for row in db.execute("SELECT * FROM competitions").fetchall()
-        }
-        suppressed_ids, suppressed_external = self._suppressed_identifiers(
-            db, tombstones
-        )
-        imported = 0
-        for remote in remote_events:
-            if (
-                str(remote.get("id") or "") in suppressed_ids
-                or str(remote.get("external_id") or "") in suppressed_external
-            ):
-                continue
-            data = planning_competitions.remote_competition_data(remote)
-            if (
-                not data
-                or self._remote_local_id(remote, data, existing) is not None
-                or len(existing) >= 20
-            ):
-                continue
-            local_id = str(self._uuid_factory())
-            external_id = str(
-                remote.get("external_id")
-                or planning_competitions.competition_external_id(local_id)
-            )
-            db.execute(
-                "INSERT INTO competitions(id, name, event_date, sport, environment, sport_detail, priority, distance, target, "
-                "course_profile, notes, category, starts_at_local, description, planned_duration_s, "
-                "intervals_event_id, external_id, sync_dirty, sync_state, sync_conflict, "
-                "last_synced_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'synced', '', ?, ?, ?)",
-                (
-                    local_id,
-                    data["name"],
-                    data["event_date"],
-                    data["sport"],
-                    data["environment"],
-                    data["sport_detail"],
-                    data["priority"],
-                    data["distance"],
-                    data["target"],
-                    "",
-                    data["notes"],
-                    data["category"],
-                    data["starts_at_local"],
-                    data["description"],
-                    data["planned_duration_s"],
-                    data["intervals_event_id"],
-                    external_id,
-                    now,
-                    now,
-                    now,
-                ),
-            )
-            _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.COMPETITION, local_id)
-            existing[local_id] = {
-                "id": local_id,
-                "name": data["name"],
-                "event_date": data["event_date"],
-                "sport": data["sport"],
-                "environment": data["environment"],
-            }
-            imported += 1
-        return imported
 
 
 class CompetitionSyncService:
@@ -525,7 +314,6 @@ class CompetitionSyncService:
     def sync(
         self,
         reason: str = "manual",
-        push_local: bool = False,
         expected_manifest: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         if not self._config.intervals_api_key:
@@ -553,10 +341,10 @@ class CompetitionSyncService:
             plan = planning_competitions.competition_sync_plan(
                 local_rows, tombstones, remote_events
             )
-            outbound = list(plan["outbound"]) if push_local else []
+            outbound = list(plan["outbound"])
             delete_identifiers = plan["delete_identifiers"]
             deleted_remote = 0
-            if push_local and delete_identifiers:
+            if delete_identifiers:
                 client.bulk_delete_events(delete_identifiers)
                 self._reconciler.clear_tombstones(tombstones)
                 deleted_remote = len(delete_identifiers)
@@ -565,16 +353,14 @@ class CompetitionSyncService:
                     planning_fields_from_intervals(event)
                     for event in client.upsert_competition_events(outbound)
                 ]
-                if push_local and outbound
+                if outbound
                 else []
             )
             now = self._now()
             reconciled = self._reconciler.reconcile(
                 plan,
                 pushed,
-                tombstones,
                 local_rows,
-                push_local=push_local,
                 now=now,
             )
             self._set_kv("last_competition_sync_at", now)
@@ -583,8 +369,6 @@ class CompetitionSyncService:
             return {
                 "status": "ok",
                 "synced_at": now,
-                "imported": reconciled["imported"],
-                "updated": reconciled["updated"],
                 "pushed": len(outbound),
                 "skipped": plan["skipped"],
                 "skipped_items": [

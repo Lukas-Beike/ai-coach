@@ -6,7 +6,6 @@ from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
-from backend.db import garmin_store
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import read_daily_health_by_date
 from backend.performance.load_context import read_local_fitness
@@ -57,7 +56,6 @@ class DailyPlanningContextService:
         self,
         db: Any,
         today: date,
-        garmin: dict[str, Any],
         history: Any,
     ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
         """Recovery and daily-health views of the window ending on the local date.
@@ -75,7 +73,7 @@ class DailyPlanningContextService:
             start=start,
             end=today,
             morning_battery_history=history,
-            morning_body_battery=self._morning_body_battery_service.current(garmin),
+            morning_body_battery=self._morning_body_battery_service.current_in(db),
             preferences=(
                 NO_PREFERENCES
                 if self._source_preferences is None
@@ -121,12 +119,11 @@ class DailyPlanningContextService:
         )
 
         with self._database_manager.reader() as db:
-            garmin = garmin_store.read_state(db)
             morning_battery_history = decode_history(
                 self._key_value_repository.get(db, _MORNING_BATTERY_HISTORY_KEY)
             )
             recovery_by_date, health_by_date = self._recovery_by_date(
-                db, today, garmin, morning_battery_history
+                db, today, morning_battery_history
             )
 
         return build_daily_planning_context(

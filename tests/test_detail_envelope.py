@@ -73,7 +73,7 @@ class DetailEnvelopeTests(unittest.TestCase):
         feedback = self.feedback = _Feedback(
             [
                 {"activity_id": reference, "notes": reference}
-                for reference in ("i1", "act_g", "act_w")
+                for reference in ("act_i", "act_g", "act_w")
             ]
         )
         self.assembly = ActivityReadAssembly(
@@ -104,7 +104,7 @@ class DetailEnvelopeTests(unittest.TestCase):
 
     def test_envelope_is_filled_for_intervals_garmin_and_wahoo_sessions(self):
         for activity_id, reference in (
-            ("act_i", "i1"),
+            ("act_i", "act_i"),
             ("act_g", "act_g"),
             ("act_w", "act_w"),
         ):
@@ -161,7 +161,8 @@ class DetailEnvelopeTests(unittest.TestCase):
                 for entry in self.detail(activity_id)["detail_data"]["providers"]
             }
 
-        self.assertEqual({"intervals": True}, refreshable("act_i"))
+        # Intervals.icu details are never served, so never offered (#1685).
+        self.assertEqual({"intervals": False}, refreshable("act_i"))
         self.assertEqual({"garmin": True}, refreshable("act_g"))
         self.assertEqual({"wahoo": False}, refreshable("act_w"))
         self.configured = ["intervals", "wahoo"]

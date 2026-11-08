@@ -4,7 +4,6 @@ import unittest
 from datetime import UTC, date, datetime
 from unittest.mock import Mock, patch
 
-from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.coverage import ProviderCoverage
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
@@ -68,7 +67,7 @@ class _Coverage:
     def coverage(self, db):
         return (
             ProviderCoverage(
-                provider=ProviderId.INTERVALS,
+                provider=ProviderId.GARMIN,
                 retrieved_at=self._fetched_at,
                 activity_count=0,
                 observation_count=0,
@@ -327,13 +326,13 @@ class TrainingReportTests(unittest.TestCase):
             ],
             activity_feedback=[
                 {
-                    "activity_id": "i-one",
+                    "activity_id": "act_1",
                     "notes": "Easy",
                     "session_rpe": 0,
                     "deviation_reason": "shortened",
                 },
-                {"activity_id": "act_1", "notes": "Not the stored key"},
                 {"activity_id": "act_2", "notes": "Session id key"},
+                {"activity_id": "i-one", "notes": "Not the stored key"},
                 {"activity_id": "outside", "notes": "Excluded"},
             ],
         )
@@ -486,7 +485,7 @@ class TrainingReportTests(unittest.TestCase):
             read_synced_at=lambda _db: None,
             read_plan=dict,
             read_checkins=list,
-            read_feedback=list,
+            read_feedback=lambda keys: [],
             today=lambda: date(2026, 10, 2),
             load_scenarios=load_scenarios,
             season_source=_empty_season_source(),
@@ -527,7 +526,7 @@ class TrainingReportTests(unittest.TestCase):
             read_synced_at=lambda _db: None,
             read_plan=dict,
             read_checkins=list,
-            read_feedback=list,
+            read_feedback=lambda keys: [],
             today=lambda: date(2026, 10, 2),
             load_scenarios=load_scenarios,
             season_source=_empty_season_source(),
@@ -560,8 +559,7 @@ class TrainingReportTests(unittest.TestCase):
             with self.subTest(sport=invalid), self.assertRaises(AppError):
                 service.read({"start": "2026-09-28", "days": 7, "sport": invalid})
 
-    def test_observations_keep_only_analyses_of_the_current_payload(self):
-        raw = {"id": "i-1", "type": "Ride", "start_date_local": "2026-09-30T08:00:00"}
+    def test_observations_join_stored_analyses_by_live_session(self):
         current = _summary(
             "act_1",
             "2026-09-30T08:00:00",
@@ -570,37 +568,21 @@ class TrainingReportTests(unittest.TestCase):
             avg_temp_c=12.5,
             recorded_by="wahoo",
             environment="virtual",
-            record_ids={"intervals": "i-1"},
-        )
-        stale = _summary(
-            "act_2", "2026-09-30T09:00:00", record_ids={"intervals": "i-2"}
+            record_ids={"intervals": "i-1", "wahoo": "w-1"},
         )
         garmin_only = _summary("act_3", "2026-09-30T10:00:00")
-
-        class Reader(_Rows):
-            def summary_fingerprints(self, db, keys):
-                rows = (raw, {"id": "i-2", "type": "Ride"})
-                current = {
-                    ("intervals", row["id"]): summary_fingerprint(row) for row in rows
-                }
-                return {key: current[key] for key in keys if key in current}
-
         stored = [
             {
-                "activity_id": key,
-                "summary_sha256": fingerprint,
+                "session_id": key,
+                "source": "Wahoo",
                 "observed_at": "2026-10-01T00:00:00Z",
             }
-            for key, fingerprint in (
-                ("i-1", summary_fingerprint(raw)),
-                ("i-2", "0" * 64),
-                ("act_3", "1" * 64),
-            )
+            for key in ("act_1", "act_gone", "act_3")
         ]
         canonical = CanonicalPerformanceSource(
             database_manager=_FakeDatabaseManager,
             observation_reader=_EmptyReader,
-            activity_summaries=lambda: Reader([current, stale, garmin_only]),
+            activity_summaries=lambda: _Rows([current, garmin_only]),
         )
         service = TrainingRecordsService(
             database_manager=Mock(),
@@ -614,8 +596,11 @@ class TrainingReportTests(unittest.TestCase):
         ):
             records = service.observations()
 
-        self.assertEqual(["i-1"], [row["activity_id"] for row in records])
+        # Garmin-only sessions take part; a gone session is skipped.
+        self.assertEqual(["act_1", "act_3"], [row["activity_id"] for row in records])
         record = records[0]
+        self.assertEqual("Wahoo", record["source"])
+        self.assertNotIn("session_id", record)
         self.assertEqual(
             ("2026-09-30", "ride", "indoor", 3600.0, 12.5, "wahoo"),
             (

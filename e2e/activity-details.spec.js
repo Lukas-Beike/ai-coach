@@ -261,7 +261,6 @@ test("@responsive analysis sessions list expands Garmin-style charts", async ({ 
   const item = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic ride <img src=x>" }).first();
   await item.locator("summary").click();
   await expect(item.locator(".activity-analysis-stats")).toContainText("25,0 km");
-  await expect(item.locator(".activity-analysis-stats div").filter({ hasText: "Intensität" })).toContainText("78 %");
   await expect(item.locator(".activity-analysis-stats div").filter({ hasText: "Normalized Power" })).toContainText("205 W");
   const power = item.getByRole("img", { name: /^Leistung: Ø 200/ });
   await expect(power).toBeVisible();
@@ -270,6 +269,21 @@ test("@responsive analysis sessions list expands Garmin-style charts", async ({ 
   await power.dispatchEvent("pointerdown", { clientX: box.x + box.width * 0.6, clientY: box.y + box.height / 2 });
   await expect(item.locator(".is-power .activity-analysis-readout")).toContainText("200 W");
   await expect(item.locator(".activity-analysis-zones").filter({ hasText: "Zeit in HF-Zonen" })).toContainText("Z2");
+  // The session detail and the report overview share one zone order and palette (#1782).
+  const zoneRows = await item.locator(".activity-analysis-zones").filter({ hasText: "Zeit in HF-Zonen" }).locator("li").evaluateAll((rows) => {
+    const color = (node) => getComputedStyle(node).getPropertyValue("--zone-color").trim();
+    const detail = rows.map((row) => ({ zone: row.dataset.zone, color: color(row), track: row.querySelector(".activity-analysis-zone-bar").getBoundingClientRect().width }));
+    const overview = trainingFocusDistribution("HF-Zonen", trainingFocusZoneSeconds([{ seconds: Object.fromEntries(detail.map(({ zone }, index) => [zone, (index + 1) * 600])) }]), "seconds", "");
+    document.querySelector("#activityAnalysis").append(overview);
+    const result = { detail, overview: [...overview.querySelectorAll(".training-focus-row")].map((row) => ({ zone: row.dataset.zone, color: color(row), track: row.querySelector("progress").getBoundingClientRect().width })) };
+    overview.remove();
+    return result;
+  });
+  expect(zoneRows.detail.length).toBeGreaterThan(1);
+  expect(zoneRows.detail.map(({ zone, color }) => [zone, color])).toEqual(zoneRows.overview.map(({ zone, color }) => [zone, color]));
+  expect(Number(zoneRows.detail[0].zone.slice(1))).toBeGreaterThan(Number(zoneRows.detail.at(-1).zone.slice(1)));
+  expect(new Set(zoneRows.detail.map(({ track }) => Math.round(track))).size).toBe(1);
+  expect(new Set(zoneRows.overview.map(({ track }) => Math.round(track))).size).toBe(1);
   const temperatureTicks = await item.locator(".is-temperature svg text").allTextContents();
   expect(temperatureTicks.some((text) => /^[-\u2212]\d/.test(text))).toBeTruthy();
   await expect(item).toContainText("Datenabdeckung");

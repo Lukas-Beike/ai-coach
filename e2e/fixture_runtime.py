@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta, timezone
 BLS_OATS_ID = "bls:C133000"
 FIXTURE_DEMO_SEED_VERSION = "8"
 FIXTURE_RATIONALE = "Synthetische Vorschau"
-FIXTURE_TRAINING_FEATURES_SEED_VERSION = "1"
+FIXTURE_TRAINING_FEATURES_SEED_VERSION = "2"
 # canned keeps the canned Coach replies; offline simulates an unreachable OpenAI.
 FIXTURE_OPENAI_MODES = ("canned", "offline")
 
@@ -51,8 +51,12 @@ import server
 from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
+from backend.providers.canonical_plans import (
+    INTERVALS_POWER_CURVE_KEY,
+    intervals_ingest_plan,
+)
 from backend.providers.snapshot_projection import stored_retrieved_at
-from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
+from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 FIXTURE_SOURCE = "synthetic fixture"
@@ -513,7 +517,15 @@ def _save_intervals_snapshot(db, snapshot):
     state an installation shows before its first completed backfill.
     """
     server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
-    ingest_intervals_partial_snapshot(db, snapshot, zone=UTC)
+    retrieved_at = stored_retrieved_at(snapshot, zone=UTC)
+    if retrieved_at is not None:
+        plan = intervals_ingest_plan(
+            snapshot.get("raw_provider_data"),
+            zone=UTC,
+            retrieved_at=retrieved_at,
+            power_curve=snapshot.get(INTERVALS_POWER_CURVE_KEY),
+        )
+        ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=UTC)
     if stored_retrieved_at(
         snapshot, zone=UTC
     ) is None or server.CANONICAL_READ.serves_tables(db):
@@ -611,6 +623,116 @@ def _save_activity_detail(activity_id, record):
         raise RuntimeError(
             f"Fixture detail for {activity_id} not stored: {result.outcome}"
         )
+
+
+def _save_garmin_copy(activity_id, streams, hr_zone_seconds=None):
+    """Bundle a Garmin copy with full streams into an Intervals activity's session.
+
+    The detail document and the canonical session analysis (#1685) read Garmin,
+    Wahoo and local detail only, so the fixture's charts, zones, recorded
+    profiles and analyses come from this copy. ``streams`` uses legacy keys.
+    """
+    from datetime import datetime
+
+    from backend.canonical.activity_detail import (
+        ActivityStreamSet,
+        ZoneBucket,
+        ZoneDistribution,
+    )
+    from backend.canonical.records import Provenance
+    from backend.canonical.vocabulary import (
+        ActivityDetailOrigin,
+        ProviderId,
+        RecordingOrigin,
+        SourceKind,
+        StreamResolution,
+        ZoneBoundarySource,
+        ZoneMetric,
+    )
+    from backend.db.activity_detail_store import replace_detail_set
+    from backend.providers.intervals_activity_detail_mapping import (
+        STREAM_KEY_CHANNELS,
+    )
+
+    now = server.runtime_clock.utc_now()
+    garmin_id = f"garmin-{activity_id}"
+    with server.database_manager().unit_of_work() as db:
+        row = db.execute(
+            "SELECT activity_id, sport, environment, started_at, name "
+            "FROM activity_records "
+            "WHERE provider = 'intervals' AND provider_activity_id = ?",
+            (activity_id,),
+        ).fetchone()
+        db.execute(
+            "INSERT OR IGNORE INTO activity_records(provider, provider_activity_id, "
+            "activity_id, state, mapper_version, source_kind, recorded_by, sport, "
+            "environment, started_at, load_model, name, fetched_at, created_at, "
+            "updated_at) VALUES ('garmin', ?, ?, 'active', 1, 'provider_reported', "
+            "'garmin', ?, ?, ?, 'unknown', ?, ?, ?, ?)",
+            (
+                garmin_id,
+                row["activity_id"],
+                row["sport"],
+                row["environment"],
+                row["started_at"],
+                row["name"],
+                now,
+                now,
+                now,
+            ),
+        )
+        provenance = Provenance(
+            provider=ProviderId.GARMIN,
+            source_kind=SourceKind.PROVIDER_REPORTED,
+            source_record_id=None,
+            recorded_by=RecordingOrigin.GARMIN,
+            retrieved_at=datetime.fromisoformat(now),
+            label="Garmin Connect",
+        )
+        replace_detail_set(
+            db,
+            ActivityStreamSet(
+                provider_activity_id=garmin_id,
+                provenance=provenance,
+                origin=ActivityDetailOrigin.FETCH,
+                resolution=StreamResolution.FULL,
+                channels={
+                    STREAM_KEY_CHANNELS[key]: tuple(float(v) for v in values)
+                    for key, values in streams.items()
+                },
+            ),
+            mapper_version=1,
+            summary_sha256=None,
+            now=now,
+        )
+        if hr_zone_seconds:
+            replace_detail_set(
+                db,
+                ZoneDistribution(
+                    provider_activity_id=garmin_id,
+                    provenance=provenance,
+                    origin=ActivityDetailOrigin.FETCH,
+                    metric=ZoneMetric.HEART_RATE,
+                    boundary_source=ZoneBoundarySource.UNKNOWN,
+                    buckets=tuple(
+                        ZoneBucket(index=index, seconds=float(seconds))
+                        for index, seconds in enumerate(hr_zone_seconds, start=1)
+                    ),
+                ),
+                mapper_version=1,
+                summary_sha256=None,
+                now=now,
+            )
+
+
+def _run_session_analysis():
+    """Store the canonical session analyses of the seeded sessions."""
+    stage = server.CANONICAL_BACKFILL.session_analysis
+    with server.database_manager().unit_of_work() as db:
+        for _ in range(100):
+            if stage.run_batch(db).done:
+                return
+    raise RuntimeError("fixture session analysis did not finish")
 
 
 def _fixture_seed_fueling_ride(today):
@@ -809,6 +931,8 @@ def seed_training_features():
                 "available_streams": ["time", "watts", "heartrate"],
             },
         )
+        _save_garmin_copy(activity["id"], detailed["streams"])
+    _run_session_analysis()
     server.ATHLETE_DATA.profile().save(
         {**server.ATHLETE_DATA.profile().get(), "sleep_target_hours": 8}
     )
@@ -1263,7 +1387,7 @@ def _fixture_calendar_payload(today):
         [
             "BEGIN:VCALENDAR",
             "VERSION:2.0",
-            "PRODID:-//Intervals Coach Fixture//EN",
+            "PRODID:-//Pacecraft Fixture//EN",
             f"BEGIN:VEVENT\nUID:fixture-no-training\nDTSTART:{stamp(start)}\nDTEND:{stamp(start, '100000')}\nSUMMARY:Fixture [NO_TRAINING] recovery marker\nDESCRIPTION:Fixture rest marker from the event title\nEND:VEVENT",
             f"BEGIN:VEVENT\nUID:fixture-no-intensity\nDTSTART:{stamp(start + timedelta(days=1))}\nDTEND:{stamp(start + timedelta(days=1), '103000')}\nSUMMARY:Fixture easy ride\nDESCRIPTION:[NO_INTENSITY]\nEND:VEVENT",
             f"BEGIN:VEVENT\nUID:fixture-title-description\nDTSTART:{stamp(start + timedelta(days=2))}\nDTEND:{stamp(start + timedelta(days=2), '110000')}\nSUMMARY:Fixture title example\nDESCRIPTION:Description from synthetic calendar\nEND:VEVENT",
@@ -1717,6 +1841,8 @@ def _fixture_wave2_details(by_id):
                 "heartrate": heart_rate,
                 "velocity_smooth": speed,
                 "distance": distance,
+                # Flat course: outdoor running bests need altitude (M4 card 4).
+                "altitude": [120.0] * n,
                 "moving": [1] * n,
             }
         else:
@@ -2223,6 +2349,11 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                         for name, values in detailed["streams"].items()
                     },
                 },
+            )
+            _save_garmin_copy(
+                activity["id"],
+                detailed["streams"],
+                hr_zone_seconds=activity["icu_hr_zone_times"],
             )
             self.send_json(200, {"activity_id": activity["id"]})
             return

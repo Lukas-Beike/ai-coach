@@ -13,6 +13,11 @@ class ProviderId(StrEnum):
     WAHOO = "wahoo"
 
 
+# Which provider's record leads a session, its measured values, streams and
+# laps, best first. Intervals.icu is output only and ranks last.
+PROVIDER_PRECEDENCE: Final = (ProviderId.WAHOO, ProviderId.GARMIN, ProviderId.INTERVALS)
+
+
 class SourceKind(StrEnum):
     PROVIDER_REPORTED = "provider_reported"
     DEVICE_MEASURED = "device_measured"
@@ -210,6 +215,10 @@ class MetricKind(StrEnum):
     VARIABILITY_INDEX = "variability_index"
     MECHANICAL_WORK = "mechanical_work"
     AEROBIC_DECOUPLING = "aerobic_decoupling"
+    # Garmin Body Battery levels around one night, derived locally (#1686): the
+    # last level up to four hours before sleep and the first after waking.
+    BODY_BATTERY_BEFORE_SLEEP = "body_battery_before_sleep"
+    MORNING_BODY_BATTERY = "morning_body_battery"
 
     @property
     def unit(self) -> str:
@@ -285,6 +294,8 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.VARIABILITY_INDEX: "ratio",
     MetricKind.MECHANICAL_WORK: "kJ",
     MetricKind.AEROBIC_DECOUPLING: "%",
+    MetricKind.BODY_BATTERY_BEFORE_SLEEP: "score",
+    MetricKind.MORNING_BODY_BATTERY: "score",
 }
 
 
@@ -323,6 +334,17 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
             MetricKind.AEROBIC_DECOUPLING,
         )
     },
+    **{
+        kind: (
+            "derived locally per night by backend.performance.morning_battery_service "
+            "from the Garmin NIGHT period and BODY_BATTERY levels, never by a "
+            "provider mapper"
+        )
+        for kind in (
+            MetricKind.BODY_BATTERY_BEFORE_SLEEP,
+            MetricKind.MORNING_BODY_BATTERY,
+        )
+    },
 }
 # Kinds stored for export, backup and history that no reader uses yet. A kind
 # leaves this list when a consumer reads it; the vocabulary accountability test
@@ -340,6 +362,24 @@ EXPORT_ONLY_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
     MetricKind.BODY_BATTERY_DRAINED: (
         "Garmin daily drained total, stored for export and history; no reader "
         "showed it before the canonical model"
+    ),
+    **dict.fromkeys(
+        (
+            MetricKind.CTL,
+            MetricKind.ATL,
+            MetricKind.FORM,
+            MetricKind.EFTP,
+            MetricKind.SUBJECTIVE_FATIGUE,
+            MetricKind.SUBJECTIVE_SORENESS,
+            MetricKind.SUBJECTIVE_STRESS,
+            MetricKind.SUBJECTIVE_MOOD,
+            MetricKind.W_PRIME,
+            MetricKind.HEIGHT,
+            MetricKind.ZONE2_PACE,
+            MetricKind.INDOOR_FTP,
+        ),
+        "Intervals.icu is output-only: stored from its sync, no current value, "
+        "load or rating reads it (athlete decision 2026-11-07)",
     ),
 }
 
@@ -460,6 +500,8 @@ class ActivityDetailKind(StrEnum):
     LAPS = "laps"
     HEART_RATE_ZONES = "heart_rate_zones"
     POWER_ZONES = "power_zones"
+    # Executed strength sets (schema version 22).
+    STRENGTH_SETS = "strength_sets"
 
 
 class ActivityDetailOrigin(StrEnum):
@@ -529,6 +571,65 @@ ZONE_DETAIL_KINDS: Final[Mapping[ZoneMetric, ActivityDetailKind]] = {
     ZoneMetric.HEART_RATE: ActivityDetailKind.HEART_RATE_ZONES,
     ZoneMetric.POWER: ActivityDetailKind.POWER_ZONES,
 }
+
+
+class StrengthSetType(StrEnum):
+    """Whether a recorded strength set is work or the rest between sets."""
+
+    ACTIVE = "active"
+    REST = "rest"
+
+
+class StrengthSetSource(StrEnum):
+    """What produced a strength set list."""
+
+    # Garmin's exercise sets, including the athlete's corrections in Connect.
+    GARMIN_EXERCISE_SETS = "garmin_exercise_sets"
+    # The ``set`` messages (225) of the original FIT activity file.
+    FIT_SET_MESSAGES = "fit_set_messages"
+
+
+class ExerciseCategory(StrEnum):
+    """Exercise categories of the FIT profile (``exercise_category``, 0-32).
+
+    Garmin's exercise sets name the same categories in upper case. A category
+    outside this list maps to ``OTHER``; the provider code is kept separately.
+    """
+
+    BENCH_PRESS = "bench_press"
+    CALF_RAISE = "calf_raise"
+    CARDIO = "cardio"
+    CARRY = "carry"
+    CHOP = "chop"
+    CORE = "core"
+    CRUNCH = "crunch"
+    CURL = "curl"
+    DEADLIFT = "deadlift"
+    FLYE = "flye"
+    HIP_RAISE = "hip_raise"
+    HIP_STABILITY = "hip_stability"
+    HIP_SWING = "hip_swing"
+    HYPEREXTENSION = "hyperextension"
+    LATERAL_RAISE = "lateral_raise"
+    LEG_CURL = "leg_curl"
+    LEG_RAISE = "leg_raise"
+    LUNGE = "lunge"
+    OLYMPIC_LIFT = "olympic_lift"
+    PLANK = "plank"
+    PLYO = "plyo"
+    PULL_UP = "pull_up"
+    PUSH_UP = "push_up"
+    ROW = "row"
+    SHOULDER_PRESS = "shoulder_press"
+    SHOULDER_STABILITY = "shoulder_stability"
+    SHRUG = "shrug"
+    SIT_UP = "sit_up"
+    SQUAT = "squat"
+    TOTAL_BODY = "total_body"
+    TRICEPS_EXTENSION = "triceps_extension"
+    WARM_UP = "warm_up"
+    RUN = "run"
+    OTHER = "other"
 
 
 class ZoneBoundarySource(StrEnum):

@@ -31,15 +31,11 @@ class SyncJobStateDependencies:
 
 @dataclass(frozen=True)
 class IntervalsJobDependencies:
-    sync_service: Callable[[], Any]
-    performance_refresh_service: Callable[[], Any]
     selected_workout_sync_service: Callable[[], Any]
     competition_sync_service: Callable[[], Any]
     nutrition_sync_service: Callable[[], Any]
     operation_observer: Callable[[], SyncOperationObserver]
     resync_gate: ProviderResyncGate
-    activity_detail_service: Callable[[], Any] | None = None
-    ingest_enabled: Callable[[], bool] = lambda: True
 
 
 @dataclass(frozen=True)
@@ -50,6 +46,7 @@ class GarminJobDependencies:
     activity_detail_service: Callable[[], Any] | None = None
     strength_push_service: Callable[[], Any] | None = None
     wellness_history_service: Callable[[], Any] | None = None
+    rating_backfill_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -74,21 +71,14 @@ def build_historical_owner(
 
 
 def build_intervals_owner(
-    historical_sync: sync_executor.HistoricalSyncJobOwner,
     intervals: IntervalsJobDependencies,
 ) -> sync_executor.IntervalsSyncJobOwner:
-    """Create the Intervals.icu job owner; activity detail is optional."""
+    """Create the Intervals.icu output job owner."""
     return sync_executor.IntervalsSyncJobOwner(
-        historical_sync=historical_sync,
-        intervals_sync_service=intervals.sync_service(),
-        performance_refresh_service=intervals.performance_refresh_service(),
         selected_workout_sync_service=intervals.selected_workout_sync_service(),
         competition_sync_service=intervals.competition_sync_service(),
         sync_operation_observer=intervals.operation_observer(),
         intervals_resync_gate=intervals.resync_gate,
-        activity_detail_service=intervals.activity_detail_service()
-        if intervals.activity_detail_service
-        else None,
     )
 
 
@@ -109,6 +99,9 @@ def build_garmin_owner(
         else None,
         wellness_history_service=garmin.wellness_history_service()
         if garmin.wellness_history_service
+        else None,
+        rating_backfill_service=garmin.rating_backfill_service()
+        if garmin.rating_backfill_service
         else None,
     )
 
@@ -159,7 +152,7 @@ class SyncJobExecutionAssembly:
             return self._runtime_executor(self._provider_runtime())
         historical_sync = build_historical_owner(self._historical, self._state)
         nutrition_sync_service = self._intervals.nutrition_sync_service()
-        intervals_jobs = build_intervals_owner(historical_sync, self._intervals)
+        intervals_jobs = build_intervals_owner(self._intervals)
         garmin_jobs = build_garmin_owner(
             historical_sync, self._garmin, self._historical.all_sync_days
         )

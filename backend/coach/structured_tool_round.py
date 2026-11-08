@@ -284,7 +284,6 @@ class CoachStructuredToolRoundService:
         local_transaction = name not in {
             "start_provider_refresh",
             "apply_adaptive_replan",
-            "delete_duplicate_intervals_activity",
             *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
         }
         with (

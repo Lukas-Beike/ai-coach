@@ -17,7 +17,6 @@ from canonical_recovery_support import (
 )
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance.planning_recovery import INTERVALS_GARMIN_RELAY_SOURCE
 from backend.performance.recovery_context import (
     GARMIN_WEEKLY_HRV_SOURCE,
     performance_recovery_context,
@@ -26,7 +25,6 @@ from backend.performance.source_policy import preferences_from_profile
 
 TODAY = date(2026, 9, 7)
 GARMIN = "Garmin Connect"
-INTERVALS = "Intervals.icu Wellness"
 _EMPTY = {
     "sleep_hours": None,
     "sleep_source": None,
@@ -83,21 +81,19 @@ class PerformanceRecoveryContextTests(unittest.TestCase):
         # Intended: a Garmin value always carries its observation day.
         self.assertEqual(result["sleep_date"], "2026-09-07")
 
-    def test_intervals_sleep_fallback_and_average_of_exact_hours(self):
+    def test_sleep_with_only_intervals_values_is_none(self):
         rows = [
             {"id": "2026-08-30", "sleepSecs": 36_000},
-            {"id": "2026-09-02", "sleep_seconds": 25_200},
             {"id": "2026-09-07", "sleepSecs": 21_600, "sleepScore": 75},
         ]
 
         result = performance_recovery_context(mapped_recovery_inputs(None, rows), TODAY)
 
-        self.assertEqual(result["sleep_hours"], 6.0)
-        self.assertEqual(result["sleep_source"], INTERVALS)
-        self.assertEqual(result["sleep_average"], 6.5)
-        self.assertEqual(result["sleep_score"], 75)
-        self.assertEqual(result["sleep_score_source"], INTERVALS)
-        self.assertIsNone(result["sleep_date"])
+        self.assertIsNone(result["sleep_hours"])
+        self.assertIsNone(result["sleep_source"])
+        self.assertIsNone(result["sleep_average"])
+        self.assertIsNone(result["sleep_score"])
+        self.assertIsNone(result["sleep_score_source"])
 
     def test_garmin_sleep_average_uses_exact_hours(self):
         # Intended: legacy rounded each Garmin night to 0.1 h before averaging.
@@ -144,7 +140,7 @@ class PerformanceRecoveryContextTests(unittest.TestCase):
         self.assertEqual(result["hrv_average"], 50.0)
         self.assertEqual(result["hrv_date"], "2026-09-07")
 
-    def test_intervals_values_and_averages_without_garmin(self):
+    def test_intervals_resting_hr_and_hrv_without_garmin_are_none(self):
         rows = [
             {"id": "2026-09-01", "restingHR": 50, "hrv": 40},
             {"id": "2026-09-07", "restingHR": 60, "hrv_ms": 50},
@@ -152,26 +148,10 @@ class PerformanceRecoveryContextTests(unittest.TestCase):
 
         result = performance_recovery_context(mapped_recovery_inputs(None, rows), TODAY)
 
-        self.assertEqual(result["resting_hr"], 60)
-        self.assertEqual(result["resting_hr_source"], INTERVALS)
-        self.assertEqual(result["resting_hr_average"], 55.0)
-        self.assertIsNone(result["resting_hr_date"])
-        self.assertEqual(result["hrv"], 50)
-        self.assertEqual(result["hrv_source"], INTERVALS)
-        self.assertEqual(result["hrv_average"], 45.0)
-        self.assertIsNone(result["hrv_date"])
-
-    def test_intervals_values_are_pinned_to_the_latest_wellness_row(self):
-        rows = [
-            {"id": "2026-09-06", "restingHR": 50, "hrv": 40},
-            {"id": "2026-09-07", "sleepSecs": 25_200},
-        ]
-
-        result = performance_recovery_context(mapped_recovery_inputs(None, rows), TODAY)
-
         self.assertIsNone(result["resting_hr"])
+        self.assertIsNone(result["resting_hr_average"])
         self.assertIsNone(result["hrv"])
-        self.assertEqual(result["resting_hr_average"], 50.0)
+        self.assertIsNone(result["hrv_average"])
 
     def test_out_of_bounds_garmin_values_are_not_current(self):
         invalid = performance_recovery_context(
@@ -187,7 +167,7 @@ class PerformanceRecoveryContextTests(unittest.TestCase):
         self.assertIsNone(invalid["resting_hr"])
         self.assertIsNone(invalid["hrv"])
 
-    def test_readiness_prefers_intervals_and_falls_back_to_garmin(self):
+    def test_readiness_comes_from_garmin_only(self):
         rows = [
             {"id": "2026-09-01", "readiness": 70},
             {"id": "2026-09-07", "readiness": 82},
@@ -198,17 +178,15 @@ class PerformanceRecoveryContextTests(unittest.TestCase):
             mapped_recovery_inputs(garmin, rows), TODAY
         )
 
-        self.assertEqual(result["readiness"], 82)
-        self.assertEqual(result["readiness_source"], INTERVALS)
-        self.assertEqual(result["readiness_average"], 76.0)
+        self.assertEqual(result["readiness"], 65)
+        self.assertEqual(result["readiness_source"], GARMIN)
+        self.assertEqual(result["readiness_average"], 65.0)
 
-        fallback = performance_recovery_context(
-            mapped_recovery_inputs(garmin, [{"id": "2026-09-07", "hrv": 50}]), TODAY
+        only_intervals = performance_recovery_context(
+            mapped_recovery_inputs(None, rows), TODAY
         )
-        self.assertEqual(fallback["readiness"], 65)
-        self.assertEqual(fallback["readiness_source"], GARMIN)
-        # Intended: the average uses the selected provider, never a mix.
-        self.assertEqual(fallback["readiness_average"], 65.0)
+        self.assertIsNone(only_intervals["readiness"])
+        self.assertIsNone(only_intervals["readiness_source"])
 
     def test_weekly_hrv_is_a_labelled_fallback_without_average(self):
         weekly_only = mapped_recovery_inputs(
@@ -228,7 +206,7 @@ class PerformanceRecoveryContextTests(unittest.TestCase):
         self.assertIsNone(result["hrv_average"])
         self.assertEqual(result["hrv_date"], "2026-09-07")
 
-    def test_last_night_rmssd_wins_over_the_weekly_average(self):
+    def test_the_weekly_average_is_not_replaced_by_an_intervals_rmssd(self):
         inputs = mapped_recovery_inputs(
             {"hrv": [{"calendarDate": "2026-09-07", "weeklyAvg": 58}]},
             [{"id": "2026-09-07", "hrv": 44}],
@@ -236,9 +214,8 @@ class PerformanceRecoveryContextTests(unittest.TestCase):
 
         result = performance_recovery_context(inputs, TODAY)
 
-        self.assertEqual(result["hrv"], 44)
-        self.assertEqual(result["hrv_source"], INTERVALS)
-        self.assertEqual(result["hrv_average"], 44.0)
+        self.assertEqual(result["hrv"], 58)
+        self.assertEqual(result["hrv_source"], GARMIN_WEEKLY_HRV_SOURCE)
 
     def test_garmin_values_without_a_wellness_day(self):
         inputs = recovery_inputs(
@@ -266,7 +243,6 @@ class PerformanceRecoveryContextTests(unittest.TestCase):
                     MetricKind.RESTING_HR, 62, "2026-09-07", ProviderId.INTERVALS
                 ),
             ],
-            latest_wellness_day=date(2026, 9, 7),
         )
 
         result = performance_recovery_context(inputs, TODAY)
@@ -279,15 +255,15 @@ class PerformanceRecoveryContextTests(unittest.TestCase):
         self.assertEqual(performance_recovery_context(recovery_inputs(), TODAY), _EMPTY)
 
 
-def _resting_hr_days(intervals_offset: float) -> list:
-    """Garmin on 2026-09-01..06, Intervals on 09-01..07, Intervals shifted."""
+def _resting_hr_days() -> list:
+    """Garmin on 2026-09-01..06, an equal Intervals series on 09-01..07."""
     observations = []
     for day in range(1, 8):
         iso = f"2026-09-0{day}"
         observations.append(
             recovery_observation(
                 MetricKind.RESTING_HR,
-                50.0 + day + intervals_offset,
+                50.0 + day,
                 iso,
                 ProviderId.INTERVALS,
                 record_id=iso,
@@ -300,51 +276,41 @@ def _resting_hr_days(intervals_offset: float) -> list:
     return observations
 
 
-class MethodFamilyTests(unittest.TestCase):
-    def test_a_relay_is_current_labelled_and_averaged_with_garmin(self):
+class IntervalsIsNeverASourceTests(unittest.TestCase):
+    def test_an_equal_intervals_series_is_not_a_relay_and_adds_no_day(self):
         context = performance_recovery_context(
-            recovery_inputs(_resting_hr_days(0.0), latest_wellness_day=TODAY), TODAY
-        )
-
-        self.assertEqual(context["resting_hr"], 57)
-        self.assertEqual(context["resting_hr_source"], INTERVALS_GARMIN_RELAY_SOURCE)
-        self.assertEqual(context["resting_hr_average"], 54.0)
-
-    def test_another_method_never_replaces_or_mixes_with_garmin(self):
-        context = performance_recovery_context(
-            recovery_inputs(_resting_hr_days(8.0), latest_wellness_day=TODAY), TODAY
+            recovery_inputs(_resting_hr_days()), TODAY
         )
 
         self.assertEqual(context["resting_hr"], 56)
         self.assertEqual(context["resting_hr_source"], GARMIN)
         self.assertEqual(context["resting_hr_average"], 53.5)
 
-    def test_an_intervals_preference_uses_only_its_values(self):
+    def test_a_stored_intervals_preference_is_ignored(self):
         inputs = replace(
-            recovery_inputs(_resting_hr_days(0.0), latest_wellness_day=TODAY),
+            recovery_inputs(_resting_hr_days()),
             preferences=preferences_from_profile(
                 {"preferred_source_resting_hr": "intervals"}
             ),
         )
 
+        self.assertEqual(inputs.preferences, {})
         context = performance_recovery_context(inputs, TODAY)
 
-        self.assertEqual(context["resting_hr"], 57)
-        self.assertEqual(context["resting_hr_source"], INTERVALS)
-        self.assertEqual(context["resting_hr_average"], 54.0)
-        self.assertFalse(inputs.relays(MetricKind.RESTING_HR))
+        self.assertEqual(context["resting_hr"], 56)
+        self.assertEqual(context["resting_hr_source"], GARMIN)
 
-    def test_an_intervals_hrv_preference_never_shows_the_garmin_weekly_value(self):
+    def test_an_intervals_hrv_preference_still_shows_the_garmin_weekly_value(self):
         weekly = recovery_observation(MetricKind.HRV_WEEKLY_AVERAGE, 61, "2026-09-07")
         inputs = replace(
-            recovery_inputs([weekly], latest_wellness_day=TODAY),
+            recovery_inputs([weekly]),
             preferences=preferences_from_profile({"preferred_source_hrv": "intervals"}),
         )
 
         context = performance_recovery_context(inputs, TODAY)
 
-        self.assertIsNone(context["hrv"])
-        self.assertIsNone(context["hrv_source"])
+        self.assertEqual(context["hrv"], 61)
+        self.assertEqual(context["hrv_source"], GARMIN_WEEKLY_HRV_SOURCE)
 
 
 if __name__ == "__main__":

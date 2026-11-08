@@ -1,8 +1,8 @@
 """Persistence of canonical activity detail sets and per-session analysis.
 
 Each provider activity keeps at most one set per detail kind, so several
-providers can hold alternative streams, laps and zone times for one canonical
-session. Functions run inside the caller's unit of work and never commit.
+providers can hold alternative streams, laps, zone times and strength sets for
+one canonical session. Functions run inside the caller's unit of work and never commit.
 Readers return only details of active records whose session is not deleted;
 the rows of tombstoned activities are kept, not destroyed.
 """
@@ -17,7 +17,7 @@ import re
 import sys
 import zlib
 from array import array
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, cast
@@ -29,6 +29,8 @@ from backend.canonical.activity_detail import (
     ActivityLap,
     ActivityLapSet,
     ActivityStreamSet,
+    ActivityStrengthSet,
+    ActivityStrengthSetSet,
     ZoneBucket,
     ZoneDistribution,
 )
@@ -38,14 +40,18 @@ from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
     ActivityRecordState,
     ActivitySessionState,
+    ExerciseCategory,
     LapKind,
     LapSource,
     ProviderId,
     ProviderRecordState,
     RecordingOrigin,
     SourceKind,
+    Sport,
     StreamChannel,
     StreamResolution,
+    StrengthSetSource,
+    StrengthSetType,
     ZoneBoundarySource,
     ZoneMetric,
 )
@@ -65,6 +71,23 @@ _LAP_COLUMNS: Final = (
     "end_offset_s",
     "name",
     *_LAP_METRIC_COLUMNS,
+)
+_STRENGTH_COLUMNS: Final = (
+    "set_index",
+    "set_type",
+    "exercise_category",
+    "exercise_name",
+    "reps",
+    "weight_kg",
+    "duration_s",
+    "start_offset_s",
+    "workout_step_index",
+)
+_CHILD_TABLES: Final = (
+    "activity_stream_channels",
+    "activity_laps",
+    "activity_zone_times",
+    "activity_strength_sets",
 )
 _ZONE_METRIC_BY_KIND: Final = {metric.detail_kind: metric for metric in ZoneMetric}
 LOGGER = logging.getLogger("intervals_coach")
@@ -187,6 +210,7 @@ def replace_detail_set(
         header["resolution"],
         header["lap_source"],
         header["zone_boundary_source"],
+        header.get("set_source"),
         summary_sha256,
         content_sha256,
         fetched_at,
@@ -196,8 +220,8 @@ def replace_detail_set(
             "INSERT INTO activity_detail_sets(provider, provider_activity_id, "
             "detail_kind, mapper_version, origin, source_kind, recorded_by, "
             "source_record_id, resolution, lap_source, zone_boundary_source, "
-            "summary_sha256, content_sha256, fetched_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "set_source, summary_sha256, content_sha256, fetched_at, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (*key, *values, now, now),
         )
     else:
@@ -205,7 +229,7 @@ def replace_detail_set(
         db.execute(
             "UPDATE activity_detail_sets SET mapper_version = ?, origin = ?, "
             "source_kind = ?, recorded_by = ?, source_record_id = ?, resolution = ?, "
-            "lap_source = ?, zone_boundary_source = ?, summary_sha256 = ?, "
+            "lap_source = ?, zone_boundary_source = ?, set_source = ?, summary_sha256 = ?, "
             "content_sha256 = ?, fetched_at = ?, updated_at = ? "
             "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
             (*values, now, *key),
@@ -258,6 +282,93 @@ class FullStreamKey:
     fetched_at: str
 
 
+def strength_sets_for_sessions(
+    db: Any,
+    activity_ids: Iterable[str],
+    *,
+    rank: Callable[[StoredDetailSet], Any],
+) -> dict[str, StoredDetailSet]:
+    """Return the one strength set list per session that ``rank`` puts first.
+
+    Lists of sessions merged into one of ``activity_ids`` belong to that
+    survivor. Headers are read in chunks; only the chosen list's sets are read.
+    """
+    ids = list(
+        dict.fromkeys(activity_id for activity_id in activity_ids if activity_id)
+    )
+    chosen: dict[str, tuple[Any, dict[str, Any], StoredDetailSet]] = {}
+    for start in range(0, len(ids), 400):
+        chunk = ids[start : start + 400]
+        marks = ", ".join("?" * len(chunk))
+        rows = db.execute(
+            "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE s.activity_id END "
+            "AS owner, d.provider, d.provider_activity_id, d.detail_kind, "
+            "d.mapper_version, d.origin, d.source_kind, d.recorded_by, "
+            "d.source_record_id, d.set_source, d.summary_sha256, d.fetched_at, "
+            "r.activity_id FROM activity_detail_sets AS d "
+            "JOIN activity_records AS r ON r.provider = d.provider "
+            "AND r.provider_activity_id = d.provider_activity_id "
+            "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+            "WHERE r.state = ? AND s.state <> ? AND d.detail_kind = ? "
+            f"AND (s.activity_id IN ({marks}) "
+            f"OR (s.state = ? AND s.merged_into IN ({marks})))",
+            (
+                ActivitySessionState.DUPLICATE.value,
+                ActivityRecordState.ACTIVE.value,
+                ActivitySessionState.DELETED.value,
+                ActivityDetailKind.STRENGTH_SETS.value,
+                *chunk,
+                ActivitySessionState.DUPLICATE.value,
+                *chunk,
+            ),
+        ).fetchall()
+        for raw in rows:
+            row = dict(raw)
+            # The header alone ranks the list; its sets are read only when chosen.
+            # An unreadable header skips that list only, like an unreadable set.
+            try:
+                header = _stored(row, _strength_header(row))
+            except (TypeError, ValueError) as error:
+                _log_unreadable(row, error)
+                continue
+            key = rank(header)
+            current = chosen.get(row["owner"])
+            if current is None or key < current[0]:
+                chosen[row["owner"]] = (key, row, header)
+    result: dict[str, StoredDetailSet] = {}
+    for owner, (_key, row, _header) in chosen.items():
+        try:
+            detail = _rebuild(db, row)
+        except (TypeError, ValueError) as error:
+            _log_unreadable(row, error)
+            continue
+        result[owner] = _stored(row, detail)
+    return result
+
+
+def _strength_header(row: Mapping[str, Any]) -> ActivityStrengthSetSet:
+    """A placeholder list with the stored header, for ranking without the sets."""
+    return ActivityStrengthSetSet(
+        provider_activity_id=row["provider_activity_id"],
+        provenance=_provenance(row),
+        origin=ActivityDetailOrigin(row["origin"]),
+        source=StrengthSetSource(row["set_source"]),
+        sets=(ActivityStrengthSet(index=0, set_type=StrengthSetType.ACTIVE),),
+    )
+
+
+def _stored(row: Mapping[str, Any], detail: ActivityDetailSet) -> StoredDetailSet:
+    return StoredDetailSet(
+        provider=row["provider"],
+        provider_activity_id=row["provider_activity_id"],
+        activity_id=row["activity_id"],
+        mapper_version=row["mapper_version"],
+        summary_sha256=row["summary_sha256"],
+        fetched_at=row["fetched_at"],
+        detail=detail,
+    )
+
+
 def full_stream_keys(
     db: Any, activity_ids: Iterable[str]
 ) -> dict[str, tuple[FullStreamKey, ...]]:
@@ -281,6 +392,18 @@ def lap_set_keys(
     """Return the keys of each session's lap sets, as ``full_stream_keys`` does."""
     return _set_keys(
         db, activity_ids, "d.detail_kind = ?", (ActivityDetailKind.LAPS.value,)
+    )
+
+
+def analysis_set_keys(
+    db: Any, activity_ids: Iterable[str]
+) -> dict[str, tuple[FullStreamKey, ...]]:
+    """Return the keys of each session's stream and lap sets of any resolution."""
+    return _set_keys(
+        db,
+        activity_ids,
+        "d.detail_kind IN (?, ?)",
+        (ActivityDetailKind.STREAMS.value, ActivityDetailKind.LAPS.value),
     )
 
 
@@ -370,6 +493,23 @@ def lap_sets_for_session(db: Any, activity_id: str) -> list[StoredDetailSet]:
             ActivitySessionState.DELETED.value,
         ),
     )
+
+
+def strength_record_ids(
+    db: Any, provider: str, provider_activity_ids: Collection[str]
+) -> set[str]:
+    """Return the given provider activity ids whose record is a strength activity."""
+    ids = sorted(set(provider_activity_ids))
+    if not ids:
+        return set()
+    return {
+        row["provider_activity_id"]
+        for row in db.execute(
+            "SELECT provider_activity_id FROM activity_records WHERE provider = ? "
+            f"AND sport = ? AND provider_activity_id IN ({', '.join('?' for _ in ids)})",
+            (provider, Sport.STRENGTH.value, *ids),
+        ).fetchall()
+    }
 
 
 def activity_detail_backfill_universe(
@@ -487,6 +627,35 @@ def remove_detail_sets(
         )
         removed += 1
     return removed
+
+
+def stored_strength_source(
+    db: Any, provider: str, provider_activity_id: str
+) -> str | None:
+    """Return the source of the stored strength set list of one provider activity."""
+    row = db.execute(
+        "SELECT set_source FROM activity_detail_sets WHERE provider = ? "
+        "AND provider_activity_id = ? AND detail_kind = ?",
+        (provider, provider_activity_id, ActivityDetailKind.STRENGTH_SETS.value),
+    ).fetchone()
+    return None if row is None else row["set_source"]
+
+
+def restamp_detail_set(
+    db: Any,
+    provider: str,
+    provider_activity_id: str,
+    kind: ActivityDetailKind,
+    *,
+    summary_sha256: str | None,
+    fetched_at: str,
+) -> None:
+    """Mark a kept set as current for a summary without changing its content."""
+    db.execute(
+        "UPDATE activity_detail_sets SET summary_sha256 = ?, fetched_at = ? "
+        "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
+        (summary_sha256, fetched_at, provider, provider_activity_id, kind.value),
+    )
 
 
 def refill_lap_metrics(
@@ -699,7 +868,7 @@ def analysis_export_rows(db: Any) -> Iterable[dict[str, Any]]:
 
 def _header(detail: ActivityDetailSet, mapper_version: int) -> dict[str, Any]:
     provenance = detail.provenance
-    return {
+    header: dict[str, Any] = {
         "detail_kind": detail.kind.value,
         "mapper_version": mapper_version,
         "origin": detail.origin.value,
@@ -718,6 +887,10 @@ def _header(detail: ActivityDetailSet, mapper_version: int) -> dict[str, Any]:
             else None
         ),
     }
+    if isinstance(detail, ActivityStrengthSetSet):
+        # Only strength sets carry the key, so other kinds keep their content hash.
+        header["set_source"] = detail.source.value
+    return header
 
 
 def _child_rows(detail: ActivityDetailSet) -> list[tuple[object, ...]]:
@@ -740,6 +913,23 @@ def _child_rows(detail: ActivityDetailSet) -> list[tuple[object, ...]]:
                 *(getattr(lap, column) for column in _LAP_METRIC_COLUMNS),
             )
             for lap in detail.laps
+        ]
+    if isinstance(detail, ActivityStrengthSetSet):
+        return [
+            (
+                item.index,
+                item.set_type.value,
+                None
+                if item.exercise_category is None
+                else item.exercise_category.value,
+                item.exercise_name,
+                item.reps,
+                item.weight_kg,
+                item.duration_s,
+                item.start_offset_s,
+                item.workout_step_index,
+            )
+            for item in detail.sets
         ]
     return [
         (
@@ -768,7 +958,7 @@ def _content_hash(header: Mapping[str, Any], children: list[tuple[object, ...]])
 
 
 def _delete_children(db: Any, key: tuple[str, str, str]) -> None:
-    for table in ("activity_stream_channels", "activity_laps", "activity_zone_times"):
+    for table in _CHILD_TABLES:
         db.execute(
             f"DELETE FROM {table} WHERE provider = ? AND provider_activity_id = ? "
             "AND detail_kind = ?",
@@ -799,6 +989,13 @@ def _insert_children(
             f"VALUES ({', '.join('?' * (3 + len(_LAP_COLUMNS)))})",
             [(*key, *row) for row in rows],
         )
+    elif isinstance(detail, ActivityStrengthSetSet):
+        db.executemany(
+            "INSERT INTO activity_strength_sets(provider, provider_activity_id, "
+            f"detail_kind, {', '.join(_STRENGTH_COLUMNS)}) "
+            f"VALUES ({', '.join('?' * (3 + len(_STRENGTH_COLUMNS)))})",
+            [(*key, *row) for row in rows],
+        )
     else:
         db.executemany(
             "INSERT INTO activity_zone_times(provider, provider_activity_id, "
@@ -815,7 +1012,8 @@ def _read_sets(
     cursor = db.execute(
         "SELECT d.provider, d.provider_activity_id, d.detail_kind, d.mapper_version, "
         "d.origin, d.source_kind, d.recorded_by, d.source_record_id, d.resolution, "
-        "d.lap_source, d.zone_boundary_source, d.summary_sha256, d.fetched_at, "
+        "d.lap_source, d.zone_boundary_source, d.set_source, d.summary_sha256, "
+        "d.fetched_at, "
         "r.activity_id FROM activity_detail_sets AS d "
         "JOIN activity_records AS r ON r.provider = d.provider "
         "AND r.provider_activity_id = d.provider_activity_id "
@@ -834,32 +1032,37 @@ def _read_sets(
         try:
             detail = _rebuild(db, row)
         except (TypeError, ValueError) as error:
-            # One unreadable set must not hide the others; report it without
-            # stored values or error text so the corruption stays visible.
-            LOGGER.warning(
-                "Stored activity detail set is unreadable",
-                extra={
-                    "event": "activity_detail_unreadable",
-                    "context": {
-                        "provider": row["provider"],
-                        "detail_kind": row["detail_kind"],
-                        "error": type(error).__name__,
-                    },
-                },
-            )
+            _log_unreadable(row, error)
             continue
-        stored.append(
-            StoredDetailSet(
-                provider=row["provider"],
-                provider_activity_id=row["provider_activity_id"],
-                activity_id=row["activity_id"],
-                mapper_version=row["mapper_version"],
-                summary_sha256=row["summary_sha256"],
-                fetched_at=row["fetched_at"],
-                detail=detail,
-            )
-        )
+        stored.append(_stored(row, detail))
     return stored
+
+
+def _log_unreadable(row: Mapping[str, Any], error: Exception) -> None:
+    # One unreadable set must not hide the others; report it without stored
+    # values or error text so the corruption stays visible.
+    LOGGER.warning(
+        "Stored activity detail set is unreadable",
+        extra={
+            "event": "activity_detail_unreadable",
+            "context": {
+                "provider": row["provider"],
+                "detail_kind": row["detail_kind"],
+                "error": type(error).__name__,
+            },
+        },
+    )
+
+
+def _provenance(row: Mapping[str, Any]) -> Provenance:
+    return Provenance(
+        provider=ProviderId(row["provider"]),
+        source_kind=SourceKind(row["source_kind"]),
+        source_record_id=row["source_record_id"],
+        recorded_by=RecordingOrigin(row["recorded_by"]),
+        retrieved_at=_aware_datetime(row["fetched_at"]),
+        label=None,
+    )
 
 
 def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
@@ -867,14 +1070,7 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
     kind = ActivityDetailKind(row["detail_kind"])
     common = {
         "provider_activity_id": row["provider_activity_id"],
-        "provenance": Provenance(
-            provider=ProviderId(row["provider"]),
-            source_kind=SourceKind(row["source_kind"]),
-            source_record_id=row["source_record_id"],
-            recorded_by=RecordingOrigin(row["recorded_by"]),
-            retrieved_at=_aware_datetime(row["fetched_at"]),
-            label=None,
-        ),
+        "provenance": _provenance(row),
         "origin": ActivityDetailOrigin(row["origin"]),
     }
     if kind is ActivityDetailKind.STREAMS:
@@ -913,6 +1109,20 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
         return ActivityLapSet(
             **common, lap_source=LapSource(row["lap_source"]), laps=laps
         )
+    if kind is ActivityDetailKind.STRENGTH_SETS:
+        return ActivityStrengthSetSet(
+            **common,
+            source=StrengthSetSource(row["set_source"]),
+            sets=tuple(
+                _strength_set(item)
+                for item in db.execute(
+                    f"SELECT {', '.join(_STRENGTH_COLUMNS)} FROM activity_strength_sets "
+                    "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ? "
+                    "ORDER BY set_index",
+                    key,
+                ).fetchall()
+            ),
+        )
     buckets = tuple(
         ZoneBucket(
             index=bucket["zone_index"],
@@ -933,6 +1143,21 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
         metric=_ZONE_METRIC_BY_KIND[kind],
         boundary_source=ZoneBoundarySource(row["zone_boundary_source"]),
         buckets=buckets,
+    )
+
+
+def _strength_set(row: Mapping[str, Any]) -> ActivityStrengthSet:
+    category = row["exercise_category"]
+    return ActivityStrengthSet(
+        index=row["set_index"],
+        set_type=StrengthSetType(row["set_type"]),
+        exercise_category=None if category is None else ExerciseCategory(category),
+        exercise_name=row["exercise_name"],
+        reps=row["reps"],
+        weight_kg=row["weight_kg"],
+        duration_s=row["duration_s"],
+        start_offset_s=row["start_offset_s"],
+        workout_step_index=row["workout_step_index"],
     )
 
 

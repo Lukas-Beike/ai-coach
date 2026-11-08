@@ -168,7 +168,6 @@
   },
   "projects": {
     "desktop": {
-      "e2e/activity-detail-floor.spec.js": 9.132982,
       "e2e/activity-details.spec.js": 21.758004,
       "e2e/analysis-info.spec.js": 80.505338,
       "e2e/analysis-on-demand.spec.js": 9.509463,
@@ -213,7 +212,6 @@
       "e2e/wahoo-connection.spec.js": 21.046177
     },
     "mobile": {
-      "e2e/activity-detail-floor.spec.js": 10.572919,
       "e2e/activity-details.spec.js": 30.530406,
       "e2e/analysis-info.spec.js": 96.728743,
       "e2e/analysis-on-demand.spec.js": 25.165556,
@@ -252,7 +250,6 @@
       "e2e/wahoo-connection.spec.js": 32.672564
     },
     "mobile-small": {
-      "e2e/activity-detail-floor.spec.js": 8.095685,
       "e2e/activity-details.spec.js": 19.654421,
       "e2e/analysis-info.spec.js": 77.865346,
       "e2e/analysis-on-demand.spec.js": 9.528405,
@@ -291,7 +288,6 @@
       "e2e/wahoo-connection.spec.js": 17.137795
     },
     "tablet": {
-      "e2e/activity-detail-floor.spec.js": 9.573658,
       "e2e/activity-details.spec.js": 25.071893,
       "e2e/analysis-info.spec.js": 92.169308,
       "e2e/analysis-on-demand.spec.js": 12.193517,
@@ -330,7 +326,6 @@
       "e2e/wahoo-connection.spec.js": 18.170095
     },
     "tablet-landscape": {
-      "e2e/activity-detail-floor.spec.js": 8.431978,
       "e2e/activity-details.spec.js": 23.40531,
       "e2e/analysis-info.spec.js": 77.844024,
       "e2e/analysis-on-demand.spec.js": 12.146753,

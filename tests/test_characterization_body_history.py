@@ -103,9 +103,6 @@ def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
         rows += raw.get("wellness", []) if isinstance(raw, dict) else []
         rows += snapshot.get("recent_wellness", [])
     canonical = CanonicalPerformanceInputs(
-        wellness_day=None,
-        ctl=None,
-        atl=None,
         # The Intervals.icu coverage time the snapshot's sync stored.
         intervals_synced_at=snapshot_coverage_time(snapshot),
         history_wellness_days=days_from_rows(rows),

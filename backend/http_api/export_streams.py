@@ -30,7 +30,7 @@ class ExportStreamTransport:
             handler.send_file_stream(
                 path,
                 "application/octet-stream",
-                "intervals-coach-database.backup",
+                "pacecraft-database.backup",
                 deadline=deadline,
             )
 
@@ -39,7 +39,7 @@ class ExportStreamTransport:
         handler.send_file_stream(
             temporary,
             "application/zip",
-            "intervals-coach-export.zip",
+            "pacecraft-export.zip",
             deadline=self._monotonic() + self._time_limit_seconds,
             cleanup=True,
         )

@@ -1,8 +1,8 @@
-# Development instructions for Intervals Coach
+# Development instructions for Pacecraft
 
 ## Project scope
 
-Intervals Coach is a private, mobile-first PWA for one athlete, using Python
+Pacecraft is a private, mobile-first PWA for one athlete, using Python
 `http.server`, SQLCipher, Intervals.icu, optional Garmin, and OpenAI Responses.
 Keep it standalone on a trusted LAN/private VPN, never directly on the internet.
 Use [README.md](README.md) for setup and operational commands.
@@ -11,12 +11,14 @@ Use [README.md](README.md) for setup and operational commands.
 
 - Preserve all athlete data, including records, snapshots, tombstones, plans,
   sessions, settings, conversations, usage, and sync state, not just chat history.
+  Named exception: the #1728 purge removes the stored Intervals.icu ingest store
+  (provider/activity records, observations, snapshots, detail sets) after re-keying
+  athlete-entered data and writing a recovery backup; output ids stay.
 - Schema changes require versioned, transactional SQLCipher migrations from
   supported released schemas, including documented skipped-release upgrades.
-  Release 1.13.32 (schema v16) is the oldest schema the code still opens; keep
-  those paths and their tests passing. The only production instance runs
-  1.13.40 (schema v20), so new schema changes need upgrade evidence only from
-  v20 and each newer released schema, not new v16-v19 fixtures or tests.
+  Release 1.13.44 (schema v21, the only production instance) is the oldest
+  schema the code still opens; older schemas are refused unchanged. New schema
+  changes need upgrade evidence from v21 and each newer released schema.
   Preserve frozen released-schema fixtures; verify populated upgrades, rollback
   on failure, and same-build restarts. A schema PR is not release-ready without
   this evidence.
@@ -79,11 +81,12 @@ Use [README.md](README.md) for setup and operational commands.
 ## Behaviour requirements
 
 - Startup initializes the database and sync/Coach workers, then enqueues configured
-  calendar, Intervals.icu, Garmin, and weather refreshes. Preserve daily scheduling,
+  calendar, Garmin, Wahoo, and weather refreshes; Intervals.icu is an output
+  target and is not read. Preserve daily scheduling,
   manual refreshes, and browser polling of local sync state.
 - Chat uses saved profile/competitions, performance, recent local feedback,
   workout library, and latest provider snapshots. Preserve source labels for
-  Intervals.icu, Garmin, derived values, and AI estimates.
+  Garmin, Wahoo, derived values, and AI estimates.
 - Confirmed local profile/competition records are authoritative; OpenAI Conversation
   state is dialogue continuity only. Durable profile, competition, check-in, and
   planning mutations come from an explicit API/UI action or from a Coach turn
@@ -155,7 +158,7 @@ node --test tests/*.cjs
 
 Tests use temporary data and mocked services, never real `.env`, `/data`, or
 OpenAI/Intervals.icu/Garmin accounts. For Dockerfile, dependency, startup, or
-deployment changes also run `docker build -t ai-coach:local .`. Browser changes
+deployment changes also run `docker build -t pacecraft:local .`. Browser changes
 run the affected Playwright project (`npm run test:e2e`; projects mobile-small,
 mobile, tablet, tablet-landscape, desktop) and, when a browser is available,
 check login, fresh PWA install/offline assets, safe Markdown, Enter versus

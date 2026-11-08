@@ -96,6 +96,11 @@ _FIT_FIELD_SCALES: Final[Mapping[tuple[int, int], tuple[str, int, int]]] = {
     (19, 33): ("normalized_power_w", 1, 0),
     (19, 110): ("enhanced_avg_speed_m_s", 1000, 0),
     (19, 111): ("enhanced_max_speed_m_s", 1000, 0),
+    # set message (strength training)
+    (225, 0): ("duration_s", 1000, 0),
+    (225, 3): ("repetitions", 1, 0),
+    (225, 4): ("weight_kg", 16, 0),
+    (225, 6): ("start_time", 1, 0),
     # session message
     (18, 2): ("timestamp", 1, 0),
     (18, 7): ("elapsed_time_s", 1000, 0),

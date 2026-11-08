@@ -122,6 +122,48 @@ class ActivityFeedbackNormalizationTests(unittest.TestCase):
         self.assertEqual(value, original)
 
 
+class FeedbackRatingTimeTests(unittest.TestCase):
+    """The rating time follows only RPE changes; an unknown time stays unknown."""
+
+    def test_rating_time_is_recorded_only_on_an_rpe_change(self) -> None:
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        self.addCleanup(db.close)
+        initialize_schema(db)
+        stamp = "2026-10-31T08:00:00+00:00"
+        later = "2026-11-01T09:30:00+00:00"
+        # Rows rated before the rating time existed keep NULL.
+        db.executemany(
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, "
+            "notes, session_rpe, deviation_reason, created_at, updated_at, provider) "
+            "VALUES (?, ?, '2026-10-30', ?, ?, '', ?, ?, ?)",
+            [
+                ("i1", "Ride", "fine", 5, stamp, stamp, "garmin"),
+                ("w1", "Run", "", 0, stamp, stamp, None),
+                ("g1", "Swim", "note only", None, stamp, stamp, "garmin"),
+            ],
+        )
+
+        def rating_times() -> dict[str, str | None]:
+            return {
+                row[0]: row[1]
+                for row in db.execute(
+                    "SELECT activity_id, session_rpe_rated_at FROM activity_feedback"
+                )
+            }
+
+        repository = ActivityFeedbackRepository(lambda: later)
+        stored = {row["activity_id"]: row for row in repository.all(db)}
+        repository.upsert(db, {**stored["i1"], "notes": "edited"})
+        repository.upsert(db, {**stored["w1"], "session_rpe": 4})
+        repository.upsert(db, {**stored["g1"], "session_rpe": 3})
+        self.assertEqual(rating_times(), {"i1": None, "w1": later, "g1": later})
+        next_day = ActivityFeedbackRepository(lambda: "2026-11-02T10:00:00+00:00")
+        next_day.upsert(db, {**stored["w1"], "session_rpe": 4, "notes": "same"})
+        next_day.upsert(db, {**stored["g1"], "session_rpe": None, "notes": "kept"})
+        self.assertEqual(rating_times(), {"i1": None, "w1": later, "g1": None})
+
+
 class ParameterRecordingConnection:
     """Delegate to a connection while recording each statement's parameter count."""
 
@@ -248,10 +290,11 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         )
         intervals_session = references.local_ids(["i-1"])["i-1"]
 
-        # Intervals id, its local id, a Garmin-only local id and provider id.
+        # Intervals id, its local id, a Garmin-only local id and provider id:
+        # every one is stored under the live session id.
         for activity_id, stored in (
-            ("i-1", "i-1"),
-            (intervals_session, "i-1"),
+            ("i-1", intervals_session),
+            (intervals_session, intervals_session),
             ("act_garmin", "act_garmin"),
             # The provider id joins its session's feedback group.
             ("g-only", "act_garmin"),
@@ -300,8 +343,8 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(result[0]["activity_feedback"]["notes"], "note")
         self.assertEqual(self.service.attach_to_activities("not a list"), [])
 
-    def test_attach_uses_the_stored_key_of_a_summary(self) -> None:
-        self.service.save("i7", {"notes": "intervals note"})
+    def test_attach_uses_the_session_id_of_a_summary(self) -> None:
+        self.service.save("act_1", {"notes": "intervals note"})
         summary = {"id": "act_1", "record_ids": {"intervals": "i7"}}
         no_intervals = {"id": "act_2", "record_ids": {"garmin": "g1"}}
 

@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
+import remote_planned_unit_fixture
+
 from backend import change_history
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import PlanningStateRepository
@@ -25,6 +27,7 @@ from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.changes import StructuredTrainingChangeValidator
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
+from backend.providers import garmin_strength_workout
 from backend.providers.intervals_workouts import planning_fields_from_intervals
 
 NOW = "2026-09-20T08:00:00+00:00"
@@ -151,6 +154,66 @@ class PlannedUnitServiceTests(unittest.TestCase):
                 (state, conflict_json, str(self.id)),
             )
         return str(self.id)
+
+    @unittest.skipUnless(
+        garmin_strength_workout.catalogue_available(), "garminconnect is not installed"
+    )
+    def test_athlete_picks_the_garmin_exercise_and_it_is_remembered(self):
+        self.service.create(
+            self.workout(
+                sport="WeightTraining",
+                description="",
+                strength_structure=[
+                    {"name": "Kabelrudern eng", "sets": 3, "reps": 10},
+                    {"name": "Face Pulls", "sets": 3, "reps": 15},
+                ],
+            )
+        )
+        listed = self.service.list(push_state=True)[0]
+        self.assertEqual({"garmin": "unmapped"}, listed["push_blocked"])
+        self.assertEqual([0], [item["index"] for item in listed["push_unmapped"]])
+        with self.assertRaises(AppError) as raised:
+            self.service.assign_garmin_exercise(
+                str(self.id), 0, "V-grip Cable Row", "stale"
+            )
+        self.assertEqual("planning_revision_conflict", raised.exception.reason)
+        for index in (5, True, "0"):
+            with self.subTest(index=index), self.assertRaises(AppError):
+                self.service.assign_garmin_exercise(
+                    str(self.id), index, "V-grip Cable Row", listed["payload_hash"]
+                )
+        # A unit in a sync conflict needs the athlete's decision first.
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET sync_state='conflict' WHERE local_id=?",
+                (str(self.id),),
+            )
+        with self.assertRaises(AppError) as raised:
+            self.service.assign_garmin_exercise(
+                str(self.id), 0, "V-grip Cable Row", listed["payload_hash"]
+            )
+        self.assertEqual("sync_conflict", raised.exception.reason)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET sync_state='synced', sync_dirty=0 "
+                "WHERE local_id=?",
+                (str(self.id),),
+            )
+        self.service.assign_garmin_exercise(
+            str(self.id), 0, "v-grip cable row", listed["payload_hash"]
+        )
+        planned, history, _revision = self.state()
+        stored = json.loads(planned[0]["payload"])["strength_structure"][0]
+        self.assertEqual("V-grip Cable Row", stored["garmin_exercise"])
+        self.assertEqual("V_GRIP_CABLE_ROW", stored["garmin_pair"]["exercise"])
+        # The pick changes nothing Intervals.icu carries: the sync state stays.
+        self.assertEqual(
+            ("synced", 0), (planned[0]["sync_state"], planned[0]["sync_dirty"])
+        )
+        self.assertEqual("update", history[-1]["action"])
+        listed = self.service.list(push_state=True)[0]
+        self.assertEqual({}, listed["push_blocked"])
+        self.assertEqual([], listed["push_unmapped"])
 
     def test_create_normalizes_and_inserts_local_sync_state(self):
         created = self.service.create(self.workout())
@@ -854,7 +917,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
             "description": "- 30m Z2",
             "moving_time": 1800,
         }
-        remote = planned_units.remote_planned_unit_payload(
+        remote = remote_planned_unit_fixture.remote_planned_unit_payload(
             planning_fields_from_intervals(provider_event), today=TODAY
         )[0]
         local_id = self.make_conflict({"remote": remote})
@@ -892,7 +955,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
             planned_units.planned_unit_payload_hash(remote),
         )
         self.assertEqual(
-            planned_units.remote_planned_unit_existing_state(
+            remote_planned_unit_fixture.remote_planned_unit_existing_state(
                 {**planned[0], "sync_dirty": 0, "sync_state": "synced"},
                 planned[0]["baseline_hash"],
             )[1],

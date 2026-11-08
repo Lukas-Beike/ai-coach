@@ -22,7 +22,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import mapped_recovery_inputs
-from performance_day_support import latest_day, snapshot_metrics
+from intervals_compaction import compact_snapshot
+from performance_day_support import snapshot_metrics
 
 from backend.activities.activity_summary import activity_summaries
 from backend.activities.identity import activity_kind
@@ -31,16 +32,13 @@ from backend.canonical.mapping import IssueReason, MappingResult
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import MetricKind, Sport
-from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.load import activity_rollup
-from backend.performance.load_context import performance_load_context
 from backend.performance.recovery_context import performance_recovery_context
 from backend.providers.intervals_activity_mapping import map_intervals_activities
 from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
-from backend.sync.intervals_compaction import compact_snapshot
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "providers" / "intervals"
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -171,7 +169,6 @@ def legacy_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
         snapshot,
         {},
         empty_garmin_metrics(),
-        latest_wellness=latest_day(snapshot.get("recent_wellness", [])),
     )
 
 
@@ -423,61 +420,29 @@ class WellnessParityTests(unittest.TestCase):
         self.snapshot = fixture_snapshot()
         self.rows = self.snapshot["recent_wellness"]
 
-    def test_load_alias_chains_match_the_legacy_load_context(self) -> None:
-        result = map_wellness(self.rows)
-        for row in self.rows:
-            with self.subTest(day=row["id"]):
-                day = date.fromisoformat(row["id"])
-                ctl = expect_value(result, MetricKind.CTL, day=row["id"])
-                atl = expect_value(result, MetricKind.ATL, day=row["id"])
-                # The stored values are the labelled history since #1726.
-                load = performance_load_context(
-                    self.snapshot["recent_activities"],
-                    TODAY,
-                    canonical=CanonicalPerformanceInputs(
-                        wellness_day=day, ctl=ctl, atl=atl
-                    ),
-                    timezone="UTC",
-                )["intervals_history"] or {"ctl": None, "atl": None}
-                self.assertEqual(
-                    expect_value(result, MetricKind.CTL, day=row["id"]), load["ctl"]
-                )
-                self.assertEqual(
-                    expect_value(result, MetricKind.ATL, day=row["id"]), load["atl"]
-                )
-
-    def test_recovery_values_match_the_recovery_context(self) -> None:
-        # Since #1411 the recovery context reads these observations directly.
+    def test_recovery_values_are_mapped_but_the_recovery_context_ignores_them(
+        self,
+    ) -> None:
         result = map_wellness(self.rows)
         legacy = performance_recovery_context(
             mapped_recovery_inputs(None, self.rows), TODAY
         )
-        sleep_seconds = expect_value(result, MetricKind.SLEEP_DURATION, day=LATEST_DAY)
-        self.assertEqual(legacy["sleep_hours"], round(sleep_seconds / 3600, 1))
-        self.assertEqual(
-            legacy["sleep_score"],
-            expect_value(result, MetricKind.SLEEP_SCORE, day=LATEST_DAY),
-        )
-        self.assertEqual(
-            legacy["resting_hr"],
-            expect_value(result, MetricKind.RESTING_HR, day=LATEST_DAY),
-        )
-        self.assertEqual(
-            legacy["hrv"],
-            expect_value(result, MetricKind.HRV_RMSSD, day=LATEST_DAY),
-        )
-        self.assertEqual(
-            legacy["readiness"],
-            expect_value(result, MetricKind.READINESS, day=LATEST_DAY),
-        )
+        for kind in (
+            MetricKind.SLEEP_DURATION,
+            MetricKind.SLEEP_SCORE,
+            MetricKind.RESTING_HR,
+            MetricKind.HRV_RMSSD,
+            MetricKind.READINESS,
+        ):
+            self.assertIsNotNone(expect_value(result, kind, day=LATEST_DAY), kind)
+        for key in ("sleep_hours", "sleep_score", "resting_hr", "hrv", "readiness"):
+            self.assertIsNone(legacy[key], key)
 
-    def test_weight_matches_current_metrics(self) -> None:
+    def test_weight_is_mapped_but_is_no_current_metric(self) -> None:
         result = map_wellness(self.rows)
         legacy = legacy_metrics(self.snapshot)
-        self.assertEqual(
-            legacy["weight_kg"]["value"],
-            expect_value(result, MetricKind.WEIGHT, day=LATEST_DAY),
-        )
+        self.assertIsNotNone(expect_value(result, MetricKind.WEIGHT, day=LATEST_DAY))
+        self.assertIsNone(legacy["weight_kg"]["value"])
 
     def test_pinned_wellness_keys_missing_from_the_compact_form(self) -> None:
         row = {"id": LATEST_DAY, **{key: 1 for key in MAPPED_WELLNESS_KEYS - {"id"}}}
@@ -496,7 +461,7 @@ class WellnessParityTests(unittest.TestCase):
             ),
         )
 
-    def test_compact_loss_of_resting_hr_is_seen_by_the_recovery_reader_too(
+    def test_compact_loss_of_resting_hr_is_seen_by_the_mapper(
         self,
     ) -> None:
         # The compact wellness fields do not carry ``resting_hr``. Observations
@@ -510,20 +475,14 @@ class WellnessParityTests(unittest.TestCase):
         self.assertIsNone(
             first_value(map_wellness([compact_row]), MetricKind.RESTING_HR)
         )
-        self.assertEqual(
-            performance_recovery_context(mapped_recovery_inputs(None, [row]), TODAY)[
-                "resting_hr"
-            ],
-            47,
-        )
         self.assertIsNone(
             performance_recovery_context(
                 mapped_recovery_inputs(None, [compact_row]), TODAY
             )["resting_hr"]
         )
 
-    def test_comma_decimal_weight_is_accepted_by_mapper_and_legacy(self) -> None:
-        # Both the mapper and the legacy readers replace the comma with a dot.
+    def test_comma_decimal_weight_is_mapped_and_is_no_current_metric(self) -> None:
+        # The mapper replaces the comma with a dot; no current metric reads it.
         row = {"id": LATEST_DAY, "weight": "70,1"}
         result = map_wellness([row])
         self.assertEqual(first_value(result, MetricKind.WEIGHT), 70.1)
@@ -531,7 +490,7 @@ class WellnessParityTests(unittest.TestCase):
         legacy = legacy_metrics(
             {"athlete": {}, "recent_wellness": [row], "recent_activities": []}
         )
-        self.assertEqual(legacy["weight_kg"]["value"], 70.1)
+        self.assertIsNone(legacy["weight_kg"]["value"])
 
 
 class ThresholdParityTests(unittest.TestCase):
@@ -539,7 +498,7 @@ class ThresholdParityTests(unittest.TestCase):
         self.athlete = load_fixture("athlete")
         self.legacy = legacy_metrics(compact_form(self.athlete, [], []))
 
-    def test_ftp_lthr_and_max_hr_match_current_metrics(self) -> None:
+    def test_ftp_lthr_and_max_hr_are_mapped_but_are_no_current_metric(self) -> None:
         result = map_thresholds(self.athlete)
         pairs = (
             ("cycling_ftp_watts", MetricKind.FTP, Sport.RIDE),
@@ -551,19 +510,15 @@ class ThresholdParityTests(unittest.TestCase):
         )
         for name, kind, sport in pairs:
             with self.subTest(metric=name):
-                self.assertEqual(
-                    first_value(result, kind, sport=sport),
-                    self.legacy[name]["value"],
-                )
+                self.assertIsNotNone(first_value(result, kind, sport=sport))
+                self.assertIsNone(self.legacy[name]["value"])
 
     def test_threshold_pace_is_metres_per_second_below_twenty(self) -> None:
         pace = expect_value(
             map_thresholds(self.athlete), MetricKind.THRESHOLD_PACE, sport=Sport.RUN
         )
-        self.assertEqual(
-            round(1000 / pace),
-            self.legacy["run_threshold_pace_seconds_per_km"]["value"],
-        )
+        self.assertEqual(round(1000 / pace), 238)
+        self.assertIsNone(self.legacy["run_threshold_pace_seconds_per_km"]["value"])
 
     def test_threshold_pace_in_seconds_per_km_converts_to_metres_per_second(
         self,
@@ -573,7 +528,7 @@ class ThresholdParityTests(unittest.TestCase):
         pace = expect_value(
             map_thresholds(athlete), MetricKind.THRESHOLD_PACE, sport=Sport.RUN
         )
-        self.assertEqual(legacy["run_threshold_pace_seconds_per_km"]["value"], 240)
+        self.assertIsNone(legacy["run_threshold_pace_seconds_per_km"]["value"])
         self.assertEqual(round(1000 / pace), 240)
 
     def test_compact_athlete_maps_like_the_raw_athlete(self) -> None:
@@ -619,7 +574,7 @@ class ThresholdParityTests(unittest.TestCase):
         athlete = {"sportSettings": [{"types": ["Workout", "Ride"], "ftp": 255}]}
         legacy = legacy_metrics(compact_form(athlete, [], []))
         result = map_thresholds(athlete)
-        self.assertEqual(legacy["cycling_ftp_watts"]["value"], 255)
+        self.assertIsNone(legacy["cycling_ftp_watts"]["value"])
         self.assertEqual(first_value(result, MetricKind.FTP, sport=Sport.RIDE), 255)
         self.assertIsNone(first_value(result, MetricKind.FTP, sport=Sport.OTHER))
 
@@ -633,8 +588,8 @@ class ThresholdParityTests(unittest.TestCase):
         }
         legacy = legacy_metrics(compact_form(athlete, [], []))
         result = map_thresholds(athlete)
-        # The zero FTP falls through to the top-level icu_ftp in both readers.
-        self.assertEqual(legacy["cycling_ftp_watts"]["value"], 250)
+        # The zero FTP falls through to the top-level icu_ftp in the mapper.
+        self.assertIsNone(legacy["cycling_ftp_watts"]["value"])
         self.assertEqual(first_value(result, MetricKind.FTP, sport=Sport.RIDE), 250)
         self.assertIsNone(legacy["bike_threshold_hr_bpm"]["value"])
         self.assertIsNone(
@@ -671,47 +626,45 @@ class ThresholdParityTests(unittest.TestCase):
                     [IssueReason.OUT_OF_RANGE],
                 )
 
-    def test_athlete_level_lthr_and_max_hr_match_the_legacy_fallback(self) -> None:
-        # Parity: current_metrics falls back to the athlete-level lthr and max_hr
-        # for both sports when no sport setting carries them. The mapper emits them
-        # with sport None, and the consumer applies the per-sport fallback.
+    def test_athlete_level_lthr_and_max_hr_are_mapped_without_a_sport(self) -> None:
+        # The mapper emits them with sport None; no current metric reads them.
         athlete = {"id": "i-synthetic-001", "lthr": 165, "max_hr": 188}
         legacy = legacy_metrics(compact_form(athlete, [], []))
         result = map_thresholds(athlete)
         self.assertEqual(first_value(result, MetricKind.THRESHOLD_HR), 165)
         self.assertEqual(first_value(result, MetricKind.MAX_HR), 188)
-        for name in ("bike_threshold_hr_bpm", "run_threshold_hr_bpm"):
+        for name in (
+            "bike_threshold_hr_bpm",
+            "run_threshold_hr_bpm",
+            "cycling_max_hr_bpm",
+            "running_max_hr_bpm",
+        ):
             with self.subTest(metric=name):
-                self.assertEqual(legacy[name]["value"], 165)
-        for name in ("cycling_max_hr_bpm", "running_max_hr_bpm"):
-            with self.subTest(metric=name):
-                self.assertEqual(legacy[name]["value"], 188)
+                self.assertIsNone(legacy[name]["value"])
 
-    def test_sport_setting_lthr_overrides_the_athlete_level_value(self) -> None:
-        # The Ride setting wins for Ride; Run has no setting, so the athlete-level
-        # value (sport None) is its fallback in both readers.
+    def test_sport_setting_lthr_is_mapped_beside_the_athlete_level_value(self) -> None:
+        # The Ride setting is a Ride observation; Run has none, and the
+        # athlete-level value has no sport. No current metric reads either.
         athlete = {
             "lthr": 165,
             "sportSettings": [{"types": ["Ride"], "lthr": 168}],
         }
         legacy = legacy_metrics(compact_form(athlete, [], []))
         result = map_thresholds(athlete)
-        self.assertEqual(legacy["bike_threshold_hr_bpm"]["value"], 168)
+        self.assertIsNone(legacy["bike_threshold_hr_bpm"]["value"])
         self.assertEqual(
             first_value(result, MetricKind.THRESHOLD_HR, sport=Sport.RIDE), 168
         )
-        self.assertEqual(legacy["run_threshold_hr_bpm"]["value"], 165)
+        self.assertIsNone(legacy["run_threshold_hr_bpm"]["value"])
         self.assertIsNone(first_value(result, MetricKind.THRESHOLD_HR, sport=Sport.RUN))
         self.assertEqual(first_value(result, MetricKind.THRESHOLD_HR), 165)
 
-    def test_athlete_weight_matches_current_metrics(self) -> None:
-        # The fixture athlete carries weight 70.0 and no wellness rows, so the
-        # legacy weight chain reads the athlete record.
+    def test_athlete_weight_is_mapped_but_is_no_current_metric(self) -> None:
         result = map_thresholds(self.athlete)
-        self.assertEqual(self.legacy["weight_kg"]["value"], 70.0)
+        self.assertIsNone(self.legacy["weight_kg"]["value"])
         self.assertEqual(first_value(result, MetricKind.WEIGHT), 70.0)
 
-    def test_sport_setting_vo2max_matches_current_metrics(self) -> None:
+    def test_sport_setting_vo2max_is_mapped_but_is_no_current_metric(self) -> None:
         athlete = {
             "sportSettings": [
                 {"types": ["Ride"], "vo2max": 58},
@@ -720,9 +673,9 @@ class ThresholdParityTests(unittest.TestCase):
         }
         legacy = legacy_metrics(compact_form(athlete, [], []))
         result = map_thresholds(athlete)
-        self.assertEqual(legacy["cycling_vo2max_ml_kg_min"]["value"], 58)
+        self.assertIsNone(legacy["cycling_vo2max_ml_kg_min"]["value"])
         self.assertEqual(first_value(result, MetricKind.VO2MAX, sport=Sport.RIDE), 58)
-        self.assertEqual(legacy["running_vo2max_ml_kg_min"]["value"], 52.5)
+        self.assertIsNone(legacy["running_vo2max_ml_kg_min"]["value"])
         self.assertEqual(first_value(result, MetricKind.VO2MAX, sport=Sport.RUN), 52.5)
 
     def test_zero_sport_vo2max_is_unset_in_both_readers(self) -> None:

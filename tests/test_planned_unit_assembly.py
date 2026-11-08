@@ -65,42 +65,6 @@ class PlannedUnitSyncAssemblyTests(unittest.TestCase):
             callbacks["planning_revision_service"], callbacks["redactor"]
         )
 
-    def test_remote_reconciler_resolves_manager_and_service_per_call(self):
-        callbacks = {
-            "database_manager": Mock(side_effect=["first manager", "second manager"]),
-            "planned_unit_service": Mock(
-                side_effect=["first service", "second service"]
-            ),
-            "planning_revision_service": Mock(),
-            "redactor": Mock(),
-            "utc_now": Mock(),
-            "today": Mock(),
-        }
-        assembly = self._assembly(callbacks)
-
-        with patch.object(
-            assembly_module, "RemotePlannedUnitReconciler"
-        ) as reconciler_type:
-            first = assembly.remote_reconciler()
-            second = assembly.remote_reconciler()
-
-        self.assertIsNotNone(first)
-        self.assertIsNotNone(second)
-        self.assertEqual(reconciler_type.call_count, 2)
-        self.assertEqual(
-            reconciler_type.call_args.args[:3],
-            (
-                "second manager",
-                "second service",
-                callbacks["planning_revision_service"],
-            ),
-        )
-        callbacks["database_manager"].assert_has_calls(
-            [unittest.mock.call(), unittest.mock.call()]
-        )
-        callbacks["planned_unit_service"].assert_has_calls(
-            [unittest.mock.call(), unittest.mock.call()]
-        )
 
 
 if __name__ == "__main__":

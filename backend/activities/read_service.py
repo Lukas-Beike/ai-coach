@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 
@@ -15,7 +15,6 @@ from backend.activities.activity_reference import (
 from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.sync_time import activities_synced_at
 from backend.canonical.activity_summary import ActivitySummary
-from backend.canonical.vocabulary import ProviderId
 from backend.runtime.ports import (
     ActivityFingerprintReader,
     ActivitySummaryReader,
@@ -89,10 +88,6 @@ def _page_limit(raw: Any) -> int:
         return PAGE_DEFAULT
 
 
-def _intervals_id(summary: ActivitySummary) -> str | None:
-    return (summary.get("record_ids") or {}).get(ProviderId.INTERVALS.value)
-
-
 class ActivityReadService:
     """Own activity listing without provider refreshes: one entry per session."""
 
@@ -149,32 +144,6 @@ class ActivityReadService:
                 return below[:count]
             fetch *= 2
 
-    def _detail_errors(
-        self, db: Any, page: Sequence[ActivitySummary]
-    ) -> dict[str, str]:
-        """Name the detail failure recorded for each listed session's Intervals summary."""
-        if self._detail_store is None:
-            return {}
-        intervals_ids = {
-            summary["id"]: intervals_id
-            for summary in page
-            if (intervals_id := _intervals_id(summary))
-        }
-        failures = self._detail_store.failures(intervals_ids.values())
-        if not failures:
-            return {}
-        fingerprints = self._summaries.summary_fingerprints(
-            db, [(ProviderId.INTERVALS.value, key) for key in failures]
-        )
-        # A note left by another summary version no longer describes this one.
-        return {
-            session_id: failures[intervals_id]["message"]
-            for session_id, intervals_id in intervals_ids.items()
-            if intervals_id in failures
-            and failures[intervals_id].get("summary_sha256")
-            == fingerprints.get((ProviderId.INTERVALS.value, intervals_id))
-        }
-
     def page(
         self,
         cursor: Any = None,
@@ -199,12 +168,9 @@ class ActivityReadService:
                 db, page_size + 1, start=start, after=_decode_page_cursor(cursor)
             )
             page = listed[:page_size]
-            failures = self._detail_errors(db, page)
         attached = self._feedback_service.attach_to_activities(
             [dict(summary) for summary in page]
         )
-        for item in attached:
-            item["detail_error"] = failures.get(item["id"])
         return {
             "snapshot_synced_at": synced_at,
             "activities": attached,

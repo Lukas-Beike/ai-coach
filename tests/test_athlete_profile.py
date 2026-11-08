@@ -13,14 +13,21 @@ from backend.errors import AppError
 class AthleteProfileTests(unittest.TestCase):
     def test_preferred_sources_accept_known_providers_only(self):
         result = normalize_profile(
-            {"preferred_source_body": "intervals", "preferred_source_hrv": "wahoo"}
+            {"preferred_source_body": "garmin", "preferred_source_hrv": "wahoo"}
         )
-        self.assertEqual(result["preferred_source_body"], "intervals")
+        self.assertEqual(result["preferred_source_body"], "garmin")
         self.assertEqual(result["preferred_source_hrv"], "")
         with self.assertRaises(AppError):
             normalize_profile(
                 {"preferred_source_sleep": "oura"}, validate_timezone=True
             )
+
+    def test_a_stored_intervals_preference_reads_as_the_default(self):
+        profile = {"preferred_source_body": "intervals"}
+        self.assertEqual(normalize_profile(profile)["preferred_source_body"], "")
+        self.assertEqual(profile, {"preferred_source_body": "intervals"})
+        with self.assertRaises(AppError):
+            normalize_profile(profile, validate_timezone=True)
 
     def test_defaults_preserve_profile_contract_and_import_time_timezone_fallback(self):
         self.assertEqual(
@@ -51,6 +58,7 @@ class AthleteProfileTests(unittest.TestCase):
                 "weight_kg": "",
                 "body_fat_pct": "",
                 "height_cm": "",
+                "sex": "",
                 "coaching_style": "Supportive, direct, and evidence-aware",
                 "timezone": os.environ.get("TZ", DEFAULT_TIMEZONE),
                 "weather_location": "",
@@ -117,6 +125,16 @@ class AthleteProfileTests(unittest.TestCase):
         )
         with self.assertRaises(AppError):
             normalize_profile({"training_model": "hiit"}, validate_timezone=True)
+
+    def test_sex_is_male_female_or_unset_and_rejects_unknown_only_when_strict(self):
+        self.assertEqual(normalize_profile({})["sex"], "")
+        for value in ("male", "female", ""):
+            self.assertEqual(
+                normalize_profile({"sex": value}, validate_timezone=True)["sex"], value
+            )
+        self.assertEqual(normalize_profile({"sex": "other"})["sex"], "")
+        with self.assertRaises(AppError):
+            normalize_profile({"sex": "other"}, validate_timezone=True)
 
     def test_normalize_profile_does_not_mutate_input(self):
         value = {"name": "  Ada  ", "timezone": "UTC", "unknown": ["keep"]}

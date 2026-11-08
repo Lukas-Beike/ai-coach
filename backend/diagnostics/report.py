@@ -26,9 +26,11 @@ from backend.diagnostics.canonical_read import (
     summarize_canonical_read,
 )
 from backend.diagnostics.history import CoachDiagnosticHistoryService
+from backend.diagnostics.intervals_purge import summarize_intervals_purge
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.plan_sync import summarize_plan_sync
 from backend.diagnostics.provider_composition import summarize_provider_composition
+from backend.diagnostics.rating_backfill import summarize_rating_backfill
 from backend.diagnostics.session_conflicts import summarize_session_conflicts
 from backend.observability import DiagnosticCapture, Redactor
 from backend.provider_credentials import garmin_tokens_connected
@@ -47,6 +49,7 @@ from backend.sync.garmin import GarminFixtureLoader, GarminSyncStateService
 from backend.sync.garmin_projection_service import GarminProjectionService
 from backend.sync.library import WorkoutLibrarySyncStateService
 from backend.sync.local_load import summarize_local_load
+from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.state import SyncStateRepository
 
@@ -83,6 +86,8 @@ class DiagnosticReportDependencies:
     canonical_read: CanonicalReadStatusReader | None = None
     activity_rows: ActivityRowAndSummaryReader | None = None
     observations: ObservationReader | None = None
+    # Whether the data directory holds the Intervals.icu purge marker file.
+    intervals_purge_marker: Callable[[], bool] = lambda: False
 
 
 class DiagnosticReportService:
@@ -161,7 +166,6 @@ class DiagnosticReportService:
                         self._get_value(db, "last_sync_error") or ""
                     )
                     or None,
-                    "running": self._get_value(db, "sync_running") == "1",
                     "snapshot_counts": {
                         "activities": activity_count(deps.activity_rows, db),
                         "wellness": wellness_day_count(
@@ -173,15 +177,6 @@ class DiagnosticReportService:
                         if snapshot
                         else 0,
                     },
-                },
-                "performance_refresh": {
-                    "last_refresh": self._get_value(db, "last_performance_refresh_at"),
-                    "last_error": deps.redactor.redact_text(
-                        self._get_value(db, "last_performance_error") or ""
-                    )
-                    or None,
-                    "running": self._get_value(db, "performance_refresh_running")
-                    == "1",
                 },
                 ProviderId.GARMIN.value: garmin_status,
                 "provider_freshness": deps.provider_freshness.current(
@@ -226,7 +221,16 @@ class DiagnosticReportService:
                 "canonical_session_conflicts": summarize_session_conflicts(db),
                 "canonical_provider_composition": summarize_provider_composition(db),
                 "local_load": summarize_local_load(deps.key_values, db),
+                "rating_backfill": summarize_rating_backfill(
+                    deps.key_values, db, deps.config.sync_history_earliest_date
+                ),
+                "intervals_purge": summarize_intervals_purge(
+                    deps.key_values,
+                    db,
+                    marker_exists=deps.intervals_purge_marker(),
+                ),
                 "session_metrics": summarize_session_metrics(deps.key_values, db),
+                "session_analysis": summarize_session_analysis(deps.key_values, db),
                 "logs": deps.recent_logs.list(),
                 "debug_capture": {
                     **diagnostic_capture_status,

@@ -6,7 +6,6 @@ import base64
 import json
 from datetime import date
 from typing import Any
-from unittest.mock import Mock
 
 from canonical_read_support import (
     CanonicalReadFixture,
@@ -14,11 +13,10 @@ from canonical_read_support import (
     make_selector,
     populate,
 )
+from intervals_compaction import compact_activity_rows
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_store import summary_fingerprint
-from backend.activities.duplicate_inspection import DuplicateInspector
-from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.read_service import ActivityReadService
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
@@ -27,7 +25,6 @@ from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.intervals_compaction import compact_activity_rows
 
 TODAY = date(2026, 10, 13)
 REMOVAL_AT = "2026-10-13T09:00:00+00:00"
@@ -90,74 +87,16 @@ class _ActivityCase(CanonicalReadFixture):
             _Feedback(),
         )
 
-    def inspector(self, selector: Any) -> DuplicateInspector:
-        return DuplicateInspector(self.manager, self.table, lambda: self.zone, selector)
 
     def ids(self, rows: Any) -> set[str]:
         return {str(row["id"]) for row in rows}
 
 
 class DuplicateRemovalTests(_ActivityCase):
-    def _service(self, selector: Any) -> DuplicateActivityService:
-        return DuplicateActivityService(
-            self.manager,
-            self.inspector(selector),
-            lambda: REMOVAL_AT,
-            Mock(),
-        )
 
-    def _payload(self, selector: Any) -> dict[str, Any]:
-        pair = self.inspector(selector).latest() or {}
-        return {
-            key: pair[key]
-            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
-        }
 
-    def test_removal_is_recorded_in_the_tables_and_leaves_the_snapshot(self) -> None:
-        populate(self)
-        selector = make_selector(self)
-        self.assertIn(GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads)))
-        snapshot = self.intervals["synced_at"]
 
-        remote = Mock()
-        self._service(selector).delete(self._payload(selector), remote)
 
-        remote.delete_activity.assert_called_once_with(GARMIN_ID)
-        for source in (selector, self.table):
-            rows = self.read(source.intervals_activity_payloads)
-            self.assertNotIn(GARMIN_ID, self.ids(rows))
-            self.assertIn(WAHOO_ID, self.ids(rows))
-        # The snapshot is an ingestion artefact and is not rewritten by a delete.
-        self.assertEqual(self.intervals["synced_at"], snapshot)
-        self.assertIn(
-            GARMIN_ID, self.ids(self.intervals["raw_provider_data"]["activities"])
-        )
-        recent = self.read_service(selector).recent(today=TODAY)["activities"]
-        self.assertNotIn(GARMIN_ID, self.ids(recent))
-
-    def test_removal_tombstones_record_session_and_provider_record(self) -> None:
-        populate(self)
-        selector = make_selector(self)
-        self._service(selector).delete(self._payload(selector), Mock())
-
-        for table in ("activity_records", "provider_records", "activity_sessions"):
-            with self.subTest(table=table):
-                self.assertTrue(
-                    self.rows(f"SELECT state FROM {table} WHERE state = 'deleted'")
-                )
-        kept = self.rows(
-            "SELECT state FROM activity_records WHERE provider_activity_id = ?",
-            (WAHOO_ID,),
-        )
-        self.assertEqual([row["state"] for row in kept], ["active"])
-
-    def test_inspector_stops_reporting_the_removed_pair(self) -> None:
-        populate(self)
-        selector = make_selector(self)
-        before = self.inspector(selector).latest()
-        self.assertEqual((before or {}).get("duplicate_id"), GARMIN_ID)
-        self._service(selector).delete(self._payload(selector), Mock())
-        self.assertIsNone(self.inspector(selector).latest())
 
     def test_mark_activity_deleted_reports_whether_anything_changed(self) -> None:
         populate(self)
@@ -246,7 +185,7 @@ class PendingAndTableReadTests(_ActivityCase):
         ]
         for key in ("id", "started_at", "started_at_local", "sport", "record_ids"):
             self.assertIn(key, row)
-        self.assertIn("detail_error", row)
+        self.assertNotIn("detail_error", row)
         self.assertFalse(
             [
                 key
@@ -257,13 +196,6 @@ class PendingAndTableReadTests(_ActivityCase):
             ]
         )
 
-    def test_duplicate_inspection_reads_only_the_tables(self) -> None:
-        # Before the first backfill nothing is in the tables:
-        # no pair is offered, so nothing can be deleted twice.
-        self.assertIsNone(self.inspector(make_selector(self)).latest())
-        populate(self)
-        pair = self.inspector(make_selector(self)).latest()
-        self.assertEqual((pair or {}).get("duplicate_id"), GARMIN_ID)
 
 
 class SessionListFreshnessTests(_ActivityCase):
@@ -329,35 +261,5 @@ class SnapshotWithoutCanonicalSectionsTests(_ActivityCase):
         self.assertEqual(service.page(today=TODAY)["activities"], expected_page)
         self.assertEqual(service.recent(today=TODAY)["activities"], expected_recent)
 
-    def test_duplicate_inspection_does_not_need_the_snapshot_sections(self) -> None:
-        populate(self)
-        selector = make_selector(self)
-        expected = self.inspector(selector).latest()
-        self.assertIsNotNone(expected)
 
-        self.strip_canonical_sections()
 
-        self.assertEqual(self.inspector(selector).latest(), expected)
-
-    def test_duplicate_removal_works_without_the_snapshot_sections(self) -> None:
-        populate(self)
-        selector = make_selector(self)
-        payload = self._payload(selector)
-        self.strip_canonical_sections()
-        service = DuplicateActivityService(
-            self.manager,
-            self.inspector(selector),
-            lambda: REMOVAL_AT,
-            Mock(),
-        )
-
-        service.delete(payload, Mock())
-
-        self.assertNotIn(GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads)))
-
-    def _payload(self, selector: Any) -> dict[str, Any]:
-        pair = self.inspector(selector).latest() or {}
-        return {
-            key: pair[key]
-            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
-        }

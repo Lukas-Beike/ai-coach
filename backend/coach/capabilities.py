@@ -22,7 +22,6 @@ OWNER_TOOLS = {
         "read_nutrition",
         "lookup_food",
         "calculate_food_nutrition",
-        "inspect_activity_duplicates",
     },
     "CoachProfileUpdateService": {"update_profile"},
     "CoachAthleteRecordToolService": {
@@ -55,7 +54,6 @@ OWNER_TOOLS = {
     "CoachLibraryPlanToolService": {"apply_workout_library_plan"},
     "CoachSyncToolService": {
         "start_provider_refresh",
-        "refresh_current_performance",
         "start_intervals_plan_sync",
         "push_strength_to_garmin",
         "sync_competitions",
@@ -67,7 +65,6 @@ OWNER_TOOLS = {
         "apply_adaptive_replan",
         "update_training_plan",
         "undo_training_change",
-        "delete_duplicate_intervals_activity",
     },
     "CoachDialogueActionService": {"clarify_coach_request", "cancel_coach_request"},
 }
@@ -77,7 +74,6 @@ REMOTE_WRITE_TOOLS = frozenset(
         "start_intervals_plan_sync",
         "push_strength_to_garmin",
         "sync_competitions",
-        "delete_duplicate_intervals_activity",
         "sync_nutrition",
     }
 )
@@ -85,7 +81,7 @@ CONDITIONAL_REMOTE_WRITE_TOOLS = frozenset(
     {"resolve_training_sync_conflict", "apply_adaptive_replan"}
 )
 PROVIDER_READ_JOB_TOOLS = frozenset(
-    {"start_provider_refresh", "refresh_current_performance"}
+    {"start_provider_refresh"}
 )
 CONTROL_TOOLS = frozenset({"clarify_coach_request", "cancel_coach_request"})
 

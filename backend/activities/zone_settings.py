@@ -1,9 +1,10 @@
 """Zone limits and thresholds used to color plan steps and recordings.
 
-Defaults follow Intervals.icu's standard zones. Canonical zone configurations
-replace them per metric: a confirmed local configuration valid on the day wins,
-then the provider's. A metric without a configuration keeps the sport's canonical
-thresholds (``from_thresholds``) and the default limits.
+Power and pace defaults follow Intervals.icu's standard zones, heart rate
+Coggan's five zones. Canonical zone configurations replace them per metric: a
+confirmed local configuration valid on the day wins, then the provider's. A metric
+without a configuration keeps the sport's canonical thresholds
+(``from_thresholds``) and the default limits.
 """
 
 from __future__ import annotations
@@ -23,9 +24,11 @@ from backend.canonical.vocabulary import (
     ZonePercentBasis,
 )
 
-# Upper zone limits (Z1..Z6; everything above is Z7) as percent of the threshold.
+# Upper zone limits as percent of the threshold; everything above the last limit is
+# the top zone. Power: Z1..Z6, above is Z7 (Intervals.icu). Heart rate: Coggan's five
+# zones as percent of LTHR, Z1..Z4, above 105 % is Z5.
 POWER_ZONE_LIMITS = (55, 75, 90, 105, 120, 150)
-HR_ZONE_LIMITS = (68, 83, 94, 105, 120, 150)
+HR_ZONE_LIMITS = (68, 83, 94, 105)
 PACE_ZONE_LIMITS = (77.5, 87.7, 94.3, 100, 103.4, 111.5)
 # Heart-rate steps are usually written as percent of max HR; threshold HR is
 # about 90 % of it.
@@ -49,33 +52,30 @@ class ZoneSettings:
     ftp: float | None = None
     lthr: float | None = None
     max_hr: float | None = None
+    # Threshold running speed in m/s; pace limits are percent of it.
+    threshold_pace: float | None = None
     power_limits: tuple[float, ...] = POWER_ZONE_LIMITS
     hr_limits: tuple[float, ...] = HR_ZONE_LIMITS
     pace_limits: tuple[float, ...] = PACE_ZONE_LIMITS
 
     @classmethod
     def from_thresholds(
-        cls,
-        observations: Iterable[Observation],
-        sport: Sport,
-        environment: Environment = Environment.UNKNOWN,
+        cls, observations: Iterable[Observation], sport: Sport
     ) -> ZoneSettings:
         """Thresholds of ``sport`` from its canonical athlete settings, default limits.
 
-        ``observations`` are the sport-scoped FTP, indoor FTP, threshold and maximum
-        heart rate of the latest provider sync; the first of each kind for ``sport``
-        is used. Indoor and virtual workouts use the indoor FTP when there is one.
+        ``observations`` are the sport-scoped FTP, threshold pace, threshold and
+        maximum heart rate winners; the first of each kind for ``sport`` is used.
         """
         values: dict[MetricKind, float] = {}
         for observation in observations:
             if observation.sport is sport:
                 values.setdefault(observation.kind, float(observation.value.value))
-        indoor = environment in {Environment.INDOOR, Environment.VIRTUAL}
         return cls(
-            ftp=(values.get(MetricKind.INDOOR_FTP) if indoor else None)
-            or values.get(MetricKind.FTP),
+            ftp=values.get(MetricKind.FTP),
             lthr=values.get(MetricKind.THRESHOLD_HR),
             max_hr=values.get(MetricKind.MAX_HR),
+            threshold_pace=values.get(MetricKind.THRESHOLD_PACE),
         )
 
     @classmethod
@@ -113,6 +113,8 @@ class ZoneSettings:
             ftp=_threshold(power, base.ftp, "threshold"),
             lthr=_threshold(heart_rate, base.lthr, "threshold"),
             max_hr=_threshold(heart_rate, base.max_hr, "maximum"),
+            # The threshold pace comes from the fallback only (resolved upstream).
+            threshold_pace=base.threshold_pace,
             power_limits=_percent_limits(power) or base.power_limits,
             hr_limits=_percent_limits(heart_rate) or base.hr_limits,
             pace_limits=_percent_limits(pace) or base.pace_limits,
@@ -146,8 +148,14 @@ class ZoneSettings:
 def _threshold(
     configuration: ZoneConfiguration | None, fallback: float | None, field: str
 ) -> float | None:
-    """A local configuration's value, else the fallback, else a provider's value."""
-    if configuration is None:
+    """A local configuration's value, else the fallback, else a provider's value.
+
+    An Intervals.icu configuration gives its limits only, never a threshold.
+    """
+    if (
+        configuration is None
+        or configuration.provenance.provider is ProviderId.INTERVALS
+    ):
         return fallback
     value: float | None = getattr(configuration, field)
     first, second = (

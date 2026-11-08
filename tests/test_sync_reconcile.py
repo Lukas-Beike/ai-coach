@@ -132,32 +132,6 @@ class SyncReconcileTests(unittest.TestCase):
         self.assertEqual(remote_event, remote_before)
         self.assertTrue(self.db.in_transaction)
 
-    def test_synced_keeps_missing_moving_time_and_pops_other_missing_fields(self):
-        # The event answers the push of the local unit, so the pushed duration is
-        # kept; remote clears arrive through RemotePlannedUnitReconciler.
-        self.add_unit(
-            "unit-1",
-            {
-                "planned_duration_s": 300,
-                "workout_doc": "old",
-                "planned_load": 1,
-                "planned_intensity": 2,
-            },
-        )
-        remote_event = {"id": "remote-1", "external_id": " external-1 "}
-
-        self.writer.persist(
-            self.db, "unit-1", "synced", None, remote_event, now="sync-time"
-        )
-
-        payload = json.loads(self.unit("unit-1")["payload"])
-        self.assertEqual(payload["planned_duration_s"], 300)
-        self.assertNotIn("workout_doc", payload)
-        self.assertNotIn("planned_load", payload)
-        self.assertNotIn("planned_intensity", payload)
-        self.assertEqual(payload["external_id"], " external-1 ")
-        self.assertEqual(self.unit("unit-1")["external_id"], "external-1")
-        self.assertEqual(self.revisions.read(self.db), 8)
 
     def test_error_conflict_and_remote_missing_state_rules(self):
         cases = (
@@ -250,6 +224,33 @@ class SyncReconcileTests(unittest.TestCase):
         self.assertEqual(row["external_id"], "stored-external")
         self.assertEqual(row["baseline_hash"], "stored-hash")
         self.assertEqual(row["last_synced_at"], "stored-time")
+        self.assertEqual(self.revisions.read(self.db), 8)
+
+    def test_synced_keeps_missing_moving_time_and_pops_other_missing_fields(self):
+        # The event answers the push of the local unit, so the pushed duration is
+        # kept; remote clears arrive through remote_reconcilers.RemotePlannedUnitReconciler.
+        self.add_unit(
+            "unit-1",
+            {
+                "planned_duration_s": 300,
+                "workout_doc": "old",
+                "planned_load": 1,
+                "planned_intensity": 2,
+            },
+        )
+        remote_event = {"id": "remote-1", "external_id": " external-1 "}
+
+        self.writer.persist(
+            self.db, "unit-1", "synced", None, remote_event, now="sync-time"
+        )
+
+        payload = json.loads(self.unit("unit-1")["payload"])
+        self.assertEqual(payload["planned_duration_s"], 300)
+        self.assertNotIn("workout_doc", payload)
+        self.assertNotIn("planned_load", payload)
+        self.assertNotIn("planned_intensity", payload)
+        self.assertEqual(payload["external_id"], " external-1 ")
+        self.assertEqual(self.unit("unit-1")["external_id"], "external-1")
         self.assertEqual(self.revisions.read(self.db), 8)
 
 

@@ -12,8 +12,12 @@ function loadPublicScript(name) {
 // plan-views.js keeps its helpers private, so load it into a sandbox and expose the week-total helper.
 const context = vm.createContext({});
 vm.runInContext(loadPublicScript("format.js"), context);
-vm.runInContext(`${loadPublicScript("plan-views.js")};globalThis.calendarWeekDistanceLabel = calendarWeekDistanceLabel;`, context);
-const { calendarWeekDistanceLabel } = context;
+vm.runInContext(`${loadPublicScript("plan-views.js")};globalThis.calendarWeekDistance = calendarWeekDistance; globalThis.calendarWeekLoad = calendarWeekLoad; globalThis.calendarHours = calendarHours;`, context);
+const { calendarHours, calendarWeekDistance, calendarWeekLoad } = context;
+const calendarWeekDistanceLabel = (activities) => {
+  const result = calendarWeekDistance(activities);
+  return result ? [result.value, result.note].filter(Boolean).join(" · ") : "–";
+};
 
 test("week distance counts a distance-bearing sport that is not in the classic list", () => {
   assert.equal(calendarWeekDistanceLabel([{ sport: "swim", distance_m: 1500 }]), "1,5 km");
@@ -30,6 +34,20 @@ test("week distance ignores strength sessions without distance", () => {
 });
 
 test("week distance reports distance sports without distance as missing", () => {
-  assert.equal(calendarWeekDistanceLabel([{ sport: "swim", distance_m: 1000 }, { sport: "swim" }]), "1,0 km · ohne 1 Aktivität");
-  assert.equal(calendarWeekDistanceLabel([{ sport: "row" }, { sport: "hike", distance_m: 0 }]), "– · ohne 2 Aktivitäten");
+  assert.equal(calendarWeekDistanceLabel([{ sport: "swim", distance_m: 1000 }, { sport: "swim" }]), "1,0 km · 1 Aktivität ohne Distanz");
+  assert.equal(calendarWeekDistanceLabel([{ sport: "row" }, { sport: "hike", distance_m: 0 }]), "– · 2 Aktivitäten ohne Distanz");
+});
+
+test("week load sums known values and names the sessions without one", () => {
+  assert.equal(calendarWeekLoad([{ training_load: null }, { training_load: undefined }]), null);
+  const partial = calendarWeekLoad([{ training_load: 40 }, { training_load: 35 }, { training_load: null }]);
+  assert.equal(partial.value, "75");
+  assert.equal(partial.note, "1 Einheit ohne Belastung");
+  assert.equal(calendarWeekLoad([{ training_load: 40 }]).note, null);
+});
+
+test("week durations always use hours and minutes", () => {
+  assert.equal(calendarHours(1800), "0:30 h");
+  assert.equal(calendarHours(29100), "8:05 h");
+  assert.equal(calendarHours(0), "0:00 h");
 });

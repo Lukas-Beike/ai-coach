@@ -3,7 +3,10 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from backend.activities.activity_summary import stored_activity_key
+from backend.activities.activity_summary import (
+    legacy_activity_keys,
+    stored_activity_key,
+)
 from backend.activities.identity import activity_kind
 from backend.activities.matching import match_planned_workouts, record_date
 from backend.activities.session_purpose import summary_is_not_training
@@ -23,7 +26,7 @@ def freeze_targets(
     candidates = [
         (event, row)
         for index, row in matches.items()
-        if stored_activity_key(row) == activity_id
+        if activity_id in (stored_activity_key(row), *legacy_activity_keys(row))
         for event in [planned[index]]
     ]
     if len(candidates) != 1:

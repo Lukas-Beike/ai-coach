@@ -127,7 +127,7 @@ class PerformanceMethodCardTests(unittest.TestCase):
 
     def test_register_lists_sources_and_lead(self) -> None:
         self.assertEqual(
-            self.known_ids, {f"R{number}" for number in range(1, 44)} | {"L1"}
+            self.known_ids, {f"R{number}" for number in range(1, 54)} | {"L1"}
         )
 
     def test_every_card_is_complete(self) -> None:
@@ -167,7 +167,9 @@ class PerformanceMethodCardTests(unittest.TestCase):
                     "invalid review state",
                     card_problems(with_review(review), self.known_ids),
                 )
-        broken = card.replace("- **Card version:** 1", "- **Card version:** x", 1)
+        broken = re.sub(
+            r"(?m)^- \*\*Card version:\*\* \d+$", "- **Card version:** x", card, count=1
+        )
         self.assertIn("invalid card version", card_problems(broken, self.known_ids))
         broken = card.replace("| Rating scale range | 0 to 10 |", "|  |  |", 1)
         problems = card_problems(broken, self.known_ids)

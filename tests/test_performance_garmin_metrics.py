@@ -159,7 +159,7 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         self.assertIsNone(invalid["cycling_ftp_watts"]["value"])
         self.assertIsNone(invalid["run_threshold_pace_seconds_per_km"]["value"])
 
-    def test_profile_stored_activity_max_hr_priority_and_observed_at(self):
+    def test_profile_max_hr_and_no_ingest_activity_maximum(self):
         profile = garmin_payload_performance_metrics(
             {
                 "heart_rate_zones": [{"sport": "DEFAULT", "maxHeartRateUsed": 186}],
@@ -185,40 +185,15 @@ class GarminPerformanceMetricTests(unittest.TestCase):
         )
         self.assertEqual(profile["cycling_max_hr_bpm"]["measurement_age_days"], 1)
 
+        # The ingest-only history keeps no activity maximum (#1686); the
+        # fallback is read from canonical activity records.
         activity_snapshot = {
             "sport_max_hr": {"cycling": 200, "running": 205},
-            "activities": [
-                {
-                    "activityType": "cycling",
-                    "maxHR": 190,
-                    "startTimeLocal": "2026-09-01T10:00:00",
-                },
-                {
-                    "activityType": "running",
-                    "maxHR": 194,
-                    "startTimeLocal": "2026-09-02T10:00:00",
-                },
-            ],
-            "source_freshness": {
-                "activities": {
-                    "freshness": "stale",
-                    "observed_at": "2026-09-07",
-                    "fetched_at": "2026-09-07T11:00:00Z",
-                }
-            },
+            "activities": [{"activityType": "cycling", "maxHR": 190}],
         }
-        stored = garmin_payload_performance_metrics(activity_snapshot, CURRENT_DATE)
-        self.assertEqual(stored["cycling_max_hr_bpm"]["value"], 200)
-        self.assertEqual(stored["running_max_hr_bpm"]["value"], 205)
-        self.assertIsNone(stored["cycling_max_hr_bpm"]["observed_at"])
-        self.assertIn("Letzter guter Wert", stored["cycling_max_hr_bpm"]["note"])
-
-        del activity_snapshot["sport_max_hr"]
         activity = garmin_payload_performance_metrics(activity_snapshot, CURRENT_DATE)
-        self.assertEqual(activity["cycling_max_hr_bpm"]["value"], 190)
-        self.assertEqual(activity["cycling_max_hr_bpm"]["observed_at"], "2026-09-01")
-        self.assertEqual(activity["cycling_max_hr_bpm"]["measurement_age_days"], 6)
-        self.assertIn("6 Tage alt", activity["cycling_max_hr_bpm"]["note"])
+        self.assertIsNone(activity["cycling_max_hr_bpm"]["value"])
+        self.assertIsNone(activity["running_max_hr_bpm"]["value"])
 
     def test_weight_freshness_and_input_nonmutation(self):
         snapshot = {

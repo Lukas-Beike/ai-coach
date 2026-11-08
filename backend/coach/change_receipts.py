@@ -26,6 +26,10 @@ _FULLY_TRACKED_TOOLS = frozenset(
         "confirm_activity_session",
         "split_activity_session",
         "merge_activity_sessions",
+        "save_nutrition_entry",
+        "update_nutrition_entry",
+        "delete_nutrition_entry",
+        "log_nutrition_template",
     }
 )
 

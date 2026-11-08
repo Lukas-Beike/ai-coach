@@ -72,7 +72,7 @@ class ExportStreamTransportTests(unittest.TestCase):
                 self.assertEqual(args[0].name.startswith(".database-backup-"), True)
                 self.assertEqual(
                     args[1:],
-                    ("application/octet-stream", "intervals-coach-database.backup"),
+                    ("application/octet-stream", "pacecraft-database.backup"),
                 )
                 self.assertEqual(kwargs, {"deadline": 18})
                 self.assertTrue(Path(args[0]).exists())
@@ -130,7 +130,7 @@ class ExportStreamTransportTests(unittest.TestCase):
             def send_file_stream(*args: object, **kwargs: object) -> None:
                 self.assertEqual(
                     args,
-                    (archive_path, "application/zip", "intervals-coach-export.zip"),
+                    (archive_path, "application/zip", "pacecraft-export.zip"),
                 )
                 self.assertEqual(kwargs, {"deadline": 19.5, "cleanup": True})
                 try:

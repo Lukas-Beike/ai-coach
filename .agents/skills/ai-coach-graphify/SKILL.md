@@ -1,6 +1,6 @@
 ---
 name: ai-coach-graphify
-description: Use the prepared fully local graphify structural graph to navigate Intervals Coach source, symbols, and dependencies.
+description: Use the prepared fully local graphify structural graph to navigate Pacecraft source, symbols, and dependencies.
 ---
 
 # Local structural graph

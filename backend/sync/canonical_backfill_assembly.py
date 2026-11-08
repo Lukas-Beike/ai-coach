@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import tzinfo
 from typing import Any
@@ -17,6 +17,7 @@ from backend.sync.activity_detail_retirement import ActivityDetailRetirement
 from backend.sync.canonical_backfill import DEFAULT_BATCH_SIZE, CanonicalBackfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.local_load import LocalLoadStage, Preferences
+from backend.sync.session_analysis_stage import PlannedUnits, SessionAnalysisStage
 from backend.sync.session_metrics import SessionMetricsStage
 
 
@@ -28,6 +29,7 @@ class CanonicalBackfillAssembly:
     detail_retirement: ActivityDetailRetirement
     local_load: LocalLoadStage
     session_metrics: SessionMetricsStage
+    session_analysis: SessionAnalysisStage
 
 
 def build_canonical_backfill(
@@ -40,6 +42,9 @@ def build_canonical_backfill(
     source_preferences: Preferences = lambda _db: NO_PREFERENCES,
     batch_size: int = DEFAULT_BATCH_SIZE,
     session_feedback: FeedbackLookup | None = None,
+    planned_units: PlannedUnits = list,
+    athlete_sex: Callable[[Any], str | None] = lambda _db: None,
+    maintenance_steps: Sequence[Callable[[], None]] = (),
 ) -> CanonicalBackfillAssembly:
     backfill = CanonicalBackfill(
         key_values=key_values,
@@ -63,16 +68,35 @@ def build_canonical_backfill(
         clock=clock,
         preferences=source_preferences,
         session_feedback=session_feedback,
+        athlete_sex=athlete_sex,
     )
     # Local session metrics (card M8) from summaries and stored streams.
     session_metrics = SessionMetricsStage(
         key_values=key_values, zone_provider=zone_provider, clock=clock
     )
+    # The one canonical session analysis per session (#1685), after M8.
+    session_analysis = SessionAnalysisStage(
+        key_values=key_values,
+        zone_provider=zone_provider,
+        clock=clock,
+        planned_units=planned_units,
+        preferences=source_preferences,
+    )
     worker = CanonicalBackfillWorker(
         backfill=backfill,
         database=database,
         maintenance_gate=maintenance_gate,
-        followups=(local_load, session_metrics, detail_backfill, detail_retirement),
+        followups=(
+            local_load,
+            session_metrics,
+            detail_backfill,
+            # After the legacy detail copy, so its target snapshots carry over.
+            session_analysis,
+            detail_retirement,
+        ),
+        # Between the canonical backfill and the follow-ups, so the local load and
+        # session analysis of the same pass follow the Intervals.icu purge (#1728).
+        maintenance_steps=maintenance_steps,
     )
     return CanonicalBackfillAssembly(
         worker=worker,
@@ -81,4 +105,5 @@ def build_canonical_backfill(
         detail_retirement=detail_retirement,
         local_load=local_load,
         session_metrics=session_metrics,
+        session_analysis=session_analysis,
     )

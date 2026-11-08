@@ -92,7 +92,10 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
     """
 
     def test_sleep_and_resting_hr_choose_sources_independently(self) -> None:
-        garmin = {"sleep": [_garmin_record("2026-05-04", sleepTimeSeconds=28_800)]}
+        garmin = {
+            "sleep": [_garmin_record("2026-05-04", sleepTimeSeconds=28_800)],
+            "resting_hr": [_garmin_record("2026-05-03", restingHeartRate=52)],
+        }
         rows = [
             _wellness_row("2026-05-03", restingHR=58),
             _wellness_row("2026-05-04", restingHR=56),
@@ -102,10 +105,11 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
 
         self.assertEqual(result["sleep_source"], GARMIN)
         self.assertEqual(result["sleep_hours"], 8.0)
-        self.assertEqual(result["resting_hr_source"], INTERVALS)
-        self.assertEqual(result["resting_hr"], 56)
-        self.assertEqual(result["resting_hr_average"], 57.0)
-        self.assertIsNone(result["resting_hr_date"])
+        # Intervals.icu resting HR is no source: Garmin's older value stands.
+        self.assertEqual(result["resting_hr_source"], GARMIN)
+        self.assertEqual(result["resting_hr"], 52)
+        self.assertEqual(result["resting_hr_average"], 52.0)
+        self.assertEqual(result["resting_hr_date"], "2026-05-03")
 
     def test_garmin_sleep_comes_from_seconds_and_carries_its_date(self) -> None:
         # Intended (#1411): the projection-only ``sleep_hours`` key has no
@@ -126,33 +130,32 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
         self.assertEqual(result["sleep_average"], 7.5)
 
     def test_zero_garmin_sleep_is_not_a_measurement(self) -> None:
-        # Intended (#1411): legacy showed a zero-second Garmin night as 0 h and
-        # blocked the Intervals fallback; the mapper stores no such night.
+        # Intended (#1411): legacy showed a zero-second Garmin night as 0 h; the
+        # mapper stores no such night, and Intervals.icu does not fill the gap.
         garmin = {"sleep": [_garmin_record("2026-05-04", sleepTimeSeconds=0)]}
 
         result = _context(garmin, [_wellness_row("2026-05-04", sleepSecs=25_200)])
 
-        self.assertEqual(result["sleep_hours"], 7.0)
-        self.assertEqual(result["sleep_source"], INTERVALS)
+        self.assertIsNone(result["sleep_hours"])
+        self.assertIsNone(result["sleep_source"])
 
     def test_garmin_sleep_score_without_duration_is_selected_independently(
         self,
     ) -> None:
         # Intended (#1411): duration and score are selected independently, so a
-        # Garmin score without a Garmin duration is no longer dropped.
+        # Garmin score without a Garmin duration is no longer dropped; the
+        # Intervals.icu duration is no source.
         garmin = {"sleep": [_garmin_record("2026-05-04", sleepScore=88)]}
         rows = [_wellness_row("2026-05-04", sleepSecs=25_200, sleepScore=70)]
 
         result = _context(garmin, rows)
 
-        self.assertEqual(result["sleep_hours"], 7.0)
-        self.assertEqual(result["sleep_source"], INTERVALS)
+        self.assertIsNone(result["sleep_hours"])
+        self.assertIsNone(result["sleep_source"])
         self.assertEqual(result["sleep_score"], 88)
         self.assertEqual(result["sleep_score_source"], GARMIN)
 
-    def test_out_of_range_garmin_sleep_score_falls_back_to_intervals_score(
-        self,
-    ) -> None:
+    def test_out_of_range_garmin_sleep_score_gets_no_intervals_score(self) -> None:
         garmin = {
             "sleep": [
                 _garmin_record("2026-05-04", sleepTimeSeconds=28_800, sleepScore=120)
@@ -162,12 +165,10 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
         with_intervals = _context(garmin, [_wellness_row("2026-05-04", sleepScore=74)])
         without_intervals = _context(garmin)
 
-        self.assertEqual(with_intervals["sleep_source"], GARMIN)
-        self.assertEqual(with_intervals["sleep_score"], 74)
-        self.assertEqual(with_intervals["sleep_score_source"], INTERVALS)
-        self.assertEqual(without_intervals["sleep_source"], GARMIN)
-        self.assertIsNone(without_intervals["sleep_score"])
-        self.assertIsNone(without_intervals["sleep_score_source"])
+        for result in (with_intervals, without_intervals):
+            self.assertEqual(result["sleep_source"], GARMIN)
+            self.assertIsNone(result["sleep_score"])
+            self.assertIsNone(result["sleep_score_source"])
 
     def test_garmin_sleep_average_never_blends_in_intervals_history(self) -> None:
         rows = [
@@ -195,7 +196,7 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
         self,
     ) -> None:
         # An implausible latest Garmin value is skipped, not treated as "no Garmin
-        # data", so an older valid Garmin value is used before Intervals.
+        # data", so an older valid Garmin value is used.
         garmin = {
             "resting_hr": [
                 _garmin_record("2026-05-04", restingHeartRate=15),
@@ -210,7 +211,7 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
         self.assertEqual(result["resting_hr_date"], "2026-05-02")
         self.assertEqual(result["resting_hr_average"], 48.0)
 
-    def test_out_of_bounds_only_garmin_resting_hr_falls_back_to_intervals(
+    def test_out_of_bounds_only_garmin_resting_hr_gets_no_intervals_fallback(
         self,
     ) -> None:
         rows = [
@@ -227,10 +228,10 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
 
                 result = _context(garmin, rows)
 
-                self.assertEqual(result["resting_hr"], 56)
-                self.assertEqual(result["resting_hr_source"], INTERVALS)
+                self.assertIsNone(result["resting_hr"])
+                self.assertIsNone(result["resting_hr_source"])
                 self.assertIsNone(result["resting_hr_date"])
-                self.assertEqual(result["resting_hr_average"], 57.0)
+                self.assertIsNone(result["resting_hr_average"])
 
     def test_plausibility_bounds_are_inclusive_at_their_edges(self) -> None:
         # Garmin bounds of the source rules: resting HR 30..230, sleep score 0..100.
@@ -275,9 +276,7 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
         self.assertEqual(result["resting_hr_date"], "2026-04-27")
         self.assertIsNone(result["resting_hr_average"])
 
-    def test_unparseable_intervals_readiness_falls_back_to_garmin(self) -> None:
-        # The Intervals mapper reports the unparseable first alias instead of
-        # reading a later one, so there is no Intervals readiness and Garmin wins.
+    def test_unparseable_intervals_readiness_leaves_garmins(self) -> None:
         rows = [
             _wellness_row(
                 "2026-05-04", readiness={"label": "unknown"}, readinessScore=81
@@ -291,22 +290,25 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
         self.assertEqual(result["readiness_source"], GARMIN)
         self.assertEqual(result["readiness_average"], 64.0)
 
-    def test_readiness_average_uses_the_selected_provider(self) -> None:
+    def test_readiness_and_its_average_are_garmins(self) -> None:
         garmin = {"readiness": [_garmin_record("2026-05-04", score=60)]}
         older = _wellness_row("2026-05-01", readiness=70)
 
-        intervals_current = _context(
+        with_intervals = _context(
             garmin, [older, _wellness_row("2026-05-04", readiness=72)]
         )
         garmin_only = _context(garmin, [_wellness_row("2026-05-04", restingHR=50)])
+        intervals_only = _context(
+            None, [older, _wellness_row("2026-05-04", readiness=72)]
+        )
 
-        self.assertEqual(intervals_current["readiness"], 72)
-        self.assertEqual(intervals_current["readiness_source"], INTERVALS)
-        self.assertEqual(intervals_current["readiness_average"], 71.0)
-        self.assertEqual(garmin_only["readiness"], 60)
-        self.assertEqual(garmin_only["readiness_source"], GARMIN)
-        # Intended (#1411): legacy always averaged the Intervals rows.
-        self.assertEqual(garmin_only["readiness_average"], 60.0)
+        for result in (with_intervals, garmin_only):
+            self.assertEqual(result["readiness"], 60)
+            self.assertEqual(result["readiness_source"], GARMIN)
+            self.assertEqual(result["readiness_average"], 60.0)
+        self.assertIsNone(intervals_only["readiness"])
+        self.assertIsNone(intervals_only["readiness_source"])
+        self.assertIsNone(intervals_only["readiness_average"])
 
 
 class PlanningBodyBatteryPrecedenceTests(unittest.TestCase):

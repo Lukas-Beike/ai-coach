@@ -27,18 +27,19 @@ from backend.performance.pace_at_hr import pace_at_heart_rate_trend
 from backend.performance.session_rpe_load import period_load, session_load
 from backend.performance.smoothed_load import complete_before
 from backend.performance.training_report import metric_sum, valid_zones
+from backend.performance.zone_time_reads import LOCAL_MODEL, zone_model
 
 METHOD = "weekly-progress-v1"
 SPORT_BUCKETS = ("run", "ride", "strength")
 # First zone number of the moderate and of the high band, by the number of zones
-# the provider recorded: 6 or more (Coggan power, Intervals.icu 7-zone heart rate)
+# of the session's zone set: 6 or more (default 7-zone power and heart rate)
 # or up to 5 (5-zone heart rate).
 ZONE_BANDS = {"many": (3, 5), "five": (3, 4)}
 ZONE_MAPPING = (
-    "Approximation of the 3-zone model from provider zone times: with 6 or more "
+    "Approximation of the 3-zone model from local zone times: with 6 or more "
     "zones Z1-Z2 low, Z3-Z4 moderate, Z5+ high; with up to 5 zones Z1-Z2 low, Z3 "
     "moderate, Z4+ high. Per session power zones, else heart-rate zones; pace "
-    "zones unused."
+    "zones and provider zone times unused."
 )
 PROFILE_DURATIONS = (60, 300, 1200)
 # Fitness (the ``ctl`` key) is the local curve (card M7), never Intervals.icu CTL.
@@ -72,6 +73,9 @@ def intensity_3zone(sessions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             ("power", "power_zone_times"),
             ("heart_rate", "heart_rate_zone_times"),
         ):
+            # Bands are only added up in the local zone model (#1743).
+            if zone_model(row, key) != LOCAL_MODEL:
+                continue
             zones = [
                 (_zone_number(str(zone["id"])), float(zone["secs"]))
                 for zone in valid_zones(row.get(key))

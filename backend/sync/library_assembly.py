@@ -18,8 +18,6 @@ from backend.providers.descriptors import Capability
 from backend.runtime.events import StateEventBuffer
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import (
-    WorkoutLibraryRefreshService,
-    WorkoutLibraryRemoteReconciler,
     WorkoutLibrarySyncService,
     WorkoutLibrarySyncStateService,
 )
@@ -109,26 +107,6 @@ class WorkoutLibrarySyncAssembly:
             self._database_manager(),
             self._redactor,
             self._key_values,
-            self._utc_now,
-        )
-
-    def remote_reconciler(self) -> WorkoutLibraryRemoteReconciler:
-        """Create local reconciliation for an already-read remote library."""
-        return WorkoutLibraryRemoteReconciler(
-            self._database_manager(), self._utc_now, self._uuid_factory
-        )
-
-    def refresh_service(self) -> WorkoutLibraryRefreshService:
-        """Create the read-only initial workout-library refresh use case."""
-        return WorkoutLibraryRefreshService(
-            self._config(),
-            self._database_manager(),
-            self.export_port(),
-            self.remote_reconciler(),
-            self._workout_library_service(),
-            self.sync_state_service(),
-            self._key_values,
-            self._event_buffer,
             self._utc_now,
         )
 

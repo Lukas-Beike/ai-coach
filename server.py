@@ -241,6 +241,7 @@ from backend.performance.morning_battery_service import (
     MorningBodyBatteryService,
 )
 from backend.performance.source_policy import preferences_from_profile
+from backend.performance.threshold_staleness import ThresholdStalenessService
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
 from backend.planning import library as planning_library
@@ -380,16 +381,9 @@ from backend.sync.gates import (
     INTERVALS_RESYNC_GATE,
     WAHOO_RESYNC_GATE,
 )
-from backend.sync.intervals_assembly import (
-    IntervalsLibraryDependencies,
-    IntervalsOperationDependencies,
-    IntervalsPersistenceDependencies,
-    IntervalsProviderDependencies,
-    IntervalsSyncAssembly,
-    IntervalsWaitSettings,
-    IntervalsWindowSettings,
-)
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
+from backend.sync.intervals_purge import BACKUP_LABEL as INTERVALS_PURGE_BACKUP
+from backend.sync.intervals_purge import IntervalsPurgeRunner
 from backend.sync.library import workout_library_sync_running
 from backend.sync.library_assembly import (
     WorkoutLibraryProvider,
@@ -448,7 +442,6 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutProviders,
     SelectedWorkoutSyncAssembly,
 )
-from backend.sync.snapshot_reader import SnapshotRepositoryReader
 from backend.sync.state import SyncStateRepository
 from backend.sync.wahoo_connection_assembly import (
     WahooConnectionAssembly,
@@ -484,8 +477,8 @@ PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
-APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.44"
+APP_NAME = "Pacecraft · AI Coach"
+APP_VERSION = "2.0.0"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -498,7 +491,6 @@ EXPORT_TIME_LIMIT_SECONDS = 120
 OPENAI_RESPONSE_TIMEOUT_SECONDS = 180
 OPENAI_BACKGROUND_POLL_SECONDS = 2
 OPENAI_BACKGROUND_MAX_SECONDS = 60 * 60
-INTERVALS_SYNC_WAIT_SECONDS = 120
 COACH_CONVERSATION_GATE = CoachConversationGate()
 SYNC_JOB_WORKER: sync_worker_runtime.SyncJobWorker | None = None
 
@@ -607,7 +599,6 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                 database_manager=database_manager,
                 key_values=KEY_VALUE_REPOSITORY,
                 database_lock=DB_LOCK,
-                intervals_sync_lock=lambda: INTERVALS_SYNC_LOCK,
                 garmin_resync_gate=GARMIN_RESYNC_GATE,
                 garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
                 historical=jobs.historical,
@@ -693,6 +684,8 @@ PROFILE_MUTATION_COORDINATOR = threading.RLock()
 
 # Declared ahead of its first lambda reference; assigned after METRIC_EXPORT below.
 METRIC_EXPORT_RUNNER: MetricExportRunner
+# Declared ahead of its first lambda reference; assigned after METRIC_EXPORT_RUNNER.
+THRESHOLD_WARNINGS: ThresholdStalenessService
 ATHLETE_DATA = AthleteDataAssembly(
     dependencies=AthleteDataAssembly.Inputs(
         database_manager=database_manager,
@@ -716,6 +709,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
             load_inputs_changed=lambda: start_canonical_backfill(),
             thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
+            threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
         ),
     )
 )
@@ -829,6 +823,8 @@ HISTORY = HistoryAssembly(
             zone_service=ATHLETE_DATA.zones,
             feedback_service=ATHLETE_DATA.activity_feedback,
             session_corrections=ATHLETE_DATA.session_corrections,
+            # Defined further down; resolved only when a history service is built.
+            nutrition_diary=lambda: NUTRITION_ASSEMBLY.diary_service(),
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,
@@ -1146,57 +1142,6 @@ EXTERNAL_CALENDAR = ExternalCalendarAssembly(
 )
 
 
-INTERVALS_SYNC = IntervalsSyncAssembly(
-    dependencies=IntervalsSyncAssembly.Inputs(
-        provider=IntervalsProviderDependencies(
-            config=lambda: CONFIG,
-            request=lambda: PROVIDER_TRANSPORT.json_http_client().request,
-            athlete_clock=lambda: ATHLETE_CLOCK,
-            utc_now=runtime_clock.utc_now,
-        ),
-        persistence=IntervalsPersistenceDependencies(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            state_repository=sync_state_repository,
-            daily_markers=sync_daily_markers,
-            event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            redact_text=REDACTOR.redact_text,
-            logger=LOGGER,
-            activity_rows=lambda: CANONICAL_READ,
-            table_serving=lambda: CANONICAL_READ,
-        ),
-        operations=IntervalsOperationDependencies(
-            operation_observer=PROVIDER_SYNC.operation_observer,
-            resync_gate=INTERVALS_RESYNC_GATE,
-            sync_lock=INTERVALS_SYNC_LOCK,
-            sync_job_queue=SYNC_JOB_QUEUE.service,
-        ),
-        library=IntervalsLibraryDependencies(
-            remote_planned_unit_reconciler=lambda: (
-                PLANNED_UNIT_SYNC.remote_reconciler()
-            ),
-            workout_library_refresh_service=lambda: (
-                WORKOUT_LIBRARY_SYNC.refresh_service()
-            ),
-            workout_library_service=PLANNING_DATA.workout_library,
-            planned_unit_service=PLANNING_DATA.planned_unit,
-        ),
-        window=IntervalsWindowSettings(
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
-            sync_chunk_days=SYNC_CHUNK_DAYS,
-            sync_earliest_date=SYNC_EARLIEST_DATE,
-            calendar_history_days=PLANNED_CALENDAR_HISTORY_DAYS,
-            calendar_future_days=PLANNED_CALENDAR_FUTURE_DAYS,
-        ),
-        waits=IntervalsWaitSettings(
-            performance_wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
-            poll_seconds=SYNC_JOB_POLL_SECONDS,
-        ),
-    )
-)
-
-
 PROVIDER_TRANSPORT = ProviderTransportAssembly(
     dependencies=ProviderTransportAssembly.Inputs(
         http=ProviderHttpSettings(
@@ -1261,7 +1206,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         export_thresholds=EXPORT_THRESHOLDS,
     )
 )
-NUTRITION_ASSEMBLY = NutritionAssembly(
+NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
     dependencies=NutritionAssembly.Inputs(
         persistence=NutritionPersistence(
             database_manager, DB_LOCK, observation_reader=lambda: CANONICAL_READ
@@ -1278,6 +1223,7 @@ NUTRITION_ASSEMBLY = NutritionAssembly(
                 ),
                 openai_path=OPENAI_RESPONSES_PATH,
             ),
+            athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
         ),
     )
 )
@@ -1420,8 +1366,6 @@ SELECTED_WORKOUT_SYNC = SelectedWorkoutSyncAssembly(
         ),
         controls=SelectedWorkoutControls(
             redactor=REDACTOR.redact_text,
-            lock=INTERVALS_SYNC_LOCK,
-            wait_seconds=INTERVALS_SYNC_WAIT_SECONDS,
             provider_resync_gate=INTERVALS_RESYNC_GATE,
         ),
     )
@@ -1488,6 +1432,7 @@ COACH_CONTEXT = CoachContextAssembly(
                 coverage=lambda: CANONICAL_READ,
             ),
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+            threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -1561,12 +1506,10 @@ COACH_PROPOSALS = CoachProposalAssembly(
     dependencies=CoachProposalAssembly.Inputs(
         persistence=ProposalPersistence(
             database_manager=database_manager,
-            duplicate_inspector=ATHLETE_DATA.duplicate_inspector,
             nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
             nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         ),
         execution=ProposalExecutionOwners(
-            duplicate_activity_service=ATHLETE_DATA.duplicate_activity,
             history_undo_service=HISTORY.undo_service,
             intervals_client_factory=PROVIDER_TRANSPORT.intervals_client,
             maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
@@ -1588,10 +1531,7 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
             competition_service=PLANNING_DATA.competition,
         ),
         resync=ResyncProviderOwners(
-            config=lambda: CONFIG,
-            intervals_sync_service=INTERVALS_SYNC.sync_service,
             garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
-            intervals_resync_gate=INTERVALS_RESYNC_GATE,
             garmin_resync_gate=GARMIN_RESYNC_GATE,
             all_sync_days=ALL_SYNC_DAYS,
         ),
@@ -1628,15 +1568,11 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         outcome_service=SYNC_JOB_QUEUE.outcome_service,
     ),
     intervals=IntervalsJobDependencies(
-        sync_service=INTERVALS_SYNC.sync_service,
-        activity_detail_service=INTERVALS_SYNC.activity_detail_service,
-        performance_refresh_service=INTERVALS_SYNC.performance_service,
         selected_workout_sync_service=SELECTED_WORKOUT_SYNC.service,
         competition_sync_service=PROVIDER_RESYNC.competition_sync_service,
         nutrition_sync_service=NUTRITION_ASSEMBLY.intervals_sync_service,
         operation_observer=PROVIDER_SYNC.operation_observer,
         resync_gate=INTERVALS_RESYNC_GATE,
-        ingest_enabled=lambda: INTERVALS_SYNC.ingest_switch().enabled(),
     ),
     garmin=GarminJobDependencies(
         sync_service=GARMIN_ASSEMBLY.sync_service,
@@ -1645,6 +1581,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         activity_detail_service=GARMIN_ASSEMBLY.activity_detail_service,
         strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
         wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
+        rating_backfill_service=GARMIN_ASSEMBLY.rating_backfill_service,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
@@ -1680,13 +1617,9 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
             garmin_sync_service=GARMIN_ASSEMBLY.sync_service,
         ),
         persistence=SyncSchedulePersistence(
-            database_manager=database_manager,
-            key_values=KEY_VALUE_REPOSITORY,
-            database_lock=DB_LOCK,
             sync_state_repository=sync_state_repository,
         ),
         controls=SyncScheduleControls(
-            intervals_resync_gate=INTERVALS_RESYNC_GATE,
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
             sleep=time.sleep,
         ),
@@ -1694,8 +1627,6 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
             config=lambda: CONFIG,
             garmin_automatic_sync_days=GARMIN_AUTOMATIC_SYNC_DAYS,
             auto_update_label=sync_scheduler_runtime.AUTO_UPDATE_LABEL,
-            sync_period_defaults=SYNC_PERIOD_DEFAULTS,
-            all_sync_days=ALL_SYNC_DAYS,
             sync_chunk_days=SYNC_CHUNK_DAYS,
             sync_earliest_date=SYNC_EARLIEST_DATE,
         ),
@@ -1711,14 +1642,12 @@ SYNC_COMMANDS = SyncCommandAssembly(
     core=SyncCommandCore(
         database_manager=database_manager,
         queue_service=SYNC_JOB_QUEUE.service,
-        intervals_sync=INTERVALS_SYNC.sync_service,
         planned_unit_service=PLANNING_DATA.planned_unit,
         competition_service=PLANNING_DATA.competition,
         workout_library_sync_state=WORKOUT_LIBRARY_SYNC.sync_state_service,
         planning_revision=PLANNING_REVISION_SERVICE,
         utc_now=runtime_clock.utc_now,
         training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
-        all_sync_days=ALL_SYNC_DAYS,
     ),
     illness_pause=IllnessPauseDependencies(
         config=lambda: CONFIG,
@@ -1861,7 +1790,6 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         plan_repair_manifest=SYNC_COMMANDS.repair_manifest,
         plan_push_command=SYNC_COMMANDS.plan_push,
         provider_refresh_command=SYNC_COMMANDS.provider_refresh,
-        duplicate_activity=ATHLETE_DATA.duplicate_activity,
     ),
     sync_provider=CoachSyncProvider(
         intervals_client=lambda: PROVIDER_TRANSPORT.intervals_client(),
@@ -1945,7 +1873,6 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
             plan_guard_service=_plan_guard_service,
         ),
         state=StructuredToolRoundState(
-            duplicate_inspector=ATHLETE_DATA.duplicate_inspector,
             job_store=lambda: COACH_BACKGROUND_JOBS.job_store(),
         ),
         conversation=StructuredToolRoundConversation(
@@ -2075,7 +2002,6 @@ PUBLIC_STATE = PublicStateAssembly(
             diagnostic_capture=lambda: DIAGNOSTIC_CAPTURE,
         ),
         operations=PublicStateOperationalServices(
-            intervals_sync_lock=lambda: INTERVALS_SYNC_LOCK,
             workout_library_sync_running=lambda: workout_library_sync_running,
             daily_planning_context_service=PLANNING_WORKFLOWS.daily_planning_context_service,
             adaptive_preview_followup_service=lambda: AdaptivePreviewFollowupService(
@@ -2106,9 +2032,6 @@ PUBLIC_STATE = PublicStateAssembly(
 CANONICAL_READ = build_canonical_read(
     key_values=KEY_VALUE_REPOSITORY,
     profile=ATHLETE_PROFILE_SERVICE,
-    compact_only=SnapshotRepositoryReader(
-        SNAPSHOT_REPOSITORY
-    ).has_unmatched_compact_activity_rows,
 )
 METRIC_EXPORT: MetricExportService = build_metric_export_service(
     database_manager,
@@ -2130,8 +2053,31 @@ METRIC_EXPORT_RUNNER = MetricExportRunner(
     enabled=_intervals_export_configured,
     maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
 )
+THRESHOLD_WARNINGS = ThresholdStalenessService(
+    database_manager,
+    lambda: CANONICAL_READ,
+    lambda: ATHLETE_CLOCK.now().date(),
+    zone_configurations=CanonicalTableReader().zone_configurations,
+    preferences=lambda db: preferences_from_profile(
+        ATHLETE_DATA.profile().get_from_db(db)
+    ),
+    sdk_failure=lambda: GARMIN_ASSEMBLY.sync_service().sdk_threshold_failure(),
+)
 
 
+# Removes the stored Intervals.icu ingest data once the Garmin rating backfill is
+# finished (#1728), after an encrypted recovery copy beside the database.
+INTERVALS_PURGE = IntervalsPurgeRunner(
+    database=database_manager,
+    key_values=KEY_VALUE_REPOSITORY,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    backup=lambda: BACKUP_ASSEMBLY.backup_service().write_recovery_copy(
+        INTERVALS_PURGE_BACKUP
+    ),
+    clock=runtime_clock.utc_now,
+    data_dir=lambda: DATA_DIR,
+    sync_lock=INTERVALS_SYNC_LOCK,
+)
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -2145,6 +2091,11 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     session_feedback=lambda keys: ATHLETE_DATA.activity_feedback().for_activity_ids(
         keys, sessions_only=True
     ),
+    # Session analyses freeze matched planned targets (#1685).
+    planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
+    # The heart-rate branch's TRIMP constants follow the profile sex (M6 v3).
+    athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
+    maintenance_steps=(INTERVALS_PURGE.run,),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
@@ -2179,6 +2130,7 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
             canonical_read=lambda: CANONICAL_READ,
             canonical_rows=lambda: CANONICAL_READ,
+            intervals_purge_marker=INTERVALS_PURGE.marker_exists,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,
@@ -2330,9 +2282,8 @@ HTTP_API = HttpApiAssembly(
             sync=HttpSyncServices(
                 job_queue=SYNC_JOB_QUEUE.service,
                 state_repository=sync_state_repository,
-                performance_refresh=INTERVALS_SYNC.performance_service,
-                analysis_sessions_refresh=INTERVALS_SYNC.analysis_sessions_service,
                 garmin_analysis_refresh=GARMIN_ASSEMBLY.analysis_refresh_service,
+                wahoo_sync=WAHOO_SYNC.sync_service,
                 full_resync=PROVIDER_RESYNC.full_resync_service,
                 period_defaults=SYNC_PERIOD_DEFAULTS,
                 all_sync_days=ALL_SYNC_DAYS,
@@ -2350,10 +2301,6 @@ HTTP_API = HttpApiAssembly(
             provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
             garmin_login=lambda: GARMIN_LOGIN,
             connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
-            intervals_ingest=INTERVALS_SYNC.ingest_switch,
-            resume_provider_schedule=lambda provider: (
-                SYNC_SCHEDULERS.startup_scheduler().resume_provider(provider)
-            ),
         ),
     ),
 )

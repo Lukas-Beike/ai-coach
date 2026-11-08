@@ -7,17 +7,23 @@ the thresholds in effect on its local day, with the first complete branch of:
 * pace (run without power): ``IF = v / v_threshold`` with the grade-adjusted
   speed, else the average speed, ``TSS = hours × IF² × 100``;
 * heart rate (other sports too, walking included; not strength, yoga or
-  alpine ski): Banister TRIMP of the average HR, normalised so 60 minutes at the
-  threshold HR is 100;
+  alpine ski): Banister TRIMP, normalised so 60 minutes at the threshold HR is
+  100, with the constants of the athlete's profile sex (male when not set,
+  marked ``sex_assumed``; method v3, #1774). It sums the TRIMP over the stored
+  per-second HR histogram of the session when that covers at least 80 % of the
+  TSS duration, else it uses the average HR (``hr_basis``, method v5, #1773);
 * session RPE (strength only): the session-RPE load (card M1, elapsed minutes x
-  RPE) times the athlete's own TSS per AU, the median of ``TSS / AU`` over the
-  rated ride and run sessions with a local load of the 365 days up to the
-  session day, rated locally or on the Garmin device, at least 20 of them.
+  RPE) times the athlete's own TSS per AU at a similar RPE (method v4, #1771):
+  the median of ``TSS / (TSS duration minutes x RPE)`` over the rated ride and
+  run sessions with a local load of the 365 days up to the session day, rated
+  locally or on the Garmin device, whose RPE lies within 1 of the strength
+  session's (else within 2), at least 20 of them.
 
 Only the power branch gives an intensity factor (percent of FTP). A provider
 load or intensity is never an input. ``DatedThresholds`` resolves the thresholds
 of a session day under the source policy of the current thresholds; a key with
-no value on the day takes the earliest later value, flagged ``after_session``.
+no value on the day takes the earliest later value observed within 90 days after
+the session, flagged ``after_session`` (v5), else it is missing.
 
 This module is pure: no database, no provider and no ``server.py`` access.
 """
@@ -27,7 +33,7 @@ from __future__ import annotations
 import bisect
 import math
 import statistics
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final
@@ -58,7 +64,7 @@ from backend.performance.session_rpe_load import session_load
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 
 METHOD_ID: Final = "local-tss-load"
-METHOD_VERSION: Final = 2
+METHOD_VERSION: Final = 5
 CARD: Final = "M6"
 
 POWER_BRANCH: Final = "power"
@@ -66,23 +72,38 @@ PACE_BRANCH: Final = "pace"
 HEART_RATE_BRANCH: Final = "heart_rate"
 SESSION_RPE_BRANCH: Final = "session_rpe"
 
-TRIMP_PREFACTOR: Final = 0.64
-TRIMP_COEFFICIENT: Final = 1.92
+# Banister TRIMP prefactor and coefficient by profile sex (card M6 v3); an
+# unset sex takes the male constants and marks the value ``sex_assumed``.
+MALE: Final = "male"
+FEMALE: Final = "female"
+TRIMP_CONSTANTS: Final = {MALE: (0.64, 1.92), FEMALE: (0.86, 1.67)}
 MAX_INTENSITY_FACTOR: Final = 2.0
+# The histogram must cover this share of the TSS duration (card M6 v5).
+HR_COVERAGE_MIN: Final = 0.8
+HR_BASIS_DISTRIBUTION: Final = "distribution"
+HR_BASIS_AVERAGE: Final = "average"
+# A later threshold stands in only when observed within this many days after
+# the session day (card M6 v5).
+LATER_STAND_IN_MAX_DAYS: Final = 90
 RESTING_HR_LOOKBACK_DAYS: Final = 7
 # Yoga and alpine ski get no value; strength only the session-RPE branch and
 # walking the heart-rate branch (athlete decisions 2026-11-06, method v2).
 NO_TSS_SPORTS: Final = frozenset({Sport.YOGA, Sport.ALPINE_SKI})
 SESSION_RPE_SPORTS: Final = frozenset({Sport.STRENGTH})
-# The sessions that calibrate TSS per AU, their ratings, window and minimum.
+# The sessions that calibrate TSS per AU, their window and minimum pairs.
 CALIBRATION_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
-CALIBRATION_RPE_SCALES: Final = frozenset(
-    {LOCAL_SESSION_RPE_SCALE.scale_id, GARMIN_RPE_SCALE.scale_id}
-)
 CALIBRATION_WINDOW_DAYS: Final = 365
 CALIBRATION_MIN_PAIRS: Final = 20
+# The RPE distances of the calibration bands, tried in order (card M6 v4).
+CALIBRATION_RPE_BANDS: Final = (1, 2)
+# The RPE values of the detail table (factor per RPE of its +-1 band).
+CALIBRATION_TABLE_RPES: Final = tuple(range(1, 11))
+_RATING_SOURCES: Final = {
+    LOCAL_SESSION_RPE_SCALE.scale_id: "local",
+    GARMIN_RPE_SCALE.scale_id: ProviderId.GARMIN.value,
+}
 _POWER_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
-_RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.INTERVALS, ProviderId.WAHOO)
+_RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.WAHOO)
 THRESHOLD_KINDS: Final = (
     MetricKind.FTP,
     MetricKind.THRESHOLD_PACE,
@@ -129,6 +150,39 @@ class SessionThresholds:
 
 
 @dataclass(frozen=True, slots=True)
+class HeartRateHistogram:
+    """Seconds per integer bpm of one session's moving heart-rate samples."""
+
+    seconds: Mapping[int, float]
+
+    @property
+    def covered_s(self) -> float:
+        return sum(self.seconds.values())
+
+    def content_hash(self) -> str:
+        return fingerprint_inputs(
+            {"seconds": [[bpm, self.seconds[bpm]] for bpm in sorted(self.seconds)]}
+        )
+
+
+# The stored histogram of a session id, read only for sessions on the HR branch.
+HistogramLookup = Callable[[str], HeartRateHistogram | None]
+
+
+def parse_heart_rate_histogram(raw: Any) -> HeartRateHistogram | None:
+    """The histogram of a stored ``hr_histogram`` payload, or None if unusable."""
+    stored = raw.get("seconds") if isinstance(raw, Mapping) else None
+    if not isinstance(stored, Mapping):
+        return None
+    seconds: dict[int, float] = {}
+    for key, value in stored.items():
+        number = _positive(value)
+        if number is not None and str(key).isdecimal():
+            seconds[int(key)] = number
+    return HeartRateHistogram(seconds) if seconds else None
+
+
+@dataclass(frozen=True, slots=True)
 class LocalLoad:
     """One session's local load, its intensity (power only) and provenance."""
 
@@ -140,13 +194,34 @@ class LocalLoad:
 
 
 @dataclass(frozen=True, slots=True)
+class CalibrationPair:
+    """One rated ride or run: its day, RPE, ``TSS / AU`` and rating source.
+
+    The AU uses the duration of the TSS, so both sides share one duration.
+    """
+
+    day: date
+    rpe: float
+    ratio: float
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
 class RpeCalibration:
-    """The athlete's TSS per session-RPE AU on one day and the pairs behind it."""
+    """The athlete's TSS per session-RPE AU at one RPE on one day.
+
+    ``rpe_band`` is the RPE range of the pairs behind ``factor``;
+    ``pairs_by_source`` splits them by rating source; ``by_rpe`` holds the
+    factor (from enough pairs) and pair count of each RPE's +-1 band.
+    """
 
     factor: float
     pairs: int
     window_start: date
     window_end: date
+    rpe_band: tuple[float, float]
+    pairs_by_source: Mapping[str, int]
+    by_rpe: tuple[Mapping[str, Any], ...] = ()
 
     def fingerprint_part(self) -> dict[str, Any]:
         return {
@@ -154,6 +229,9 @@ class RpeCalibration:
             "pairs": self.pairs,
             "window_start": self.window_start.isoformat(),
             "window_end": self.window_end.isoformat(),
+            "rpe_band": list(self.rpe_band),
+            "pairs_by_source": dict(self.pairs_by_source),
+            "by_rpe": [dict(item) for item in self.by_rpe],
         }
 
 
@@ -166,28 +244,74 @@ class SessionRating:
     rpe_scale: str | None
 
 
+def _band(
+    pairs: Sequence[CalibrationPair], rpe: float, distance: float
+) -> list[CalibrationPair]:
+    return [pair for pair in pairs if abs(pair.rpe - rpe) <= distance]
+
+
+def _rpe_table(pairs: Sequence[CalibrationPair]) -> tuple[dict[str, Any], ...]:
+    """Each table RPE's +-1 band: pair count and, from enough pairs, the factor."""
+    table = []
+    for rpe in CALIBRATION_TABLE_RPES:
+        band = _band(pairs, rpe, CALIBRATION_RPE_BANDS[0])
+        if not band:
+            continue
+        factor = (
+            statistics.median(pair.ratio for pair in band)
+            if len(band) >= CALIBRATION_MIN_PAIRS
+            else None
+        )
+        table.append({"rpe": rpe, "tss_per_au": factor, "pairs": len(band)})
+    return tuple(table)
+
+
+def _calibration(
+    band: Sequence[CalibrationPair],
+    window: Sequence[CalibrationPair],
+    rpe: float,
+    distance: float,
+    start: date,
+    day: date,
+) -> RpeCalibration:
+    sources: dict[str, int] = {}
+    for pair in band:
+        sources[pair.source] = sources.get(pair.source, 0) + 1
+    return RpeCalibration(
+        factor=statistics.median(pair.ratio for pair in band),
+        pairs=len(band),
+        window_start=start,
+        window_end=day,
+        rpe_band=(max(rpe - distance, 0.0), min(rpe + distance, 10.0)),
+        pairs_by_source=dict(sorted(sources.items())),
+        by_rpe=_rpe_table(window),
+    )
+
+
 class RpeCalibrations:
-    """TSS per AU by day from dated ``(day, TSS / AU)`` pairs (see the module doc)."""
+    """TSS per AU by day and RPE from dated calibration pairs (see the module doc)."""
 
-    def __init__(self, pairs: Iterable[tuple[date, float]]) -> None:
-        ordered = sorted(pairs)
-        self._days = [day for day, _ratio in ordered]
-        self._ratios = [ratio for _day, ratio in ordered]
-        self._by_day: dict[date, RpeCalibration | None] = {}
+    def __init__(self, pairs: Iterable[CalibrationPair]) -> None:
+        self._pairs = sorted(pairs, key=lambda pair: pair.day)
+        self._days = [pair.day for pair in self._pairs]
+        self._by_key: dict[tuple[date, float], RpeCalibration | None] = {}
 
-    def on(self, day: date) -> RpeCalibration | None:
-        if day not in self._by_day:
-            self._by_day[day] = self._calibrate(day)
-        return self._by_day[day]
+    def on(self, day: date, rpe: float) -> RpeCalibration | None:
+        key = (day, rpe)
+        if key not in self._by_key:
+            self._by_key[key] = self._calibrate(day, rpe)
+        return self._by_key[key]
 
-    def _calibrate(self, day: date) -> RpeCalibration | None:
+    def _calibrate(self, day: date, rpe: float) -> RpeCalibration | None:
         start = day - timedelta(days=CALIBRATION_WINDOW_DAYS - 1)
         low = bisect.bisect_left(self._days, start)
         high = bisect.bisect_right(self._days, day)
-        ratios = self._ratios[low:high]
-        if len(ratios) < CALIBRATION_MIN_PAIRS:
-            return None
-        return RpeCalibration(statistics.median(ratios), len(ratios), start, day)
+        window = self._pairs[low:high]
+        for distance in CALIBRATION_RPE_BANDS:
+            band = _band(window, rpe, distance)
+            if len(band) >= CALIBRATION_MIN_PAIRS:
+                return _calibration(band, window, rpe, distance, start, day)
+        return None
 
 
 def _positive(value: Any) -> float | None:
@@ -303,19 +427,40 @@ def _pace(
     )
 
 
-def _trimp(minutes: float, reserve: float) -> float:
-    return minutes * reserve * TRIMP_PREFACTOR * math.exp(TRIMP_COEFFICIENT * reserve)
+def _trimp(minutes: float, reserve: float, sex: str) -> float:
+    prefactor, coefficient = TRIMP_CONSTANTS[sex]
+    return minutes * reserve * prefactor * math.exp(coefficient * reserve)
 
 
-def _heart_rate(
-    summary: Mapping[str, Any],
-    sport: Sport,
+def trimp_sex(sex: str | None) -> tuple[str, bool]:
+    """The sex whose TRIMP constants apply and whether it was assumed."""
+    if sex in TRIMP_CONSTANTS:
+        return str(sex), False
+    return MALE, True
+
+
+def _distribution_trimp(
+    histogram: HeartRateHistogram,
     seconds: float,
-    thresholds: SessionThresholds,
-) -> LocalLoad | str | None:
-    heart_rate = _positive(summary.get("avg_hr"))
-    if heart_rate is None:
+    rest: float,
+    span: float,
+    sex: str,
+) -> float | None:
+    """TRIMP of the histogram scaled to ``seconds``, or None below 80 % coverage."""
+    covered = histogram.covered_s
+    if covered < HR_COVERAGE_MIN * seconds:
         return None
+    total = sum(
+        _trimp(time / 60, min(max((bpm - rest) / span, 0.0), 1.0), sex)
+        for bpm, time in histogram.seconds.items()
+    )
+    return total * seconds / covered if total > 0 else None
+
+
+def _heart_rate_thresholds(
+    thresholds: SessionThresholds,
+) -> tuple[Threshold, Threshold, Threshold] | str:
+    """The resting, threshold and maximum HR, or the reason one is unusable."""
     rest, threshold, maximum = (
         thresholds.resting_hr,
         thresholds.threshold_hr,
@@ -329,17 +474,70 @@ def _heart_rate(
         return "no_max_hr"
     if not rest.value < threshold.value < maximum.value:
         return "inconsistent_heart_rate_thresholds"
-    span = maximum.value - rest.value
-    reserve = (heart_rate - rest.value) / span
+    return rest, threshold, maximum
+
+
+def _session_trimp(
+    heart_rate: float,
+    histogram: HeartRateHistogram | None,
+    seconds: float,
+    rest: float,
+    span: float,
+    sex: str,
+) -> tuple[float, dict[str, Any]] | str:
+    """The session's TRIMP with its basis inputs, or the reason it has none."""
+    basis: dict[str, Any] = {}
+    if histogram is not None:
+        basis = {
+            "hr_coverage": round(histogram.covered_s / seconds, 4),
+            "hr_histogram_sha256": histogram.content_hash(),
+        }
+        trimp = _distribution_trimp(histogram, seconds, rest, span, sex)
+        if trimp is not None:
+            return trimp, {"hr_basis": HR_BASIS_DISTRIBUTION, **basis}
+    reserve = (heart_rate - rest) / span
     if not 0 < reserve <= 1:
         return "heart_rate_outside_reserve"
+    return _trimp(seconds / 60, reserve, sex), {"hr_basis": HR_BASIS_AVERAGE, **basis}
+
+
+def _heart_rate(
+    summary: Mapping[str, Any],
+    sport: Sport,
+    seconds: float,
+    thresholds: SessionThresholds,
+    sex: str | None,
+    histograms: HistogramLookup | None = None,
+) -> LocalLoad | str | None:
+    heart_rate = _positive(summary.get("avg_hr"))
+    if heart_rate is None:
+        return None
+    used = _heart_rate_thresholds(thresholds)
+    if isinstance(used, str):
+        return used
+    rest, threshold, maximum = used
+    span = maximum.value - rest.value
+    used_sex, assumed = trimp_sex(sex)
+    histogram = None if histograms is None else histograms(str(summary.get("id")))
+    session = _session_trimp(heart_rate, histogram, seconds, rest.value, span, used_sex)
+    if isinstance(session, str):
+        return session
+    trimp, basis = session
     threshold_reserve = (threshold.value - rest.value) / span
-    load = _trimp(seconds / 60, reserve) / _trimp(60, threshold_reserve) * 100
+    inputs: dict[str, Any] = {
+        "sport": sport.value,
+        "duration_s": seconds,
+        "avg_hr": heart_rate,
+        "sex": used_sex,
+        **basis,
+    }
+    if assumed:
+        inputs["sex_assumed"] = True
     return _result(
         HEART_RATE_BRANCH,
-        load,
+        trimp / _trimp(60, threshold_reserve, used_sex) * 100,
         None,
-        {"sport": sport.value, "duration_s": seconds, "avg_hr": heart_rate},
+        inputs,
         {"resting_hr": rest, "threshold_hr": threshold, "max_hr": maximum},
     )
 
@@ -353,11 +551,12 @@ def _session_rpe(
         return "no_rating"
     if isinstance(rating, str):
         return rating
-    if calibration is None:
+    if calibration is None and rating.au > 0:
         return "not_calibrated"
+    # An RPE of 0 gives 0 AU and so 0 TSS without a factor.
     return _result(
         SESSION_RPE_BRANCH,
-        rating.au * calibration.factor,
+        0.0 if calibration is None else rating.au * calibration.factor,
         None,
         {
             "sport": sport.value,
@@ -376,6 +575,8 @@ def session_local_load(
     *,
     rating: SessionRating | str | None = None,
     calibration: RpeCalibration | None = None,
+    sex: str | None = None,
+    histograms: HistogramLookup | None = None,
 ) -> LocalLoad | str:
     """Return the session's local load, or the reason it has none.
 
@@ -383,7 +584,10 @@ def session_local_load(
     skipped, while a branch that has its input but no valid threshold falls
     through to the next one and its reason is kept if none succeeds. A strength
     session reads only the session-RPE branch with its ``rating`` and the
-    ``calibration`` of its day.
+    ``calibration`` of its day. ``sex`` (profile value, None or empty when not
+    set) chooses the heart-rate branch's TRIMP constants; ``histograms`` gives
+    the stored heart-rate histogram of a session id and is called only when the
+    session reaches the heart-rate branch.
     """
     sport = _sport(summary)
     if sport is None or sport in NO_TSS_SPORTS:
@@ -394,11 +598,12 @@ def session_local_load(
     if seconds is None:
         return "no_duration"
     reason = "no_inputs"
-    for outcome in (
-        _power(summary, sport, seconds, thresholds.ftp),
-        _pace(summary, sport, seconds, thresholds.threshold_pace),
-        _heart_rate(summary, sport, seconds, thresholds),
+    for branch in (
+        lambda: _power(summary, sport, seconds, thresholds.ftp),
+        lambda: _pace(summary, sport, seconds, thresholds.threshold_pace),
+        lambda: _heart_rate(summary, sport, seconds, thresholds, sex, histograms),
     ):
+        outcome = branch()
         if isinstance(outcome, LocalLoad):
             return outcome
         if isinstance(outcome, str) and reason == "no_inputs":
@@ -430,7 +635,8 @@ class DatedThresholds:
     each provider's newest value observed on or before it competes under the
     source policy, with age limits counted from that day. Local confirmed zone
     configurations in effect on the day win. A key without a value on the day
-    takes the earliest later value, flagged ``after_session``.
+    takes the earliest later value observed at most 90 days after the day,
+    flagged ``after_session``; a later one does not stand in (v5).
     """
 
     def __init__(
@@ -443,7 +649,13 @@ class DatedThresholds:
     ) -> None:
         self._observations = tuple(
             sorted(
-                (item for item in observations if item.kind in THRESHOLD_KINDS),
+                (
+                    item
+                    for item in observations
+                    if item.kind in THRESHOLD_KINDS
+                    # Stored Intervals.icu thresholds are never a source.
+                    and item.provenance.provider is not ProviderId.INTERVALS
+                ),
                 key=lambda item: item.observed_on,
             )
         )
@@ -506,10 +718,12 @@ class DatedThresholds:
         found = self._resolve(day).get((kind, sport))
         if found is not None:
             return found
+        last = day + timedelta(days=LATER_STAND_IN_MAX_DAYS)
         start = bisect.bisect_right(self._later_days, day)
-        for later in self._later_days[start:]:
+        end = bisect.bisect_right(self._later_days, last)
+        for later in self._later_days[start:end]:
             found = self._resolve(later).get((kind, sport))
-            if found is not None:
+            if found is not None and (found.observed_on or later) <= last:
                 return Threshold(
                     found.value, found.source, found.observed_on, after_session=True
                 )
@@ -520,7 +734,8 @@ class DatedThresholds:
 
         Garmin's value wins over another provider's value of the same window.
         Without one, the earliest later value stands in, flagged ``after_session``
-        (athlete decision 2026-11-06), Garmin first on that day.
+        (athlete decision 2026-11-06), Garmin first on that day, when observed
+        within 90 days after ``day`` (v5).
         """
         start = bisect.bisect_left(
             self._rest_days, day - timedelta(days=RESTING_HR_LOOKBACK_DAYS)
@@ -533,6 +748,8 @@ class DatedThresholds:
         if not later:
             return None
         first_day = later[0].observed_on
+        if first_day > day + timedelta(days=LATER_STAND_IN_MAX_DAYS):
+            return None
         stand_in = _first_by_provider(
             [item for item in later if item.observed_on == first_day], latest=False
         )
@@ -621,15 +838,33 @@ def rated_sessions(
     return [summary for summary in summaries if _sport(summary) in sports]
 
 
+def _calibration_pair(
+    summary: Mapping[str, Any],
+    load: LocalLoad,
+    day: date,
+    feedback: Mapping[str, Any] | None,
+) -> CalibrationPair | None:
+    rating = _rating(summary, feedback)
+    if isinstance(rating, str) or rating.rpe <= 0:
+        return None
+    source = _RATING_SOURCES.get(rating.rpe_scale or "")
+    seconds = _positive(summary_duration_s(summary))
+    if source is None or seconds is None:
+        return None
+    au = seconds / 60 * rating.rpe
+    return CalibrationPair(day, rating.rpe, load.load / au, source)
+
+
 def calibration_pairs(
     summaries: Sequence[Mapping[str, Any]],
     loads: Mapping[str, LocalLoad | str],
     feedback: Mapping[str, Mapping[str, Any]],
-) -> list[tuple[date, float]]:
-    """Dated ``TSS / AU`` of rated ride and run sessions with a local load.
+) -> list[CalibrationPair]:
+    """The calibration pairs of rated ride and run sessions with a local load.
 
     Only a local or Garmin rating counts; a rating relayed by Intervals.icu does
-    not (athlete decision 2026-11-06).
+    not (athlete decision 2026-11-06). The AU uses the TSS duration (moving,
+    else elapsed; card M6 v4).
     """
     pairs = []
     for summary in summaries:
@@ -641,14 +876,11 @@ def calibration_pairs(
         # calibrates (``invalid_value`` in the stage).
         if _sport(summary) not in CALIBRATION_SPORTS or load.load > MAX_ACTIVITY_LOAD:
             continue
-        rating = _rating(summary, feedback.get(stored_activity_key(summary)))
-        if (
-            isinstance(rating, str)
-            or rating.au <= 0
-            or rating.rpe_scale not in CALIBRATION_RPE_SCALES
-        ):
-            continue
-        pairs.append((day, load.load / rating.au))
+        pair = _calibration_pair(
+            summary, load, day, feedback.get(stored_activity_key(summary))
+        )
+        if pair is not None:
+            pairs.append(pair)
     return pairs
 
 
@@ -656,12 +888,17 @@ def session_loads(
     summaries: Sequence[Mapping[str, Any]],
     thresholds: DatedThresholds,
     feedback: Mapping[str, Mapping[str, Any]] | None = None,
+    *,
+    sex: str | None = None,
+    histograms: HistogramLookup | None = None,
 ) -> dict[str, LocalLoad | str]:
     """Each summary's local load or no-load reason, by session id.
 
     ``feedback`` maps a summary's stored key to its session's effective local
     feedback (``feedback_by_session``). Strength sessions come last, with the
-    calibration from the other sessions' loads.
+    calibration from the other sessions' loads. ``sex`` is the profile sex the
+    heart-rate branch reads; ``histograms`` looks up a session's stored heart-rate
+    histogram.
     """
     ratings = feedback or {}
     result: dict[str, LocalLoad | str] = {}
@@ -684,13 +921,18 @@ def session_loads(
         result[session_id] = session_local_load(
             summary,
             thresholds.for_session(sport, day, indoor=summary_is_indoor(summary)),
+            sex=sex,
+            histograms=histograms,
         )
     calibrations = RpeCalibrations(calibration_pairs(summaries, result, ratings))
     for session_id, summary, day in strength:
+        rating = _rating(summary, ratings.get(stored_activity_key(summary)))
         result[session_id] = session_local_load(
             summary,
             SessionThresholds(),
-            rating=_rating(summary, ratings.get(stored_activity_key(summary))),
-            calibration=calibrations.on(day),
+            rating=rating,
+            calibration=None
+            if isinstance(rating, str)
+            else calibrations.on(day, rating.rpe),
         )
     return result

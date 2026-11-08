@@ -204,7 +204,7 @@ class OpenFoodFactsTests(unittest.TestCase):
         self.assertTrue(
             req.full_url.startswith("https://world.openfoodfacts.org/api/v3/product/")
         )
-        self.assertIn("IntervalsCoach", req.get_header("User-agent"))
+        self.assertIn("Pacecraft", req.get_header("User-agent"))
         self.assertIsNone(req.get_header("Authorization"))
         self.assertEqual(opener.call_args.kwargs["timeout"], 10)
         for index in range(13):

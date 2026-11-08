@@ -6,11 +6,15 @@ import math
 import re
 from typing import Any
 
+from backend.canonical.activity_summary import summary_is_indoor
+from backend.performance.grade_adjustment import grade_adjusted_speeds, grade_stream
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 
 TARGET_BASIS_FTP_KEY = "ftp"
 
-METHOD = "time-weighted-session-analysis-v1"
+# v2: Pa:HR of outdoor runs uses grade-adjusted speed (card M8 v2, #1770).
+METHOD = "time-weighted-session-analysis-v2"
+GRADE_ADJUSTED_SPEED = "grade_adjusted_speed"
 
 
 def _number(value: Any) -> float | None:
@@ -39,6 +43,34 @@ def _samples(
             continue
         samples.append((left, right - left, value))
     return samples
+
+
+# Bump when ``heart_rate_histogram`` counts differently, so stored rows recompute.
+HEART_RATE_HISTOGRAM_VERSION = 1
+HISTOGRAM_MIN_BPM = 30
+HISTOGRAM_MAX_BPM = 240
+
+
+def heart_rate_histogram(activity: dict[str, Any]) -> dict[str, Any] | None:
+    """Seconds per integer bpm of the moving heart-rate samples, or None.
+
+    Counts the samples ``_samples`` keeps (moving, gaps over 5 s left out)
+    with a reading of 30-240 bpm. ``covered_s`` is the counted time.
+    """
+    seconds: dict[int, float] = {}
+    for _timestamp, weight, value in _samples(
+        activity, "heartrate", -math.inf, math.inf
+    ):
+        if HISTOGRAM_MIN_BPM <= value <= HISTOGRAM_MAX_BPM:
+            bpm = round(value)
+            seconds[bpm] = seconds.get(bpm, 0.0) + weight
+    if not seconds:
+        return None
+    return {
+        "version": HEART_RATE_HISTOGRAM_VERSION,
+        "covered_s": round(sum(seconds.values()), 3),
+        "seconds": {str(bpm): round(seconds[bpm], 3) for bpm in sorted(seconds)},
+    }
 
 
 def _target(
@@ -122,17 +154,30 @@ def _aerobic_sensor(activity: dict[str, Any]) -> str | None:
     return None
 
 
+def _aerobic_output(
+    activity: dict[str, Any], sensor: str
+) -> tuple[dict[str, Any], str] | None:
+    """The activity and stream the halves read, or ``None`` for unknown terrain.
+
+    Outdoor runs compare grade-adjusted speed (Minetti 2002); treadmill and
+    virtual runs are flat and keep their speed.
+    """
+    if sensor != "velocity_smooth" or summary_is_indoor(activity):
+        return activity, sensor
+    streams = activity.get("streams") or {}
+    grades = grade_stream(streams)
+    if grades is None:
+        return None
+    adjusted = grade_adjusted_speeds(streams, grades)
+    view = {**activity, "streams": {**streams, GRADE_ADJUSTED_SPEED: adjusted}}
+    return view, GRADE_ADJUSTED_SPEED
+
+
 def aerobic_analysis(
     activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
 ) -> dict[str, Any]:
-    provider = _number(activity.get("decoupling"))
     base = {
         "method": METHOD,
-        "provider_decoupling": {
-            "value": provider,
-            "unit": "%",
-            "source": "Intervals.icu",
-        },
         "source": f"derived from {source_label} original streams",
         "warmup_excluded_seconds": 600,
         "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps >5 seconds, stops and non-positive output excluded. No universal fitness cutoff.",
@@ -145,6 +190,14 @@ def aerobic_analysis(
             "status": "insufficient_data",
             "reason": "Geeignete Sportart oder ausreichend lange Messreihe fehlt.",
         }
+    selected = _aerobic_output(activity, sensor)
+    if selected is None:
+        return {
+            **base,
+            "status": "insufficient_data",
+            "reason": "Gelände unbekannt: Steigung oder Höhe fehlt.",
+        }
+    activity, sensor = selected
     start, end = float(times[0]) + 600, float(times[-1])
     output = _samples(activity, sensor, start, end)
     hr = {

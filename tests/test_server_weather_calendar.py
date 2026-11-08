@@ -8,6 +8,8 @@ from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import remote_reconcilers
+import snapshot_seed
 from garmin_support import save_garmin
 from server_test_support import ServerTestCase, server
 from support import (
@@ -31,11 +33,6 @@ from backend.providers import calendar as calendar_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers import weather as weather_provider
 from backend.runtime import clock as runtime_clock
-from backend.sync import snapshots as sync_snapshots
-from backend.sync.daily import DailySyncMarkerService
-from backend.sync.intervals import IntervalsSnapshotReader
-from backend.sync.library import WorkoutLibraryRefreshService
-from backend.sync.performance import PerformanceRefreshFollowupService
 from backend.sync.state import SyncStateRepository
 from backend.weather import cache as weather_cache
 from backend.weather import history as weather_history
@@ -59,72 +56,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(endpoint.state(), {"configured": True})
         weather.state.assert_called_once_with(refresh=True)
 
-    def test_historical_sync_does_not_queue_performance_follow_up_from_common_path(
-        self,
-    ):
-        snapshot = {
-            "synced_at": "historical",
-            "athlete": {},
-            "recent_activities": [],
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-        }
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                IntervalsSnapshotReader, "fetch_snapshot", return_value=snapshot
-            ),
-            patch.object(
-                WorkoutLibraryRefreshService, "refresh", return_value={"workouts": 0}
-            ),
-            patch.object(
-                PerformanceRefreshFollowupService, "enqueue_after_sync"
-            ) as enqueue,
-            patch.object(DailySyncMarkerService, "mark") as mark,
-        ):
-            server.INTERVALS_SYNC.sync_service().sync(
-                "startup historical backfill",
-                activity_days=90,
-                end_date=date(2026, 1, 1),
-            )
-        enqueue.assert_not_called()
-        mark.assert_not_called()
 
-    def test_historical_snapshot_merge_preserves_current_read_model(self):
-        current = {
-            "synced_at": "current",
-            "recent_activities": [{"id": "new"}],
-            "raw_provider_data": {
-                "athlete": {"id": "athlete"},
-                "activities": [{"id": "new"}],
-                "wellness": [],
-                "upcoming_calendar": [],
-            },
-        }
-        historical = {
-            "synced_at": "historical",
-            "recent_activities": [{"id": "old"}],
-            "raw_provider_data": {
-                "athlete": {},
-                "activities": [{"id": "old"}],
-                "wellness": [{"id": "wellness-old"}],
-                "upcoming_calendar": [],
-            },
-            "provider_sync": {
-                "calendar_window": {"start": "2020-01-01", "end": "2020-03-30"}
-            },
-        }
-        merged = sync_snapshots.merge_historical_snapshot(current, historical)
-        self.assertEqual(merged["recent_activities"], current["recent_activities"])
-        self.assertEqual(
-            {item["id"] for item in merged["raw_provider_data"]["activities"]},
-            {"new", "old"},
-        )
-        self.assertEqual(
-            merged["raw_provider_data"]["wellness"], [{"id": "wellness-old"}]
-        )
-        self.assertEqual(merged["synced_at"], "current")
 
     def test_public_calendar_source_delete_cascades_to_candidates(self):
         now = runtime_clock.utc_now()
@@ -285,26 +217,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertTrue(weather["configured"])
         self.assertTrue(weather["loading"])
 
-    def test_weather_background_sync_refreshes_and_reuses_three_hour_cache(self):
-        server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
-        forecast = {
-            "query": "Berlin",
-            "location": {"name": "Berlin", "country": "Deutschland"},
-            "model": "ECMWF",
-            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
-            "fetched_at": runtime_clock.utc_now(),
-        }
-        with patch.object(
-            weather_provider.WeatherClient, "fetch", return_value=forecast
-        ) as fetch:
-            first = server.WEATHER_ASSEMBLY.sync_service().sync("test")
-            second = server.WEATHER_ASSEMBLY.sync_service().sync("test")
-            manual = server.WEATHER_ASSEMBLY.sync_service().sync("manuell", force=True)
-        self.assertEqual(first["status"], "ok")
-        self.assertEqual(second["status"], "ok")
-        self.assertEqual(manual["status"], "ok")
-        self.assertEqual(fetch.call_count, 2)
-        fetch.assert_called_with("Berlin")
 
     def test_weather_failure_uses_exponential_negative_cache_until_forced(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
@@ -329,29 +241,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(forced["fetched_at"], forecast["fetched_at"])
         self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
 
-    def test_weather_refresh_rechecks_adaptive_planning(self):
-        server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
-        forecast = {
-            "query": "Berlin",
-            "location": {"name": "Berlin", "country": "Deutschland"},
-            "model": "ECMWF",
-            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
-            "fetched_at": runtime_clock.utc_now(),
-        }
-        with (
-            patch.object(
-                weather_provider.WeatherClient, "fetch", return_value=forecast
-            ),
-            patch.object(
-                adaptive_preview_service.AdaptiveReplanPreviewService,
-                "preview",
-                return_value={"changes": [{"id": "change-1"}]},
-            ) as preview,
-        ):
-            result = server.WEATHER_ASSEMBLY.sync_service().sync("test")
-        preview.assert_called_once_with()
-        self.assertTrue(result["needs_replan"])
-        self.assertEqual(result["replan_changes"], 1)
 
     def test_coach_context_reads_weather_cache_without_refreshing_it(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
@@ -487,49 +376,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertNotIn("import_public_calendar", backend)
         self.assertNotIn("renderExternalCalendarMarker", app)
 
-    def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
-        today = server.ATHLETE_CLOCK.now().date().isoformat()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.execute(
-                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    "good-event",
-                    "good-event",
-                    "Good event",
-                    today,
-                    today + "T10:00:00+02:00",
-                    today + "T11:00:00+02:00",
-                    60,
-                    0,
-                    1,
-                    runtime_clock.utc_now(),
-                ),
-            )
-        with (
-            patch.object(
-                server,
-                "CONFIG",
-                replace(
-                    server.CONFIG, calendar_ical_url="https://calendar.example/feed.ics"
-                ),
-            ),
-            patch.object(
-                calendar_provider,
-                "external_calendar_url",
-                return_value="https://calendar.example/feed.ics",
-            ),
-            patch.object(
-                calendar_provider,
-                "fetch_calendar_feed",
-                return_value=b"not an ical feed",
-            ),
-            self.assertRaises(server.AppError),
-        ):
-            server.EXTERNAL_CALENDAR.sync_service().sync("test")
-        self.assertEqual(
-            server.EXTERNAL_CALENDAR.reader().list_events(1000)[0]["id"],
-            "good-event",
-        )
 
     def test_ical_no_training_marker_is_excluded_from_adaptive_constraints(self):
         tomorrow = (
@@ -600,128 +446,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
             ]
         )
 
-    def test_external_calendar_sync_keeps_url_server_side_and_replaces_events(self):
-        payload = (
-            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:family-2\r\nDTSTART:20260902T100000Z\r\n"
-            b"DTEND:20260902T120000Z\r\nSUMMARY:School meeting\r\nDESCRIPTION: [NO_INTENSITY]\r\nEND:VEVENT\r\n"
-            b"BEGIN:VEVENT\r\nUID:unmarked\r\nDTSTART:20260903T100000Z\r\n"
-            b"DTEND:20260903T120000Z\r\nSUMMARY:Unmarked\r\nDESCRIPTION:[NO_TRAINING]\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-        )
-        config = replace(
-            server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics"
-        )
-        preview_service = Mock()
-        preview_service.preview.return_value = {
-            "changes": [{"id": "change-1"}, {"id": "change-2"}]
-        }
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                calendar_provider, "fetch_calendar_feed", return_value=payload
-            ) as fetch,
-            patch.object(
-                server.ATHLETE_CLOCK,
-                "now",
-                return_value=datetime(2026, 9, 2, tzinfo=UTC),
-            ),
-            patch.object(
-                server.PLANNING_WORKFLOWS,
-                "adaptive_replan_preview_service",
-                return_value=preview_service,
-            ),
-        ):
-            result = server.EXTERNAL_CALENDAR.sync_service().sync("test")
-            self.assertEqual(result["events"], 2)
-            self.assertTrue(result["needs_replan"])
-            self.assertEqual(result["replan_changes"], 2)
-            preview_service.preview.assert_called_once_with()
-            state = server.EXTERNAL_CALENDAR.reader().state(
-                configured=True,
-                running=False,
-                window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
-            )
-            self.assertTrue(state["configured"])
-            self.assertNotIn("url", state)
-            self.assertEqual(state["events"][0]["duration_minutes"], 120)
-            self.assertEqual(state["events"][0]["short_only"], 0)
-            self.assertEqual(
-                [
-                    event["uid"]
-                    for event in server.EXTERNAL_CALENDAR.reader().list_events(
-                        1000, training_relevant_only=True
-                    )
-                ],
-                ["family-2", "unmarked"],
-            )
-            self.assertFalse(state["events"][1]["training_relevant"])
-            fetch.assert_called_once_with(
-                config.calendar_ical_url, app_version=server.APP_VERSION
-            )
 
-    def test_external_calendar_sync_limits_events_to_eight_weeks(self):
-        today = server.ATHLETE_CLOCK.now().date()
-        in_window = today + timedelta(
-            days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS
-        )
-        outside_window = in_window + timedelta(days=1)
-        payload = (
-            "BEGIN:VCALENDAR\r\n"
-            f"BEGIN:VEVENT\r\nUID:in-window\r\nDTSTART;VALUE=DATE:{in_window.strftime('%Y%m%d')}\r\nSUMMARY:Within window\r\nDESCRIPTION:[SHORT_ONLY]\r\nEND:VEVENT\r\n"
-            f"BEGIN:VEVENT\r\nUID:outside-window\r\nDTSTART;VALUE=DATE:{outside_window.strftime('%Y%m%d')}\r\nSUMMARY:Outside window\r\nEND:VEVENT\r\n"
-            "END:VCALENDAR\r\n"
-        ).encode()
-        config = replace(
-            server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics"
-        )
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                calendar_provider, "fetch_calendar_feed", return_value=payload
-            ),
-        ):
-            result = server.EXTERNAL_CALENDAR.sync_service().sync("test")
 
-        self.assertEqual(result["window_days"], 56)
-        self.assertEqual(result["events"], 1)
-        self.assertEqual(
-            server.EXTERNAL_CALENDAR.reader().list_events()[0]["uid"], "in-window"
-        )
-
-    def test_external_calendar_sync_keeps_last_successful_events_on_failure(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            db.execute(
-                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    "event-old",
-                    "family-old",
-                    "Existing appointment",
-                    tomorrow,
-                    tomorrow + "T10:00:00+02:00",
-                    tomorrow + "T11:00:00+02:00",
-                    60,
-                    0,
-                    runtime_clock.utc_now(),
-                ),
-            )
-        config = replace(
-            server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics"
-        )
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(
-                calendar_provider,
-                "fetch_calendar_feed",
-                side_effect=server.AppError(502, "upstream unavailable"),
-            ),
-            self.assertRaises(server.AppError),
-        ):
-            server.EXTERNAL_CALENDAR.sync_service().sync("test")
-        self.assertEqual(
-            server.EXTERNAL_CALENDAR.reader().list_events()[0]["id"], "event-old"
-        )
 
     def test_external_calendar_event_reduces_hard_or_long_local_draft_only_in_preview(
         self,
@@ -1096,7 +822,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         tomorrow = (
             _local_datetime.now().astimezone().date() + timedelta(days=1)
         ).isoformat()
-        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
+        remote_reconcilers.planned_reconciler(server).reconcile(
             [
                 {
                     "id": "existing",
@@ -1129,7 +855,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         day = (
             _local_datetime.now().astimezone().date() + timedelta(days=2)
         ).isoformat()
-        server.PLANNED_UNIT_SYNC.remote_reconciler().reconcile(
+        remote_reconcilers.planned_reconciler(server).reconcile(
             [
                 {
                     "id": "later",
@@ -1228,7 +954,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             post.call_args_list[0].args,
             (
                 "/athlete/athlete-1/folders",
-                {"name": "Intervals Coach"},
+                {"name": "Pacecraft"},
             ),
         )
         self.assertEqual(
@@ -1363,7 +1089,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(set(result["provider_sync"]["pagination"]), {"activities"})
 
     def test_library_plan_ignores_stale_provider_calendar_until_imported(self):
-        server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
+        remote_reconcilers.library_reconciler(server).reconcile(
             [
                 {
                     "id": 43,
@@ -1378,7 +1104,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         tomorrow = (
             _local_datetime.now().astimezone().date() + timedelta(days=1)
         ).isoformat()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -1674,6 +1400,218 @@ class ServerWeatherCalendarTests(ServerTestCase):
         )
         self.assertEqual(friday_result["suggested_time"], "14:00–15:00 Uhr")
         self.assertEqual(friday_result["availability"], "nach der Arbeit")
+
+    def test_weather_background_sync_refreshes_and_reuses_three_hour_cache(self):
+        server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
+        forecast = {
+            "query": "Berlin",
+            "location": {"name": "Berlin", "country": "Deutschland"},
+            "model": "ECMWF",
+            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
+            "fetched_at": runtime_clock.utc_now(),
+        }
+        with patch.object(
+            weather_provider.WeatherClient, "fetch", return_value=forecast
+        ) as fetch:
+            first = server.WEATHER_ASSEMBLY.sync_service().sync("test")
+            second = server.WEATHER_ASSEMBLY.sync_service().sync("test")
+            manual = server.WEATHER_ASSEMBLY.sync_service().sync("manuell", force=True)
+        self.assertEqual(first["status"], "ok")
+        self.assertEqual(second["status"], "ok")
+        self.assertEqual(manual["status"], "ok")
+        self.assertEqual(fetch.call_count, 2)
+        fetch.assert_called_with("Berlin")
+
+    def test_weather_refresh_rechecks_adaptive_planning(self):
+        server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
+        forecast = {
+            "query": "Berlin",
+            "location": {"name": "Berlin", "country": "Deutschland"},
+            "model": "ECMWF",
+            "forecast": {"daily": {"time": []}, "hourly": {"time": []}},
+            "fetched_at": runtime_clock.utc_now(),
+        }
+        with (
+            patch.object(
+                weather_provider.WeatherClient, "fetch", return_value=forecast
+            ),
+            patch.object(
+                adaptive_preview_service.AdaptiveReplanPreviewService,
+                "preview",
+                return_value={"changes": [{"id": "change-1"}]},
+            ) as preview,
+        ):
+            result = server.WEATHER_ASSEMBLY.sync_service().sync("test")
+        preview.assert_called_once_with()
+        self.assertTrue(result["needs_replan"])
+        self.assertEqual(result["replan_changes"], 1)
+
+    def test_external_calendar_keeps_last_good_events_on_invalid_feed(self):
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, training_relevant, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "good-event",
+                    "good-event",
+                    "Good event",
+                    today,
+                    today + "T10:00:00+02:00",
+                    today + "T11:00:00+02:00",
+                    60,
+                    0,
+                    1,
+                    runtime_clock.utc_now(),
+                ),
+            )
+        with (
+            patch.object(
+                server,
+                "CONFIG",
+                replace(
+                    server.CONFIG, calendar_ical_url="https://calendar.example/feed.ics"
+                ),
+            ),
+            patch.object(
+                calendar_provider,
+                "external_calendar_url",
+                return_value="https://calendar.example/feed.ics",
+            ),
+            patch.object(
+                calendar_provider,
+                "fetch_calendar_feed",
+                return_value=b"not an ical feed",
+            ),
+            self.assertRaises(server.AppError),
+        ):
+            server.EXTERNAL_CALENDAR.sync_service().sync("test")
+        self.assertEqual(
+            server.EXTERNAL_CALENDAR.reader().list_events(1000)[0]["id"],
+            "good-event",
+        )
+
+    def test_external_calendar_sync_keeps_url_server_side_and_replaces_events(self):
+        payload = (
+            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:family-2\r\nDTSTART:20260902T100000Z\r\n"
+            b"DTEND:20260902T120000Z\r\nSUMMARY:School meeting\r\nDESCRIPTION: [NO_INTENSITY]\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:unmarked\r\nDTSTART:20260903T100000Z\r\n"
+            b"DTEND:20260903T120000Z\r\nSUMMARY:Unmarked\r\nDESCRIPTION:[NO_TRAINING]\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+        config = replace(
+            server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics"
+        )
+        preview_service = Mock()
+        preview_service.preview.return_value = {
+            "changes": [{"id": "change-1"}, {"id": "change-2"}]
+        }
+        with (
+            patch.object(server, "CONFIG", config),
+            patch.object(
+                calendar_provider, "fetch_calendar_feed", return_value=payload
+            ) as fetch,
+            patch.object(
+                server.ATHLETE_CLOCK,
+                "now",
+                return_value=datetime(2026, 9, 2, tzinfo=UTC),
+            ),
+            patch.object(
+                server.PLANNING_WORKFLOWS,
+                "adaptive_replan_preview_service",
+                return_value=preview_service,
+            ),
+        ):
+            result = server.EXTERNAL_CALENDAR.sync_service().sync("test")
+            self.assertEqual(result["events"], 2)
+            self.assertTrue(result["needs_replan"])
+            self.assertEqual(result["replan_changes"], 2)
+            preview_service.preview.assert_called_once_with()
+            state = server.EXTERNAL_CALENDAR.reader().state(
+                configured=True,
+                running=False,
+                window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
+            )
+            self.assertTrue(state["configured"])
+            self.assertNotIn("url", state)
+            self.assertEqual(state["events"][0]["duration_minutes"], 120)
+            self.assertEqual(state["events"][0]["short_only"], 0)
+            self.assertEqual(
+                [
+                    event["uid"]
+                    for event in server.EXTERNAL_CALENDAR.reader().list_events(
+                        1000, training_relevant_only=True
+                    )
+                ],
+                ["family-2", "unmarked"],
+            )
+            self.assertFalse(state["events"][1]["training_relevant"])
+            fetch.assert_called_once_with(
+                config.calendar_ical_url, app_version=server.APP_VERSION
+            )
+
+    def test_external_calendar_sync_limits_events_to_eight_weeks(self):
+        today = server.ATHLETE_CLOCK.now().date()
+        in_window = today + timedelta(
+            days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS
+        )
+        outside_window = in_window + timedelta(days=1)
+        payload = (
+            "BEGIN:VCALENDAR\r\n"
+            f"BEGIN:VEVENT\r\nUID:in-window\r\nDTSTART;VALUE=DATE:{in_window.strftime('%Y%m%d')}\r\nSUMMARY:Within window\r\nDESCRIPTION:[SHORT_ONLY]\r\nEND:VEVENT\r\n"
+            f"BEGIN:VEVENT\r\nUID:outside-window\r\nDTSTART;VALUE=DATE:{outside_window.strftime('%Y%m%d')}\r\nSUMMARY:Outside window\r\nEND:VEVENT\r\n"
+            "END:VCALENDAR\r\n"
+        ).encode()
+        config = replace(
+            server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics"
+        )
+        with (
+            patch.object(server, "CONFIG", config),
+            patch.object(
+                calendar_provider, "fetch_calendar_feed", return_value=payload
+            ),
+        ):
+            result = server.EXTERNAL_CALENDAR.sync_service().sync("test")
+
+        self.assertEqual(result["window_days"], 56)
+        self.assertEqual(result["events"], 1)
+        self.assertEqual(
+            server.EXTERNAL_CALENDAR.reader().list_events()[0]["uid"], "in-window"
+        )
+
+    def test_external_calendar_sync_keeps_last_successful_events_on_failure(self):
+        tomorrow = (
+            _local_datetime.now().astimezone().date() + timedelta(days=1)
+        ).isoformat()
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            db.execute(
+                "INSERT INTO external_calendar_events(id, uid, name, event_date, start_local, end_local, duration_minutes, all_day, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "event-old",
+                    "family-old",
+                    "Existing appointment",
+                    tomorrow,
+                    tomorrow + "T10:00:00+02:00",
+                    tomorrow + "T11:00:00+02:00",
+                    60,
+                    0,
+                    runtime_clock.utc_now(),
+                ),
+            )
+        config = replace(
+            server.CONFIG, calendar_ical_url="https://93.184.216.34/family.ics"
+        )
+        with (
+            patch.object(server, "CONFIG", config),
+            patch.object(
+                calendar_provider,
+                "fetch_calendar_feed",
+                side_effect=server.AppError(502, "upstream unavailable"),
+            ),
+            self.assertRaises(server.AppError),
+        ):
+            server.EXTERNAL_CALENDAR.sync_service().sync("test")
+        self.assertEqual(
+            server.EXTERNAL_CALENDAR.reader().list_events()[0]["id"], "event-old"
+        )
 
 
 if __name__ == "__main__":

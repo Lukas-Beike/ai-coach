@@ -74,6 +74,7 @@
     content.append(...providerNotes(payload));
     renderSeries(session, payload.streams, content);
     renderLaps(payload.laps, content);
+    renderStrengthSets(payload.strength_sets, content);
     renderIntervalQuality(payload, content);
     renderAerobic(payload, content);
     renderPower(payload, content);
@@ -120,7 +121,10 @@
     const value = Number(load.value).toLocaleString("de-DE", { maximumFractionDigits: 1 });
     const rpe = Number(load.rpe).toLocaleString("de-DE");
     const minutes = Number(load.duration_min).toLocaleString("de-DE", { maximumFractionDigits: 1 });
-    return `Session-RPE-Last: ${value} AU · RPE ${rpe} (${load.rpe_source_label}) × ${minutes} min`;
+    const text = `Session-RPE-Last: ${value} AU · RPE ${rpe} (${load.rpe_source_label}) × ${minutes} min`;
+    if (load.duration_flag !== "deviating_duration") return text;
+    const moving = Number(load.moving_duration_min).toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    return `${text} · lange Unterbrechung, ${moving} min in Bewegung`;
   }
 
   function renderFeedback(feedback, session, api, activityId, content, sessionLoad) {
@@ -354,6 +358,70 @@
   }
 
 
+  const STRENGTH_SOURCES = { garmin_exercise_sets: "Garmin-Sätze", fit_set_messages: "FIT-Datei" };
+
+  // "Kniebeuge – Barbell Back Squat": the category links it to the plan, the code names the exercise.
+  function strengthExerciseLabel(exercise) {
+    const category = AppFormat.strengthCategory(exercise.category);
+    const code = typeof exercise.name === "string" && exercise.name
+      ? exercise.name.toLowerCase().split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ")
+      : null;
+    return [category, code].filter(Boolean).join(" – ") || "Übung";
+  }
+
+  function strengthNumber(value, digits = 1) {
+    const number = Number(value);
+    return value == null || !Number.isFinite(number) ? "–" : AppFormat.number(number, { digits: Number.isInteger(number) ? 0 : digits });
+  }
+
+  function strengthSeconds(value) {
+    const seconds = Number(value);
+    if (value == null || !Number.isFinite(seconds)) return "–";
+    return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
+  }
+
+  // Reps, else the duration of a timed set.
+  function strengthAmount(set) {
+    if (set.reps != null) return strengthNumber(set.reps, 0);
+    return strengthSeconds(set.duration_s);
+  }
+
+  function renderStrengthSets(strength, content) {
+    if (!strength?.exercises?.length) return;
+    content.append(node("h3", "Kraftsätze"));
+    const sets = Number(strength.active_sets) || 0;
+    content.append(node("p", [
+      `${sets} ${sets === 1 ? "Satz" : "Sätze"}`,
+      strength.total_reps != null ? `${strength.total_reps} Wdh.` : null,
+      strength.volume_kg != null ? `${strengthNumber(strength.volume_kg)} kg Volumen` : null,
+      STRENGTH_SOURCES[strength.source],
+    ].filter(Boolean).join(" · "), "muted"));
+    const tableWrap = makeScrollRegionFocusable(node("div", null, "analysis-chart-table"), "Kraftsätze");
+    const table = node("table");
+    table.append(node("caption", "Ausgeführte Sätze je Übung"));
+    const thead = node("thead"); const heading = node("tr");
+    ["Übung", "Satz", "Wdh. / Dauer", "kg", "Pause"].forEach((label) => { const cell = node("th", label); cell.scope = "col"; heading.append(cell); });
+    thead.append(heading); table.append(thead);
+    strength.exercises.forEach((exercise) => {
+      const setList = Array.isArray(exercise.set_list) ? exercise.set_list : [];
+      // One row group per exercise, so its header covers exactly its own sets.
+      const body = node("tbody");
+      setList.forEach((set, index) => {
+        const row = node("tr");
+        if (index === 0) {
+          // One header per exercise spans its sets, so every set row keeps its exercise.
+          const nameCell = node("th", strengthExerciseLabel(exercise)); nameCell.scope = "rowgroup"; nameCell.rowSpan = setList.length; row.append(nameCell);
+        }
+        row.append(node("td", String(index + 1)), node("td", strengthAmount(set)), node("td", strengthNumber(set.weight_kg)), node("td", strengthSeconds(set.rest_s)));
+        body.append(row);
+      });
+      table.append(body);
+    });
+    tableWrap.append(table); content.append(tableWrap);
+    const omitted = Number(strength.omitted_exercises) || 0;
+    if (omitted) content.append(node("p", `${omitted} weitere ${omitted === 1 ? "Übung" : "Übungen"} nicht angezeigt.`, "muted"));
+  }
+
   function renderIntervalQuality(payload, content) {
     const quality = payload.analysis?.interval_quality;
     if (quality) {
@@ -376,13 +444,11 @@
   function renderAerobic(payload, content) {
     const aerobic = payload.analysis?.aerobic;
     if (aerobic) {
-      content.append(node("h3", "Aerobe Effizienz"));
-      const decoupling = aerobic.provider_decoupling;
-      if (decoupling?.value != null) content.append(node("p", `${decoupling.source} Decoupling: ${decoupling.value}% (Anbieterberechnung)`));
+      content.append(node("h3", "Herzfrequenzdrift"));
       let description = aerobic.reason;
       if (aerobic.status === "ok") {
         const longSession = aerobic.long_session ? " · lange Einheit" : "";
-        description = `${aerobic.efficiency} ${aerobic.unit} · lokale Herzfrequenzdrift ${aerobic.drift_percent}%${longSession}`;
+        description = `Drift ${aerobic.drift_percent}% · gleichmäßige Leistung pro Schlag ${aerobic.efficiency} ${aerobic.unit}${longSession}`;
       }
       content.append(node("p", description));
       content.append(node("p", "Lokale Methode: zehn Minuten Aufwärmen ausgeschlossen, danach zwei gleich lange Hälften bei gleichmäßiger Belastung und mindestens 85% Messabdeckung. Temperatur, Gelände und Indoor/Outdoor beeinflussen den Vergleich; keine pauschale Fitnessbewertung.", "muted"));

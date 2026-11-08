@@ -11,7 +11,6 @@ from backend.db import DatabaseManager
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import library as planning_library
 from backend.sync.gates import INTERVALS_RESYNC_GATE, ProviderResyncGate
-from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.library import WorkoutLibrarySyncService
 from backend.sync.planned_calendar import (
     PlannedCalendarRepairBatch,
@@ -19,10 +18,6 @@ from backend.sync.planned_calendar import (
     PlannedCalendarSyncService,
 )
 
-INTERVALS_SYNC_WAIT_SECONDS = 120
-_REPAIR_LOCK_ERROR = (
-    "Der Hintergrund-Sync ist noch aktiv. Reparatur wird erneut versucht."
-)
 _RETRY_SCOPE = "Nur fehlgeschlagene Objekte erneut auswählen."
 
 
@@ -37,8 +32,6 @@ class SelectedWorkoutSyncService:
         planned_calendar_sync_service: PlannedCalendarSyncService,
         planned_calendar_repair_service: PlannedCalendarRepairService,
         redactor: Callable[[str], str],
-        lock: Any = INTERVALS_SYNC_LOCK,
-        wait_seconds: float = INTERVALS_SYNC_WAIT_SECONDS,
         provider_resync_gate: ProviderResyncGate = INTERVALS_RESYNC_GATE,
     ) -> None:
         self._config = config
@@ -47,21 +40,9 @@ class SelectedWorkoutSyncService:
         self._planned_calendar_sync_service = planned_calendar_sync_service
         self._planned_calendar_repair_service = planned_calendar_repair_service
         self._redact = redactor
-        self._lock = lock
-        self._wait_seconds = wait_seconds
         self._provider_resync_gate = provider_resync_gate
 
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if payload.get("repair"):
-            if not self._lock.acquire(timeout=self._wait_seconds):
-                raise AppError(503, _REPAIR_LOCK_ERROR, reason="temporary_error")
-            try:
-                return self._sync_unlocked(payload)
-            finally:
-                self._lock.release()
-        return self._sync_unlocked(payload)
-
-    def _sync_unlocked(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         requested = planning_library.library_bulk_request_entries(

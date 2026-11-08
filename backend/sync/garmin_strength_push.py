@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -35,13 +35,16 @@ from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import strength_structure
+from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.push_state import garmin_fingerprint
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_personal import GarminTransportClient
 from backend.providers.garmin_strength_workout import (
+    NO_STRUCTURE_MESSAGE,
+    GarminExercise,
     GarminStrengthMappingError,
     strength_workout,
-    workout_exercise_pairs,
+    workout_exercise_steps,
 )
 from backend.sync.garmin_service import _persist_garmin_tokens, shared_garmin_sync_lock
 from backend.sync.gates import ProviderResyncGate
@@ -201,6 +204,7 @@ class GarminStrengthPushService:
                 "SELECT payload, tombstone FROM planned_units WHERE local_id=?",
                 (local_id,),
             ).fetchone()
+            remembered = remembered_exercises(db)
         if not row or row["tombstone"]:
             return _error_result(local_id, "Einheit nicht gefunden", "conflict")
         payload_hash = planning_library.library_payload_hash(row["payload"])
@@ -208,7 +212,7 @@ class GarminStrengthPushService:
             return _error_result(local_id, "Seit der Vorschau geändert", "conflict")
         try:
             unit = json.loads(row["payload"] or "{}")
-            plan_date, document = self._document(unit)
+            plan_date, document = self._document(unit, remembered)
         except (AppError, GarminStrengthMappingError, TypeError, ValueError) as exc:
             return _error_result(local_id, self._redact(str(exc))[:500])
         return _Prepared(
@@ -220,7 +224,9 @@ class GarminStrengthPushService:
             garmin_fingerprint(unit),
         )
 
-    def _document(self, unit: Any) -> tuple[str, dict[str, Any]]:
+    def _document(
+        self, unit: Any, remembered: Mapping[str, GarminExercise]
+    ) -> tuple[str, dict[str, Any]]:
         if (
             not isinstance(unit, dict)
             or unit.get("local_deleted")
@@ -241,11 +247,12 @@ class GarminStrengthPushService:
             unit.get("strength_structure")
         )
         if not exercises:
-            raise ValueError("Die Einheit hat keine Kraftstruktur.")
+            raise ValueError(NO_STRUCTURE_MESSAGE)
         document = strength_workout(
             name=str(unit.get("name") or ""),
             description=strength_structure.render(exercises),
             exercises=exercises,
+            remembered=remembered,
         )
         return plan_date, document
 
@@ -328,9 +335,9 @@ class GarminStrengthPushService:
     def _verified(client: Any, workout_id: str, document: dict[str, Any]) -> bool:
         """Whether the saved workout kept every sent exercise step."""
         saved = _call(client.get_workout_by_id, workout_id)
-        return isinstance(saved, dict) and workout_exercise_pairs(
+        return isinstance(saved, dict) and workout_exercise_steps(
             saved
-        ) == workout_exercise_pairs(document)
+        ) == workout_exercise_steps(document)
 
     def _drop_broken(
         self,

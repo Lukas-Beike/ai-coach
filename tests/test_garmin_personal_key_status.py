@@ -262,6 +262,18 @@ class SdkSkipHintTests(unittest.TestCase):
         working._state_service.clear_sdk_skipped.assert_called_once_with()
         working._state_service.record_sdk_skipped.assert_not_called()
 
+    def test_threshold_failure_needs_a_configured_sdk(self) -> None:
+        failure = {"reason": "login_failed", "at": "2026-11-06T08:00:00Z"}
+        configured = _reader(
+            _config(garmin_email="athlete@example.invalid", garmin_password="x"),
+            _factory(lambda _argument: (None, None)),
+        )
+        configured._state_service.sdk_threshold_failure.return_value = failure
+        self.assertEqual(configured.sdk_threshold_failure(), failure)
+        unconfigured = _reader(_config(), _factory(lambda _argument: (None, None)))
+        unconfigured._state_service.sdk_threshold_failure.return_value = failure
+        self.assertIsNone(unconfigured.sdk_threshold_failure())
+
 
 class _Tokens:
     def __init__(self, connected: bool) -> None:

@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v21 and supports upgrades from v16; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v22 and supports upgrades from v21 (releases 1.13.41 to 1.13.44); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,17 +28,13 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from schema v16 through released v20 and the current schema v21, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from released schema v21 and the current schema v22, executing required versioned steps within one rollback-capable migration transaction.
 
-#### Scenario: Skipped-release upgrade
-- **WHEN** a populated released v16 database is opened by this build
-- **THEN** all intermediate migrations run to the exact current schema while preserving existing rows.
+#### Scenario: Released baseline upgrade
+- **WHEN** a populated released v21 database is opened by this build
+- **THEN** the remaining migrations run to the exact current schema while preserving existing rows.
 
-#### Scenario: Later supported release
-- **WHEN** a populated v17 or v18 database is opened
-- **THEN** only remaining upgrade steps run and existing data remains intact.
-
-Evidence: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_planning_metrics_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+Evidence: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py::test_oldest_supported_release_schema_upgrades_to_current`, `tests/test_db_strength_sets_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
 
 ### Requirement: Unknown schema preservation
 
@@ -70,7 +66,7 @@ A failing migration SHALL roll back its schema and data changes, preserve the or
 - **WHEN** a storage failure rolls back the outer transaction and removes the savepoint
 - **THEN** cleanup does not replace the original migration exception with a savepoint error
 
-Evidence: `backend/db/migrations.py::migrate_schema`; `backend/db/migrations.py::_abandon_migration_savepoint`; `backend/db/schema.py::execute_ddl`. Tests: `tests/test_db_planning_metrics_migration.py::test_failure_rolls_back_schema_and_data`; `tests/test_db_encrypted_upgrade_matrix.py::test_a_failing_upgrade_leaves_every_released_schema_unchanged`; `tests/test_db_migrations.py::test_lost_savepoint_does_not_mask_the_original_upgrade_error`.
+Evidence: `backend/db/migrations.py::migrate_schema`; `backend/db/migrations.py::_abandon_migration_savepoint`; `backend/db/schema.py::execute_ddl`. Tests: `tests/test_db_strength_sets_migration.py::test_failed_upgrade_leaves_the_release_unchanged`; `tests/test_db_encrypted_upgrade_matrix.py::test_a_failing_upgrade_leaves_every_released_schema_unchanged`; `tests/test_db_migrations.py::test_lost_savepoint_does_not_mask_the_original_upgrade_error`.
 
 ### Requirement: Owned atomic transactions and consistent reads
 
@@ -105,7 +101,7 @@ The database manager SHALL block new leases, wait for active operations and clos
 Evidence: `backend/db/manager.py::DatabaseManager.restore_drain`; `backend/db/manager.py::DatabaseManagerCache`. Tests: `tests/test_db_manager.py`; `tests/test_database_restore_service.py::test_restores_after_checkpoint_and_drain_then_resumes_both_job_owners`.
 
 ### Requirement: Canonical extension upgrade preservation
-The extended schema SHALL preserve all athlete records, feedback, snapshots, tombstones, plans, sessions, settings, conversations, usage and sync state. Supported populated upgrades, injected-failure rollback, same-build restart and encrypted backup/restore SHALL be verified from v20 (release 1.13.40, the only production instance) and every later released schema for new schema changes; existing upgrade paths from v16 through v19 SHALL keep their existing tests passing.
+The extended schema SHALL preserve all athlete records, feedback, snapshots, tombstones, plans, sessions, settings, conversations, usage and sync state. Supported populated upgrades, injected-failure rollback, same-build restart and encrypted backup/restore SHALL be verified from v21 (release 1.13.44, the only production instance) and every later released schema.
 
 #### Scenario: Populated released schemas
 - **WHEN** each frozen released schema covered by the requirement is upgraded
@@ -123,99 +119,46 @@ The extended schema SHALL preserve all athlete records, feedback, snapshots, tom
 - **WHEN** a database has an unsupported version, unrecognized shape or mismatched version/shape pair
 - **THEN** initialization rejects it without deleting, resetting or partially modifying it.
 
-### Requirement: Provider-neutral planning field upgrade
-Databases at v16 or later SHALL retain local planning fields and allow changes recorded before v16 to be inspected and undone using current names and accepted historical hashes.
-
-#### Scenario: Populated upgrade
-- **WHEN** a populated v16 database with planning records is opened
-- **THEN** the current start and duration names and their values remain intact.
-
-#### Scenario: Rewritten records
-- **WHEN** planned units, conflicts, artifacts, previews or undo proposals already use current field names
-- **THEN** their start and duration values remain unchanged through the upgrade.
-
-#### Scenario: Recorded remote baseline
-- **WHEN** a synced planned unit recorded its remote baseline hash before v16
-- **THEN** the same remote event still matches it after upgrade and reports no remote change.
-
-#### Scenario: Undo of an earlier change
-- **WHEN** a planned-unit or competition change recorded before v16, or its pending undo proposal, is undone after upgrade
-- **THEN** the hash check accepts the recorded state and the restore writes the current field names.
-
-#### Scenario: Upgrade fails partway
-- **WHEN** a migration from v16 fails after changing planning data
-- **THEN** the database returns to the unchanged v16 schema and rows.
-
-Evidence: `backend/planning/planned_units.py`, `backend/change_history.py`, and `tests/test_db_planning_fields_migration.py`.
-
-### Requirement: Canonical power curve upgrade
-The v16 to v17 upgrade SHALL add the canonical `power_curve_points` and `power_curve_fetches` tables in one migration transaction and keep the Intervals.icu power curve of the newest stored snapshot as one unmapped `power_curve` raw record, so the canonical backfill projects it; other values SHALL stay intact.
-
-#### Scenario: Populated upgrade
-- **WHEN** a populated v16 database whose newest snapshot stores a power curve is opened
-- **THEN** the empty tables are added, the curve is kept as one raw record with mapped version 0, and other values remain intact through subsequent upgrades.
-
-#### Scenario: No stored curve
-- **WHEN** no snapshot, a snapshot without a power curve, or one without any parseable fetch time is stored
-- **THEN** the power-curve step adds only the empty tables.
-
-#### Scenario: Completed backfill before the upgrade
-- **WHEN** an installation whose backfill completed under v16 finishes its next backfill run
-- **THEN** the chart shows the same power curve points as the former snapshot read.
-
-#### Scenario: Upgrade fails partway
-- **WHEN** an injected failure follows the table creation and the raw record copy
-- **THEN** the database returns to the unchanged v16 schema and rows.
-
-Evidence: `backend/db/power_curve_migration.py::copy_power_curve_to_raw_record`; `backend/db/migrations.py::_upgrade_v16_to_v17`. Tests: `tests/test_db_power_curve_migration.py::test_every_populated_release_keeps_its_rows_and_its_newest_curve`; `tests/test_db_power_curve_migration.py::test_a_release_without_a_stored_curve_only_adds_the_empty_table`; `tests/test_db_power_curve_migration.py::test_the_raw_record_takes_the_first_parseable_fetch_time`; `tests/test_db_power_curve_migration.py::test_failure_after_the_step_rolls_back_to_the_unchanged_release`; `tests/test_db_power_curve_migration.py::test_upgraded_database_restarts_with_the_same_build_unchanged`; `tests/test_db_power_curve_migration.py::test_restore_of_a_populated_v16_backup_upgrades_through_validation`; `tests/test_db_power_curve_migration.py::CompletedBackfillUpgradeTests`; `tests/test_db_encrypted_upgrade_matrix.py`.
-
-### Requirement: Session RPE rating time upgrade
-The v17 to v18 upgrade SHALL add the nullable `activity_feedback.session_rpe_rated_at` column in one migration transaction; every existing row SHALL keep its values with an unknown (NULL) rating time.
-
-#### Scenario: Populated upgrade
-- **WHEN** a populated v17 database with rated, unrated and session-linked feedback is opened
-- **THEN** each feedback row keeps its existing values and gains a NULL rating time.
-
-#### Scenario: Upgrade fails partway
-- **WHEN** an injected failure follows the column addition
-- **THEN** the database returns to the unchanged v17 or v16 schema and rows.
-
-Evidence: `backend/db/migrations.py::_upgrade_v17_to_v18`; `tests/test_db_feedback_rating_time_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
-
 ### Requirement: Retired schema rejection
 
-The database SHALL reject schema versions older than v16 before changing their data or schema.
+The database SHALL reject schema versions older than v21 (releases before 1.13.41) before changing their data or schema, with a message that names release 1.13.44 for the upgrade. Change-history entries written before v16 under the former planning field names are not translated and cannot be undone.
 
 #### Scenario: Opening an older database
-- **WHEN** a database from a release with schema v15 or older is opened
-- **THEN** startup rejects it and leaves the database unchanged.
+- **WHEN** a database from a release with schema v20 or older is opened
+- **THEN** startup rejects it with the release 1.13.44 hint and leaves its rows and version unchanged.
 
-### Requirement: Planning metric upgrade preservation
+Evidence: `backend/db/migrations.py::migrate_schema`, `backend/db/schema_history.py::OLDEST_SUPPORTED_SCHEMA_VERSION`; `tests/test_db_migrations.py::test_older_database_file_is_refused_at_startup_without_changes`, `tests/test_db_migrations.py::test_older_or_newer_schema_version_is_rejected_without_modification`, `tests/test_change_history.py::test_planning_field_names_before_schema_v16_are_not_translated`.
 
-The v18 to v19 upgrade SHALL rename stored local planning metrics and frozen target FTP without losing their values, identities or sync state. It SHALL preserve retired detail KV records and normalize their target basis on canonical backfill.
+### Requirement: Legacy detail target basis
 
-The v18 and v19 schemas share one table shape, so the v18 to v20 step also upgrades a v19 database. It SHALL add `nutrition_products.favorite` as 0 for every existing product and leave all other product values unchanged.
-
-#### Scenario: Existing planning records
-- **WHEN** a supported database contains local planning metrics under the former names
-- **THEN** the upgraded records use the new names with the same values and sync baseline.
-
-#### Scenario: Conflicting or unreadable values
-- **WHEN** a relevant stored record has conflicting old and new values or cannot be parsed
-- **THEN** the upgrade fails and rolls back without discarding either value.
+Canonical backfill SHALL normalize the former FTP target basis of a preserved legacy detail record without changing the source record until it is safely retired.
 
 #### Scenario: Retired detail record is backfilled
 - **WHEN** a preserved legacy detail record has a former FTP basis
 - **THEN** canonical analysis stores the equivalent neutral basis while the source record stays unchanged until safely retired.
 
-Evidence: `backend/db/planning_metrics_migration.py`, `backend/sync/activity_detail_canonical.py`, `backend/sync/activity_detail_retirement.py`; `tests/test_db_planning_metrics_migration.py`, `tests/test_activity_detail_canonical.py`, `tests/test_activity_detail_retirement.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+Evidence: `backend/canonical/legacy_planning_fields.py`, `backend/sync/activity_detail_canonical.py`, `backend/sync/activity_detail_retirement.py`; `tests/test_activity_detail_canonical.py`, `tests/test_activity_detail_retirement.py`.
 
-### Requirement: Observation lifecycle upgrade
+### Requirement: Strength set storage upgrade
 
-The v20 to v21 step SHALL add `observations.state` and `observations.owner_record_id`, keep every existing row active with all values unchanged, and set the owner only where the raw record is known exactly.
+The v21 to v22 step SHALL rebuild the detail set tables so the kind CHECK accepts `strength_sets`, add `activity_detail_sets.set_source` (NULL for every released set) and an empty `activity_strength_sets` table, keep every stream, lap, zone and analysis row unchanged with foreign keys enforced, and fail without changes when a detail row has no parent.
 
 #### Scenario: Populated release upgrade
-- **WHEN** a populated v20 database is opened by this build
-- **THEN** Intervals.icu wellness and Wahoo threshold rows are owned by their source record, other Intervals.icu rows by the stored athlete record, and Garmin rows or rows without a stored raw record keep no owner; a failure rolls back to the unchanged release.
+- **WHEN** a populated v21 database is opened by this build
+- **THEN** every detail row and its cascade survive, strength sets can be stored afterwards, and a failure rolls back to the unchanged release.
 
-Evidence: `backend/db/migrations.py:_assign_observation_owners`; `tests/test_db_observation_lifecycle_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+Evidence: `backend/db/migrations.py:_upgrade_v21_to_v22`; `tests/test_db_strength_sets_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+
+### Requirement: Versioned data maintenance after an upgrade
+
+A data maintenance step that deletes stored records without a schema change, such as the Intervals.icu ingest purge, SHALL run once per version behind a completion marker, after an encrypted recovery copy, inside one writer transaction, and SHALL be provable on a populated released v21 database upgraded to the current schema.
+
+#### Scenario: Populated v21 database
+- **WHEN** a populated v21 database is upgraded and the purge runs, fails midway or the application restarts
+- **THEN** athlete data is re-keyed, a failure rolls back to the upgraded state without the marker, and a restart repeats nothing.
+
+#### Scenario: Dry run on a copy
+- **WHEN** the dry-run script runs on a copy of the database
+- **THEN** it upgrades and purges inside one transaction, prints counts only, rolls back, and the file's hash is unchanged.
+
+Evidence: `backend/sync/intervals_purge.py`, `scripts/intervals_purge_dry_run.py`; `tests/test_intervals_purge.py`.

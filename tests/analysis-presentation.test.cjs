@@ -37,7 +37,7 @@ test("analysis popovers stay inside the viewport on narrow screens and flip abov
 });
 
 test("ratio units such as W/bpm keep significant digits and small efficiencies are not rounded to zero", () => {
-  const { analysisValue } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisNumber", "analysisValue"], { AppFormat: require("../public/format.js") });
+  const { analysisValue } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue"], { AppFormat: require("../public/format.js") });
   assert.equal(analysisValue(0.0234, "(m/s)/bpm"), "0,0234 (m/s)/bpm");
   assert.equal(analysisValue(1.4237, "W/bpm"), "1,42 W/bpm");
   assert.equal(analysisValue(1.5, "W/bpm"), "1,5 W/bpm");
@@ -69,7 +69,7 @@ test("race prediction rows exclude body weight and empty states give a reason", 
 
   assert.equal(
     racePredictionEmptyReason({ weight_kg: { value: 72.4 } }),
-    "Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Intervals.icu oder Garmin.",
+    "Noch keine Prognosen – dafür fehlen aktuelle Leistungswerte aus Garmin oder Wahoo.",
   );
   assert.match(racePredictionEmptyReason({ run_threshold_pace_seconds_per_km: { value: 290 } }), /^Noch keine Prognosen – Laufwerte sind vorhanden/);
 });
@@ -115,10 +115,10 @@ test("analysisHasData is true only when a series holds a valid finite point", ()
   assert.equal(analysisValidPoint({ value: Infinity }), false);
 });
 
-test("an analysis chart without data is omitted and its title is listed once as missing", () => {
-  const { analysisChart, collectAnalysisChart, analysisMissingDataNote } = loadFunctions(
+test("an analysis chart without data is omitted and its title is collected once as missing", () => {
+  const { analysisChart, collectAnalysisChart } = loadFunctions(
     "analysis.js",
-    ["analysisValidPoint", "analysisHasData", "analysisChart", "collectAnalysisChart", "analysisMissingDataNote"],
+    ["analysisValidPoint", "analysisHasData", "analysisAxisCaption", "analysisChart", "collectAnalysisChart"],
     {
       reportNode: (tag, text, className) => ({ tag, text, className }),
     },
@@ -130,8 +130,55 @@ test("an analysis chart without data is omitted and its title is listed once as 
   assert.equal(collectAnalysisChart(missing, "Ruhepuls", empty, "bpm", "2026-10-01", "2026-10-17", ""), null);
   assert.equal(collectAnalysisChart(missing, "HRV", [], "ms", "2026-10-01", "2026-10-17", ""), null);
   assert.deepEqual(Array.from(missing), ["Ruhepuls", "HRV"]);
-  assert.deepEqual({ ...analysisMissingDataNote(missing) }, { tag: "p", text: "Keine Daten: Ruhepuls, HRV", className: "empty" });
-  assert.equal(analysisMissingDataNote([]), null, "nothing missing renders no line");
+});
+
+test("an analysis segment is empty only when every content container reports no data", () => {
+  const markers = {};
+  const { analysisSegmentEmpty } = loadFunctions("analysis.js", ["analysisSegmentEmpty"], {
+    ANALYSIS_SEGMENT_CONTENT: { load: ["focus", "charts"], sessions: ["list"] },
+    document: { getElementById: (id) => (id in markers ? { dataset: { analysisEmpty: markers[id] } } : { dataset: {} }) },
+  });
+  assert.equal(analysisSegmentEmpty("load"), false, "unrendered containers are not empty");
+  Object.assign(markers, { focus: "true", charts: "loading" });
+  assert.equal(analysisSegmentEmpty("load"), false, "a loading container keeps the segment");
+  markers.charts = "failed";
+  assert.equal(analysisSegmentEmpty("load"), false, "a failed container shows its retry");
+  markers.charts = "true";
+  assert.equal(analysisSegmentEmpty("load"), true);
+  markers.list = "false";
+  assert.equal(analysisSegmentEmpty("sessions"), false);
+});
+
+test("the analysis empty card offers one action that depends on the connected sources", () => {
+  const reportNode = (tag, text, className) => ({ tag, text, className, listeners: [], addEventListener(type) { this.listeners.push(type); } });
+  const state = { data: {} };
+  const { analysisEmptyCard, analysisDataSourceConnected } = loadFunctions("analysis.js", ["analysisDataSourceConnected", "analysisSegmentPeriod", "analysisEmptyCard"], {
+    state, reportNode, analysisRefresh() {}, analysisHistoryPeriod: "twelveWeeks", recoveryHistoryPeriod: "fortnight",
+    ANALYSIS_EMPTY_TITLES: { load: "Noch keine Belastungsdaten", recovery: "Noch keine Erholungsdaten" },
+    createEmptyState: (title, cause, action) => ({ title, cause, action }),
+  });
+  const offline = analysisEmptyCard("load");
+  assert.deepEqual([offline.title, offline.cause, offline.action.tag, offline.action.text, offline.action.href], ["Noch keine Belastungsdaten", "Garmin oder Wahoo ist nicht verbunden.", "a", "Anbindung einrichten", "#more/connections"]);
+  state.data = { garmin: { configured: false }, wahoo: { connected: true } };
+  assert.equal(analysisDataSourceConnected(state.data), true);
+  const connected = analysisEmptyCard("load");
+  assert.deepEqual([connected.cause, connected.action.tag, connected.action.text, connected.action.listeners.length], ["Noch keine Daten abgeglichen.", "button", "Jetzt abgleichen", 1]);
+  // An empty 14-day window may hide older data, so it offers the 12-week view instead of a sync.
+  const shortWindow = analysisEmptyCard("recovery");
+  assert.deepEqual([shortWindow.title, shortWindow.cause, shortWindow.action.text], ["Noch keine Erholungsdaten", "Keine Daten in den letzten 14 Tagen.", "12 Wochen anzeigen"]);
+  state.data = {};
+  assert.equal(analysisEmptyCard("recovery").action.text, "Anbindung einrichten", "without a source the period does not matter");
+  assert.equal(analysisDataSourceConnected({ garmin: { configured: true } }), true);
+  assert.equal(analysisDataSourceConnected({ garmin: { configured: false }, wahoo: { connected: false } }), false);
+});
+
+test("the power profile counts only measured durations as values", () => {
+  const { cyclingPowerProfileHasValues } = loadFunctions("analysis.js", ["cyclingPowerProfilePoint", "cyclingPowerProfileHasValues"], {
+    CYCLING_POWER_PROFILE_DURATIONS: [[5, "5 Sekunden"], [60, "1 Minute"]],
+  });
+  assert.equal(cyclingPowerProfileHasValues({}), false);
+  assert.equal(cyclingPowerProfileHasValues({ windows: { 90: { power: [{ duration_seconds: 5, status: "missing", watts: null }] } } }), false);
+  assert.equal(cyclingPowerProfileHasValues({ windows: { 90: { power: [{ duration_seconds: 60, status: "ok", watts: 300 }] } } }), true);
 });
 
 test("a filled analysis chart is kept and is not listed as missing", () => {
@@ -175,7 +222,7 @@ test("body overview falls back to Garmin when the profile fat is absent", () => 
     isPreferredSource: (item, preferred) => item.source_provider === preferred,
     analysisValidPoint: (point) => point.value != null, dateLabel: (v) => v,
     analysisValue: (v, unit) => `${v} ${unit}`, analysisPeriodControls: () => makeNode("nav"),
-    bodyHistoryPeriod: "twelveWeeks", bodyMetricChart: () => null, analysisMissingDataNote: () => makeNode("p"),
+    bodyHistoryPeriod: "twelveWeeks", bodyMetricChart: () => null,
   });
   const point = { date: "2026-10-10", value: 16 };
   const body = { preferred_providers: { body_fat_pct: "garmin" }, windows: { "12w": { start: "2026-10-01", end: "2026-10-15", metrics: { body_fat_pct: [{ source_provider: "garmin", points: [point] }] } } } };
@@ -189,15 +236,15 @@ test("body overview falls back to Garmin when the profile fat is absent", () => 
 test("performance status shows only the server's status text", () => {
   const { performanceDataStatus } = loadFunctions("performance-view.js", ["performanceDataStatus"]);
   assert.deepEqual(Array.from(performanceDataStatus({ available: false, reason: "canonical_pending", status: "Daten werden vorbereitet" })), ["Daten werden vorbereitet"]);
-  assert.deepEqual(Array.from(performanceDataStatus({ available: true, activities_need_refresh: true, status: "Aktivitäten: Intervals.icu neu abrufen" })), ["Aktivitäten: Intervals.icu neu abrufen"]);
+  assert.deepEqual(Array.from(performanceDataStatus({ available: true, status: "Daten werden aktualisiert" })), ["Daten werden aktualisiert"]);
   assert.deepEqual(Array.from(performanceDataStatus({ available: false, reason: "canonical_pending" })), []);
-  assert.deepEqual(Array.from(performanceDataStatus({ available: true, activities_need_refresh: true })), []);
+  assert.deepEqual(Array.from(performanceDataStatus({ available: true })), []);
   assert.deepEqual(Array.from(performanceDataStatus({ status: "" })), []);
   assert.deepEqual(Array.from(performanceDataStatus(undefined)), []);
 });
 
 test("current performance shows the status lines below its heading", () => {
-  const root = { children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
+  const root = { dataset: {}, children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
   const reportNode = (tag, text, className) => ({ tag, text, className, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
   const { renderCurrentPerformance } = loadFunctions("performance-view.js", ["currentPerformanceValues", "renderCurrentPerformance"], {
     document: { getElementById: () => root },
@@ -209,8 +256,10 @@ test("current performance shows the status lines below its heading", () => {
   });
   renderCurrentPerformance({}, undefined, ["Daten werden vorbereitet"]);
   assert.deepEqual(root.children.slice(0, 2).map((node) => [node.tag, node.text]), [["h3", "Aktuelle Leistungswerte"], ["p", "Daten werden vorbereitet"]]);
+  assert.equal(root.dataset.analysisEmpty, "false", "a status line keeps the section visible");
   renderCurrentPerformance({}, undefined);
   assert.equal(root.children.filter((node) => node.text === "Daten werden vorbereitet").length, 0);
+  assert.equal(root.dataset.analysisEmpty, "true");
 });
 
 test("weekly daily-activity mean averages known days and keeps empty weeks as gaps", () => {
@@ -242,4 +291,41 @@ test("12-week body charts show the latest reading of each week and draw a single
   assert.deepEqual([weeks[1].date, weeks[1].value, weeks[1].weekReadings], ["2026-11-06", 14.9, 3], "the week shows its last reading, not the median 15.2");
   assert.equal(analysisPlottable({ points: weeks, minPoints: 1 }), true, "body charts draw one weekly value");
   assert.equal(analysisPlottable({ points: weeks }), false, "other charts still need two values");
+});
+
+test("the seven-day ln(RMSSD) note shows the back-transformed mean, range and spread", () => {
+  const { recoveryRollingNote } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue", "recoveryRollingNote"], { AppFormat: require("../public/format.js") });
+  assert.equal(
+    recoveryRollingNote({ status: "ok", mean_ms: 51.9, lower_ms: 53, upper_ms: 62.2, position: "below", cv_pct: 3, window_nights: 5 }),
+    "7-Tage-Mittel 51,9 ms (5 Nächte) · unter deinem Bereich 53 ms–62,2 ms · Schwankung 3 %",
+  );
+  assert.equal(
+    recoveryRollingNote({ status: "provisional", mean_ms: 57, lower_ms: 53, upper_ms: 62.2, position: "within", cv_pct: null, window_nights: 3 }),
+    "7-Tage-Mittel 57 ms (3 Nächte) · in deinem Bereich 53 ms–62,2 ms · vorläufig",
+  );
+  assert.equal(
+    recoveryRollingNote({ status: "insufficient_data", reason: "Mindestens 3 Nächte in den letzten 7 Tagen erforderlich." }),
+    "7-Tage-Mittel: Mindestens 3 Nächte in den letzten 7 Tagen erforderlich",
+  );
+});
+
+test("steps and floors carry their own per-day unit, a named basis and whole numbers", () => {
+  const fns = loadFunctions("analysis.js", ["dailyActivityMetrics", "analysisBasisCaption", "analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue", "analysisValidPoint", "dailyActivityTitle"], { AppFormat: require("../public/format.js") });
+  const metrics = fns.dailyActivityMetrics();
+  assert.deepEqual(Array.from(metrics, ({ key, unit }) => [key, unit]), [["steps", "Schritte/Tag"], ["floors", "Stockwerke/Tag"]]);
+  assert.equal(fns.analysisBasisCaption("Schritte/Tag", true, "mean"), "Schritte/Tag · Wochenmittel");
+  assert.equal(fns.analysisBasisCaption("Stockwerke/Tag", false, "mean"), "Stockwerke/Tag");
+  assert.equal(fns.analysisBasisCaption("Belastungspunkte", true, "state"), "Belastungspunkte · Wochenstand");
+  assert.equal(fns.analysisBasisCaption("h", false, "sum"), "h · Tagessumme");
+  for (const { unit } of metrics) assert.doesNotMatch(fns.analysisBasisCaption(unit, true, "mean"), /Belastungspunkte/);
+  assert.equal(fns.analysisValue(8171.4, "Schritte/Tag"), "8.171 Schritte/Tag");
+  assert.equal(fns.analysisValue(7.5, "Stockwerke/Tag"), "8 Stockwerke/Tag");
+  const days = [{ date: "2026-10-01", value: 6500 }, { date: "2026-10-02", value: 9843 }, { date: "2026-10-03", value: null }];
+  assert.equal(fns.dailyActivityTitle("Schritte", "Schritte/Tag", days), "Schritte · Ø 8.172 pro Tag", "the header averages the same days the chart plots");
+});
+
+test("zone distributions list the highest zone first", () => {
+  const { trainingFocusZoneSeconds } = loadFunctions("analysis.js", ["trainingFocusZoneSeconds"]);
+  const readings = trainingFocusZoneSeconds([{ seconds: { Z1: 60, Z3: 30 } }, { seconds: { Z2: 10, Z5: 5, Z1: 15 } }]);
+  assert.deepEqual(Array.from(readings, (item) => [item.label, item.value]), [["Z5", 5], ["Z3", 30], ["Z2", 10], ["Z1", 75]]);
 });

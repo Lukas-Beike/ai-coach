@@ -106,6 +106,14 @@ class SyncOperationStateWriterTests(unittest.TestCase):
         self.assertEqual(payload["progress"], 0)
         self.assertNotIn("error", payload)
 
+    def test_a_completed_sync_clears_the_error_a_failed_one_left(self) -> None:
+        self.writer.write("operation-1", "error", "error", 100, "Failed", "boom")
+        self.assertEqual("boom", self.get_value("last_sync_error"))
+
+        self.writer.write("operation-2", "completed", "complete", 100, "Done")
+
+        self.assertEqual("", self.get_value("last_sync_error"))
+
     def test_persistence_failure_does_not_publish(self) -> None:
         with (
             patch.object(
@@ -157,7 +165,6 @@ class SyncPublicStateServiceTests(unittest.TestCase):
             self.maintenance,
             self.jobs,
             self.versions,
-            self.intervals_lock,
         )
 
     def tearDown(self) -> None:
@@ -209,11 +216,8 @@ class SyncPublicStateServiceTests(unittest.TestCase):
 
     def test_state_derives_running_freshness_and_jobs_from_owners(self) -> None:
         self.set_values(sync_running="0")
-        self.intervals_lock.acquire()
-        try:
-            actual = self.service.state()
-        finally:
-            self.intervals_lock.release()
+        self.service._running_probes = {"synthetic": lambda: True}
+        actual = self.service.state()
 
         self.assertTrue(actual["running"])
         self.assertEqual(actual["status"], "running")

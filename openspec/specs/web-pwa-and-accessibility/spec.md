@@ -30,6 +30,10 @@ The client SHALL use semantic labels, focusable controls and scroll regions, cur
 - **WHEN** the viewport narrows, rotates, or shrinks around a focused chat input
 - **THEN** the composer and relevant controls remain reachable using the visible viewport and safe-area layout instead of being covered by navigation.
 
+#### Scenario: Large text size
+- **WHEN** the text size grows up to 200 %
+- **THEN** navigation labels that no longer fit collapse to named icons and banners wrap, so neither clips text nor leaves the viewport.
+
 #### Scenario: Dialog opens and closes
 - **WHEN** an accessible application dialog opens and later closes
 - **THEN** initial focus enters an available control and returns to the connected, enabled originating control when appropriate.
@@ -38,7 +42,7 @@ The client SHALL use semantic labels, focusable controls and scroll regions, cur
 - **WHEN** content exceeds the viewport or reduced motion is requested
 - **THEN** designated scroll regions remain keyboard focusable and labelled, chart/table alternatives remain available, and reduced-motion CSS applies to the relevant animations.
 
-Evidence: `public/components.js::showAccessibleDialog`, `public/components.js::restoreDialogFocus`, `public/shared.js::updateMobileViewportLayout`, `public/shared.js::makeScrollRegionFocusable`, `public/styles.css` (touch targets, safe-area, focus-visible, reduced-motion rules); `e2e/coach.spec.js::core views satisfy WCAG AA checks`, `e2e/coach-layout.spec.js::coach composer keeps a stable bottom edge and publishes its height @responsive`, `e2e/analysis-info.spec.js::@responsive legend info buttons are at least 44x44 and never overlap each other`. These tests were inspected; no browser accessibility scan ran here.
+Evidence: `public/components.js::showAccessibleDialog`, `public/components.js::restoreDialogFocus`, `public/shared.js::updateMobileViewportLayout`, `public/shared.js::makeScrollRegionFocusable`, `public/styles.css` (touch targets, safe-area, focus-visible, reduced-motion, large-text navigation container rules); `e2e/coach.spec.js::core views satisfy WCAG AA checks`, `e2e/text-reflow.spec.js::@responsive navigation and banners keep their text inside at 200 % text size`, `e2e/coach-layout.spec.js::coach composer keeps a stable bottom edge and publishes its height @responsive`, `e2e/analysis-info.spec.js::@responsive legend info buttons are at least 44x44 and never overlap each other`. These tests were inspected; no browser accessibility scan ran here.
 
 ### Requirement: Markdown and external display text remain inert
 The client SHALL escape untrusted content before rendering its supported Markdown, permit only supported HTTP(S) links, and render external values through safe text or escaped templates. Tables SHALL have semantic headers and labelled scroll containers.
@@ -191,7 +195,7 @@ The client SHALL expose server-advertised model, thinking, and speed capabilitie
 - **WHEN** appearance, calendar horizon, or activity-detail start date changes
 - **THEN** appearance persists on the device with system/light/dark support, while server-owned settings use their explicit API and report validation errors.
 
-Evidence: `public/settings.js::saveProfile`, `public/settings.js::saveModel`, `public/settings.js::saveThinkingLevel`, `public/settings.js::saveServiceTier`, `public/shared.js::applyAppearance`, `public/appearance.js` (early theme projection), `public/views.js::renderModel`; `e2e/model-settings.spec.js::model and speed selection persist with capability checks @responsive`, `e2e/audit-remediation.spec.js::profile edits made while saving remain dirty and visible`, `e2e/contracts.spec.js::appearance choice updates the theme and survives reload on this device`, `e2e/activity-detail-floor.spec.js::@responsive an empty day is rejected and keeps the saved value`.
+Evidence: `public/settings.js::saveProfile`, `public/settings.js::saveModel`, `public/settings.js::saveThinkingLevel`, `public/settings.js::saveServiceTier`, `public/shared.js::applyAppearance`, `public/appearance.js` (early theme projection), `public/views.js::renderModel`; `e2e/model-settings.spec.js::model and speed selection persist with capability checks @responsive`, `e2e/audit-remediation.spec.js::profile edits made while saving remain dirty and visible`, `e2e/contracts.spec.js::appearance choice updates the theme and survives reload on this device`.
 
 ### Requirement: Diagnostics and destructive operational controls retain reviewable outcomes
 The client SHALL expose operations through their explicit controls, keep downloads and destructive requests visibly pending, request applicable confirmation, and display failures without implying a completed restore/deletion. Diagnostic values SHALL be displayed as inert text.
@@ -217,6 +221,10 @@ The client SHALL present domain-provided planning, performance, activity, and eq
 - **WHEN** the athlete opens plan overview, library, or season
 - **THEN** the agenda prioritizes dates and sessions with expandable weather/details, the active undated library is grouped by sport, and season calculations retain their evidence and estimate labels; explicit preview/apply/export effects remain governed by the planning domain.
 
+#### Scenario: Compact calendar week
+- **WHEN** the athlete opens a calendar week with past, today's and planned sessions
+- **THEN** each session is one compact row with sport icon, title, duration and distance; planned sessions look distinct from completed ones; identical extra activities of a day form one row; past days with sessions collapse to one line; "Zusätzlich" appears only in weeks with a plan; the week summary is a fixed planned/completed grid with one duration format and no dash-only rows; calendar notes are neutral text, each conflict is one component with one Coach action, and weeks with workout profiles show a zone legend.
+
 #### Scenario: Performance and recovery charts
 - **WHEN** domain series contain sparse, stale, current, or missing observations
 - **THEN** charts/tables retain dates, gaps, provenance and period-specific coverage, distinguish current reference lines from historical observations, and avoid fabricating normal ranges or duplicate prediction charts.
@@ -233,7 +241,7 @@ The client SHALL present domain-provided planning, performance, activity, and eq
 - **WHEN** equipment is displayed or maintenance is requested
 - **THEN** local authoritative items and imported/archived sources remain distinguishable, and only eligible active local gear offers the maintenance action under the equipment domain contract.
 
-Evidence: `public/plan-views.js::renderPlanned`, `public/plan-views.js::renderLibrary`, `public/analysis.js::renderAnalysisHistory`, `public/analysis.js::renderTrainingRecords`, `public/analysis.js::recoveryReferenceLabel`, `public/analysis.js::renderRecoveryCharts`, `public/performance-view.js::renderPerformance`, `public/activity-analysis.js::renderPanel`, `public/activity-details.js::render`; `e2e/contracts.spec.js::planned agenda prioritizes dates and sessions with compact weather and expandable details`, `e2e/analysis-info.spec.js::@responsive latest measurement stays visible without inventing measurements in empty weeks`, `e2e/analysis-info.spec.js::@responsive recovery uses independent scales, honest coverage over exactly fourteen days`, `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`, `e2e/training-feature-panels.spec.js::@responsive equipment keeps local authority and groups archived sources`. Source sections and these browser scenarios were inspected; this requirement does not independently re-specify backend calculations.
+Evidence: `public/plan-views.js::renderPlanned`, `public/plan-views.js::renderLibrary`, `public/analysis.js::renderAnalysisHistory`, `public/analysis.js::renderTrainingRecords`, `public/analysis.js::recoveryReferenceLabel`, `public/analysis.js::renderRecoveryCharts`, `public/performance-view.js::renderPerformance`, `public/activity-analysis.js::renderPanel`, `public/activity-details.js::render`; `e2e/contracts.spec.js::planned agenda prioritizes dates and sessions with compact weather and expandable details`, `e2e/calendar-week-compact.spec.js::@responsive compact calendar week collapses past days, groups repeats and keeps one conflict style`, `e2e/analysis-info.spec.js::@responsive latest measurement stays visible without inventing measurements in empty weeks`, `e2e/analysis-info.spec.js::@responsive recovery uses independent scales, honest coverage over exactly fourteen days`, `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`, `e2e/training-feature-panels.spec.js::@responsive equipment keeps local authority and groups archived sources`. Source sections and these browser scenarios were inspected; this requirement does not independently re-specify backend calculations.
 
 ### Requirement: Action reviews distinguish known rejection from unknown outcome
 The client SHALL offer confirmation only for current confirmable proposals, preserve pending/failed/completed receipt states, and keep an action locked when its execution outcome cannot be confirmed. Reconciliation SHALL determine whether retry is safe rather than automatically repeating an uncertain write.

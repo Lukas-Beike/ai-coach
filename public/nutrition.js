@@ -235,17 +235,21 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   status.textContent = "Für diesen Tag liegen keine Garmin-Verbrauchsdaten vor.";
   if (measured) status.textContent = [expenditure.source || "Garmin Connect", freshness].join(" · ") + provisionalLabel;
 
+  // Absent values return null and render muted as "nicht erfasst" (#1783).
   const formatKcal = (rawValue) => {
     const value = rawValue == null || rawValue === "" ? null : Number(rawValue);
-    return value != null && Number.isFinite(value)
-      ? `${AppFormat.number(value, { digits: 0 })} kcal`
-      : "Nicht verfügbar";
+    return value != null && Number.isFinite(value) ? `${AppFormat.number(value, { digits: 0 })} kcal` : null;
   };
   const totalTile = document.createElement("div");
   totalTile.className = "nutrition-total";
   totalTile.style.gridColumn = "1 / -1";
-  const totalValue = document.createElement("strong");
-  totalValue.textContent = formatKcal(expenditure?.total_kcal);
+  const kcalValue = (rawValue) => {
+    const value = document.createElement("strong");
+    const text = formatKcal(rawValue);
+    if (text == null) markValueMissing(value); else value.textContent = text;
+    return value;
+  };
+  const totalValue = kcalValue(expenditure?.total_kcal);
   const totalCaption = document.createElement("span");
   totalCaption.textContent = expenditure?.provisional ? "Tagesverbrauch (vorläufig)" : "Tagesverbrauch";
   totalTile.append(totalValue, totalCaption);
@@ -253,8 +257,7 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   const componentTile = (rawValue, caption) => {
     const tile = document.createElement("div");
     tile.className = "nutrition-total";
-    const value = document.createElement("strong");
-    value.textContent = formatKcal(rawValue);
+    const value = kcalValue(rawValue);
     const label = document.createElement("span");
     label.textContent = caption;
     tile.append(value, label);
@@ -277,12 +280,12 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   if (syncedAt) date.textContent = `Sync: ${syncedAt}`;
   else if (fetchedAt) date.textContent = `Abgerufen: ${fetchedAt}`;
   if (projectionTile) {
-    projectionTile.title = `Grundumsatz vom ${nutritionExpenditureDate(expenditure.projection_reference_date)} (${formatKcal(expenditure.projection_resting_kcal)}) + bisherige Aktivkalorien (${formatKcal(expenditure.active_kcal)}), eigene Schätzung`;
+    projectionTile.title = `Grundumsatz vom ${nutritionExpenditureDate(expenditure.projection_reference_date)} (${formatKcal(expenditure.projection_resting_kcal) ?? "nicht erfasst"}) + bisherige Aktivkalorien (${formatKcal(expenditure.active_kcal) ?? "nicht erfasst"}), eigene Schätzung`;
   }
 }
 
 function appendNutritionTotals(totals, day) {
-  // Empty days report zero totals, which are unknown, so the tiles stay at "–".
+  // Empty days report zero totals, which are unknown, so the tiles stay "nicht erfasst".
   const hasEntries = Number(day.entry_count) > 0;
   for (const [label, key, unit] of [["Kalorien", "kcal", "kcal"], ["Kohlenhydrate", "carbs_g", "g"], ["Protein", "protein_g", "g"], ["Fett", "fat_g", "g"], ["Zucker", "sugar_g", "g"], ["Salz", "salt_g", "g"]]) {
     totals.append(nutritionTotalTile(label, key, unit, day, hasEntries));
@@ -301,8 +304,8 @@ function nutritionTotalTile(label, key, unit, day, hasEntries) {
   }
   // A partial sum of known values is shown only with an explicit incompleteness label.
   const total = hasEntries ? (complete ?? day.known_macro_totals?.[key] ?? day.known_intake_totals?.[key]) : null;
-  const totalText = total != null ? nutritionNumber(total) : "–";
-  value.textContent = `${totalText} ${unit}`;
+  if (total == null) markValueMissing(value);
+  else value.textContent = `${nutritionNumber(total)} ${unit}`;
   const caption = document.createElement("span");
   caption.textContent = label + (complete == null && total != null ? " · unvollständig" : "");
   tile.append(value, caption);
@@ -359,7 +362,8 @@ function renderNutritionWeek(week) {
   const items = [[balanceLabel, balance, "kcal", week.balance_days, true],    ["Ø Kalorienbilanz pro Tag", week.balance_days > 0 && balance != null ? Math.sign(balance) * Math.round(Math.abs(balance / week.balance_days)) || 0 : null, "kcal", week.balance_days, true],    ...[["Ø Aufnahme", "intake_kcal", "kcal"], ["Ø Verbrauch", "expenditure_kcal", "kcal"], ["Ø Kohlenhydrate", "carbs_g", "g"], ["Ø Protein", "protein_g", "g"], ["Ø Fett", "fat_g", "g"], ["Ø Zucker", "sugar_g", "g"], ["Ø Salz", "salt_g", "g"]].map(([label, key, unit]) => [label, week.averages[key].value, unit, week.averages[key].days, false])];
   totals.replaceChildren(...items.map(([label, value, unit, days, isBalance]) => {
     const tile = document.createElement("div"); tile.className = "nutrition-total";
-    const number = document.createElement("strong"); number.textContent = nutritionWeekValue(value, unit, isBalance);
+    const number = document.createElement("strong");
+    if (value == null) markValueMissing(number); else number.textContent = nutritionWeekValue(value, unit, isBalance);
     const caption = document.createElement("span"); caption.textContent = label;
     const coverage = document.createElement("small"); coverage.textContent = `${days} von ${dayCount} Tagen${isBalance && days < dayCount ? " · Teilbilanz" : ""}`;
     tile.append(number, caption, coverage); return tile;

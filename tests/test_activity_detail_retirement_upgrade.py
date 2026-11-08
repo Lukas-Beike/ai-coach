@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import legacy_detail_kv
 from activity_row_support import FixedActivityRows
 from canonical_detail_support import NOW, open_manager, seed_intervals_activity
+from intervals_detail_refresh import ActivityDetailRefreshService
 from test_activity_detail_retirement import (
     POINTS,
     RecordingWriter,
@@ -32,7 +33,6 @@ from backend.providers.intervals_activity_detail_projection import _downsample_s
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import activity_detail_retirement
 from backend.sync.activity_detail_retirement import STATE_KEY
-from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -43,7 +43,7 @@ except ImportError:
     cipher_backend = None
 
 FIXTURES = Path(__file__).with_name("fixtures")
-RELEASED_VERSIONS = (16, 17, 18)
+RELEASED_VERSIONS = (21,)
 PASSWORD = "synthetic-retirement-upgrade-key"
 FULL = "9501"
 DOWNSAMPLED = "9502"
@@ -159,13 +159,6 @@ class RetirementUpgradeTestCase(unittest.TestCase):
             fixture = FIXTURES / f"schema_v{version}.sql.txt"
             db.executescript(fixture.read_text(encoding="utf-8"))
             self.source.copy_into(db)
-            if version == 13:
-                # A lap set stored before v13 gained the column but no value.
-                db.execute(
-                    "UPDATE activity_laps SET max_speed_mps = NULL "
-                    "WHERE provider_activity_id = ?",
-                    (PRE_V13_LAPS,),
-                )
             db.commit()
         return path
 
@@ -243,9 +236,11 @@ class RetirementUpgradeTestCase(unittest.TestCase):
         self.assertEqual(2, len(calls))
         self.assertEqual(before, self.dump(manager))
         state = self.counters(manager)
-        self.assertEqual(("failed", "", 0), (state["status"], state["cursor"], state["batches"]))
+        self.assertEqual(
+            ("failed", "", 0), (state["status"], state["cursor"], state["batches"])
+        )
 
-    def assert_retired(self, manager, version):
+    def assert_retired(self, manager):
         keys = {legacy_detail_kv.key(item) for item in (UNVERIFIABLE, UNLINKED)}
         self.assertEqual(keys, self.detail_keys(manager))
         state = self.counters(manager)
@@ -261,24 +256,34 @@ class RetirementUpgradeTestCase(unittest.TestCase):
             for activity_id in SEEDED_IDS:
                 document = reader.read(db, activity_id)
                 self.assertEqual(ACTIVITY_DETAIL_CONTRACT, document["contract"])
-                self.assertTrue(document["streams"])
-                self.assertEqual(2, len(document["laps"]["laps"]))
-                self.assertTrue(document["zones"])
+                # The retired kv detail survives in the canonical tables; the
+                # document no longer serves Intervals.icu sets (#1685).
+                stored = {
+                    item.detail.kind.value: item.detail
+                    for item in detail_sets_for(
+                        db, ProviderId.INTERVALS.value, activity_id
+                    )
+                }
+                self.assertIn("streams", stored)
+                self.assertEqual(2, len(stored["laps"].laps))
+                self.assertTrue(
+                    {"heart_rate_zones", "power_zones"} & set(stored), stored
+                )
             laps = {
                 item.detail.kind.value: item.detail
-                for item in detail_sets_for(db, ProviderId.INTERVALS.value, PRE_V13_LAPS)
+                for item in detail_sets_for(
+                    db, ProviderId.INTERVALS.value, PRE_V13_LAPS
+                )
             }["laps"].laps
             origins = {
                 row["origin"]
-                for row in db.execute("SELECT DISTINCT origin FROM activity_detail_sets")
+                for row in db.execute(
+                    "SELECT DISTINCT origin FROM activity_detail_sets"
+                )
             }
         self.assertEqual([11.5, 7.25], [lap.max_speed_mps for lap in laps])
-        if version == 9:
-            # The schema had no detail tables, so the detail backfill copied kv.
-            self.assertEqual({"legacy_backfill"}, origins)
-        else:
-            self.assertEqual([LapKind.WORK, LapKind.RECOVERY], [lap.kind for lap in laps])
-            self.assertEqual({"fetch"}, origins)
+        self.assertEqual([LapKind.WORK, LapKind.RECOVERY], [lap.kind for lap in laps])
+        self.assertEqual({"fetch"}, origins)
 
     def run_upgrade(self, version):
         path = self.released_database(version)
@@ -286,7 +291,7 @@ class RetirementUpgradeTestCase(unittest.TestCase):
         try:
             self.interrupt_retirement(manager)
             self.assembly(manager).worker.run_loop()
-            self.assert_retired(manager, version)
+            self.assert_retired(manager)
             after = self.dump(manager)
         finally:
             manager.close()
@@ -295,7 +300,7 @@ class RetirementUpgradeTestCase(unittest.TestCase):
         try:
             self.assembly(manager).worker.run_loop()
             self.assertEqual(after, self.dump(manager))
-            self.assert_retired(manager, version)
+            self.assert_retired(manager)
         finally:
             manager.close()
         return path

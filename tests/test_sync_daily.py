@@ -85,7 +85,7 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
         return self.local_time
 
     def test_every_allowed_source_is_due_then_marked_for_refresh_interval(self):
-        for source in ("intervals", "garmin", "calendar"):
+        for source in ("garmin", "calendar", "wahoo"):
             with self.subTest(source=source):
                 self.assertTrue(self.service.is_due(source, self.local_time))
                 self.service.mark(source, self.local_time)
@@ -94,9 +94,9 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
     def test_explicit_and_default_now_are_supported(self):
         explicit = datetime(2026, 9, 21, 1, tzinfo=UTC)
 
-        self.service.mark("intervals", explicit)
-        self.assertFalse(self.service.is_due("intervals", explicit))
-        self.assertFalse(self.service.is_due("intervals"))
+        self.service.mark("garmin", explicit)
+        self.assertFalse(self.service.is_due("garmin", explicit))
+        self.assertFalse(self.service.is_due("garmin"))
         self.assertEqual(self.local_now_calls, 1)
 
         self.service.mark("garmin")
@@ -137,7 +137,7 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
         self.assertEqual(self.repository.connections, [])
 
     def test_marker_persists_and_can_be_read_after_reopening_database(self):
-        self.service.mark("intervals", self.local_time)
+        self.service.mark("garmin", self.local_time)
         self.manager.close()
 
         reopened_manager = DatabaseManager(
@@ -150,7 +150,7 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
             lambda: self.local_time,
         )
 
-        self.assertFalse(reopened_service.is_due("intervals", self.local_time))
+        self.assertFalse(reopened_service.is_due("garmin", self.local_time))
 
     def test_nested_unit_of_work_reuses_the_active_connection_and_rolls_back_safely(
         self,
@@ -185,7 +185,7 @@ class RegistryDailyMarkerTests(unittest.TestCase):
     def test_daily_marker_ids_are_the_providers_with_marker_keys(self):
         self.assertEqual(
             DEFAULT_PROVIDER_REGISTRY.daily_marker_ids(),
-            frozenset({"intervals", "garmin", "calendar", "wahoo"}),
+            frozenset({"garmin", "calendar", "wahoo"}),
         )
         for provider in DEFAULT_PROVIDER_REGISTRY.ids():
             with self.subTest(provider=provider):

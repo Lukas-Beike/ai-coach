@@ -27,7 +27,7 @@ async function downloadServerLogs() {
     const url = URL.createObjectURL(await downloadRequest("/api/logs/download", "Server-Logs konnten nicht heruntergeladen werden.", 130_000));
     const link = document.createElement("a");
     link.href = url;
-    link.download = `intervals-coach-server-logs-${todayIso()}.jsonl`;
+    link.download = `pacecraft-server-logs-${todayIso()}.jsonl`;
     document.body.append(link);
     link.click();
     link.remove();
@@ -66,7 +66,7 @@ async function downloadDiagnostics() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `intervals-coach-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `pacecraft-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.append(link);
     link.click();
     link.remove();

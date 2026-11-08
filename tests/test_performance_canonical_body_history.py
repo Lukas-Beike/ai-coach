@@ -493,10 +493,8 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         self.assertLess(choose, events.index("exit"))
         self.assertLess(choose, events.index("read"))
         kinds = {kind for kind, _start, _end in chosen.calls}
-        self.assertTrue(
-            {MetricKind.WEIGHT, MetricKind.BODY_FAT, MetricKind.CTL, MetricKind.ATL}
-            <= kinds
-        )
+        self.assertTrue({MetricKind.WEIGHT, MetricKind.BODY_FAT} <= kinds)
+        self.assertFalse({MetricKind.CTL, MetricKind.ATL} & kinds)
 
     def test_source_without_observations_shows_no_garmin_body_values(self) -> None:
         case = CASES[0]

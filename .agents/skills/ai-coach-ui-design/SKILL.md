@@ -1,10 +1,10 @@
 ---
 name: ai-coach-ui-design
-description: Design or improve Intervals Coach screens, visual hierarchy, interaction copy, or mobile usability. Use for deliberate UI/UX work; use ai-coach-debugging for functional failures and ai-coach-pwa-e2e for browser verification.
+description: Design or improve Pacecraft screens, visual hierarchy, interaction copy, or mobile usability. Use for deliberate UI/UX work; use ai-coach-debugging for functional failures and ai-coach-pwa-e2e for browser verification.
 license: Apache-2.0 adaptation; see ../THIRD_PARTY.md.
 ---
 
-# Designing Intervals Coach UI
+# Designing Pacecraft UI
 
 Adapted from Anthropic frontend-design. Modified for the existing mobile PWA,
 plain JavaScript, athlete data, and local-action contracts; see

@@ -33,3 +33,23 @@ test("past, completed, synced or unhashed units show no button", () => {
   // Without configuration nothing is offered.
   assert.deepEqual([...context.targets(unit, "2026-11-10", "2026-11-07")], []);
 });
+
+const labelStart = source.indexOf("function plannedPushTargetLabel");
+const labelEnd = source.indexOf("// Providers this planned unit", labelStart);
+const labels = vm.createContext({ focusSport: (entry) => String(entry?.sport || "").toLowerCase() || null });
+vm.runInContext(source.slice(labelStart, labelEnd) + ";globalThis.label = plannedPushTargetLabel; globalThis.blocked = plannedGarminBlockedText;", labels);
+const ids = { intervals: "intervals", garmin: "garmin" };
+
+test("the toast names what each target received", () => {
+  assert.equal(labels.label("garmin", { sport: "strength" }, ids), "Garmin: strukturiert");
+  // Strength reaches Intervals.icu only as a calendar note, never the watch.
+  assert.equal(labels.label("intervals", { sport: "strength" }, ids), "Intervals.icu: Notiz");
+  assert.equal(labels.label("intervals", { sport: "run" }, ids), "Intervals.icu");
+});
+
+test("a strength unit says why it was not sent to Garmin", () => {
+  assert.equal(labels.blocked({ push_blocked: { garmin: "no_structure" } }), "Keine Kraftstruktur – nicht an Garmin gesendet");
+  assert.equal(labels.blocked({ push_blocked: { garmin: "unmapped" } }), "Übung ohne Garmin-Zuordnung – nicht an Garmin gesendet");
+  assert.equal(labels.blocked({ push_blocked: {} }), "");
+  assert.equal(labels.blocked({}), "");
+});

@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Self
 from unittest.mock import Mock
 
-from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.coach.clarification import CoachClarificationService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.tool_dispatch import CoachToolDispatchService
@@ -74,7 +73,6 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.key_values = KeyValueRepository(lambda: "2026-09-24T00:00:00+00:00")
         self.clarification = Mock(spec=CoachClarificationService)
         self.training_patch = Mock(spec=CoachTrainingPatchService)
-        self.inspector = Mock(spec=DuplicateInspector)
         self.proposal_creation = Mock(spec=CoachProposalCreationService)
         self.tool_dispatch = Mock(spec=CoachToolDispatchService)
         self.service = CoachStructuredToolExecutionService(
@@ -83,7 +81,6 @@ class StructuredToolExecutionTests(unittest.TestCase):
             self.key_values,
             self.clarification,
             self.training_patch,
-            self.inspector,
             self.proposal_creation,
             self.tool_dispatch,
             threading.RLock(),
@@ -164,60 +161,7 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.assertEqual(self.database_manager.uow_count, 2)
         self.training_patch.apply.assert_called_once_with(arguments, action)
 
-    def test_duplicate_inspection_never_creates_delete_proposal(self) -> None:
-        duplicate = {
-            "canonical_id": "900",
-            "canonical_name": "Run A",
-            "duplicate_id": "901",
-            "duplicate_name": "Run A copy",
-            "start_date_local": "2026-09-20T08:00:00",
-            "moving_time": 1200,
-            "distance": 5000,
-            "snapshot_synced_at": "2026-09-21T00:00:00Z",
-        }
-        self.inspector.latest.return_value = duplicate
-        result = self.execute("inspect_activity_duplicates", session_csrf_hash="")
 
-        self.assertEqual(result, {"ok": True, "duplicate": duplicate})
-        self.proposal_creation.create.assert_not_called()
-        self.inspector.latest.assert_called_once_with()
-
-        result = self.execute(
-            "inspect_activity_duplicates", session_csrf_hash="bound-csrf"
-        )
-        self.assertEqual(result, {"ok": True, "duplicate": duplicate})
-        self.assertNotIn("proposal", result)
-        self.proposal_creation.create.assert_not_called()
-        self.proposal_creation.create_remote_write.assert_not_called()
-
-    def test_direct_duplicate_delete_requires_remote_write_approval(self) -> None:
-        action = {
-            "operation": "delete_duplicate_intervals_activity",
-            "intent": "remote_sync",
-            "target_system": "intervals",
-            "request": {"remote_write": True, "source_message_ids": [3]},
-        }
-        self.proposal_creation.create_remote_write.return_value = {
-            "status": "preview",
-            "proposed_action": {"id": "proposal-1"},
-        }
-
-        result = self.execute(
-            "delete_duplicate_intervals_activity",
-            {"canonical_id": "900", "duplicate_id": "901"},
-            action=action,
-        )
-
-        self.assertEqual(result["status"], "approval_required")
-        self.proposal_creation.create_remote_write.assert_called_once_with(
-            "delete_duplicate_intervals_activity",
-            {"canonical_id": "900", "duplicate_id": "901"},
-            action,
-            conversation_id="conversation-1",
-            client_turn_id="turn-1",
-            session_csrf_hash="csrf-hash",
-        )
-        self.tool_dispatch.execute.assert_not_called()
 
     def test_dispatch_receives_complete_turn_and_cancellation_context(self) -> None:
         expected = {"ok": True, "status": "completed"}
@@ -262,16 +206,6 @@ class StructuredToolExecutionTests(unittest.TestCase):
         self.assertEqual(self.lock.enter_count, 0)
         self.assertEqual(self.database_manager.uow_count, 0)
 
-    def test_delete_duplicate_intervals_activity_is_also_outside_local_database_transaction(
-        self,
-    ) -> None:
-        self.tool_dispatch.execute.return_value = {"ok": True}
-
-        self.assertEqual(
-            self.execute("delete_duplicate_intervals_activity"), {"ok": True}
-        )
-        self.assertEqual(self.lock.enter_count, 0)
-        self.assertEqual(self.database_manager.uow_count, 0)
 
     def test_food_lookups_do_not_hold_a_local_database_transaction(self) -> None:
         self.tool_dispatch.execute.side_effect = lambda *_args, **_kwargs: (

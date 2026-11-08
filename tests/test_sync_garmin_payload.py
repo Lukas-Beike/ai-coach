@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import snapshot_seed
+
 from backend.canonical import garmin_payload
 from backend.db import garmin_store
 from backend.db.manager import DatabaseManager
@@ -815,7 +817,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
             return garmin_store.read_view(db)
 
     def store_intervals_snapshot(self, activities):
-        self.sync_state.save_snapshot(
+        snapshot_seed.save_snapshot(self.sync_state, 
             {"synced_at": "2026-09-20T11:00:00", "recent_activities": activities}
         )
 
@@ -898,7 +900,8 @@ class GarminPayloadServiceTests(unittest.TestCase):
         )
         # Canonical reads (#1416): equipment pairs canonical records at read time.
         self.assertNotIn("activity_matches", payload)
-        self.assertEqual(payload["sport_max_hr"], {"cycling": 205, "running": 196})
+        # The dead sport max HR aggregate is no longer written (#1686).
+        self.assertNotIn("sport_max_hr", payload)
         self.assertNotIn("morning_body_battery", payload)
         self.assertEqual(
             self.service.state()["morning_body_battery"],
@@ -909,7 +912,6 @@ class GarminPayloadServiceTests(unittest.TestCase):
             [
                 {"date": "2026-09-14", "metrics": {"ftp": 300}},
                 {"date": "2026-09-15", "metrics": {"ftp": 310}},
-                {"date": "2026-09-19", "metrics": {"cycling_max_hr_bpm": 205}},
             ],
         )
         self.assertEqual(
@@ -922,7 +924,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
             },
         )
 
-    def test_remote_deduplicates_external_ids_before_max_hr_and_keeps_match_ids(self):
+    def test_remote_deduplicates_external_ids_and_keeps_match_ids(self):
         intervals = {
             "id": "intervals-run",
             "start_date_local": "2026-09-19T08:00:00",
@@ -980,7 +982,7 @@ class GarminPayloadServiceTests(unittest.TestCase):
         )
         # Canonical reads (#1416): equipment pairs canonical records at read time.
         self.assertNotIn("activity_matches", payload)
-        self.assertEqual(payload["sport_max_hr"], {"cycling": 188, "running": 190})
+        self.assertNotIn("sport_max_hr", payload)
         self.assertEqual(
             self.sync_state.latest_snapshot()["recent_activities"], [intervals]
         )

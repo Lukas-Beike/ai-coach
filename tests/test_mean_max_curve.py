@@ -282,10 +282,8 @@ class SessionCurveReaderTests(unittest.TestCase):
             self.db, GARMIN, "g-1", ride_power(350.0), StreamResolution.DOWNSAMPLED
         )
         add_session(self.db, "act_2")
-        add_record(self.db, INTERVALS, "i-2", "act_2")
-        store_streams(
-            self.db, INTERVALS, "i-2", ride_power(350.0), StreamResolution.FULL
-        )
+        add_record(self.db, WAHOO, "w-2", "act_2")
+        store_streams(self.db, WAHOO, "w-2", ride_power(350.0), StreamResolution.FULL)
         reader = CanonicalDetailReader(
             CanonicalTableReader().session_activities,
             refreshable=lambda: frozenset({INTERVALS}),
@@ -410,11 +408,11 @@ class ProfileSelectionTests(unittest.TestCase):
         )
         self.assertEqual("Intervals.icu original watts stream", best["source"])
         self.assertEqual(
-            (350.0, "i-act_1", 300.0),
+            (350.0, "act_1", 300.0),
             (best["watts"], best["activity_id"], best["start_seconds"]),
         )
         self.assertEqual(
-            ("mean-max-curve", 1), (result["method"], result["method_version"])
+            ("mean-max-curve", 2), (result["method"], result["method_version"])
         )
         self.assertRegex(window["input_fingerprint"], r"^[0-9a-f]{64}$")
 
@@ -449,7 +447,7 @@ class ProfileSelectionTests(unittest.TestCase):
         result = self.service(summaries).power_profiles()
 
         self.assertEqual(
-            ["i-act_1"], [row["activity_id"] for row in result["activities"]]
+            ["act_1"], [row["activity_id"] for row in result["activities"]]
         )
         bests = {
             point["watts"]
@@ -491,7 +489,7 @@ class ProfileSelectionTests(unittest.TestCase):
         records = self.service(summaries).curve_records()
 
         self.assertEqual(
-            [("i-act_1", "race")],
+            [("act_1", "race")],
             [(row["activity_id"], row["effort_context"]) for row in records],
         )
 

@@ -36,14 +36,12 @@ class SyncCommandAssemblyTests(unittest.TestCase):
             core=SyncCommandCore(
                 database_manager=self.database_manager,
                 queue_service=self.queue_service,
-                intervals_sync=self.intervals_sync,
                 planned_unit_service=self.planned_unit_service,
                 competition_service=self.competition_service,
                 workout_library_sync_state=self.library_sync_state,
                 planning_revision=self.revision,
                 utc_now=self.clock,
                 training_change_limit=24,
-                all_sync_days=-1,
             ),
             illness_pause=IllnessPauseDependencies(
                 config=self.config,
@@ -79,11 +77,8 @@ class SyncCommandAssemblyTests(unittest.TestCase):
         ) as factory:
             self.assertIs(assembly.provider_refresh(), result)
 
-        factory.assert_called_once_with(
-            self.queue, self.intervals, -1, synchronous_refreshes=None
-        )
+        factory.assert_called_once_with(self.queue, {})
         self.queue_service.assert_called_once_with()
-        self.intervals_sync.assert_called_once_with()
 
     def test_illness_pause_uses_current_config_and_sync_authority_dependencies(self):
         assembly = self.make_assembly()

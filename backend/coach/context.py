@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.activities.zone_settings import effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
@@ -96,6 +96,43 @@ def _section_source(provider: ProviderId, synced_at: Any) -> dict[str, Any]:
     }
 
 
+def _activity_section_source(
+    activities: Sequence[Mapping[str, Any]], synced_at: Any
+) -> dict[str, Any]:
+    """Label the activity section with the providers its sessions came from.
+
+    Merged sessions mix providers, so the label lists every primary source and
+    every per-value source; ``synced_at`` is the newest current activity fetch.
+    """
+    found: set[ProviderId] = set()
+    for activity in activities:
+        sources = activity.get("sources")
+        labels = [
+            activity.get("source"),
+            *(sources.values() if isinstance(sources, Mapping) else ()),
+        ]
+        # Local labels such as competitions are no providers.
+        found.update(
+            _PROVIDER_BY_LABEL[label]
+            for label in labels
+            if isinstance(label, str) and label in _PROVIDER_BY_LABEL
+        )
+    providers = sorted(found, key=lambda provider: provider.value)
+    return {
+        "provider": providers[0].value if len(providers) == 1 else None,
+        "providers": [provider.value for provider in providers],
+        "label": ", ".join(_source_label(provider) for provider in providers) or None,
+        "synced_at": synced_at,
+    }
+
+
+_PROVIDER_BY_LABEL: Final[Mapping[str, ProviderId]] = {
+    provider_label(provider, view): provider
+    for provider in ProviderId
+    for view in SourceView
+}
+
+
 PLANNED_WORKOUTS_SOURCE = {
     "kind": "local_planning",
     "label": "Lokale Planung",
@@ -119,6 +156,7 @@ COACH_ACTIVITY_FIELDS = (
     "training_load",
     "load_branch",
     "load_threshold_after_session",
+    "load_assumption",
     "load_calibration",
     "aerobic_training_effect",
     "anaerobic_training_effect",
@@ -356,7 +394,7 @@ class CoachIntervalsContextService:
         planned = future_coach_planned_workouts(source_planned, today)
         return {
             "source": {
-                **_section_source(ProviderId.INTERVALS, synced_at),
+                **_activity_section_source(summaries, synced_at),
                 "applies_to": [
                     "recent_activities_by_sport",
                     "activity_rollups_by_sport",
@@ -714,7 +752,9 @@ class CoachStructuredContextService:
         zone_configurations: Callable[[], Sequence[ZoneConfiguration]] | None = None,
         planning_brief: Callable[[], Any] | None = None,
         today: Callable[[], date] = date.today,
+        threshold_warnings: Callable[[], Any] | None = None,
     ) -> None:
+        self._threshold_warnings = threshold_warnings
         self._planning_brief = planning_brief
         self._nutrition_meal_library = nutrition_meal_library
         self._zone_configurations = zone_configurations
@@ -786,7 +826,13 @@ class CoachStructuredContextService:
         self, performance_inputs: CanonicalPerformanceInputs | None
     ) -> Any:
         current = self._performance_reader.current_performance(performance_inputs)
-        if self._zone_configurations is None or not isinstance(current, dict):
+        if not isinstance(current, dict):
+            return current
+        if self._threshold_warnings is not None and (
+            warnings := self._threshold_warnings()
+        ):
+            current = {**current, "threshold_warnings": warnings}
+        if self._zone_configurations is None:
             return current
         zones = coach_training_zones(self._zone_configurations(), self._today())
         return {**current, "training_zones": zones} if zones else current

@@ -25,7 +25,7 @@ class SelectedWorkoutSyncAssemblyTests(unittest.TestCase):
         return SelectedWorkoutSyncAssembly(
             dependencies=SelectedWorkoutSyncAssembly.Inputs(
                 providers=SelectedWorkoutProviders(**callbacks),
-                controls=SelectedWorkoutControls(Mock(), Mock(), 120, Mock()),
+                controls=SelectedWorkoutControls(Mock(), Mock()),
             )
         )
 
@@ -41,12 +41,11 @@ class SelectedWorkoutSyncAssemblyTests(unittest.TestCase):
     def test_service_uses_fresh_services_and_shared_sync_controls(self):
         callbacks = self._callbacks()
         redactor = Mock()
-        lock = Mock()
         gate = Mock()
         assembly = SelectedWorkoutSyncAssembly(
             dependencies=SelectedWorkoutSyncAssembly.Inputs(
                 providers=SelectedWorkoutProviders(**callbacks),
-                controls=SelectedWorkoutControls(redactor, lock, 90, gate),
+                controls=SelectedWorkoutControls(redactor, gate),
             )
         )
 
@@ -69,11 +68,7 @@ class SelectedWorkoutSyncAssemblyTests(unittest.TestCase):
         )
         self.assertEqual(
             service_type.call_args.kwargs,
-            {
-                "lock": lock,
-                "wait_seconds": 90,
-                "provider_resync_gate": gate,
-            },
+            {"provider_resync_gate": gate},
         )
 
 

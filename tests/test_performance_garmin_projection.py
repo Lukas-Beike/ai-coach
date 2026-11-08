@@ -94,7 +94,7 @@ class GarminProjectionTests(unittest.TestCase):
             },
         }
         result = garmin_training_load_projection(snapshot, date(2026, 10, 6))
-        self.assertEqual(result["four_week_balance"]["monthlyLoadAerobicLow"], 75)
+        self.assertEqual(result["four_week_balance"]["aerobic_low"], 75)
         self.assertEqual(result["four_week_balance"]["freshness"], "current")
         self.assertNotIn("trainingBalanceFeedbackPhrase", str(result))
         self.assertEqual(result["daily_status"]["acute_load"], 110)

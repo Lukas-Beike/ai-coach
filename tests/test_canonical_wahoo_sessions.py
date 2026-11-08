@@ -86,9 +86,9 @@ class WahooAgainstIntervalsTests(unittest.TestCase):
     def _bundle(self, *records: ActivityRecord) -> tuple[ActivitySession, ...]:
         return bundle_sessions(records, zone=BERLIN)
 
-    def test_matching_ride_is_a_heuristic_duplicate_of_the_intervals_copy(self) -> None:
+    def test_intervals_copy_is_a_heuristic_duplicate_of_the_matching_ride(self) -> None:
         sessions = self._bundle(intervals_wahoo(), wahoo())
-        self.assertEqual(links(sessions), {("i-1", "w-1", "heuristic")})
+        self.assertEqual(links(sessions), {("w-1", "i-1", "heuristic")})
         self.assertEqual(len(sessions), 1)
 
     def test_rule_table(self) -> None:
@@ -136,10 +136,10 @@ class WahooAgainstIntervalsTests(unittest.TestCase):
                 other = record(ProviderId.INTERVALS, "i-1", origin=origin)
                 self.assertEqual(len(self._bundle(other, wahoo())), 2)
 
-    def test_intervals_stays_primary_whatever_the_start_order(self) -> None:
+    def test_wahoo_leads_over_intervals_whatever_the_start_order(self) -> None:
         earlier_wahoo = wahoo(started_at=START - timedelta(minutes=10))
         sessions = self._bundle(intervals_wahoo(), earlier_wahoo)
-        self.assertEqual(links(sessions), {("i-1", "w-1", "heuristic")})
+        self.assertEqual(links(sessions), {("w-1", "i-1", "heuristic")})
 
     def test_wall_clock_is_compared_across_the_autumn_dst_change(self) -> None:
         # 02:30 occurs twice on 2026-10-25 in Berlin; 02:50 CEST vs 02:20 CET are
@@ -202,15 +202,15 @@ class GarminAgainstWahooTests(unittest.TestCase):
             garmin(started_at=START + timedelta(minutes=29)),
         )
         self.assertEqual(len(sessions), 1)
-        self.assertEqual(sessions[0].primary.activity_id, "i-1")
+        self.assertEqual(sessions[0].primary.activity_id, "w-1")
         self.assertEqual(
-            {d.activity_id for d in sessions[0].duplicates}, {"w-1", "g-1"}
+            {d.activity_id for d in sessions[0].duplicates}, {"i-1", "g-1"}
         )
 
     def test_garmin_matching_intervals_directly_keeps_that_link(self) -> None:
         sessions = self._bundle(intervals_wahoo(), garmin(), wahoo())
         self.assertEqual(
-            links(sessions), {("i-1", "g-1", "heuristic"), ("i-1", "w-1", "heuristic")}
+            links(sessions), {("w-1", "g-1", "heuristic"), ("w-1", "i-1", "heuristic")}
         )
 
     def test_link_kinds_run_parallel_to_duplicates_and_stay_out_of_equality(

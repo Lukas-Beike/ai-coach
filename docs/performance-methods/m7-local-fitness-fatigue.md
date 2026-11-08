@@ -1,12 +1,12 @@
 # M7 — Local fitness, fatigue and form
 
 - **Card:** M7
-- **Card version:** 1
+- **Card version:** 2
 - **Method ID:** local-fitness-fatigue v1 (#1726)
 - **Status:** implemented (`backend/performance/fitness_fatigue.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-06
-- **Review:** released 2026-11-06 (athlete)
+- **Review:** released 2026-11-08 (athlete)
 
 ## Target construct
 
@@ -23,7 +23,7 @@ Athlete decisions (2026-11-06, #1726):
 - Local fitness, fatigue and form from the M6 load, not M5 only.
 - Computed on read from the stored per-session load, never stored.
 - Never initialised, corrected or mixed with Intervals.icu CTL, ATL or form;
-  the stored Intervals series stay labelled history.
+  the stored Intervals series are not shown (athlete decision 2026-11-07).
 - A session without a local load adds nothing and marks its day incomplete.
 
 ## Formula and units
@@ -46,6 +46,13 @@ Athlete decisions (2026-11-06, #1726):
 - Values appear after a warm-up of 2τ days from the first load day (84 days
   for fitness, 14 for fatigue; form needs both). Each day is computed in full
   precision and rounded to 0.1 only for output.
+- The result carries `incomplete_days` (days in the served window with state
+  `incomplete`) and `incomplete_share` (that count over all days of the
+  window, 0 to 1, rounded to 3 decimals). The load-tab chart shows it as
+  "N % der Tage unvollständig" only above 0.
+- TrainingPeaks conventions differ: its gain is 1/τ, this app uses
+  1 − e^(−1/τ), so the values differ slightly; form is computed here with
+  the same day's fitness and fatigue.
 - Reference case for tests: 80 TSS every second day for 120 days gives the
   recursion values computed independently in `tests/test_fitness_fatigue.py`.
 
@@ -75,7 +82,7 @@ of M5, and the common CTL/ATL convention, not individually fitted.
   fitness, fatigue and form comparisons, the progress report and block review
   (`ctl` first and last of the window), the daily planning context and the
   load scenarios (yesterday's values as the start state) read the same curve
-  (#1726). The stored Intervals.icu values stay a labelled history.
+  (#1726). The stored Intervals.icu values are not shown.
 
 ## Measurement error and uncertainty
 

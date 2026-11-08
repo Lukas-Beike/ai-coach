@@ -1,7 +1,7 @@
 """SQLCipher upgrade, rollback, restart and backup/restore from every released schema.
 
-Each supported released schema (v16 to v20) is populated in an encrypted temporary database
-with the rows of the native migration tests. The upgrade keeps every original
+Each supported released schema (v21, releases 1.13.41 to 1.13.44) is populated in
+an encrypted temporary database with the rows of the native migration tests. The upgrade keeps every original
 value, the file stays encrypted, a failing upgrade leaves the database exactly as
 it was, a restart with the same build changes nothing, a wrong key reads nothing,
 and an encrypted backup of the upgraded database restores the same rows. Runs in
@@ -22,9 +22,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
-import test_db_feedback_rating_time_migration as rating_time
 import test_db_migrations as gate
-import test_db_power_curve_migration as power_curve
+import test_db_strength_sets_migration as strength_sets
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.restore_validation import (
@@ -39,7 +38,7 @@ from backend.db.schema import (
     configure_cipher,
     database_schema_is_current,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V20
+from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V21
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -50,50 +49,68 @@ CIPHER_PHRASE = "synthetic encrypted matrix"
 PLAINTEXT_HEADER = b"SQLite format 3\x00"
 
 
+STAMP = "2026-10-31T08:00:00+00:00"
+SESSION = "act_feedback"
+
+
+def populated_v21_database(db: Any) -> None:
+    """A v21 database with a message, a snapshot and rated, linked feedback."""
+    db.executescript(gate.V21_FIXTURE.read_text(encoding="utf-8"))
+    db.execute(
+        "INSERT INTO messages(role, content, created_at) VALUES ('user', 'Hallo', ?)",
+        (STAMP,),
+    )
+    db.execute(
+        "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
+        "VALUES (?, ?, ?, 0)",
+        (json.dumps({"synced_at": STAMP}), STAMP, STAMP),
+    )
+    db.execute(
+        "INSERT INTO activity_sessions(activity_id, primary_provider, "
+        "primary_provider_activity_id, started_at, created_at, updated_at) "
+        "VALUES (?, 'garmin', 'g1', '2026-10-30T07:00:00+00:00', ?, ?)",
+        (SESSION, STAMP, STAMP),
+    )
+    db.executemany(
+        "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, "
+        "notes, session_rpe, deviation_reason, created_at, updated_at, provider, "
+        "session_id, session_rpe_rated_at) "
+        "VALUES (?, ?, '2026-10-30', ?, ?, '', ?, ?, ?, ?, ?)",
+        [
+            ("g1", "Ride", "fine", 5, STAMP, STAMP, "garmin", SESSION, STAMP),
+            ("w1", "Run", "", 0, STAMP, STAMP, None, None, None),
+        ],
+    )
+
+
 def builders() -> dict[int, Callable[[Any], None]]:
     """The populated released databases of the native migration tests."""
-    base = {
-        16: power_curve.populated_power_curve_database,
-        17: rating_time.populated_feedback_database,
-        18: lambda db: rating_time.populated_feedback_database(
-            db, gate.FIXTURES / "schema_v18.sql.txt"
-        ),
-        19: lambda db: rating_time.populated_feedback_database(
-            db, gate.FIXTURES / "schema_v19.sql.txt"
-        ),
-        20: lambda db: rating_time.populated_feedback_database(
-            db, gate.FIXTURES / "schema_v20.sql.txt"
-        ),
-    }
+    base = {21: populated_v21_database}
 
-    def populated(db: Any, build: Callable[[Any], Any], version: int) -> None:
-        # A v19 database already holds the neutral planning metric names.
-        load, intensity = (
-            ("planned_load", "planned_intensity")
-            if version >= 19
-            else ("icu_training_load", "icu_intensity")
-        )
+    def populated(db: Any, build: Callable[[Any], Any]) -> None:
         build(db)
+        # Schema v22 rebuilds the detail set tables of these releases.
+        strength_sets.populate_detail_rows(db)
         db.execute(
             "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (
                 "matrix-unit",
                 "matrix-unit",
-                json.dumps({load: 42, intensity: 0.8}),
+                json.dumps({"planned_load": 42, "planned_intensity": 0.8}),
                 "now",
                 "now",
             ),
         )
         db.executemany(
             "INSERT INTO workout_library(id, local_id, payload, updated_at) VALUES (?, ?, ?, 'now')",
-            [(f"matrix-{i}", f"matrix-{i}", json.dumps({load: i})) for i in range(130)],
+            [
+                (f"matrix-{i}", f"matrix-{i}", json.dumps({"planned_load": i}))
+                for i in range(130)
+            ],
         )
         db.commit()
 
-    return {
-        version: partial(populated, build=build, version=version)
-        for version, build in base.items()
-    }
+    return {version: partial(populated, build=build) for version, build in base.items()}
 
 
 def snapshot(db: Any) -> dict[str, Any]:
@@ -206,7 +223,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
 
     def test_a_failing_upgrade_leaves_every_released_schema_unchanged(self) -> None:
         def failing_last_step(connection: Any) -> None:
-            migrations._upgrade_v20_to_v21(connection)
+            migrations._upgrade_v21_to_v22(connection)
             raise RuntimeError("injected migration failure")
 
         for version in builders():
@@ -217,7 +234,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                     with (
                         mock.patch.dict(
                             migrations.UPGRADE_STEPS,
-                            {SHAPE_SCHEMA_V20: (SHAPE_CURRENT, failing_last_step)},
+                            {SHAPE_SCHEMA_V21: (SHAPE_CURRENT, failing_last_step)},
                         ),
                         self.assertRaisesRegex(RuntimeError, "injected"),
                     ):

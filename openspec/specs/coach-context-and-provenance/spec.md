@@ -83,7 +83,7 @@ The system SHALL support read-only loading of named local Coach context sections
 Evidence: `backend/coach/read_tools.py:CoachReadToolService._read_coach_context`; `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService`; `tests/test_coach_context_reduction.py:test_detail_read_bounds_output_and_rejects_unknown_sections`; `tests/test_coach_context_selection.py:test_rephrased_requests_offer_required_registered_tools`.
 
 ### Requirement: CP5 Saved provider evidence and honest freshness
-The system SHALL build ordinary Coach context from saved provider observations and local planning, retain available source/sync metadata, and read cached weather without causing an unconditional provider refresh. The `activities` section SHALL report its sync time (`synced_at` and `source.synced_at`) from the Intervals.icu activity fetch time of the canonical provider coverage, read in the same read snapshot as the activity rows, and SHALL report null when no coverage is stored.
+The system SHALL build ordinary Coach context from saved provider observations and local planning, retain available source/sync metadata, and read cached weather without causing an unconditional provider refresh. The `activities` section SHALL report the activity sync time as `synced_at` and `source.synced_at`, read in the same snapshot as the rows (null without coverage), and SHALL label its source with the providers of its sessions.
 
 #### Scenario: Ordinary context read
 - **WHEN** the athlete sends an ordinary Coach message
@@ -102,10 +102,10 @@ The system SHALL build ordinary Coach context from saved provider observations a
 - **THEN** calendar items identify their local-plan, competition or external-calendar origin; external calendar context is read-only.
 
 #### Scenario: Activities freshness from canonical coverage
-- **WHEN** the context includes the activities section and canonical coverage stores an Intervals.icu activity fetch time
+- **WHEN** the context includes the activities section and canonical coverage stores a current Garmin or Wahoo activity fetch time
 - **THEN** the section's `synced_at` and `source.synced_at` equal that time regardless of the stored snapshot's `synced_at` or of a duplicate deletion, and are null when no coverage is stored.
 
-Evidence: `backend/coach/context.py:CoachStructuredContextService.build`, `backend/coach/context.py:CoachPlanningContextReader.calendar`, `backend/coach/context.py:CoachPlanningContextReader.external_calendar`, `backend/coach/context.py:CoachPerformanceContextReader.current_performance`, `backend/coach/context.py:CoachIntervalsContextService.project`; `tests/test_coach_structured_context.py:test_build_uses_snapshot_fallback_and_projects_safe_provider_context`, `tests/test_coach_structured_context.py:test_explicit_snapshot_is_used_without_fallback_and_empty_snapshot_enables_garmin_fallback`. Per-metric provenance is owned by performance/provider capabilities; this requirement does not assert that every legacy section label identifies every canonical provider correctly. Missing evidence (planned in this change): activities section `synced_at` from coverage and null without coverage.
+Evidence: `backend/coach/context.py:CoachStructuredContextService.build`, `backend/coach/context.py:CoachPlanningContextReader.calendar`, `backend/coach/context.py:CoachPlanningContextReader.external_calendar`, `backend/coach/context.py:CoachPerformanceContextReader.current_performance`, `backend/coach/context.py:CoachIntervalsContextService.project`; `tests/test_coach_structured_context.py:test_build_uses_snapshot_fallback_and_projects_safe_provider_context`, `tests/test_coach_structured_context.py:test_explicit_snapshot_is_used_without_fallback_and_empty_snapshot_enables_garmin_fallback`. Per-metric provenance is owned by performance/provider capabilities; this requirement does not assert that every legacy section label identifies every canonical provider correctly. The activity sync time is the activity sync time (the oldest current activity fetch of Garmin and Wahoo in the canonical provider coverage; a provider fetched more than 14 days before the newest one is left out, Intervals.icu copies never count); `source.providers` lists the providers of the sessions' primary and per-value sources (`tests/test_coach_domain_sections.py:test_activities_source_block_comes_first_and_names_the_session_sources`, `tests/test_activity_sync_time.py`).
 
 ### Requirement: CP6 Explicit provider refresh and current results
 The system SHALL route a requested provider update through the existing provider refresh owners, distinguish queued work from completed refreshed data, and use refreshed local context before the subsequent model response where the provider contract waits for completion.
@@ -253,9 +253,9 @@ The system SHALL give every subjective rating that reaches the Coach (Intervals.
 - **THEN** Coach rule 8h names 1–4 (higher is worse, Intervals.icu, athlete-entered) for the first and 0–10 (higher is worse, local check-in) for the second and forbids comparing or averaging them.
 
 #### Scenario: Activity detail ratings
-- **WHEN** `get_activity_details` returns Intervals.icu RPE or feel
-- **THEN** the metric source kind is `athlete_entered`, not `measured`, and the metric carries its scale text, a named value's `rating_label` (feel 1 stark … 5 schwach) and `normalized_0_1` (0 best or lowest strain, 1 worst or highest).
+- **WHEN** `get_activity_details` serves a session
+- **THEN** it carries no Intervals.icu RPE or feel from the provider summary row (#1685); the athlete's own rating stays in `activity_feedback` with its local scale.
 
 Detailed contract: ratings keep the entered number; each field's scale is fixed by where it was entered and resolved at read time from `backend/canonical/rating_scales.py`, so stored rows need no replay. The legend is constant, so it is rule 8h of the fixed Coach prompt instead of per-turn context; tests check the rule against those scales. Session-RPE load entries name their `rpe_scale` (local 0–10 or Intervals.icu 1–10) and keep their values.
 
-Evidence: `backend/canonical/rating_scales.py:RatingScale`, `backend/activities/detail_summary_metrics.py:intervals_summary_metrics`, `backend/performance/session_rpe_load.py:session_load`, `backend/coach/prompt.py:COACH_PROMPT`; `tests/test_subjective_rating_scales.py`.
+Evidence: `backend/canonical/rating_scales.py:RatingScale`, `backend/performance/session_rpe_load.py:session_load`, `backend/coach/prompt.py:COACH_PROMPT`; `tests/test_subjective_rating_scales.py`.

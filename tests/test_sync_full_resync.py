@@ -13,7 +13,7 @@ from provider_runtime_fakes import ACME_ID, acme_descriptor, fake_binding
 
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
-from backend.errors import INTERVALS_API_KEY_ERROR, AppError
+from backend.errors import AppError
 from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
 from backend.sync.full_resync import (
     PROVIDER_RESYNC_KEYS,
@@ -137,11 +137,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         )
         gates = {INTERVALS_ID: self.intervals_gate, GARMIN_ID: self.garmin_gate}
         handlers = full_resync_handlers(
-            config=config or SimpleNamespace(intervals_api_key="fake-key"),
-            intervals_service=self.intervals_service,
             garmin_service=self.garmin_service,
-            competition_service=self.competition_service,
-            gates=gates,
             all_sync_days=-1,
         )
         return FullProviderResyncService(
@@ -166,12 +162,12 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             self.key_values.set(db, keys[field], value)
 
     def test_state_projects_running_status_and_last_error_in_contract_order(self):
-        self._set_value("intervals", "running", "0")
-        self._set_value("intervals", "status", "stale progress")
-        self._set_value("intervals", "last_at", NOW)
-        self._set_value("intervals", "error", "prior failure")
+        self._set_value("garmin", "running", "0")
+        self._set_value("garmin", "status", "stale progress")
+        self._set_value("garmin", "last_at", NOW)
+        self._set_value("garmin", "error", "prior failure")
 
-        state = self.service.state("intervals")
+        state = self.service.state("garmin")
         self.assertEqual(
             list(state), ["running", "status", "last_resync_at", "last_error"]
         )
@@ -185,14 +181,14 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             },
         )
 
-        self._set_value("intervals", "running", "1")
-        self.assertEqual(self.service.state("intervals")["status"], "stale progress")
+        self._set_value("garmin", "running", "1")
+        self.assertEqual(self.service.state("garmin")["status"], "stale progress")
 
     def test_state_reads_all_values_through_one_reader(self):
         with patch.object(
             self.database, "reader", wraps=self.database.reader
         ) as reader:
-            self.service.state("intervals")
+            self.service.state("garmin")
 
         reader.assert_called_once_with()
 
@@ -201,7 +197,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             self.database.unit_of_work() as db,
             patch.object(self.database, "reader") as reader,
         ):
-            self.service.state("intervals", db)
+            self.service.state("garmin", db)
 
         reader.assert_not_called()
 
@@ -211,13 +207,6 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.status, 400)
         self.assertEqual(caught.exception.message, "Unbekannte Anbindung.")
 
-    def test_intervals_without_key_uses_existing_error(self):
-        service = self._service(config=SimpleNamespace(intervals_api_key=""))
-        with self.assertRaises(AppError) as caught:
-            service.resync("intervals")
-        self.assertEqual(caught.exception.status, 503)
-        self.assertEqual(caught.exception.message, INTERVALS_API_KEY_ERROR)
-        self.assertFalse(self.intervals_gate.is_resetting())
 
     def test_garmin_without_configuration_uses_existing_message(self):
         self.garmin_service.configured = lambda: False
@@ -230,65 +219,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         )
         self.assertFalse(self.garmin_gate.is_resetting())
 
-    def test_gate_competition_returns_without_kv_or_provider_writes(self):
-        self.assertTrue(self.intervals_gate.begin_reset())
-        try:
-            result = self.service.resync("intervals", "contended-operation")
-        finally:
-            self.intervals_gate.end_reset()
 
-        self.assertEqual(result, {"status": "already_running", "source": "intervals"})
-        self.assertEqual(self.intervals_calls, [])
-        self.assertEqual(self.competition_calls, [])
-        self.assertIsNone(self._get_value("intervals", "running"))
-        self.assertIsNone(self._get_value("intervals", "status"))
-
-    def test_intervals_and_competitions_share_operation_and_never_push(self):
-        token = OPERATION_CONTEXT.set({"operation_id": "parent", "trigger": "chat"})
-        try:
-            result = self.service.resync("intervals", "shared-operation")
-            restored = OPERATION_CONTEXT.get()
-        finally:
-            OPERATION_CONTEXT.reset(token)
-
-        self.assertEqual(
-            self.intervals_calls,
-            [
-                (
-                    ("Vollständiger Resync",),
-                    {
-                        "activity_days": -1,
-                        "operation_id": "shared-operation",
-                        "one_off": True,
-                    },
-                )
-            ],
-        )
-        self.assertEqual(
-            self.competition_calls,
-            [{"reason": "Vollständiger Resync", "push_local": False}],
-        )
-        self.assertEqual(
-            self.observer.calls,
-            [
-                (
-                    "intervals",
-                    "competitions",
-                    "Vollständiger Resync",
-                    "shared-operation",
-                )
-            ],
-        )
-        self.assertEqual(self.observer.scopes[0].result, self.competition_result)
-        self.assertEqual(self.intervals_gate.operation_entries, 1)
-        self.assertEqual(restored, {"operation_id": "parent", "trigger": "chat"})
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["competitions"], self.competition_result)
-        self.assertEqual(self._get_value("intervals", "running"), "0")
-        self.assertEqual(self._get_value("intervals", "status"), "")
-        self.assertEqual(self._get_value("intervals", "last_at"), NOW)
-        self.assertEqual(self._get_value("intervals", "error"), "")
-        self.assertFalse(self.intervals_gate.is_resetting())
 
     def test_garmin_receives_full_days_reason_and_operation_id(self):
         result = self.service.resync("garmin", "garmin-operation")
@@ -309,46 +240,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(self._get_value("garmin", "last_at"), NOW)
         self.assertFalse(self.garmin_gate.is_resetting())
 
-    def test_empty_generated_operation_id_still_cleans_up_and_logs_completion(self):
-        service = self._service(operation_id_factory=lambda: "")
 
-        result = service.resync("intervals")
-
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(
-            self.intervals_calls[0][1]["operation_id"],
-            "",
-        )
-        self.assertEqual(self._get_value("intervals", "running"), "0")
-        self.assertEqual(self._get_value("intervals", "status"), "")
-        self.assertEqual(self.logger.events[-1][2]["event"], "operation_completed")
-        self.assertEqual(
-            self.logger.events[-1][2]["context"]["operation_id"],
-            "",
-        )
-
-    def test_failure_is_redacted_bounded_and_restores_context_and_gate(self):
-        self.intervals_error = RuntimeError("api-secret" + "x" * 1100)
-        token = OPERATION_CONTEXT.set({"operation_id": "outer", "trigger": "chat"})
-        try:
-            with self.assertRaisesRegex(RuntimeError, "api-secret"):
-                self.service.resync("intervals", "failed-operation")
-            restored = OPERATION_CONTEXT.get()
-        finally:
-            OPERATION_CONTEXT.reset(token)
-
-        error = self._get_value("intervals", "error")
-        self.assertEqual(len(error), 1000)
-        self.assertNotIn("api-secret", error)
-        self.assertEqual(self._get_value("intervals", "running"), "0")
-        self.assertEqual(self._get_value("intervals", "status"), "")
-        self.assertEqual(restored, {"operation_id": "outer", "trigger": "chat"})
-        self.assertFalse(self.intervals_gate.is_resetting())
-        self.assertEqual(
-            self.logger.exceptions[0][1]["extra"]["context"]["provider"],
-            "intervals",
-        )
-        self.assertEqual(self.logger.events[-1][2]["event"], "operation_failed")
 
     def test_gate_and_context_are_restored_when_status_cleanup_fails(self):
         class FailingStatusCleanupRepository:
@@ -356,7 +248,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
                 return self_base.get(db, key)
 
             def set(self, db, key, value):
-                if key == PROVIDER_RESYNC_KEYS["intervals"]["status"] and value == "":
+                if key == PROVIDER_RESYNC_KEYS["garmin"]["status"] and value == "":
                     raise RuntimeError("status cleanup failed")
                 self_base.set(db, key, value)
 
@@ -365,14 +257,17 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         token = OPERATION_CONTEXT.set({"operation_id": "outer", "trigger": "chat"})
         try:
             with self.assertRaisesRegex(RuntimeError, "status cleanup failed"):
-                service.resync("intervals", "cleanup-operation")
+                service.resync("garmin", "cleanup-operation")
             restored = OPERATION_CONTEXT.get()
         finally:
             OPERATION_CONTEXT.reset(token)
 
-        self.assertEqual(self._get_value("intervals", "running"), "0")
+        self.assertEqual(self._get_value("garmin", "running"), "0")
         self.assertEqual(restored, {"operation_id": "outer", "trigger": "chat"})
         self.assertFalse(self.intervals_gate.is_resetting())
+
+
+
 
 
 ACME_KEYS = (

@@ -10,7 +10,7 @@ from typing import Any
 from backend import change_history
 from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
-from backend.canonical.planning_fields import FOCUS_ONLY_KEYS
+from backend.canonical.planning_fields import FOCUS_ONLY_KEYS, STRENGTH_STRUCTURE
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.db.remote_links import RemoteLinkRepository
@@ -18,6 +18,8 @@ from backend.errors import CORRUPT_PLANNING_ERROR, AppError
 from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
 from backend.planning.conflicts import calendar_item_window
+from backend.planning.exercise_mappings import remembered_exercises
+from backend.planning.library import library_payload_hash
 from backend.planning.push_state import attach_push_state, garmin_baselines
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.planning.session_focus import carry_focus
@@ -350,13 +352,14 @@ class PlannedUnitService:
                 since=since,
             )
             baselines = garmin_baselines(db) if push_state else {}
+            remembered = remembered_exercises(db) if push_state else {}
         pairs = [
             (row, payload)
             for row in rows
             if (payload := planned_unit_payload(row, include_archived)) is not None
         ]
         if push_state:
-            attach_push_state(pairs, baselines)
+            attach_push_state(pairs, baselines, remembered)
         return [payload for _row, payload in pairs]
 
     def list_for_coach(self, limit: int = 250) -> dict[str, Any]:
@@ -541,7 +544,13 @@ class PlannedUnitService:
         *,
         skip_calendar_conflict: bool,
         bump_planning_revision: bool,
+        remote_neutral: bool = False,
     ) -> dict[str, Any]:
+        """Apply one update; ``remote_neutral`` keeps the provider sync state.
+
+        A remote-neutral change (focus only, or a Garmin exercise pick that the
+        Intervals.icu description never carries) leaves the sync state as is.
+        """
         normalized_id, values, action = planned_units.planned_workout_update_request(
             local_id, values
         )
@@ -608,13 +617,67 @@ class PlannedUnitService:
             updated,
             before,
             bump_planning_revision=bump_planning_revision,
-            focus_only=action == "update" and _is_focus_only(values),
+            focus_only=action == "update"
+            and (remote_neutral or _is_focus_only(values)),
         )
         return {
             "status": "local",
             "local_id": normalized_id,
             "library_entry": updated,
         }
+
+    def assign_garmin_exercise(
+        self, local_id: str, index: Any, garmin_exercise: Any, expected_hash: Any
+    ) -> dict[str, Any]:
+        """Name the Garmin catalogue exercise of one structure exercise.
+
+        The athlete's pick is stored like a Coach ``garmin_exercise`` (checked
+        against the catalogue, pair derived), so it is remembered for the same
+        exercise name in other units. It keeps the Intervals.icu sync state,
+        whose content it does not change. A unit changed since the browser read
+        it, or one in a sync conflict, is refused.
+        """
+        with self._database_manager.unit_of_work() as db:
+            row = db.execute(
+                "SELECT payload, sync_state FROM planned_units "
+                "WHERE local_id=? AND tombstone=0",
+                (str(local_id),),
+            ).fetchone()
+            if row is None:
+                raise AppError(404, "Einheit nicht gefunden.")
+            if row["sync_state"] == "conflict":
+                raise AppError(
+                    409, "Erst den Sync-Konflikt lösen.", reason="sync_conflict"
+                )
+            if library_payload_hash(row["payload"]) != expected_hash:
+                raise AppError(
+                    409,
+                    "Die Einheit wurde inzwischen geändert.",
+                    reason="planning_revision_conflict",
+                )
+            structure = json.loads(row["payload"] or "{}").get(STRENGTH_STRUCTURE)
+            if (
+                not isinstance(structure, list)
+                or not isinstance(index, int)
+                or isinstance(index, bool)
+                or not 0 <= index < len(structure)
+            ):
+                raise AppError(
+                    400, "Unbekannte Übung.", reason="invalid_exercise_index"
+                )
+            exercises = [dict(item) for item in structure]
+            exercises[index].pop("garmin_pair", None)
+            exercises[index]["garmin_exercise"] = garmin_exercise
+            result = self._update_in_db(
+                db,
+                local_id,
+                {STRENGTH_STRUCTURE: exercises},
+                skip_calendar_conflict=True,
+                bump_planning_revision=True,
+                remote_neutral=True,
+            )
+        self._publish_change()
+        return result
 
     def update(
         self,

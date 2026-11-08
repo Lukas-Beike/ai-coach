@@ -40,7 +40,9 @@ def week(low: int, moderate: int, high: int) -> list[dict]:
     """A week with the given minutes in Z2 (low), Z3 (moderate) and Z5 (high)."""
     return [
         unit("a", "2026-11-03", "Ride", f"- {low}m Z2\n"),
-        unit("b", "2026-11-05", "Run", f"- {moderate}m 85% HR\n"),
+        # 80 % of max HR is 89 % of LTHR here: Z3 of the default five Coggan
+        # heart-rate zones (85 % would be Z4, the high band of five zones).
+        unit("b", "2026-11-05", "Run", f"- {moderate}m 80% HR\n"),
         unit("c", "2026-11-07", "Ride", f"- {high}m Z5\n"),
     ]
 
@@ -194,6 +196,7 @@ def done(day: str, sport: str, minutes: int, zone: str) -> dict:
             {"id": f"Z{number}", "secs": minutes * 60 if f"Z{number}" == zone else 0}
             for number in range(1, 8)
         ],
+        "zone_models": {"power_zone_times": "local"},
     }
 
 

@@ -10,7 +10,9 @@ from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from canonical_detail_support import NOW, seed_intervals_activity
+import remote_reconcilers
+import snapshot_seed
+from canonical_detail_support import add_garmin_copy, seed_intervals_activity
 from garmin_support import read_garmin, save_garmin
 from server_test_support import ServerTestCase, server
 from support import complete_canonical_backfill, store_canonical_snapshot
@@ -30,7 +32,6 @@ from backend.planning import competitions as planning_competitions
 from backend.providers import openai as openai_provider
 from backend.runtime import clock as runtime_clock
 from backend.sync import queue as sync_queue
-from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.authority import competition_push_manifest
 
 
@@ -144,7 +145,6 @@ class ServerCoachTests(ServerTestCase):
                 "list_change_history",
                 "apply_workout_library_plan",
                 "delete_activity_feedback",
-                "refresh_current_performance",
             },
             names,
         )
@@ -207,7 +207,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(enqueue.call_args.kwargs, {"requested_by": "coach"})
 
     def test_explicit_activity_detail_reads_only_the_requested_local_session(self):
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
             {
                 "synced_at": "2026-09-11T08:00:00+00:00",
                 "athlete": {},
@@ -266,22 +266,10 @@ class ServerCoachTests(ServerTestCase):
             start_date_local="2026-09-11T07:00:00",
         )
         complete_canonical_backfill(server)
-        with server.DB_LOCK, manager.unit_of_work() as db:
-            CanonicalDetailWriter().write_legacy(
-                db,
-                record={
-                    "activity_id": "activity-1",
-                    "activity": {
-                        "streams": {
-                            "time": [0, 1, 2],
-                            "watts": [200, 250, 280],
-                            "latlng": [[1, 2], [3, 4], [5, 6]],
-                        }
-                    },
-                    "observed_at": NOW,
-                    "full_resolution": True,
-                },
-                now=NOW,
+        # Intervals.icu detail is never read (#1685): the streams sit on a Garmin copy.
+        with server.DB_LOCK:
+            add_garmin_copy(
+                manager, "activity-1", {"time": [0, 1, 2], "watts": [200, 250, 280]}
             )
         intent = {
             "intent": "local_action",
@@ -316,7 +304,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(
             result["data_scope"],
             "bounded sanitized activity_detail.v1 document of exactly one local "
-            "session; providers: Intervals.icu; recorded by: unknown",
+            "session; providers: Garmin Connect, Intervals.icu; recorded by: garmin",
         )
         self.assertNotIn("activity-2", json.dumps(result))
         self.assertNotIn("Recovery", json.dumps(result))
@@ -684,7 +672,8 @@ class ServerCoachTests(ServerTestCase):
         activity = server.PUBLIC_STATE.state_service().read(local_only=True)[
             "activities"
         ][0]
-        self.assertEqual(activity["activity_feedback"]["activity_id"], "activity-1")
+        self.assertEqual(activity["activity_feedback"]["activity_id"], activity["id"])
+        self.assertTrue(activity["id"].startswith("act_"))
         self.assertEqual(
             activity["activity_feedback"]["notes"], "Linkes Knie ungewohnt empfindlich"
         )
@@ -730,7 +719,8 @@ class ServerCoachTests(ServerTestCase):
                 "notes": "Locker, aber am Ende müde",
             },
         )
-        self.assertEqual(result["activity_feedback"]["activity_id"], "activity-2")
+        # Stored under the live session id, not the id the Coach named.
+        self.assertTrue(result["activity_feedback"]["activity_id"].startswith("act_"))
 
     def test_activity_feedback_remains_coach_managed_without_history_tab(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
@@ -1149,7 +1139,7 @@ class ServerCoachTests(ServerTestCase):
             sort_keys=True,
             separators=(",", ":"),
         )
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(intervals_snapshot)
+        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), intervals_snapshot)
         save_garmin(garmin_snapshot)
         garmin_stored = read_garmin()
         self.assertEqual(garmin_stored["vendor_payload"], "kept in the full snapshot")
@@ -1325,7 +1315,7 @@ class ServerCoachTests(ServerTestCase):
         wake_worker.assert_called_once()
 
     def test_coach_planning_reuses_matching_local_template(self):
-        template = server.WORKOUT_LIBRARY_SYNC.remote_reconciler().reconcile(
+        template = remote_reconcilers.library_reconciler(server).reconcile(
             [
                 {
                     "id": "remote-template-1",
@@ -1494,7 +1484,7 @@ class ServerCoachTests(ServerTestCase):
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", push_local=True
+                "test", 
             )
 
         self.assertEqual(result["pushed"], 1)

@@ -102,7 +102,6 @@ TOOL_DOMAIN: dict[str, str] = {
     "sync_competitions": REMOTE_INTERVALS,
     "sync_nutrition": REMOTE_INTERVALS,
     "resolve_training_sync_conflict": REMOTE_INTERVALS,
-    "delete_duplicate_intervals_activity": REMOTE_INTERVALS,
     "push_strength_to_garmin": REMOTE_GARMIN,
 }
 
@@ -116,7 +115,6 @@ UNGATED_TOOLS = frozenset(
         "clarify_coach_request",
         "cancel_coach_request",
         "start_provider_refresh",
-        "refresh_current_performance",
     }
 )
 

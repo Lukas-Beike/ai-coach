@@ -106,8 +106,8 @@ class FakeMorningBodyBatteryService:
         self.record = record
         self.calls = []
 
-    def current(self, snapshot):
-        self.calls.append(snapshot)
+    def current_in(self, db):
+        self.calls.append(db)
         return self.record
 
 
@@ -201,7 +201,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.assertEqual(self.calendar.calls, [((), {"training_relevant_only": True})])
         self.assertEqual(self.feedback.calls, [500])
         self.assertEqual(self.today_calls, 1)
-        self.assertEqual(self.morning_battery.calls, [{}])
+        self.assertEqual(self.morning_battery.calls, [outer_db])
 
     def test_corrupt_and_non_object_garmin_values_fail_soft(self):
         for stored_value in ("{broken", "[]", None):
@@ -213,24 +213,14 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
                 self.morning_battery.calls.clear()
                 result = self.service.build()
                 self.assertEqual(len(self.morning_battery.calls), 1)
-                self.assertIsNone(
-                    self.morning_battery.calls[0].get("morning_body_battery")
-                )
                 self.assertEqual(result, [])
 
-    def test_only_the_small_state_is_passed_to_the_battery_projection(self):
-        morning = {"status": "ready", "morning": {"value": 84}}
-        self.key_values.values["garmin_state"] = json.dumps(
-            {"morning_body_battery": morning}
-        )
-        # Section rows are never read for the battery; the legacy value is unread.
-        self.key_values.values["garmin_snapshot_legacy"] = json.dumps(
-            {"unrelated_history": ["synthetic-unused"] * 1000}
-        )
+    def test_the_battery_is_read_inside_the_context_transaction(self):
+        # #1686: the service reads the morning record (derived observations and
+        # refresh bookkeeping) itself; the context no longer reads the Garmin state.
         self.service.build()
-        self.assertEqual(
-            self.morning_battery.calls, [{"morning_body_battery": morning}]
-        )
+        self.assertEqual(len(self.morning_battery.calls), 1)
+        self.assertIsInstance(self.morning_battery.calls[0], FakeConnection)
 
     def test_corrupt_history_is_empty_and_does_not_break_garmin_projection(self):
         self.key_values.values["morning_body_battery_history"] = "not-json"

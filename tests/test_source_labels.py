@@ -15,7 +15,6 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
-from backend.performance.source_policy import _is_athlete_level
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
@@ -23,7 +22,6 @@ from backend.providers.intervals_wellness_mapping import (
 )
 from backend.providers.source_labels import (
     SourceView,
-    _is_wellness_record,
     observation_source_label,
     provider_label,
 )
@@ -386,21 +384,6 @@ class GarminSourceLabelTests(unittest.TestCase):
                 self.assertEqual(
                     observation_source_label(observation, SourceView.PERFORMANCE_NOTE),
                     "Garmin Connect",
-                )
-
-
-class SourceRuleParityTests(unittest.TestCase):
-    def test_wellness_rule_matches_the_performance_source_policy(self) -> None:
-        samples = (
-            _observation(MetricKind.WEIGHT, record_id=WELLNESS_RECORD_ID),
-            _observation(MetricKind.WEIGHT, record_id=ATHLETE_RECORD_ID),
-            _observation(MetricKind.WEIGHT, record_id=None),
-        )
-        for observation in samples:
-            with self.subTest(record_id=observation.provenance.source_record_id):
-                self.assertEqual(
-                    _is_wellness_record(observation),
-                    not _is_athlete_level(observation),
                 )
 
 

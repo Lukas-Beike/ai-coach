@@ -22,7 +22,6 @@ from backend.coach.outcomes import unresolved_coach_steps
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.errors import AppError
 from backend.sync import queue as sync_queue
-from backend.sync.intervals import IntervalsSyncService
 
 server = fixtures.server
 WRITE_IMPACT = "write_impact"  # name of the write gate's classifier schema
@@ -65,16 +64,24 @@ class DialogueHarness:
         # this off and assert the proposal remains inert.
         self.auto_approve_remote_proposals = True
 
-    def workout(self, day="2026-09-09", name="Oberkörper moderat + Core"):
-        return {
+    def workout(
+        self, day="2026-09-09", name="Oberkörper moderat + Core", sport="WeightTraining"
+    ):
+        workout = {
             "date": day,
             "name": name,
-            "sport": "WeightTraining",
+            "sport": sport,
             "description": "- 30m 60% Synthetic easy workout",
             "duration_minutes": 30,
             "target": "AUTO",
             "rationale": "Synthetic training goal",
         }
+        if sport == "WeightTraining":
+            # The Coach writes every strength unit with all three (#1802).
+            workout["strength_structure"] = [{"name": "Rudern", "sets": 3, "reps": 10}]
+            workout["session_focus"] = "upper"
+            workout["strength_intensity"] = "moderate"
+        return workout
 
     def request(
         self, scope, target="local", period=None, remote_write=False, sync_scope=None
@@ -1152,9 +1159,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                             ],
                         }
                     ],
-                    "workouts": [
-                        {**self.workout(name="Lockerer 10-km-Lauf"), "sport": "Run"}
-                    ],
+                    "workouts": [self.workout(name="Lockerer 10-km-Lauf", sport="Run")],
                     "expected_revision": before["planning_revision"],
                 },
                 [f"planned_unit:{existing['id']}", "local_plan"],
@@ -1419,31 +1424,6 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         enqueue.assert_not_called()
         self.assertEqual(result["status"], "failed")
 
-    def test_current_refresh_runs_before_next_model_response_without_trigger_gate(self):
-        with patch.object(
-            IntervalsSyncService,
-            "sync",
-            return_value={"status": "ok", "activity_days": 7},
-        ) as sync:
-            result, model = self.turn(
-                "Sind die Zahlen wirklich von heute? Bitte damit bewerten.",
-                [
-                    lambda _: self.call(
-                        "start_provider_refresh",
-                        {"days": 7},
-                        ["intervals_refresh"],
-                        target="intervals",
-                    ),
-                    lambda _: (
-                        {"output_text": "Aktuelle Daten bewertet."}
-                        if sync.called
-                        else self.fail("refresh must finish first")
-                    ),
-                ],
-            )
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(model.call_count, 2)
-        sync.assert_called_once()
 
     def test_idempotent_client_turn_does_not_repeat_effect(self):
         steps = [
@@ -1498,8 +1478,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
     def test_repaired_planning_scope_finishes_without_false_failure_and_replays(self):
         period = {"start": "2026-09-12", "end": "2026-09-14"}
         workouts = [
-            {**self.workout("2026-09-12", "100 km flach"), "sport": "Ride"},
-            {**self.workout("2026-09-14", "Recovery 7 km"), "sport": "Run"},
+            self.workout("2026-09-12", "100 km flach", sport="Ride"),
+            self.workout("2026-09-14", "Recovery 7 km", sport="Run"),
         ]
 
         def apply(scope):
@@ -1939,43 +1919,6 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             ).fetchone()
         self.assertEqual(len(json.loads(job["payload"])["entries"]), 1)
 
-    def test_sync_followup_can_read_job_and_inspect_duplicates(self):
-        server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [self.workout("2026-09-08")]
-        )
-        result, _ = self.turn(
-            "Sync zu intervals.icu durchführen",
-            [
-                lambda _: self.call(
-                    "start_intervals_plan_sync",
-                    {},
-                    ["local_plan", "intervals_sync"],
-                    target="intervals",
-                    remote_write=True,
-                    sync_scope="all_pending",
-                ),
-                {"output_text": "Synchronisierung beauftragt."},
-            ],
-        )
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(len(result["sync_job_ids"]), 1)
-        followup, _ = self.turn(
-            "Zeig den Sync-Status.",
-            [
-                lambda _: self.call(
-                    "get_sync_job", {"job_id": result["sync_job_ids"][0]}
-                ),
-                lambda _: self.call("inspect_activity_duplicates"),
-                {"output_text": "Status gelesen."},
-            ],
-        )
-        self.assertTrue(
-            all(step["result"]["ok"] for step in followup["command_receipts"])
-        )
-        self.assertEqual(
-            server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],
-            "queued",
-        )
 
     def test_sync_followup_failure_distinguishes_coach_interruption_and_keeps_job(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
@@ -2730,6 +2673,31 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(result["status"], "failed")
         self.assertEqual(self.state(), before)
+
+    def test_current_refresh_runs_before_next_model_response_without_trigger_gate(self):
+        with patch(
+            "backend.sync.wahoo_sync.WahooSyncService.sync",
+            return_value={"status": "ok"},
+        ) as sync:
+            result, model = self.turn(
+                "Sind die Zahlen wirklich von heute? Bitte damit bewerten.",
+                [
+                    lambda _: self.call(
+                        "start_provider_refresh",
+                        {"days": 7},
+                        ["wahoo_refresh"],
+                        target="wahoo",
+                    ),
+                    lambda _: (
+                        {"output_text": "Aktuelle Daten bewertet."}
+                        if sync.called
+                        else self.fail("refresh must finish first")
+                    ),
+                ],
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(model.call_count, 2)
+        sync.assert_called_once()
 
 
 if __name__ == "__main__":

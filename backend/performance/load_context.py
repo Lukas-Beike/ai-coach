@@ -1,9 +1,7 @@
 """Stateless performance load context composition.
 
 Fitness, fatigue and form come only from the local curve (card M7,
-``backend.performance.fitness_fatigue``) over the stored local load. The stored
-Intervals.icu CTL, ATL and form stay a separately labelled history and never
-enter a local value.
+``backend.performance.fitness_fatigue``) over the stored local load.
 """
 
 from collections.abc import Mapping
@@ -19,7 +17,6 @@ from backend.performance.smoothed_load import complete_before
 from backend.runtime.ports import LocalLoadDayReader
 
 LOCAL_LOAD_SOURCE: Final = SOURCE_LABEL
-INTERVALS_HISTORY_SOURCE: Final = "Intervals.icu (gespeichert, nicht lokal)"
 # The days the current local values and their averages are read from.
 CURRENT_DAYS: Final = 7
 
@@ -108,22 +105,6 @@ def _current_load(curve: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _intervals_history(canonical: CanonicalPerformanceInputs) -> dict[str, Any] | None:
-    """The stored Intervals.icu values of its latest wellness day, labelled."""
-    if canonical.wellness_day is None:
-        return None
-    form = (canonical.form_by_day or {}).get(canonical.wellness_day)
-    if canonical.ctl is None and canonical.atl is None and form is None:
-        return None
-    return {
-        "as_of": canonical.wellness_day.isoformat(),
-        "ctl": canonical.ctl,
-        "atl": canonical.atl,
-        "tsb": form,
-        "source": INTERVALS_HISTORY_SOURCE,
-    }
-
-
 def performance_load_context(
     activities: list[Any],
     today: date,
@@ -132,7 +113,7 @@ def performance_load_context(
     timezone: str,
     session_feedback: SessionFeedback | None = None,
 ) -> dict[str, Any]:
-    """Load rollups, the local fitness (M7) and the labelled Intervals history.
+    """Load rollups and the local fitness (M7).
 
     ``session_feedback`` as ``activity_rollup``.
     """
@@ -158,7 +139,6 @@ def performance_load_context(
     )
     return {
         "load": _current_load(curve),
-        "intervals_history": _intervals_history(canonical),
         "last_7": last_7,
         "previous_7": previous_7,
         "last_30": last_30,

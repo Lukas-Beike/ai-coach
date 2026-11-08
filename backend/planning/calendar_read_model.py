@@ -112,7 +112,7 @@ def _zone_settings(
         sport,
         environment,
         _row_day(row),
-        fallback=ZoneSettings.from_thresholds(sport_thresholds, sport, environment),
+        fallback=ZoneSettings.from_thresholds(sport_thresholds, sport),
     )
 
 

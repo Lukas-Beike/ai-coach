@@ -22,8 +22,6 @@ from backend.coach.proposal_models import (
 )
 from backend.planning import workouts as planning_workouts
 from backend.runtime import clock as runtime_clock
-from backend.sync.intervals import IntervalsSyncService
-from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 
 server = fixtures.server
 
@@ -83,104 +81,8 @@ class CoachReviewTests(unittest.TestCase):
             "target": "AUTO",
         }
 
-    def test_waited_full_refresh_preserves_all_time_window(self):
-        server.key_value_service().set("last_sync_at", "old-sync")
-        server.key_value_service().set(
-            "last_sync_activity_days", str(server.ALL_SYNC_DAYS)
-        )
-        previous_sync_read = threading.Event()
-        service = server.INTERVALS_SYNC.sync_service()
-        original_get_value = service._status.get
-        INTERVALS_SYNC_LOCK.acquire()
 
-        def observe_previous_sync_read(key):
-            value = original_get_value(key)
-            if (
-                key == "last_sync_at"
-                and threading.current_thread() is threading.main_thread()
-            ):
-                previous_sync_read.set()
-            return value
 
-        def finish_active_sync():
-            try:
-                previous_sync_read.wait(timeout=2)
-                server.key_value_service().set("last_sync_at", "new-sync")
-            finally:
-                INTERVALS_SYNC_LOCK.release()
-
-        worker = threading.Thread(target=finish_active_sync)
-        worker.start()
-        try:
-            with patch.object(
-                service._status, "get", side_effect=observe_previous_sync_read
-            ):
-                result = service.sync(
-                    "full refresh test",
-                    activity_days=server.ALL_SYNC_DAYS,
-                    wait_for_existing=True,
-                )
-        finally:
-            worker.join(timeout=2)
-            if INTERVALS_SYNC_LOCK.locked():
-                INTERVALS_SYNC_LOCK.release()
-        self.assertEqual(result["activity_days"], server.ALL_SYNC_DAYS)
-
-    def test_synchronous_refresh_rejects_windows_beyond_job_limit(self):
-        intent = {
-            **self.intent("start_provider_refresh", ["intervals_refresh"]),
-            "intent": "remote_sync",
-            "target_system": "intervals",
-        }
-        kwargs = {
-            "intent": intent,
-            "conversation_id": "wide-sync-validation",
-            "client_turn_id": "wide-sync-validation",
-            "session_csrf_hash": "review-session",
-            "sync_job_ids": [],
-        }
-        with (
-            patch.object(IntervalsSyncService, "sync") as sync,
-            self.assertRaises(server.AppError) as error,
-        ):
-            server.COACH_TOOL_DISPATCH.service().execute(
-                "start_provider_refresh",
-                {"days": 3661, "_wait_for_completion": True},
-                **kwargs,
-            )
-        self.assertEqual(error.exception.reason, "invalid_refresh_request")
-        sync.assert_not_called()
-
-    def test_synchronous_refresh_retries_after_waiting_for_narrower_sync(self):
-        intent = {
-            **self.intent("start_provider_refresh", ["intervals_refresh"]),
-            "intent": "remote_sync",
-            "target_system": "intervals",
-        }
-        kwargs = {
-            "intent": intent,
-            "conversation_id": "wide-sync-retry",
-            "client_turn_id": "wide-sync-retry",
-            "session_csrf_hash": "review-session",
-            "sync_job_ids": [],
-        }
-        with patch.object(
-            IntervalsSyncService,
-            "sync",
-            side_effect=[
-                {"status": "ok", "waited_for_existing": True, "activity_days": 3},
-                {"status": "ok", "activity_days": 365},
-            ],
-        ) as sync:
-            result = server.COACH_TOOL_DISPATCH.service().execute(
-                "start_provider_refresh",
-                {"days": 365, "_wait_for_completion": True},
-                **kwargs,
-            )
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["activity_days"], 365)
-        self.assertEqual(sync.call_count, 2)
-        self.assertFalse(sync.call_args_list[1].kwargs["wait_for_existing"])
 
     def test_resumed_effect_is_preserved_but_incomplete_summary_is_partial(self):
         csrf_hash = server.session_auth_service().session_token_hash(

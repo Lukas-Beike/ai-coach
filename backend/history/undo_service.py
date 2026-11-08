@@ -12,6 +12,7 @@ _INVALID_HISTORY_ID = "Ungültige Änderungshistorie-ID."
 _MISSING_HISTORY = "Änderung nicht gefunden."
 _ALREADY_UNDONE = "Eine Undo-Aktion kann nicht erneut zurückgenommen werden."
 _NOT_UNDOABLE = "Ein Export an einen Anbieter lässt sich nicht zurücknehmen."
+_NO_LONGER_UNDOABLE = "Diese Änderung lässt sich nicht mehr zurücknehmen."
 _STALE_HISTORY = (
     "Die lokale Änderung wurde inzwischen weiter geändert; Undo wurde abgebrochen."
 )
@@ -33,6 +34,7 @@ class HistoryUndoService:
         zone_service: Any | None = None,
         feedback_service: Any | None = None,
         session_corrections: Any | None = None,
+        nutrition_diary: Any | None = None,
         *,
         profile_mutation_coordinator: Any,
     ):
@@ -48,6 +50,7 @@ class HistoryUndoService:
         self._zone_service = zone_service
         self._feedback_service = feedback_service
         self._session_corrections = session_corrections
+        self._nutrition_diary = nutrition_diary
 
     @property
     def profile_mutation_coordinator(self) -> Any:
@@ -161,6 +164,8 @@ class HistoryUndoService:
             raise AppError(409, _ALREADY_UNDONE)
         if history["entity_type"] in change_history.NOT_UNDOABLE_ENTITY_TYPES:
             raise AppError(400, _NOT_UNDOABLE)
+        if not change_history.undoable(history):
+            raise AppError(400, _NO_LONGER_UNDOABLE)
         return normalized_id, history
 
     @staticmethod
@@ -220,6 +225,10 @@ class HistoryUndoService:
             )
         if entity_type == "activity_session" and self._session_corrections is not None:
             return self._session_corrections.restore_in_transaction(
+                db, entity_id, current, target
+            )
+        if entity_type == "nutrition_entry" and self._nutrition_diary is not None:
+            return self._nutrition_diary.restore_in_transaction(
                 db, entity_id, current, target
             )
         raise AppError(400, "Unbekannte lokale Änderung.")

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
@@ -23,13 +24,21 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Final
 
+from backend.canonical.activity_detail import ActivityStrengthSetSet
 from backend.canonical.mapping import MappingResult
-from backend.canonical.vocabulary import ActivityRecordState, RecordingOrigin
+from backend.canonical.vocabulary import (
+    ActivityRecordState,
+    RecordingOrigin,
+    StrengthSetSource,
+)
 from backend.db.activity_detail_store import (
     activity_detail_backfill_candidates,
     activity_detail_backfill_universe,
     detail_sets_for,
     replace_detail_set,
+    restamp_detail_set,
+    stored_strength_source,
+    strength_record_ids,
 )
 from backend.db.canonical_store import (
     ACTIVITY_ID_PREFIX,
@@ -44,18 +53,20 @@ from backend.providers.garmin_activity_detail_mapping import (
     MAPPER_VERSION,
     map_garmin_activity_detail,
 )
-from backend.sync.activity_details import normalize_activity_id
 from backend.sync.garmin import GARMIN_CAPABILITY_PAUSE_SECONDS
 from backend.sync.refresh import sync_job_error_class
 
 _LOGGER = logging.getLogger(__name__)
+ACTIVITY_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9_-]{1,200}")
 COOLDOWN: Final = timedelta(minutes=10)
 BACKFILL_BATCH_SIZE: Final = 10
 BACKFILL_WINDOW: Final = timedelta(days=90)
 BACKFILL_RATE_LIMIT_PAUSE: Final = timedelta(seconds=GARMIN_CAPABILITY_PAUSE_SECONDS)
 BACKFILL_STATE_KEY: Final = "garmin_activity_detail_backfill"
 BACKFILL_RETRY_ATTEMPTS: Final = 3
-# The optional ``activity_fit`` part pauses only itself, never the other parts.
+# The optional ``activity_fit`` and ``activity_exercise_sets`` parts pause only
+# themselves, never the other parts. Exercise sets are fetched for strength
+# activities only.
 DETAIL_CAPABILITIES: Final = (
     "activity_details",
     "activity_splits",
@@ -81,6 +92,13 @@ class _BatchOutcome:
     marked: int = 0
     skipped: int = 0
     paused_until: datetime | None = None
+
+
+def normalize_activity_id(value: Any) -> str:
+    """Reject path syntax and ambiguous IDs before provider access."""
+    if not isinstance(value, str) or not ACTIVITY_ID_PATTERN.fullmatch(value):
+        raise ValueError("Die Aktivitäts-ID ist ungültig.")
+    return value
 
 
 class GarminActivityDetailService:
@@ -128,6 +146,7 @@ class GarminActivityDetailService:
             current_summary = active_provider_record_hash(
                 db, GARMIN_ID, ACTIVITY_RECORD_KIND, provider_activity_id
             )
+            strength = bool(strength_record_ids(db, GARMIN_ID, (provider_activity_id,)))
         if _within_cooldown(stored, current_summary, _aware(self._utc_now())):
             return {
                 "status": "unchanged",
@@ -136,7 +155,9 @@ class GarminActivityDetailService:
             }
 
         with self._guard():
-            collected = self._reader.fetch_activity_detail(provider_activity_id)
+            collected = self._reader.fetch_activity_detail(
+                provider_activity_id, strength=strength
+            )
             now = self._utc_now()
             mapped = _map_collected(collected, recorded_by=recorded_by, now=now)
         # Malformed parts are dropped by the mapper, so they count like failures.
@@ -256,8 +277,10 @@ class GarminActivityDetailService:
     ) -> None:
         """Fetch and store one batch, updating counts, marks and retries in ``outcome``."""
         by_id = {item["provider_activity_id"]: item for item in batch}
+        with self._database_manager.reader() as db:
+            strength_ids = strength_record_ids(db, GARMIN_ID, by_id)
         details = self._reader.fetch_activity_details(
-            list(by_id), cancel_event=cancel_event
+            list(by_id), strength_ids=strength_ids, cancel_event=cancel_event
         )
         try:
             for provider_activity_id, collected in details:
@@ -369,6 +392,16 @@ class GarminActivityDetailService:
                 db, GARMIN_ID, ACTIVITY_RECORD_KIND, provider_activity_id
             )
             for item in mapped.records:
+                if _keeps_corrected_sets(db, provider_activity_id, item):
+                    restamp_detail_set(
+                        db,
+                        GARMIN_ID,
+                        provider_activity_id,
+                        item.kind,
+                        summary_sha256=summary_sha256,
+                        fetched_at=now,
+                    )
+                    continue
                 replace_detail_set(
                     db,
                     item,
@@ -454,6 +487,21 @@ def _map_collected(
             },
         )
     return mapped
+
+
+def _keeps_corrected_sets(db: Any, provider_activity_id: str, item: Any) -> bool:
+    """Whether stored exercise sets must stay instead of the file's set messages.
+
+    Garmin's exercise sets carry the athlete's Connect corrections, which the
+    original file lacks. A fetch without that part (paused, failed or no SDK)
+    falls back to the file, which must not overwrite the corrected sets.
+    """
+    return (
+        isinstance(item, ActivityStrengthSetSet)
+        and item.source is StrengthSetSource.FIT_SET_MESSAGES
+        and stored_strength_source(db, GARMIN_ID, provider_activity_id)
+        == StrengthSetSource.GARMIN_EXERCISE_SETS.value
+    )
 
 
 def _resolve_record(db: Any, activity_id: str) -> dict[str, Any] | None:

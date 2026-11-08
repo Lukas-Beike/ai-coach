@@ -22,7 +22,9 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.db import canonical_store
+from backend.db.activity_detail_store import save_analysis
 from backend.db.repositories import KeyValueRepository
+from backend.performance.canonical_session_analysis import ANALYSIS_VERSION
 from backend.performance.load import activity_rollup
 from backend.providers.garmin_health_mapping import MAPPER_VERSION
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -177,6 +179,82 @@ class LocalLoadStoreTests(unittest.TestCase):
             {"tss_per_au": 1 / 3, "pairs": 20, "session_rpe_au": 270.0},
         )
 
+    def test_served_strength_load_names_its_rpe_band_and_slope(self) -> None:
+        calibration = {
+            "tss_per_au": 0.19,
+            "pairs": 22,
+            "rpe_band": [6.0, 8.0],
+            "pairs_by_source": {"garmin": 12, "local": 10},
+            "by_rpe": [
+                {"rpe": 2, "tss_per_au": 0.352083, "pairs": 30},
+                {"rpe": 5, "tss_per_au": None, "pairs": 4},
+            ],
+        }
+        stored = {
+            "act_gym": {
+                "session_load": {
+                    "value": 80.0,
+                    "method_version": 4,
+                    "derivation": {
+                        "branch": "session_rpe",
+                        "inputs": {"session_rpe_au": 420.0},
+                        "calibration": calibration,
+                    },
+                }
+            }
+        }
+        (served,) = with_local_loads([{"id": "act_gym", "sport": "strength"}], stored)
+        served_calibration = served["load_calibration"]
+        self.assertEqual(served_calibration["rpe_band"], [6.0, 8.0])
+        self.assertEqual(
+            served_calibration["pairs_by_rating_source"], {"garmin": 12, "local": 10}
+        )
+        self.assertEqual(
+            served_calibration["tss_per_au_by_rpe"],
+            [
+                {"rpe": 2, "tss_per_au": 0.352, "pairs": 30},
+                {"rpe": 5, "tss_per_au": None, "pairs": 4},
+            ],
+        )
+
+    def test_served_heart_rate_load_marks_the_assumed_sex(self) -> None:
+        def stored(inputs: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "act_hike": {
+                    "session_load": {
+                        "value": 60.0,
+                        "method_version": 3,
+                        "derivation": {"branch": "heart_rate", "inputs": inputs},
+                    }
+                }
+            }
+
+        row = [{"id": "act_hike", "sport": "hike"}]
+        (assumed,) = with_local_loads(row, stored({"sex": "male", "sex_assumed": True}))
+        (saved,) = with_local_loads(row, stored({"sex": "male"}))
+        self.assertEqual(
+            assumed["load_assumption"],
+            "Geschlecht nicht gesetzt, männliche Konstanten angenommen",
+        )
+        self.assertNotIn("load_assumption", saved)
+
+    def test_pass_reads_the_profile_sex_in_its_transaction(self) -> None:
+        seen: list[Any] = []
+
+        def sex(db: Any) -> str:
+            seen.append(db)
+            return "female"
+
+        stage = LocalLoadStage(
+            key_values=self.key_values,
+            zone_provider=lambda: ZONE,
+            clock=lambda: NOW,
+            athlete_sex=sex,
+        )
+        with self.manager.unit_of_work() as db:
+            stage.run_batch(db)
+        self.assertEqual(seen, [db])
+
     def test_pass_reads_no_feedback_without_strength(self) -> None:
         requested: list[list[str]] = []
 
@@ -214,6 +292,124 @@ class LocalLoadStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _heart_threshold(
+    db: Any, kind: MetricKind, value: float, sport: Sport | None, day: date
+) -> None:
+    canonical_store.upsert_observation(
+        db,
+        Observation(
+            kind=kind,
+            value=MetricValue(value, kind.unit),
+            observed_on=day,
+            observed_at=None,
+            provenance=Provenance(
+                provider=ProviderId.GARMIN,
+                source_kind=SourceKind.PROVIDER_REPORTED,
+                source_record_id=f"garmin-{kind.value}",
+                recorded_by=RecordingOrigin.GARMIN,
+                retrieved_at=datetime(2026, 9, 1, tzinfo=UTC),
+                label=None,
+            ),
+            sport=sport,
+        ),
+        mapper_version=MAPPER_VERSION,
+        now=NOW,
+    )
+
+
+class LocalLoadHeartRateHistogramTests(unittest.TestCase):
+    """Card M6 v5: rest 50, threshold 165, max 190, 60 min, average HR 120."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.manager = open_manager(directory.name)
+        self.addCleanup(self.manager.close)
+        self.stage = LocalLoadStage(
+            key_values=KeyValueRepository(lambda: NOW),
+            zone_provider=lambda: ZONE,
+            clock=lambda: NOW,
+        )
+        add_session_record(
+            self.manager,
+            ProviderId.GARMIN,
+            "g1",
+            "act_g1",
+            avg_hr=120.0,
+            moving_duration_s=3600.0,
+        )
+        with self.manager.unit_of_work() as db:
+            _heart_threshold(db, MetricKind.RESTING_HR, 50.0, None, date(2026, 9, 9))
+            _heart_threshold(
+                db, MetricKind.THRESHOLD_HR, 165.0, Sport.RIDE, date(2026, 9, 1)
+            )
+            _heart_threshold(db, MetricKind.MAX_HR, 190.0, Sport.RIDE, date(2026, 9, 1))
+
+    def _run(self) -> dict[str, Any]:
+        with self.manager.unit_of_work() as db:
+            self.stage.run_batch(db)
+            return self.stage.summary(db)["counts"]
+
+    def _load(self) -> tuple[float, dict[str, Any]]:
+        with self.manager.reader() as db:
+            row = stored_local_loads(db)["act_g1"]["session_load"]
+        return row["value"], row["derivation"]["inputs"]
+
+    def _store_histogram(self, histogram: dict[str, Any] | None) -> None:
+        with self.manager.unit_of_work() as db:
+            save_analysis(
+                db,
+                "act_g1",
+                analysis_version=ANALYSIS_VERSION,
+                input_sha256="a" * 64,
+                payload={"hr_histogram": histogram},
+                now=NOW,
+            )
+
+    def test_without_a_stored_histogram_the_average_heart_rate_counts(self) -> None:
+        self._run()
+        value, inputs = self._load()
+        self.assertAlmostEqual(value, 32.84, places=2)
+        self.assertEqual(inputs["hr_basis"], "average")
+
+    def test_a_newly_stored_histogram_recomputes_on_the_next_pass(self) -> None:
+        self._run()
+        self._store_histogram(
+            {
+                "version": 1,
+                "covered_s": 3600.0,
+                "seconds": {"100": 2400.0, "160": 1200.0},
+            }
+        )
+        self.assertEqual(self._run()["written"], 1)
+        value, inputs = self._load()
+        self.assertAlmostEqual(value, 41.7, places=1)
+        self.assertEqual(inputs["hr_basis"], "distribution")
+        self.assertEqual(inputs["hr_coverage"], 1.0)
+        self.assertEqual(self._run()["written"], 0)
+        self._store_histogram(
+            {
+                "version": 1,
+                "covered_s": 3600.0,
+                "seconds": {"100": 2400.0, "161": 1200.0},
+            }
+        )
+        self.assertEqual(self._run()["written"], 1)
+
+    def test_a_histogram_under_eighty_percent_keeps_the_average(self) -> None:
+        self._store_histogram(
+            {
+                "version": 1,
+                "covered_s": 1800.0,
+                "seconds": {"100": 1200.0, "160": 600.0},
+            }
+        )
+        self._run()
+        value, inputs = self._load()
+        self.assertAlmostEqual(value, 32.84, places=2)
+        self.assertEqual((inputs["hr_basis"], inputs["hr_coverage"]), ("average", 0.5))
 
 
 class LocalLoadReviewRegressionTests(unittest.TestCase):

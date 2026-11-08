@@ -167,7 +167,7 @@ class CoachUiParityTests(unittest.TestCase):
                 read_synced_at=Mock(),
                 read_plan=lambda: None,
                 read_checkins=list,
-                read_feedback=list,
+                read_feedback=lambda keys: [],
                 today=lambda: TODAY,
                 load_scenarios=Mock(),
                 season_source=Mock(),
@@ -303,7 +303,7 @@ class CoachUiParityTests(unittest.TestCase):
 
     def test_m3_timing_matches_in_context_and_report_section(self):
         ui = self.ui["personal_recovery"]["regularity"]
-        self.assertEqual("sleep-timing-variability-v2", ui["method"])
+        self.assertEqual("sleep-timing-variability-v3", ui["method"])
         coach = self.coach_context["personal_recovery"]["regularity"]
         section = self.coach_report("sleep_timing_variability")[
             "sleep_timing_variability"
@@ -339,7 +339,7 @@ class CoachUiParityTests(unittest.TestCase):
         status, ui = handler.sent
         self.assertEqual(200, status)
         self.assertEqual(
-            ("mean-max-curve", 1, "ok"),
+            ("mean-max-curve", 2, "ok"),
             (ui["method"], ui["method_version"], ui["status"]),
         )
         coach = self.coach_report("power_profiles")["power_profiles"]

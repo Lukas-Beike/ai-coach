@@ -60,21 +60,42 @@ _EXERCISE_PROPERTIES: dict[str, Any] = {
     "name": {"type": "string", "minLength": 1, "maxLength": 80},
     "sets": {"type": "integer", "minimum": 1, "maximum": 10},
     "reps": {"type": "integer", "minimum": 1, "maximum": 100},
-    "kg": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+    "kg": {
+        "type": ["number", "null"],
+        "minimum": 0,
+        "maximum": 1000,
+        "description": "Added weight per working set; 0 for bodyweight without added weight.",
+    },
     "pct_1rm": {"type": ["number", "null"], "minimum": 1, "maximum": 150},
     "rpe": {"type": ["number", "null"], "minimum": 1, "maximum": 10},
     "rir": {"type": ["integer", "null"], "minimum": 0, "maximum": 10},
     "rest_s": {"type": ["integer", "null"], "minimum": 0, "maximum": 600},
+    "warmup": {
+        "type": ["object", "null"],
+        "additionalProperties": False,
+        "required": ["sets", "reps", "kg"],
+        "description": "Warm-up sets done before the working sets, e.g. 1 set of 12 at 20 kg; null without warm-up sets. sets/reps above count working sets only.",
+        "properties": {
+            "sets": {"type": "integer", "minimum": 1, "maximum": 5},
+            "reps": {"type": "integer", "minimum": 1, "maximum": 100},
+            "kg": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+        },
+    },
+    "note": {
+        "type": ["string", "null"],
+        "maxLength": 100,
+        "description": "Short cue for this exercise, e.g. 'nicht bis zum Muskelversagen'; null otherwise.",
+    },
     "garmin_exercise": {
         "type": ["string", "null"],
         "maxLength": 80,
-        "description": "Exact English Garmin Connect exercise name for the watch, e.g. 'Barbell Back Squat' or 'Romanian Deadlift'; null when unsure. An unknown name is rejected with suggestions.",
+        "description": "Exact English Garmin Connect exercise name for the watch, e.g. 'Barbell Back Squat' or 'Romanian Deadlift'. When unsure, ask the athlete with catalogue suggestions instead of guessing; a confirmed name is remembered for that exercise. An unknown name is rejected with suggestions.",
     },
 }
 STRENGTH_STRUCTURE_SCHEMA: dict[str, Any] = {
     "type": ["array", "null"],
     "maxItems": 12,
-    "description": "Strength only: exercises with sets, reps, optional load and rest. At most one of pct_1rm, rpe or rir per exercise. The server generates the description from it and derives strength_intensity (heavy from 80 % 1RM, RPE 8 or 2 RIR) when not set. Null for free text.",
+    "description": "Strength only, required for every strength unit you create, move or change (the server rejects one without it, without session_focus or without strength_intensity): exercises in order with working sets, reps, optional load and rest. At most one of pct_1rm, rpe or rir per exercise. The server generates the description from it. Null for other sports.",
     "items": {
         "type": "object",
         "additionalProperties": False,
@@ -806,7 +827,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "start_provider_refresh",
-            "Queue an explicitly requested read-only provider refresh. For a Garmin catch-up after an outage or when the athlete asks for a 30-day refresh, pass days=30; otherwise use the saved provider window.",
+            "Run an explicitly requested read-only provider refresh (Garmin, Wahoo, calendar, weather). For a Garmin catch-up after an outage or when the athlete asks for a 30-day refresh, pass days=30; otherwise use the saved provider window.",
             {
                 "days": {
                     "anyOf": [
@@ -817,11 +838,6 @@ def build_structured_tool_schemas(
                 },
                 "reason": {"type": "string"},
             },
-        ),
-        _canonical_coach_tool(
-            "refresh_current_performance",
-            "Queue an explicit Intervals.icu performance-metrics refresh without reloading activities.",
-            {"reason": {"type": "string"}},
         ),
         _canonical_coach_tool(
             "start_intervals_plan_sync",
@@ -947,20 +963,6 @@ def build_structured_tool_schemas(
                 "apply": {
                     "type": "boolean",
                     "description": "Apply the undo directly after explicit athlete confirmation or request; ignored when undoing a creation.",
-                },
-            },
-        ),
-        _canonical_coach_tool(
-            "delete_duplicate_intervals_activity",
-            "Delete a duplicate Garmin cycling activity from Intervals.icu after explicit athlete confirmation or request, retaining the canonical Wahoo recording.",
-            {
-                "duplicate_id": {
-                    "type": "string",
-                    "description": "Optional Intervals.icu activity ID of the duplicate to delete. Omit to delete the latest detected duplicate.",
-                },
-                "canonical_id": {
-                    "type": "string",
-                    "description": "Optional Intervals.icu activity ID of the canonical Wahoo activity to retain.",
                 },
             },
         ),

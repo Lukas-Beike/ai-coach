@@ -51,11 +51,10 @@ class ReadRecoveryInputsTests(unittest.TestCase):
     ) -> None:
         reader = RecordingReader({})
 
-        inputs = read_recovery_inputs(reader, None, as_of=DAY, latest_wellness_day=DAY)
+        inputs = read_recovery_inputs(reader, None, as_of=DAY)
 
         start = DAY - timedelta(days=83)
         self.assertEqual(reader.calls, [(kind, start, None) for kind in RECOVERY_KINDS])
-        self.assertEqual(inputs.latest_wellness_day, DAY)
         self.assertEqual(set(inputs.observations), set(RECOVERY_KINDS))
 
     def test_kinds_include_both_hrv_methods_and_the_weekly_average(self) -> None:
@@ -70,7 +69,7 @@ class ReadRecoveryInputsTests(unittest.TestCase):
 
 
 class RecoveryInputsTests(unittest.TestCase):
-    def test_current_pins_intervals_values_to_the_latest_wellness_day(self) -> None:
+    def test_current_ignores_intervals_values(self) -> None:
         # Wellness observations carry their row day as the record id.
         older = recovery_observation(
             MetricKind.RESTING_HR,
@@ -79,11 +78,12 @@ class RecoveryInputsTests(unittest.TestCase):
             ProviderId.INTERVALS,
             record_id="2026-09-19",
         )
-        pinned = recovery_inputs([older], latest_wellness_day=DAY)
-        unpinned = recovery_inputs([older])
+        garmin = recovery_observation(MetricKind.RESTING_HR, 48, "2026-09-18")
 
-        self.assertIsNone(pinned.current(MetricKind.RESTING_HR))
-        self.assertIs(unpinned.current(MetricKind.RESTING_HR), older)
+        self.assertIsNone(recovery_inputs([older]).current(MetricKind.RESTING_HR))
+        self.assertIs(
+            recovery_inputs([older, garmin]).current(MetricKind.RESTING_HR), garmin
+        )
 
     def test_daily_keeps_the_first_record_of_each_day_and_provider(self) -> None:
         inputs = recovery_inputs(
@@ -150,7 +150,6 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
         mapped = mapped_recovery_inputs(
             self.garmin,
             self.intervals["raw_provider_data"]["wellness"],
-            latest_wellness_day=inputs.recovery.latest_wellness_day,
         )
 
         served = current_performance_context(

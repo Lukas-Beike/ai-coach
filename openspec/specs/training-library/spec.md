@@ -324,7 +324,7 @@ Local planning records (planned units, workout-library entries, competitions, st
 - **WHEN** an athlete-started Coach turn saves a competition with `starts_at_local` and `planned_duration_s`
 - **THEN** the competition is stored with those values.
 
-Evidence: `backend/providers/intervals_workouts.py::planning_fields_from_intervals`, `backend/providers/intervals_workouts.py::intervals_fields_from_planning`, `backend/providers/intervals_workouts.py::intervals_event_payload`; `backend/sync/intervals_workout_export.py::IntervalsWorkoutExport`; `backend/sync/competitions.py::CompetitionSyncService.sync`; `backend/sync/planned_units.py`; `backend/sync/reconcile.py`. Tests: `tests/test_workout_export_parity.py::test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_workout_export_intervals.py::test_library_workouts_cross_the_adapter_with_planning_field_names`; `tests/test_workout_export_intervals.py::test_library_readback_checks_the_remote_duration_under_its_wire_name`; `tests/test_planning_competitions.py::test_event_payload_fallbacks_limits_and_input_immutability`; `tests/test_sync_adaptive.py::test_sync_sends_the_illness_start_under_the_intervals_wire_name`; `tests/test_server_coach.py`.
+Evidence: `backend/providers/intervals_workouts.py::planning_fields_from_intervals`, `backend/providers/intervals_workouts.py::intervals_fields_from_planning`, `backend/providers/intervals_workouts.py::intervals_event_payload`; `backend/sync/intervals_workout_export.py::IntervalsWorkoutExport`; `backend/sync/competitions.py::CompetitionSyncService.sync`; ; `backend/sync/reconcile.py`. Tests: `tests/test_workout_export_parity.py::test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_workout_export_intervals.py::test_library_workouts_cross_the_adapter_with_planning_field_names`; `tests/test_workout_export_intervals.py::test_library_readback_checks_the_remote_duration_under_its_wire_name`; `tests/test_planning_competitions.py::test_event_payload_fallbacks_limits_and_input_immutability`; `tests/test_sync_adaptive.py::test_sync_sends_the_illness_start_under_the_intervals_wire_name`; `tests/test_server_coach.py`.
 
 ### Requirement: Provider-neutral planning metrics
 
@@ -342,7 +342,7 @@ Local planning records SHALL use provider-neutral names for planned load, intens
 - **WHEN** an activity detail freezes a local workout target
 - **THEN** the stored FTP basis uses a provider-neutral name and retains its value.
 
-Evidence: `backend/planning/library.py`, `backend/planning/target_snapshot.py`, `backend/providers/intervals_workouts.py`; `tests/test_workout_export_intervals.py`, `tests/test_target_snapshot_summaries.py`, `tests/test_db_planning_metrics_migration.py`.
+Evidence: `backend/planning/library.py`, `backend/planning/target_snapshot.py`, `backend/providers/intervals_workouts.py`; `tests/test_workout_export_intervals.py`, `tests/test_target_snapshot_summaries.py`.
 
 ### Requirement: Session focus of planned units and templates
 Planned units and library templates SHALL carry an optional local session focus, validated per sport, that no provider export writes.

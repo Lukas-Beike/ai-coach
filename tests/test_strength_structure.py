@@ -79,6 +79,44 @@ class ValidationTests(unittest.TestCase):
                 planned(value)
             self.assertEqual(raised.exception.reason, "invalid_strength_structure")
 
+    def test_warmup_bodyweight_and_note_are_stored_and_rendered(self):
+        press = {
+            "name": "Schrägbankdrücken",
+            "sets": 3,
+            "reps": 8,
+            "kg": 40,
+            "warmup": {"sets": 1, "reps": 12, "kg": 20},
+            "note": "  nicht bis zum   Muskelversagen ",
+        }
+        hyper = {"name": "Hyperextensions", "sets": 3, "reps": 12, "kg": 0}
+        stored = planned([press, hyper])
+        self.assertEqual(
+            stored["description"],
+            "Schrägbankdrücken: Aufwärmen 1x12 @ 20 kg, dann 3x8 @ 40 kg"
+            " – nicht bis zum Muskelversagen\n"
+            "Hyperextensions: 3x12 @ ohne Zusatzgewicht",
+        )
+        self.assertEqual(
+            stored["strength_structure"][0]["note"], "nicht bis zum Muskelversagen"
+        )
+        self.assertEqual(
+            stored["strength_structure"][0]["warmup"], {"sets": 1, "reps": 12, "kg": 20}
+        )
+        # An empty warm-up or note is dropped instead of stored.
+        bare = planned([{**hyper, "warmup": None, "note": ""}])
+        self.assertEqual(bare["strength_structure"], [hyper])
+
+    def test_invalid_warmups_are_rejected(self):
+        for warmup in (
+            {"sets": 0, "reps": 10},
+            {"sets": 6, "reps": 10},
+            {"sets": 1},
+            {"sets": 1, "reps": 10, "rpe": 5},
+            "1x10",
+        ):
+            with self.subTest(warmup=warmup), self.assertRaises(AppError):
+                planned([{**ROW, "warmup": warmup}])
+
     def test_structure_is_only_for_strength(self):
         with self.assertRaises(AppError):
             normalize_planned_unit(

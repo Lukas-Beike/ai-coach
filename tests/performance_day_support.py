@@ -30,7 +30,7 @@ from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     read_garmin_state,
 )
-from backend.performance.wellness_days import WellnessDay, current_window, latest
+from backend.performance.wellness_days import WellnessDay
 from backend.providers.garmin_activity_mapping import (
     map_garmin_activities,
     merge_training_load_rows,
@@ -59,12 +59,8 @@ def days_from_rows(rows: list[dict[str, Any]]) -> tuple[WellnessDay, ...]:
     return tuple(WellnessDay(day, by_day[day]) for day in sorted(by_day))
 
 
-def current_days(rows: list[dict[str, Any]]) -> tuple[WellnessDay, ...]:
-    return current_window(days_from_rows(rows))
-
-
 def latest_day(rows: list[dict[str, Any]]) -> WellnessDay | None:
-    return latest(current_days(rows))
+    return max(days_from_rows(rows), key=lambda item: item.day, default=None)
 
 
 class StubReader:
@@ -87,7 +83,6 @@ class StubReader:
 def current_from_snapshot(
     snapshot: dict[str, Any],
     *,
-    latest_wellness: WellnessDay | None = None,
     extra: tuple[Observation, ...] = (),
 ) -> CanonicalCurrentInputs:
     """Read the current inputs of a synthetic snapshot through the real mapper."""
@@ -97,7 +92,6 @@ def current_from_snapshot(
     return read_current_inputs(
         StubReader((*mapped.records, *extra)),
         None,
-        latest_wellness_day=None if latest_wellness is None else latest_wellness.day,
         as_of=SYNCED_AT.date(),
     )
 
@@ -182,7 +176,6 @@ def snapshot_metrics(
     garmin: dict[str, dict[str, Any]],
     *,
     activities: list[Any] | None = None,
-    latest_wellness: WellnessDay | None = None,
     extra: tuple[Observation, ...] = (),
     canonical: CanonicalCurrentInputs | None = None,
     garmin_body: tuple[Observation, ...] | None = None,
@@ -201,7 +194,6 @@ def snapshot_metrics(
         canonical=_overlaid(
             current_from_snapshot(
                 snapshot,
-                latest_wellness=latest_wellness,
                 extra=(
                     *extra,
                     # A Wahoo FTP overlay is a stored observation the read resolves.
@@ -215,7 +207,6 @@ def snapshot_metrics(
             canonical,
         ),
         activities=activities,
-        latest_wellness=latest_wellness,
         garmin_thresholds=garmin_threshold_observations(garmin),
         garmin_body=(
             garmin_body_observations(garmin) if garmin_body is None else garmin_body

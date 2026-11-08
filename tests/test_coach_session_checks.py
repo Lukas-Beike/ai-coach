@@ -121,7 +121,7 @@ class StrengthAndPaceTests(unittest.TestCase):
         summary = {"id": "act_1", "record_ids": {"intervals": "i1"}}
         records = [
             {
-                "activity_id": "i1",
+                "activity_id": "act_1",
                 "pace_at_hr_profile": {
                     "status": "insufficient_data",
                     "reason": "Zu kurz.",
@@ -183,7 +183,7 @@ class ComparableSessionsCheckTests(unittest.TestCase):
     def test_rides_compare_with_their_peers_from_the_curves_read_once(self):
         summary = {"id": "act_1", "record_ids": {"intervals": "i1"}}
         records = [
-            _easy("2026-11-03", "i1", 210),
+            _easy("2026-11-03", "act_1", 210),
             _easy("2026-10-27", "i2", 200),
             _easy("2026-10-20", "i3", 198),
             _easy("2026-10-13", "i4", 202),
@@ -197,7 +197,7 @@ class ComparableSessionsCheckTests(unittest.TestCase):
 
     def test_an_older_session_names_its_cut_window(self):
         summary = {"id": "act_1", "record_ids": {"intervals": "i1"}}
-        records = [_easy("2026-09-17", "i1", 210)]
+        records = [_easy("2026-09-17", "act_1", 210)]
         service = _service(
             "ride", [], [summary], records, started="2026-09-17T08:00:00"
         )

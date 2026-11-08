@@ -1,100 +1,17 @@
 from __future__ import annotations
 
-import threading
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.measurements import number
 from backend.errors import AppError
-from backend.http_api.athlete_assembly import (
-    AthleteDataAssembly,
-    AthleteRepositories,
-    AthleteRuntime,
-)
-from backend.performance.source_policy import PREFERENCE_PROFILE_FIELDS
 from backend.planning.assembly import (
     PlanningDataAssembly,
     PlanningMutations,
     PlanningRepositories,
     PlanningRuntime,
 )
-from backend.sync.canonical_table_reader import CanonicalTableReader
-
-
-class AthleteDataAssemblyTests(unittest.TestCase):
-    def test_factories_use_active_manager_and_keep_shared_dependencies(self) -> None:
-        manager = Mock(name="manager")
-        event_buffer = Mock(name="event_buffer")
-        repositories = [Mock(name=f"repository_{index}") for index in range(4)]
-        row_reader = Mock(name="row_reader")
-        serving = Mock(name="serving")
-        now = Mock(name="utc_now")
-        today = Mock(name="local_date")
-        assembly = AthleteDataAssembly(
-            dependencies=AthleteDataAssembly.Inputs(
-                profile_mutation_coordinator=threading.RLock(),
-                database_manager=lambda: manager,
-                repositories=AthleteRepositories(
-                    activity_feedback=repositories[0],
-                    checkin=repositories[1],
-                    profile=repositories[3],
-                    key_values=Mock(name="key_values"),
-                    activity_rows=lambda: row_reader,
-                    table_serving=lambda: serving,
-                    competition=repositories[2],
-                ),
-                runtime=AthleteRuntime(
-                    utc_now=now,
-                    local_date=today,
-                    event_buffer=event_buffer,
-                    normalize_profile=Mock(name="normalize_profile"),
-                    normalize_competition=Mock(name="normalize_competition"),
-                    uuid_factory=Mock(name="uuid_factory"),
-                    load_inputs_changed=lambda: load_input_changes.append(True),
-                    thresholds_changed=lambda: threshold_changes.append(True),
-                ),
-            )
-        )
-        load_input_changes: list[bool] = []
-        threshold_changes: list[bool] = []
-
-        feedback = assembly.activity_feedback()
-        checkin = assembly.checkin()
-        profile = assembly.profile()
-        duplicate = assembly.duplicate_activity()
-
-        self.assertIs(feedback._database_manager, manager)
-        self.assertIs(feedback._feedback_repository, repositories[0])
-        self.assertIs(checkin._manager, manager)
-        self.assertIs(checkin._today, today)
-        self.assertIs(profile._manager, manager)
-        # The profile hook keeps the location invalidation and requests a local
-        # load pass (card M6) only when a preferred threshold source or the time zone
-        # changes.
-        with patch(
-            "backend.http_api.athlete_assembly.invalidate_for_location_change"
-        ) as invalidate:
-            profile._on_location_changed({"city": "a"}, {"city": "b"}, db=None)
-            invalidate.assert_called_once_with({"city": "a"}, {"city": "b"}, db=None)
-            self.assertEqual(load_input_changes, [])
-            field = next(iter(PREFERENCE_PROFILE_FIELDS.values()))
-            profile._on_location_changed({}, {field: "garmin"}, db=None)
-            self.assertEqual(load_input_changes, [True])
-            # A new time zone re-dates the stored loads (#1726).
-            profile._on_location_changed(
-                {"timezone": "Europe/Berlin"}, {"timezone": "UTC"}, db=None
-            )
-            self.assertEqual(load_input_changes, [True, True])
-            self.assertEqual(threshold_changes, [])
-        # A local zone change requests a load pass and a threshold export (#1729).
-        assembly.zones()._on_change()
-        self.assertEqual((load_input_changes[-1], threshold_changes), (True, [True]))
-        self.assertIs(duplicate._database_manager, manager)
-        self.assertIs(duplicate._event_buffer, event_buffer)
-        self.assertFalse(hasattr(assembly, "activity_read"))
-        self.assertIsInstance(duplicate._inspector._activities, CanonicalTableReader)
-        self.assertIs(duplicate._inspector._serving, serving)
 
 
 class EquipmentDependencyTests(unittest.TestCase):

@@ -24,7 +24,6 @@ from backend.planning import season as planning_season
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
 from backend.runtime.ports import ProviderStateReader
 from backend.sync import intervals_state
-from backend.sync.intervals_ingest import INGEST_ENABLED_KEY, ingest_enabled_value
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import connection_status
 
@@ -70,7 +69,6 @@ class PublicStateDependencies:
     provider_freshness: ProviderFreshnessService
     garmin_sync_state: GarminSyncStateService
     sync_public_state: SyncPublicStateService
-    intervals_sync_lock: Any
     workout_library_sync_running: Callable[[], bool]
     workout_library_sync_state: WorkoutLibrarySyncStateService
     garmin_sync: GarminSyncService
@@ -81,8 +79,6 @@ class PublicStateDependencies:
     provider_state: ProviderStateReader
     sync_period_defaults: dict[str, int]
     all_sync_days: int
-    calendar_history_days: int
-    calendar_future_days: int
     local_now: Callable[[], datetime]
     provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
     provider_credentials: Callable[[], Any] | None = None
@@ -121,7 +117,6 @@ class PublicStateService:
         deps = self._deps
         registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
         prelude = deps.local_prelude.read(local_only)
-        sync_metadata = prelude.sync_metadata
         activities = prelude.activities
         local_planned = prelude.local_planned
         canonical_planned = prelude.canonical_planned
@@ -176,22 +171,13 @@ class PublicStateService:
                 ),
                 ProviderId.INTERVALS.value: intervals_state.public_state(
                     configured=bool(deps.config.intervals_api_key),
-                    running=deps.intervals_sync_lock.locked()
-                    or deps.workout_library_sync_running(),
-                    status=self._get_value("sync_status", manager) or None,
-                    last_sync_at=self._get_value("last_sync_at", manager),
-                    last_sync_error=self._get_value("last_sync_error", manager) or None,
+                    running=deps.workout_library_sync_running(),
                     last_library_sync_at=self._library_activity_at(manager),
                     last_library_sync_error=self._get_value(
                         "last_library_sync_error", manager
                     )
                     or None,
-                    pagination_value=self._get_value("last_sync_pagination", manager),
-                    snapshot=sync_metadata,
                     library_sync_state=deps.workout_library_sync_state.summary(),
-                    today=deps.local_now().date(),
-                    history_days=deps.calendar_history_days,
-                    future_days=deps.calendar_future_days,
                 ),
                 "provider_freshness": freshness,
                 "garmin_sync": {
@@ -216,9 +202,6 @@ class PublicStateService:
                         )
                         for provider_id in registry.sync_period_defaults()
                     },
-                    INGEST_ENABLED_KEY: ingest_enabled_value(
-                        self._get_value(INGEST_ENABLED_KEY, manager)
-                    ),
                 },
                 "calendar_display": deps.settings.calendar_display_settings(),
                 "competition_sync": {
@@ -233,15 +216,6 @@ class PublicStateService:
                     == "1",
                     "status": self._get_value("competition_sync_status", manager)
                     or None,
-                },
-                "performance_refresh": {
-                    "last_refresh_at": self._get_value(
-                        "last_performance_refresh_at", manager
-                    ),
-                    "last_error": self._get_value("last_performance_error", manager)
-                    or None,
-                    "running": self._get_value("performance_refresh_running", manager)
-                    == "1",
                 },
                 "morning_checkin": deps.morning_checkin.state(),
                 "coach_quick_actions": deps.coach_quick_actions.state(),

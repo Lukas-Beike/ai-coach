@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
@@ -25,19 +25,17 @@ from backend.sync.garmin_service import (
     refresh_morning_battery_after_sync,
 )
 from backend.sync.gates import ProviderResyncGate
-from backend.sync.intervals import IntervalsSyncService
-from backend.sync.intervals_ingest import INGEST_OFF_REASON
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
     BACKFILL_JOB_TYPES,
+    RATING_BACKFILL,
     WELLNESS_BACKFILL,
     JobValidationError,
     decode_job_payload,
     normalize_sync_job_request,
 )
 from backend.sync.observation import SyncOperationObserver
-from backend.sync.performance import PerformanceRefreshService
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.provider_runtime import ProviderJobOwner
 from backend.sync.queue import SyncJobQueueService
@@ -45,6 +43,7 @@ from backend.sync.selected import SelectedWorkoutSyncService
 from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
 
+UNKNOWN_PROVIDER_JOB: Final = "Unbekannter Providerjob."
 _LOGGER = logging.getLogger(__name__)
 
 # Consecutive chunks without any fetched record (2 x 90 days) end a backfill.
@@ -199,28 +198,20 @@ class HistoricalSyncJobOwner:
 
 
 class IntervalsSyncJobOwner:
-    """Own Intervals job routing, competitions, and their provider gate."""
+    """Own the Intervals.icu output jobs: plan and competition pushes."""
 
     def __init__(
         self,
         *,
-        historical_sync: HistoricalSyncJobOwner,
-        intervals_sync_service: IntervalsSyncService,
-        performance_refresh_service: PerformanceRefreshService,
         selected_workout_sync_service: SelectedWorkoutSyncService,
         competition_sync_service: CompetitionSyncService,
         sync_operation_observer: SyncOperationObserver,
         intervals_resync_gate: ProviderResyncGate,
-        activity_detail_service: Any = None,
     ) -> None:
-        self._historical_sync = historical_sync
-        self._intervals_sync_service = intervals_sync_service
-        self._performance_refresh_service = performance_refresh_service
         self._selected_workout_sync_service = selected_workout_sync_service
         self._competition_sync_service = competition_sync_service
         self._sync_operation_observer = sync_operation_observer
         self._intervals_resync_gate = intervals_resync_gate
-        self._activity_detail_service = activity_detail_service
 
     def execute_specific(
         self,
@@ -229,17 +220,9 @@ class IntervalsSyncJobOwner:
         reason: str,
         job_type: str,
     ) -> dict[str, Any] | None:
-        if job_type == "activity_details":
-            if self._activity_detail_service is None:
-                raise AppError(503, "Aktivitätsdetails sind nicht verfügbar.")
-            with self._intervals_resync_gate.operation():
-                return self._activity_detail_service.refresh(payload["activity_id"])
-        if job_type == "performance_refresh":
-            return self._performance_refresh_service.refresh()
         if job_type == "competition_push":
             return self._sync_competitions(
                 reason,
-                push_local=True,
                 operation_id=job["id"],
                 approval_manifest=payload.get("approval_manifest"),
             )
@@ -250,77 +233,10 @@ class IntervalsSyncJobOwner:
             return self._selected_workout_sync_service.sync(selected_payload)
         return None
 
-    def execute_sync(
-        self, job: Mapping[str, Any], payload: dict[str, Any], reason: str
-    ) -> dict[str, Any]:
-        days, historical_end = self._historical_sync.window(
-            payload,
-            str(job.get("type") or ""),
-            lambda: self._historical_sync.sync_period(INTERVALS_ID),
-        )
-        floor_result = self._historical_sync.below_floor(
-            INTERVALS_ID, str(job.get("type") or ""), historical_end
-        )
-        if floor_result is not None:
-            return floor_result
-        sync_kwargs: dict[str, Any] = {
-            "reason": reason,
-            "activity_days": days,
-            "operation_id": job["id"],
-        }
-        if historical_end is not None:
-            sync_kwargs["end_date"] = historical_end
-        elif payload.get("automatic") is True:
-            sync_kwargs["automatic"] = True
-        if payload.get("one_off") is True:
-            sync_kwargs["one_off"] = True
-        result = self._intervals_sync_service.sync(**sync_kwargs)
-        ingest_off = result.get("reason") == INGEST_OFF_REASON
-        if ingest_off and str(job.get("type") or "") == "historical_backfill":
-            # The backfill cursor stays put until the ingest is on again.
-            return result
-        if str(job.get("type") or "") == "historical_backfill":
-            self._historical_sync.add_next_end(
-                INTERVALS_ID, payload, result, historical_end, days
-            )
-            # Backfill chunks only add history; refreshes own competitions.
-            return result
-        if result.get("status") == "already_running":
-            return result
-        if not ingest_off:
-            self._prefetch_details(result)
-        return self._reconcile_competitions(result, reason, job["id"])
-
-    def _prefetch_details(self, result: dict[str, Any]) -> None:
-        if self._activity_detail_service is None:
-            return
-        try:
-            result["detail_prefetch"] = self._activity_detail_service.prefetch_new(
-                self._intervals_resync_gate.operation
-            )
-        except Exception:  # noqa: BLE001 - prefetch is best effort; the window is synced
-            result["detail_prefetch"] = {"status": "error"}
-
-    def _reconcile_competitions(
-        self, result: dict[str, Any], reason: str, operation_id: str
-    ) -> dict[str, Any]:
-        try:
-            result["competitions"] = self._sync_competitions(
-                reason, push_local=False, operation_id=operation_id
-            )
-        except Exception:  # noqa: BLE001 - competition failure remains a partial refresh
-            # The job stays partial so the competitions section can be retried;
-            # the flag records whether the Intervals window itself was complete.
-            result["window_complete"] = result.get("status") == "ok"
-            result["status"] = "partial"
-            result["competitions"] = {"status": "error"}
-        return result
-
     def _sync_competitions(
         self,
         reason: str,
         *,
-        push_local: bool,
         operation_id: str,
         approval_manifest: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
@@ -330,7 +246,7 @@ class IntervalsSyncJobOwner:
             ) as scope,
             self._intervals_resync_gate.operation(),
         ):
-            sync_arguments = {"reason": reason, "push_local": push_local}
+            sync_arguments: dict[str, Any] = {"reason": reason}
             if approval_manifest is not None:
                 sync_arguments["expected_manifest"] = approval_manifest
             result = self._competition_sync_service.sync(**sync_arguments)
@@ -351,9 +267,11 @@ class GarminSyncJobOwner:
         all_sync_days: int,
         activity_detail_service: Any = None,
         wellness_history_service: GarminWellnessBackfill | None = None,
+        rating_backfill_service: GarminRatingBackfill | None = None,
     ) -> None:
         self._historical_sync = historical_sync
         self._wellness_history_service = wellness_history_service
+        self._rating_backfill_service = rating_backfill_service
         self._garmin_sync_service = garmin_sync_service
         self._morning_body_battery_service = morning_body_battery_service
         self._garmin_fixture_loader = garmin_fixture_loader
@@ -371,6 +289,8 @@ class GarminSyncJobOwner:
             return self._activity_detail_service.refresh(payload["activity_id"])
         if job_type == WELLNESS_BACKFILL:
             return self._wellness_backfill(payload)
+        if job_type == RATING_BACKFILL:
+            return self._rating_backfill(payload)
         days, historical_end = self._historical_sync.window(
             payload, job_type, lambda: self._sync_days(job_type)
         )
@@ -422,6 +342,17 @@ class GarminSyncJobOwner:
         )
         return result
 
+    def _rating_backfill(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run one rating backfill batch (newest first; stored ratings only)."""
+        if self._rating_backfill_service is None:
+            raise AppError(503, "Der Bewertungs-Backfill ist nicht verfügbar.")
+        if not self._rating_backfill_service.available():
+            # Fixture mode: no remote read, no cursor move, no continuation.
+            return {"status": "ok", "reason": "not_configured", "window_records": 0}
+        end_date = payload.get("end_date")
+        end = date.fromisoformat(iso_date_prefix(str(end_date))) if end_date else None
+        return self._rating_backfill_service.backfill(end)
+
     def _sync_days(self, job_type: str) -> int:
         """Return the default window: backfills use the automatic refresh span."""
         if job_type == "historical_backfill":
@@ -435,6 +366,14 @@ class GarminWellnessBackfill(Protocol):
     def available(self) -> bool: ...
 
     def backfill(self, days: int, end: date) -> dict[str, Any]: ...
+
+
+class GarminRatingBackfill(Protocol):
+    """Backfills the watch ratings of one batch of past activities."""
+
+    def available(self) -> bool: ...
+
+    def backfill(self, end: date | None) -> dict[str, Any]: ...
 
 
 class CalendarWeatherSyncJobOwner:
@@ -466,7 +405,7 @@ class CalendarWeatherSyncJobOwner:
                 force=bool(payload.get("force", True)),
                 operation_id=job["id"],
             )
-        raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
+        raise AppError(400, UNKNOWN_PROVIDER_JOB, reason="invalid_job_request")
 
 
 def _reject_plan_push(job_type: str) -> None:
@@ -480,7 +419,7 @@ def _reject_plan_push(job_type: str) -> None:
 
 
 class IntervalsJobAdapter:
-    """Route Intervals jobs: nutrition inline, specific job types, then the sync."""
+    """Route Intervals jobs: nutrition inline, then the plan and competition pushes."""
 
     def __init__(
         self, *, jobs: IntervalsSyncJobOwner, nutrition_sync_service: Any
@@ -499,10 +438,11 @@ class IntervalsJobAdapter:
         if job_type == "nutrition_sync":
             return self._nutrition_sync(payload)
         specific = self._jobs.execute_specific(job, payload, reason, job_type)
-        if specific is not None:
-            return specific
-        _reject_plan_push(job_type)
-        return self._jobs.execute_sync(job, payload, reason)
+        if specific is None:
+            raise AppError(
+                400, UNKNOWN_PROVIDER_JOB, reason="invalid_job_request"
+            )
+        return specific
 
     def _nutrition_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         if "approval_manifest" in payload:
@@ -643,7 +583,7 @@ def dispatch_provider_job(
     owner = job_owners.get(provider)
     if owner is None:
         _reject_plan_push(job_type)
-        raise AppError(400, "Unbekannter Providerjob.", reason="invalid_job_request")
+        raise AppError(400, UNKNOWN_PROVIDER_JOB, reason="invalid_job_request")
     return owner.execute(job, payload, reason, job_type=job_type)
 
 
@@ -667,6 +607,22 @@ def build_job_owners(
             jobs=calendar_weather_jobs, provider_id=WEATHER_ID
         ),
     }
+
+
+# Job types the Intervals.icu ingest queued before it was removed (#1728). A
+# persisted one is retired unrun: it is neither executed nor offered for retry.
+INTERVALS_INGEST_JOB_TYPES = frozenset(
+    {"refresh", "performance_refresh", "activity_details", "historical_backfill"}
+)
+INGEST_REMOVED_REASON = "intervals_ingest_removed"
+
+
+def is_retired_intervals_ingest_job(job: Mapping[str, Any]) -> bool:
+    """Return whether a persisted job is an obsolete Intervals.icu ingest job."""
+    return (
+        str(job.get("provider") or "") == INTERVALS_ID
+        and str(job.get("type") or "") in INTERVALS_INGEST_JOB_TYPES
+    )
 
 
 class SyncJobExecutor:
@@ -693,6 +649,11 @@ class SyncJobExecutor:
     def run(self, job: dict[str, Any]) -> None:
         """Execute a claimed job, recording failures through its outcome owner."""
         try:
+            if is_retired_intervals_ingest_job(job):
+                self._outcome_service.complete(
+                    job["id"], {"status": "skipped", "reason": INGEST_REMOVED_REASON}
+                )
+                return
             result = self.execute(job)
             fallback_status = self._outcome_service.complete(job["id"], result)
             self._historical_sync.queue_next(job, result, fallback_status)

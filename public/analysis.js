@@ -33,9 +33,14 @@ function analysisMinimumPadding(unit, high) {
   return analysisRatioUnit(unit) ? Math.abs(high) * .02 : 1;
 }
 
+function analysisCountUnit(unit) {
+  return unit === "Schritte/Tag" || unit === "Stockwerke/Tag";
+}
+
 // Ratio units such as W/bpm keep three significant digits so small efficiencies are not rounded to zero.
 function analysisNumber(value, unit) {
   const numeric = Number(value);
+  if (analysisCountUnit(unit)) return AppFormat.number(Math.round(numeric), { digits: 0 });
   if (!analysisRatioUnit(unit) || !numeric) return AppFormat.number(numeric);
   return AppFormat.number(numeric, { digits: Math.max(1, 2 - Math.floor(Math.log10(Math.abs(numeric)))) });
 }
@@ -103,7 +108,7 @@ function bindAnalysisPopover(button, info) {
 }
 
 function analysisChart(title, series, unit, start, end, note, {
-  sparse = false, zeroCentered = false, showLegend = true, calendarWeeks = false,
+  sparse = false, zeroCentered = false, showLegend = true, calendarWeeks = false, caption = analysisAxisCaption(unit),
 } = {}) {
   if (!analysisHasData(series)) return null;
   const section = reportNode("section", null, "analysis-chart-card");
@@ -143,7 +148,7 @@ function analysisChart(title, series, unit, start, end, note, {
 
   if (!series.some(analysisPlottable)) {
     section.append(reportNode("p", "Ein einzelner Messwert zeigt noch keinen Verlauf; mindestens zwei datierte Werte sind erforderlich.", "empty"));
-    appendAnalysisTable(section, title, series, unit);
+    appendAnalysisTable(section, title, series, unit, caption);
     return section;
   }
   const fewReadings = sparse && series.every((item) => item.points.filter(valid).length < 3);
@@ -151,15 +156,15 @@ function analysisChart(title, series, unit, start, end, note, {
   const scales = analysisPlotScales(series, start, end, { unit, zeroCentered });
   const svg = analysisSvg("svg", { viewBox: `0 0 ${scales.chartWidth} 200`, role: "group", "aria-label": `${title}: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen.` });
   svg.append(analysisSvg("title", {}, `${title} · ${dateLabel(start)} bis ${dateLabel(end)}`));
-  svg.append(analysisSvg("desc", {}, `Eigene Skala in ${unit || "Belastungspunkten"}. Fehlende Messungen bleiben unbekannt.`));
-  appendAnalysisAxes(svg, unit, scales);
-  appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse);
+  svg.append(analysisSvg("desc", {}, `Eigene Skala: ${caption}. Fehlende Messungen bleiben unbekannt.`));
+  appendAnalysisAxes(svg, unit, scales, caption);
+  appendAnalysisSeries(svg, series, unit, scales, zeroCentered, caption);
   const weekTicks = calendarWeeks && series.length > 0 && series.every((item) => item.cadenceDays === 7);
   appendAnalysisDateTicks(svg, start, end, scales, weekTicks ? analysisWeekTickLabel : analysisDayTickLabel);
   appendAnalysisPointInspectors(section, svg, series, unit, scales);
   section.append(svg);
   appendAnalysisReferenceNotes(section, series, unit);
-  appendAnalysisTable(section, title, series, unit);
+  appendAnalysisTable(section, title, series, unit, caption);
   return section;
 }
 
@@ -203,23 +208,19 @@ function analysisHasData(series) {
   return series.some((item) => item.points.some(analysisValidPoint));
 }
 
-// A chart without any valid point is omitted; its title is collected for one "Keine Daten" line.
+// A chart without any valid point is omitted without a note (#1783); its title is still collected.
 function collectAnalysisChart(missing, title, ...chartArguments) {
   const chart = analysisChart(title, ...chartArguments);
   if (!chart) missing.push(title);
   return chart;
 }
 
-function analysisMissingDataNote(missing) {
-  return missing.length ? reportNode("p", `Keine Daten: ${missing.join(", ")}`, "empty") : null;
-}
-
-function appendAnalysisTable(section, title, series, unit) {
+function appendAnalysisTable(section, title, series, unit, caption = analysisAxisCaption(unit)) {
   const details = reportNode("details");
   details.append(reportNode("summary", "Werte ansehen"));
   const scroll = makeScrollRegionFocusable(reportNode("div", null, "analysis-chart-table"), `${title}: Einzelwerte`);
   const table = reportNode("table");
-  table.append(reportNode("caption", `${title} · ${unit || "Belastungspunkte"} · nur vorhandene Werte`));
+  table.append(reportNode("caption", `${title} · ${caption} · nur vorhandene Werte`));
   const header = reportNode("tr");
   ["Tag", ...series.map((item) => item.label)].forEach((label) => {
     const cell = reportNode("th", label); cell.scope = "col"; header.append(cell);
@@ -255,6 +256,7 @@ function analysisPlotScales(series, start, end, { unit = "", zeroCentered = fals
   const magnitude = 10 ** Math.floor(Math.log10(rawStep));
   let step = [1, 2, 5, 10].find((factor) => factor * magnitude >= rawStep) * magnitude;
   if (unit === "s/km") step = Math.max(5, Math.ceil(step / 5) * 5);
+  if (analysisCountUnit(unit)) step = Math.max(1, step);
   const min = series.some((item) => item.bars) ? 0 : Math.floor((low - padding) / step) * step;
   const max = Math.ceil((high + padding) / step) * step;
   const chartWidth = globalThis.innerWidth < 600 ? Math.max(220, globalThis.innerWidth - 80) : 680;
@@ -270,19 +272,28 @@ function analysisAxisLabel(value, unit) {
   return analysisNumber(analysisRatioUnit(unit) ? value : Number(value.toFixed(3)), unit);
 }
 
-function appendAnalysisAxes(svg, unit, { min, max, step, chartRight, y }) {
+function analysisAxisCaption(unit) {
+  if (unit === "s/km") return "min/km · schneller oben";
+  return unit || "Belastungspunkte";
+}
+
+function appendAnalysisAxes(svg, unit, { min, max, step, chartRight, y }, caption = analysisAxisCaption(unit)) {
   for (let value = min; value <= max + step / 100; value += step) {
     svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(value), y2: y(value), class: Math.abs(value) < step / 100 ? "analysis-zero-line" : "analysis-grid-line" }));
     const label = analysisAxisLabel(value, unit);
     svg.append(analysisSvg("text", { x: 52, y: y(value) + 4, "text-anchor": "end", class: "analysis-value-tick" }, label));
   }
-  svg.append(analysisSvg("text", { x: 60, y: 15, class: "analysis-axis-unit" }, unit === "s/km" ? "min/km · schneller oben" : unit || "Belastungspunkte"));
+  svg.append(analysisSvg("text", { x: 4, y: 15, class: "analysis-axis-unit" }, caption));
 }
 
-function appendAnalysisReferenceLines(svg, item, index, unit, scales) {
+function appendAnalysisReferenceLines(svg, item, index, unit, scales, obstacles = []) {
   const { chartRight, y } = scales;
+  const lineBox = (value) => ({ left: 60, right: chartRight, top: y(value) - 1.5, bottom: y(value) + 1.5 });
   if (item.range) svg.append(analysisSvg("rect", { x: 60, y: Math.min(y(item.range.lower), y(item.range.upper)), width: chartRight - 60, height: Math.max(1, Math.abs(y(item.range.lower) - y(item.range.upper))), class: "analysis-baseline-band" }));
-  if (item.target != null) svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(item.target), y2: y(item.target), class: "analysis-target-line" }));
+  if (item.target != null) {
+    svg.append(analysisSvg("line", { x1: 60, x2: chartRight, y1: y(item.target), y2: y(item.target), class: "analysis-target-line" }));
+    obstacles.push(lineBox(item.target));
+  }
   if (item.average) {
     const readings = item.points.filter(analysisValidPoint).map((point) => Number(point.value));
     if (readings.length) {
@@ -290,6 +301,9 @@ function appendAnalysisReferenceLines(svg, item, index, unit, scales) {
       const line = analysisSvg("line", { x1: 60, x2: chartRight, y1: y(average), y2: y(average), class: "analysis-average-line" });
       line.append(analysisSvg("title", {}, `${item.label}: Durchschnitt ${analysisValue(average, item.unit || unit)}`));
       svg.append(line);
+      obstacles.push(lineBox(average));
+      const text = `\u00d8 ${analysisValue(average, item.unit || unit)}`;
+      if (!item.averageInHeading) obstacles.push({ left: chartRight - text.length * 7.5, right: chartRight, top: y(average) - 20, bottom: y(average) - 5 });
       if (!item.averageInHeading) svg.append(analysisSvg("text", { x: chartRight, y: y(average) - 8, "text-anchor": "end", class: "analysis-point-value analysis-average-value", stroke: "var(--surface)", "stroke-width": 4, "paint-order": "stroke", "stroke-linejoin": "round" }, `\u00d8 ${analysisValue(average, item.unit || unit)}`));
     }
   }
@@ -299,66 +313,81 @@ function flushAnalysisArea(svg, segment, zeroCentered, color, x, y) {
   if (zeroCentered && segment.length > 1) svg.append(analysisSvg("path", { d: `M${x(segment[0].date)},${y(0)} ` + segment.map((point) => `L${x(point.date)},${y(point.value)}`).join(" ") + ` L${x(segment.at(-1).date)},${y(0)} Z`, class: "analysis-form-area", "data-color": color }));
 }
 
-function appendAnalysisPointMark(svg, item, point, index, unit, scales) {
-  const { chartRight, x, y } = scales;
-  if (point.lower != null) svg.append(analysisSvg("line", { x1: x(point.date), x2: x(point.date), y1: y(point.lower), y2: y(point.upper), class: "analysis-range-whisker", "data-color": item.color ?? index }));
-  if (item.bars) {
-    const width = Math.min(24, (chartRight - 60) / Math.max(1, item.points.length) * .55);
-    const left = item.connected ? x(point.date) - width / 2 : Math.max(60, Math.min(chartRight - width, x(point.date) - width / 2));
-    svg.append(analysisSvg("rect", { x: left, y: y(point.value), width, height: Math.max(0, y(0) - y(point.value)), rx: 3, class: item.connected ? "analysis-series-bar" : "recovery-sleep-bar", "data-color": item.color ?? index }));
-  }
-  if (!item.bars || item.connected) {
-    const dot = analysisSvg("circle", { cx: x(point.date), cy: y(point.value), r: 2.5, "data-series": index, "data-color": item.color ?? index });
-    dot.append(analysisSvg("title", {}, `${item.label} \u00b7 ${dateLabel(point.date)}: ${analysisPointValue(item, point, unit)}`));
-    svg.append(dot);
-  }
+function analysisBarGeometry(item, point, { chartRight, x }) {
+  const width = Math.min(24, (chartRight - 60) / Math.max(1, item.points.length) * .55);
+  const left = item.connected ? x(point.date) - width / 2 : Math.max(60, Math.min(chartRight - width, x(point.date) - width / 2));
+  return { left, width };
 }
 
-function analysisPointValueLabel(item, point, { pointIndex, index, unit, scales, latest, latestIndex, labelledValues }) {
-  if (item.bars && !item.connected) return null;
-  const label = analysisValue(point.value, item.unit || unit).split(" ")[0];
-  const required = Boolean(item.bars && item.connected);
-  if (!required && (labelledValues.has(label) || (label === latest && pointIndex !== latestIndex))) return null;
-  labelledValues.add(label);
-  const { chartRight, x, y } = scales;
-  const pointX = x(point.date);
-  let anchor = "middle";
-  if (pointX <= 70) anchor = "start";
-  else if (pointX >= chartRight - 10) anchor = "end";
-  const width = label.length * 8 + 8;
-  const pointY = y(point.value);
-  if (required) return { label, x: pointX, y: pointY + (pointIndex % 2 ? 20 : -12), pointY, anchor, width, index, required, latest: pointIndex === latestIndex };
-  const nearby = item.points.filter((other) => analysisValidPoint(other) && other !== point && Math.abs(x(other.date) - pointX) < width + 12);
-  const aboveClear = pointY >= 30 && !nearby.some((other) => Math.abs(y(other.value) - pointY) < 22);
-  return { label, x: pointX, y: aboveClear ? pointY - 10 : Math.min(174, pointY + 16), anchor, width, index, latest: pointIndex === latestIndex };
-}
-
-function appendAnalysisBarExtremaLabels(item, unit, index, scales, labels) {
-  if (!item.bars || item.connected) return;
-  const values = item.points.filter(analysisValidPoint).map((point) => Number(point.value));
-  if (!values.length) return;
+function appendAnalysisPointMark(svg, item, point, index, unit, scales, obstacles) {
   const { x, y } = scales;
-  const extrema = [...new Set([Math.min(...values), Math.max(...values)])];
-  for (const value of extrema) {
-    const point = item.points.find((candidate) => analysisValidPoint(candidate) && Number(candidate.value) === value);
-    if (point) {
-      const width = Math.min(24, (scales.chartRight - 60) / Math.max(1, item.points.length) * .55);
-      const center = item.connected ? x(point.date) : Math.max(60, Math.min(scales.chartRight - width, x(point.date) - width / 2)) + width / 2;
-      labels.push({ label: analysisValue(value, item.unit || unit).split(" ")[0], x: center, y: y(value) - 10, anchor: "middle", width: 50, index, latest: false, extrema: true });
+  if (point.lower != null) {
+    svg.append(analysisSvg("line", { x1: x(point.date), x2: x(point.date), y1: y(point.lower), y2: y(point.upper), class: "analysis-range-whisker", "data-color": item.color ?? index }));
+    obstacles.push({ left: x(point.date) - 1, right: x(point.date) + 1, top: Math.min(y(point.lower), y(point.upper)), bottom: Math.max(y(point.lower), y(point.upper)) });
+  }
+  // One mark type per series (#1782): bars for per-day or per-week sums and means, dots on a line otherwise.
+  if (item.bars) {
+    const { left, width } = analysisBarGeometry(item, point, scales);
+    const top = Math.min(y(point.value), y(0));
+    const bottom = Math.max(y(point.value), y(0));
+    svg.append(analysisSvg("rect", { x: left, y: top, width, height: bottom - top, rx: 3, class: item.connected ? "analysis-series-bar" : "recovery-sleep-bar", "data-color": item.color ?? index }));
+    obstacles.push({ left, right: left + width, top, bottom });
+    return;
+  }
+  const dot = analysisSvg("circle", { cx: x(point.date), cy: y(point.value), r: 2.5, "data-series": index, "data-color": item.color ?? index });
+  dot.append(analysisSvg("title", {}, `${item.label} · ${dateLabel(point.date)}: ${analysisPointValue(item, point, unit)}`));
+  svg.append(dot);
+  obstacles.push({ left: x(point.date) - 3, right: x(point.date) + 3, top: y(point.value) - 3, bottom: y(point.value) + 3 });
+}
+
+// Only the latest, highest, lowest and first reading carry a value label (#1782); the tap readout shows the rest.
+function analysisLabelledPoints(item) {
+  const readings = item.points.filter(analysisValidPoint);
+  if (!readings.length) return [];
+  const byValue = [...readings].sort((a, b) => Number(a.value) - Number(b.value));
+  return [...new Set([readings.at(-1), byValue.at(-1), byValue[0], readings[0]])];
+}
+
+function analysisPointValueLabel(item, point, { index, unit, scales }) {
+  const label = analysisValue(point.value, item.unit || unit).split(" ")[0];
+  const { chartRight, x, y } = scales;
+  let pointX = x(point.date);
+  if (item.bars) {
+    const { left, width } = analysisBarGeometry(item, point, scales);
+    pointX = left + width / 2;
+  }
+  const width = label.length * 8 + 8;
+  let anchor = "middle";
+  let left = pointX - width / 2;
+  if (left < 60) { anchor = "start"; left = pointX - 4; }
+  else if (left + width > chartRight + 16) { anchor = "end"; left = pointX - width + 4; }
+  return { label, x: pointX, left, width, anchor, index, bars: Boolean(item.bars), pointY: item.bars ? Math.min(y(point.value), y(0)) : y(point.value) };
+}
+
+function analysisTextBox(x, y, text, charWidth) {
+  return { left: x, right: x + String(text).length * charWidth, top: y - 12, bottom: y + 3 };
+}
+
+function analysisLineObstacles(points, { x, y }) {
+  const boxes = [];
+  for (let index = 1; index < points.length; index++) {
+    const [x1, y1, x2, y2] = [x(points[index - 1].date), y(points[index - 1].value), x(points[index].date), y(points[index].value)];
+    const steps = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 3));
+    for (let step = 0; step <= steps; step++) {
+      const px = x1 + (x2 - x1) * step / steps;
+      const py = y1 + (y2 - y1) * step / steps;
+      boxes.push({ left: px - 1, right: px + 1, top: py - 1, bottom: py + 1 });
     }
   }
+  return boxes;
 }
 
-function appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCentered, labels }) {
+function appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCentered, labels, obstacles }) {
   const { x, y } = scales;
   const color = item.color ?? index;
   let path = "", previous = null, segment = [], hasLinePoint = false;
-  const labelledValues = new Set();
-  const latest = item.points.findLast(analysisValidPoint);
-  const latestLabel = latest ? analysisValue(latest.value, item.unit || unit).split(" ")[0] : null;
-  const latestIndex = item.points.findLastIndex(analysisValidPoint);
   if (!analysisPlottable(item)) return path;
-  item.points.forEach((point, pointIndex) => {
+  item.points.forEach((point) => {
     if (!analysisValidPoint(point)) {
       flushAnalysisArea(svg, segment, zeroCentered, color, x, y);
       segment = [];
@@ -372,54 +401,56 @@ function appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCenter
     segment.push(point);
     path += `${hasLinePoint ? "L" : "M"}${x(point.date).toFixed(2)},${y(point.value).toFixed(2)} `;
     hasLinePoint = true;
-    appendAnalysisPointMark(svg, item, point, index, unit, scales);
-    const label = analysisPointValueLabel(item, point, { pointIndex, index, unit, scales, latest: latestLabel, latestIndex, labelledValues });
-    if (label) labels.push(label);
+    appendAnalysisPointMark(svg, item, point, index, unit, scales, obstacles);
     previous = point;
   });
   flushAnalysisArea(svg, segment, zeroCentered, color, x, y);
-  appendAnalysisBarExtremaLabels(item, unit, index, scales, labels);
+  for (const point of analysisLabelledPoints(item)) labels.push(analysisPointValueLabel(item, point, { index, unit, scales }));
   return path;
 }
 
-function appendAnalysisPointLabels(svg, labels) {
+function analysisBoxesOverlap(box, other, gapX, gapY) {
+  return box.left < other.right + gapX && box.right > other.left - gapX && box.top < other.bottom + gapY && box.bottom > other.top - gapY;
+}
+
+// Labels avoid marks, lines, the caption and each other and stay inside the plot; a label without a free slot is dropped.
+function appendAnalysisPointLabels(svg, labels, obstacles, { chartWidth }) {
   const occupied = [];
   const accepted = [];
-  labels.sort((a, b) => Number(b.extrema) - Number(a.extrema) || Number(b.latest) - Number(a.latest));
+  const clear = (box) => box.left >= 56 && box.right <= chartWidth && box.top >= 2 && box.bottom <= 176
+    && !obstacles.some((other) => analysisBoxesOverlap(box, other, 1, 1))
+    && !occupied.some((other) => analysisBoxesOverlap(box, other, 6, 4));
+  const seen = new Set();
   labels.forEach((label) => {
-    let left = label.x - label.width / 2;
-    if (label.anchor === "start") left = label.x;
-    else if (label.anchor === "end") left = label.x - label.width;
-    const box = { left, right: left + label.width, top: label.y - 12, bottom: label.y + 3 };
-    const overlaps = () => occupied.some((other) => box.left < other.right + 6 && box.right > other.left - 6 && box.top < other.bottom + 4 && box.bottom > other.top - 4);
-    if (label.required) {
-      const positions = [label.y, ...[-12, 20, -34, 42, -56, 64, -78, 86].map((offset) => label.pointY + offset), 18, 40, 62, 84, 106, 128, 150, 172];
-      for (const position of positions) {
-        if (position < 18 || position > 172) continue;
-        label.y = position; box.top = position - 12; box.bottom = position + 3;
-        if (!overlaps()) break;
-      }
-    } else if (overlaps()) {
-      if (!label.extrema) return;
-      label.y = Math.max(18, label.y - 18);
-      box.top = label.y - 12; box.bottom = label.y + 3;
-    }
-    occupied.push(box);
+    const key = `${label.index}:${label.label}`;
+    if (seen.has(key)) return;
+    const offsets = label.bars ? [-10, -32, -54, -76] : [-10, 18, -30, 38, -50, 58];
+    const position = offsets.map((offset) => label.pointY + offset)
+      .find((y) => clear({ left: label.left, right: label.left + label.width, top: y - 12, bottom: y + 3 }));
+    if (position == null) return;
+    label.y = position;
+    seen.add(key);
+    occupied.push({ left: label.left, right: label.left + label.width, top: position - 12, bottom: position + 3 });
     accepted.push(label);
   });
   accepted.sort((a, b) => a.index - b.index || a.x - b.x);
   accepted.forEach((label) => svg.append(analysisSvg("text", { x: label.x, y: label.y, "text-anchor": label.anchor, class: "analysis-point-value", "data-value-series": label.index }, label.label)));
 }
 
-function appendAnalysisSeries(svg, series, unit, scales, zeroCentered, sparse) {
+function appendAnalysisSeries(svg, series, unit, scales, zeroCentered, caption) {
   const labels = [];
+  const obstacles = [analysisTextBox(4, 15, caption, 6.4)];
   series.forEach((item, index) => {
     const color = item.color ?? index;
-    appendAnalysisReferenceLines(svg, item, index, unit, scales);
-    const path = appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCentered, labels });
-    if ((!item.bars || item.connected) && item.points.filter(analysisValidPoint).length >= 2) svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": item.line || (index ? "dashed" : "solid") }));
+    appendAnalysisReferenceLines(svg, item, index, unit, scales, obstacles);
+    const path = appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCentered, labels, obstacles });
+    const readings = item.points.filter(analysisValidPoint);
+    if (!item.bars && readings.length >= 2) {
+      svg.append(analysisSvg("path", { d: path, fill: "none", "data-series": index, "data-color": color, "data-line": item.line || (index ? "dashed" : "solid") }));
+      obstacles.push(...analysisLineObstacles(readings, scales));
+    }
   });
-  appendAnalysisPointLabels(svg, labels);
+  appendAnalysisPointLabels(svg, labels, obstacles, scales);
 }
 
 function analysisWeekTickLabel(dateKey) {
@@ -590,7 +621,7 @@ function requestAnalysisReport(path) {
   const version = analysisReportVersionKey();
   const cached = analysisReportCache.get(path);
   if (cached?.version === version) return cached.request;
-  const request = api(path).catch((error) => {
+  const request = api(path, { timeoutMs: DATA_LOAD_TIMEOUT_MS }).catch((error) => {
     if (analysisReportCache.get(path)?.request === request) analysisReportCache.delete(path);
     throw error;
   });
@@ -607,6 +638,17 @@ function clearAnalysisReportCache() {
 }
 
 let cyclingPowerProfileGeneration = 0;
+const ANALYSIS_PERFORMANCE_ROUTES = new Set(["analysis", "analysis/performance"]);
+const CYCLING_POWER_PROFILE_DURATIONS = [[5, "5 Sekunden"], [60, "1 Minute"], [300, "5 Minuten"], [1200, "20 Minuten"], [3600, "1 Stunde"]];
+
+function cyclingPowerProfilePoint(result, duration) {
+  const candidates = result?.windows?.["90"]?.power || [];
+  return candidates.filter((item) => item.duration_seconds === duration && item.status === "ok" && item.watts != null && Number.isFinite(Number(item.watts))).sort((a, b) => Number(b.watts) - Number(a.watts))[0];
+}
+
+function cyclingPowerProfileHasValues(result) {
+  return CYCLING_POWER_PROFILE_DURATIONS.some(([duration]) => cyclingPowerProfilePoint(result, duration));
+}
 
 function cyclingPowerProfileTable(result) {
   const table = reportNode("table", null, "race-predictions-table");
@@ -616,13 +658,13 @@ function cyclingPowerProfileTable(result) {
   }
   head.append(header); table.append(head);
   const body = reportNode("tbody");
-  for (const [duration, label] of [[5, "5 Sekunden"], [60, "1 Minute"], [300, "5 Minuten"], [1200, "20 Minuten"], [3600, "1 Stunde"]]) {
+  for (const [duration, label] of CYCLING_POWER_PROFILE_DURATIONS) {
     const row = reportNode("tr"); row.dataset.powerDuration = String(duration);
     const heading = reportNode("th", label); heading.scope = "row"; row.append(heading);
-    const candidates = result.windows?.["90"]?.power || [];
-    const point = candidates.filter((item) => item.duration_seconds === duration && item.status === "ok" && item.watts != null && Number.isFinite(Number(item.watts))).sort((a, b) => Number(b.watts) - Number(a.watts))[0];
-    const cell = reportNode("td", point ? analysisValue(point.watts, "W") : "\u2014");
+    const point = cyclingPowerProfilePoint(result, duration);
+    const cell = reportNode("td", point ? analysisValue(point.watts, "W") : null);
     if (point) cell.title = [dateLabel(point.date), point.source].filter(Boolean).join(" · ");
+    else markValueMissing(cell);
     row.append(cell);
     body.append(row);
   }
@@ -639,40 +681,54 @@ function criticalPowerLine(result) {
   const parts = estimate.fits.map((fit) => {
     const label = labels[`${fit.sport}:${fit.environment}`] || fit.sport;
     if (fit.status !== "ok") return `${label} —`;
-    return fit.sport === "run"
-      ? `${label} CS ${AppFormat.number(fit.cs_mps, { digits: 2 })} m/s · D′ ${analysisValue(fit.d_prime_meters, "m")}`
-      : `${label} CP ${analysisValue(fit.cp_watts, "W")} · W′ ${analysisValue(fit.w_prime_joules / 1000, "kJ")}`;
+    const value = fit.sport === "run"
+      ? `${label} CS ${AppFormat.number(fit.cs_mps, { digits: 2 })} m/s · D′ ${analysisValue(fit.d_prime_meters, "m")} (unsicher)`
+      : `${label} CP ${analysisValue(fit.cp_watts, "W")} · W′ ${analysisValue(fit.w_prime_joules / 1000, "kJ")} (unsicher)`;
+    const races = (fit.efforts || []).filter((effort) => effort.effort_context === "race").length;
+    return races ? `${value} · ${races}× Wettkampf` : value;
   });
-  const line = reportNode("p", `Experimentelle CP/CS-Schätzung (3/7/12 min, ${estimate.window_days} Tage): ${parts.join(" · ")}`, "analysis-reference-note");
+  const line = reportNode("p", `Experimentelle CP/CS-Schätzung (${estimate.window_days} Tage): ${parts.join(" · ")}`, "analysis-reference-note");
   line.dataset.criticalPower = "true";
   line.title = estimate.scope || "";
   return line;
 }
 
 async function renderCyclingPowerProfile() {
-  if (state.route !== "analysis/performance" || !state.data?.performance) return;
+  if (!ANALYSIS_PERFORMANCE_ROUTES.has(state.route) || !state.data?.performance) return;
   const root = document.getElementById("cyclingPowerProfile");
   const generation = ++cyclingPowerProfileGeneration;
   const session = state.sessionGeneration;
-  if (!root.childElementCount) root.append(reportNode("p", "Leistungsprofil wird geladen…", "empty"));
+  if (!root.childElementCount || root.dataset.analysisEmpty === "failed") {
+    root.dataset.analysisEmpty = "loading";
+    root.replaceChildren(reportNode("h4", "Leistungsprofil"), createLoadingState("Leistungsprofil wird geladen…"));
+  }
   try {
     const result = await requestAnalysisReport("/api/analysis/power-profiles");
     if (generation !== cyclingPowerProfileGeneration || session !== state.sessionGeneration) return;
     root.replaceChildren(reportNode("h4", "Leistungsprofil"));
-    root.append(reportNode("p", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · Rad und Indoor zusammen", "analysis-reference-note"));
-    root.append(cyclingPowerProfileTable(result));
+    const hasValues = cyclingPowerProfileHasValues(result);
+    if (hasValues) {
+      root.append(reportNode("p", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · Rad und Indoor zusammen", "analysis-reference-note"));
+      root.append(cyclingPowerProfileTable(result));
+    } else root.append(reportNode("p", "Noch keine Leistungsdaten.", "muted"));
     const coverage = result.windows?.["90"]?.cache_coverage;
     if (coverage?.power_unknown_records > 0) {
       const gap = reportNode("p", `Für ${coverage.power_unknown_records} von ${coverage.power_records} Radeinheiten fehlen vollständige Messreihen; die Bestwerte können höher liegen.`, "analysis-reference-note");
       gap.dataset.powerProfileGap = "true";
       root.append(gap);
     }
-    const criticalPower = criticalPowerLine(result);
+    // The running CS estimate does not need cycling power, so it stays without a profile;
+    // a line of only missing estimates is dropped there.
+    const hasEstimate = (result?.critical_power?.fits || []).some((fit) => fit.status === "ok");
+    const criticalPower = hasValues || hasEstimate ? criticalPowerLine(result) : null;
     if (criticalPower) root.append(criticalPower);
-  } catch {
+    root.dataset.analysisEmpty = String(!hasValues && !criticalPower);
+    renderAnalysisSegmentsIfActive();
+  } catch (error) {
     if (generation === cyclingPowerProfileGeneration && session === state.sessionGeneration) {
-      root.replaceChildren(reportNode("h4", "Leistungsprofil"), cyclingPowerProfileTable({}));
-      root.append(reportNode("p", "Lokale Aktivitätsdetails konnten nicht geladen werden.", "empty"));
+      root.dataset.analysisEmpty = "failed";
+      root.replaceChildren(reportNode("h4", "Leistungsprofil"), createErrorState(error?.message, () => void renderCyclingPowerProfile()));
+      renderAnalysisSegmentsIfActive();
     }
   }
 }
@@ -709,6 +765,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   if (!history?.start || !history?.end) {
     // Without a history window there are no charts, so no empty sport groups; the async tables stay attached.
     root.append(predictions, powerProfile);
+    for (const target of [root, loadRoot, enduranceRoot]) target.dataset.analysisEmpty = "true";
     return;
   }
   const end = history.end;
@@ -721,7 +778,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   }));
   const performanceStart = addDateKey(weekStart, -77);
   const load = history.load || { points: [] };
-  const loadSeries = [{ label: "Akute Belastung", legendLabel: "Akute Belastung", source: load.source, unit: "", color: 0, bars: true, connected: true,
+  const loadSeries = [{ label: "Akute Belastung", legendLabel: "Akute Belastung", source: load.source, unit: "", color: 0,
     cadenceDays: analysisHistoryPeriod === "twelveWeeks" ? 7 : 1, average: true, averageInHeading: true,
     points: analysisHistoryPeriod === "twelveWeeks" ? analysisWeeklyLastPoints(load.points.filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value })), start, end) : load.points.filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value })),
     currentPoint: load.points.filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value })).findLast(analysisValidPoint) }];
@@ -730,7 +787,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   const loadTitle = loadAverage == null ? "Akute Belastung" : `Akute Belastung \u00b7 \u00d8 ${analysisValue(loadAverage, "")}`;
   const sourcePrefix = (source) => (source ? `${source}: ` : "");
   const loadMissing = [];
-  const loadChart = collectAnalysisChart(loadMissing, loadTitle, loadSeries, "", start, end, `${sourcePrefix(load.source)}gemessene akute Trainingsbelastung. Gestrichelte Linie: Durchschnitt der angezeigten Werte. Fehlende Messungen bleiben L\u00fccken.`, { calendarWeeks: analysisHistoryPeriod === "twelveWeeks" });
+  const loadChart = collectAnalysisChart(loadMissing, loadTitle, loadSeries, "", start, end, `${sourcePrefix(load.source)}gemessene akute Trainingsbelastung. Gestrichelte Linie: Durchschnitt der angezeigten Werte. Fehlende Messungen bleiben L\u00fccken.`, { calendarWeeks: analysisHistoryPeriod === "twelveWeeks", caption: analysisBasisCaption("Belastungspunkte", analysisHistoryPeriod === "twelveWeeks", "state") });
   if (loadChart) {
     loadChart.querySelector(".analysis-chart-legend")?.remove();
     loadRoot.append(loadChart);
@@ -743,7 +800,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     const timeAverage = timeValues.reduce((sum, value) => sum + value, 0) / timeValues.length;
     const timeCadence = weekly ? " pro Woche" : " pro Tag";
     const timeTitle = timeValues.length ? `Trainingszeit \u00b7 \u00d8 ${analysisValue(timeAverage, "h")}${timeCadence}` : "Trainingszeit";
-    const timeChart = collectAnalysisChart(loadMissing, timeTitle, timeSeries, "h", start, end, `${sourcePrefix(history.training_time.source)}Summe der Bewegungszeit erfasster Aktivit\u00e4ten, jede Aktivit\u00e4t einmal. Tage und Wochen ohne erfasste Dauer bleiben L\u00fccken.`, { calendarWeeks: weekly });
+    const timeChart = collectAnalysisChart(loadMissing, timeTitle, timeSeries, "h", start, end, `${sourcePrefix(history.training_time.source)}Summe der Bewegungszeit erfasster Aktivit\u00e4ten, jede Aktivit\u00e4t einmal. Tage und Wochen ohne erfasste Dauer bleiben L\u00fccken.`, { calendarWeeks: weekly, caption: analysisBasisCaption("h", weekly, "sum") });
     if (timeChart) {
       timeChart.querySelector(".analysis-chart-legend")?.remove();
       loadRoot.append(timeChart);
@@ -755,8 +812,6 @@ function renderAnalysisHistory(history) { // NOSONAR
   appendSmoothedLoadChart(history.smoothed_session_load, history.session_rpe_load, loadRoot, loadMissing, start, end);
   appendLocalFitnessChart(history.local_fitness_fatigue, loadRoot, loadMissing, start, end);
   appendDailyActivityGroup(history.daily_activity, loadRoot, loadMissing, start, end);
-  const loadMissingNote = analysisMissingDataNote(loadMissing);
-  if (loadMissingNote) loadRoot.append(loadMissingNote);
   const performanceSeries = [
     ["cycling_ftp_watts", "Rad · FTP", "W", 0],
     ["run_threshold_pace_seconds_per_km", "Lauf · Schwellenpace", "s/km", 2],
@@ -770,6 +825,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     currentPoint: item.points.filter((point) => point.date <= end).findLast(analysisValidPoint),
     points: key === "cycling_ftp_watts" ? item.points.filter((point) => point.date >= performanceStart && point.date <= end) : analysisWeeklyPerformancePoints(item.points, performanceStart, end, key.includes("vo2max")),
   })));
+  let developmentCharts = 0;
   for (const [sport, title, primaryUnit] of [["Lauf", "Laufen", "s/km"], ["Rad", "Rad", "W"]]) {
     const sportSeries = performanceSeries.filter((item) => item.label.startsWith(sport));
     const missing = [];
@@ -779,9 +835,8 @@ function renderAnalysisHistory(history) { // NOSONAR
       renderProviderMetrics({ running_tolerance: history.provider_metrics?.running_tolerance }, extra, performanceStart, end, missing);
       charts.push(...extra.children);
     }
+    developmentCharts += charts.length;
     const group = analysisChartGroup(title, charts, sportSeries, "Letzte 12 Kalenderwochen einschließlich der laufenden Woche: alle datierten Garmin-FTP-Werte, letzter gültiger Wochenwert für Schwellenpace, Wochenmedian für VO₂max. Fehlende Messungen bleiben Lücken. Garmin. VO₂max ist eine Schätzung. Quellen und Messdatum bleiben sichtbar.");
-    const missingNote = analysisMissingDataNote(missing);
-    if (missingNote) group.append(missingNote);
     makeAnalysisSectionCollapsible(group, `development-${sport}`);
     if (sport === "Lauf") group.querySelector(".analysis-section-content").append(predictions);
     else group.querySelector(".analysis-section-content").prepend(powerProfile);
@@ -798,16 +853,16 @@ function renderAnalysisHistory(history) { // NOSONAR
   const enduranceMissing = [];
   renderProviderMetrics({ endurance_score: enduranceScore }, extra, performanceStart, end, enduranceMissing);
   while (extra.firstElementChild) enduranceRoot.append(makeAnalysisSectionCollapsible(extra.firstElementChild, "endurance-score"));
-  const enduranceMissingNote = analysisMissingDataNote(enduranceMissing);
-  if (enduranceMissingNote) enduranceRoot.append(enduranceMissingNote);
   const otherMissing = [];
   renderProviderMetrics(otherMetrics, extra, performanceStart, end, otherMissing);
   while (extra.firstElementChild) {
     const chart = extra.firstElementChild;
     root.append(makeAnalysisSectionCollapsible(chart, chart.querySelector("h3").textContent));
+    developmentCharts += 1;
   }
-  const otherMissingNote = analysisMissingDataNote(otherMissing);
-  if (otherMissingNote) root.append(otherMissingNote);
+  root.dataset.analysisEmpty = String(!developmentCharts);
+  loadRoot.dataset.analysisEmpty = String(!loadRoot.childElementCount);
+  enduranceRoot.dataset.analysisEmpty = String(!enduranceRoot.childElementCount);
   for (const target of [root, loadRoot, enduranceRoot]) target.querySelectorAll("details:not([data-analysis-section])").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
 }
 
@@ -829,7 +884,7 @@ function appendSessionRpeLoadChart(report, loadRoot, loadMissing, start, end) {
   const weekly = analysisHistoryPeriod === "twelveWeeks";
   const points = days.map((day) => ({ date: day.date, value: day.value }));
   const series = [{ label: weekly ? "Session-RPE-Last pro Woche" : "Session-RPE-Last pro Tag", legendLabel: "Session-RPE-Last", source, unit: "AU", color: 2, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, points: weekly ? analysisWeeklySumPoints(points, start, end) : points }];
-  const chart = analysisChart(`Session-RPE-Last · ${rated}/${total} bewertet`, series, "AU", start, end, `${source}: RPE × Gesamtdauer je Einheit.`, { calendarWeeks: weekly });
+  const chart = analysisChart(`Session-RPE-Last · ${rated}/${total} bewertet`, series, "AU", start, end, `${source}: RPE × Gesamtdauer je Einheit.`, { calendarWeeks: weekly, caption: analysisBasisCaption("AU", weekly, "sum") });
   if (!chart) { loadMissing.push("Session-RPE-Last"); return; }
   chart.querySelector(".analysis-chart-legend")?.remove();
   loadRoot.append(chart);
@@ -847,7 +902,7 @@ function appendSmoothedLoadChart(report, rpeReport, loadRoot, loadMissing, start
     return { label, legendLabel: label, source, unit: "AU", color, connected: true, cadenceDays: weekly ? 7 : 1,
       points: weekly ? analysisWeeklyLastPoints(points, start, end) : points, currentPoint: points.findLast(analysisValidPoint) };
   });
-  const chart = collectAnalysisChart(loadMissing, "Kurz-/Langzeitbelastung", series, "AU", start, end, "", { calendarWeeks: weekly });
+  const chart = collectAnalysisChart(loadMissing, "Kurz-/Langzeitbelastung", series, "AU", start, end, "", { calendarWeeks: weekly, caption: analysisBasisCaption("AU", weekly, "state") });
   if (chart) loadRoot.append(chart);
 }
 
@@ -864,21 +919,50 @@ function appendLocalFitnessChart(report, loadRoot, loadMissing, start, end) {
   });
   const unloaded = days.reduce((sum, day) => sum + (day.sessions_without_load || 0), 0);
   const unloadedNote = unloaded === 1 ? "1 Einheit ohne TSS" : `${unloaded} Einheiten ohne TSS`;
-  const chart = collectAnalysisChart(loadMissing, title, series, "TSS/Tag", start, end, unloaded ? unloadedNote : "", { calendarWeeks: weekly });
+  // Share of the visible days, so the note matches the shown period like the session count.
+  const incompletePercent = Math.round(100 * days.filter((day) => day.state === "incomplete").length / days.length);
+  const notes = [];
+  if (unloaded) notes.push(unloadedNote);
+  if (incompletePercent > 0) notes.push(`${incompletePercent} % der Tage unvollständig`);
+  const chart = collectAnalysisChart(loadMissing, title, series, "TSS/Tag", start, end, notes.join(" · "), { calendarWeeks: weekly, caption: analysisBasisCaption("TSS/Tag", weekly, "state") });
   if (chart) loadRoot.append(chart);
+}
+
+// Steps and floors are whole counts per day; the weekly view plots the daily mean of each week (#1782).
+function dailyActivityMetrics() {
+  return [
+    { key: "steps", label: "Schritte", unit: "Schritte/Tag", color: 3 },
+    { key: "floors", label: "Stockwerke", unit: "Stockwerke/Tag", color: 4 },
+  ];
+}
+
+// Names what one plotted value is: a daily value, a weekly sum or mean, or the state at the end of the week.
+function analysisBasisCaption(unit, weekly, kind) {
+  const basis = {
+    state: weekly ? "Wochenstand" : "Tageswert",
+    sum: weekly ? "Wochensumme" : "Tagessumme",
+    mean: weekly ? "Wochenmittel" : "",
+  }[kind];
+  return basis ? `${unit} · ${basis}` : unit;
+}
+
+function dailyActivityTitle(label, unit, daily) {
+  const values = daily.filter(analysisValidPoint).map((point) => Number(point.value));
+  if (!values.length) return label;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return `${label} · Ø ${analysisNumber(mean, unit)} pro Tag`;
 }
 
 function appendDailyActivityGroup(activity, loadRoot, loadMissing, start, end) {
   if (!activity) return;
   const weekly = analysisHistoryPeriod === "twelveWeeks";
   const charts = []; const allSeries = [];
-  for (const [key, label, unit, color] of [["steps", "Schritte", "", 3], ["floors", "Stockwerke", "", 4]]) {
+  for (const { key, label, unit, color } of dailyActivityMetrics()) {
     const daily = (activity[key] || []).filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value }));
     const points = weekly ? analysisWeeklyMeanPoints(daily, start, end) : daily;
     const current = daily.findLast(analysisValidPoint);
     const series = [{ label: weekly ? `${label} Ø pro Tag` : label, legendLabel: label, source: activity.source, unit, color, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, points, currentPoint: current }];
-    const title = current ? `${label} · ${analysisValue(current.value, unit)}` : label;
-    const chart = collectAnalysisChart(loadMissing, title, series, unit, start, end, `${activity.source}: ${weekly ? "Tagesdurchschnitt je Woche" : "Tageswerte"}. Fehlende Tage bleiben Lücken.`, { calendarWeeks: weekly });
+    const chart = collectAnalysisChart(loadMissing, dailyActivityTitle(label, unit, daily), series, unit, start, end, `${activity.source}: ${weekly ? "Tagesdurchschnitt je Woche" : "Tageswerte"}. Fehlende Tage bleiben Lücken.`, { calendarWeeks: weekly, caption: analysisBasisCaption(unit, weekly, "mean") });
     if (!chart) continue;
     chart.querySelector(".analysis-chart-legend")?.remove();
     charts.push(chart); allSeries.push(series[0]);
@@ -1038,13 +1122,10 @@ function renderBodyAnalysis(body) {
     root.append(reportNode("p", "Noch keine Body-Historie verfügbar.", "empty"));
     return;
   }
-  const missing = [];
   for (const [metric, title, unit] of metrics) {
     const chart = bodyMetricChart(metric, title, unit, window, bodyHistoryPeriod, preferred);
-    if (chart) root.append(chart); else missing.push(title);
+    if (chart) root.append(chart);
   }
-  const missingNote = analysisMissingDataNote(missing);
-  if (missingNote) root.append(missingNote);
   root.querySelectorAll("details").forEach((details) => { details.open = openDetails.has(details.querySelector("summary")?.textContent); });
 }
 
@@ -1161,21 +1242,89 @@ async function renderTrainingRecords() { // NOSONAR
   }
 }
 
+// Containers whose data decides whether a segment shows its one empty card (#1783). A container
+// without a marker, still loading or failed counts as not empty; period controls stay visible.
+const ANALYSIS_SEGMENT_CONTENT = {
+  load: ["sessionPerformance", "analysisLoadCharts", "trainingZoneCharts"],
+  performance: ["currentPerformance", "performanceEnduranceCharts", "analysisHistoryCharts", "performancePredictions", "cyclingPowerProfile"],
+  recovery: ["personalRecovery"],
+  sessions: ["activityAnalysis"],
+};
+const ANALYSIS_EMPTY_TITLES = { load: "Noch keine Belastungsdaten", performance: "Noch keine Leistungsdaten", recovery: "Noch keine Erholungsdaten", sessions: "Noch keine Einheiten" };
+
+function analysisSegmentEmpty(segment) {
+  return ANALYSIS_SEGMENT_CONTENT[segment].every((id) => document.getElementById(id)?.dataset.analysisEmpty === "true");
+}
+
+function analysisDataSourceConnected(data = state.data) {
+  return Boolean(data?.garmin?.configured || data?.wahoo?.connected);
+}
+
+function analysisSegmentPeriod(segment) {
+  if (segment === "load") return analysisHistoryPeriod;
+  return segment === "recovery" ? recoveryHistoryPeriod : null;
+}
+
+function analysisEmptyCard(segment) {
+  let action;
+  let cause;
+  const connected = analysisDataSourceConnected();
+  if (connected && analysisSegmentPeriod(segment) === "fortnight") {
+    // Data may exist outside the short window, so the one action widens the period.
+    cause = "Keine Daten in den letzten 14 Tagen.";
+    action = reportNode("button", "12 Wochen anzeigen", "push-button");
+    action.type = "button";
+    action.addEventListener("click", () => {
+      const controls = document.querySelectorAll(segment === "load" ? "#analysisLoadPeriod button" : "#personalRecovery .analysis-period-controls button");
+      [...controls].find((button) => button.textContent === "12 Wochen")?.click();
+    });
+  } else if (connected) {
+    cause = "Noch keine Daten abgeglichen.";
+    action = reportNode("button", "Jetzt abgleichen", "push-button");
+    action.type = "button";
+    action.addEventListener("click", () => void analysisRefresh());
+  } else {
+    cause = "Garmin oder Wahoo ist nicht verbunden.";
+    action = reportNode("a", "Anbindung einrichten", "push-button");
+    action.href = "#more/connections";
+  }
+  return createEmptyState(ANALYSIS_EMPTY_TITLES[segment], cause, action);
+}
+
+function renderAnalysisEmptyState(segment) {
+  const root = document.getElementById("analysisEmptyState");
+  const empty = analysisSegmentEmpty(segment);
+  const key = empty ? `${segment}:${analysisDataSourceConnected()}:${analysisSegmentPeriod(segment)}` : "";
+  if (root.dataset.segment !== key) {
+    root.dataset.segment = key;
+    root.replaceChildren(...(empty ? [analysisEmptyCard(segment)] : []));
+  }
+  root.hidden = !empty;
+  return empty;
+}
+
+function renderAnalysisSegmentsIfActive() {
+  if (String(state.route || "").startsWith("analysis")) renderAnalysisSegments(state.route);
+}
+
 function renderAnalysisSegments(route = state.route) {
   const segment = { "analysis/load": "load", "analysis/recovery": "recovery", "analysis/sessions": "sessions" }[route] || "performance";
+  const empty = renderAnalysisEmptyState(segment);
   const labels = { performance: "Leistung", load: "Belastung", recovery: "Erholung", sessions: "Einheiten" };
   document.getElementById("analysisRefreshButton").setAttribute("aria-label", `Analyse aktualisieren: ${labels[segment]}`);
-  document.getElementById("analysisHistoryCharts").hidden = segment !== "performance";
-  document.getElementById("currentPerformance").hidden = segment !== "performance";
+  const performance = segment === "performance" && !empty;
+  const load = segment === "load" && !empty;
+  document.getElementById("analysisHistoryCharts").hidden = !performance;
+  document.getElementById("currentPerformance").hidden = !performance;
   const endurance = document.getElementById("performanceEnduranceCharts");
-  endurance.hidden = segment !== "performance" || !endurance.childElementCount;
-  document.getElementById("performancePredictions").hidden = segment !== "performance" || !document.getElementById("performancePredictions").childElementCount;
+  endurance.hidden = !performance || !endurance.childElementCount;
+  document.getElementById("performancePredictions").hidden = !performance || !document.getElementById("performancePredictions").childElementCount;
   document.getElementById("analysisLoadPeriod").hidden = segment !== "load";
-  document.getElementById("sessionPerformance").hidden = segment !== "load";
-  document.getElementById("trainingZoneCharts").hidden = segment !== "load";
-  document.getElementById("analysisLoadCharts").hidden = segment !== "load";
+  document.getElementById("sessionPerformance").hidden = !load;
+  document.getElementById("trainingZoneCharts").hidden = !load;
+  document.getElementById("analysisLoadCharts").hidden = !load;
   document.getElementById("personalRecovery").hidden = segment !== "recovery";
-  document.getElementById("activityAnalysis").hidden = segment !== "sessions";
+  document.getElementById("activityAnalysis").hidden = segment !== "sessions" || empty;
   document.querySelectorAll("[data-analysis-segment]").forEach((link) => {
     const active = link.dataset.analysisSegment === segment;
     link.classList.toggle("active", active);
@@ -1244,6 +1393,17 @@ function recoveryReferenceLabel(item, range, target, unit, position) {
   return item.reason || "Noch kein Vergleich verfügbar";
 }
 
+// M2 rolling-lnrmssd-v1 (#1772): seven-day mean of ln(RMSSD), back-transformed to ms.
+// The caller ends the note with a full stop, so a reason drops its own.
+function recoveryRollingNote(rolling) {
+  if (!["ok", "provisional"].includes(rolling.status)) return `7-Tage-Mittel: ${String(rolling.reason || "kein Vergleich").replace(/\.$/, "")}`;
+  const position = { below: "unter", within: "in", above: "über" }[rolling.position] || "neben";
+  const range = `${analysisValue(rolling.lower_ms, "ms")}–${analysisValue(rolling.upper_ms, "ms")}`;
+  const spread = rolling.cv_pct == null ? "" : ` · Schwankung ${analysisValue(rolling.cv_pct, "%")}`;
+  const provisional = rolling.status === "provisional" ? " · vorläufig" : "";
+  return `7-Tage-Mittel ${analysisValue(rolling.mean_ms, "ms")} (${rolling.window_nights} Nächte) · ${position} deinem Bereich ${range}${spread}${provisional}`;
+}
+
 function renderRecoveryCharts(report, root) {
   const metrics = [["sleep", "Schlafdauer", "h", 0], ["hrv", "HRV", "ms", 2], ["resting_hr", "Ruhepuls", "bpm", 3]];
   const baselines = selectedRecoveryBaselines(report);
@@ -1272,12 +1432,13 @@ function renderRecoveryCharts(report, root) {
     const rangeDescription = range ? " Vergleich mit " + item.nights + " früheren Nächten." : "";
     const changed = item.context_changed_on ? ` Messkontext geändert am ${dateLabel(item.context_changed_on)}.` : "";
     const continuity = `${changed}${item.continuity === "unknown" ? " Messkontext unbekannt." : ""}`;
+    const rolling = item.rolling ? ` ${recoveryRollingNote(item.rolling)}.` : "";
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
       bars: metric === "sleep", average: true, averageInHeading: true, cadenceDays: recoveryHistoryPeriod === "twelveWeeks" ? 7 : 1, range, target,
       currentPoint: points.some(analysisValidPoint) ? null : item.history.findLast((point) => point.date <= today && analysisValidPoint(point)),
       referenceLabel: metric === "sleep" ? "Durchschnitt der angezeigten Werte" : recoveryReferenceLabel(item, range, target, unit, position),
       coverageShort: analysisCoverageText(readings.length, expectedDays, "Tagen"),
-      coverage: `${analysisCoverageText(readings.length, expectedDays, "Tagen")}${rangeDescription}${continuity}`, points };
+      coverage: `${analysisCoverageText(readings.length, expectedDays, "Tagen")}${rangeDescription}${continuity}${rolling}`, points };
   });
   const missing = [];
   const charts = series.map((item) => {
@@ -1293,9 +1454,9 @@ function renderRecoveryCharts(report, root) {
     charts.unshift(...readinessCharts.children);
   }
   root.append(analysisPeriodControls("Zeitraum für Erholung", recoveryHistoryPeriod, (period) => { recoveryHistoryPeriod = period; renderPersonalRecovery(report); }));
+  root.dataset.analysisEmpty = String(!charts.length);
+  if (!charts.length) return;
   const group = analysisChartGroup(`Erholung · ${recoveryHistoryPeriod === "twelveWeeks" ? "Letzte 12 Wochen" : "Letzte 14 Tage"}`, charts, series);
-  const missingNote = analysisMissingDataNote(missing);
-  if (missingNote) group.append(missingNote);
   root.append(group);
 }
 
@@ -1323,7 +1484,10 @@ function renderTrainingFocus(report) {
   const zones = document.getElementById("trainingZoneCharts");
   zones.replaceChildren();
   root.replaceChildren(reportNode("h3", "Trainingsfokus"));
-  if (!report) { root.append(reportNode("p", "Noch keine Trainingsdaten vorhanden.", "muted")); return; }
+  // Unclassified sessions keep the card, which explains why they are not counted.
+  root.dataset.analysisEmpty = String(!report?.classified_sessions && !report?.unclassified_sessions);
+  zones.dataset.analysisEmpty = "true";
+  if (!report) { root.append(reportNode("p", "Noch keine Trainingsdaten vorhanden.", "muted")); renderAnalysisSegmentsIfActive(); return; }
 
   const categories = [["low_aerobic", "Leicht aerob"], ["high_aerobic", "Hoch aerob"], ["anaerobic", "Anaerob"]];
   const info = reportNode("button", "i", "analysis-legend-info");
@@ -1333,6 +1497,8 @@ function renderTrainingFocus(report) {
   bindAnalysisPopover(info, explanation); root.firstChild.append(info); root.append(explanation);
   appendTrainingFocusShare(report, categories, root);
   appendTrainingFocusZones(report, zones);
+  zones.dataset.analysisEmpty = String(!zones.childElementCount);
+  renderAnalysisSegmentsIfActive();
 }
 
 function appendLocalEquipment(items, root) {
@@ -1507,16 +1673,33 @@ function appendTrainingFocusShare(report, categories, root) {
   } else root.append(reportNode("p", "Noch keine Garmin-Einheiten mit auswertbarer Trainingswirkung vorhanden.", "muted"));
 }
 
+function trainingFocusZoneSeconds(items) {
+  const seconds = new Map();
+  for (const item of items) for (const [zone, value] of Object.entries(item.seconds)) seconds.set(zone, (seconds.get(zone) || 0) + value);
+  // Highest zone on top, as in the session detail (#1782).
+  return [...seconds.entries()].sort(([a], [b]) => Number(b.slice(1)) - Number(a.slice(1))).map(([label, value]) => ({label, value}));
+}
+
+function trainingFocusZoneInfo(report, model, items) {
+  const period = trainingFocusPeriodLabel(report).toLowerCase();
+  const source = [...new Set(items.map((item) => item.source).filter(Boolean))].join(", ");
+  // Each zone model is summed on its own (#1743); a session can appear for HF and power.
+  const basis = model === "provider" ? "Zonen des Geräts, für Einheiten ohne lokale Zonenzeiten" : "Lokale Zonen am Tag der Einheit, aus den Streams gezählt";
+  return `${basis} (${period}). Quelle: ${source || "unbekannt"}.`;
+}
+
 function appendTrainingFocusZones(report, details) {
   const zones = report.zones || [];
   for (const sensor of ["heart_rate", "power"]) {
+    const name = sensor === "heart_rate" ? "HF-Zonen" : "Power-Zonen";
     const matching = zones.filter((item) => item.sensor === sensor);
-    const title = sensor === "heart_rate" ? "HF-Zonen" : "Power-Zonen";
-    const seconds = new Map();
-    for (const item of matching) for (const [zone, value] of Object.entries(item.seconds)) seconds.set(zone, (seconds.get(zone) || 0) + value);
-    if (![...seconds.values()].some((value) => value > 0)) { details.append(reportNode("p", `${title}: keine aufgezeichneten Zonenzeiten.`, "muted")); continue; }
-    details.append(trainingFocusDistribution(title, [...seconds.entries()].sort(([a], [b]) => Number(a.slice(1)) - Number(b.slice(1))).map(([label, value]) => ({label, value})), "seconds",
-      `Intervals.icu: aufgezeichnete Zonenzeiten aller Sportarten im Zeitraum (${trainingFocusPeriodLabel(report).toLowerCase()}). HF und Power werden separat summiert; eine Einheit kann in beiden Ansichten vorkommen. Zonen beziehen sich auf die jeweils aufgezeichneten sportartspezifischen Schwellen. Fehlende Messungen werden nicht als null gewertet.`));
+    if (!matching.some((item) => item.measured_seconds > 0)) continue;
+    for (const model of ["local", "provider"]) {
+      const items = matching.filter((item) => (item.zone_model || "provider") === model);
+      const readings = trainingFocusZoneSeconds(items);
+      if (!readings.some((item) => item.value > 0)) continue;
+      const title = model === "provider" ? `${name} (Gerät)` : name;
+      details.append(trainingFocusDistribution(title, readings, "seconds", trainingFocusZoneInfo(report, model, items)));
+    }
   }
-  if (!zones.length) details.append(reportNode("p", "Noch keine aufgezeichneten HF- oder Power-Zonenzeiten vorhanden.", "muted"));
 }

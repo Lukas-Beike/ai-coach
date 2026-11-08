@@ -92,10 +92,8 @@ class ActivitySummaryTests(unittest.TestCase):
         self.assertEqual(60.0, summary["provider_training_load"])
         self.assertEqual("intervals_training_load", summary["provider_load_model"])
         self.assertEqual(78.0, summary["provider_intensity"])
-        self.assertEqual(
-            [{"id": "Z1", "secs": 600.0}, {"id": "Z2", "secs": 1200.0}],
-            summary["heart_rate_zone_times"],
-        )
+        # Intervals.icu zone times are never read (#1743).
+        self.assertNotIn("heart_rate_zone_times", summary)
         self.assertEqual("77", summary["planned_event_id"])
         self.assertEqual("Intervals.icu", summary["source"])
         self.assertEqual("Intervals.icu", summary["sources"]["provider_training_load"])
@@ -327,8 +325,11 @@ if __name__ == "__main__":
 
 
 class StoredKeyTests(unittest.TestCase):
-    def test_stored_key_is_the_intervals_record_else_the_session(self) -> None:
-        from backend.activities.activity_summary import stored_activity_key
+    def test_stored_key_is_the_session_id(self) -> None:
+        from backend.activities.activity_summary import (
+            legacy_activity_keys,
+            stored_activity_key,
+        )
 
         mixed = activity_summary(
             "act_1",
@@ -343,8 +344,65 @@ class StoredKeyTests(unittest.TestCase):
         )
 
         self.assertEqual({"garmin": "g1", "intervals": "i1"}, mixed["record_ids"])
-        self.assertEqual("i1", stored_activity_key(mixed))
+        self.assertEqual("act_1", stored_activity_key(mixed))
         self.assertEqual("act_2", stored_activity_key(garmin_only))
+        self.assertEqual(("g1", "i1"), legacy_activity_keys(mixed))
+        self.assertEqual(("g2",), legacy_activity_keys(garmin_only))
+
+
+class IntervalsLastTests(unittest.TestCase):
+    """Intervals.icu is output only: it never leads a session it shares."""
+
+    def test_garmin_is_primary_and_measured_source_over_intervals(self) -> None:
+        garmin = record(
+            ProviderId.GARMIN,
+            "g1",
+            recorded_by=RecordingOrigin.GARMIN,
+            avg_power=205.0,
+            name="Garmin name",
+        )
+        intervals = record(
+            ProviderId.INTERVALS,
+            "i1",
+            recorded_by=RecordingOrigin.GARMIN,
+            avg_power=999.0,
+            name="Intervals name",
+        )
+
+        for order in ([garmin, intervals], [intervals, garmin]):
+            summary = activity_summary("act_1", order, BERLIN)
+
+            self.assertEqual("Garmin Connect", summary["source"])
+            self.assertEqual(205.0, summary["avg_power"])
+            self.assertEqual("Garmin name", summary["name"])
+            self.assertEqual("Garmin Connect", summary["sources"]["avg_power"])
+
+    def test_wahoo_is_primary_over_garmin_and_intervals(self) -> None:
+        wahoo = record(ProviderId.WAHOO, "w1", avg_power=210.0, name="Wahoo name")
+        garmin = record(
+            ProviderId.GARMIN,
+            "g1",
+            recorded_by=RecordingOrigin.GARMIN,
+            avg_power=205.0,
+            name="Garmin name",
+        )
+        intervals = record(
+            ProviderId.INTERVALS, "i1", avg_power=999.0, name="Intervals name"
+        )
+
+        summary = activity_summary("act_1", [intervals, garmin, wahoo], BERLIN)
+
+        self.assertEqual("wahoo", summary["recorded_by"])
+        self.assertEqual("Wahoo", summary["source"])
+        self.assertEqual(210.0, summary["avg_power"])
+        self.assertEqual("Wahoo name", summary["name"])
+
+    def test_a_session_without_an_intervals_record_reads_as_before(self) -> None:
+        garmin = record(ProviderId.GARMIN, "g1", recorded_by=RecordingOrigin.GARMIN)
+
+        summary = activity_summary("act_1", [garmin], BERLIN)
+
+        self.assertEqual({"garmin": "g1"}, summary["record_ids"])
 
 
 class IntervalsCopyOrderTests(unittest.TestCase):

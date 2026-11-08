@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, date, timedelta
 from pathlib import Path
@@ -32,6 +32,10 @@ from backend.providers.garmin_personal import (
     PERSONAL_KEY_REJECTED_REASON,
     GarminPersonalClient,
     GarminTransportClient,
+)
+from backend.providers.garmin_rating_history import (
+    RatingReadHooks,
+    collect_activity_ratings,
 )
 from backend.providers.garmin_wellness_history import (
     WellnessHistoryHooks,
@@ -209,6 +213,12 @@ class GarminRemoteReader:
     def _personal_configured(self) -> bool:
         return bool(str(self._config.garmin_personal_api_key or "").strip())
 
+    def sdk_threshold_failure(self) -> dict[str, str] | None:
+        """The failure freezing the Garmin thresholds; None without an SDK setup."""
+        if not self._sdk_configured():
+            return None
+        return self._state_service.sdk_threshold_failure()
+
     def _sdk_configured(self) -> bool:
         return self._client_factory.available() and _garmin_sync_configured(
             self._config, self._garmin_tokens
@@ -276,9 +286,12 @@ class GarminRemoteReader:
         self,
         provider_activity_ids: Sequence[str],
         *,
+        strength_ids: Collection[str] = (),
         cancel_event: threading.Event | None = None,
     ) -> Generator[tuple[str, dict[str, Any]]]:
         """Collect the bounded detail sets of several Garmin activities.
+
+        Activities in ``strength_ids`` also get their exercise sets.
 
         One client is authenticated for the whole batch, and the Garmin tokens are
         persisted when the generator finishes or is closed early. A payload gets
@@ -315,6 +328,7 @@ class GarminRemoteReader:
                     capability_allowed=allowed,
                     capability_failure=record_failure,
                     capability_success=self._state_service.record_capability_success,
+                    exercise_sets=provider_activity_id in strength_ids,
                 )
                 if rate_limit_hits:
                     detail["rate_limited"] = True
@@ -327,11 +341,14 @@ class GarminRemoteReader:
         self,
         provider_activity_id: str,
         *,
+        strength: bool = False,
         cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         """Collect the bounded detail sets of one Garmin activity."""
         details = self.fetch_activity_details(
-            [provider_activity_id], cancel_event=cancel_event
+            [provider_activity_id],
+            strength_ids=(provider_activity_id,) if strength else (),
+            cancel_event=cancel_event,
         )
         try:
             item = next(details, None)
@@ -390,6 +407,40 @@ class GarminRemoteReader:
                     capability_allowed=self._state_service.capability_allowed,
                     capability_failure=self._state_service.record_capability_failure,
                     capability_success=self._state_service.record_capability_success,
+                ),
+            )
+        finally:
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
+
+    def fetch_activity_ratings(
+        self,
+        activities: list[tuple[str, str]],
+        on_row: Callable[[dict[str, Any]], None],
+        on_skip: Callable[[str], None],
+        guard: Callable[[], AbstractContextManager[Any]],
+    ) -> None:
+        """Read the watch ratings of past activities for the one-off backfill (#1728).
+
+        One authenticated client serves the whole batch, so the Personal API token
+        is exchanged once. Only a failed token exchange flags the Personal API key
+        (the client does that); the classification is the sync owner's.
+        """
+        if not self.configured():
+            raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
+        call_external = self._external_call(None)
+        client, login_argument = self._authenticated_client(call_external)
+        try:
+            collect_activity_ratings(
+                client,
+                activities,
+                on_row,
+                on_skip,
+                external_call=call_external,
+                hooks=RatingReadHooks(
+                    error_class=sync_job_error_class,
+                    skippable=_skippable_history_error,
+                    key_rejected=self._state_service.personal_key_rejected,
+                    guard=guard,
                 ),
             )
         finally:
@@ -1022,6 +1073,12 @@ class GarminSyncSource:
             self._fixture_loader.path() is not None or self._remote_reader.available()
         )
 
+    def sdk_threshold_failure(self) -> dict[str, str] | None:
+        """The SDK failure freezing Garmin thresholds; None in fixture mode."""
+        if self._fixture_loader.path() is not None:
+            return None
+        return self._remote_reader.sdk_threshold_failure()
+
     def configured(self) -> bool:
         return (
             self._fixture_loader.path() is not None or self._remote_reader.configured()
@@ -1203,6 +1260,10 @@ class GarminSyncService:
 
     def available(self) -> bool:
         return self._source.available()
+
+    def sdk_threshold_failure(self) -> dict[str, str] | None:
+        """The failure that freezes the Garmin thresholds, or None (#1768)."""
+        return self._source.sdk_threshold_failure()
 
     def configured(self) -> bool:
         return self._source.configured()

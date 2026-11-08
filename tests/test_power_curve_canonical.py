@@ -18,6 +18,11 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_compaction import (
+    ingest_intervals_partial_snapshot,
+    ingest_intervals_snapshot,
+)
+
 from backend.canonical.domain_records import (
     EMPTY_POWER_CURVE,
     PowerCurve,
@@ -43,10 +48,6 @@ from backend.providers.intervals_power_curve_mapping import (
 from backend.runtime.ports import PowerCurveReader
 from backend.sync.canonical_backfill import CanonicalBackfill
 from backend.sync.canonical_backfill import _ingest_work as backfill_ingest_work
-from backend.sync.canonical_ingest import (
-    ingest_intervals_partial_snapshot,
-    ingest_intervals_snapshot,
-)
 from backend.sync.canonical_read_selector import PENDING_READER, CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
@@ -399,7 +400,6 @@ class PowerCurveReadStateTests(IngestFixture):
             reprojecting_table=CanonicalTableReader(),
             key_values=key_values or KeyValueRepository(lambda: NOW),
             zone=lambda _db: ZONE,
-            compact_only=lambda _db: False,
             competitions=CompetitionRepository(),
         )
 

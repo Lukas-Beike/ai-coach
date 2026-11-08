@@ -82,6 +82,7 @@ DETAIL_FILES = (
     "activity_stream_channels.jsonl",
     "activity_laps.jsonl",
     "activity_zone_times.jsonl",
+    "activity_strength_sets.jsonl",
     "activity_detail_analysis.jsonl",
 )
 DETAIL_TABLES = tuple(name.removesuffix(".jsonl") for name in DETAIL_FILES)
@@ -364,8 +365,8 @@ class PrivacyExportProviderTests(ProviderDataFixture):
     def lines(archive, name):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
-    def test_format_version_ten_lists_provider_detail_domain_and_link_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 11)
+    def test_format_version_lists_provider_detail_domain_and_link_files(self):
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 12)
         expected = {
             *PROVIDER_FILES,
             *DETAIL_FILES,
@@ -375,7 +376,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 11)
+            self.assertEqual(manifest["format_version"], 12)
             self.assertLessEqual(expected, set(manifest["jsonl_files"]))
             self.assertLessEqual(expected, set(archive.namelist()))
 
@@ -642,6 +643,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
             ("activity_stream_channels", "activity_detail_sets"),
             ("activity_laps", "activity_detail_sets"),
             ("activity_zone_times", "activity_detail_sets"),
+            ("activity_strength_sets", "activity_detail_sets"),
             ("activity_detail_sets", "activity_records"),
             ("activity_detail_analysis", "activity_sessions"),
             ("activity_records", "activity_sessions"),

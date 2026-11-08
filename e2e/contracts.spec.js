@@ -474,7 +474,7 @@ test("fresh service worker keeps the current shell available offline", async ({ 
     await expect(page.locator("#loginPassword")).toBeEditable();
     expect(await page.evaluate(async () => {
       const names = await caches.keys();
-      const cacheName = names.find((name) => /^intervals-coach-v/.test(name));
+      const cacheName = names.find((name) => /^pacecraft-v/.test(name));
       const cache = await caches.open(cacheName);
       return (await cache.keys()).some((request) => new URL(request.url).pathname.startsWith("/api/"));
     })).toBe(false);
@@ -543,12 +543,15 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
       { id: "agenda-completed-swim", date: addDateKey(date, 1), name: "Absolvierte Schwimmeinheit", type: "Swim", is_completed_activity: true, moving_duration_s: 1800, distance_m: 1500 },
       { id: "agenda-completed-strength", date: addDateKey(date, 1), name: "Absolvierte Krafteinheit", type: "WeightTraining", is_completed_activity: true, moving_duration_s: 1800 },
       { id: "agenda-completed-other", date: addDateKey(date, 1), name: "Absolvierte sonstige Einheit", type: "Hike", is_completed_activity: true, moving_duration_s: 1800 },
+      // Keeps a plan in the week of date + 1 on Sundays too, so extra activities there still show "Zusätzlich".
+      { id: "agenda-next-plan", date: addDateKey(date, 1), name: "Geplante Folgeeinheit", type: "Run", duration_minutes: 30 },
       { id: "agenda-matched", date: addDateKey(date, -2), name: "Aktivierung", type: "Ride", duration_minutes: 45, training_load: 25,
         compliance: { status: "completed", percentage: 136, basis: "training_load", actual_activity: { name: "Aktivierung absolviert", type: "Ride", moving_duration_s: 3600, distance_m: 24000, training_load: 34, avg_hr: 125, avg_power: 201 } } },
       { id: "agenda-missed", date: addDateKey(date, -3), name: "Ausgefallene Einheit", type: "Ride", duration_minutes: 45, compliance: { status: "missed", percentage: 0 } },
     ];
     renderPlanned(state.data.training_calendar);
-    document.querySelectorAll(".planned-week").forEach((week) => { week.open = true; });
+    // Past days with sessions start collapsed; open them with the weeks so every session can be inspected.
+    document.querySelectorAll(".planned-week, .planned-day-toggle").forEach((toggle) => { toggle.open = true; });
     return date;
   });
   const day = page.locator(`.planned-day[data-date="${today}"]`);
@@ -615,8 +618,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
   expect(await day.evaluate((element) => {
     const heading = element.querySelector(".planned-day-heading").getBoundingClientRect();
     const content = element.querySelector(".planned-day-content").getBoundingClientRect();
-    return heading.right <= content.left && element.scrollWidth <= element.clientWidth
-      && content.top <= heading.top + 1;
+    return heading.bottom <= content.top + 1 && element.scrollWidth <= element.clientWidth;
   })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await day.screenshot({ path: testInfo.outputPath("planned-agenda.png") });
@@ -745,7 +747,6 @@ test("analysis charts preserve sources, gaps and dated values", { tag: "@respons
   }));
   await expect(charts.locator("svg")).toHaveCount(0);
   await expect(charts.locator(".empty").filter({ hasText: "Noch keine datierten Werte im Zeitraum vorhanden." })).toHaveCount(0);
-  await expect(charts.locator('[data-analysis-section="development-Lauf"]').locator("..").locator("p.empty", { hasText: "Keine Daten" })).toHaveText("Keine Daten: Schwellenpace, VO₂max · Schätzung, Lauf-Belastbarkeit");
-  await expect(charts.locator('[data-analysis-section="development-Rad"]').locator("..").locator("p.empty", { hasText: "Keine Daten" })).toHaveText("Keine Daten: Leistungsschwelle · FTP, VO₂max · Schätzung");
+  await expect(charts).not.toContainText("Keine Daten");
   await expect(charts.locator("#performancePredictions")).toHaveText(predictionsText);
 });

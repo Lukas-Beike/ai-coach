@@ -92,6 +92,9 @@ class _Battery:
     def current(self) -> dict[str, Any]:
         return BODY_BATTERY
 
+    def current_in(self, _db: Any) -> dict[str, Any]:
+        return BODY_BATTERY
+
 
 class _Observations:
     """A fixed list of observations behind the reader port."""
@@ -210,7 +213,19 @@ class GarminStateEqualityTests(GarminReadFixture):
             ("readiness", state.has_readiness),
         ):
             self.assertEqual(bool(self.garmin.get(section)), flag, section)
-        self.assertEqual(overlay, legacy)
+        # Only the canonical read derives the activity max HR (#1686); the payload
+        # parser keeps the profile value alone.
+        activity_keys = {
+            key
+            for key in ("cycling_max_hr_bpm", "running_max_hr_bpm")
+            if legacy[key]["value"] is None
+        }
+        self.assertEqual(
+            {key: value for key, value in overlay.items() if key not in activity_keys},
+            {key: value for key, value in legacy.items() if key not in activity_keys},
+        )
+        for key in activity_keys:
+            self.assertIsNotNone(overlay[key]["observed_at"], key)
 
     def test_activity_max_hr_skips_deleted_sessions(self) -> None:
         populate(self)
@@ -673,9 +688,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
             {},
             metrics,
         )
-        # The Intervals ride FTP precedes Garmin's (#1668); pace and HR stay Garmin.
-        self.assertEqual(current["cycling_ftp_watts"]["value"], 400)
-        self.assertEqual(current["cycling_ftp_watts"]["alternatives"][0]["value"], 306)
+        # Garmin's ride FTP is the value; the Intervals setting is no source.
+        self.assertEqual(current["cycling_ftp_watts"]["value"], 306)
+        self.assertNotIn("alternatives", current["cycling_ftp_watts"])
         for key, expected in (
             ("run_threshold_pace_seconds_per_km", 279),
             ("run_threshold_hr_bpm", 161),

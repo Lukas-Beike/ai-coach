@@ -220,10 +220,10 @@ class WorkflowSourceTests(unittest.TestCase):
         )
         self.assertEqual(len(re.findall(r"docker build\s", workflow)), 1)
         image = workflow.split("  image:\n", 1)[1].split("  test_shards:\n", 1)[0]
-        self.assertIn("docker build --tag ai-coach:ci .", image)
+        self.assertIn("docker build --tag pacecraft:ci .", image)
         self.assertIn("needs: source\n", image)
         upload = image.split("actions/upload-artifact@", 1)[1]
-        self.assertIn("name: ai-coach-ci-image", upload)
+        self.assertIn("name: pacecraft-ci-image", upload)
         self.assertIn("retention-days: 1", upload)
         consumers = {
             "container_tests": (
@@ -242,11 +242,11 @@ class WorkflowSourceTests(unittest.TestCase):
         for job, (text, needs) in consumers.items():
             with self.subTest(job=job):
                 self.assertIn(needs, text)
-                self.assertIn("name: ai-coach-ci-image", text)
-                self.assertIn("gunzip -c ai-coach-ci-image.tar.gz | docker load", text)
+                self.assertIn("name: pacecraft-ci-image", text)
+                self.assertIn("gunzip -c pacecraft-ci-image.tar.gz | docker load", text)
                 self.assertNotIn("docker build", text)
-        self.assertIn("image: ai-coach:ci", consumers["image_sbom"][0])
-        self.assertIn("--workdir /app ai-coach:ci", consumers["container_tests"][0])
+        self.assertIn("image: pacecraft:ci", consumers["image_sbom"][0])
+        self.assertIn("--workdir /app pacecraft:ci", consumers["container_tests"][0])
 
     def test_e2e_selects_specs_with_playwright_list_not_file_grep(self):
         root = Path(__file__).resolve().parents[1]

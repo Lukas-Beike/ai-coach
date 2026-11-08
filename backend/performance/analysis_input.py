@@ -70,7 +70,6 @@ def analysis_input(
     streams: MergedStreams | None,
     laps: SetChoice | None,
     *,
-    decoupling: float | None = None,
     members: Sequence[ActivityRecord] = (),
 ) -> AnalysisInput:
     """Build the analysis input of one activity from its merged detail.
@@ -88,7 +87,6 @@ def analysis_input(
     )
     activity: dict[str, Any] = {
         **analysis_sport(record, members),
-        "decoupling": decoupling,
         "streams": stream_fields,
         "laps": lap_fields,
     }

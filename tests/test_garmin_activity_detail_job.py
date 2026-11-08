@@ -151,7 +151,9 @@ class GarminActivityDetailJobTests(unittest.TestCase):
             result,
             {"status": "completed", "activity_id": ACTIVITY, "kinds": KINDS},
         )
-        self.reader.fetch_activity_detail.assert_called_once_with(ACTIVITY)
+        self.reader.fetch_activity_detail.assert_called_once_with(
+            ACTIVITY, strength=False
+        )
         with self.manager.reader() as db:
             items = detail_sets_for(db, GARMIN_ID, ACTIVITY)
         self.assertEqual(len(items), 4)
@@ -334,7 +336,9 @@ class GarminActivityDetailJobTests(unittest.TestCase):
         result = self.service().refresh(session)
 
         self.assertEqual(result["activity_id"], ACTIVITY)
-        self.reader.fetch_activity_detail.assert_called_once_with(ACTIVITY)
+        self.reader.fetch_activity_detail.assert_called_once_with(
+            ACTIVITY, strength=False
+        )
 
     def test_mfa_required_from_the_reader_propagates_as_401(self) -> None:
         self.reader.fetch_activity_detail.side_effect = AppError(
@@ -348,7 +352,7 @@ class GarminActivityDetailJobTests(unittest.TestCase):
         self.assertEqual(_stored(self.manager), {})
 
     def test_record_removed_during_fetch_is_not_written(self) -> None:
-        def fetch_then_delete(_activity_id: str) -> dict[str, Any]:
+        def fetch_then_delete(_activity_id: str, **_kwargs: Any) -> dict[str, Any]:
             with self.manager.unit_of_work() as db:
                 db.execute(
                     "UPDATE activity_records SET state = ? "
@@ -426,7 +430,6 @@ class GarminActivityDetailWiringTests(unittest.TestCase):
             threading.Event(),
             all_sync_days=-1,
             daily_sync_markers=Mock(),
-            references=references,
         )
 
         queue.enqueue(

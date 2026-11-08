@@ -163,9 +163,7 @@ class ReadPathTests(unittest.TestCase):
             canonical_periods([garmin_night(end, 8) for end in nights(30)], [])
         )
         reader = PeriodReader(periods)
-        inputs = read_recovery_inputs(
-            reader, None, as_of=TODAY, latest_wellness_day=None
-        )
+        inputs = read_recovery_inputs(reader, None, as_of=TODAY)
         self.assertEqual(inputs.sleep_periods, periods)
         self.assertEqual(reader.start, TODAY - timedelta(days=RECOVERY_HISTORY_DAYS))
         regularity = personal_recovery(
@@ -193,9 +191,7 @@ class ReadPathTests(unittest.TestCase):
 
     def test_a_source_without_periods_has_no_timing_data(self) -> None:
         # Canonical reads (#1416): no raw-row fallback; no periods, no data.
-        inputs = read_recovery_inputs(
-            FakeReader(None), None, as_of=TODAY, latest_wellness_day=None
-        )
+        inputs = read_recovery_inputs(FakeReader(None), None, as_of=TODAY)
         self.assertIsNone(inputs.sleep_periods)
         regularity = personal_recovery({}, TODAY, canonical=inputs)["regularity"]
         self.assertEqual(regularity["status"], "insufficient_data")

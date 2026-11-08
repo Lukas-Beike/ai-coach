@@ -252,7 +252,7 @@ def json_request_parts(
     body = request_body(payload, raw_body)
     request_headers = {
         "Accept": "application/json",
-        "User-Agent": f"IntervalsCoach/{app_version}",
+        "User-Agent": f"Pacecraft/{app_version}",
     }
     if body is not None:
         request_headers["Content-Type"] = "application/json"

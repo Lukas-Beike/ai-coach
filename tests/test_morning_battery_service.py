@@ -111,7 +111,6 @@ class Harness:
     def get(self, _db: object, key: str) -> str | None:
         return self.values.get(key)
 
-
     def set(self, _db: object, key: str, value: str) -> None:
         self.trace.append(f"write:{key}")
         self.values[key] = value
@@ -119,6 +118,10 @@ class Harness:
     def execute(self, _sql: str, _params: object) -> Harness:
         # Stands in for the connection the Garmin state is read from.
         return self
+
+    def fetchall(self) -> list[dict[str, object]]:
+        # No derived morning observations: the record is read from the view.
+        return []
 
     def fetchone(self) -> dict[str, str]:
         snapshot = json.loads(self.values["garmin_snapshot"])
@@ -250,19 +253,20 @@ class MorningBodyBatteryServiceTests(unittest.TestCase):
         with patch.object(
             harness, "get", side_effect=AssertionError("full snapshot read")
         ):
-            self.assertEqual(store.current(), {"status": "ready", "value": 84})
+            self.assertEqual(
+                store.current(),
+                {"status": "ready", "value": 84, "before_sleep": None, "morning": None},
+            )
 
-    def test_current_reads_persisted_or_explicit_snapshot(self) -> None:
+    def test_current_reads_the_persisted_record(self) -> None:
         persisted = {"sleep_date": "2026-09-04", "status": "ready"}
         harness = Harness(snapshot={"morning_body_battery": persisted})
         service = harness.make_service()
 
-        self.assertEqual(service.current(), persisted)
         self.assertEqual(
-            service.current({"morning_body_battery": {"status": "explicit"}}),
-            {"status": "explicit"},
+            service.current(),
+            {**persisted, "before_sleep": None, "morning": None},
         )
-        self.assertIsNone(service.current({"morning_body_battery": "invalid"}))
 
     def test_sync_is_bounded_by_maintenance_and_provider_gates(self) -> None:
         harness = Harness()

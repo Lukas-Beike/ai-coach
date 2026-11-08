@@ -24,7 +24,6 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance.freshness import GarminSyncStatus
-from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
 from backend.provider_credentials import GARMIN_PERSONAL_KEY_REJECTED_KEY
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
@@ -34,12 +33,19 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_payload_metrics import garmin_source_observed_at
 from backend.sync.garmin_performance_history import append_garmin_performance_history
 from backend.sync.garmin_personal_status import SDK_SKIPPED_KEY, sdk_skipped_view
-from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.garmin_snapshot_writer import (
+    GarminSnapshotWriter,
+    complete_activity_read_window,
+)
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.state import SyncStateRepository
 
 GARMIN_CAPABILITY_FAILURE_LIMIT = 3
 GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
+# SDK-only families that carry the Garmin FTP and lactate threshold, and the
+# count of syncs in a row whose reads of them failed (#1768).
+SDK_THRESHOLD_SOURCES = ("cycling_ftp", "cycling_ftp_history", "running_threshold")
+SDK_THRESHOLD_FAILURES_KEY = "garmin_sdk_threshold_failures"
 GARMIN_INITIAL_SYNC_DAYS = 84
 GARMIN_CATCHUP_MAX_DAYS = 90
 # The days of Garmin read-window sections that the performance views load.
@@ -130,17 +136,8 @@ def activity_deletion_window(payload: dict[str, Any]) -> DeletionWindow | None:
     Only a run whose activity list came back for every date window, without an
     error, rate limit, capability pause or cancel, vouches for its ``read_window``.
     """
-    provider_sync = payload.get("provider_sync") or {}
-    stats = (provider_sync.get("pagination") or {}).get("activities") or {}
-    read_window = provider_sync.get("read_window") or {}
-    if stats.get("complete") is not True:
-        return None
-    try:
-        start = date.fromisoformat(iso_date_prefix(str(read_window["start"])))
-        end = date.fromisoformat(iso_date_prefix(str(read_window["end"])))
-    except KeyError, TypeError, ValueError:
-        return None
-    return fetch_deletion_window(start, end)
+    window = complete_activity_read_window(payload)
+    return None if window is None else fetch_deletion_window(*window)
 
 
 def _source_deletion_window(
@@ -451,10 +448,6 @@ class GarminPayloadService:
             payload["activities"] = deduplicate_api_records(
                 payload.get("activities", [])
             )
-        payload["sport_max_hr"] = merge_garmin_max_hr(
-            garmin_activity_max_hr(payload.get("activities")),
-            previous.get("sport_max_hr"),
-        )
         if fixture:
             payload["provider_sync"].setdefault(
                 "pagination",
@@ -743,6 +736,45 @@ class GarminSyncStateService:
             value = None
         return sdk_skipped_view(value)
 
+    def sdk_threshold_failure(self) -> dict[str, str] | None:
+        """The SDK failure that freezes Garmin thresholds, or None (#1768).
+
+        A skipped SDK login counts at once; otherwise the threshold reads must
+        have failed in ``GARMIN_CAPABILITY_FAILURE_LIMIT`` syncs in a row.
+        """
+        skipped = self.sdk_skipped()
+        if skipped:
+            return skipped
+        state = self._threshold_read_state()
+        if int(state.get("count") or 0) < GARMIN_CAPABILITY_FAILURE_LIMIT:
+            return None
+        return {"reason": "requests_failed", "at": str(state.get("at") or "")}
+
+    def _threshold_read_state(self) -> dict[str, Any]:
+        try:
+            value = json.loads(self._get(SDK_THRESHOLD_FAILURES_KEY) or "{}")
+        except TypeError, ValueError:
+            value = {}
+        return value if isinstance(value, dict) else {}
+
+    def _track_threshold_reads(self, payload: dict[str, Any]) -> None:
+        """Count syncs in a row whose SDK threshold reads failed; a read resets."""
+        failed = any(
+            isinstance(entry, dict) and entry.get("source") in SDK_THRESHOLD_SOURCES
+            for entry in payload.get("errors") or ()
+        )
+        if failed:
+            count = int(self._threshold_read_state().get("count") or 0) + 1
+            self._set(
+                SDK_THRESHOLD_FAILURES_KEY,
+                json.dumps(
+                    {"count": count, "at": self._utc_now()}, separators=(",", ":")
+                ),
+            )
+        elif any(source in payload for source in SDK_THRESHOLD_SOURCES):
+            if self._get(SDK_THRESHOLD_FAILURES_KEY):
+                self._set(SDK_THRESHOLD_FAILURES_KEY, "")
+
     def error_entries(self) -> list[dict[str, Any]]:
         try:
             errors = json.loads(self._get("last_garmin_error") or "[]")
@@ -801,6 +833,7 @@ class GarminSyncStateService:
             if not payload.get("errors")
             else json.dumps(payload["errors"], ensure_ascii=False),
         )
+        self._track_threshold_reads(payload)
         if complete:
             self._sync_state_repository.update_cursor(
                 GARMIN_ID,

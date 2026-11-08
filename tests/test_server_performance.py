@@ -4,13 +4,12 @@ import unittest
 from dataclasses import replace
 from datetime import date, timedelta
 from datetime import datetime as _local_datetime
-from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
+import intervals_compaction
 from canonical_detail_support import seed_intervals_activity
 from canonical_recovery_support import RecordingReader, recovery_only_inputs
-from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
 from performance_day_support import (
     canonical_from_snapshot,
@@ -23,26 +22,18 @@ from server_test_support import (
     _garmin_metrics,
     server,
 )
-from support import complete_canonical_backfill
+from support import complete_canonical_backfill, mark_tables_serving
 
 from backend.performance import activity_validation
 from backend.performance import context as performance_context
 from backend.performance import load as performance_load
-from backend.performance import max_hr as performance_max_hr
 from backend.performance import morning_battery as performance_morning_battery
 from backend.performance import planning_recovery as performance_planning_recovery
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.morning_battery_service import MORNING_BATTERY_HISTORY_KEY
 from backend.providers import garmin as garmin_provider
-from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
-from backend.sync import garmin_payload_metrics, intervals_compaction
-from backend.sync import queue as sync_queue
-from backend.sync.garmin_activity_duplicates import (
-    garmin_activity_duplicates_intervals,
-)
-from backend.sync.intervals import IntervalsSnapshotReader
-from backend.sync.performance import PerformanceRefreshService
+from backend.sync import garmin_payload_metrics
 from backend.weather import history as weather_history
 
 
@@ -78,53 +69,8 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(load["totals"]["value"], 300.0)
         self.assertIsNotNone(load["computed_at"])
 
-    def test_performance_refresh_jobs_are_deduplicated_atomically(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with patch.object(server, "CONFIG", config):
-            first = server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals",
-                "performance_refresh",
-                {"reason": "first"},
-                requested_by="scheduler",
-            )
-            second = server.SYNC_JOB_QUEUE.service().enqueue(
-                "intervals",
-                "performance_refresh",
-                {"reason": "second"},
-                requested_by="coach",
-            )
-        self.assertEqual(second["id"], first["id"])
-        self.assertEqual(second["payload"], {"reason": "first"})
-        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            self.assertEqual(
-                db.execute(
-                    "SELECT COUNT(*) AS count FROM sync_jobs WHERE type='performance_refresh'"
-                ).fetchone()["count"],
-                1,
-            )
 
-    def test_automatic_performance_follow_up_skips_direct_refresh(self):
-        config = replace(server.CONFIG, intervals_api_key="test-key")
-        with (
-            patch.object(server, "CONFIG", config),
-            patch.object(PerformanceRefreshService, "running", return_value=True),
-            patch.object(sync_queue.SyncJobQueueService, "enqueue") as enqueue,
-        ):
-            self.assertIsNone(
-                server.INTERVALS_SYNC.performance_followup().enqueue_after_sync(
-                    "startup"
-                )
-            )
-        enqueue.assert_not_called()
 
-    def test_performance_refresh_timestamp_and_initial_loading_state_are_rendered(self):
-        root = Path(__file__).resolve().parents[1] / "public"
-        app = "\n".join(
-            (root / name).read_text(encoding="utf-8")
-            for name in ("shared.js", "performance-view.js", "state-loader.js")
-        )
-        self.assertIn("performance_refresh", app)
-        self.assertIn("state.loadPromise", app)
 
     def test_garmin_coach_context_keeps_only_latest_recovery_records(self):
         latest = server.ATHLETE_CLOCK.now().date() - timedelta(days=1)
@@ -318,58 +264,10 @@ class ServerPerformanceTests(ServerTestCase):
             }
         )
         self.assertEqual(result["weight_kg"]["value"], 72.8)
-        self.assertEqual(result["cycling_max_hr_bpm"]["value"], 181)
-        self.assertEqual(result["running_max_hr_bpm"]["value"], 194)
+        # Activity maxima are a read-time fallback over canonical records (#1686).
+        self.assertIsNone(result["cycling_max_hr_bpm"]["value"])
+        self.assertIsNone(result["running_max_hr_bpm"]["value"])
         self.assertEqual(result["weight_kg"]["source"], "Garmin Connect")
-
-    def test_garmin_max_heart_rate_survives_activity_deduplication(self):
-        garmin = [
-            {
-                "activityType": "cycling",
-                "startTimeLocal": "2026-08-29T07:00:00",
-                "duration": 3600,
-                "distance": 30000,
-                "maxHR": 188,
-            },
-            {
-                "activityType": "running",
-                "startTimeLocal": "2026-08-29T08:00:00",
-                "duration": 1800,
-                "distance": 5000,
-                "maxHR": 193,
-            },
-        ]
-        intervals = [
-            {
-                "type": "Ride",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3600,
-                "distance": 30000,
-            },
-            {
-                "type": "Run",
-                "start_date_local": "2026-08-29T08:00:00",
-                "moving_time": 1800,
-                "distance": 5000,
-            },
-        ]
-        kept = [
-            item
-            for item in garmin
-            if not garmin_activity_duplicates_intervals(item, intervals)
-        ]
-        skipped = len(garmin) - len(kept)
-        self.assertEqual(skipped, 2)
-        self.assertEqual(kept, [])
-        metrics = _garmin_metrics(
-            {
-                "activities": kept,
-                "sport_max_hr": performance_max_hr.garmin_activity_max_hr(garmin),
-            }
-        )
-        self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
-        self.assertEqual(metrics["running_max_hr_bpm"]["value"], 193)
-        self.assertEqual(metrics["cycling_max_hr_bpm"]["source"], "Garmin Connect")
 
     def test_garmin_profile_max_heart_rate_overrides_activity_values(self):
         zones = [{"sport": "DEFAULT", "maxHeartRateUsed": 186}]
@@ -428,10 +326,10 @@ class ServerPerformanceTests(ServerTestCase):
             _garmin_metrics(read_garmin()),
             canonical=recovery_only_inputs(snapshot=snapshot).current,
         )
-        # The Intervals ride setting precedes Garmin's FTP (#1668).
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 250)
-        self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Intervals.icu")
-        self.assertEqual(metrics["cycling_ftp_watts"]["alternatives"][0]["value"], 302)
+        # Garmin's FTP is the value; the Intervals.icu setting is no source.
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
+        self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")
+        self.assertNotIn("alternatives", metrics["cycling_ftp_watts"])
         # Intervals.icu eFTP is no longer read (#1727).
         self.assertNotIn("cycling_eftp_watts", metrics)
         self.assertEqual(metrics["run_threshold_watts"]["value"], 328)
@@ -531,8 +429,8 @@ class ServerPerformanceTests(ServerTestCase):
         comparisons = performance["comparisons"]
         self.assertIsNone(comparisons["cycling_ftp_watts_30d"])
         self.assertIsNone(comparisons["bike_threshold_hr_bpm_30d"])
-        self.assertEqual(comparisons["readiness_30d"]["delta"], 5)
-        self.assertEqual(comparisons["readiness_30d"]["color"], "good")
+        # Intervals.icu readiness is no source, so there is no readiness trend.
+        self.assertIsNone(comparisons["readiness_30d"])
         # The canonical Garmin history keeps today's prediction too (1500, 1600).
         self.assertEqual(comparisons["run_5k_seconds_30d"]["delta"], -50)
         self.assertEqual(comparisons["run_5k_seconds_30d"]["color"], "good")
@@ -542,7 +440,13 @@ class ServerPerformanceTests(ServerTestCase):
         snapshot = intervals_compaction.compact_snapshot(
             {"sportSettings": [{"types": ["Ride"], "ftp": 300}]},
             [],
-            [{"id": today, "sportInfo": [{"types": ["Ride"], "eFTP": 290}]}],
+            [
+                {
+                    "id": today,
+                    "restingHR": 50,
+                    "sportInfo": [{"types": ["Ride"], "eFTP": 290}],
+                }
+            ],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
             synced_at=runtime_clock.utc_now(),
@@ -550,7 +454,8 @@ class ServerPerformanceTests(ServerTestCase):
 
         performance = _current_performance_context(snapshot)
 
-        self.assertEqual(performance["metrics"]["cycling_ftp_watts"]["value"], 300)
+        # Neither the Intervals.icu FTP nor its eFTP is a current value or history.
+        self.assertIsNone(performance["metrics"]["cycling_ftp_watts"]["value"])
         self.assertIsNone(performance["comparisons"]["cycling_ftp_watts_30d"])
 
     def test_morning_body_battery_uses_timestamped_levels_not_daily_charge(self):
@@ -735,21 +640,10 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(validation["activity"]["sport"], "Laufen")
         self.assertEqual(validation["activity"]["pace_seconds_per_km"], 312)
         self.assertEqual(validation["activity"]["average_heart_rate_bpm"], 166)
-        self.assertEqual(
-            validation["provider_references"][0]["metric"], "running_vo2max_ml_kg_min"
+        # The Intervals.icu sport settings give no provider reference value.
+        self.assertTrue(
+            all(item["value"] is None for item in validation["provider_references"])
         )
-        zone2_reference = next(
-            item
-            for item in validation["provider_references"]
-            if item["metric"] == "run_zone2_pace_seconds_per_km"
-        )
-        self.assertEqual(zone2_reference["value"], 333)
-        threshold_reference = next(
-            item
-            for item in validation["provider_references"]
-            if item["metric"] == "run_threshold_pace_seconds_per_km"
-        )
-        self.assertEqual(threshold_reference["value"], 250)
         self.assertIn("direct_support", validation["validation_outcome_enum"])
 
     def test_activity_validation_exposes_cycling_power_as_percent_of_ftp(self):
@@ -779,16 +673,12 @@ class ServerPerformanceTests(ServerTestCase):
         validation = _current_performance_context(snapshot)["activity_validation"]
 
         self.assertEqual(validation["activity"]["sport"], "Radfahren")
-        self.assertEqual(validation["activity"]["intensity"], 90)
-        self.assertEqual(
-            validation["activity"]["power_as_percent_of_current_ftp"], 90.0
-        )
-        self.assertEqual(
-            [item["metric"] for item in validation["provider_references"]],
-            [
-                "cycling_vo2max_ml_kg_min",
-                "cycling_ftp_watts",
-            ],
+        # Without a Garmin, Wahoo or local FTP there is no local intensity and no
+        # power ratio; the Intervals.icu FTP is no source.
+        self.assertNotIn("intensity", validation["activity"])
+        self.assertNotIn("power_as_percent_of_current_ftp", validation["activity"])
+        self.assertTrue(
+            all(item["value"] is None for item in validation["provider_references"])
         )
         self.assertEqual(
             validation["direct_activity_estimates"]["activity_configured_ftp_watts"],
@@ -906,6 +796,7 @@ class ServerPerformanceTests(ServerTestCase):
                 "id": (today - timedelta(days=offset)).isoformat(),
                 "atl": 60.0,
                 "ctl": 55.0,
+                "weight": 70,
             }
             for offset in range(7)
         ]
@@ -947,20 +838,32 @@ class ServerPerformanceTests(ServerTestCase):
                 ],
             },
             [],
-            [{"id": today, "ctLoad": 68, "atlLoad": 74, "form": -6, "readiness": 82}],
+            [
+                {
+                    "id": today,
+                    "ctLoad": 68,
+                    "atlLoad": 74,
+                    "form": -6,
+                    "readiness": 82,
+                    "weight": 72,
+                }
+            ],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
             synced_at=runtime_clock.utc_now(),
         )
         performance = _mapped_performance_context(snapshot)
         metrics = performance["metrics"]
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 285)
-        self.assertEqual(metrics["run_threshold_watts"]["value"], 315)
-        self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 286)
-        self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 174)
-        self.assertEqual(metrics["cycling_vo2max_ml_kg_min"]["value"], 62)
-        history = performance["intervals_load_history"]
-        self.assertEqual((history["ctl"], history["tsb"]), (68, -6))
+        # Intervals.icu sport settings are no source, whatever their aliases.
+        for key in (
+            "cycling_ftp_watts",
+            "run_threshold_watts",
+            "run_threshold_pace_seconds_per_km",
+            "run_threshold_hr_bpm",
+            "cycling_vo2max_ml_kg_min",
+        ):
+            self.assertIsNone(metrics[key]["value"], key)
+        self.assertNotIn("intervals_load_history", performance)
 
     def test_mmp_model_is_neither_ftp_nor_a_current_eftp(self):
         today = _local_datetime.now().astimezone().date().isoformat()
@@ -976,14 +879,14 @@ class ServerPerformanceTests(ServerTestCase):
                 ],
             },
             [],
-            [{"id": today}],
+            [{"id": today, "restingHR": 50}],
             [],
             all_sync_days=server.ALL_SYNC_DAYS,
             synced_at=runtime_clock.utc_now(),
         )
 
         metrics = _current_performance_context(snapshot)["metrics"]
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
+        self.assertIsNone(metrics["cycling_ftp_watts"]["value"])
         # Intervals.icu eFTP is no longer read (#1727).
         self.assertNotIn("cycling_eftp_watts", metrics)
 
@@ -1003,7 +906,7 @@ class ServerPerformanceTests(ServerTestCase):
             {
                 "synced_at": "now",
                 "athlete": {},
-                "recent_wellness": [{"id": today, "ctl": 40}],
+                "recent_wellness": [{"id": today, "restingHR": 50}],
                 "recent_activities": [],
             }
         )
@@ -1014,158 +917,17 @@ class ServerPerformanceTests(ServerTestCase):
             {
                 "synced_at": "now",
                 "athlete": {"height": 1.83},
-                "recent_wellness": [{"id": today, "ctl": 40}],
+                "recent_wellness": [{"id": today, "restingHR": 50}],
                 "recent_activities": [],
             }
         )["metrics"]["height_cm"]
-        self.assertEqual(metric["value"], 183)
+        # The Intervals.icu athlete height is no source; the profile's stands.
+        self.assertEqual(metric["value"], 181)
 
-    def test_performance_refresh_only_requests_provider_data(self):
-        calls = []
 
-        def fetch_performance_snapshot(_reader, existing):
-            calls.append(existing)
-            return {
-                "synced_at": "2026-08-28T08:00:00+00:00",
-                "athlete": {},
-                "recent_wellness": [],
-                "recent_activities": [],
-                "upcoming_calendar": [],
-            }
 
-        with (
-            patch.object(
-                IntervalsSnapshotReader,
-                "fetch_performance_snapshot",
-                fetch_performance_snapshot,
-            ),
-            patch.object(
-                server.MODEL_TRANSPORT, "openai_responses_client"
-            ) as openai_client,
-            patch.object(
-                server, "CONFIG", replace(server.CONFIG, intervals_api_key="test-key")
-            ),
-        ):
-            result = server.INTERVALS_SYNC.performance_service().refresh()
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(len(calls), 1)
-        openai_client.assert_not_called()
 
-    def test_garmin_near_duplicate_allows_thirty_minute_start_difference(self):
-        garmin = {
-            "activityId": 3,
-            "activityType": "cycling",
-            "activityName": "Ride",
-            "startTimeLocal": "2026-08-29T07:30:00",
-            "duration": 3600,
-            "distance": 30000,
-        }
-        intervals = [
-            {
-                "type": "Ride",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 30000,
-            }
-        ]
-        self.assertTrue(garmin_activity_duplicates_intervals(garmin, intervals))
 
-    def test_garmin_activity_more_than_thirty_minutes_apart_is_kept(self):
-        garmin = {
-            "activityId": 4,
-            "activityType": "cycling",
-            "activityName": "Ride",
-            "startTimeLocal": "2026-08-29T07:31:00",
-            "duration": 3600,
-            "distance": 30000,
-        }
-        intervals = [
-            {
-                "type": "Ride",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 30000,
-            }
-        ]
-        self.assertFalse(garmin_activity_duplicates_intervals(garmin, intervals))
-
-    def test_garmin_different_activity_is_kept(self):
-        garmin = {
-            "activityId": 2,
-            "activityType": "cycling",
-            "startTimeLocal": "2026-08-29T07:05:00",
-            "duration": 3600,
-            "distance": 30000,
-        }
-        intervals = [
-            {
-                "type": "Run",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 3560,
-                "distance": 10000,
-            }
-        ]
-        self.assertFalse(garmin_activity_duplicates_intervals(garmin, intervals))
-
-    def test_confirmed_duplicate_delete_removes_only_garmin_copy_and_keeps_the_snapshot(
-        self,
-    ):
-        snapshot = {
-            "synced_at": "2026-08-29T10:00:00+00:00",
-            "athlete": {},
-            "recent_wellness": [],
-            "upcoming_calendar": [],
-            "recent_activities": [
-                {
-                    "id": "i-wahoo",
-                    "type": "Ride",
-                    "source": "Wahoo",
-                    "start_date_local": "2026-08-29T07:00:00",
-                    "moving_time": 7200,
-                    "distance": 60000,
-                },
-                {
-                    "id": "i-garmin",
-                    "type": "Ride",
-                    "source": "Garmin",
-                    "start_date_local": "2026-08-29T07:03:00",
-                    "moving_time": 7180,
-                    "distance": 59800,
-                },
-            ],
-        }
-        snapshot["raw_provider_data"] = {
-            "activities": list(snapshot["recent_activities"])
-        }
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
-        for activity in snapshot["recent_activities"]:
-            seed_intervals_activity(
-                server.database_manager(),
-                activity["id"],
-                **{key: value for key, value in activity.items() if key != "id"},
-            )
-        mark_tables_serving(server)
-        pair = server.ATHLETE_DATA.duplicate_inspector().latest()
-        with patch.object(
-            intervals_client_module.IntervalsClient,
-            "delete_activity",
-            return_value=None,
-        ) as delete:
-            result = server.ATHLETE_DATA.duplicate_activity().delete(
-                {
-                    "canonical_id": pair["canonical_id"],
-                    "duplicate_id": pair["duplicate_id"],
-                    "snapshot_synced_at": pair["snapshot_synced_at"],
-                },
-                server.PROVIDER_TRANSPORT.intervals_client(),
-            )
-        delete.assert_called_once_with("i-garmin")
-        self.assertEqual(result["kept_activity_id"], "i-wahoo")
-        # The snapshot is an ingestion artefact: a delete leaves it as it was.
-        self.assertEqual(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"],
-            snapshot["synced_at"],
-        )
 
 
 if __name__ == "__main__":

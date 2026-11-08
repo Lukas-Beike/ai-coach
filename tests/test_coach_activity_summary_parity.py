@@ -51,6 +51,7 @@ RIDE_SUMMARY = {
     "training_load": 82.0,
     "load_branch": "power",
     "load_threshold_after_session": True,
+    "load_assumption": "Geschlecht nicht gesetzt, männliche Konstanten angenommen",
     # Shape only: a strength session's calibration basis (M6 v2).
     "load_calibration": {"tss_per_au": 0.33, "pairs": 20, "session_rpe_au": 270.0},
     "rpe": 6.0,
@@ -112,6 +113,7 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
                 "training_load": 82.0,
                 "load_branch": "power",
                 "load_threshold_after_session": True,
+                "load_assumption": "Geschlecht nicht gesetzt, männliche Konstanten angenommen",
                 "load_calibration": {
                     "tss_per_au": 0.33,
                     "pairs": 20,
@@ -151,6 +153,7 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
             result["source"],
             {
                 "provider": "intervals",
+                "providers": ["intervals"],
                 "label": "Intervals.icu",
                 "synced_at": "2026-09-23T05:00:00",
                 "applies_to": [

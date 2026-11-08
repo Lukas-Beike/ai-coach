@@ -41,7 +41,7 @@ class WeeklyProgressTests(unittest.TestCase):
             read_synced_at=lambda _db: None,
             read_plan=lambda: plan,
             read_checkins=list,
-            read_feedback=list,
+            read_feedback=lambda keys: [],
             today=lambda: self.TODAY,
             load_scenarios=load_scenarios,
             season_source=_empty_season_source(),
@@ -72,6 +72,7 @@ class WeeklyProgressTests(unittest.TestCase):
                 training_load=50,
                 sources={"training_load": "Intervals.icu"},
                 power_zone_times=_zones(600, 600, 600, 600, 600, 300, 300),
+                zone_models={"power_zone_times": "local"},
             ),
             _summary(
                 "u1",
@@ -79,6 +80,7 @@ class WeeklyProgressTests(unittest.TestCase):
                 sport="run",
                 moving_duration_s=1800,
                 heart_rate_zone_times=_zones(100, 100, 100, 100, 100),
+                zone_models={"heart_rate_zone_times": "local"},
             ),
             _summary("s1", "2026-09-24", sport="strength", moving_duration_s=900),
         ]
@@ -238,6 +240,7 @@ class WeeklyProgressTests(unittest.TestCase):
                 sport="run",
                 moving_duration_s=700,
                 heart_rate_zone_times=_zones(100, 100, 100, 100, 100, 100, 100),
+                zone_models={"heart_rate_zone_times": "local"},
             )
         ]
         week = self._progress({"days": 7}, rows=rows)["week_list"][0]

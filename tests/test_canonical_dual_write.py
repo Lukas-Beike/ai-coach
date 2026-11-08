@@ -7,7 +7,6 @@ replaced by small fakes. No provider account, network or real data directory is 
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 import tempfile
 import unittest
@@ -19,12 +18,10 @@ from zoneinfo import ZoneInfo
 
 from backend.canonical.garmin_payload import STATE_KEY as GARMIN_STATE_KEY
 from backend.db import DatabaseManager, canonical_store, row_factory
-from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.sync.garmin import GarminSyncStateService
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
-from backend.sync.intervals import IntervalsSnapshotService
 from backend.sync.state import SyncStateRepository
 
 NOW = "2026-09-20T08:00:00+00:00"
@@ -133,159 +130,6 @@ class DualWriteFixture(unittest.TestCase):
             return self.key_values.get(db, key)
 
 
-class IntervalsDualWriteTests(DualWriteFixture):
-    def setUp(self) -> None:
-        super().setUp()
-        # Test double: the service only calls ``reconcile`` on it.
-        self.reconciler: Any = FakePlannedReconciler()
-        self.service = self.make_service()
-
-    def make_service(self) -> IntervalsSnapshotService:
-        # Same positional arguments as the sync test harness.
-        return IntervalsSnapshotService(
-            self.manager,
-            self.key_values,
-            self.sync_state,
-            self.reconciler,
-            Mock(),
-            Mock(list=Mock(return_value=[])),
-            lambda value: value,
-            lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
-            date(2026, 9, 1),
-            3,
-            3,
-        )
-
-    def test_failure_in_a_canonical_write_rolls_back_the_legacy_snapshot(self) -> None:
-        for function in ("upsert_provider_record", "upsert_activity_record"):
-            with self.subTest(function=function):
-                with (
-                    patch.object(
-                        canonical_store, function, side_effect=RuntimeError("boom")
-                    ),
-                    self.assertRaises(RuntimeError),
-                ):
-                    self.service.store_snapshot(
-                        intervals_snapshot([activity("i-1")]), 3, None
-                    )
-                self.assertIsNone(self.sync_state.latest_snapshot())
-                self.assertIsNone(self.value("last_sync_at"))
-                self.assertEqual(self.count("provider_records"), 0)
-                self.assertEqual(self.count("activity_records"), 0)
-
-    def test_successful_store_writes_the_snapshot_and_all_canonical_rows(self) -> None:
-        result, _ = self.service.store_snapshot(
-            intervals_snapshot([activity("i-1")]), 3, None
-        )
-        self.assertEqual(self.sync_state.latest_snapshot(), result)
-        self.assertEqual(self.count("provider_records"), 1)
-        self.assertEqual(self.count("activity_sessions"), 1)
-        self.assertEqual(self.count("activity_records"), 1)
-
-    def test_storing_the_same_snapshot_twice_is_idempotent(self) -> None:
-        snapshot = intervals_snapshot([activity("i-1")])
-        self.service.store_snapshot(snapshot, 3, None)
-        with self.manager.reader() as db:
-            first = db.execute(
-                "SELECT activity_id, payload_hash FROM provider_records p "
-                "JOIN activity_records a ON a.provider_activity_id = p.source_record_id"
-            ).fetchone()
-        self.service.store_snapshot(snapshot, 3, None)
-        with self.manager.reader() as db:
-            second = db.execute(
-                "SELECT activity_id, payload_hash FROM provider_records p "
-                "JOIN activity_records a ON a.provider_activity_id = p.source_record_id"
-            ).fetchone()
-        self.assertEqual(first, second)
-        self.assertEqual(self.count("activity_records"), 1)
-        self.assertEqual(self.count("activity_sessions"), 1)
-
-    def test_changed_activity_is_updated_in_place_with_a_new_hash(self) -> None:
-        self.service.store_snapshot(intervals_snapshot([activity("i-1")]), 3, None)
-        with self.manager.reader() as db:
-            before = db.execute(
-                "SELECT a.activity_id, p.payload_hash FROM provider_records p "
-                "JOIN activity_records a ON a.provider_activity_id = p.source_record_id"
-            ).fetchone()
-        self.service.store_snapshot(
-            intervals_snapshot([activity("i-1", kind="Run")]), 3, None
-        )
-        with self.manager.reader() as db:
-            after = db.execute(
-                "SELECT a.activity_id, a.sport, p.payload_hash FROM provider_records p "
-                "JOIN activity_records a ON a.provider_activity_id = p.source_record_id"
-            ).fetchone()
-        self.assertEqual(after["activity_id"], before["activity_id"])
-        self.assertNotEqual(after["payload_hash"], before["payload_hash"])
-        self.assertEqual(after["sport"], "run")
-        self.assertEqual(self.count("activity_records"), 1)
-
-    def test_stored_payload_hash_is_the_sha256_of_the_stored_text(self) -> None:
-        self.service.store_snapshot(intervals_snapshot([activity("i-1")]), 3, None)
-        with self.manager.reader() as db:
-            row = db.execute(
-                "SELECT payload, payload_hash FROM provider_records"
-            ).fetchone()
-        text, digest = row["payload"], row["payload_hash"]
-        self.assertEqual(digest, hashlib.sha256(text.encode("utf-8")).hexdigest())
-
-    def test_secrets_never_reach_the_provider_records(self) -> None:
-        self.service.store_snapshot(intervals_snapshot([activity("i-1")]), 3, None)
-        text = provider_payload_text(self.manager)
-        self.assertNotIn(SECRET, text)
-        self.assertNotIn("X-Amz-Signature", text)
-
-    def test_only_a_full_current_fetch_deletes_missing_activities(self) -> None:
-        self.service.store_snapshot(
-            intervals_snapshot([activity("kept"), activity("gone")]), 3, None
-        )
-
-        self.service.store_snapshot(
-            intervals_snapshot([activity("kept")], incremental=True), 3, None
-        )
-        self.assertEqual(activity_states(self.manager)["gone"], "active")
-
-        self.service.store_snapshot(
-            intervals_snapshot([activity("kept")]), 3, date(2026, 9, 10)
-        )
-        self.assertEqual(activity_states(self.manager)["gone"], "active")
-
-        self.service.store_snapshot(intervals_snapshot([activity("kept")]), 3, None)
-        self.assertEqual(
-            activity_states(self.manager), {"kept": "active", "gone": "deleted"}
-        )
-
-    def test_restart_with_a_new_manager_keeps_the_canonical_rows(self) -> None:
-        self.service.store_snapshot(intervals_snapshot([activity("i-1")]), 3, None)
-        self.manager.close()
-        restarted = DatabaseManager(
-            self.database_path, sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(restarted.close)
-        # Same-build startup runs the application bootstrap on the populated file.
-        with restarted.unit_of_work() as db:
-            initialize_application_database(
-                db,
-                key_values=self.key_values,
-                now=NOW,
-                current_time=datetime(2026, 9, 20, 8, tzinfo=UTC),
-                default_profile_json="{}",
-                provider_resync_keys=(),
-                retention_days=-1,
-            )
-        with restarted.reader() as db:
-            self.assertEqual(
-                db.execute("SELECT COUNT(*) AS n FROM activity_records").fetchone()[
-                    "n"
-                ],
-                1,
-            )
-            self.assertEqual(
-                db.execute("SELECT COUNT(*) AS n FROM provider_records").fetchone()[
-                    "n"
-                ],
-                1,
-            )
 
 
 class GarminDualWriteTests(DualWriteFixture):

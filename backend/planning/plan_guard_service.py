@@ -29,6 +29,7 @@ from backend.planning import (
 from backend.planning.load_checks import LoadThresholds, load_thresholds
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
+from backend.planning.strength_progress import strength_progress
 
 PLAN_FINDINGS_ARGUMENT = "accept_plan_findings"
 BRIEF_WEEKS = 6
@@ -300,6 +301,7 @@ def build_planning_brief(
                 training_model, planned_weeks, BRIEF_WEEKS
             ),
             "strength": leg_strength.brief_strength(planned_strength, BRIEF_WEEKS),
+            "strength_progress": strength_progress(completed),
             "planned_sessions": list(planned_sessions),
             "calendar_busy_minutes": dict(calendar_busy or {}),
             "free_time_minutes": dict(free_time_minutes or {}),
@@ -462,6 +464,7 @@ class PlanGuardService:
             *intensity_distribution.distribution_findings(
                 self._training_model(), self._planned_weeks(units, today, completed)
             ),
+            *plan_checks.strength_incomplete(units),
         ]
 
     def _reported_illness(self) -> str:
@@ -494,8 +497,11 @@ class PlanGuardService:
         blocking = [
             item
             for item in new
-            if item["code"] in plan_checks.BLOCKING_CODES
-            and item["code"] not in accepted
+            if item["code"] in plan_checks.REQUIRED_CODES
+            or (
+                item["code"] in plan_checks.BLOCKING_CODES
+                and item["code"] not in accepted
+            )
         ]
         if blocking:
             raise PlanCheckError(blocking)

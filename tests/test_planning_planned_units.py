@@ -2,7 +2,6 @@
 
 import copy
 import hashlib
-import json
 import unittest
 from datetime import date
 
@@ -14,8 +13,6 @@ from backend.planning.planned_units import (
     planned_workout_update_candidate,
     planned_workout_update_request,
     prepare_planned_workout_date,
-    remote_planned_unit_existing_state,
-    remote_planned_unit_payload,
 )
 
 LOCAL_ID = "e8267245-0d20-456f-9c9b-b4bf3fc3c233"
@@ -330,192 +327,8 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
         self.assertTrue(result["local_deleted"])
 
 
-class RemotePlannedUnitPayloadTests(unittest.TestCase):
-    def test_remote_category_id_date_duration_and_identity_projection(self):
-        event = {
-            "id": " event-17 ",
-            "external_id": " external-17 ",
-            "category": "workout",
-            "starts_at_local": "2026-09-21T06:45:00+02:00",
-            "type": "Run",
-            "name": "Easy run",
-            "description": "- 20m Z1",
-            "planned_duration_s": 1200,
-            "target": "PACE",
-            "pairedEventId": "paired-9",
-        }
-        before = copy.deepcopy(event)
-
-        result = remote_planned_unit_payload(event, today=TODAY)
-
-        self.assertIsNotNone(result)
-        payload, remote_id, identity = result
-        self.assertEqual(event, before)
-        self.assertEqual(remote_id, "event-17")
-        self.assertEqual(identity, "external-17")
-        self.assertEqual(payload["external_id"], identity)
-        self.assertEqual(payload["date"], "2026-09-21")
-        self.assertEqual(payload["starts_at_local"], event["starts_at_local"])
-        self.assertEqual((payload["sport"], payload["environment"]), ("run", "unknown"))
-        self.assertNotIn("type", payload)
-        self.assertEqual(payload["duration_minutes"], 20)
-        self.assertEqual(payload["planned_duration_s"], 1200)
-        self.assertEqual(payload["paired_event_id"], "paired-9")
-        self.assertEqual(payload["source"], "intervals")
-        self.assertEqual(payload["origin"], "intervals")
-        self.assertEqual(payload["sync_status"], "synced")
-
-    def test_remote_defaults_and_fallback_identity_are_preserved(self):
-        payload, remote_id, identity = remote_planned_unit_payload(
-            {"id": "event-18", "date": "2026-09-20", "planned_duration_s": "bad"},
-            today=TODAY,
-        )
-        self.assertEqual(remote_id, "event-18")
-        self.assertEqual(identity, "intervals-event-event-18")
-        self.assertEqual(payload["date"], "2026-09-20")
-        self.assertEqual(payload["starts_at_local"], "2026-09-20T00:00:00")
-        self.assertEqual(payload["sport"], "ride")
-        self.assertEqual(payload["name"], "Intervals.icu-Einheit")
-        self.assertEqual(payload["duration_minutes"], 30)
-        self.assertEqual(payload["remote_event_external_id"], "")
-
-    def test_remote_duration_has_five_minute_floor(self):
-        payload, _, _ = remote_planned_unit_payload(
-            {"id": "event-short", "date": "2026-09-21", "planned_duration_s": 30},
-            today=TODAY,
-        )
-        self.assertEqual(payload["duration_minutes"], 5)
-
-    def test_remote_import_filters_category_id_invalid_date_and_past_date_using_today(
-        self,
-    ):
-        self.assertIsNone(
-            remote_planned_unit_payload(
-                {"id": "event", "category": "RIDE", "date": "2026-09-21"},
-                today=TODAY,
-            )
-        )
-        self.assertIsNone(
-            remote_planned_unit_payload(
-                {"id": "event", "date": "not-a-date"}, today=TODAY
-            )
-        )
-        self.assertIsNone(
-            remote_planned_unit_payload({"date": "2026-09-21"}, today=TODAY)
-        )
-        self.assertIsNone(
-            remote_planned_unit_payload(
-                {"id": "old", "date": "2026-09-19"}, today=TODAY
-            )
-        )
-
-    def test_today_is_required_and_does_not_use_a_global_clock(self):
-        with self.assertRaises(TypeError):
-            remote_planned_unit_payload({"id": "event", "date": "2026-09-21"})
-        self.assertIsNone(
-            remote_planned_unit_payload(
-                {"id": "event", "date": "2026-09-21"},
-                today=date(2026, 9, 22),
-            )
-        )
-        self.assertIsNotNone(
-            remote_planned_unit_payload(
-                {"id": "event", "date": "2026-09-21"},
-                today=date(2026, 9, 20),
-            )
-        )
 
 
-class RemotePlannedUnitExistingStateTests(unittest.TestCase):
-    def test_dirty_conflict_preserve_unchanged_and_update_matrix(self):
-        incoming_hash = planned_unit_payload_hash({"name": "remote"})
-        changed_hash = planned_unit_payload_hash({"name": "different"})
-        cases = (
-            (
-                {
-                    "sync_dirty": 1,
-                    "sync_state": "synced",
-                    "baseline_hash": changed_hash,
-                },
-                "conflict",
-            ),
-            (
-                {
-                    "sync_dirty": 1,
-                    "sync_state": "synced",
-                    "baseline_hash": incoming_hash,
-                },
-                "preserve",
-            ),
-            (
-                {
-                    "sync_dirty": 0,
-                    "sync_state": "conflict",
-                    "baseline_hash": incoming_hash,
-                },
-                "preserve",
-            ),
-            (
-                {
-                    "sync_dirty": 0,
-                    "sync_state": "synced",
-                    "baseline_hash": incoming_hash,
-                },
-                "unchanged",
-            ),
-            (
-                {
-                    "sync_dirty": 0,
-                    "sync_state": "synced",
-                    "baseline_hash": changed_hash,
-                },
-                "update",
-            ),
-            (
-                {
-                    "sync_dirty": 0,
-                    "sync_state": "sync_error",
-                    "baseline_hash": changed_hash,
-                },
-                "conflict",
-            ),
-        )
-        for row_fields, expected_state in cases:
-            with self.subTest(row=row_fields):
-                current_row = {
-                    "payload": json.dumps({"name": "local"}),
-                    **row_fields,
-                }
-                current, state = remote_planned_unit_existing_state(
-                    current_row, incoming_hash
-                )
-                self.assertEqual(state, expected_state)
-                self.assertEqual(current, {"name": "local"})
-
-    def test_existing_state_falls_back_to_current_hash_and_handles_corrupt_json(self):
-        payload = {"name": "remote"}
-        incoming_hash = planned_unit_payload_hash(payload)
-        current, state = remote_planned_unit_existing_state(
-            {"payload": json.dumps(payload), "sync_state": "synced"}, incoming_hash
-        )
-        self.assertEqual((current, state), (payload, "unchanged"))
-
-        current, state = remote_planned_unit_existing_state(
-            {"payload": "invalid json", "sync_state": "synced"}, incoming_hash
-        )
-        self.assertEqual(current, {})
-        self.assertEqual(state, "update")
-
-    def test_existing_state_never_mutates_row_payload(self):
-        row = {
-            "payload": json.dumps({"name": "local", "nested": {"keep": True}}),
-            "sync_dirty": 0,
-            "sync_state": "synced",
-        }
-        before = copy.deepcopy(row)
-        current, _ = remote_planned_unit_existing_state(row, "new-hash")
-        current["nested"]["keep"] = False
-        self.assertEqual(row, before)
 
 
 if __name__ == "__main__":

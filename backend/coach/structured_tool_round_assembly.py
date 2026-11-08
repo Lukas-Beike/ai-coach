@@ -49,7 +49,6 @@ class StructuredToolRoundServices:
 
 @dataclass(frozen=True)
 class StructuredToolRoundState:
-    duplicate_inspector: Callable[[], Any]
     job_store: Callable[[], Any]
 
 
@@ -95,7 +94,6 @@ class CoachStructuredToolRoundAssembly:
         self._dialogue_action_service = services.dialogue_action_service
         self._planning_authority_service = services.planning_authority_service
         self._plan_guard_service = services.plan_guard_service
-        self._duplicate_inspector = state.duplicate_inspector
         self._job_store = state.job_store
         self._training_context_service = conversation.training_context_service
         self._response_service = conversation.response_service
@@ -108,7 +106,6 @@ class CoachStructuredToolRoundAssembly:
             self._key_value_repository,
             self._clarification_service(),
             self._training_patch_service(),
-            self._duplicate_inspector(),
             self._proposal_creation_service(),
             self._tool_dispatch_service(),
             self._profile_mutation_coordinator,

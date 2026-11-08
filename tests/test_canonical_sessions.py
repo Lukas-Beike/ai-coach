@@ -24,7 +24,6 @@ from backend.activities.canonical_sessions import (
     bundle_sessions,
     wahoo_garmin_copy_match,
 )
-from backend.activities.duplicate_inspection import latest_wahoo_garmin_duplicate
 from backend.canonical.records import ActivityRecord, ExternalRef, Provenance
 from backend.canonical.vocabulary import (
     ActivityLinkKind,
@@ -37,10 +36,6 @@ from backend.canonical.vocabulary import (
 )
 from backend.providers.garmin_activity_mapping import map_garmin_activities
 from backend.providers.intervals_activity_mapping import map_intervals_activities
-from backend.sync.garmin_activity_duplicates import (
-    garmin_activity_duplicates_intervals,
-    intervals_cycling_activities_match,
-)
 
 BERLIN = ZoneInfo("Europe/Berlin")
 RETRIEVED_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
@@ -73,14 +68,16 @@ def _bundle(*groups: Iterable[ActivityRecord]) -> tuple[ActivitySession, ...]:
     )
 
 
-def _duplicate_ids(
+def _joined_ids(
     sessions: tuple[ActivitySession, ...], provider: ProviderId
 ) -> set[str]:
+    """The provider's records that share a session with another record."""
     return {
-        duplicate.activity_id
+        record.activity_id
         for session in sessions
-        for duplicate in session.duplicates
-        if duplicate.provenance.provider is provider
+        if session.duplicates
+        for record in (session.primary, *session.duplicates)
+        if record.provenance.provider is provider
     }
 
 
@@ -124,7 +121,7 @@ def _canonical_garmin_duplicate(
     garmin_row: dict[str, Any], intervals_row: dict[str, Any]
 ) -> bool:
     sessions = _bundle(_map_garmin([garmin_row]), _map_intervals([intervals_row]))
-    return bool(_duplicate_ids(sessions, ProviderId.GARMIN))
+    return bool(_joined_ids(sessions, ProviderId.GARMIN))
 
 
 def _ride(
@@ -171,11 +168,6 @@ class GarminIntervalsPairTests(unittest.TestCase):
     def assert_pair(
         self, garmin_row: dict[str, Any], intervals_row: dict[str, Any], expected: bool
     ) -> None:
-        self.assertEqual(
-            expected,
-            garmin_activity_duplicates_intervals(garmin_row, [intervals_row]),
-            "legacy",
-        )
         self.assertEqual(
             expected,
             _canonical_garmin_duplicate(garmin_row, intervals_row),
@@ -323,49 +315,6 @@ class GarminIntervalsPairTests(unittest.TestCase):
         )
 
 
-class DocumentedDeviationTests(unittest.TestCase):
-    """Cases where canonical records cannot reproduce a legacy field read.
-
-    The canonical duration is ``duration`` (or ``movingTime``) for Garmin and
-    ``moving_time`` (or ``elapsed_time``) for Intervals, as the mappers document.
-    The legacy rules read only one field per side, so these differ on purpose.
-    """
-
-    def test_intervals_without_moving_time_uses_elapsed_time(self) -> None:
-        # Legacy skips the duration comparison when moving_time is absent. The
-        # canonical duration is elapsed_time (4500 s), which differs from the
-        # Garmin 3600 s by more than the tolerance.
-        row = intervals_ride(moving_time=None, elapsed_time=4500)
-        self.assertTrue(garmin_activity_duplicates_intervals(garmin_ride(), [row]))
-        self.assertFalse(_canonical_garmin_duplicate(garmin_ride(), row))
-
-    def test_zero_intervals_moving_time_falls_back_to_elapsed_time(self) -> None:
-        # Legacy compares a zero moving_time as zero and only the Garmin elapsed
-        # duration (4500 s) with elapsed_time, so it rejects the pair. The
-        # canonical duration ignores the zero and uses elapsed_time (3600 s),
-        # which the Garmin moving duration matches.
-        garmin = garmin_ride(duration=4500.0, movingDuration=3600.0)
-        row = intervals_ride(moving_time=0, elapsed_time=3600)
-        self.assertFalse(garmin_activity_duplicates_intervals(garmin, [row]))
-        self.assertTrue(_canonical_garmin_duplicate(garmin, row))
-
-    def test_zero_garmin_duration_falls_back_to_moving_time_only_in_legacy(
-        self,
-    ) -> None:
-        # Legacy reads ``duration or movingTime``, so a zero duration falls back
-        # to movingTime. The canonical duration keeps the zero it was sent.
-        row = garmin_ride(duration=0.0, movingTime=3600.0)
-        self.assertTrue(garmin_activity_duplicates_intervals(row, [intervals_ride()]))
-        self.assertFalse(_canonical_garmin_duplicate(row, intervals_ride()))
-
-    def test_nonexistent_garmin_wall_time_moves_forward_in_canonical(self) -> None:
-        # 02:50 does not exist on the spring-forward day. Legacy compares the
-        # naive 02:50 (20 minutes from 03:10). Canonical localises it to 03:50
-        # CEST (40 minutes from 03:10), as local_time documents.
-        garmin = garmin_ride(startTimeLocal="2026-03-29 02:50:00")
-        row = intervals_ride(start_date_local="2026-03-29T03:10:00")
-        self.assertTrue(garmin_activity_duplicates_intervals(garmin, [row]))
-        self.assertFalse(_canonical_garmin_duplicate(garmin, row))
 
 
 class WahooGarminRideTests(unittest.TestCase):
@@ -374,7 +323,6 @@ class WahooGarminRideTests(unittest.TestCase):
     def assert_wahoo_pair(
         self, left: dict[str, Any], right: dict[str, Any], expected: bool
     ) -> None:
-        self.assertEqual(expected, intervals_cycling_activities_match(left, right))
         sessions = _bundle(_map_intervals([left, right]))
         paired = [session for session in sessions if session.duplicates]
         self.assertEqual(expected, bool(paired), "canonical")
@@ -414,18 +362,6 @@ class WahooGarminRideTests(unittest.TestCase):
         self.assert_wahoo_pair(_wahoo(), _garmin_copy(type="Run"), False)
         self.assert_wahoo_pair(_wahoo(type="Run"), _garmin_copy(), False)
 
-    def test_intervals_zero_moving_time_falls_back_to_elapsed_time(self) -> None:
-        # Legacy rejects a zero moving_time outright. Canonical uses the 3600 s
-        # elapsed_time, which matches the Wahoo ride.
-        self.assertFalse(
-            intervals_cycling_activities_match(
-                _wahoo(), _garmin_copy(moving_time=0, elapsed_time=3600)
-            )
-        )
-        sessions = _bundle(
-            _map_intervals([_wahoo(), _garmin_copy(moving_time=0, elapsed_time=3600)])
-        )
-        self.assertTrue(any(session.duplicates for session in sessions))
 
     def test_zero_canonical_duration_never_matches(self) -> None:
         # The mappers never produce a zero duration, so build the record directly.
@@ -441,6 +377,14 @@ class WahooGarminRideTests(unittest.TestCase):
         )
         self.assertFalse(any(session.duplicates for session in sessions))
 
+    def test_intervals_zero_moving_time_falls_back_to_elapsed_time(self) -> None:
+        # A zero moving_time falls back to the 3600 s elapsed_time, which matches
+        # the Wahoo ride.
+        sessions = _bundle(
+            _map_intervals([_wahoo(), _garmin_copy(moving_time=0, elapsed_time=3600)])
+        )
+        self.assertTrue(any(session.duplicates for session in sessions))
+
 
 class FixtureParityTests(unittest.TestCase):
     """Parity on the shared provider fixtures."""
@@ -449,24 +393,17 @@ class FixtureParityTests(unittest.TestCase):
         self.intervals_rows = _load_fixture("intervals", "activities.json")
         self.garmin_rows = _load_fixture("garmin", "activities.json")
 
-    def test_garmin_fixture_duplicates_match_the_pairwise_rule(self) -> None:
-        legacy_removed = {
-            str(row["activityId"])
-            for row in self.garmin_rows
-            if garmin_activity_duplicates_intervals(row, self.intervals_rows)
-        }
-        count = len(legacy_removed)
-        sessions = _bundle(
-            _map_garmin(self.garmin_rows), _map_intervals(self.intervals_rows)
-        )
-        self.assertEqual(1, count)
-        self.assertEqual({"910001"}, legacy_removed)
-        self.assertEqual(legacy_removed, _duplicate_ids(sessions, ProviderId.GARMIN))
 
     def test_intervals_fixture_alone_has_no_duplicates(self) -> None:
         sessions = _bundle(_map_intervals(self.intervals_rows))
         self.assertEqual(len(self.intervals_rows), len(sessions))
         self.assertTrue(all(not session.duplicates for session in sessions))
+
+    def test_garmin_fixture_duplicates_match_the_pairwise_rule(self) -> None:
+        sessions = _bundle(
+            _map_garmin(self.garmin_rows), _map_intervals(self.intervals_rows)
+        )
+        self.assertEqual({"910001"}, _joined_ids(sessions, ProviderId.GARMIN))
 
     def test_dst_fixture_runs_match_only_their_wall_clock_neighbour(self) -> None:
         # i-act-002 (01:59 CET) and i-act-003 (03:01 CEST) are 2 minutes apart on
@@ -483,12 +420,10 @@ class FixtureParityTests(unittest.TestCase):
             "duration": 2300.0,
             "distance": 7200.0,
         }
-        self.assertFalse(garmin_activity_duplicates_intervals(garmin_run, [before]))
-        self.assertTrue(garmin_activity_duplicates_intervals(garmin_run, [after]))
         self.assertFalse(_canonical_garmin_duplicate(garmin_run, before))
         self.assertTrue(_canonical_garmin_duplicate(garmin_run, after))
 
-    def test_fixture_ride_recorded_twice_matches_legacy_wahoo_rule(self) -> None:
+    def test_fixture_ride_recorded_twice_bundles_under_the_wahoo_recording(self) -> None:
         ride = next(row for row in self.intervals_rows if row["id"] == "i-act-001")
         wahoo = dict(ride, id="w-1", device_name="Wahoo ELEMNT")
         copy = dict(
@@ -499,11 +434,12 @@ class FixtureParityTests(unittest.TestCase):
             moving_time=5410,
             distance=88600.0,
         )
-        self.assertTrue(intervals_cycling_activities_match(wahoo, copy))
         sessions = _bundle(_map_intervals([wahoo, copy]))
         self.assertEqual(1, len(sessions))
         self.assertEqual("w-1", sessions[0].primary.activity_id)
         self.assertEqual(["g-1"], [d.activity_id for d in sessions[0].duplicates])
+
+
 
 
 def _intervals_copy_of(upstream: str, **fields: Any) -> dict[str, Any]:
@@ -527,6 +463,46 @@ def _session_of(
         if activity_id
         in {session.primary.activity_id, *(d.activity_id for d in session.duplicates)}
     )
+
+
+class PrimaryRankTests(unittest.TestCase):
+    """Intervals.icu is output only: Garmin and Wahoo lead the sessions they join."""
+
+    def test_garmin_leads_its_intervals_copy_whatever_the_input_order(self) -> None:
+        records = [
+            *_map_garmin([garmin_ride()]),
+            *_map_intervals([intervals_ride()]),
+        ]
+
+        for ordered in (records, list(reversed(records))):
+            (session,) = bundle_sessions(ordered, zone=BERLIN)
+
+            self.assertEqual(ProviderId.GARMIN, session.primary.provenance.provider)
+            self.assertEqual(
+                [ProviderId.INTERVALS],
+                [d.provenance.provider for d in session.duplicates],
+            )
+            self.assertEqual((ActivityLinkKind.HEURISTIC,), session.link_kinds)
+
+    def test_wahoo_leads_garmin_and_intervals(self) -> None:
+        wahoo = _ride("w-1", provider=ProviderId.WAHOO)
+        garmin = _ride(
+            "g-1", provider=ProviderId.GARMIN, recorded_by=RecordingOrigin.GARMIN
+        )
+        intervals = _ride("i-1", recorded_by=RecordingOrigin.WAHOO)
+
+        (session,) = bundle_sessions([intervals, garmin, wahoo], zone=BERLIN)
+
+        self.assertEqual("w-1", session.primary.activity_id)
+        self.assertCountEqual(
+            ["g-1", "i-1"], [d.activity_id for d in session.duplicates]
+        )
+
+    def test_intervals_alone_stays_its_own_primary(self) -> None:
+        (session,) = bundle_sessions(_map_intervals([intervals_ride()]), zone=BERLIN)
+
+        self.assertEqual("i-1", session.primary.activity_id)
+        self.assertEqual((), session.duplicates)
 
 
 class ExactLinkTests(unittest.TestCase):
@@ -553,7 +529,7 @@ class ExactLinkTests(unittest.TestCase):
         )
         sessions = _bundle(_map_garmin([garmin]), _map_intervals([copy]))
         self.assertEqual(1, len(sessions))
-        self.assert_exact_pair(sessions, "copy-1", "1")
+        self.assert_exact_pair(sessions, "1", "copy-1")
 
     def test_trimmed_and_shifted_copy_links_exactly(self) -> None:
         garmin = garmin_ride(activityId=1)
@@ -561,7 +537,7 @@ class ExactLinkTests(unittest.TestCase):
             "1", distance=21000.0, start_date_local="2026-06-01T08:10:00"
         )
         sessions = _bundle(_map_garmin([garmin]), _map_intervals([copy]))
-        self.assert_exact_pair(sessions, "copy-1", "1")
+        self.assert_exact_pair(sessions, "1", "copy-1")
 
     def test_exact_links_win_over_a_closer_heuristic_pair(self) -> None:
         # Garmin 1 matches the copy perfectly; the copy names Garmin 2, which
@@ -573,7 +549,7 @@ class ExactLinkTests(unittest.TestCase):
         sessions = _bundle(
             _map_garmin(garmin), _map_intervals([_intervals_copy_of("2")])
         )
-        self.assert_exact_pair(sessions, "copy-1", "2")
+        self.assert_exact_pair(sessions, "2", "copy-1")
         self.assertEqual((), _session_of(sessions, "1").duplicates)
 
     def test_unknown_upstream_leaves_the_copy_to_the_heuristics(self) -> None:
@@ -584,7 +560,7 @@ class ExactLinkTests(unittest.TestCase):
         ]
         garmin.append(garmin_ride(activityId=3, startTimeLocal="2026-06-02 07:00:00"))
         sessions = _bundle(_map_garmin(garmin), _map_intervals(intervals))
-        for primary, duplicate in (("copy-1", "1"), ("i-2", "3")):
+        for duplicate, primary in (("copy-1", "1"), ("i-2", "3")):
             session = _session_of(sessions, duplicate)
             self.assertEqual(primary, session.primary.activity_id)
             self.assertEqual((ActivityLinkKind.HEURISTIC,), session.link_kinds)
@@ -598,7 +574,7 @@ class ExactLinkTests(unittest.TestCase):
         )
         copy = _wahoo(source="WAHOO", external_id="w-1")
         sessions = _bundle([wahoo], _map_intervals([copy]))
-        self.assert_exact_pair(sessions, "wahoo-1", "w-1")
+        self.assert_exact_pair(sessions, "w-1", "wahoo-1")
 
     def test_a_copy_without_an_upstream_source_has_no_reference(self) -> None:
         (record,) = _map_intervals([intervals_ride(source="UPLOAD", external_id="1")])
@@ -607,24 +583,6 @@ class ExactLinkTests(unittest.TestCase):
         self.assertEqual(ExternalRef(ProviderId.GARMIN, "1"), record.external_ref)
 
 
-class LatestWahooDifferenceTests(unittest.TestCase):
-    def test_latest_wahoo_duplicate_only_reports_pairs_with_newest_activity(
-        self,
-    ) -> None:
-        # The Wahoo ride and its Garmin copy are older than a newer run. The
-        # latest-pair view only considers pairs containing the newest
-        # activity, so it reports nothing. Session bundling reports the pair.
-        wahoo = _wahoo()
-        copy = _garmin_copy()
-        newest_run = intervals_ride(
-            id="i-run", type="Run", start_date_local="2026-06-02T07:00:00"
-        )
-        records = _map_intervals([wahoo, copy, newest_run])
-        self.assertIsNone(latest_wahoo_garmin_duplicate(records, zone=BERLIN))
-        sessions = _bundle(_map_intervals([wahoo, copy, newest_run]))
-        paired = [session for session in sessions if session.duplicates]
-        self.assertEqual(1, len(paired))
-        self.assertEqual("wahoo-1", paired[0].primary.activity_id)
 
 
 class PublicCopyMatchTests(unittest.TestCase):
@@ -727,9 +685,9 @@ class SessionStructureTests(unittest.TestCase):
             elapsed_duration_s=4500.0,
         )
 
-        self.assertFalse(_duplicate_ids(_bundle([copy, wahoo]), ProviderId.WAHOO))
+        self.assertFalse(_joined_ids(_bundle([copy, wahoo]), ProviderId.WAHOO))
         self.assertEqual(
-            {"garmin"}, _duplicate_ids(_bundle([copy, garmin]), ProviderId.GARMIN)
+            {"garmin"}, _joined_ids(_bundle([copy, garmin]), ProviderId.GARMIN)
         )
 
     def test_every_record_appears_in_exactly_one_session(self) -> None:
@@ -782,7 +740,7 @@ class SessionStructureTests(unittest.TestCase):
         ) + _map_garmin([garmin_ride(startTimeLocal="2026-06-01 07:10:00")])
         sessions = bundle_sessions(records, zone=BERLIN)
         by_primary = {session.primary.activity_id: session for session in sessions}
-        self.assertEqual(["1"], [d.activity_id for d in by_primary["early"].duplicates])
+        self.assertEqual(["early"], [d.activity_id for d in by_primary["1"].duplicates])
         self.assertEqual((), by_primary["late"].duplicates)
 
     def test_one_wahoo_ride_keeps_only_one_garmin_copy(self) -> None:
@@ -840,9 +798,9 @@ class SessionStructureTests(unittest.TestCase):
         ) + _map_garmin([garmin_ride(startTimeLocal="2026-06-01 07:05:00")])
         sessions = bundle_sessions(records, zone=BERLIN)
         self.assertEqual(1, len(sessions))
-        self.assertEqual("wahoo-1", sessions[0].primary.activity_id)
+        self.assertEqual("1", sessions[0].primary.activity_id)
         self.assertCountEqual(
-            ["garmin-copy-1", "1"],
+            ["garmin-copy-1", "wahoo-1"],
             [d.activity_id for d in sessions[0].duplicates],
         )
 
@@ -855,9 +813,10 @@ class SessionStructureTests(unittest.TestCase):
         ]
         sessions = bundle_sessions(records, zone=BERLIN)
         self.assertEqual(1, len(sessions))
-        self.assertEqual("wahoo-1", sessions[0].primary.activity_id)
+        self.assertEqual("1", sessions[0].primary.activity_id)
         self.assertCountEqual(
-            ["garmin-copy-1", "1"], [d.activity_id for d in sessions[0].duplicates]
+            ["garmin-copy-1", "wahoo-1"],
+            [d.activity_id for d in sessions[0].duplicates],
         )
 
     def test_unmatched_garmin_record_is_its_own_session(self) -> None:
@@ -1263,7 +1222,7 @@ class WindowSearchEdgeTests(unittest.TestCase):
             for session in sessions
         }
         self.assertEqual(
-            {"intervals-low": ["garmin-low"], "intervals-high": ["garmin-high"]},
+            {"garmin-low": ["intervals-low"], "garmin-high": ["intervals-high"]},
             pairs,
         )
 

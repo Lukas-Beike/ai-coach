@@ -259,7 +259,6 @@ class ProfileCoordinatorTests(unittest.TestCase):
             Mock(),
             Mock(),
             Mock(),
-            Mock(),
             dispatch,
             self.coordinator,
         )

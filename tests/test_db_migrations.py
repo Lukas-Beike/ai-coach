@@ -3,14 +3,17 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar
 from unittest import mock
 
 from backend.canonical.vocabulary import ProviderId
 from backend.db import migrations
+from backend.db.bootstrap import initialize_application_database
 from backend.db.manager import DatabaseManager
-from backend.db.migrations import migrate_schema
+from backend.db.migrations import OlderSchemaError, migrate_schema
+from backend.db.repositories import KeyValueRepository
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     configure_cipher,
@@ -20,63 +23,19 @@ from backend.db.schema import (
 )
 from backend.db.schema_history import (
     SHAPE_CURRENT,
-    SHAPE_SCHEMA_V16,
-    SHAPE_SCHEMA_V17,
+    SHAPE_SCHEMA_V21,
     released_shape,
 )
 
 INTERVALS = ProviderId.INTERVALS.value
-GARMIN = ProviderId.GARMIN.value
 STAMP = "2026-10-16T08:00:00+00:00"
-OLDEST_SUPPORTED_VERSION = 16
+OLDEST_SUPPORTED_VERSION = 21
 FIXTURES = Path(__file__).with_name("fixtures")
-V9_FIXTURE = FIXTURES / "schema_v9.sql.txt"
-V10_FIXTURE = FIXTURES / "schema_v10.sql.txt"
-V11_FIXTURE = FIXTURES / "schema_v11.sql.txt"
-V12_FIXTURE = FIXTURES / "schema_v12.sql.txt"
-V13_FIXTURE = FIXTURES / "schema_v13.sql.txt"
-# Release schema 14: Yazio food sources; the canonical extensions are version 15.
-V14_FIXTURE = FIXTURES / "schema_v14.sql.txt"
-# Release schema 15: canonical extensions; version 16 renames planning fields.
-V15_FIXTURE = FIXTURES / "schema_v15.sql.txt"
-# Release schema 16: planning field names; version 17 adds the power curve.
-V16_FIXTURE = FIXTURES / "schema_v16.sql.txt"
-OLDEST_SUPPORTED_FIXTURE = V16_FIXTURE
-# Release schema 17: power curve; version 18 adds the session RPE rating time.
-V17_FIXTURE = FIXTURES / "schema_v17.sql.txt"
-RELEASED_FIXTURES = (
-    V16_FIXTURE,
-    FIXTURES / "schema_v17.sql.txt",
-    FIXTURES / "schema_v18.sql.txt",
-    FIXTURES / "schema_v19.sql.txt",
-    FIXTURES / "schema_v20.sql.txt",
-    V17_FIXTURE,
-)
-# Columns an upgrade renamed: (table, released name) -> current name. Rows read
-# with the columns of a released schema compare the same values afterwards.
-RENAMED_COLUMNS = {
-    ("competitions", "start_date_local"): "starts_at_local",
-    ("competitions", "moving_time"): "planned_duration_s",
-}
+# Schema v21, releases 1.13.41 to 1.13.44: the oldest supported schema.
+V21_FIXTURE = FIXTURES / "schema_v21.sql.txt"
+OLDEST_SUPPORTED_FIXTURE = V21_FIXTURE
+RELEASED_FIXTURES = (V21_FIXTURE,)
 CURRENT_FIXTURE = FIXTURES / f"schema_v{CURRENT_SCHEMA_VERSION}.sql.txt"
-DETAIL_TABLES = {
-    "activity_detail_sets",
-    "activity_stream_channels",
-    "activity_laps",
-    "activity_zone_times",
-    "activity_detail_analysis",
-}
-MIRROR_TABLES = {"food_database_entries"}
-EXTENSION_TABLES = {
-    "sleep_periods",
-    "zone_configurations",
-    "categorical_observations",
-    "gear_items",
-    "gear_activity_links",
-}
-# Schema version 17: the canonical power curve; added empty by every upgrade
-# whose newest snapshot stores no power curve.
-POWER_CURVE_TABLES = {"power_curve_points", "power_curve_fetches"}
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -118,7 +77,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         self.assertTrue(database_schema_is_current(db))
 
     def test_oldest_supported_release_schema_upgrades_to_current(self):
-        # Release 1.13.32 is the migration baseline.
+        # Release 1.13.44 is the migration baseline.
         db = self.connect()
         db.executescript(OLDEST_SUPPORTED_FIXTURE.read_text(encoding="utf-8"))
         db.execute(
@@ -140,12 +99,51 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         )
 
     def test_older_or_newer_schema_version_is_rejected_without_modification(self):
-        for version in (0, OLDEST_SUPPORTED_VERSION - 1, CURRENT_SCHEMA_VERSION + 1):
+        for version in (0, 1, OLDEST_SUPPORTED_VERSION - 1, CURRENT_SCHEMA_VERSION + 1):
             with self.subTest(version=version):
                 db = self.current_database()
                 db.execute(f"PRAGMA user_version = {version}")
                 db.commit()
                 self.assert_rejected_unchanged(db)
+
+    def test_older_database_file_is_refused_at_startup_without_changes(self):
+        # A release before 1.13.41 wrote a schema below 21: startup names the
+        # release to upgrade with first and leaves every row and the version.
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "older.db"
+            with closing(sqlite3.connect(path)) as db:
+                db.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
+                db.execute(
+                    "INSERT INTO messages(role, content, created_at) "
+                    "VALUES ('user', 'Hallo', ?)",
+                    (STAMP,),
+                )
+                db.execute(f"PRAGMA user_version = {OLDEST_SUPPORTED_VERSION - 1}")
+                db.commit()
+                before = list(db.iterdump())
+            manager = DatabaseManager(path, sqlite3, row_factory=sqlite3.Row)
+            try:
+                with (
+                    self.assertRaisesRegex(OlderSchemaError, "Release 1.13.44"),
+                    manager.unit_of_work() as db,
+                ):
+                    initialize_application_database(
+                        db,
+                        key_values=KeyValueRepository(lambda: STAMP),
+                        now=STAMP,
+                        current_time=datetime.now(UTC),
+                        default_profile_json="{}",
+                        provider_resync_keys=(),
+                        retention_days=-1,
+                    )
+            finally:
+                manager.close()
+            with closing(sqlite3.connect(path)) as db:
+                self.assertEqual(list(db.iterdump()), before)
+                self.assertEqual(
+                    db.execute("PRAGMA user_version").fetchone()[0],
+                    OLDEST_SUPPORTED_VERSION - 1,
+                )
 
     def test_unknown_schema_shape_is_rejected_without_modification(self):
         changes = (
@@ -189,14 +187,8 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         # original value after an upgrade that adds columns.
         rows = {}
         for table in tables:
-            present = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
             selected = (
-                ", ".join(
-                    f'"{name if name in present else RENAMED_COLUMNS.get((table, name), name)}"'
-                    for name in columns[table]
-                )
-                if columns
-                else "*"
+                ", ".join(f'"{name}"' for name in columns[table]) if columns else "*"
             )
             rows[table] = [
                 tuple(row) for row in db.execute(f"SELECT {selected} FROM {table}")
@@ -212,77 +204,11 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             )
         )
 
-    GARMIN_BLOB: ClassVar[dict[str, Any]] = {
-        "synced_at": "2026-10-20T06:00:00+00:00",
-        "start": "2026-10-01",
-        "end": "2026-10-20",
-        "source_freshness": {
-            "sleep": {"fetched_at": "2026-10-20T06:00:00+00:00", "freshness": "current"}
-        },
-        "provider_sync": {"read_window": {"start": "2026-10-01", "end": "2026-10-20"}},
-        "sport_max_hr": {"run": 190},
-        "sleep": [
-            {"calendarDate": "2026-10-19", "sleepScore": 80},
-            {"calendarDate": "2026-10-20", "sleepScore": 84},
-            {"sleepScore": 70},
-        ],
-        "max_metrics": {"vo2MaxRunning": 52.0},
-        "performance_history": [{"date": "2026-10-20", "metrics": {"x": 1}}],
-        "activities": [
-            {
-                "activityId": 4001,
-                "startTimeLocal": "2026-10-20 07:00:00",
-                "activityName": "Morning run",
-                "authToken": "never-stored",
-            },
-            {"activityId": "bad id!", "startTimeLocal": "2026-10-20 08:00:00"},
-        ],
-        "empty_section": [],
-    }
-
-    # (activity_id, primary provider, provider activity id, state, merged_into)
-    V13_SESSIONS: ClassVar[tuple[tuple[str, str, str, str, str | None], ...]] = (
-        ("act_1", INTERVALS, "i1", "active", None),
-        ("act_2", GARMIN, "g2", "active", None),
-        ("act_3", INTERVALS, "shared", "active", None),
-        ("act_4", GARMIN, "shared", "active", None),
-        ("act_5", INTERVALS, "pair", "active", None),
-        ("act_6", GARMIN, "pair", "active", None),
-        ("act_7", GARMIN, "g7", "duplicate", "act_1"),
-        ("act_8", INTERVALS, "i8", "deleted", None),
-        ("act_9", GARMIN, "g9", "active", None),
-    )
-    # Feedback before schema version 15 names its activity by a provider id, or by
-    # the local session id; (activity_id, provider) -> the session_id it must get.
-    V13_FEEDBACK_SESSIONS: ClassVar[dict[tuple[str, str | None], str | None]] = {
-        ("act_2", None): "act_2",
-        ("i1", INTERVALS): "act_1",
-        ("g9", None): "act_9",
-        ("pair", GARMIN): "act_6",
-        # The session the feedback was written for, not the merge survivor.
-        ("g7", None): "act_7",
-        ("i8", None): "act_8",
-        # Ambiguous, provider mismatch, record without session, unmatched.
-        ("shared", None): None,
-        ("g2", INTERVALS): None,
-        ("orphan", None): None,
-        ("missing", None): None,
-        ("act_99", None): None,
-    }
-    LONG_NOTE: ClassVar[str] = ("Beine schwer, Puls ruhig. " * 160)[:4000]
-
-    def test_frozen_v17_fixture_is_the_recorded_released_shape(self):
+    def test_frozen_v21_fixture_is_the_recorded_released_shape(self):
         db = self.connect()
-        db.executescript(V17_FIXTURE.read_text(encoding="utf-8"))
+        db.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
         self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V17
-        )
-
-    def test_frozen_v16_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V16_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V16
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V21
         )
 
     def test_every_released_schema_upgrades_to_the_frozen_current_signature(self):
@@ -306,7 +232,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         for statement in ("ROLLBACK", "RELEASE schema_migration"):
             with self.subTest(statement=statement):
                 db = self.connect()
-                db.executescript(V16_FIXTURE.read_text(encoding="utf-8"))
+                db.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
                 before = list(db.iterdump())
 
                 def failing_step(connection, statement=statement):
@@ -314,7 +240,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                     connection.execute(statement)
                     raise RuntimeError("injected migration failure")
 
-                steps = {SHAPE_SCHEMA_V16: (SHAPE_CURRENT, failing_step)}
+                steps = {SHAPE_SCHEMA_V21: (SHAPE_CURRENT, failing_step)}
                 with (
                     mock.patch.dict(migrations.UPGRADE_STEPS, steps),
                     self.assertRaisesRegex(RuntimeError, "injected"),
@@ -329,7 +255,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             db = sqlite3.connect(path)
             db.row_factory = sqlite3.Row
             try:
-                db.executescript(V16_FIXTURE.read_text(encoding="utf-8"))
+                db.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
                 migrate_schema(db)
                 db.commit()
                 upgraded = list(db.iterdump())
@@ -353,7 +279,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         current.commit()
         self.assert_rejected_unchanged(current)
         released = self.connect()
-        released.executescript(V16_FIXTURE.read_text(encoding="utf-8"))
+        released.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
         released.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
         released.commit()
         self.assert_rejected_unchanged(released)

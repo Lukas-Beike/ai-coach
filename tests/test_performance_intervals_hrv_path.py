@@ -3,10 +3,10 @@ from datetime import date, timedelta
 from typing import Any
 
 from canonical_recovery_support import recovery_only_inputs
+from intervals_compaction import compact_snapshot
 
 from backend.performance.context import current_performance_context
 from backend.performance.freshness import GarminSyncStatus
-from backend.sync.intervals_compaction import compact_snapshot
 
 TODAY = date(2026, 5, 4)
 SYNCED_AT = "2026-05-04T08:00:00+00:00"

@@ -13,11 +13,13 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from intervals_compaction import compact_sport_settings
 from zone_settings_reference import (
     canonical_sport_inputs,
     canonical_zone_settings,
@@ -37,7 +39,6 @@ from backend.history.undo_service import HistoryUndoService
 from backend.planning import calendar_read_model
 from backend.providers.intervals_zone_mapping import map_intervals_zone_configurations
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.intervals_compaction import compact_sport_settings
 
 RETRIEVED_AT = datetime(2026, 10, 11, 6, tzinfo=UTC)
 NOW = "2026-10-11T06:00:00+00:00"
@@ -82,17 +83,24 @@ class EffectiveZoneTests(unittest.TestCase):
             for environment in Environment:
                 with self.subTest(sport=sport, environment=environment):
                     legacy = legacy_sport_settings(settings, sport, environment)
+                    # An Intervals.icu configuration gives its limits only; its
+                    # thresholds are never a source.
                     self.assertEqual(
                         ZoneSettings.from_configurations(
                             configurations, sport, environment
                         ),
-                        legacy,
+                        replace(legacy, ftp=None, lthr=None, max_hr=None),
+                    )
+                    # The Intervals.icu indoor FTP is never read: an indoor workout
+                    # uses the sport FTP.
+                    outdoor = legacy_sport_settings(
+                        settings, sport, Environment.UNKNOWN
                     )
                     self.assertEqual(
                         canonical_zone_settings(
                             ATHLETE["sportSettings"], sport, environment
                         ),
-                        legacy,
+                        replace(legacy, ftp=outdoor.ftp),
                     )
 
     def test_a_local_configuration_wins_on_its_valid_days(self) -> None:
@@ -104,12 +112,13 @@ class EffectiveZoneTests(unittest.TestCase):
         after = ZoneSettings.from_configurations(
             configurations, Sport.RIDE, Environment.INDOOR, date(2026, 11, 1)
         )
-        self.assertEqual((before.ftp, before.power_limits[0]), (250, 55))
+        self.assertEqual((before.ftp, before.power_limits[0]), (None, 55))
         self.assertEqual(
             (after.ftp, after.power_limits), (280, (50, 70, 85, 100, 115, 140))
         )
-        # Heart-rate zones still come from the provider.
-        self.assertEqual(after.lthr, 168)
+        # Heart-rate limits still come from the provider, its threshold does not.
+        self.assertIsNone(after.lthr)
+        self.assertTrue(after.hr_limits)
 
     def test_absolute_local_limits_become_percent_of_the_threshold(self) -> None:
         local = local_configuration(
@@ -150,7 +159,9 @@ class EffectiveZoneTests(unittest.TestCase):
             return row["workout_profile"]["segments"][0]["zone"]
 
         local = local_configuration(LOCAL_POWER)
-        self.assertEqual(zone(provider_configurations()), 5)
+        # An Intervals.icu configuration gives no threshold, so only the local one
+        # colors the step.
+        self.assertIsNone(zone(provider_configurations()))
         self.assertEqual(zone((*provider_configurations(), local)), 4)
 
     def test_a_missing_power_list_keeps_the_canonical_ride_ftp(self) -> None:
@@ -232,6 +243,28 @@ class CoachZoneTests(unittest.TestCase):
                 {k: z[k] for k in ("sport", "metric", "source")}
                 for z in current["training_zones"]
             ],
+        )
+
+    def test_current_performance_carries_the_threshold_warning(self) -> None:
+        performance = Mock()
+        performance.current_performance.return_value = {"ftp": 260}
+        warning: dict[str, Any] = {
+            "stale_after_days": 56,
+            "sdk_failure": None,
+            "items": [{}],
+        }
+
+        def service(read):
+            return CoachStructuredContextService(
+                Mock(), Mock(), Mock(), Mock(), performance, threshold_warnings=read
+            )
+
+        self.assertEqual(
+            service(lambda: warning)._current_performance(None)["threshold_warnings"],
+            warning,
+        )
+        self.assertNotIn(
+            "threshold_warnings", service(lambda: None)._current_performance(None)
         )
 
 
@@ -322,6 +355,21 @@ class LocalZoneEditTests(unittest.TestCase):
             )
         )
 
+    def test_read_carries_the_threshold_warning_only_when_present(self) -> None:
+        self.assertNotIn("threshold_warnings", self.service.read())
+        warning: dict[str, Any] = {
+            "stale_after_days": 56,
+            "sdk_failure": None,
+            "items": [{}],
+        }
+        service = ZoneConfigurationService(
+            self.manager,
+            CanonicalTableReader(),
+            lambda: NOW,
+            threshold_warnings=lambda: warning,
+        )
+        self.assertEqual(service.read()["threshold_warnings"], warning)
+
     def test_committed_save_and_removal_notify_the_change_hook(self) -> None:
         calls: list[bool] = []
         service = ZoneConfigurationService(
@@ -345,6 +393,71 @@ class LocalZoneEditTests(unittest.TestCase):
             {"change_id": change["id"], "expected_current_hash": change["after_hash"]}
         )
         self.assertEqual(self.zone_changes, [True, True])
+
+    def _clocked(self) -> tuple[ZoneConfigurationService, list[str]]:
+        clock = ["2026-08-01T06:00:00+00:00"]
+        service = ZoneConfigurationService(
+            self.manager, CanonicalTableReader(), lambda: clock[0]
+        )
+        unused: Any = None
+        self.undo = HistoryUndoService(
+            self.manager,
+            ChangeHistoryService(self.manager, unused, service),
+            unused,
+            unused,
+            unused,
+            unused,
+            unused,
+            unused,
+            zone_service=service,
+            profile_mutation_coordinator=threading.RLock(),
+        )
+        return service, clock
+
+    def _saved_day(self, key: str) -> date:
+        with self.manager.reader() as db:
+            return canonical_domain_store.local_zone_saved_days(db)[key]
+
+    def _undo(self, change: dict[str, Any]) -> None:
+        self.undo.apply(
+            {"change_id": change["id"], "expected_current_hash": change["after_hash"]}
+        )
+
+    def test_undo_restores_the_save_date_of_the_restored_value(self) -> None:
+        service, clock = self._clocked()
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        clock[0] = "2026-11-07T06:00:00+00:00"
+        self._undo(service.save({**LOCAL_POWER, "threshold": 300})["change"])
+        self.assertEqual(self._saved_day(key), date(2026, 8, 1))
+
+    def test_undo_keeps_a_re_confirmation_date(self) -> None:
+        service, clock = self._clocked()
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        clock[0] = "2026-11-01T06:00:00+00:00"
+        service.save(LOCAL_POWER)
+        self.assertEqual(self._saved_day(key), date(2026, 11, 1))
+        clock[0] = "2026-11-07T06:00:00+00:00"
+        self._undo(service.save({**LOCAL_POWER, "threshold": 300})["change"])
+        self.assertEqual(self._saved_day(key), date(2026, 11, 1))
+
+    def test_re_confirming_a_changed_value_keeps_the_replaced_date(self) -> None:
+        service, clock = self._clocked()
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        clock[0] = "2026-11-01T06:00:00+00:00"
+        change = service.save({**LOCAL_POWER, "threshold": 300})["change"]
+        for day in ("2026-11-02", "2026-11-03"):
+            clock[0] = f"{day}T06:00:00+00:00"
+            service.save({**LOCAL_POWER, "threshold": 300})
+        self.assertEqual(self._saved_day(key), date(2026, 11, 3))
+        self._undo(change)
+        self.assertEqual(self._saved_day(key), date(2026, 8, 1))
+
+    def test_undoing_a_removal_restores_the_removed_save_date(self) -> None:
+        service, clock = self._clocked()
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        clock[0] = "2026-11-07T06:00:00+00:00"
+        self._undo(service.remove({"key": key, "confirmed": True})["change"])
+        self.assertEqual(self._saved_day(key), date(2026, 8, 1))
 
     def test_removal_needs_confirmation_and_can_be_undone(self) -> None:
         key = self.service.save(LOCAL_POWER)["configuration"]["key"]

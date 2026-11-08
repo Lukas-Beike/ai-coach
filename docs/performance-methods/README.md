@@ -198,6 +198,16 @@ accessible text, not a declared absence.
 | R41 | Ettema & Lorås 2009, "Efficiency in cycling: a review", Eur J Appl Physiol 106(1):1-14, PMID 19229554, DOI `10.1007/s00421-009-1008-7` | abstract | Energy expenditure is linear in work rate; gross efficiency depends on work rate. A fixed kJ-to-kcal factor is an approximation. |
 | R42 | Moseley & Jeukendrup 2001, "The reliability of cycling efficiency", Med Sci Sports Exerc 33(4):621-627, PMID 11283439, DOI `10.1097/00005768-200104000-00017` | abstract | 17 men: gross efficiency 19.8 ± 0.6 %, test-retest CV 4.2 %. Lab value, not a field constant. |
 | R43 | Hopker et al. 2009, "The effects of training on gross efficiency in cycling: a review", Int J Sports Med 30(12):845-850, PMID 19941249, DOI `10.1055/s-0029-1237712` | abstract | Training can raise gross efficiency, so work-to-energy varies within an athlete. |
+| R44 | Minetti et al. 2002, "Energy cost of walking and running at extreme uphill and downhill slopes", J Appl Physiol 93(3):1039-1046, PMID 12183501, DOI `10.1152/japplphysiol.01177.2001` | abstract | 10 elite mountain runners on a treadmill, slopes −0.45 to +0.45; cost of running as a polynomial of slope. Laboratory model, not Garmin's GAP; used for grade-adjusted speed (M8, pace at heart rate). |
+| R45 | Sweet et al. 2004, "Quantitation of resistance training using the session rating of perceived exertion method", J Strength Cond Res 18(4):796-802, PMID 15574104, DOI `10.1519/14153.1` | abstract | Session RPE in resistance training rose with lifting intensity while total work fell; session RPE may underrate the mean of per-set ratings. Supports the AU of strength sessions, not a conversion into TSS. |
+| R46 | Day et al. 2004, "Monitoring exercise intensity during resistance training using the session RPE scale", J Strength Cond Res 18(2):353-358, PMID 15142026, DOI `10.1519/R-13113.1` | abstract | Session RPE distinguished resistance-training intensities; ICC 0.88. No TSS conversion. |
+| R47 | Plews et al. 2012, "Heart rate variability in elite triathletes, is variation in variability the key to effective training? A case comparison", Eur J Appl Physiol 112(11):3729-3741, PMID 22367011, DOI `10.1007/s00421-012-2354-4` | abstract | Two elite triathletes; the 7-day rolling mean of ln(RMSSD) and its CV followed training better than single days. Case comparison, morning recordings. |
+| R48 | Plews et al. 2014, "Monitoring training with heart-rate variability: how much compliance is needed for valid assessment?", IJSPP 9(5):784-791, DOI `10.1123/IJSPP.2013-0455` | abstract | Trained triathletes; ln(RMSSD) averaged over 1-7 random days per week; standardised changes and correlations plateau after 3-4 days; recommends at least 3 valid days per week. |
+| R49 | Buchheit 2014, "Monitoring training status with HR measures: do all roads lead to Rome?", Front Physiol 5:73, PMID 24578692, DOI `10.3389/fphys.2014.00073` | abstract | Review; recommends log-transformed vagal HRV indices and weekly means over single values; interpretation depends on context. |
+| R50 | Mattioni Maturana et al. 2018, "Critical power: How different protocols and models affect its determination", J Sci Med Sport 21(7):742-747, PMID 29203319, DOI `10.1016/j.jsams.2017.11.015` | abstract | 13 trained cyclists, five exhaustive trials of about 1-20 min on separate days. CP was considerably overestimated when only trials under 10 min entered the fit, independent of the model; fits with two trials of 12-20 min agreed well with the criterion for CP and W′. Lab trials, not training files. |
+| R51 | Hunter, Ledger & Muniz-Pumares 2023, "Remote determination of critical speed and critical power in recreational runners", IJSPP, PMID 37888148 | abstract | 23 recreational runners, 8 weeks of foot-pod training data vs time trials and 3-min all-out tests. CS/CP from habitual training agreed with the tests; D′/W′ agreed only weakly and were moderately reliable. Running, not cycling. |
+| R52 | Manzi et al. 2009, "Relation between individualized training impulses and performance in distance runners", Med Sci Sports Exerc 41(11):2090-2096, PMID 19812506, DOI `10.1249/MSS.0b013e3181a6a959` | abstract (PubMed summary) | 8 recreational runners over 8 weeks: a training impulse weighted by each runner's own heart-rate and lactate profiles correlated with gains in speed at 2 and 4 mmol/L lactate and with 5 and 10 km performance; group-average weights did not. Small sample. Supports summing the impulse over the heart-rate distribution; the card keeps Banister weights. |
+| R53 | Charoensap et al. 2025 (author order differs between sources), "Durability of the moderate-to-heavy intensity transition can be predicted using readily available markers of physiological decoupling", Eur J Appl Physiol 125:2911-2920, PMC12479576 | abstract | 51 trained cyclists pooled from four studies; power at VT1 before and after about 2.5 h of moderate cycling; HR decoupling correlated with the VT1 power loss (r = −0.76), respiratory frequency weaker, ventilation not. Candidate reference for M8; laboratory sessions, not field files. |
 | L1 | Phillips & Steven 2026, "Perspective: sleep regularity—where do we go from here?", Sleep 49(8), PMID 42023690, DOI `10.1093/sleep/zsag114` | full text | Perspective without new data, formula, threshold or wearable/athlete content. Background only; not decision evidence. |
 
 ### Vendor documentation (not peer-reviewed)
@@ -209,6 +219,7 @@ accessible text, not a declared absence.
 
 | V3 | Friel, TrainingPeaks, "Efficiency Factor and Decoupling" (2011-12-07, updated 2026-07-18), https://www.trainingpeaks.com/blog/efficiency-factor-and-decoupling/ | full text (web) | EF ride = NP / avg HR, run = normalized graded speed / avg HR; decoupling = (EF1 − EF2)/EF1 on a steady effort; "5 % or less" as a preference, no citations. |
 | V4 | Friel, TrainingPeaks, "Aerobic Endurance and Decoupling" (2008-10-10, updated 2026-06-03), https://www.trainingpeaks.com/learn/articles/aerobic-endurance-and-decoupling/ | full text (web) | Bands < 5 %, 5-10 %, > 10 %, with "There's no hard research-based rule here"; heat and dehydration named as causes. |
+| V6 | Garmin, "HRV Status" (health science page, https://www.garmin.co.jp/minisite/garmin-technology/health-science/hrv-status) and device manuals ("Daily RHR is calculated using the lowest 30 minute average in a 24 hour period", as quoted in Garmin forums) | search snippet only | HRV status = seven-night average of overnight HRV against a slowly adapting personal baseline after about three weeks; no formula. Resting HR definition as quoted, not verified from a manual page. |
 | V5 | TrainingPeaks Help, "Aerobic Decoupling and Efficiency Factor" (204071724) and "Variability Index (VI)" (204071734) | search snippet only | VI = NP / AP; steady ride 1.00-1.02, MTB or cyclocross 1.13-1.50; decoupling under 20 min "not as valid". Not verified from the page. |
 
 M8 search on 2026-11-07 (PubMed E-utilities, Crossref, vendor pages):
@@ -219,6 +230,26 @@ M8 search on 2026-11-07 (PubMed E-utilities, Crossref, vendor pages):
 `filter=updates:<doi>` and PubMed `CommentsCorrections` found no correction or
 retraction for R32-R43. No peer-reviewed validity or reliability study of EF or
 VI and no peer-reviewed decoupling threshold was found.
+R44 was added on 2026-11-07 (#1770) from a bibliographic search (PubMed
+ID, repository records); its correction status was not checked.
+R47 to R49 and V6 were added on 2026-11-07 (#1772) from a web search
+(`Garmin HRV status 7-day average baseline`, `Plews 2014 compliance ln
+rMSSD`, `Garmin resting heart rate lowest 30-minute average`) and the science
+review's citations; their correction status was not checked.
+R53 was added on 2026-11-08 (#1773) from a web search (`2025 European Journal
+of Applied Physiology aerobic decoupling first ventilatory threshold
+durability`); its correction status was not checked.
+R50 and R51 were added on 2026-11-08 (#1773) from a web search
+(`Mattioni Maturana 2018 critical power trial duration`, `Hunter 2023 critical
+power W' training data`) and the science review's citations; their correction
+status was not checked.
+R45 and R46 were added on 2026-11-07 (#1771) from a web and PubMed search
+(`session RPE resistance training`, TrainingPeaks and Intervals.icu pages on
+TSS from RPE); no study converting session-RPE AU into TSS was found. Their
+correction status was not checked.
+R52 was added on 2026-11-08 (#1773) from a PubMed search
+(`Manzi individualized training impulse`); its correction status was not
+checked.
 
 M6 search on 2026-11-06 (PubMed E-utilities, Europe PMC, publisher and vendor
 pages): `"training stress score"[tiab] AND 2020:2026[dp]`,

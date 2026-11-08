@@ -17,7 +17,9 @@ from backend.providers.intervals_performance_fields import (
 # A separate key keeps failures out of the `activity_detail:` record scans.
 _FAILURE = "activity_detail_failure"
 _RECORD_PREFIX = "activity_detail:"
-PREFETCH_FLOOR_KEY = "activity_detail_prefetch_floor"
+# kv GLOB patterns of the Intervals.icu detail records and their failure notes,
+# which the Intervals.icu ingest purge deletes (#1728).
+LEGACY_KEY_PATTERNS = (f"{_RECORD_PREFIX}*", f"{_FAILURE}:*")
 
 
 def _json_or_none(raw: str) -> Any:
@@ -101,22 +103,6 @@ class ActivityDetailStore:
             if isinstance(value, dict):
                 result[keys[row["key"]]] = value
         return result
-
-    def prefetch_floor(self) -> str | None:
-        """Start time from which every new activity is loaded automatically."""
-        with self._database_manager.reader() as db:
-            row = db.execute(
-                "SELECT value FROM kv WHERE key=?", (PREFETCH_FLOOR_KEY,)
-            ).fetchone()
-        return None if row is None else str(row["value"])
-
-    def save_prefetch_floor(self, value: str, observed_at: str) -> None:
-        """Set the floor once; an existing floor is never moved."""
-        with self._database_manager.unit_of_work() as db:
-            db.execute(
-                "INSERT OR IGNORE INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                (PREFETCH_FLOOR_KEY, value, observed_at),
-            )
 
     @staticmethod
     def records_after(db: Any, after_key: str, limit: int) -> list[tuple[str, Any]]:

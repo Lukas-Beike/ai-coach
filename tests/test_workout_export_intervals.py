@@ -123,29 +123,40 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
         self.assertEqual(method, "GET")
         self.assertTrue(url.endswith("/athlete/athlete%2F1/events/event-1"))
 
-    def test_list_window_requests_athlete_events_with_workout_category(self):
-        self.request.return_value = [{"id": "event-1"}]
+    def test_list_window_reads_every_category_unfiltered(self):
+        own_note = {
+            "id": "note-1",
+            "category": "NOTE",
+            "external_id": self.export.external_id_for(LOCAL_ID),
+        }
+        self.request.return_value = [
+            {"id": "event-1", "category": "WORKOUT"},
+            own_note,
+            {"id": "note-2", "category": "NOTE"},
+            {"id": "race-1", "category": "RACE_A"},
+        ]
 
         events = self.export.list_window(oldest="2026-09-20", newest="2026-09-26")
 
-        self.assertEqual(events, [{"id": "event-1"}])
+        self.assertEqual(events, self.request.return_value)
         method, url = self.request.call_args.args[:2]
         self.assertEqual(method, "GET")
         self.assertIn("/athlete/athlete%2F1/events?", url)
         self.assertIn("oldest=2026-09-20", url)
         self.assertIn("newest=2026-09-26", url)
-        self.assertIn("category=WORKOUT", url)
+        self.assertNotIn("category=", url)
 
     def test_list_window_passes_repair_collection_label_to_pagination(self):
+        event = {"id": "event-1", "category": "WORKOUT"}
         with patch.object(
-            self.client, "get_paged_collection", return_value=[{"id": "event-1"}]
+            self.client, "get_paged_collection", return_value=[event]
         ) as paged:
             events = self.export.list_window(oldest="2026-09-20", newest="2026-09-26")
 
-        self.assertEqual(events, [{"id": "event-1"}])
+        self.assertEqual(events, [event])
         paged.assert_called_once_with(
             "/athlete/athlete%2F1/events",
-            {"oldest": "2026-09-20", "newest": "2026-09-26", "category": "WORKOUT"},
+            {"oldest": "2026-09-20", "newest": "2026-09-26"},
             "repair_workouts",
         )
 
@@ -159,6 +170,24 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
         with self.assertRaises(AppError) as caught:
             self.export.verify_readback(workout(), {**saved, "type": "Ride"})
         self.assertEqual(caught.exception.reason, "intervals_workout_sport_mismatch")
+
+    def test_strength_is_sent_and_read_back_as_a_note(self):
+        payload = self.export.serialize(
+            LOCAL_ID, build_planned_workout_export(workout(), today=TODAY)
+        )
+        # Intervals.icu forwards WORKOUT events to Garmin as one unnamed step.
+        self.assertEqual("NOTE", payload["category"])
+        saved = {**payload, "id": "event-1"}
+        self.export.verify_readback(workout(), saved)
+        self.export.verify_readback(workout(), {**saved, "type": None})
+        with self.assertRaises(AppError) as caught:
+            self.export.verify_readback(workout(), {**saved, "category": "WORKOUT"})
+        self.assertEqual(caught.exception.reason, "intervals_workout_category_mismatch")
+        ride = workout(sport="Ride", description="- 35m 60%")
+        ride_payload = self.export.serialize(
+            LOCAL_ID, build_planned_workout_export(ride, today=TODAY)
+        )
+        self.assertEqual("WORKOUT", ride_payload["category"])
 
     def test_library_workouts_cross_the_adapter_with_planning_field_names(self):
         client = Mock()
@@ -251,6 +280,15 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
         self.assertFalse(
             self.export.is_unpaired_future_planned(
                 {**planned, "category": "RACE_A"}, today=TODAY
+            )
+        )
+        # Only a note this app sent counts as planned.
+        note = {**planned, "category": "NOTE"}
+        self.assertFalse(self.export.is_unpaired_future_planned(note, today=TODAY))
+        self.assertTrue(
+            self.export.is_unpaired_future_planned(
+                {**note, "external_id": self.export.external_id_for(LOCAL_ID)},
+                today=TODAY,
             )
         )
         self.assertFalse(

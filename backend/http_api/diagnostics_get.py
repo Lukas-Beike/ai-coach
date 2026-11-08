@@ -35,7 +35,7 @@ class DiagnosticsGetRoutes:
                 self._recent_log_entries_service().download(),
                 "application/x-ndjson; charset=utf-8",
                 {
-                    "Content-Disposition": 'attachment; filename="intervals-coach-server-logs.jsonl"'
+                    "Content-Disposition": 'attachment; filename="pacecraft-server-logs.jsonl"'
                 },
             )
             return True

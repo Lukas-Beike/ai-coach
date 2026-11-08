@@ -156,14 +156,17 @@ class M1SessionRpeInputs(linking.LinkingCase):
         self.assertIsNone(canonical_store.activity_device_type(garmin["details"]))
 
         saved = self._feedback().save(alias["activity_id"], {"session_rpe": 5})
+        # Feedback is stored under the session it was written for, here the
+        # alias named by the request, not the survivor.
         self.assertEqual(
-            saved["activity_feedback"]["activity_id"], linking.INTERVALS_ID
+            saved["activity_feedback"]["activity_id"], alias["activity_id"]
         )
         self.assertEqual(
-            self._stored_feedback(linking.INTERVALS_ID)[0]["session_rpe"], 5
+            self._stored_feedback(alias["activity_id"])[0]["session_rpe"], 5
         )
+        self.assertEqual(self._stored_feedback(survivor["activity_id"]), [])
+        self.assertEqual(self._stored_feedback(linking.INTERVALS_ID), [])
         self.assertEqual(self._stored_feedback(linking.GARMIN_ID), [])
-        self.assertEqual(self._stored_feedback(alias["activity_id"]), [])
 
     def test_incomplete(self) -> None:
         workout = linking.wahoo_workout()
@@ -192,7 +195,8 @@ class M1SessionRpeInputs(linking.LinkingCase):
 
         service = self._feedback()
         service.save(linking.WAHOO_ID, {"session_rpe": 0})
-        self.assertEqual(self._stored_feedback(linking.WAHOO_ID)[0]["session_rpe"], 0)
+        self.assertEqual(self._stored_feedback(local_id)[0]["session_rpe"], 0)
+        self.assertEqual(self._stored_feedback(linking.WAHOO_ID), [])
         for invalid in (-1, 10.5, math.nan):
             with self.subTest(rpe=invalid), self.assertRaises(AppError):
                 service.save(linking.WAHOO_ID, {"session_rpe": invalid})
@@ -211,9 +215,8 @@ class M1SessionRpeInputs(linking.LinkingCase):
             ],
             linking.THIRD,
         )
-        self.assertEqual(
-            self._stored_feedback(linking.INTERVALS_ID)[0]["session_rpe"], 5
-        )
+        session = self._sessions()[linking.INTERVALS_ID]["activity_id"]
+        self.assertEqual(self._stored_feedback(session)[0]["session_rpe"], 5)
         with self.manager.reader() as db:
             payloads = canonical_store.active_activity_payload_texts(
                 db, provider=INTERVALS, record_kind=ACTIVITY_RECORD_KIND
@@ -359,7 +362,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
                 MetricKind.RESTING_HR, 47.0, TODAY.isoformat(), ProviderId.INTERVALS
             )
         )
-        canonical = recovery_inputs(observations, latest_wellness_day=TODAY)
+        canonical = recovery_inputs(observations)
 
         served = personal_recovery({}, TODAY, canonical=canonical)
 
@@ -372,9 +375,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
         )
         reader = RecordingReader({MetricKind.HRV_RMSSD: [observation]})
 
-        inputs = read_recovery_inputs(
-            reader, None, as_of=TODAY, latest_wellness_day=None
-        )
+        inputs = read_recovery_inputs(reader, None, as_of=TODAY)
         # A source without stored sleep periods leaves the regularity on raw rows.
         self.assertIsNone(inputs.sleep_periods)
         served = personal_recovery({}, TODAY, canonical=inputs)
@@ -508,9 +509,7 @@ class M3SleepInputs(unittest.TestCase):
             MetricKind.SLEEP_DURATION, 28_800.0, TODAY.isoformat(), ProviderId.GARMIN
         )
         reader = RecordingReader({MetricKind.SLEEP_DURATION: [observation]})
-        inputs = read_recovery_inputs(
-            reader, None, as_of=TODAY, latest_wellness_day=None
-        )
+        inputs = read_recovery_inputs(reader, None, as_of=TODAY)
         # Since #1411 sleep duration is a canonical input of the baselines.
         self.assertIn(MetricKind.SLEEP_DURATION, [call[0] for call in reader.calls])
         served = personal_recovery({}, TODAY, canonical=inputs)
@@ -536,7 +535,7 @@ class M3SleepInputs(unittest.TestCase):
             sleep_storage,
             ["sleep_periods.sleep_periods"],
             msg="#1419: canonical sleep periods are stored (schema v15); "
-            "sleep-timing-variability-v2 reads them",
+            "sleep-timing-variability-v3 reads them",
         )
         series = mapped_personal_recovery(
             [], {"sleep": [_night(0)]}, self.profile, TODAY

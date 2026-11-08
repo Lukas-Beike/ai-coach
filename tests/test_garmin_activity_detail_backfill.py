@@ -166,7 +166,9 @@ class _Details:
         self.fetched: list[str] = []
         self.closed = False
 
-    def fetch_activity_details(self, provider_activity_ids, *, cancel_event=None):
+    def fetch_activity_details(
+        self, provider_activity_ids, *, strength_ids=(), cancel_event=None
+    ):
         self.calls.append((tuple(provider_activity_ids), cancel_event))
         return self._iterate(list(provider_activity_ids), cancel_event)
 
