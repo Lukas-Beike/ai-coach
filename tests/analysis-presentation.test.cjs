@@ -37,7 +37,7 @@ test("analysis popovers stay inside the viewport on narrow screens and flip abov
 });
 
 test("ratio units such as W/bpm keep significant digits and small efficiencies are not rounded to zero", () => {
-  const { analysisValue } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisNumber", "analysisValue"], { AppFormat: require("../public/format.js") });
+  const { analysisValue } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue"], { AppFormat: require("../public/format.js") });
   assert.equal(analysisValue(0.0234, "(m/s)/bpm"), "0,0234 (m/s)/bpm");
   assert.equal(analysisValue(1.4237, "W/bpm"), "1,42 W/bpm");
   assert.equal(analysisValue(1.5, "W/bpm"), "1,5 W/bpm");
@@ -118,7 +118,7 @@ test("analysisHasData is true only when a series holds a valid finite point", ()
 test("an analysis chart without data is omitted and its title is listed once as missing", () => {
   const { analysisChart, collectAnalysisChart, analysisMissingDataNote } = loadFunctions(
     "analysis.js",
-    ["analysisValidPoint", "analysisHasData", "analysisChart", "collectAnalysisChart", "analysisMissingDataNote"],
+    ["analysisValidPoint", "analysisHasData", "analysisAxisCaption", "analysisChart", "collectAnalysisChart", "analysisMissingDataNote"],
     {
       reportNode: (tag, text, className) => ({ tag, text, className }),
     },
@@ -245,7 +245,7 @@ test("12-week body charts show the latest reading of each week and draw a single
 });
 
 test("the seven-day ln(RMSSD) note shows the back-transformed mean, range and spread", () => {
-  const { recoveryRollingNote } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisNumber", "analysisValue", "recoveryRollingNote"], { AppFormat: require("../public/format.js") });
+  const { recoveryRollingNote } = loadFunctions("analysis.js", ["analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue", "recoveryRollingNote"], { AppFormat: require("../public/format.js") });
   assert.equal(
     recoveryRollingNote({ status: "ok", mean_ms: 51.9, lower_ms: 53, upper_ms: 62.2, position: "below", cv_pct: 3, window_nights: 5 }),
     "7-Tage-Mittel 51,9 ms (5 Nächte) · unter deinem Bereich 53 ms–62,2 ms · Schwankung 3 %",
@@ -258,4 +258,25 @@ test("the seven-day ln(RMSSD) note shows the back-transformed mean, range and sp
     recoveryRollingNote({ status: "insufficient_data", reason: "Mindestens 3 Nächte in den letzten 7 Tagen erforderlich." }),
     "7-Tage-Mittel: Mindestens 3 Nächte in den letzten 7 Tagen erforderlich",
   );
+});
+
+test("steps and floors carry their own per-day unit, a named basis and whole numbers", () => {
+  const fns = loadFunctions("analysis.js", ["dailyActivityMetrics", "analysisBasisCaption", "analysisRatioUnit", "analysisCountUnit", "analysisNumber", "analysisValue", "analysisValidPoint", "dailyActivityTitle"], { AppFormat: require("../public/format.js") });
+  const metrics = fns.dailyActivityMetrics();
+  assert.deepEqual(Array.from(metrics, ({ key, unit }) => [key, unit]), [["steps", "Schritte/Tag"], ["floors", "Stockwerke/Tag"]]);
+  assert.equal(fns.analysisBasisCaption("Schritte/Tag", true, "mean"), "Schritte/Tag · Wochenmittel");
+  assert.equal(fns.analysisBasisCaption("Stockwerke/Tag", false, "mean"), "Stockwerke/Tag");
+  assert.equal(fns.analysisBasisCaption("Belastungspunkte", true, "state"), "Belastungspunkte · Wochenstand");
+  assert.equal(fns.analysisBasisCaption("h", false, "sum"), "h · Tagessumme");
+  for (const { unit } of metrics) assert.doesNotMatch(fns.analysisBasisCaption(unit, true, "mean"), /Belastungspunkte/);
+  assert.equal(fns.analysisValue(8171.4, "Schritte/Tag"), "8.171 Schritte/Tag");
+  assert.equal(fns.analysisValue(7.5, "Stockwerke/Tag"), "8 Stockwerke/Tag");
+  const days = [{ date: "2026-10-01", value: 6500 }, { date: "2026-10-02", value: 9843 }, { date: "2026-10-03", value: null }];
+  assert.equal(fns.dailyActivityTitle("Schritte", "Schritte/Tag", days), "Schritte · Ø 8.172 pro Tag", "the header averages the same days the chart plots");
+});
+
+test("zone distributions list the highest zone first", () => {
+  const { trainingFocusZoneSeconds } = loadFunctions("analysis.js", ["trainingFocusZoneSeconds"]);
+  const readings = trainingFocusZoneSeconds([{ seconds: { Z1: 60, Z3: 30 } }, { seconds: { Z2: 10, Z5: 5, Z1: 15 } }]);
+  assert.deepEqual(Array.from(readings, (item) => [item.label, item.value]), [["Z5", 5], ["Z3", 30], ["Z2", 10], ["Z1", 75]]);
 });

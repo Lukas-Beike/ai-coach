@@ -235,53 +235,99 @@ test("@responsive recovery comparison band is neutral and keeps series contrast 
   }
 });
 
+// Value labels never touch a mark, the line, an axis text or another label, and stay inside the chart (#1782).
+async function chartLabelCollisions(svg) {
+  return svg.evaluate((element) => {
+    const rect = (node) => { const box = node.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom }; };
+    const hit = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const labels = [...element.querySelectorAll(".analysis-point-value[data-value-series]")].map(rect);
+    const marks = [...element.querySelectorAll("rect.analysis-series-bar, rect.recovery-sleep-bar, circle[data-series], .analysis-axis-unit, .analysis-value-tick, .analysis-date-tick")].map(rect);
+    for (const path of element.querySelectorAll("path[data-series]")) {
+      const matrix = path.getScreenCTM();
+      for (let at = 0; at <= path.getTotalLength(); at += 2) {
+        const point = path.getPointAtLength(at).matrixTransform(matrix);
+        marks.push({ left: point.x - .5, right: point.x + .5, top: point.y - .5, bottom: point.y + .5 });
+      }
+    }
+    const frame = rect(element);
+    return {
+      labels: labels.length,
+      outside: labels.filter((box) => box.left < frame.left || box.right > frame.right || box.top < frame.top || box.bottom > frame.bottom).length,
+      onMarks: labels.filter((box) => marks.some((mark) => hit(box, mark))).length,
+      onLabels: labels.filter((box, index) => labels.slice(index + 1).some((other) => hit(box, other))).length,
+    };
+  });
+}
+
 test("@responsive Garmin acute load switches fourteen days and twelve weeks with real gaps", async ({ page }) => {
   const points = Array.from({ length: 90 }, (_, index) => ({ date: new Date(Date.UTC(2026, 6, 3 + index)).toISOString().slice(0, 10), value: index >= 38 && index <= 44 ? null : 300 + index }));
   await performanceFixture(page, { history: { start: points[0].date, end: points.at(-1).date, load: { source: "Garmin Connect", points }, training_time: { source: "Intervals.icu", points: points.map((point) => ({ ...point, value: point.value == null ? null : 1 })) }, metrics: {} } }, "load");
   const loadRoot = page.locator("#analysisLoadCharts");
   await expect(loadRoot.locator("svg")).toHaveCount(2);
   const root = loadRoot.locator(".analysis-chart-card").first();
+  // Acute load is a rolling state: one line with dots, no bars (#1782).
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
-  await expect(root.locator("rect.analysis-series-bar")).toHaveCount(11);
-  await expect(root.locator(".analysis-point-value[data-value-series]")).toHaveCount(11);
+  await expect(root.locator("rect.analysis-series-bar")).toHaveCount(0);
+  await expect(root.locator(".analysis-axis-unit")).toHaveText("Belastungspunkte · Wochenstand");
   expect(await root.locator(".analysis-date-tick").allTextContents()).toEqual(expect.arrayContaining([expect.stringMatching(/^\d{2}\.\d{2}$/)]));
   await expect(root).not.toContainText("KW ");
   await expect(root.locator("path[data-series='0']")).toHaveAttribute("d", /M.*L/);
   await expect(root).not.toContainText("Fitness");
+  const time = loadRoot.locator(".analysis-chart-card").nth(1);
+  await expect(time.locator("rect.analysis-series-bar")).toHaveCount(11);
+  await expect(time.locator("circle[data-series], path[data-series]")).toHaveCount(0);
+  await expect(time.locator(".analysis-axis-unit")).toHaveText("h · Wochensumme");
   await page.locator("#analysisLoadPeriod").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(14);
-  for (const chart of await loadRoot.locator(".analysis-chart-card").all()) {
-    await expect(chart.locator(".analysis-point-value[data-value-series]")).toHaveCount(14);
-    const boxes = await chart.locator(".analysis-point-value[data-value-series]").evaluateAll((labels) => labels.map((label) => {
-      const box = label.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
-    }));
-    for (let index = 0; index < boxes.length; index++) {
-      const box = boxes[index];
-      expect(boxes.slice(index + 1).some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top)).toBe(false);
-    }
+  await expect(root.locator(".analysis-axis-unit")).toHaveText("Belastungspunkte · Tageswert");
+  for (const svg of await loadRoot.locator("svg").all()) {
+    const collisions = await chartLabelCollisions(svg);
+    expect(collisions.labels).toBeGreaterThan(0);
+    expect(collisions.labels).toBeLessThanOrEqual(4);
+    expect(collisions).toMatchObject({ outside: 0, onMarks: 0, onLabels: 0 });
   }
   await page.locator("#analysisLoadPeriod").getByRole("button", { name: "12 Wochen", exact: true }).click();
   await expect(root.locator("circle[data-series='0']")).toHaveCount(11);
-  for (const svg of await loadRoot.locator("svg").all()) {
-    const geometry = await svg.evaluate((element) => {
-      const dots = [...element.querySelectorAll("circle[data-series]")];
-      const bars = [...element.querySelectorAll("rect.analysis-series-bar")];
-      const path = element.querySelector("path[data-series]").getAttribute("d");
-      return { dots: dots.map((dot) => [Number(dot.getAttribute("cx")), Number(dot.getAttribute("cy"))]),
-        bars: bars.map((bar) => [Number(bar.getAttribute("x")) + Number(bar.getAttribute("width")) / 2, Number(bar.getAttribute("y"))]),
-        line: [...path.matchAll(/[ML](-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)].map((match) => [Number(match[1]), Number(match[2])]) };
-    });
-    expect(geometry.dots.length).toBeGreaterThan(0);
-    expect(geometry.bars.length).toBe(geometry.dots.length);
-    geometry.dots.forEach((dot, index) => {
-      expect(geometry.bars[index][0]).toBeCloseTo(dot[0], 4);
-      expect(geometry.bars[index][1]).toBeCloseTo(dot[1], 4);
-      expect(geometry.line[index][0]).toBeCloseTo(dot[0], 2);
-      expect(geometry.line[index][1]).toBeCloseTo(dot[1], 2);
-    });
-  }
+  const geometry = await root.locator("svg").evaluate((element) => {
+    const dots = [...element.querySelectorAll("circle[data-series]")].map((dot) => [Number(dot.getAttribute("cx")), Number(dot.getAttribute("cy"))]);
+    const path = element.querySelector("path[data-series]").getAttribute("d");
+    return { dots, line: [...path.matchAll(/[ML](-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)].map((match) => [Number(match[1]), Number(match[2])]) };
+  });
+  expect(geometry.line.length).toBe(geometry.dots.length);
+  geometry.dots.forEach((dot, index) => {
+    expect(geometry.line[index][0]).toBeCloseTo(dot[0], 2);
+    expect(geometry.line[index][1]).toBeCloseTo(dot[1], 2);
+  });
+  for (const svg of await loadRoot.locator("svg").all()) expect(await chartLabelCollisions(svg)).toMatchObject({ outside: 0, onMarks: 0, onLabels: 0 });
   expect((await new AxeBuilder({ page }).include("#analysisLoadCharts").analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("@responsive steps and floors show per-day units, whole numbers and the plotted basis", async ({ page }) => {
+  await performanceFixture(page, (performance) => {
+    const end = performance.history.end;
+    const days = Array.from({ length: 84 }, (_, index) => {
+      const date = new Date(`${end}T12:00:00Z`);
+      date.setUTCDate(date.getUTCDate() - 83 + index);
+      return date.toISOString().slice(0, 10);
+    });
+    return { history: { ...performance.history, daily_activity: {
+      source: "Garmin Connect",
+      steps: days.map((date, index) => ({ date, value: 6000 + (index % 7) * 700 + 0.4 })),
+      floors: days.map((date, index) => ({ date, value: 5 + (index % 4) * 1.5 })),
+    } } };
+  }, "load");
+  const group = page.locator("#analysisLoadCharts .analysis-chart-stack").filter({ hasText: "Alltagsaktivität" });
+  const steps = group.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: /^Schritte · Ø [\d.]+ pro Tag$/ }) });
+  const floors = group.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: /^Stockwerke · Ø \d+ pro Tag$/ }) });
+  await expect(steps.locator(".analysis-axis-unit")).toHaveText("Schritte/Tag · Wochenmittel");
+  await expect(floors.locator(".analysis-axis-unit")).toHaveText("Stockwerke/Tag · Wochenmittel");
+  await expect(group).not.toContainText("Belastungspunkte");
+  for (const chart of [steps, floors]) {
+    const values = [...await chart.locator(".analysis-point-value, .analysis-value-tick").allTextContents()];
+    for (const value of values) expect(value).toMatch(/^[\d.]+$/);
+    expect(await chartLabelCollisions(chart.locator("svg"))).toMatchObject({ outside: 0, onMarks: 0, onLabels: 0 });
+  }
 });
 
 test("@responsive sparse performance shows measurements and the current value line", async ({ page }) => {

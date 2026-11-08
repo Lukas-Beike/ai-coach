@@ -276,7 +276,7 @@
     for (const item of [...items].reverse()) {
       const share = item.secs / total;
       const row = node("li");
-      row.dataset.zone = item.id.slice(0, 3);
+      row.dataset.zone = item.id.match(/^Z\d/)?.[0] || "";
       const bar = node("span", null, "activity-analysis-zone-bar");
       bar.style.setProperty("--zone-share", `${Math.round(share * 1000) / 10}%`);
       row.append(node("span", item.id.slice(0, 20), "activity-analysis-zone-label"), bar, node("span", `${clock(item.secs)} · ${Math.round(share * 100)} %`, "activity-analysis-zone-value"));
