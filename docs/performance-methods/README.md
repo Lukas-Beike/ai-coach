@@ -207,6 +207,7 @@ accessible text, not a declared absence.
 | R50 | Mattioni Maturana et al. 2018, "Critical power: How different protocols and models affect its determination", J Sci Med Sport 21(7):742-747, PMID 29203319, DOI `10.1016/j.jsams.2017.11.015` | abstract | 13 trained cyclists, five exhaustive trials of about 1-20 min on separate days. CP was considerably overestimated when only trials under 10 min entered the fit, independent of the model; fits with two trials of 12-20 min agreed well with the criterion for CP and W′. Lab trials, not training files. |
 | R51 | Hunter, Ledger & Muniz-Pumares 2023, "Remote determination of critical speed and critical power in recreational runners", IJSPP, PMID 37888148 | abstract | 23 recreational runners, 8 weeks of foot-pod training data vs time trials and 3-min all-out tests. CS/CP from habitual training agreed with the tests; D′/W′ agreed only weakly and were moderately reliable. Running, not cycling. |
 | R52 | Manzi et al. 2009, "Relation between individualized training impulses and performance in distance runners", Med Sci Sports Exerc 41(11):2090-2096, PMID 19812506, DOI `10.1249/MSS.0b013e3181a6a959` | abstract (PubMed summary) | 8 recreational runners over 8 weeks: a training impulse weighted by each runner's own heart-rate and lactate profiles correlated with gains in speed at 2 and 4 mmol/L lactate and with 5 and 10 km performance; group-average weights did not. Small sample. Supports summing the impulse over the heart-rate distribution; the card keeps Banister weights. |
+| R53 | Charoensap et al. 2025 (author order differs between sources), "Durability of the moderate-to-heavy intensity transition can be predicted using readily available markers of physiological decoupling", Eur J Appl Physiol 125:2911-2920, PMC12479576 | abstract | 51 trained cyclists pooled from four studies; power at VT1 before and after about 2.5 h of moderate cycling; HR decoupling correlated with the VT1 power loss (r = −0.76), respiratory frequency weaker, ventilation not. Candidate reference for M8; laboratory sessions, not field files. |
 | L1 | Phillips & Steven 2026, "Perspective: sleep regularity—where do we go from here?", Sleep 49(8), PMID 42023690, DOI `10.1093/sleep/zsag114` | full text | Perspective without new data, formula, threshold or wearable/athlete content. Background only; not decision evidence. |
 
 ### Vendor documentation (not peer-reviewed)
@@ -235,6 +236,9 @@ R47 to R49 and V6 were added on 2026-11-07 (#1772) from a web search
 (`Garmin HRV status 7-day average baseline`, `Plews 2014 compliance ln
 rMSSD`, `Garmin resting heart rate lowest 30-minute average`) and the science
 review's citations; their correction status was not checked.
+R53 was added on 2026-11-08 (#1773) from a web search (`2025 European Journal
+of Applied Physiology aerobic decoupling first ventilatory threshold
+durability`); its correction status was not checked.
 R50 and R51 were added on 2026-11-08 (#1773) from a web search
 (`Mattioni Maturana 2018 critical power trial duration`, `Hunter 2023 critical
 power W' training data`) and the science review's citations; their correction

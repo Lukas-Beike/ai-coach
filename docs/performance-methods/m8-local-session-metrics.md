@@ -1,12 +1,12 @@
 # M8 — Local efficiency factor, variability index, work and decoupling
 
 - **Card:** M8
-- **Card version:** 2
-- **Method ID:** local-session-metrics v2 (#1680, #1770)
+- **Card version:** 3
+- **Method ID:** local-session-metrics v3 (#1680, #1770, #1773)
 - **Status:** implemented (`backend/performance/session_metrics.py`, `backend/sync/session_metrics.py`)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-11-07
-- **Review:** released 2026-11-07 (athlete)
+- **Review:** released 2026-11-08 (athlete)
 
 ## Target construct
 
@@ -37,6 +37,11 @@ Athlete decisions (2026-11-07, #1680):
   issue re-fetches the streams of the history, and the values then follow
   automatically.
 - Calories come from the device as `energy_kcal`, not from a local formula.
+- Card 3 (2026-11-08, #1773): the decoupling's output per heartbeat is named
+  `steady_output_per_hr` (halves: `output_per_hr`), apart from the session
+  EF; run work carries `power_model: running_power_model`; the steady-output
+  rule for outdoor rides is re-measured after the stream history is fetched
+  again (#1763).
 - Provider values of these metrics (Intervals.icu `icu_efficiency_factor`,
   `icu_variability_index`, `decoupling`, `icu_joules`) are never used.
 
@@ -54,12 +59,16 @@ Athlete decisions (2026-11-07, #1680):
    `work_accum`, `basis: device_total`), else
    `W = Σ P_i × Δt_i / 1000` in kJ over the power stream (`basis:
    power_stream`). Samples with `Δt > 5 s`, a missing or negative power are
-   skipped.
+   skipped. Run work records `power_model: running_power_model`: it is the
+   output of the device's running-power model (R40), not a measured force.
 5. **Aerobic decoupling:** the drift of `aerobic_analysis`
    (`backend/performance/session_analysis.py`, method
    `time-weighted-session-analysis-v2`):
    `decoupling = (EF₁ − EF₂) / EF₁ × 100` in %, with `EF_h` the time-weighted
-   mean output over the mean HR of half `h`. Output is power for rides and
+   mean non-zero output over the mean HR of half `h`, stored as
+   `output_per_hr` per half and `steady_output_per_hr` for both halves. It is
+   not the session EF of items 1 and 2: it uses the mean of non-zero output
+   samples, not NP or Garmin's grade-adjusted average. Output is power for rides and
    grade-adjusted speed for road runs.
    - Grade-adjusted speed per sample: `v × C(g) / C(0)` with the Minetti
      et al. (2002) cost of running `C(g)` at the sample's grade `g`, clamped
@@ -76,7 +85,7 @@ Athlete decisions (2026-11-07, #1680):
 
 - Each value is a derived observation owned by its canonical session:
   `observed_on` is the session's local day, `source_kind` `derived`,
-  `method` `local-session-metrics`, `method_version` 1, natural key series
+  `method` `local-session-metrics`, `method_version` 3, natural key series
   `session:<id>`.
 - Kinds: `efficiency_factor`, `variability_index`, `mechanical_work`,
   `aerobic_decoupling`. The derivation holds the basis, the unit of EF, the
@@ -145,6 +154,11 @@ uncontrolled outdoor sessions.
   value in heat or without drinking can exceed any typical range.
 - EF inherits the errors of NP and of the device's grade-adjusted speed; NP
   algorithms differ between vendors.
+- VI uses the device's average power, which depends on Garmin's "include
+  zeros" power-averaging setting: excluding zeros raises the average and
+  lowers VI for rides with coasting. The setting is not reported.
+- The second half includes any cool-down at the end of the session; a
+  symmetric trim is evaluated together with the steady-output rule (#1763).
 - Stream work misses the skipped samples; its coverage is stored. Mechanical
   work is not energy expenditure: gross efficiency is about 20 % and varies
   with work rate and training (R41-R43).
@@ -238,7 +252,16 @@ uncontrolled outdoor sessions.
 ## Open points
 
 - **Validity:** no peer-reviewed validity or reliability study of EF, VI or
-  field decoupling; all three stay descriptive.
+  field decoupling; all three stay descriptive. Candidate reference R53: in
+  51 trained cyclists, HR decoupling over about 2.5 h of moderate cycling
+  tracked the fall of power at the first ventilatory threshold (r = −0.76);
+  controlled laboratory sessions, not everyday outdoor files.
+- **Steady-output rule:** the output CV ≤ 15 % on ~1 s samples probably
+  excludes most outdoor rides (science review 2026-11-07). A counts-only
+  measurement (`scripts/decoupling_eligibility_dry_run.py`) on the athlete's
+  data on 2026-11-08 found no session of the last 365 days with Garmin or
+  Wahoo full-resolution streams, so it could not be evaluated; it runs again
+  after the stream history re-fetch (#1763), and the rule is decided then.
 - **History:** sessions without stored full-resolution streams have no stream
   work and no decoupling until the follow-up stream re-fetch.
 - **EF trend:** an EF or decoupling trend over comparable sessions is not
