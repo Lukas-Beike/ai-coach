@@ -527,6 +527,7 @@ def demo_performance_history(today):
 # stored Intervals.icu rows, the way an older database holds them, next to the
 # Garmin copies. The fixture builds those canonical rows itself.
 FIXTURE_ACTIVITY_MAPPER_VERSION = 1
+FIXTURE_INTERVALS_LABEL = "Intervals.icu"
 _FIXTURE_SPORTS = {
     "Ride": (Sport.RIDE, Environment.UNKNOWN),
     "VirtualRide": (Sport.RIDE, Environment.VIRTUAL),
@@ -626,7 +627,7 @@ def _fixture_activity_record(row, retrieved_at):
             source_record_id=activity_id,
             recorded_by=_fixture_origin(row),
             retrieved_at=retrieved_at,
-            label="Intervals.icu",
+            label=FIXTURE_INTERVALS_LABEL,
         ),
         sport=sport,
         environment=environment,
@@ -834,7 +835,7 @@ def _save_activity_detail(activity_id, record):
             source_record_id=None,
             recorded_by=RecordingOrigin(link["recorded_by"]),
             retrieved_at=datetime.fromisoformat(record["observed_at"]),
-            label="Intervals.icu",
+            label=FIXTURE_INTERVALS_LABEL,
         )
         summary = record.get("summary_sha256")
         if StreamChannel.TIME_S in channels:
@@ -2586,7 +2587,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                         ),
                         "interval_quality": interval_quality(detailed, None),
                     },
-                    "source": "Intervals.icu",
+                    "source": FIXTURE_INTERVALS_LABEL,
                     "observed_at": datetime.now(UTC).isoformat(),
                     "full_resolution": True,
                     "available_streams": [
