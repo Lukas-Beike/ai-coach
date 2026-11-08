@@ -42,7 +42,10 @@ FAILED: Final = "failed"
 
 
 class RatingReadStopped(RuntimeError):
-    """The read ended early; ``kind`` says why and ``activity_id`` where."""
+    """The read ended early; ``kind`` says why and ``activity_id`` where.
+
+    The activity file read of the stream backfill ends the same way.
+    """
 
     def __init__(self, kind: str, activity_id: str) -> None:
         super().__init__(kind)
@@ -88,13 +91,13 @@ def collect_activity_ratings(
             sleep(delay_seconds)
         try:
             with hooks.guard():
-                value = _read_one(fetch, activity_id, external_call)
-        except _ReadFailed as failed:
-            if _skips(failed.original, hooks):
+                value = read_one(fetch, activity_id, external_call)
+        except ReadFailed as failed:
+            if skips(failed.original, hooks):
                 on_skip(activity_id)
                 continue
             raise RatingReadStopped(
-                _stop_kind(failed.original, hooks), activity_id
+                stop_kind(failed.original, hooks), activity_id
             ) from None
         row = rating_row(value, activity_id, started)
         if row is None:
@@ -103,14 +106,17 @@ def collect_activity_ratings(
         on_row(row)
 
 
-class _ReadFailed(Exception):
+class ReadFailed(Exception):
     def __init__(self, original: BaseException) -> None:
         super().__init__()
         self.original = original
 
 
-def _read_one(
-    fetch: Callable[[str], Any], activity_id: str, external_call: ExternalCall
+def read_one(
+    fetch: Callable[[str], Any],
+    activity_id: str,
+    external_call: ExternalCall,
+    operation: str = ACTIVITY_RATINGS_SECTION,
 ) -> Any:
     """Read one activity; a failure carries the original error, not external_call's."""
     originals: list[BaseException] = []
@@ -124,14 +130,12 @@ def _read_one(
             raise
 
     try:
-        return external_call(
-            GARMIN_ID, ACTIVITY_RATINGS_SECTION, read, {"activity_id": activity_id}
-        )
+        return external_call(GARMIN_ID, operation, read, {"activity_id": activity_id})
     except Exception as exc:  # noqa: BLE001 - classified by the caller.
-        raise _ReadFailed(originals[0] if originals else exc) from None
+        raise ReadFailed(originals[0] if originals else exc) from None
 
 
-def _skips(error: BaseException, hooks: RatingReadHooks) -> bool:
+def skips(error: BaseException, hooks: RatingReadHooks) -> bool:
     """Only a client error, an unreadable answer or a 403 skips one activity."""
     code = hooks.error_class(error)
     if code == "rate_limited":
@@ -145,7 +149,7 @@ def _skips(error: BaseException, hooks: RatingReadHooks) -> bool:
     return hooks.skippable(error) or type(error).__name__ == _SDK_NOT_FOUND
 
 
-def _stop_kind(error: BaseException, hooks: RatingReadHooks) -> str:
+def stop_kind(error: BaseException, hooks: RatingReadHooks) -> str:
     code = hooks.error_class(error)
     if code == "rate_limited":
         return RATE_LIMITED

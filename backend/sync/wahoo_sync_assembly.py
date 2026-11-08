@@ -8,11 +8,11 @@ import time
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import datetime, tzinfo
+from datetime import date, datetime, tzinfo
 from typing import Any
 
 from backend.canonical.records import Observation
-from backend.canonical.vocabulary import Sport
+from backend.canonical.vocabulary import ProviderId, Sport
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -24,10 +24,16 @@ from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.provider_registry import ProviderRegistry
+from backend.sync.stream_backfill import StreamBackfillService
 from backend.sync.wahoo_activity_details import WahooActivityDetailImport
 from backend.sync.wahoo_connection import WahooConnectionService
 from backend.sync.wahoo_library_state import WahooLibraryState
 from backend.sync.wahoo_plan_push import WahooPlanPushService
+from backend.sync.wahoo_stream_backfill import (
+    WAHOO_BATCH_LIMIT,
+    WahooStreamMapping,
+    WahooStreamSource,
+)
 from backend.sync.wahoo_sync import (
     WahooSyncClock,
     WahooSyncService,
@@ -54,6 +60,8 @@ class WahooSyncInputs:
     resync_gate: ProviderResyncGate
     # ``db -> export thresholds`` (local zones, Garmin, Wahoo) for plan references.
     export_thresholds: Callable[[Any], Mapping[ThresholdKey, Observation]]
+    # The oldest day the stream backfill reaches.
+    history_earliest_date: date
 
 
 class WahooSyncAssembly:
@@ -114,6 +122,26 @@ class WahooSyncAssembly:
                     logger=inputs.logger,
                 )
             return self._details
+
+    def stream_backfill_service(self) -> StreamBackfillService:
+        """Compose the backfill of the FIT streams of past Wahoo workouts."""
+        inputs = self._inputs
+        return StreamBackfillService(
+            provider=ProviderId.WAHOO.value,
+            source=WahooStreamSource(
+                client=self.client,
+                download=download_wahoo_fit,
+            ),
+            mapping=WahooStreamMapping(),
+            database_manager=inputs.database_manager,
+            key_values=inputs.key_values,
+            guard=lambda: inputs.database_lock,
+            utc_now=lambda: inputs.now().isoformat(),
+            configured=self.sync_service().configured,
+            earliest_date=inputs.history_earliest_date,
+            batch_limit=WAHOO_BATCH_LIMIT,
+            operation=inputs.resync_gate.operation,
+        )
 
     def workout_export(self) -> WahooWorkoutExport:
         """Create the library export target; the client resolves per remote call.

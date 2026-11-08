@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 from contextlib import nullcontext
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import Mock
 
 from backend.canonical.records import MetricValue, Observation, Provenance
@@ -261,7 +261,9 @@ class ExportReferenceTests(unittest.TestCase):
 
 
 class AssemblyReferenceTests(unittest.TestCase):
-    def test_assembled_export_reads_thresholds_once_per_run_inside_a_reader(self) -> None:
+    def test_assembled_export_reads_thresholds_once_per_run_inside_a_reader(
+        self,
+    ) -> None:
         database = object()
         seen: list[object] = []
         manager = Mock()
@@ -288,6 +290,7 @@ class AssemblyReferenceTests(unittest.TestCase):
                 redactor=Mock(),
                 resync_gate=Mock(),
                 export_thresholds=thresholds,
+                history_earliest_date=date(2020, 1, 1),
             )
         )
 

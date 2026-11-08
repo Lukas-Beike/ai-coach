@@ -93,6 +93,24 @@ class SyncCoordination(Protocol):
     def release(self) -> None: ...
 
 
+@contextmanager
+def coordinated_guard(coordination: SyncCoordination) -> Iterator[None]:
+    """Hold the Garmin coordination lock for one read or one write only.
+
+    A running Garmin sync is waited for ``LOCK_WAIT_SECONDS``; the stream backfill
+    shares this guard.
+    """
+    with coordination.operation():
+        if not coordination.acquire(timeout=LOCK_WAIT_SECONDS):
+            raise AppError(
+                503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
+            )
+        try:
+            yield
+        finally:
+            coordination.release()
+
+
 @dataclass(frozen=True)
 class RatingCandidate:
     session_id: str
@@ -252,18 +270,9 @@ class GarminRatingBackfillService:
         """Return whether a real Garmin read is configured (never in fixture mode)."""
         return self._configured()
 
-    @contextmanager
-    def _guard(self) -> Iterator[None]:
+    def _guard(self) -> AbstractContextManager[None]:
         """Hold the Garmin coordination lock for one read or one write only."""
-        with self._coordination.operation():
-            if not self._coordination.acquire(timeout=LOCK_WAIT_SECONDS):
-                raise AppError(
-                    503, "Garmin wird bereits aktualisiert.", reason="provider_busy"
-                )
-            try:
-                yield
-            finally:
-                self._coordination.release()
+        return coordinated_guard(self._coordination)
 
     def backfill(self, end: date | None) -> dict[str, Any]:
         """Read one batch ending on day ``end`` (None: newest); return the job result.

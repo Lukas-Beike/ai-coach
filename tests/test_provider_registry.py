@@ -400,13 +400,14 @@ PREVIOUS_JOB_SUPPORT: dict[str, frozenset[str]] = {
             "historical_backfill",
             "wellness_backfill",
             "rating_backfill",
+            "stream_backfill",
             "activity_details",
             "plan_push",
         }
     ),
     "calendar": frozenset({"refresh"}),
     "weather": frozenset({"refresh"}),
-    "wahoo": frozenset({"refresh", "plan_push"}),
+    "wahoo": frozenset({"refresh", "plan_push", "stream_backfill"}),
 }
 PREVIOUS_REFRESH_FIELDS: dict[str, frozenset[str]] = {
     "intervals": frozenset({"reason"}),

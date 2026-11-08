@@ -133,6 +133,25 @@ Detailed contract: Signed links SHALL be absent from stored raw rows, errors, an
 
 Evidence: `backend/sync/wahoo_activity_details.py:WahooActivityDetailImport.import_details`, `backend/providers/wahoo_fit_download.py:download_wahoo_fit`, `backend/providers/fit_file.py:fit_messages`, `backend/providers/fit_activity_detail_mapping.py:map_fit_activity_detail`; `tests/test_wahoo_activity_details.py:test_at_most_ten_downloads_run_per_sync`, `tests/test_wahoo_activity_details.py:test_download_link_is_absent_from_storage_and_logs`, `tests/test_wahoo_sync.py:test_a_failing_detail_import_keeps_the_sync_ok`.
 
+### Requirement: Stream history backfill
+The system SHALL re-fetch the original FIT files of past Garmin (Personal API) and Wahoo (workout list download links) activities that have no full-resolution stream set, newest first back to the history floor, and store their stream and device-lap sets exactly like the regular detail fetch, with the provider's provenance and the current summary hash. Manual and strength records SHALL be skipped, strength sets of a file SHALL never be stored, and nothing SHALL be written to a provider.
+
+#### Scenario: Missing streams are filled once
+- **WHEN** a live session's active Garmin or Wahoo record has no full-resolution stream set
+- **THEN** its file is downloaded, paced, and stored; a repeated run finds no candidate and downloads nothing.
+
+#### Scenario: A file is missing, empty or fails
+- **WHEN** the provider holds no file, the file holds no sensor records, a download fails three runs or answers with a client error
+- **THEN** only that record is counted and kept out of later runs, the rest of the batch goes on, and queuing a finished chain again without `end_date` lets failed records retry.
+
+#### Scenario: Rate limit or rejected key
+- **WHEN** the provider limits the requests or Garmin rejects the Personal API key
+- **THEN** the job fails with the cursor unchanged and the files stored before stay; a rejected key shows the key hint, and Garmin without a Personal API key stays blocked with the state in diagnostics.
+
+Detailed contract: Wahoo download links SHALL never be stored or logged. The backfill counts per provider (`candidates`, `with_streams`, `stored`, `no_file`, `no_streams`, `skipped_by_error`, `blocked`, `cursor`) SHALL appear in the diagnostic report without ids.
+
+Evidence: `backend/sync/stream_backfill.py:StreamBackfillService.backfill`, `backend/providers/garmin_fit_history.py:collect_activity_fit_files`, `backend/sync/wahoo_stream_backfill.py:WahooStreamSource.fetch`, `backend/diagnostics/stream_backfill.py:summarize_stream_backfill`; `tests/test_stream_backfill.py`.
+
 ### Requirement: Local activity reads and pagination
 The system SHALL read activity rows and sync metadata from one local read snapshot without refreshing providers, expose local activity references with feedback, and offer descending keyset pagination with versioned cursors and legacy cursor compatibility. Page limits SHALL default to 100 and clamp to 1 through 250. Reads SHALL retain summary rows whose detail failed and show only failure notes matching the current summary fingerprint.
 

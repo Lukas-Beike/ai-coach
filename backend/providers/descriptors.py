@@ -328,13 +328,15 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         # wellness_backfill is the one-off, insert-only wellness history walk
         # (backend/sync/garmin_wellness_history.py), queued once at startup;
         # rating_backfill likewise reads the watch ratings of past activities
-        # (backend/sync/garmin_rating_backfill.py).
+        # (backend/sync/garmin_rating_backfill.py); stream_backfill re-fetches the
+        # FIT streams of past activities (backend/sync/stream_backfill.py).
         job_types=frozenset(
             {
                 "refresh",
                 "historical_backfill",
                 "wellness_backfill",
                 "rating_backfill",
+                "stream_backfill",
                 "activity_details",
                 "plan_push",
             }
@@ -431,7 +433,9 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
             "wahoo_full_resync_error",
         ),
         # plan_push is the explicit library export; backend/sync/jobs.py checks it.
-        job_types=frozenset({"refresh", "plan_push"}),
+        # stream_backfill re-fetches the FIT streams of past workouts
+        # (backend/sync/stream_backfill.py).
+        job_types=frozenset({"refresh", "plan_push", "stream_backfill"}),
         refresh_fields=frozenset({"days", "reason"}),
         default_sync_days=_WAHOO_DEFAULT_SYNC_DAYS,
         # Ranked after every earlier provider in the daily, startup and Coach order.
