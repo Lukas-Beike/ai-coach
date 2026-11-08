@@ -65,7 +65,6 @@ class AnalysisRefreshService:
             "incomplete_sources": incomplete,
             "pending_sources": pending,
             "not_refreshed_sources": missing,
-            "truncated_sources": [],
             "source_status": {
                 name: outcome.get("status") or "failed"
                 for name, outcome in outcomes.items()

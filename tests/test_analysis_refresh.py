@@ -26,7 +26,6 @@ class AnalysisRefreshTests(unittest.TestCase):
         self.assertEqual("ok", result["status"])
         self.assertEqual(["Garmin-Aktivitätsübersicht"], result["refreshed_sources"])
         self.assertEqual([], result["not_refreshed_sources"])
-        self.assertEqual([], result["truncated_sources"])
 
     def test_recovery_refreshes_its_own_garmin_area_and_reports_partial_sources(self):
         service, garmin = self.make_service()

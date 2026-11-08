@@ -55,10 +55,6 @@ test("immediate remote writes report the completed operation in their receipt", 
   const context = vm.createContext({});
   vm.runInContext(source.slice(receiptStart, receiptEnd) + ";globalThis.readReceipt = coachActionReceipt;", context);
 
-  const duplicate = context.readReceipt(
-    { action_type: "delete_duplicate_intervals_activity" },
-    { ok: true, status: "deleted" },
-  );
   const adaptive = context.readReceipt(
     { action_type: "remote_coach_write" },
     { ok: true, status: "completed" },
@@ -68,7 +64,6 @@ test("immediate remote writes report the completed operation in their receipt", 
     { ok: true, status: "queued", sync_job_id: "sync-1" },
   );
 
-  assert.match(duplicate.details[0], /Intervals\.icu gelöscht/);
   assert.match(adaptive.details[0], /direkt ausgeführt/);
   assert.equal(queued.details.join("|"), "Syncjob sync-1 eingereiht");
 });

@@ -330,12 +330,6 @@ Merge, provider deletion, restart and backup/restore SHALL preserve athlete feed
 - **WHEN** a provider copy is marked deleted
 - **THEN** stored athlete feedback remains intact and reachable through its canonical session/history.
 
-#### Scenario: Intervals.icu purge
-- **WHEN** the one-time #1728 purge removes the stored Intervals.icu activities
-- **THEN** feedback and equipment assignments of an Intervals.icu session move to the live Garmin or Wahoo session that survives it, keyed by that session id; the newest row wins against rows already stored for the survivor and the others are dropped and counted; data of a session without a survivor is dropped and counted; the recorded feedback changes of those sessions become non-undoable. This is the named exception to preserving all athlete data.
-
-Evidence: `backend/sync/intervals_purge.py:run_purge`.
-
 #### Scenario: Existing save and Coach contracts
 - **WHEN** feedback is saved or undone through the supported API or an athlete-started Coach turn
 - **THEN** existing partial-edit, validation, authorization, receipt and undo behavior remains available.

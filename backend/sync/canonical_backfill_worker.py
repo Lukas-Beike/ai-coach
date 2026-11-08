@@ -60,7 +60,6 @@ class CanonicalBackfillWorker:
         retry_seconds: float = DEFAULT_RETRY_SECONDS,
         thread_factory: Callable[..., threading.Thread] | None = None,
         followups: Sequence[BackfillStage] = (),
-        maintenance_steps: Sequence[Callable[[], None]] = (),
     ) -> None:
         self._backfill = backfill
         self._database = database
@@ -69,7 +68,6 @@ class CanonicalBackfillWorker:
         self._retry_seconds = retry_seconds
         self._thread_factory = thread_factory or threading.Thread
         self._followups = tuple(followups)
-        self._maintenance_steps = tuple(maintenance_steps)
         self._stop_event = threading.Event()
         self._start_lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -120,15 +118,10 @@ class CanonicalBackfillWorker:
                 self._rerun_requested = False
 
     def _run_pass(self) -> None:
-        """Run the canonical backfill to completion, the maintenance steps, then
-        each follow-up in order."""
+        """Run the canonical backfill to completion, then each follow-up in order."""
         while not self._run_stage(self._backfill, "canonical"):
             if self._stop_event.wait(self._retry_seconds):
                 return
-        for step in self._maintenance_steps:
-            if self._stop_event.is_set():
-                return
-            self._run_step(step)
         for followup in self._followups:
             if not self._run_stage(followup, followup.stage):
                 return
@@ -155,19 +148,6 @@ class CanonicalBackfillWorker:
             if report.done:
                 return True
         return False
-
-    @staticmethod
-    def _run_step(step: Callable[[], None]) -> None:
-        try:
-            step()
-        except Exception as exc:  # noqa: BLE001 - a failed step is logged, not raised
-            _LOGGER.error(
-                "Canonical backfill maintenance step failed",
-                extra={
-                    "event": "canonical_backfill_step_failed",
-                    "error_class": type(exc).__name__,
-                },
-            )
 
     def _run_batch(self, stage: BatchStage) -> BatchReport:
         with self._maintenance_gate.operation(), self._database().unit_of_work() as db:

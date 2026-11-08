@@ -6,9 +6,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.backup.recovery_copies import RecoveryCopies
-from backend.sync.intervals_ingest import PURGE_MARKER_FILE
-from backend.sync.intervals_purge import BACKUP_LABEL
 
+# Written by the Intervals.icu purge of release 2.0.0, which is removed; the copies
+# stay on disk until the athlete erases them.
+BACKUP_LABEL = "pre-intervals-purge-v1"
+PURGE_MARKER_FILE = "intervals-purge-v1.done"
 DATABASE = "athlete.db"
 STAMP = "20261101120000-" + "0123456789abcdef" * 2
 

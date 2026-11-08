@@ -65,7 +65,7 @@ The system SHALL audit and restore the entity types profile, workout_library, pl
 - **THEN** an update entry for `<provider>:<remote record>` with the allowlisted field names is recorded, shows `remote_sync` remote and `undoable` false, and a preview or apply for it fails with HTTP 400
 
 #### Scenario: Entry marked not undoable
-- **WHEN** an entry's diff carries `undoable: false`, as set by the one-time purge for the feedback rows it re-keyed
+- **WHEN** an entry's diff carries `undoable: false`, as set by the Intervals.icu purge of release 2.0.0 for the feedback rows it re-keyed
 - **THEN** the entry stays listed but preview and apply fail with HTTP 400 instead of restoring a record the purge moved
 
 Evidence: `backend/change_history.py:ENTITY_TYPES`, `backend/change_history.py:NOT_UNDOABLE_ENTITY_TYPES`, `backend/change_history.py:undoable`, `backend/change_history.py:mark_not_undoable`, `backend/history/undo_service.py:HistoryUndoService._restore`, `backend/history/undo_service.py:HistoryUndoService._load_history`, `backend/sync/metric_export.py`; `tests/test_metric_export.py:test_writes_are_in_the_change_history_without_undo`, `tests/test_intervals_purge.py` (history_entries_not_undoable count).

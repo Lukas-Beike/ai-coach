@@ -3604,15 +3604,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/sync/intervals_lock.py",
-      "capabilities": [
-        "sync-jobs-and-scheduling",
-        "provider-connections",
-        "activity-ingestion-and-storage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/sync/intervals_metric_export.py",
       "capabilities": [
         "sync-jobs-and-scheduling",

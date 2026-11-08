@@ -470,7 +470,6 @@ class ServerDatabaseTests(ServerTestCase):
             provider_freshness=owner(current={}),
             garmin_sync_state=owner(core_error_entries=[]),
             sync_public_state=owner(browser_state={}),
-            intervals_sync_lock=owner(locked=False),
             workout_library_sync_running=lambda: False,
             workout_library_sync_state=owner(summary={}),
             garmin_sync=owner(running=False),
@@ -631,10 +630,14 @@ class ServerDatabaseTests(ServerTestCase):
             garmin = json.loads(archive.read("garmin_snapshot.json"))
             weather = json.loads(archive.read("weather_cache.json"))
             state = json.loads(archive.read("application_state.json"))
-            tombstones = self.archive_lines(archive, "competition_sync_tombstones.jsonl")
+            tombstones = self.archive_lines(
+                archive, "competition_sync_tombstones.jsonl"
+            )
             adjustments = self.archive_lines(archive, "plan_adjustments.jsonl")
             export_text = b"".join(archive.read(name) for name in names).decode("utf-8")
-        self.assertTrue(any(item.get("name") == "Archived template" for item in library))
+        self.assertTrue(
+            any(item.get("name") == "Archived template" for item in library)
+        )
         self.assertEqual(garmin["source"], "Garmin")
         self.assertEqual(weather["query"], "Berlin")
         self.assertEqual(state["calendar_display"]["future_weeks"], 6)
@@ -673,9 +676,12 @@ class ServerDatabaseTests(ServerTestCase):
 
     def test_privacy_json_projection_uses_composed_local_clock(self):
         fixed_local_time = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
-        with patch.object(
-            server.ATHLETE_CLOCK, "now", return_value=fixed_local_time
-        ) as local_clock, self.privacy_archive() as archive:
+        with (
+            patch.object(
+                server.ATHLETE_CLOCK, "now", return_value=fixed_local_time
+            ) as local_clock,
+            self.privacy_archive() as archive,
+        ):
             planning = json.loads(archive.read("planning.json"))
 
         self.assertEqual(planning["season"]["as_of"], "2026-01-02")
@@ -684,7 +690,8 @@ class ServerDatabaseTests(ServerTestCase):
     def test_privacy_export_zip_streams_collections_and_contains_complete_manifest(
         self,
     ):
-        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+        snapshot_seed.save_snapshot(
+            server.SYNC_PERSISTENCE.state_repository(),
             {
                 "export-test": True,
                 "synced_at": "2026-09-01",
@@ -692,7 +699,7 @@ class ServerDatabaseTests(ServerTestCase):
                 "recent_activities": [],
                 "recent_wellness": [],
                 "upcoming_calendar": [],
-            }
+            },
         )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(
@@ -1071,13 +1078,14 @@ class ServerDatabaseTests(ServerTestCase):
         server.COACH_CONVERSATION.message_service().add(
             "user", "Synthetic private message"
         )
-        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+        snapshot_seed.save_snapshot(
+            server.SYNC_PERSISTENCE.state_repository(),
             {
                 "synced_at": "synthetic",
                 "recent_activities": [],
                 "recent_wellness": [],
                 "upcoming_calendar": [],
-            }
+            },
         )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(

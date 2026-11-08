@@ -26,7 +26,6 @@ from backend.diagnostics.canonical_read import (
     summarize_canonical_read,
 )
 from backend.diagnostics.history import CoachDiagnosticHistoryService
-from backend.diagnostics.intervals_purge import summarize_intervals_purge
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.plan_sync import summarize_plan_sync
 from backend.diagnostics.provider_composition import summarize_provider_composition
@@ -87,8 +86,6 @@ class DiagnosticReportDependencies:
     canonical_read: CanonicalReadStatusReader | None = None
     activity_rows: ActivityRowAndSummaryReader | None = None
     observations: ObservationReader | None = None
-    # Whether the data directory holds the Intervals.icu purge marker file.
-    intervals_purge_marker: Callable[[], bool] = lambda: False
 
 
 class DiagnosticReportService:
@@ -227,11 +224,6 @@ class DiagnosticReportService:
                 ),
                 "stream_backfill": summarize_stream_backfill(
                     deps.key_values, db, deps.config.sync_history_earliest_date
-                ),
-                "intervals_purge": summarize_intervals_purge(
-                    deps.key_values,
-                    db,
-                    marker_exists=deps.intervals_purge_marker(),
                 ),
                 "session_metrics": summarize_session_metrics(deps.key_values, db),
                 "session_analysis": summarize_session_analysis(deps.key_values, db),

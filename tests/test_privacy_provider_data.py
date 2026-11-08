@@ -71,7 +71,6 @@ from backend.privacy import (
     PrivacyDeleteDependencies,
     PrivacyDeleteService,
 )
-from backend.sync.intervals_ingest import PURGE_STATE_KEY, purge_done
 
 STAMP = "2026-10-01T08:00:00+00:00"
 PROVIDER = "synthetic-provider"
@@ -703,17 +702,6 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
             self.assertFalse((self.root / name).exists())
         self.assertTrue(keep.exists())
         self.assertTrue(self.database_path.exists())
-
-    def test_the_erased_database_is_never_purged_again(self):
-        self.seed_recovery_files()
-        service = self.service(
-            recovery_copies=RecoveryCopies(self.root, self.database_path.name),
-            utc_now=lambda: STAMP,
-        )
-        service.delete("LOKALE DATEN LÖSCHEN")
-        state = json.loads(self.key_values.values[PURGE_STATE_KEY])
-        self.assertTrue(purge_done(state))
-        self.assertEqual(state["completed_at"], STAMP)
 
     def test_a_recovery_copy_that_cannot_be_removed_is_reported_not_raised(self):
         self.seed_recovery_files()

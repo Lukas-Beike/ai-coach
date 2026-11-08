@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -152,7 +151,6 @@ class SyncPublicStateServiceTests(unittest.TestCase):
         self.jobs.list.return_value = [{"id": "job-1", "status": "pending"}]
         self.versions = Mock()
         self.versions.versions.return_value = {"chat": "9:2"}
-        self.intervals_lock = threading.Lock()
         self.service = SyncPublicStateService(
             SimpleNamespace(
                 garmin_tokenstore=str(Path(self.temporary_directory.name) / "tokens")

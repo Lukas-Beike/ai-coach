@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import tzinfo
 from typing import Any
@@ -44,7 +44,6 @@ def build_canonical_backfill(
     session_feedback: FeedbackLookup | None = None,
     planned_units: PlannedUnits = list,
     athlete_sex: Callable[[Any], str | None] = lambda _db: None,
-    maintenance_steps: Sequence[Callable[[], None]] = (),
 ) -> CanonicalBackfillAssembly:
     backfill = CanonicalBackfill(
         key_values=key_values,
@@ -96,7 +95,6 @@ def build_canonical_backfill(
         ),
         # Between the canonical backfill and the follow-ups, so the local load and
         # session analysis of the same pass follow the Intervals.icu purge (#1728).
-        maintenance_steps=maintenance_steps,
     )
     return CanonicalBackfillAssembly(
         worker=worker,

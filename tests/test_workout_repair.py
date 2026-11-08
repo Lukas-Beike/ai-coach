@@ -20,7 +20,6 @@ from backend.planning import planned_units as planning_planned_units
 from backend.planning import workouts as planning_workouts
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
-from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.planned_calendar import planned_unit_sync_guard
 
 
@@ -277,10 +276,6 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             [value for kind, value in self.mutations if kind == "delete"], ["duplicate"]
         )
-
-
-
-
 
     def test_multi_unit_repair_reads_calendar_twice_and_checks_all_final_results(self):
         ids = []
@@ -915,7 +910,6 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             server.PLANNING_DATA.planned_unit().list()[0]["sync_status"], "sync_error"
         )
-        self.assertFalse(INTERVALS_SYNC_LOCK.locked())
 
 
 if __name__ == "__main__":

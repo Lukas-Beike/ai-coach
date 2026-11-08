@@ -30,7 +30,6 @@ from backend.provider_credentials import (
 )
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
-from backend.sync.intervals_ingest import PURGE_DONE, PURGE_STATE_KEY, PURGE_VERSION
 
 PRIVACY_DELETE_CONFIRMATION_TEXT = "LOKALE DATEN LÖSCHEN"
 
@@ -161,7 +160,8 @@ class PrivacyDeleteDependencies:
     refresh_credentials: Callable[[], Any] | None = None
     # Discards a pending Garmin MFA login so it cannot store tokens afterwards.
     cancel_garmin_login: Callable[[], None] | None = None
-    # Copies saved by a restore or the Intervals.icu purge; erased with the data.
+    # Copies saved by a restore or by the Intervals.icu purge of an earlier
+    # release; erased with the data.
     recovery_copies: RecoveryCopies | None = None
     utc_now: Callable[[], str] = lambda: datetime.now(UTC).isoformat()
 
@@ -273,21 +273,6 @@ class PrivacyDeleteService:
                 )
                 dependencies.key_value_repository.set(
                     db, "profile", json.dumps(DEFAULT_PROFILE)
-                )
-                # The erased database holds no Intervals.icu ingest data, so the
-                # purge must not run again and save a copy of it.
-                dependencies.key_value_repository.set(
-                    db,
-                    PURGE_STATE_KEY,
-                    json.dumps(
-                        {
-                            "version": PURGE_VERSION,
-                            "status": PURGE_DONE,
-                            "completed_at": dependencies.utc_now(),
-                            "counts": {},
-                        },
-                        sort_keys=True,
-                    ),
                 )
                 dependencies.planning_revision_service.mark_reset_pending()
             if dependencies.recovery_copies is not None:
