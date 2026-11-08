@@ -303,7 +303,7 @@ class CoachUiParityTests(unittest.TestCase):
 
     def test_m3_timing_matches_in_context_and_report_section(self):
         ui = self.ui["personal_recovery"]["regularity"]
-        self.assertEqual("sleep-timing-variability-v2", ui["method"])
+        self.assertEqual("sleep-timing-variability-v3", ui["method"])
         coach = self.coach_context["personal_recovery"]["regularity"]
         section = self.coach_report("sleep_timing_variability")[
             "sleep_timing_variability"

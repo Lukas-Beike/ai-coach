@@ -304,7 +304,11 @@ def sleep_timing_variability(
 
     Compares onset and wake with the athlete's own earlier nights; this is not the
     Sleep Regularity Index. Version 2 (#1429) reports no median and no deviation
-    below 14 earlier intervals; otherwise it equals version 1.
+    below 14 earlier intervals; otherwise it equals version 1. Version 3 marks
+    nights read outside the profile zone (``SleepPeriod.timezone`` is None) with
+    ``other_timezone`` and leaves them out of the onset/wake clock-time
+    comparison: medians, deviations, baseline counts and points; sleep duration
+    elsewhere is unaffected.
 
     ``periods`` are the canonical sleep periods; None means the serving source
     stores none, and there is no data. Each provider and field pair is kept
@@ -324,7 +328,7 @@ def sleep_timing_variability(
     if not series:
         reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
         return {
-            "method": "sleep-timing-variability-v2",
+            "method": "sleep-timing-variability-v3",
             "timezone": timezone_name,
             "status": "insufficient_data",
             "reason": reason,
@@ -337,7 +341,7 @@ def sleep_timing_variability(
         }
     rank = {"insufficient_data": 0, "provisional": 1, "ok": 2}
     return {
-        "method": "sleep-timing-variability-v2",
+        "method": "sleep-timing-variability-v3",
         "timezone": timezone_name,
         "status": max(
             (item["status"] for item in series), key=lambda status: rank[status]
@@ -369,6 +373,7 @@ def _interval_item(
     if not today - timedelta(days=83) <= local_end.date() <= today:
         return None
     return {
+        "other_timezone": False,
         "method": method,
         "date": local_end.date().isoformat(),
         "onset_at": local_start.isoformat(),
@@ -394,6 +399,7 @@ def _period_items(
             continue
         item = _interval_item(period.start, period.end, "/".join(fields), zone, today)
         if item is not None:
+            item["other_timezone"] = period.timezone is None
             items.append((source, item))
     return items
 
@@ -413,14 +419,22 @@ def _circular_deviation(value: float, center: float | None) -> float | None:
     )
 
 
+def _night_deviation(
+    item: dict[str, Any], key: str, center: float | None
+) -> float | None:
+    return None if item["other_timezone"] else _circular_deviation(item[key], center)
+
+
 def _sleep_series(
     source: str, method: str, records: dict[str, dict[str, Any]], today: date
 ) -> dict[str, Any]:
     ordered = [records[key] for key in sorted(records)]
-    latest = ordered[-1]
+    # v3: nights read outside the profile zone are marked and never compared.
+    comparable = [item for item in ordered if not item["other_timezone"]]
+    latest = (comparable or ordered)[-1]
     prior = [
         item
-        for item in ordered
+        for item in comparable
         if (today - timedelta(days=42)).isoformat() <= item["date"] < latest["date"]
     ]
     count = len(prior)
@@ -451,11 +465,11 @@ def _sleep_series(
             **item,
             "source": source,
             "method": method,
-            "onset_deviation_minutes": _circular_deviation(
-                item["onset_minutes_local"], onset
+            "onset_deviation_minutes": _night_deviation(
+                item, "onset_minutes_local", onset
             ),
-            "wake_deviation_minutes": _circular_deviation(
-                item["wake_minutes_local"], wake
+            "wake_deviation_minutes": _night_deviation(
+                item, "wake_minutes_local", wake
             ),
         }
         for item in ordered

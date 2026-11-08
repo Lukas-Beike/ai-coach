@@ -233,7 +233,7 @@ class PersonalRecoveryTests(unittest.TestCase):
         ):
             self.assertIn(sentence, note)
         self.assertEqual("personal-quartiles-v1", result["method"])
-        self.assertEqual("sleep-timing-variability-v2", result["regularity"]["method"])
+        self.assertEqual("sleep-timing-variability-v3", result["regularity"]["method"])
 
     def test_profile_target_requires_valid_explicit_value(self):
         self.assertEqual(
