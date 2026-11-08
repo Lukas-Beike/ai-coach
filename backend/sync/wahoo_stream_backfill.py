@@ -30,7 +30,6 @@ from backend.providers.wahoo_client import WahooWorkoutFetch
 from backend.providers.wahoo_fit_download import WahooFitUnavailable, wahoo_fit_url
 from backend.sync.stream_backfill import (
     FileHandler,
-    Guard,
     SkipHandler,
     StreamCandidate,
 )
@@ -73,7 +72,6 @@ class WahooStreamSource:
         batch: Sequence[StreamCandidate],
         on_file: FileHandler,
         on_skip: SkipHandler,
-        guard: Guard,  # noqa: ARG002 - writes take the service's own lock
     ) -> None:
         fetch = self._client().list_workouts(
             since=_oldest(batch) - timedelta(days=1),

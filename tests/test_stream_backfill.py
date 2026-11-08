@@ -281,7 +281,7 @@ def garmin_service(
 ) -> StreamBackfillService:
     return StreamBackfillService(
         provider=GARMIN,
-        source=GarminStreamSource(_GarminReader(client, sleeps, rejected)),
+        source=GarminStreamSource(_GarminReader(client, sleeps, rejected), nullcontext),
         mapping=GarminStreamMapping(),
         database_manager=lambda: env.manager,
         key_values=env.key_values,

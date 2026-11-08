@@ -83,7 +83,6 @@ class StreamSource(Protocol):
         batch: Sequence[StreamCandidate],
         on_file: FileHandler,
         on_skip: SkipHandler,
-        guard: Guard,
     ) -> None: ...
 
 
@@ -257,24 +256,7 @@ class StreamBackfillService:
                 earliest=self._earliest_date,
             )
         batch, more = selection.batch(end, self._batch_limit)
-        by_id = {item.provider_activity_id: item for item in batch}
-        outcome = _Outcome([], [], [], [])
-        failure: Exception | None = None
-        blocked: str | None = None
-        if batch:
-            try:
-                self._source.fetch(
-                    batch,
-                    lambda identifier, data: self._handle_file(
-                        identifier, data, by_id[identifier], outcome
-                    ),
-                    outcome.skipped.append,
-                    self._guard,
-                )
-            except FitTransportMissing:
-                blocked = BLOCKED_PERSONAL_API
-            except Exception as exc:  # noqa: BLE001 - stored first, then re-raised.
-                failure = exc
+        outcome, failure, blocked = self._fetch_batch(batch)
         fetched_at = self._utc_now()
         oldest = batch[-1].day if batch else None
         failed = (
@@ -310,6 +292,28 @@ class StreamBackfillService:
         if blocked is not None:
             result["reason"] = blocked
         return result
+
+    def _fetch_batch(
+        self, batch: Sequence[StreamCandidate]
+    ) -> tuple[_Outcome, Exception | None, str | None]:
+        """Download and store one batch; a stop is returned, never raised."""
+        by_id = {item.provider_activity_id: item for item in batch}
+        outcome = _Outcome([], [], [], [])
+        if not batch:
+            return outcome, None, None
+        try:
+            self._source.fetch(
+                batch,
+                lambda identifier, data: self._handle_file(
+                    identifier, data, by_id[identifier], outcome
+                ),
+                outcome.skipped.append,
+            )
+        except FitTransportMissing:
+            return outcome, None, BLOCKED_PERSONAL_API
+        except Exception as exc:  # noqa: BLE001 - stored first, then re-raised.
+            return outcome, exc, None
+        return outcome, None, None
 
     def _handle_file(
         self,

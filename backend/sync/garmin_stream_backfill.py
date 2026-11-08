@@ -44,18 +44,21 @@ class GarminFileReader(Protocol):
 class GarminStreamSource:
     """Download the FIT files of one batch through the Garmin reader."""
 
-    def __init__(self, reader: GarminFileReader) -> None:
+    def __init__(self, reader: GarminFileReader, guard: Guard) -> None:
         self._reader = reader
+        self._guard = guard
 
     def fetch(
         self,
         batch: Sequence[StreamCandidate],
         on_file: FileHandler,
         on_skip: SkipHandler,
-        guard: Guard,
     ) -> None:
         self._reader.fetch_activity_files(
-            [item.provider_activity_id for item in batch], on_file, on_skip, guard
+            [item.provider_activity_id for item in batch],
+            on_file,
+            on_skip,
+            self._guard,
         )
 
 

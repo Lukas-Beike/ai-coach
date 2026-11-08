@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -361,13 +361,17 @@ class GarminAssembly:
         fixture_loader = self.fixture_loader()
         reader = self.remote_reader()
         coordination = self._sync_coordination()
+
+        def guard() -> AbstractContextManager[None]:
+            return coordinated_guard(coordination)
+
         return StreamBackfillService(
             provider=GARMIN_ID,
-            source=GarminStreamSource(reader),
+            source=GarminStreamSource(reader, guard),
             mapping=GarminStreamMapping(),
             database_manager=self._database_manager,
             key_values=self._key_values,
-            guard=lambda: coordinated_guard(coordination),
+            guard=guard,
             utc_now=self._utc_now,
             configured=lambda: fixture_loader.path() is None and reader.configured(),
             earliest_date=self._earliest_date,
