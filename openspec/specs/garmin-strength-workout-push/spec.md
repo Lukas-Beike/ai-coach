@@ -23,7 +23,7 @@ Each strength exercise SHALL resolve to one Garmin catalogue exercise before exp
 Evidence: `backend/providers/garmin_strength_workout.py:resolve_exercise`, `backend/planning/exercise_mappings.py:remembered_exercises`, `backend/planning/strength_structure.py`; `tests/test_garmin_strength_push.py` (MappingTests, StructureTests), `tests/test_planning_push_state.py:test_a_confirmed_exercise_is_remembered_for_other_units`.
 
 ### Requirement: Explicit Garmin strength push
-A strength planned unit SHALL reach Garmin only through an explicit `plan_push` job for provider `garmin` with the preview payload hash. Each unit SHALL be validated and mapped locally before any remote call, become one strength workout (a repeat group per exercise, a warm-up group before it when the exercise has warm-up sets, kg as weight, relative load as note, timed rest) and be scheduled on its date. Ids SHALL be stored in `remote_links`.
+A strength planned unit SHALL reach Garmin only through an explicit `plan_push` job for provider `garmin` with the preview payload hash. Each unit SHALL be validated and mapped locally before any remote call, become one strength workout (a repeat group per exercise, a warm-up group before it when the exercise has warm-up sets, weight sent in kilograms, relative load as note, timed rest) and be scheduled on its date. Ids SHALL be stored in `remote_links`.
 
 #### Scenario: First push
 - **WHEN** a future, active strength unit with a resolvable structure is pushed
@@ -32,6 +32,10 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 #### Scenario: Repeated push
 - **WHEN** a linked unit is pushed again after a change or move
 - **THEN** the same Garmin workout is updated, its own schedule is replaced by one on the current date, and a workout missing at Garmin is uploaded again.
+
+#### Scenario: Weight unit
+- **WHEN** a set with 40 kg is exported
+- **THEN** the step carries `weightValue` 40.0 with the kilogram unit, and units sent in an earlier form show as changed so the athlete can send them again.
 
 #### Scenario: Coach request
 - **WHEN** the Coach proposes the push after the athlete named Garmin or the watch
@@ -44,7 +48,7 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 Evidence: `backend/sync/garmin_strength_push.py`, `backend/sync/jobs.py`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py` (PushTests, JobValidationTests).
 
 ### Requirement: Calendar sync button
-The calendar list SHALL show one sync action on each future, not yet completed planned unit that still needs a push to a configured provider: Intervals.icu when its state is local, sync_error or remote_missing; Garmin when it is a strength unit with a valid structure whose name, date and structure differ from the pushed ones. It SHALL send one `plan_push` job per provider, Intervals.icu last, with the current payload hash.
+The calendar list SHALL show one sync action on each future, not yet completed planned unit that still needs a push to a configured provider: Intervals.icu when its state is local, sync_error or remote_missing; Garmin when it is a strength unit with a valid structure whose name, date, structure or workout document version differ from the pushed ones. It SHALL send one `plan_push` job per provider, Intervals.icu last, with the current payload hash.
 
 #### Scenario: Pending structured strength unit
 - **WHEN** a future strength unit with a structure is neither synced to Intervals.icu nor pushed to Garmin in its current version

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import tempfile
@@ -13,6 +14,7 @@ from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import DatabaseManager, row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.schema import initialize_schema
+from backend.planning import strength_structure
 from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.push_state import (
     attach_push_state,
@@ -121,6 +123,35 @@ class PushStateTests(unittest.TestCase):
                     ]
                 )
                 self.assertTrue(projected[0]["push_pending"]["garmin"])
+
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
+    def test_a_unit_sent_in_the_gram_weight_form_is_pending_again(self) -> None:
+        # The baseline an earlier release stored: the same content without a
+        # payload version, spelled out here instead of derived from the code.
+        content = {
+            "name": "",
+            "date": STRENGTH["date"][:10],
+            "exercises": strength_structure.normalize_structure(
+                STRENGTH["strength_structure"]
+            ),
+        }
+        legacy = hashlib.sha256(
+            json.dumps(content, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        self.link("s1", legacy)
+
+        projected = self.project(
+            [
+                {
+                    "local_id": "s1",
+                    "payload": json.dumps(STRENGTH),
+                    "sync_state": "synced",
+                }
+            ]
+        )
+
+        self.assertNotEqual(legacy, garmin_fingerprint(STRENGTH))
+        self.assertTrue(projected[0]["push_pending"]["garmin"])
 
     def test_a_conflicted_unit_offers_no_provider(self) -> None:
         conflicted = self.project(

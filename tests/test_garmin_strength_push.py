@@ -121,7 +121,7 @@ class MappingTests(unittest.TestCase):
         warmup, working, dips = document["workoutSegments"][0]["workoutSteps"]
         warmup_step = warmup["workoutSteps"][0]
         self.assertEqual(
-            ("warmup", 1, 12.0, 20000.0),
+            ("warmup", 1, 12.0, 20.0),
             (
                 warmup_step["stepType"]["stepTypeKey"],
                 warmup["numberOfIterations"],
@@ -132,7 +132,7 @@ class MappingTests(unittest.TestCase):
         self.assertNotIn("description", warmup_step)
         working_step = working["workoutSteps"][0]
         self.assertEqual(
-            ("interval", 3, 40000.0, "2 RIR · nicht bis zum Muskelversagen"),
+            ("interval", 3, 40.0, "2 RIR · nicht bis zum Muskelversagen"),
             (
                 working_step["stepType"]["stepTypeKey"],
                 working["numberOfIterations"],
@@ -160,6 +160,23 @@ class MappingTests(unittest.TestCase):
             mapping.workout_exercise_steps(document),
         )
 
+    def test_weights_are_sent_in_kilograms_not_grams(self) -> None:
+        # Garmin Connect showed 40 kg as "40,000 kg" while the value was grams.
+        for kg, expected in ((40, 40.0), (12.5, 12.5), (0.5, 0.5)):
+            with self.subTest(kg=kg):
+                document = mapping.strength_workout(
+                    name="Kraft",
+                    description="",
+                    exercises=[
+                        {**SQUAT, "kg": kg, "warmup": {"sets": 1, "reps": 5, "kg": kg}}
+                    ],
+                )
+                warmup, working = document["workoutSegments"][0]["workoutSteps"][:2]
+                for group in (warmup, working):
+                    step = group["workoutSteps"][0]
+                    self.assertEqual(expected, step["weightValue"])
+                    self.assertEqual("kilogram", step["weightUnit"]["unitKey"])
+
     def test_document_has_a_repeat_group_per_exercise(self) -> None:
         document = mapping.strength_workout(
             name="Kraft A", description="Kniebeuge: 4x5", exercises=[SQUAT, PLANK]
@@ -177,7 +194,7 @@ class MappingTests(unittest.TestCase):
                 "endConditionValue": 5.0,
                 "category": "SQUAT",
                 "exerciseName": "BARBELL_BACK_SQUAT",
-                "weightValue": 80000.0,
+                "weightValue": 80.0,
                 "description": "RPE 8",
             },
             {
@@ -525,6 +542,31 @@ class PushTests(unittest.TestCase):
         )
         self.assertEqual(["501"], list(self.garmin.workouts))
         self.assertEqual({"503": ("501", "2026-11-10")}, self.garmin.schedules)
+
+    def test_a_resend_replaces_the_workout_sent_with_gram_weights(self) -> None:
+        digest = self.insert(U1, UNIT)
+        self.push((U1, digest))
+        sent = self.garmin.workouts["501"]["workoutSegments"][0]["workoutSteps"]
+        sent[0]["workoutSteps"][0]["weightValue"] = 80000.0  # the old, wrong form
+        self.garmin.calls.clear()
+
+        result = self.push((U1, digest))
+
+        self.assertEqual("ok", result["status"])
+        # The same Garmin workout is updated and rescheduled; nothing is added.
+        self.assertEqual(
+            [
+                ("update", "501"),
+                ("get", "501"),
+                ("unschedule", "502"),
+                ("schedule", "501", "2026-11-09"),
+            ],
+            self.garmin.calls,
+        )
+        self.assertEqual(["501"], list(self.garmin.workouts))
+        self.assertEqual({"503": ("501", "2026-11-09")}, self.garmin.schedules)
+        steps = self.garmin.workouts["501"]["workoutSegments"][0]["workoutSteps"]
+        self.assertEqual(80.0, steps[0]["workoutSteps"][0]["weightValue"])
 
     def test_a_workout_deleted_at_garmin_is_uploaded_again(self) -> None:
         digest = self.insert(U1, UNIT)
