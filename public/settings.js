@@ -286,7 +286,10 @@ async function deletePrivacyData() {
     if (resultNotice) {
       const deleted = Object.entries(result.deleted_categories || {}).map(([category, count]) => `${category}: ${count}`).join(" · ");
       resultNotice.hidden = false;
-      resultNotice.textContent = `Lokale Datenklassen gelöscht: ${deleted || "keine"}. Remote-Providerdaten bleiben unverändert.`;
+      const kept = result.recovery_copies_failed
+        ? ` ${result.recovery_copies_failed} Wiederherstellungskopie(n) im Datenordner konnten nicht gelöscht werden.`
+        : "";
+      resultNotice.textContent = `Lokale Datenklassen gelöscht: ${deleted || "keine"}. Remote-Providerdaten bleiben unverändert.${kept}`;
     }
     toast("Lokale Daten gelöscht");
     // Deleted records must neither stay on screen nor reach the session snapshot.

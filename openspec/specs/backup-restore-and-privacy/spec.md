@@ -46,7 +46,7 @@ Evidence: `backend/backup/database.py::DatabaseBackupService._check_source_capac
 
 ### Requirement: Complete secret-filtered privacy exports
 
-The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions, approval proposals and the planning-state revision counter, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The format version is currently 13.
+The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions, approval proposals and the planning-state revision counter, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are exported in `provider_settings.json`. The format version is currently 14.
 
 #### Scenario: Privacy archive requested
 - **WHEN** the authenticated athlete requests the archive export
@@ -64,7 +64,7 @@ The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines m
 - **WHEN** a privacy download is requested without a valid session
 - **THEN** authentication fails before export streaming starts
 
-Evidence: `backend/backup/export.py::PrivacyArchiveExportService`; `backend/backup/export.py::PRIVACY_EXPORT_JSONL_FILES`; `backend/http_api/privacy_get.py`. Only the archive is served; `backend/privacy.py::PrivacyDataExportService` is an in-process projection without a route and holds a subset. Tests: `tests/test_data_safety_coverage.py::DataKindExportTests`; `tests/test_server_database.py::test_privacy_export_zip_streams_collections_and_contains_complete_manifest`; `tests/test_privacy_provider_data.py`; `tests/test_server_database.py::test_privacy_download_routes_require_auth_before_streaming`.
+Evidence: `backend/backup/export.py::PrivacyArchiveExportService`; `backend/backup/export.py::PRIVACY_EXPORT_JSONL_FILES`; `backend/http_api/privacy_get.py`. Only the archive is served. `backend/provider_credentials.py::stored_visible_settings` selects the exported provider fields. Tests: `tests/test_data_safety_coverage.py::DataKindExportTests`; `tests/test_server_database.py::test_privacy_export_zip_streams_collections_and_contains_complete_manifest`; `tests/test_privacy_provider_data.py`; `tests/test_server_database.py::test_privacy_download_routes_require_auth_before_streaming`.
 
 ### Requirement: Coverage guards for stored data kinds
 
@@ -168,7 +168,11 @@ Local privacy deletion SHALL require the exact backend confirmation text before 
 - **WHEN** a table deletion fails within the local transaction
 - **THEN** earlier table deletes roll back rather than reporting successful erasure
 
-Evidence: `backend/privacy.py::PrivacyDeleteService.preview`; `backend/privacy.py::PrivacyDeleteService.delete`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`. Tests: `tests/test_data_safety_coverage.py::DataKindDeleteTests`; `tests/test_privacy_provider_data.py::test_preview_counts_remote_links_by_owning_group`; `tests/test_privacy_delete_confirmation.py::test_missing_or_wrong_confirmation_fails_before_any_dependency_access`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`; `tests/test_server_database.py::test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure`.
+#### Scenario: Recovery copies beside the database
+- **WHEN** restores or the Intervals.icu purge saved database recovery copies and a purge marker file in the data directory
+- **THEN** the preview counts them, the confirmed erasure deletes them after the transaction commits, and a copy that cannot be removed is reported without failing the erasure
+
+Evidence: `backend/privacy.py::PrivacyDeleteService.preview`; `backend/privacy.py::PrivacyDeleteService.delete`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`; `backend/backup/recovery_copies.py::RecoveryCopies`. Tests: `tests/test_data_safety_coverage.py::DataKindDeleteTests`; `tests/test_privacy_provider_data.py::test_preview_counts_remote_links_by_owning_group`; `tests/test_privacy_delete_confirmation.py::test_missing_or_wrong_confirmation_fails_before_any_dependency_access`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`; `tests/test_server_database.py::test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure`.
 
 ### Requirement: Remote-erasure and credential outcomes remain separate
 

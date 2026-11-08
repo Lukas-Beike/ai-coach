@@ -104,6 +104,12 @@ def stored_credentials(raw: str | None) -> dict[str, str]:
     }
 
 
+def stored_visible_settings(raw: str | None) -> dict[str, str]:
+    """The stored non-secret credential fields, safe to export."""
+    stored = stored_credentials(raw)
+    return {field: stored[field] for field in sorted(VISIBLE_FIELDS & stored.keys())}
+
+
 def _with_values(config: Config, values: Mapping[str, Any]) -> Config:
     # dataclasses.replace is typed as returning the generic dataclass protocol.
     return cast(Config, dataclasses.replace(config, **values))

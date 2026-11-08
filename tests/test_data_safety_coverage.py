@@ -181,13 +181,14 @@ EXPORT_COLUMNS_NOT_EXPORTED: dict[str, dict[str, str]] = {
     "kv": {"updated_at": "bookkeeping"},
 }
 # Schema version -> export format version that documents it. Bump both together.
-EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 13}
+# Format 14 adds provider_settings.json without a schema change.
+EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 14}
 
 # Key/value families (exact key or prefix ending in ":") and what the privacy
 # export does with them. "exported": application_state.json; "excluded": never
 # exported, with the reason; "dropped": removed by the _running/_status rule.
 KV_EXPORT_DISPOSITION: dict[str, str] = {
-    "provider_credentials": "excluded: API keys, Personal API key and expiry date",
+    "provider_credentials": "excluded: API keys and the Personal API key; only the non-secret fields leave, in provider_settings.json",
     "garmin_oauth_tokens": "excluded: Garmin tokens",
     "garmin_tokenstore_state": "excluded: connection state of the Garmin token file",
     "wahoo_oauth_tokens": "excluded: Wahoo tokens",
@@ -781,7 +782,10 @@ class DataKindDeleteTests(DataKindFixture):
                     self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
                 )
         keys = {row[0] for row in self.db.execute("SELECT key FROM kv")}
-        self.assertEqual(keys, {"profile", "garmin_tokenstore_state"})
+        # The erased database is marked as purged so no new recovery copy is saved.
+        self.assertEqual(
+            keys, {"profile", "garmin_tokenstore_state", "intervals_purge_state"}
+        )
         profile = json.loads(
             self.db.execute("SELECT value FROM kv WHERE key = 'profile'").fetchone()[0]
         )

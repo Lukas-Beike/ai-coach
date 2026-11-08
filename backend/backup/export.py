@@ -23,7 +23,11 @@ from backend.db.canonical_domain_store import zone_configuration_export_rows
 from backend.errors import AppError
 from backend.observability import sanitized_provider_payload
 from backend.planning import season as planning_season
-from backend.provider_credentials import CREDENTIAL_KV_KEYS
+from backend.provider_credentials import (
+    CREDENTIAL_KV_KEYS,
+    PROVIDER_CREDENTIALS_KEY,
+    stored_visible_settings,
+)
 from backend.weather import cache as weather_cache
 
 if TYPE_CHECKING:
@@ -62,7 +66,8 @@ TimeoutErrorFactory = Callable[[], Exception]
 # Version 12 adds activity_strength_sets and activity_detail_sets.set_source
 # (schema v22).
 # Version 13 adds activity_feedback.purpose (schema v23).
-PRIVACY_EXPORT_FORMAT_VERSION = 13
+# Version 14 adds provider_settings.json, the stored non-secret provider fields.
+PRIVACY_EXPORT_FORMAT_VERSION = 14
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -215,6 +220,16 @@ class PrivacyArchiveExportService:
                     "application_state.json",
                     json.dumps(
                         self._application_state(db),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                )
+                archive.writestr(
+                    "provider_settings.json",
+                    json.dumps(
+                        stored_visible_settings(
+                            self._key_values.get(db, PROVIDER_CREDENTIALS_KEY)
+                        ),
                         ensure_ascii=False,
                         separators=(",", ":"),
                     ),

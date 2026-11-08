@@ -2,6 +2,7 @@ import base64
 import json
 import struct
 import unittest
+import zipfile
 from unittest.mock import Mock, patch
 
 from test_coach_dialogue import DialogueHarness, server
@@ -407,7 +408,15 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             json.loads(history[0]["attachment_names"]), ["route.gpx", "chart.png"]
         )
-        exported = server.PRIVACY_ASSEMBLY.data_export_service().export()["messages"]
+        archive_path = server.PRIVACY_ASSEMBLY.archive_export_service().create_file()
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                exported = [
+                    json.loads(line)
+                    for line in archive.read("messages.jsonl").splitlines()
+                ]
+        finally:
+            archive_path.unlink()
         self.assertEqual(json.loads(exported[0]["attachments"]), saved)
         server.COACH_CONVERSATION.message_service().add("assistant", "Synthetic answer")
         server.COACH_CONVERSATION.message_service().add(

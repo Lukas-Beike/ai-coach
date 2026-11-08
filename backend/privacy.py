@@ -1,4 +1,4 @@
-"""Local JSON privacy export projection."""
+"""Local privacy deletion and the privacy service composition."""
 
 from __future__ import annotations
 
@@ -7,171 +7,30 @@ import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from backend.activities.feedback import ActivityFeedbackService
-from backend.athlete.checkins import CheckinService
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService
 from backend.backup.export import (
     PrivacyArchiveExportConfig,
     PrivacyArchiveExportService,
 )
-from backend.calendar import public_events as public_event_calendar
-from backend.calendar.external import ExternalCalendarReader
-from backend.canonical import garmin_payload
+from backend.backup.recovery_copies import RecoveryCopies
 from backend.canonical.vocabulary import RemoteEntityKind
-from backend.db import garmin_store
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository, NutritionTemplateRepository
+from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
-from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.competition_service import CompetitionService
-from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.revision import PlanningRevisionService
-from backend.planning.training_plans import TrainingPlanService
 from backend.provider_credentials import (
-    CREDENTIAL_KV_KEYS,
     GARMIN_TOKENSTORE_DISCONNECTED,
     GARMIN_TOKENSTORE_STATE_KEY,
 )
 from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
-from backend.weather import cache as weather_cache
-
-
-@dataclass(frozen=True)
-class PrivacyDataExportDependencies:
-    database_manager: DatabaseManager
-    key_value_repository: KeyValueRepository
-    profile_service: ProfileService
-    workout_library_service: WorkoutLibraryService
-    competition_service: CompetitionService
-    training_plan_service: TrainingPlanService
-    checkin_service: CheckinService
-    activity_feedback_service: ActivityFeedbackService
-    adaptive_preview_service: AdaptiveReplanPreviewService
-    external_calendar_reader: ExternalCalendarReader
-    local_now: Callable[[], datetime]
-    utc_now: Callable[[], str]
-
-
-class PrivacyDataExportService:
-    """Project durable local athlete data into the privacy JSON contract."""
-
-    def __init__(self, dependencies: PrivacyDataExportDependencies):
-        self._dependencies = dependencies
-
-    def _stored_json(self, key: str) -> Any:
-        dependencies = self._dependencies
-        with dependencies.database_manager.reader() as db:
-            value = dependencies.key_value_repository.get(db, key)
-        try:
-            return json.loads(value or "{}")
-        except TypeError, ValueError:
-            return {}
-
-    def export(self) -> dict[str, Any]:
-        dependencies = self._dependencies
-        # The export only reads, so one WAL snapshot keeps it off the writer.
-        with dependencies.database_manager.read_snapshot() as db:
-            messages = [
-                dict(row)
-                for row in db.execute(
-                    "SELECT role, content, attachments, created_at FROM messages ORDER BY id"
-                ).fetchall()
-            ]
-            snapshots = [
-                json.loads(row["payload"])
-                for row in db.execute(
-                    "SELECT payload FROM snapshots ORDER BY id"
-                ).fetchall()
-            ]
-            library = dependencies.workout_library_service.list(include_archived=True)
-            competitions = dependencies.competition_service.list()
-            tombstones = [
-                dict(row)
-                for row in db.execute(
-                    "SELECT intervals_event_id, external_id, created_at "
-                    "FROM competition_sync_tombstones ORDER BY created_at"
-                ).fetchall()
-            ]
-            adjustments = [
-                dict(row)
-                for row in db.execute(
-                    "SELECT id, payload, status, created_at, applied_at "
-                    "FROM plan_adjustments ORDER BY created_at"
-                ).fetchall()
-            ]
-            public_calendar = public_event_calendar.state(db)
-            garmin_data = garmin_store.read_view(db)
-            kv_rows = db.execute("SELECT key, value FROM kv ORDER BY key").fetchall()
-            nutrition_templates = NutritionTemplateRepository().list(db)
-            nutrition_products = [
-                dict(row)
-                for row in db.execute(
-                    "SELECT * FROM nutrition_products ORDER BY name COLLATE NOCASE"
-                ).fetchall()
-            ]
-            food_database = [
-                {**json.loads(row["payload"]), "fetched_at": row["fetched_at"]}
-                for row in db.execute(
-                    "SELECT payload, fetched_at FROM food_database_entries "
-                    "ORDER BY food_id"
-                ).fetchall()
-            ]
-
-        application_state: dict[str, Any] = {}
-        excluded_state = {
-            "profile",
-            "garmin_snapshot",
-            garmin_payload.STATE_KEY,
-            garmin_payload.RETIRED_SNAPSHOT_KEY,
-            weather_cache.CACHE_KEY,
-            *CREDENTIAL_KV_KEYS,
-        }
-        for row in kv_rows:
-            key = str(row["key"])
-            if key in excluded_state or key.endswith(("_running", "_status")):
-                continue
-            value = row["value"]
-            try:
-                application_state[key] = json.loads(value)
-            except TypeError, ValueError:
-                application_state[key] = value
-
-        weather_data = self._stored_json(weather_cache.CACHE_KEY)
-        adaptive_preview = dependencies.adaptive_preview_service
-        return {
-            "exported_at": dependencies.utc_now(),
-            "profile": dependencies.profile_service.get(),
-            "application_state": application_state,
-            "nutrition_templates": nutrition_templates,
-            "nutrition_products": nutrition_products,
-            "food_database_entries": food_database,
-            "competitions": competitions,
-            "competition_sync_tombstones": tombstones,
-            "messages": messages,
-            "snapshots": snapshots,
-            "workout_library": library,
-            "training_plans": dependencies.training_plan_service.list(),
-            "plan_adjustments": adjustments,
-            "local_feedback": dependencies.checkin_service.context(),
-            "activity_feedback": dependencies.activity_feedback_service.context(),
-            "planning": planning_season.planning_state(
-                dependencies.competition_service.list(),
-                dependencies.local_now().date(),
-                adaptive_preview.latest_preview(),
-                adaptive_preview.status(),
-            ),
-            "external_calendar": dependencies.external_calendar_reader.list_events(),
-            "public_calendar": public_calendar,
-            "garmin_snapshot": garmin_data,
-            "weather_cache": weather_data,
-        }
-
+from backend.sync.intervals_ingest import PURGE_DONE, PURGE_STATE_KEY, PURGE_VERSION
 
 PRIVACY_DELETE_CONFIRMATION_TEXT = "LOKALE DATEN LÖSCHEN"
 
@@ -271,6 +130,11 @@ _REMOTE_LINK_KINDS_BY_CATEGORY = {
     "competitions": (RemoteEntityKind.COMPETITION,),
     "provider_data": (RemoteEntityKind.OBSERVATION,),
 }
+# Not a database table: files beside the database, reported next to the categories.
+RECOVERY_COPIES_CATEGORY = "recovery_copies"
+RECOVERY_COPIES_LABEL = (
+    "Wiederherstellungskopien der Datenbank und Bereinigungsmarkierung"
+)
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",
     (
@@ -297,6 +161,9 @@ class PrivacyDeleteDependencies:
     refresh_credentials: Callable[[], Any] | None = None
     # Discards a pending Garmin MFA login so it cannot store tokens afterwards.
     cancel_garmin_login: Callable[[], None] | None = None
+    # Copies saved by a restore or the Intervals.icu purge; erased with the data.
+    recovery_copies: RecoveryCopies | None = None
+    utc_now: Callable[[], str] = lambda: datetime.now(UTC).isoformat()
 
 
 class PrivacyDeleteService:
@@ -332,13 +199,22 @@ class PrivacyDeleteService:
         dependencies = self._dependencies
         with dependencies.database_manager.read_snapshot() as db:
             counts = self._counts(db)
+        categories = [
+            {"id": category, "label": label, "records": counts[category]}
+            for category, label, _tables in PRIVACY_DELETE_SCOPE
+        ]
+        if dependencies.recovery_copies is not None:
+            categories.append(
+                {
+                    "id": RECOVERY_COPIES_CATEGORY,
+                    "label": RECOVERY_COPIES_LABEL,
+                    "records": dependencies.recovery_copies.count(),
+                }
+            )
         return {
             "status": "preview",
             "confirmation_text": PRIVACY_DELETE_CONFIRMATION_TEXT,
-            "categories": [
-                {"id": category, "label": label, "records": counts[category]}
-                for category, label, _tables in PRIVACY_DELETE_SCOPE
-            ],
+            "categories": categories,
             "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
             "openai_conversation": "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; ein Fehlschlag wird separat ausgewiesen.",
         }
@@ -361,6 +237,7 @@ class PrivacyDeleteService:
                 )
             remote_delete_attempted = bool(conversation_id)
             remote_deleted = False
+            recovery_copies_failed = 0
             if conversation_id:
                 try:
                     remote_deleted = dependencies.openai_client.delete_conversation(
@@ -397,13 +274,42 @@ class PrivacyDeleteService:
                 dependencies.key_value_repository.set(
                     db, "profile", json.dumps(DEFAULT_PROFILE)
                 )
+                # The erased database holds no Intervals.icu ingest data, so the
+                # purge must not run again and save a copy of it.
+                dependencies.key_value_repository.set(
+                    db,
+                    PURGE_STATE_KEY,
+                    json.dumps(
+                        {
+                            "version": PURGE_VERSION,
+                            "status": PURGE_DONE,
+                            "completed_at": dependencies.utc_now(),
+                            "counts": {},
+                        },
+                        sort_keys=True,
+                    ),
+                )
                 dependencies.planning_revision_service.mark_reset_pending()
+            if dependencies.recovery_copies is not None:
+                # After the commit: a failed erase never leaves a half-wiped database.
+                erased = dependencies.recovery_copies.erase()
+                deleted_counts[RECOVERY_COPIES_CATEGORY] = erased.removed
+                recovery_copies_failed = erased.failed
+                if erased.failed:
+                    dependencies.logger.warning(
+                        "Recovery copies could not be deleted",
+                        extra={
+                            "event": "privacy_recovery_copy_delete_failed",
+                            "context": {"failed": erased.failed},
+                        },
+                    )
             if dependencies.refresh_credentials is not None:
                 dependencies.refresh_credentials()
             return {
                 "status": "ok",
                 "local_data_deleted": True,
                 "deleted_categories": deleted_counts,
+                "recovery_copies_failed": recovery_copies_failed,
                 "remote_delete_attempted": remote_delete_attempted,
                 "remote_conversation_deleted": remote_deleted,
                 "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
@@ -413,21 +319,16 @@ class PrivacyDeleteService:
 @dataclass(frozen=True)
 class PrivacyAthleteSources:
     profile_service: Callable[[], ProfileService]
-    checkin_service: Callable[[], CheckinService]
-    activity_feedback_service: Callable[[], ActivityFeedbackService]
 
 
 @dataclass(frozen=True)
 class PrivacyPlanningSources:
-    workout_library_service: Callable[[], WorkoutLibraryService]
     competition_service: Callable[[], CompetitionService]
-    training_plan_service: Callable[[], TrainingPlanService]
 
 
 @dataclass(frozen=True)
 class PrivacyContextSources:
     adaptive_preview_service: Callable[[], AdaptiveReplanPreviewService]
-    external_calendar_reader: Callable[[], ExternalCalendarReader]
 
 
 @dataclass(frozen=True)
@@ -482,13 +383,8 @@ class PrivacyAssembly:
         self._database_lock = state.database_lock
         self._key_value_repository = state.key_value_repository
         self._profile_service = athlete.profile_service
-        self._checkin_service = athlete.checkin_service
-        self._activity_feedback_service = athlete.activity_feedback_service
-        self._workout_library_service = planning.workout_library_service
         self._competition_service = planning.competition_service
-        self._training_plan_service = planning.training_plan_service
         self._adaptive_preview_service = context.adaptive_preview_service
-        self._external_calendar_reader = context.external_calendar_reader
         self._local_now = clock.local_now
         self._utc_now = clock.utc_now
         self._maintenance_gate = state.maintenance_gate
@@ -504,24 +400,6 @@ class PrivacyAssembly:
         self._minimum_free_bytes = archive.minimum_free_bytes
         self._time_limit_seconds = archive.time_limit_seconds
 
-    def data_export_service(self) -> PrivacyDataExportService:
-        return PrivacyDataExportService(
-            PrivacyDataExportDependencies(
-                database_manager=self._database_manager(),
-                key_value_repository=self._key_value_repository,
-                profile_service=self._profile_service(),
-                workout_library_service=self._workout_library_service(),
-                competition_service=self._competition_service(),
-                training_plan_service=self._training_plan_service(),
-                checkin_service=self._checkin_service(),
-                activity_feedback_service=self._activity_feedback_service(),
-                adaptive_preview_service=self._adaptive_preview_service(),
-                external_calendar_reader=self._external_calendar_reader(),
-                local_now=self._local_now,
-                utc_now=self._utc_now,
-            )
-        )
-
     def delete_service(self) -> PrivacyDeleteService:
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
@@ -536,6 +414,10 @@ class PrivacyAssembly:
                 diagnostics_suspended=self._diagnostics_suspended,
                 refresh_credentials=self._refresh_credentials,
                 cancel_garmin_login=self._cancel_garmin_login,
+                recovery_copies=RecoveryCopies(
+                    self._data_dir(), self._database_path().name
+                ),
+                utc_now=self._utc_now,
             )
         )
 
