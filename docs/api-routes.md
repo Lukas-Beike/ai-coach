@@ -23,26 +23,27 @@ server by `POST /api/wahoo/connect`.
 
 ## Activity identifiers
 
-Activity routes accept either the local canonical activity ID (`act_...`) or the
-legacy Intervals.icu provider ID. The server resolves a local ID once, at the
-entry point, to the provider ID; every stored key and provider request stays
-provider-keyed.
+Activity routes accept the local session ID (`act_...`) or the provider activity
+ID of one of the session's records, as long as that ID names one session. The
+Intervals.icu ingest store is removed (#1728); its activity IDs stop resolving
+once the purge has deleted their records.
 
-- `GET /api/activities` items and `GET /api/activities/{id}` responses carry
-  `activity_id` (the provider ID) and `local_activity_id` (the local ID, or
-  `null` when no canonical record exists yet).
-- The list `cursor` is versioned: `{"v": 2, "after": [sort_date, provider_id]}`,
-  base64url-encoded. Unversioned cursors issued before this change are still
-  accepted. Unrecognized cursors return the first page.
-- `POST /api/activities/{id}/feedback` and the Coach activity tools, including
-  equipment assignment and duplicate deletion, accept either form. Those two
-  have no HTTP route of their own; a confirmed duplicate deletion runs through
-  `POST /api/coach/actions/execute`. Only Intervals.icu
-  primary, non-deleted sessions resolve; each resolves to its own provider ID,
-  including a duplicate. Any other `act_` reference (unknown, Garmin-primary or
-  deleted) is passed through unchanged and receives the route's existing
+- `GET /api/activities` items carry the local session `id` and `record_ids`
+  (provider to provider activity ID). `GET /api/activities/{id}` serves the
+  `activity_detail.v1` document of the session whatever form the ID has; an
+  unknown or ambiguous ID returns `404` (`activity_details_not_found`).
+- The list `cursor` is versioned:
+  `{"v": 3, "after": [started_at, id], "day": "YYYY-MM-DD"}`, base64url-encoded.
+  Any other version or an unrecognized cursor returns the first page.
+- `POST /api/activities/{id}/feedback` and the Coach activity tools (feedback,
+  equipment assignment, session confirmation) accept either form and store the
+  data under the live session the ID leads to. A reference that leads to no
+  live session is passed through unchanged and receives the route's existing
   not-found or validation response.
-- `activity_details` sync jobs are stored under the provider ID at enqueue time.
+- `POST /api/activities/{id}/session` confirms, splits, merges or deletes one
+  session bundle (`action`: `confirm`, `split` with `member_id`, `merge` with
+  `other_id`, `delete` with `confirmed: true`) and returns the new
+  `session_bundle`.
 
 ## Reads
 
@@ -71,7 +72,9 @@ provider-keyed.
 | POST | `/api/coach/actions/confirm`, `/api/coach/actions/cancel`, `/api/coach/actions/execute` | Confirm, cancel or execute a Coach proposal | CSRF |
 | POST | `/api/planning/commands` | Apply an approved local planning command | CSRF |
 | POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback; activity feedback returns a `change` undo reference | CSRF |
+| POST | `/api/activities/{id}/session` | Confirm, split, merge or delete one session bundle | CSRF |
 | POST | `/api/planned-units/{id}/focus` | Set or clear `session_focus` and `strength_intensity` of a planned unit; returns the unit | CSRF |
+| POST | `/api/planned-units/{id}/garmin-exercise` | Assign the Garmin exercise of one strength exercise (`exercise_index`, `garmin_exercise`, `expected_payload_hash`) | CSRF |
 | POST | `/api/sync/jobs`, `/api/sync/jobs/{id}/resolve` | Queue or resolve a sync job | CSRF |
 | POST | `/api/garmin/sync`, `/api/wahoo/sync`, `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Queue provider synchronization | CSRF |
 | POST | `/api/external-calendar/sync`, `/api/weather/sync`, `/api/analysis/refresh`, `/api/nutrition/refresh` | Queue or run a targeted refresh | CSRF |
@@ -87,7 +90,7 @@ provider-keyed.
 | POST | `/api/wahoo/connect`, `/api/wahoo/disconnect` | Start the Wahoo OAuth connection or disconnect Wahoo | CSRF |
 | POST | `/api/metric-export/preview` | Preview metric values for export without writing | CSRF |
 | POST | `/api/metric-export/execute` | Intervals.icu write: send the confirmed metric selection | CSRF |
-| POST | `/api/metric-export/automatic` | Intervals.icu write: switch the automatic metric export (consent per field); needs `confirmed: true`, `source: "garmin"` and the `intervals` target | CSRF |
+| POST | `/api/metric-export/automatic` | Intervals.icu write: switch the automatic metric export (consent per field); needs `confirmed: true`, a boolean `enabled`, `source: "garmin"` and `provider: "intervals"` | CSRF |
 | POST | `/api/transcribe` | Transcribe short-lived voice input | CSRF |
 
 ## PUT routes
@@ -95,7 +98,7 @@ provider-keyed.
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
 | PUT | `/api/settings/model`, `/api/settings/service-tier`, `/api/settings/thinking-level`, `/api/settings/calendar-display` | Update settings | CSRF |
-| PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile | CSRF |
+| PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile; with `sync_body_to_garmin: true` a changed weight or body fat is also exported to Garmin and the result carries `garmin_body_export` | CSRF |
 | PUT | `/api/zones` | Save one local zone configuration; returns a receipt with an undo reference | CSRF |
 | PUT | `/api/zones/remove` | Remove one local zone configuration; needs `confirmed: true` | CSRF |
 | PUT | `/api/athlete-context` | Replace profile and competitions | CSRF |
@@ -113,18 +116,20 @@ return a secret: the response is the credential status only.
   `intervals_athlete_id`, `garmin_personal_api_key`,
   `garmin_personal_api_key_expires` (ISO date; changing the key without it
   clears the stored date), `wahoo_client_id`,
-  `wahoo_client_secret`, `garmin_email`). `garmin_email` has no UI field; it pairs with the
-  environment `GARMIN_PASSWORD` fallback and is reported as configured only,
-  never echoed back. A string
+  `wahoo_client_secret`, `garmin_email`, `yazio_email`, `yazio_password`).
+  `garmin_email` and `yazio_email` are reported as configured only, never
+  echoed back; `garmin_email` has no UI field and pairs with the
+  environment `GARMIN_PASSWORD` fallback. A string
   stores the value; `null` or a blank string clears the value stored in the app,
   so the environment value applies again. Each field is validated server-side.
   Changing the effective `intervals_athlete_id` returns `409` while Intervals.icu
   records or sync cursors are stored, because they are not scoped by athlete; a
   privacy delete clears them first.
-  The response is the credential status: per field `source` (`db`, `env` or
-  `none`), `configured`, and `value` only for non-secret fields, plus
-  `garmin_connected`, `openai_configured`, `intervals_configured`,
-  `wahoo_configured` and `garmin_connection` (`connected`, `source`,
+  The response is the credential status: `fields` with per field `source`
+  (`db`, `env` or `none`), `configured`, and `value` only for non-secret
+  fields, plus `garmin_connected`, `garmin_connection_source`,
+  `openai_configured`, `intervals_configured`, `wahoo_configured`,
+  `yazio_configured` and `garmin_connection` (`connected`, `source`,
   `mfa_pending`).
 - `POST /api/garmin/login` takes `{"email": "...", "password": "..."}`. The
   password is used once and never stored. The response is `{"status":

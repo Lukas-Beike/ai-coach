@@ -119,6 +119,8 @@ The extended schema SHALL preserve all athlete records, feedback, snapshots, tom
 - **WHEN** a database has an unsupported version, unrecognized shape or mismatched version/shape pair
 - **THEN** initialization rejects it without deleting, resetting or partially modifying it.
 
+Evidence: `backend/db/migrations.py`; `tests/test_db_encrypted_upgrade_matrix.py::test_every_released_schema_upgrades_encrypted_like_the_plain_upgrade`, `tests/test_db_encrypted_upgrade_matrix.py::test_a_failing_upgrade_leaves_every_released_schema_unchanged`, `tests/test_db_encrypted_upgrade_matrix.py::test_an_encrypted_backup_of_an_upgrade_restores_the_same_rows`, `tests/test_database_restore_validation.py::test_validate_upgrades_a_populated_release_v21_backup`.
+
 ### Requirement: Retired schema rejection
 
 The database SHALL reject schema versions older than v21 (releases before 1.13.41) before changing their data or schema, with a message that names release 1.13.44 for the upgrade. Change-history entries written before v16 under the former planning field names are not translated and cannot be undone.

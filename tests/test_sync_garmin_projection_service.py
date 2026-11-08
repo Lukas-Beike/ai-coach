@@ -435,7 +435,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self.assertNotIn("performance", basic)
         self.assertEqual(
             result["scope"],
-            "Kein Intervals.icu-Snapshot vorhanden; Garmin-Leistungswerte und der aktuellste Recovery-Datensatz werden als Fallback verwendet.",
+            "Garmin-Leistungswerte und der aktuellste Recovery-Datensatz.",
         )
         self.assertEqual(result["performance"], performance)
         self.assertEqual(context_projection.call_count, 1)

@@ -98,7 +98,7 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
             + "\nBEGIN UNTRUSTED EXTERNAL DATA\nSTRUCTURED ATHLETE CONTEXT (authoritative for this turn):\n"
             + "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
             + json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
-            + "\nLOCAL TRAINING LIBRARY (bounded selection synced from Intervals.icu; templates available to the coach):\n"
+            + "\nLOCAL TRAINING LIBRARY (bounded selection of local templates; templates available to the coach):\n"
             + library_text
             + "\nEND UNTRUSTED EXTERNAL DATA\n"
         )
@@ -150,7 +150,7 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         marker = "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
         structured_start = result.index(marker) + len(marker)
         structured_end = result.index(
-            "\nLOCAL TRAINING LIBRARY (bounded selection synced from Intervals.icu; templates available to the coach):\n",
+            "\nLOCAL TRAINING LIBRARY (bounded selection of local templates; templates available to the coach):\n",
             structured_start,
         )
         parsed = json.loads(result[structured_start:structured_end])
@@ -188,7 +188,7 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         marker = "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
         structured_start = result.index(marker) + len(marker)
         structured_end = result.index(
-            "\nLOCAL TRAINING LIBRARY (bounded selection synced from Intervals.icu; templates available to the coach):\n",
+            "\nLOCAL TRAINING LIBRARY (bounded selection of local templates; templates available to the coach):\n",
             structured_start,
         )
         parsed = json.loads(result[structured_start:structured_end])

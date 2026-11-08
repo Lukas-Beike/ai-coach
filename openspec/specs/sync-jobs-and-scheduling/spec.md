@@ -22,7 +22,7 @@ Detailed contract: Intervals supports plan push, competition push, and nutrition
 Evidence: `backend/sync/jobs.py:normalize_sync_job_request`, `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`, `tests/test_sync_jobs.py:test_boolean_fields_require_actual_booleans`.
 
 ### Requirement: Durable jobs and duplicate suppression
-The system SHALL persist jobs and ordered items atomically, expose bounded progress and safe errors, and atomically coalesce active performance-refresh jobs and eligible automatically requested refresh/backfill jobs. Coalescing SHALL preserve the existing job identity and avoid a second created event or worker wake. User requests are not covered by a blanket exactly-once guarantee.
+The system SHALL persist jobs and ordered items atomically, expose bounded progress and safe errors, and atomically coalesce active scheduler- or startup-requested refresh and backfill jobs. Coalescing SHALL preserve the existing job identity and avoid a second created event or worker wake. User requests are not covered by a blanket exactly-once guarantee.
 
 #### Scenario: Concurrent automatic enqueue
 - **WHEN** concurrent eligible automatic requests target the same provider and operation while one job is queued or running
@@ -32,10 +32,10 @@ The system SHALL persist jobs and ordered items atomically, expose bounded progr
 - **WHEN** storing an item or validating its bounded operation list fails
 - **THEN** the request creates no partially populated job.
 
-Evidence: `backend/sync/jobs.py:SyncJobStore.enqueue`, `backend/sync/queue.py:SyncJobQueueService.enqueue`; `tests/test_sync_jobs.py:test_concurrent_automatic_enqueues_create_exactly_one_job`, `tests/test_sync_queue.py:test_deduplicated_performance_job_does_not_publish_or_wake_again`.
+Evidence: `backend/sync/jobs.py:SyncJobStore.enqueue`, `backend/sync/queue.py:SyncJobQueueService.enqueue`; `tests/test_sync_jobs.py:test_concurrent_automatic_enqueues_create_exactly_one_job`, `tests/test_sync_jobs.py:test_automatic_refresh_and_backfill_requests_coalesce_atomically`.
 
 ### Requirement: Startup scheduling
-The system SHALL schedule configured startup refreshes in calendar, Garmin, weather, Wahoo order, skip an already active refresh, and enqueue historical backfill only for providers declaring it. Weather startup requests are forced. Garmin and Wahoo default sync periods are 84 days; ordinary selectable periods are limited to 90 days, with the separate all-history sentinel interpreted by each provider owner.
+The system SHALL schedule configured startup refreshes in calendar, Garmin, weather, Wahoo order, skip an already active refresh, and enqueue historical backfill only for providers declaring it. Intervals.icu SHALL never be scheduled. Weather startup requests are forced. Garmin and Wahoo default sync periods are 84 days; ordinary selectable periods are limited to 90 days, with the separate all-history sentinel interpreted by each provider owner.
 
 #### Scenario: Configured startup
 - **WHEN** startup scheduling runs with configured and connected providers
@@ -74,7 +74,7 @@ Detailed contract: Garmin's slowly changing metric sources SHALL be reread when 
 Evidence: `backend/sync/garmin.py:GarminPayloadService.automatic_sync_window`, `backend/providers/garmin.py:GarminCollectionOptions`, `backend/sync/wahoo_sync.py:sync_window_days`; `tests/test_sync_garmin_service.py:test_current_refresh_reads_daily_metrics_only_when_due`, `tests/test_wahoo_sync.py:test_all_sentinel_and_zero_mean_the_descriptor_maximum`.
 
 ### Requirement: Output-only Intervals.icu
-The system SHALL NOT read Intervals.icu activities, wellness, athlete record, events window or activity details. Intervals.icu SHALL accept only plan push, competition push and nutrition sync jobs plus the explicit library, metric and calendar writes with their read-backs. A refresh, historical backfill, activity-details or performance-refresh job, manual sync route or full resync for Intervals.icu SHALL be rejected.
+The system SHALL NOT read Intervals.icu activities, wellness history, athlete record or activity details in any sync, and reads its calendar events only as the read-back of an explicit export. Intervals.icu SHALL accept only plan push, competition push and nutrition sync jobs plus the explicit library, metric and calendar writes with their read-backs. A refresh, historical backfill, activity-details or performance-refresh job, manual sync route or full resync for Intervals.icu SHALL be rejected.
 
 #### Scenario: Refresh for Intervals.icu
 - **WHEN** a request queues a `refresh` job for Intervals.icu
@@ -84,7 +84,7 @@ The system SHALL NOT read Intervals.icu activities, wellness, athlete record, ev
 - **WHEN** the athlete explicitly asks the Coach for current data
 - **THEN** the Coach waits for the Garmin and Wahoo refreshes where configured and calls no Intervals.icu ingest endpoint.
 
-Detailed contract: Stored Intervals.icu records from earlier releases stay until the Intervals.icu data purge removes them. The competition push reconciles linked events and never imports new competitions from Intervals.icu.
+Detailed contract: The explicit connection check requests the athlete endpoint once and stores nothing. Stored Intervals.icu records from earlier releases stay until the one-time Intervals.icu data purge removes them; the purge waits for the finished Garmin rating backfill (see activity-ingestion-and-storage). The competition push reconciles linked events and never imports new competitions from Intervals.icu.
 
 Evidence: `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/sync/commands.py:WahooSynchronousRefresh`, `backend/sync/executor.py:IntervalsSyncJobOwner`; `tests/test_current_data_refresh.py`.
 
@@ -105,7 +105,7 @@ The system SHALL walk Garmin history in inclusive chunks of at most 90 days down
 
 #### Scenario: Garmin rating history
 - **WHEN** Garmin is configured and its `rating_history` cursor has not reached the floor
-- **THEN** startup queues one `rating_backfill` chain; each job reads at most 30 single activities, newest session first, paced, over one transport client (one Personal API token), for sessions whose Intervals.icu copy has an RPE or feel and whose Garmin copy has no stored rating, and stores them as Garmin ratings. A rate limit fails the job and keeps the cursor; only a failed key exchange flags the key; an activity with a client error, or failing three runs, is skipped and counted. The chain finishes once the Garmin activity chain reached the floor, and never reads before it.
+- **THEN** startup queues one `rating_backfill` chain; each job reads at most 30 single activities, newest session first, paced, over one transport client (one Personal API token), for sessions whose stored Intervals.icu copy has an RPE or feel and whose Garmin copy has no stored rating, and stores them as Garmin ratings. A rate limit fails the job and keeps the cursor; only a failed key exchange flags the key; an activity with a client error, or failing three runs, is skipped and counted. The chain finishes once the Garmin activity chain reached the floor, and never reads before it.
 
 #### Scenario: Stream history
 - **WHEN** Garmin or Wahoo is configured and its `stream_history` cursor has not reached the floor
@@ -141,7 +141,7 @@ The system SHALL require `confirm=FULL_RESYNC` on a full-resync route, serialize
 
 Detailed contract: Authenticated clients SHALL be able to inspect jobs, freshness, operation progress, and safe last-error state; browser polling SHALL recognize completed, partial, failed, and nonretryable states. Cooperative cancellation on supported synchronous reads SHALL stop provider work without being represented as a successful completion; the generic job contract does not add a cancelled state or arbitrary job-cancel endpoint.
 
-Evidence: `backend/http_api/sync_commands.py:SyncCommandEndpoint._full_resync_command`, `backend/sync/full_resync.py:FullProviderResyncService.resync`, `backend/sync/provider_resync_assembly.py:GarminFullResync`, `public/sync-actions.js:waitForSyncJob`; `tests/test_sync_full_resync.py:test_failure_is_redacted_bounded_and_restores_context_and_gate`.
+Evidence: `backend/http_api/sync_commands.py:SyncCommandEndpoint._full_resync_command`, `backend/sync/full_resync.py:FullProviderResyncService.resync`, `backend/sync/provider_resync_assembly.py:GarminFullResync`, `public/sync-actions.js:waitForSyncJob`; `tests/test_sync_full_resync.py:test_gate_and_context_are_restored_when_status_cleanup_fails`, `tests/test_sync_full_resync.py:test_unconfigured_handler_error_is_raised_before_gate_reset`.
 
 ### Requirement: Partial source recovery and freshness projection
 The system SHALL preserve last-good optional sources and their own fetch dates when a source fails or is skipped, expose partial status, and advance historical cursors only for complete supported coverage. Garmin capability failures of the same class SHALL pause that capability after three failures for 24 hours; success clears its breaker. Provider freshness SHALL distinguish attempts, successful/partial results, errors, and scheduled retry.
@@ -158,4 +158,4 @@ The system SHALL preserve last-good optional sources and their own fetch dates w
 - **WHEN** the latest attempt fails but a last-good refresh exists
 - **THEN** freshness can report stale data with a safe error and retry timestamp rather than treating the stored measurement as a new successful read. Registry staleness limits are 48 hours for training/calendar areas and three hours for weather.
 
-Evidence: `backend/sync/garmin.py:GarminSyncStateService.record_capability_failure`, `backend/sync/garmin.py:GarminSyncStateService.persist_payload`, `backend/sync/freshness.py:provider_freshness_state`; `tests/test_sync_garmin.py:test_failure_class_changes_reset_count_and_success_clears_existing_state`, `tests/test_provider_review.py:test_garmin_partial_metrics_and_backfill_keep_last_good_sources_and_cursors`, `tests/test_sync_freshness.py:test_fresh_stale_malformed_and_z_timestamps`.
+Evidence: `backend/sync/garmin.py:GarminSyncStateService.record_capability_failure`, `backend/sync/garmin.py:GarminSyncStateService.persist_payload`, `backend/sync/freshness.py:provider_freshness_state`; `tests/test_sync_garmin.py:test_failure_class_changes_reset_count_and_success_clears_existing_state`, `tests/test_provider_review.py:test_garmin_partial_metrics_and_backfill_keep_last_good_sources_and_cursors`, `tests/test_provider_runtime_acceptance.py:test_freshness_moves_from_never_loaded_to_fresh_then_stale`.

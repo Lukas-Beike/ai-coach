@@ -7,19 +7,19 @@ Record the implemented connection surfaces, authentication lifecycle, safe statu
 ## Requirements
 
 ### Requirement: Supported connection surface
-The system SHALL expose training-provider integration for Intervals.icu, Garmin Connect, and Wahoo according to their registry descriptors, plus location-based Open-Meteo weather and a configured read-only iCalendar feed. It SHALL distinguish provider availability, configuration, and an athlete connection where these are separate states. A recording-origin label such as Wahoo, Garmin, Strava, Zwift, manual, or upload SHALL not by itself create a direct provider connection.
+The system SHALL expose Garmin Connect and Wahoo as data sources and Intervals.icu as an output target according to their registry descriptors, plus Open-Meteo weather and a read-only iCalendar feed. It SHALL distinguish provider availability, configuration and an athlete connection where these are separate states. A recording-origin label such as Wahoo, Garmin, Strava, Zwift, manual or upload SHALL not by itself create a direct provider connection.
 
 #### Scenario: Unconnected Wahoo configuration
 - **WHEN** Wahoo client settings exist but the athlete has not connected an account
 - **THEN** status distinguishes configured from connected and scheduled Wahoo import is ineligible.
 
 #### Scenario: Relayed activity
-- **WHEN** an Intervals activity identifies a different recording app or device
-- **THEN** its provenance can identify that origin while transport and connection ownership remain Intervals.icu.
+- **WHEN** a Garmin Connect activity names a Wahoo or Zwift manufacturer
+- **THEN** its provenance records that recording origin while transport and connection ownership remain Garmin.
 
 Detailed contract: The current training registry contains no direct Polar, COROS, Suunto, or Strava OAuth adapter.
 
-Evidence: `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/canonical/vocabulary.py:ProviderId`, `backend/canonical/vocabulary.py:RecordingOrigin`; `tests/test_provider_registry.py:test_capabilities_are_assigned_per_provider`, `tests/test_wahoo_connection.py:test_configured_only_with_all_three_values`.
+Evidence: `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`, `backend/canonical/vocabulary.py:ProviderId`, `backend/canonical/vocabulary.py:RecordingOrigin`; `tests/test_provider_registry.py:test_capabilities_are_assigned_per_provider`, `tests/test_wahoo_connection.py:test_configured_only_with_all_three_values`, `tests/test_garmin_activity_mapping.py:test_manufacturer_names_the_recording_origin`.
 
 ### Requirement: Intervals server configuration and requests
 The system SHALL keep the Intervals API key and athlete identifier in server-side configuration, construct the authenticated transport there, URL-encode provider identifiers, and reject unconfigured sync work before enqueueing. Intervals.icu is an output target: the system SHALL NOT read its activities, wellness or events, and remote writes SHALL enter their explicit domain use cases.
@@ -30,9 +30,9 @@ The system SHALL keep the Intervals API key and athlete identifier in server-sid
 
 #### Scenario: Output only
 - **WHEN** Intervals credentials are configured
-- **THEN** no activity, wellness or athlete read runs; only an explicit push or its read-back reaches Intervals.icu.
+- **THEN** no activity, wellness-history or athlete-record read is part of any sync; only an explicit push, its read-back (library, calendar events, the wellness day and sport settings of an export) or the explicit connection check reaches Intervals.icu.
 
-Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_sync_full_resync.py:test_intervals_and_competitions_share_operation_and_never_push`.
+Evidence: `backend/providers/intervals.py:IntervalsApiClient`, `backend/providers/intervals_client.py:IntervalsClient`, `backend/http_api/sync_commands.py:SyncCommandEndpoint._require_provider_configured`; `tests/test_http_sync_registry_routes.py:test_not_configured_message_rejects_manual_and_job_routes`, `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`.
 
 ### Requirement: Garmin login and MFA
 The system SHALL support authenticated Garmin login with an optional MFA continuation, bounded text/code validation, an expiring pending MFA slot, and a bounded rejection count. A newer login, cancellation, or disconnect SHALL supersede the old generation so an in-flight old login cannot store a connection later. Provider errors SHALL be mapped to safe application errors rather than exposing SDK messages or login values.
@@ -55,10 +55,31 @@ The system SHALL use the Garmin token-store owner for encrypted-database token p
 - **THEN** cleanup still preserves updated token state without returning token material in public status.
 
 #### Scenario: Optional SDK absent
-- **WHEN** the optional Garmin client is unavailable or neither login configuration nor a supported token store is present
+- **WHEN** the optional Garmin client is unavailable, or none of a login configuration, a supported token store and a Personal API key is present
 - **THEN** Garmin is reported unavailable or unconfigured and no data collection is attempted.
 
 Evidence: `backend/sync/garmin_login.py:GarminTokenStore`, `backend/sync/garmin_login.py:GarminLoginService.status`, `backend/sync/garmin_service.py:GarminRemoteReader`; `tests/test_sync_garmin_service.py:test_fetch_persists_tokens_even_when_the_read_fails`, `tests/test_garmin_login.py:test_login_success_stores_tokens_without_password`, `tests/test_garmin_login.py:test_disconnect_clears_tokens_and_blocks_legacy_file`.
+
+### Requirement: Garmin Personal API key and SDK fallback
+The system SHALL read the Garmin families the official Personal API serves through it whenever a key is configured, and every other family only through the unofficial SDK login. The key is a server-side credential that the provider settings may also store. Public status SHALL expose only whether a key is set, its entered expiry date and a state, never the key.
+
+#### Scenario: Key without SDK login
+- **WHEN** a Personal API key is configured and no SDK login is connected
+- **THEN** every Personal API family syncs and the SDK-only families are absent as an unsupported capability without failing the sync.
+
+#### Scenario: SDK login skipped
+- **WHEN** a key is configured and the SDK login fails or needs MFA
+- **THEN** only the SDK-only families are dropped, the reason `login_failed` or `mfa_required` and its time are kept so the card asks for a new login, and the next successful SDK login clears it.
+
+#### Scenario: Key state
+- **WHEN** the athlete entered an expiry date for the key
+- **THEN** the state is valid, expiring within 14 days, or expired; a missing date reads `expiry_missing`, a key Garmin refused (401 or 403 on the exchange) reads `rejected` above every expiry state, and an unreachable Garmin is no rejection.
+
+#### Scenario: Key replaced or removed
+- **WHEN** the athlete saves or removes the key
+- **THEN** its stored expiry date and rejection are cleared and the environment expiry does not apply to a stored key.
+
+Evidence: `backend/providers/garmin_personal.py:GarminTransportClient`, `backend/providers/garmin_personal.py:PERSONAL_METHODS`, `backend/sync/garmin_personal_status.py:personal_key_state`, `backend/sync/garmin_service.py:GarminRemoteReader._authenticated_client`, `backend/sync/garmin_projection_service.py:GarminProjectionService._personal_api_state`, `backend/provider_credentials.py`; `tests/test_garmin_personal_key_status.py:test_state_follows_the_entered_expiry_date`, `tests/test_garmin_personal_key_status.py:test_a_rejected_key_wins_over_every_expiry_state`, `tests/test_garmin_personal_key_status.py:test_unreachable_personal_api_is_not_a_rejection`, `tests/test_garmin_personal_key_status.py:test_saving_or_removing_the_key_clears_its_expiry`, `tests/test_garmin_personal_transport.py:test_personal_key_alone_syncs_every_personal_family_without_errors`, `tests/test_garmin_personal_transport.py:test_failed_sdk_login_keeps_the_personal_families`, `tests/test_garmin_personal_transport.py:test_pending_mfa_keeps_the_personal_families`.
 
 ### Requirement: Wahoo authorization state and callback
 The system SHALL initiate Wahoo OAuth only through an authenticated, CSRF-protected action, require a credential-free HTTPS redirect URI without a fragment, and persist only a digest of one pending authorization state with a ten-minute expiry. The cross-site callback SHALL use that single-use state instead of requiring a session cookie, exchange a bounded code only after state validation, and redirect to fixed connected/error targets without echoing callback values.
@@ -123,7 +144,7 @@ The system SHALL offer metric export only to a capable target, with a preview, n
 
 #### Scenario: Automatic export after consent
 - **WHEN** a successful eligible current Garmin sync completes, a local zone configuration is saved, removed or undone, or a Wahoo sync succeeds, and stored consent is enabled
-- **THEN** only the consented fields transfer; a different Intervals.icu sport setting is overwritten by the resolved threshold, heart-rate thresholds are written with `recalcHrZones=true`; a wellness target edited independently is preserved and reported as conflict, without blocking unrelated fields.
+- **THEN** only the consented fields transfer, with body metrics taken from Garmin measurements only; a different Intervals.icu sport setting is overwritten by the resolved threshold, heart-rate thresholds are written with `recalcHrZones=true`; a wellness target edited independently is preserved and reported as conflict, without blocking unrelated fields.
 
 #### Scenario: Unconfirmed or failed export
 - **WHEN** the request lacks named consent/confirmation, preview values changed, or a remote write fails
@@ -212,8 +233,45 @@ The system SHALL offer an explicit read-only connection check on the OpenAI, Int
 
 #### Scenario: Garmin never logs in with credentials
 - **WHEN** the Garmin check runs
-- **THEN** it authenticates with the stored tokens only, and without them it reports not configured; it never uses e-mail and password.
+- **THEN** it exchanges the Personal API key when one is configured and authenticates the SDK with stored tokens only; without a key or tokens it reports not configured, and it never uses e-mail and password.
+
+#### Scenario: Intervals.icu check
+- **WHEN** the athlete checks Intervals.icu
+- **THEN** one athlete-endpoint request verifies the credentials and nothing from it is stored.
 
 #### Scenario: Providers without a check
 - **WHEN** the card is the shared calendar or Open Food Facts
 - **THEN** no check action is offered because a check would equal the full feed fetch or the provider needs no credentials.
+
+### Requirement: Yazio connection status and explicit check
+The system SHALL present Yazio on the connections screen, distinguish missing configuration, an unchecked configuration, a successful check, and a safely classified failure, and provide an explicit authenticated connection check. Status SHALL describe the last check rather than promise current availability.
+
+#### Scenario: Missing configuration
+- **WHEN** any required Yazio credential is absent
+- **THEN** the card reports not configured and a check makes no upstream request.
+
+#### Scenario: Configured but not checked
+- **WHEN** configuration is complete but has not been checked for the current credentials
+- **THEN** the card reports that the connection has not been checked and does not claim it is connected.
+
+#### Scenario: Explicit check succeeds
+- **WHEN** the athlete requests a check and Yazio accepts the current authentication
+- **THEN** the card reports successful authentication and the time of the check; no food or diary record is changed.
+
+#### Scenario: Authentication or service failure
+- **WHEN** a check is rejected, rate-limited, or encounters a transient or unexpected provider failure
+- **THEN** the card shows a safe actionable category and does not claim success or reveal provider responses, account values, or tokens.
+
+#### Scenario: Credentials change or server restarts
+- **WHEN** effective Yazio credentials change or the server restarts
+- **THEN** an old successful result is not presented as a current verification; complete configuration is shown as unchecked.
+
+#### Scenario: Passive status refresh
+- **WHEN** the connections screen is loaded or polled
+- **THEN** it reads local status without starting a Yazio network request.
+
+#### Scenario: Unauthorized check
+- **WHEN** a check request lacks an authenticated session or valid CSRF protection
+- **THEN** it is rejected before contacting Yazio.
+
+Evidence: `backend/providers/yazio.py::YazioClient.connection_status`, `backend/providers/yazio.py::YazioClient.check_connection`, `backend/http_api/nutrition.py::NutritionGetRoutes.handle`, `backend/http_api/nutrition.py::NutritionPostRoutes._check_yazio`, `public/provider-connections.js::checkYazioConnection`, `public/provider-connections.js::loadYazioStatus`; `tests/test_yazio.py::YazioConnectionTests.test_passive_status_check_and_credential_change`, `tests/test_yazio.py::YazioConnectionTests.test_check_uses_password_grant_and_restart_is_unchecked`, `tests/test_yazio.py::YazioConnectionTests.test_inflight_result_is_discarded_after_credential_replacement`, `tests/test_yazio_connection_routes.py`, `tests/provider-connections.test.cjs`, `e2e/yazio-connection.spec.js::@responsive Yazio shows a checked login and refreshes its local status`. The check reports `not_configured`, `unchecked`, `success`, `auth_failed`, `rate_limited` or `unavailable`.

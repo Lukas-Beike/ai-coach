@@ -259,14 +259,17 @@ PRIVACY_DELETE_SCOPE = (
             "activity_records",
             "activity_sessions",
             "provider_records",
+            "remote_links",
         ),
     ),
 )
-# remote_links is one table listed in two groups: each group reports (and the
-# deletion removes) the links of the entities it owns.
+# remote_links is one table listed in three groups: each group reports (and the
+# deletion removes) the links of the entities it owns. Metric-export links point
+# at observations, so they belong to the provider data group.
 _REMOTE_LINK_KINDS_BY_CATEGORY = {
     "library": (RemoteEntityKind.LIBRARY_WORKOUT, RemoteEntityKind.PLANNED_UNIT),
     "competitions": (RemoteEntityKind.COMPETITION,),
+    "provider_data": (RemoteEntityKind.OBSERVATION,),
 }
 PRIVACY_REMOTE_SCOPE = (
     "Intervals.icu-Trainings-, Kalender- und Bibliotheksdaten bleiben unverändert.",

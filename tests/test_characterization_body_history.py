@@ -26,7 +26,6 @@ from backend.performance.freshness import GarminSyncStatus
 TODAY = date(2026, 5, 4)
 SYNC_DAY_BEFORE = datetime(2026, 5, 3, 8, tzinfo=UTC)
 GARMIN = "Garmin Connect"
-INTERVALS = "Intervals.icu"
 INTERVALS_WELLNESS = "Intervals.icu Wellness"
 ANALYSIS_METRIC_KEYS = (
     "cycling_ftp_watts",
@@ -450,7 +449,7 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             (GARMIN, "2026-02-04", "2026-05-04"),
         )
         self.assertEqual(len(result["load"]["points"]), 90)
-        self.assertEqual(result["training_time"]["source"], INTERVALS)
+        self.assertEqual(result["training_time"]["source"], "Garmin Connect, Wahoo")
         self.assertEqual(len(result["training_time"]["points"]), 90)
         self.assertEqual(set(result["metrics"]), set(ANALYSIS_METRIC_KEYS))
         for key in ANALYSIS_METRIC_KEYS:

@@ -21,7 +21,7 @@ When an athlete saves a changed weight or body-fat value in the profile, the sys
 - **THEN** the response identifies that no upload was needed.
 
 #### Scenario: Missing or invalid data
-- **WHEN** either value is missing or invalid, or Garmin is unavailable
+- **WHEN** either value is missing or invalid, or Garmin is unavailable (including a connection that has only the read-only Personal API key and no SDK login)
 - **THEN** the local profile remains saved, no entry is sent, and the athlete is informed why.
 
 #### Scenario: A later local change supersedes a waiting export
@@ -60,4 +60,4 @@ When an athlete saves a changed weight or body-fat value in the profile, the sys
 - **WHEN** a Coach, undo, import, or unrelated API action changes a profile value
 - **THEN** it does not implicitly write to Garmin.
 
-Evidence: `backend/http_api/athlete_put.py`, `backend/athlete/profile.py`, `backend/sync/garmin_service.py`; `tests/test_garmin_profile_body_export.py::BodyExportTests`, `tests/test_garmin_profile_body_export.py::BodyExportMockTests`, `tests/test_garmin_sdk_body_transport.py::GarminSdkBodyTransportTests` (synthetic, mocked Garmin). Gap: live Garmin Connect compatibility is not established.
+Evidence: `backend/http_api/athlete_put.py`, `backend/athlete/profile.py`, `backend/sync/garmin_profile_body_export.py:GarminProfileBodyExport`; `tests/test_garmin_profile_body_export.py::BodyExportTests`, `tests/test_garmin_profile_body_export.py::BodyExportMockTests`, `tests/test_garmin_sdk_body_transport.py::GarminSdkBodyTransportTests` (synthetic, mocked Garmin). Gap: live Garmin Connect compatibility is not established.

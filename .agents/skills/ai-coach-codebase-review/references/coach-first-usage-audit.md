@@ -22,7 +22,7 @@ For every user-facing capability, verify whether the athlete can perform it natu
 
 - inspect current performance, activities, feedback, planned units, library, training plans, competitions, weather, calendar constraints, and provider status;
 - create and change dated workouts, create/change templates, plan from the library, bulk or multi-session planning, feedback and check-ins, training-plan changes, competitions, and adaptive replanning;
-- explicitly refresh Intervals, Garmin, performance, library, weather, external calendar, or competitions and synchronize the permitted local objects;
+- explicitly refresh Garmin, Wahoo, performance, library, weather, external calendar, or competitions and synchronize the permitted local objects;
 - handle missing identifiers by listing/resolving current objects rather than hallucinating IDs or asking the athlete to use a hidden manual UI workflow;
 - provide a truthful action receipt and final answer that names what changed, what stayed local, what synchronized remotely, what failed, and what remains pending.
 
@@ -156,7 +156,7 @@ For each integration, execute or inject:
 
 Integration-specific focus:
 
-- **Intervals.icu:** activity pagination/windowing, competition reconciliation/tombstones, local workout/library synchronization, remote IDs, partial batches, retries, duplicate writes, remote deletion protections, and explicit remote-write authorization.
+- **Intervals.icu (output only; no ingest):** competition reconciliation/tombstones, local workout/library synchronization, remote IDs, partial batches, retries, duplicate writes, remote deletion protections, and explicit remote-write authorization.
 - **Garmin:** token-store behavior, MFA/setup boundary, date windows, concurrent range fetches, Body Battery/morning data, activity/profile zones, partial metric availability, error freshness, and no snapshot erasure.
 - **iCalendar:** secret URL redaction, HTTPS/SSRF/DNS rebinding/redirect defense, recurrence/exception/timezone expansion, bounded feeds, last-good snapshot, and event text as untrusted scheduling data.
 - **Weather:** location derivation, attribution, forecast horizon, timezone, negative cache/backoff, stale forecast communication, and no invented precise recommendation beyond available data.

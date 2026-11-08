@@ -15,5 +15,5 @@
 ## 3. Integration validation
 
 - [x] 3.1 Review the complete final diff and scoped evidence; run focused backend and JavaScript tests, relevant architecture and lint/type checks, `python -m unittest discover -s tests -v`, and `python -m compileall -q server.py backend tests`; document failures or unavailable checks.
-- [ ] 3.2 Run the affected isolated Playwright project and applicable manual PWA/browser checks, including the connection flow and fresh/offline assets; rebuild the Docker image as required for application changes and report any unavailable runtime evidence.
+- [x] 3.2 Run the affected isolated Playwright project and applicable manual PWA/browser checks, including the connection flow and fresh/offline assets; rebuild the Docker image as required for application changes and report any unavailable runtime evidence.
 - [x] 3.3 Run `npm run openspec -- validate fix-yazio-connection-status --strict --no-interactive` and verify the change is valid before completion.

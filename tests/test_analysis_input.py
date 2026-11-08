@@ -273,19 +273,21 @@ class GoldenParityTests(unittest.TestCase):
             "basis": {"ftp": 200},
         }
         self.assertEqual("Intervals.icu", adapted.source_label)
-        legacy_aerobic = aerobic_analysis(projected)
+        legacy_aerobic = aerobic_analysis(projected, source_label=adapted.source_label)
         self.assertEqual("ok", legacy_aerobic["status"])
         self.assertEqual(
             legacy_aerobic,
             aerobic_analysis(adapted.activity, source_label=adapted.source_label),
         )
-        legacy_power = power_profile(projected)
+        legacy_power = power_profile(projected, source_label=adapted.source_label)
         self.assertEqual("ok", legacy_power["status"])
         self.assertEqual(
             legacy_power,
             power_profile(adapted.activity, source_label=adapted.source_label),
         )
-        legacy_quality = interval_quality(projected, targets)
+        legacy_quality = interval_quality(
+            projected, targets, source_label=adapted.source_label
+        )
         self.assertEqual("ok", legacy_quality["status"])
         self.assertEqual(
             legacy_quality,
@@ -300,13 +302,13 @@ class GoldenParityTests(unittest.TestCase):
         adapted = analysis_input(
             record(Sport.RUN, Environment.UNKNOWN), merged.streams, merged.laps
         )
-        legacy_running = running_profile(projected)
+        legacy_running = running_profile(projected, source_label=adapted.source_label)
         self.assertEqual("ok", legacy_running["status"])
         self.assertEqual(
             legacy_running,
             running_profile(adapted.activity, source_label=adapted.source_label),
         )
-        legacy_aerobic = aerobic_analysis(projected)
+        legacy_aerobic = aerobic_analysis(projected, source_label=adapted.source_label)
         self.assertEqual("ok", legacy_aerobic["status"])
         self.assertEqual(
             legacy_aerobic,

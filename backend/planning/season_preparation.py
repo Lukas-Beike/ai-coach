@@ -18,18 +18,16 @@ from backend.athlete.measurements import number
 from backend.canonical.planning_fields import PLANNED_INTENSITY as PLANNED_INTENSITY_KEY
 from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
 from backend.canonical.stored_sports import resolve_competition_sport
-from backend.canonical.vocabulary import Environment, ProviderId
+from backend.canonical.vocabulary import Environment
 from backend.errors import AppError
 from backend.performance.season_inputs import SeasonLoadInputs
 from backend.planning.season import season_plan_summary
-from backend.providers.source_labels import SourceView, provider_label
+from backend.providers.source_labels import SESSION_SOURCES_LABEL
 
 ActivitySummariesBetween = Callable[[date, date], Sequence[ActivitySummary]]
 
 
-ACTIVITY_SOURCE = provider_label(
-    ProviderId.INTERVALS, SourceView.SEASON_PREPARATION_ACTIVITY
-)
+ACTIVITY_SOURCE = f"{SESSION_SOURCES_LABEL} recorded activities"
 PREPARATION_WEEKS = 12
 PLANNED_LOAD_ESTIMATE_SOURCE = (
     f"estimated from planned duration and {PLANNED_INTENSITY_KEY} (hours x IF^2 x 100)"
@@ -49,7 +47,7 @@ def season_preparation(
 
     ``activity_summaries`` returns the activity summaries around the given
     inclusive local dates; it is called once for the span of all event windows.
-    ``synced_at`` is the canonical Intervals.icu sync time.
+    ``synced_at`` is the canonical activity sync time.
     """
     result = season_plan_summary(competitions, today)
     windows = [_evidence_window(event, today) for event in result["events"]]

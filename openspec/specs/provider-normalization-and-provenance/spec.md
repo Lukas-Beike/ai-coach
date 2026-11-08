@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe canonical interpretation of provider fields, units, dates, origins, source precedence, corrections, and the limits of current canonical coverage.
+Describe canonical interpretation of provider fields, units, dates, origins, source precedence, corrections, and the limits of current canonical coverage. Garmin and Wahoo are the data providers. Intervals.icu is an output target only (#1728) and never a source: statements about Intervals.icu records and mappers describe the retired mapper code that replays copies stored earlier until the one-time purge removes them. The field-by-field map is `docs/canonical-field-map.md`.
 
 ## Requirements
 
@@ -79,15 +79,15 @@ The system SHALL retain distinct moving and elapsed durations from every provide
 - **THEN** it is not stored as a completed activity and a copy stored earlier is tombstoned only when that copy holds no measured value either, so the calendar shows no extra activity; once a later sync brings its summary, the activity is stored or revived and linked as usual. A workout whose summary offers a recording file is a recording and is never withdrawn.
 
 #### Scenario: Elapsed duration beside moving duration
-- **WHEN** a Wahoo workout has both an active and a total duration, or a Garmin activity has `duration` and `movingTime`
-- **THEN** the total or `duration` is stored as the elapsed duration and the moving time is not.
+- **WHEN** a Wahoo workout has both an active and a total duration, or a Garmin activity has `elapsedDuration` (else `duration`) and a `movingTime` timer alias
+- **THEN** the total or `elapsedDuration` is stored as the elapsed duration and the moving time is not.
 
 #### Scenario: Garmin strength session duration
 - **WHEN** a Garmin strength activity has an active timer `duration` and a longer `elapsedDuration`
 - **THEN** `elapsedDuration` is stored as the elapsed duration, and as the activity duration, so rest between sets counts; Intervals.icu and Wahoo strength sessions follow the same rule.
 
 #### Scenario: Provider loads differ
-- **WHEN** Intervals training load and Wahoo TSS describe copies of a session
+- **WHEN** a stored Intervals.icu training load and Wahoo TSS describe copies of a session
 - **THEN** their canonical values retain their respective load models and provenance rather than being relabeled as interchangeable measurements.
 
 Detailed contract: Wahoo work in joules SHALL convert to kJ; zero ascent remains measured, while zero unsupported/unmeasured summary power, cadence, energy, and TSS remain absent under its mapper rules.
@@ -121,7 +121,11 @@ The system SHALL map the Garmin activity list's zone times, training-effect valu
 Evidence: `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/activities/activity_summary.py:activity_summary`, `backend/activities/detail_contract.py:activity_detail_contract`; `tests/test_garmin_activity_mapping.py:ZoneEffectAndExtremeTests`, `tests/test_activity_summary.py:test_effect_values_and_garmin_extremes_reach_the_summary`, `tests/test_activity_detail_contract.py:test_garmin_summary_values_are_labelled_metrics`.
 
 ### Requirement: Health and body unit normalization
-The system SHALL normalize Garmin sleep duration/score, night SpO2/respiration/sleeping HR, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.
+The system SHALL normalize Garmin health and body values to canonical units using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams, pounds and kilograms SHALL convert to kg and body-fat fractions to percent, with bounded magnitude interpretation only for undeclared units.
+
+#### Scenario: Normalized Garmin kinds
+- **WHEN** Garmin supplies sleep duration and score, night SpO2, respiration and sleeping heart rate, last-night RMSSD, weekly HRV average, resting heart rate, readiness, body measurements, daily counts and energy, VO2max, thresholds, race predictions or endurance score
+- **THEN** each is mapped through its supported aliases and plausible bounds, and an invalid value is dropped with a content-free issue.
 
 #### Scenario: Declared weight unit
 - **WHEN** a valid Garmin weigh-in explicitly declares pounds or grams
@@ -149,7 +153,7 @@ The system SHALL normalize Garmin sleep duration/score, night SpO2/respiration/s
 
 Detailed contract: Zero SHALL remain valid for sleep score, steps, floors, and active energy where implemented, while absent or invalid measurements remain unknown.
 
-Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_wake_up_reading_wins_regardless_of_list_order`, `tests/test_garmin_health_mapping.py:test_manual_weigh_in_is_provider_reported_and_recorded_by_manual`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:SleepNightValueTests`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
+Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_wake_up_reading_wins_regardless_of_list_order`, `tests/test_garmin_health_mapping.py:test_manual_weigh_in_is_provider_reported_and_recorded_by_manual`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:SleepNightValueTests`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
 
 ### Requirement: Current thresholds and dated special metrics
 The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed conversion to canonical m/s, display conversion to seconds/km, date-bearing historical FTP, running race-prediction seconds, and endurance-score wrapper normalization. An undated current Garmin FTP, running threshold, zone maximum, or prediction may use the fetch's local day only in its implemented current-value path. Undated current FTP SHALL never invent historical FTP.
@@ -175,10 +179,10 @@ Detailed contract: Wahoo SHALL map the newest power-zone set per cycling/running
 Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/performance/garmin_canonical.py:garmin_thresholds`, `tests/test_current_thresholds.py:test_garmin_run_power_is_one_ftp_kind_with_the_legacy_kind_readable`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_ftp_history_reads_biometric_range_records`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
 
 ### Requirement: Metric-specific source priority and local authority
-The system SHALL apply per-metric source rules rather than a universal provider order. A locally confirmed zone configuration precedes every provider for thresholds. Intervals.icu is never a source (athlete decision 2026-11-07). Current ride FTP prefers Garmin, with Wahoo last; threshold and maximum heart rate, threshold pace, run power and VO2max are Garmin's. Weight and body fat take the most recent measurement of Garmin, the profile and Wahoo.
+The system SHALL apply per-metric source rules rather than a universal provider order. A locally confirmed zone configuration precedes every provider for thresholds. Intervals.icu is never a source (athlete decision 2026-11-07). Current ride FTP prefers Garmin, with Wahoo last; threshold and maximum heart rate, threshold pace, run power and VO2max are Garmin's. Weight takes the most recent measurement of Garmin, the profile and Wahoo; body fat that of Garmin and the profile.
 
 #### Scenario: Three FTP sources
-- **WHEN** eligible Intervals, Garmin, and Wahoo cycling FTP values coexist and no local zone configuration applies
+- **WHEN** eligible Intervals.icu, Garmin, and Wahoo cycling FTP values coexist and no local zone configuration applies
 - **THEN** current metric composition selects Garmin's, labels its provider, lists the Wahoo value as an alternative with a conflict flag above 3 %, and ignores the Intervals.icu value, also for the dated thresholds of the local session load.
 
 #### Scenario: Old Wahoo fallback
@@ -193,7 +197,7 @@ The system SHALL apply per-metric source rules rather than a universal provider 
 - **WHEN** Intervals.icu wellness holds today's weight and Garmin's newest weight is three days old
 - **THEN** the current weight is Garmin's; the Intervals.icu weight is neither current nor an alternative.
 
-Detailed contract: Within one day of the newest weight or body fat, a device measurement precedes a provider report, which precedes a local entry; the manual profile value and Wahoo's profile weight are fallbacks in that order. Body fat follows the weight rule with a 2-percentage-point conflict tolerance; readiness, sleep, RMSSD, and resting HR are Garmin's (performance-and-readiness); CTL/ATL have no rule. Wahoo current FTP/weight older than 90 days SHALL be excluded when an as-of local day is supplied, without deleting history. The PWA display preference of weight, body fat, sleep, HRV, resting HR, threshold pace, VO2max and eFTP is the first provider of that metric's rule; FTP and W/kg charts keep Garmin, whose FTP history they draw. Local profile and competition records SHALL retain their domain authority rather than being overwritten by provider read sync.
+Detailed contract: Within one day of the newest weight or body fat, a device measurement precedes a provider report, which precedes a local entry; the manual profile value and Wahoo's profile weight are fallbacks in that order. Body fat follows the weight rule with a 2-percentage-point conflict tolerance; readiness, sleep, RMSSD, and resting HR are Garmin's (performance-and-readiness); CTL, ATL and form are local (M7) and have no source rule. Wahoo current FTP/weight older than 90 days SHALL be excluded when an as-of local day is supplied, without deleting history. The PWA display preference of weight, body fat, sleep, HRV, resting HR, threshold pace and VO2max is the first provider of that metric's rule; FTP and W/kg charts keep Garmin, whose FTP history they draw. Local profile and competition records SHALL retain their domain authority rather than being overwritten by provider read sync.
 
 Evidence: `backend/performance/source_policy.py:CURRENT_RULES`, `backend/performance/source_policy.py:resolve_candidates`, `backend/performance/current_thresholds.py:resolve_current_thresholds`, `backend/performance/display_sources.py:PREFERRED_PROVIDER`, `backend/performance/current_metrics.py:current_performance_metrics`, `backend/sync/authority.py:PlanningAuthorityService`; `tests/test_current_thresholds.py`, `tests/test_source_policy.py:RecencyResolutionTests`, `tests/test_performance_current_metrics.py:test_garmin_ftp_beats_wahoo_ftp_and_intervals_is_ignored`, `tests/test_performance_current_metrics.py:test_manual_profile_weight_beats_wahoo_weight`, `tests/test_performance_display_sources.py`, `tests/test_sync_authority.py:test_revision_failure_rolls_back_planning_update_atomically`.
 
@@ -205,7 +209,7 @@ The system SHALL preserve provider raw-record identity and mapper version, inges
 - **THEN** stored table values remain readable while batches create corrected observations and current versions take precedence as available.
 
 #### Scenario: Provider clears or deletes a value
-- **WHEN** a sync or reprojection maps a raw record again (an Intervals.icu wellness day or athlete record, a Garmin health element, a Wahoo threshold record) and it no longer emits an observation that record owns
+- **WHEN** a sync or reprojection maps a raw record again (a Garmin health element, a Wahoo threshold record, or a stored Intervals.icu wellness day or athlete record) and it no longer emits an observation that record owns
 - **THEN** the observation is retired: it stays stored and in backups, but no canonical read, Coach context or readiness serves it; a later projection that emits it again makes it active. A record retires only on the days it speaks for: its own day (a wellness day, a dated element) or, for a dateless snapshot (athlete profile, Wahoo profile, a whole Garmin section), its fetch day, plus the days it still emits; values of earlier days stay as history. A raw record the sync did not fetch (failed, skipped or empty section) retires nothing, and an observation another record emits or without an owner is untouched.
 
 #### Scenario: Garmin weigh-in deleted in Garmin Connect
@@ -216,13 +220,9 @@ The system SHALL preserve provider raw-record identity and mapper version, inges
 - **WHEN** initial backfill is pending, running, or failed
 - **THEN** activities, activity rows and summaries, observations, metric windows and the chosen reader return nothing, coverage reports only current persisted summaries, and performance and Coach contexts mark the unavailable canonical data instead of presenting partial values. A failure is reported as such and the worker retries after a delay from the last committed cursor without requiring a restart.
 
-#### Scenario: Compact-only Intervals.icu snapshot
-- **WHEN** the stored Intervals.icu snapshot lists activities only in compact form (from a release before raw provider data) and the backfill has completed
-- **THEN** activity reads come from the tables without those compact rows, and the gap is reported as `activities_need_refresh` and marked in the PWA while any stored compact row has no raw row with its id. Intervals.icu is no longer read, so the mark stays until the stored Intervals.icu data is purged. No remote write or implicit refetch happens.
-
 Detailed contract: No legacy snapshot projection serves reads. Reprojection SHALL preserve session ownership and mark retired or invalid mapped records without deleting original provider evidence.
 
-Evidence: `backend/sync/canonical_ingest.py:ingest_plan`, `backend/sync/canonical_backfill.py:CanonicalBackfill`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector`; `tests/test_canonical_read_selector.py:test_observations_stay_available_until_the_reprojection_completes`, `tests/test_canonical_read_selector.py:test_first_backfill_not_complete_serves_nothing_from_filled_tables`, `tests/test_canonical_read_selector.py:test_compact_only_snapshot_reads_tables_and_needs_a_refresh`, `tests/test_canonical_backfill.py:test_a_dropped_activity_is_invalid_and_a_later_version_restores_it`, `tests/test_canonical_backfill.py:test_retry_preserves_committed_cursor_and_finishes`, `tests/test_performance_canonical_parity.py:test_failed_first_backfill_is_visible_but_completed_data_stays_available`, `tests/test_observation_retirement.py:test_cleared_intervals_wellness_value_is_retired_and_revived`, `tests/test_observation_retirement.py:test_a_failed_or_skipped_garmin_section_retires_nothing`, `tests/test_garmin_snapshot_writer.py:test_a_complete_window_retires_the_deleted_weigh_in_only`.
+Evidence: `backend/sync/canonical_ingest.py:ingest_plan`, `backend/sync/canonical_backfill.py:CanonicalBackfill`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector`; `tests/test_canonical_read_selector.py:test_observations_stay_available_until_the_reprojection_completes`, `tests/test_canonical_read_selector.py:test_first_backfill_not_complete_serves_nothing_from_filled_tables`, `tests/test_canonical_backfill.py:test_a_dropped_activity_is_invalid_and_a_later_version_restores_it`, `tests/test_canonical_backfill.py:test_retry_preserves_committed_cursor_and_finishes`, `tests/test_performance_canonical_parity.py:test_failed_first_backfill_is_visible_but_completed_data_stays_available`, `tests/test_observation_retirement.py:test_cleared_intervals_wellness_value_is_retired_and_revived`, `tests/test_observation_retirement.py:test_a_failed_or_skipped_garmin_section_retires_nothing`, `tests/test_garmin_snapshot_writer.py:test_a_complete_window_retires_the_deleted_weigh_in_only`.
 
 ### Requirement: Provenance and incomplete coverage remain visible
 The system SHALL expose source labels, observation dates, retrieval freshness, and missing or unsupported coverage without synthesizing measurements. Canonically mapped Garmin status, load balance and Body Battery SHALL retain provider-estimate labels, their supported measurement windows and explicit partial coverage.
@@ -237,10 +237,10 @@ The system SHALL expose source labels, observation dates, retrieval freshness, a
 
 Detailed contract: Public metric names SHALL be provider-neutral while source labels identify origin, derived values, and AI estimates when present.
 
-Evidence baseline: `backend/canonical/records.py`, `backend/db/canonical_store.py`, `backend/providers/canonical_plans.py`, `backend/sync/canonical_table_reader.py`, `backend/activities/zone_settings.py`; tests in `tests/test_canonical_records.py`, `tests/test_canonical_store.py`, `tests/test_garmin_health_mapping.py`. The added behavior requires new implementation and regression evidence.
+Evidence baseline: `backend/canonical/records.py`, `backend/db/canonical_store.py`, `backend/providers/canonical_plans.py`, `backend/sync/canonical_table_reader.py`, `backend/activities/zone_settings.py`; tests in `tests/test_canonical_records.py`, `tests/test_canonical_store.py`, `tests/test_garmin_health_mapping.py`.
 
-### Requirement: Intervals wellness and athlete threshold mapping
-The system SHALL map dated Intervals wellness body, HRV, sleep, readiness, VO2max, load/form, and sport eFTP observations. It SHALL derive form from valid CTL minus ATL only when no reported form alias is present, label derivation, and preserve athlete versus wellness series. Sport settings SHALL keep threshold/HR/pace/VO2max scope and supported unset-zero semantics; invalid first-present aliases SHALL not silently fall through.
+### Requirement: Retired Intervals.icu wellness and athlete threshold mapping
+The retired Intervals.icu mapper, which only replays rows stored earlier, SHALL map dated Intervals wellness body, HRV, sleep, readiness, VO2max, load/form, and sport eFTP observations. It SHALL derive form from valid CTL minus ATL only when no reported form alias is present, label derivation, and preserve athlete versus wellness series. Sport settings SHALL keep threshold/HR/pace/VO2max scope and supported unset-zero semantics; invalid first-present aliases SHALL not silently fall through.
 
 #### Scenario: Derived form versus reported zero
 - **WHEN** a wellness row contains valid CTL/ATL without a reported form field
@@ -342,7 +342,7 @@ Canonical zone configuration SHALL retain sport, metric, boundaries in canonical
 
 Detailed contract (#1416): indoor and virtual workouts use the INDOOR power configuration's threshold, else the sport's FTP (no provider indoor FTP is read); the Ride FTP falls back to the athlete's configured FTP as the canonical current metrics do; zone lists and values the mappers reject leave the default limits or no threshold.
 
-Evidence: `backend/performance/canonical_current.py:read_sport_thresholds`, `backend/activities/zone_settings.py:ZoneSettings.from_thresholds`, `backend/planning/calendar_read_model.py:project_planning_calendar`; `tests/test_plan_zone_canonical_parity.py`, `tests/test_zone_configuration_canonical.py:EffectiveZoneTests`, `tests/test_zone_settings.py`.
+Evidence: `backend/performance/canonical_current.py:read_zone_thresholds`, `backend/activities/zone_settings.py:ZoneSettings.from_thresholds`, `backend/planning/calendar_read_model.py:project_planning_calendar`; `tests/test_plan_zone_canonical_parity.py`, `tests/test_zone_configuration_canonical.py:EffectiveZoneTests`, `tests/test_zone_settings.py`.
 
 ### Requirement: Retained provider domains and equipment links
 Training status and load balance, running tolerance, readiness history, endurance score details/history, performance history, Body Battery, stress, resting energy, subjective provider wellness and equipment SHALL have canonical representations. Their affected consumers SHALL read canonical values with provider labels. Proprietary scores SHALL not be rebuilt locally; equipment links SHALL resolve to canonical sessions.
@@ -374,7 +374,7 @@ Every metric kind SHALL have an implemented provider producer or a documented lo
 The system SHALL give activity consumers one provider-neutral summary per live canonical session, built from the active records of every provider in it. Each value SHALL come from the best-ranked record that has it (measured values from the recording platform's own copy first, derived values by provider rank) and name its source label. Consumers outside the provider adapters, sync and canonical owners SHALL NOT read provider activity field names.
 
 #### Scenario: Copies of one session
-- **WHEN** Intervals.icu and Garmin Connect both report a session that canonical linking bundled
+- **WHEN** Wahoo and Garmin Connect (and any stored Intervals.icu copy) report a session that canonical linking bundled
 - **THEN** consumers receive one summary with the local session id, the canonical sport and environment, and each value's source label.
 
 #### Scenario: Recording relayed through Garmin Connect
@@ -382,7 +382,7 @@ The system SHALL give activity consumers one provider-neutral summary per live c
 - **THEN** its origin is that manufacturer (any other manufacturer stays a Garmin recording), so the Wahoo recording, not the Garmin copy, wins the measured values; Wahoo rides that are not indoor or virtual, including such relayed copies, carry the bike computer device type, and Garmin's own recordings name none.
 
 #### Scenario: Intervals.icu ranks last
-- **WHEN** a Wahoo or Garmin record and an Intervals.icu record share a session
+- **WHEN** a Wahoo or Garmin record and a stored Intervals.icu record share a session
 - **THEN** the Wahoo record, else the Garmin record, supplies the session's primary, measured values and laps; Intervals.icu records stay readable as ordinary members.
 
 #### Scenario: Load on different scales
@@ -397,7 +397,7 @@ The system SHALL give activity consumers one provider-neutral summary per live c
 - **WHEN** a consumer looks up feedback, workout profiles or analyses of a summary
 - **THEN** it uses the local session id, which the reference resolver returns for any reference to the session; rows stored under a provider record id are still found through the feedback and equipment lookups.
 
-Detailed contract: summary keys follow `activity_detail.v1` (`started_at_local`, `moving_duration_s`, `elapsed_duration_s`, `distance_m`, `elevation_gain_m`, `avg_hr`, `max_hr`, `avg_power`, `normalized_power`, `avg_speed_mps`, `pace_mps`, `grade_adjusted_speed_mps`, `rpe`, `feel`, `ftp_w`, `eftp_w`, `vo2max`, `provider_training_load`, `provider_load_model`, `provider_intensity`, the served `training_load`, `intensity`, `load_method`, `load_method_version`, `load_branch` and `load_threshold_after_session`, zone times as `{id, secs}` lists, `planned_event_id`, `recorded_by`, `source`, `sources`, `record_ids`). The Intervals.icu (v6) and Garmin (v7) mappers store the summary values in the record details, so the existing backfill re-maps stored rows; no schema change.
+Detailed contract: the summary keys are the `ActivitySummary` keys listed in `docs/canonical-field-map.md` ("`ActivitySummary` keys"), each with its unit and source field; zone times are `{id, secs}` lists, and the served `training_load`, `intensity` and their load method keys come from the stored local load. The Garmin mapper stores the summary values in the record details, so the existing backfill re-maps stored rows; no schema change.
 
 Evidence: `backend/activities/activity_summary.py`, `backend/sync/canonical_table_reader.py:CanonicalTableReader.activity_sessions`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector.activity_summaries`; `tests/test_activity_summary.py`, `tests/test_canonical_table_reader.py:ActivitySessionReadTests`, `tests/test_intervals_activity_mapping.py:SummaryValueTests`, `tests/test_garmin_activity_mapping.py:SummaryValueTests`, `tests/test_provider_coupling_guard.py`.
 

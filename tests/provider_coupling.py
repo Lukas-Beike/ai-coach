@@ -254,7 +254,6 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     **{
         (RULE_SOURCE_LABEL, path): _LEGACY_LABEL
         for path in (
-            "backend/performance/chart_history.py",
             "backend/performance/garmin_projection.py",
             "backend/performance/morning_battery.py",
             "backend/performance/personal_recovery.py",

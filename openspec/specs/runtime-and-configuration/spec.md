@@ -40,16 +40,20 @@ Configuration SHALL accept HTTPS OpenAI base URLs and HTTP only on loopback, rej
 - **WHEN** the browser requests provider connection/configuration status
 - **THEN** it receives source/configured metadata without stored credential values
 
-Evidence: `backend/config.py::validated_openai_base_url`; `backend/provider_credentials.py::ProviderCredentialService.status`; `backend/provider_credentials.py::credential_status`. Tests: `tests/test_config.py::test_openai_base_url_requires_https_or_loopback_http`; `tests/test_provider_credentials.py::test_status_never_contains_secret_values`; `tests/test_provider_credentials.py::test_stored_value_overrides_env_and_clearing_restores_env`.
+#### Scenario: Garmin Personal API key and expiry
+- **WHEN** the Garmin Personal API key is stored in the app or read from `GARMIN_PERSONAL_API_KEY` with its `GARMIN_PERSONAL_API_KEY_EXPIRES` date
+- **THEN** the key is never returned, the ISO expiry date is the only visible value, and a stored key never takes the environment's expiry, so saving or removing the key clears its expiry
+
+Evidence: `backend/config.py::validated_openai_base_url`; `backend/provider_credentials.py::ProviderCredentialService.status`; `backend/provider_credentials.py::credential_status`; `backend/provider_credentials.py::_unpaired_expiry`. Tests: `tests/test_config.py::test_openai_base_url_requires_https_or_loopback_http`; `tests/test_provider_credentials.py::test_status_never_contains_secret_values`; `tests/test_provider_credentials.py::test_stored_value_overrides_env_and_clearing_restores_env`; `tests/test_garmin_personal_key_status.py::test_a_stored_key_never_takes_the_environment_expiry`; `tests/test_garmin_personal_key_status.py::test_saving_or_removing_the_key_clears_its_expiry`.
 
 ### Requirement: Ordered startup and durable-work recovery
 
-Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, start workers/canonical backfill, enqueue configured startup refreshes and start daily scheduling before serving the main loop.
+Startup SHALL validate secure configuration, initialize the database, recover interrupted sync/Coach work, start workers/canonical backfill (which also runs the one-time maintenance steps once its rating backfill is finished), enqueue configured startup refreshes and start daily scheduling before serving the main loop.
 
 
 #### Scenario: Normal start
 - **WHEN** secure initialization succeeds
-- **THEN** job recovery is performed by the startup owner, workers start, and configured startup refreshes are scheduled
+- **THEN** job recovery is performed by the startup owner, workers start, and configured startup refreshes (calendar, Garmin, Wahoo, weather) are scheduled; Intervals.icu, an output target, is not read
 
 #### Scenario: Database initialization alone
 - **WHEN** the schema/bootstrap service initializes persistent state

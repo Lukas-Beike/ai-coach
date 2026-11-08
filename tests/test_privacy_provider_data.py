@@ -276,6 +276,7 @@ def seed_remote_link_rows(db):
         ("competition", "1", "event-1"),
         ("library_workout", "lib-1", "event-2"),
         ("planned_unit", "u-1", "event-3"),
+        ("observation", "obs-1", "metric-1"),
     ):
         db.execute(
             "INSERT INTO remote_links(entity_kind, local_id, provider, remote_id, "
@@ -390,6 +391,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
             [
                 ("competition", "1"),
                 ("library_workout", "lib-1"),
+                ("observation", "obs-1"),
                 ("planned_unit", "u-1"),
             ],
         )
@@ -638,6 +640,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
                 "activity_records",
                 "activity_sessions",
                 "provider_records",
+                "remote_links",
             },
         )
         order = scope["provider_data"].index
@@ -690,6 +693,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         scope = {category: tables for category, _label, tables in PRIVACY_DELETE_SCOPE}
         self.assertIn("remote_links", scope["library"])
         self.assertIn("remote_links", scope["competitions"])
+        self.assertIn("remote_links", scope["provider_data"])
 
     def test_preview_counts_remote_links_by_owning_group(self):
         seed_remote_link_rows(self.db)
@@ -698,12 +702,15 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         # Two library links, one competition link and one tombstone.
         self.assertEqual(counts["library"], 2)
         self.assertEqual(counts["competitions"], 2)
+        # The metric-export link counts as provider data (no other rows seeded).
+        self.assertEqual(counts["provider_data"], 1)
 
     def test_delete_removes_every_remote_link(self):
         seed_remote_link_rows(self.db)
         result = self.service().delete("LOKALE DATEN LÖSCHEN")
         self.assertEqual(result["deleted_categories"]["library"], 2)
         self.assertEqual(result["deleted_categories"]["competitions"], 2)
+        self.assertEqual(result["deleted_categories"]["provider_data"], 1)
         for table in ("remote_links", "competition_sync_tombstones"):
             with self.subTest(table=table):
                 self.assertEqual(
