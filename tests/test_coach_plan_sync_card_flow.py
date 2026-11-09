@@ -1,10 +1,12 @@
-"""Coach plan sync from tool call to approved card to queued Intervals.icu job.
+"""Coach sync from tool call to approved card to queued provider job.
 
 The athlete approves a card that lists the units. That card authorizes exactly
 those units; the model's own scope tokens are not what decides it. Real services
 run on a temporary SQLite database: dialogue classification, tool preparation,
-card creation, confirmation, one-shot execution, plan selection and the job queue.
-Only the planning-authority collaborator is mocked. No network, no real ``.env``.
+card creation, confirmation, one-shot execution, plan selection, planning
+authority, nutrition manifests and the job queue. Every card kind of the Coach
+and every provider refresh target is driven through that chain. No network, no
+real ``.env``.
 """
 
 from __future__ import annotations
@@ -15,14 +17,18 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from nutrition_service_support import build_nutrition_services
+
 from backend.coach.dialogue_action import CoachDialogueActionService
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_execution import CoachProposalExecutionService
+from backend.coach.proposal_models import REMOTE_COACH_WRITE_TOOLS
 from backend.coach.proposal_read import CoachProposalConfirmationService
 from backend.coach.sync_tools import CoachSyncToolService
 from backend.coach.tool_preparation import CoachStructuredToolPreparationService
@@ -32,10 +38,14 @@ from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.authority import PlanningAuthorityService
+from backend.sync.commands import ProviderRefreshCommandService
+from backend.sync.conflict_commands import SyncConflictCommandService
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.jobs import SyncJobStore
 from backend.sync.plan_commands import PlanPushCommandService
 from backend.sync.plan_selection import StructuredPlanSyncService
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.queue import SyncJobQueueService
 
 NOW = datetime(2026, 11, 9, 8, 0, tzinfo=UTC)
@@ -59,185 +69,257 @@ def _payload(name: str, day: str, sport: str) -> str:
     return json.dumps({"name": name, "date": day, "type": sport}, sort_keys=True)
 
 
+RACE = "race-1"
+STRENGTH_IDS = [WEEK[0][0], WEEK[2][0], WEEK[5][0]]
+NUTRITION_DAY = "2026-11-09"
+SELECTED = "selected"
+
+
+@dataclass(frozen=True)
+class CardFlow:
+    """The real Coach services of one card chain over one temporary database."""
+
+    database: DatabaseManager
+    sync_tools: CoachSyncToolService
+    creation: CoachProposalCreationService
+    confirmation: CoachProposalConfirmationService
+    execution: CoachProposalExecutionService
+    preparation: CoachStructuredToolPreparationService
+    inline_refreshes: dict[str, Any]
+
+
+def wire_card_flow(case: unittest.TestCase) -> CardFlow:
+    """Build the real Coach card chain on a temporary database for one case."""
+    temporary = tempfile.TemporaryDirectory()
+    case.addCleanup(temporary.cleanup)
+    database = DatabaseManager(
+        Path(temporary.name) / "coach.sqlite", sqlite3, row_factory=row_factory
+    )
+    case.addCleanup(database.close)
+    # A refresh the descriptor makes the Coach wait for runs inline, not queued.
+    inline_refreshes = {
+        descriptor.provider_id: mock.Mock(
+            refresh=mock.Mock(return_value={"ok": True, "status": "completed"})
+        )
+        for descriptor in DEFAULT_PROVIDER_REGISTRY.all()
+        if descriptor.coach_waits_for_completion
+    }
+    with database.unit_of_work() as db:
+        initialize_schema(db)
+        for local_id, day, sport in (*WEEK, (OTHER_UNIT, "2026-11-20", "Run")):
+            db.execute(
+                "INSERT INTO planned_units (local_id, payload, sync_dirty, sync_state, "
+                "revision, tombstone, created_at, updated_at) "
+                "VALUES (?, ?, 1, 'local', 1, 0, 'now', 'now')",
+                (local_id, _payload(f"{sport} {day}", day, sport)),
+            )
+        db.execute(
+            "INSERT INTO competitions (id, name, event_date, sport, priority, distance, "
+            "target, course_profile, notes, created_at, updated_at) "
+            "VALUES (?, 'Race', '2026-12-01', 'Run', 'A', '', '', '', '', 'now', 'now')",
+            (RACE,),
+        )
+        db.execute(
+            "INSERT INTO messages(id, role, content, client_turn_id, created_at) "
+            "VALUES (1, 'user', 'Sync diese Woche', ?, 'now')",
+            (TURN,),
+        )
+        db.execute(
+            "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, "
+            "target_system, status, receipt, created_at, updated_at) "
+            "VALUES ('command-1', ?, ?, '{}', 'intervals', 'complete', ?, 'now', 'now')",
+            (
+                TURN,
+                CONVERSATION,
+                json.dumps(
+                    {"session_key": hashlib.sha256(SESSION.encode()).hexdigest()}
+                ),
+            ),
+        )
+    identifiers = iter(f"job-{index}" for index in range(1, 100))
+    queue = SyncJobQueueService(
+        SyncJobStore(database, NOW.isoformat, lambda: next(identifiers)),
+        mock.Mock(spec=StateEventBuffer),
+        MaintenanceGate(),
+        threading.Event(),
+        all_sync_days=-1,
+        daily_sync_markers=DailySyncMarkerService(
+            database, KeyValueRepository(NOW.isoformat), lambda: NOW
+        ),
+    )
+    authority = PlanningAuthorityService(
+        database, mock.Mock(), mock.Mock(), NOW.isoformat
+    )
+    diary, _library = build_nutrition_services(
+        database, threading.RLock(), NOW.isoformat, lambda: NOW
+    )
+    plan_push = PlanPushCommandService(queue)
+    sync_tools = CoachSyncToolService(
+        queue,
+        authority,
+        SyncConflictCommandService(database, mock.Mock(), mock.Mock(), queue),
+        StructuredPlanSyncService(database, authority, plan_push, 28),
+        mock.Mock(),
+        plan_push,
+        ProviderRefreshCommandService(queue, inline_refreshes),
+        diary,
+    )
+    dispatcher = mock.Mock()
+    dispatcher.execute.side_effect = lambda name, arguments, **kwargs: (
+        sync_tools.execute(
+            name,
+            arguments,
+            intent=kwargs["intent"],
+            sync_job_ids=kwargs["sync_job_ids"],
+        )
+    )
+    clock = [1000.0]
+    creation = CoachProposalCreationService(
+        database,
+        now=lambda: clock[0],
+        utc_now=NOW.isoformat,
+        nutrition_diary_service=lambda: diary,
+        today=lambda: date(2026, 11, 9),
+    )
+    confirmation = CoachProposalConfirmationService(database, now=lambda: clock[0])
+    execution = CoachProposalExecutionService(
+        database,
+        mock.Mock(),
+        mock.Mock(),
+        MaintenanceGate(),
+        lambda: dispatcher,
+        now=lambda: clock[0],
+        utc_now=NOW.isoformat,
+    )
+    preparation = CoachStructuredToolPreparationService(
+        CoachDialogueActionService(
+            database,
+            threading.RLock(),
+            lambda: queue,
+            mock.Mock(),
+            lambda: date(2026, 11, 9),
+        ),
+        authority,
+        frozenset(),
+    )
+    return CardFlow(
+        database=database,
+        sync_tools=sync_tools,
+        creation=creation,
+        confirmation=confirmation,
+        execution=execution,
+        preparation=preparation,
+        inline_refreshes=inline_refreshes,
+    )
+
+
+def unit_entries(flow: CardFlow, ids: list[str]) -> list[dict[str, str]]:
+    with flow.database.reader() as db:
+        payloads = {
+            row["local_id"]: row["payload"]
+            for row in db.execute("SELECT local_id, payload FROM planned_units")
+        }
+    return [
+        {
+            "library_workout_id": local_id,
+            "expected_payload_hash": hashlib.sha256(
+                payloads[local_id].encode()
+            ).hexdigest(),
+        }
+        for local_id in ids
+    ]
+
+
+def request_for(
+    target: str, scope: list[str], *, sync_scope: str | None, remote_write: bool = True
+) -> dict[str, Any]:
+    """The model's validated request: the athlete's message, target and scope."""
+    return {
+        "summary": "Auftrag des Athleten",
+        "source_message_ids": [1],
+        "target": target,
+        "scope": scope,
+        "period": {"start": "2026-11-09", "end": "2026-11-15"},
+        "constraints": [],
+        "remote_write": remote_write,
+        "sync_scope": sync_scope,
+    }
+
+
+def prepared_call(
+    flow: CardFlow, tool: str, arguments: dict[str, Any], request: dict[str, Any]
+) -> dict[str, Any]:
+    """The model's tool call after dialogue classification and tool preparation."""
+    arguments = {**arguments, "_request": request}
+    action = flow.preparation.prepare(
+        {"name": tool, "arguments": arguments, "action": {}},
+        [],
+        question="",
+        cancelled=False,
+        context={
+            "messages": [{"id": 1, "role": "user"}],
+            "current_user_message_id": 1,
+        },
+        allow_mutations=True,
+    )
+    return {"tool": tool, "arguments": arguments, "action": action}
+
+
+def create_card(flow: CardFlow, call: dict[str, Any]) -> dict[str, Any]:
+    return flow.creation.create_remote_write(
+        call["tool"],
+        call["arguments"],
+        call["action"],
+        conversation_id=CONVERSATION,
+        client_turn_id=TURN,
+        session_csrf_hash=SESSION,
+    )["proposed_action"]
+
+
+def approve_card(flow: CardFlow, card: dict[str, Any]) -> dict[str, Any]:
+    confirmed = flow.confirmation.confirm(card["id"], SESSION)
+    return flow.execution.execute(
+        confirmed["action_token"], SESSION, confirmed["proposed_action"]["payload_hash"]
+    )
+
+
+def queued_jobs(flow: CardFlow, job_type: str | None = None) -> list[dict[str, Any]]:
+    with flow.database.reader() as db:
+        return [
+            dict(row)
+            for row in db.execute(
+                "SELECT id, provider, type, status, requested_by, payload "
+                "FROM sync_jobs WHERE ? IS NULL OR type=? ORDER BY created_at, id",
+                (job_type, job_type),
+            )
+        ]
+
+
+def plan_sync_request(scope: list[str]) -> dict[str, Any]:
+    return request_for("intervals", scope, sync_scope=SELECTED)
+
+
 class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.database = DatabaseManager(
-            Path(temporary.name) / "coach.sqlite", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.database.close)
-        with self.database.unit_of_work() as db:
-            initialize_schema(db)
-            for local_id, day, sport in (*WEEK, (OTHER_UNIT, "2026-11-20", "Run")):
-                db.execute(
-                    "INSERT INTO planned_units (local_id, payload, sync_dirty, sync_state, "
-                    "revision, tombstone, created_at, updated_at) "
-                    "VALUES (?, ?, 1, 'local', 1, 0, 'now', 'now')",
-                    (local_id, _payload(f"{sport} {day}", day, sport)),
-                )
-            db.execute(
-                "INSERT INTO messages(id, role, content, client_turn_id, created_at) "
-                "VALUES (1, 'user', 'Sync diese Woche nach Intervals', ?, 'now')",
-                (TURN,),
-            )
-            db.execute(
-                "INSERT INTO coach_commands(id, client_turn_id, conversation_id, intent, "
-                "target_system, status, receipt, created_at, updated_at) "
-                "VALUES ('command-1', ?, ?, '{}', 'intervals', 'complete', ?, 'now', 'now')",
-                (
-                    TURN,
-                    CONVERSATION,
-                    json.dumps(
-                        {"session_key": hashlib.sha256(SESSION.encode()).hexdigest()}
-                    ),
-                ),
-            )
-        identifiers = iter(f"job-{index}" for index in range(1, 100))
-        self.queue = SyncJobQueueService(
-            SyncJobStore(self.database, NOW.isoformat, lambda: next(identifiers)),
-            mock.Mock(spec=StateEventBuffer),
-            MaintenanceGate(),
-            threading.Event(),
-            all_sync_days=-1,
-            daily_sync_markers=DailySyncMarkerService(
-                self.database, KeyValueRepository(NOW.isoformat), lambda: NOW
-            ),
-        )
-        self.authority = mock.Mock()
-        self.sync_tools = CoachSyncToolService(
-            self.queue,
-            self.authority,
-            mock.Mock(),
-            StructuredPlanSyncService(
-                self.database, self.authority, PlanPushCommandService(self.queue), 28
-            ),
-            mock.Mock(),
-            PlanPushCommandService(self.queue),
-            mock.Mock(),
-        )
-        dispatcher = mock.Mock()
-        dispatcher.execute.side_effect = lambda name, arguments, **kwargs: (
-            self.sync_tools.execute(
-                name,
-                arguments,
-                intent=kwargs["intent"],
-                sync_job_ids=kwargs["sync_job_ids"],
-            )
-        )
-        self.clock = [1000.0]
-        self.creation = CoachProposalCreationService(
-            self.database,
-            now=lambda: self.clock[0],
-            utc_now=NOW.isoformat,
-        )
-        self.confirmation = CoachProposalConfirmationService(
-            self.database, now=lambda: self.clock[0]
-        )
-        self.execution = CoachProposalExecutionService(
-            self.database,
-            mock.Mock(),
-            mock.Mock(),
-            MaintenanceGate(),
-            lambda: dispatcher,
-            now=lambda: self.clock[0],
-            utc_now=NOW.isoformat,
-        )
-        self.preparation = CoachStructuredToolPreparationService(
-            CoachDialogueActionService(
-                self.database,
-                threading.RLock(),
-                lambda: self.queue,
-                mock.Mock(),
-                lambda: date(2026, 11, 9),
-            ),
-            self.authority,
-            frozenset(),
-        )
-
-    def entries(self, ids: list[str]) -> list[dict[str, str]]:
-        with self.database.reader() as db:
-            payloads = {
-                row["local_id"]: row["payload"]
-                for row in db.execute("SELECT local_id, payload FROM planned_units")
-            }
-        return [
-            {
-                "library_workout_id": local_id,
-                "expected_payload_hash": hashlib.sha256(
-                    payloads[local_id].encode()
-                ).hexdigest(),
-            }
-            for local_id in ids
-        ]
+        self.flow = wire_card_flow(self)
 
     def coach_tool_call(self, ids: list[str], *, scope: list[str]) -> dict[str, Any]:
         """The model's call: entries by id and hash, a request without unit tokens."""
-        arguments: dict[str, Any] = {
-            "entries": self.entries(ids),
-            "reason": "Woche nach Intervals",
-            "_request": {
-                "summary": "Wochenplan nach Intervals.icu synchronisieren",
-                "source_message_ids": [1],
-                "target": "intervals",
-                "scope": scope,
-                "period": {"start": "2026-11-09", "end": "2026-11-15"},
-                "constraints": [],
-                "remote_write": True,
-                "sync_scope": "selected",
-            },
-        }
-        metadata = {
-            "name": "start_intervals_plan_sync",
-            "arguments": arguments,
-            "action": {},
-        }
-        action = self.preparation.prepare(
-            metadata,
-            [],
-            question="",
-            cancelled=False,
-            context={
-                "messages": [{"id": 1, "role": "user"}],
-                "current_user_message_id": 1,
-            },
-            allow_mutations=True,
-        )
-        return {"arguments": arguments, "action": action}
-
-    def card(self, call: dict[str, Any]) -> dict[str, Any]:
-        return self.creation.create_remote_write(
+        return prepared_call(
+            self.flow,
             "start_intervals_plan_sync",
-            call["arguments"],
-            call["action"],
-            conversation_id=CONVERSATION,
-            client_turn_id=TURN,
-            session_csrf_hash=SESSION,
-        )["proposed_action"]
-
-    def approve(self, card: dict[str, Any]) -> dict[str, Any]:
-        confirmed = self.confirmation.confirm(card["id"], SESSION)
-        return self.execution.execute(
-            confirmed["action_token"],
-            SESSION,
-            confirmed["proposed_action"]["payload_hash"],
+            {"entries": unit_entries(self.flow, ids), "reason": "Woche nach Intervals"},
+            plan_sync_request(scope),
         )
 
     def plan_push_jobs(self) -> list[dict[str, Any]]:
-        with self.database.reader() as db:
-            return [
-                dict(row)
-                for row in db.execute(
-                    "SELECT provider, type, requested_by, payload FROM sync_jobs "
-                    "WHERE type='plan_push'"
-                )
-            ]
+        return queued_jobs(self.flow, "plan_push")
 
     def test_mixed_week_card_is_approved_and_queues_one_plan_push_job(self) -> None:
         ids = [local_id for local_id, _, _ in WEEK]
         call = self.coach_tool_call(ids, scope=["intervals_sync"])
 
-        card = self.card(call)
+        card = create_card(self.flow, call)
 
         self.assertEqual("remote_coach_write", card["action_type"])
         self.assertEqual(sorted(ids), sorted(detail["id"] for detail in card["diff"]))
@@ -250,7 +332,7 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
         )
         self.assertEqual([], self.plan_push_jobs())
 
-        result = self.approve(card)
+        result = approve_card(self.flow, card)
 
         self.assertEqual("queued", result["status"])
         jobs = self.plan_push_jobs()
@@ -268,12 +350,12 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
             scope=["intervals_sync", f"planned_unit:{OTHER_UNIT}"],
         )
 
-        card = self.card(call)
-        self.approve(card)
+        card = create_card(self.flow, call)
+        approve_card(self.flow, card)
 
         queued = json.loads(self.plan_push_jobs()[0]["payload"])["entries"]
         self.assertEqual([WEEK[0][0]], [e["library_workout_id"] for e in queued])
-        with self.database.reader() as db:
+        with self.flow.database.reader() as db:
             row = db.execute("SELECT payload FROM coach_action_proposals").fetchone()
         scope = json.loads(row["payload"])["intent"]["authorization_scope"]
         self.assertNotIn(f"planned_unit:{OTHER_UNIT}", scope)
@@ -285,7 +367,7 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
         )
 
         with self.assertRaises(AppError) as caught:
-            self.card(call)
+            create_card(self.flow, call)
 
         self.assertEqual("request_object_missing", caught.exception.reason)
 
@@ -294,7 +376,7 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
         call = self.coach_tool_call([WEEK[0][0]], scope=["intervals_sync"])
 
         with self.assertRaises(AppError) as caught:
-            self.sync_tools.execute(
+            self.flow.sync_tools.execute(
                 "start_intervals_plan_sync",
                 call["arguments"],
                 intent=call["action"],
@@ -306,6 +388,241 @@ class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
             (caught.exception.status, caught.exception.reason),
         )
         self.assertEqual([], self.plan_push_jobs())
+
+
+def _plan_sync_call(flow: CardFlow) -> dict[str, Any]:
+    return prepared_call(
+        flow,
+        "start_intervals_plan_sync",
+        {"entries": unit_entries(flow, [WEEK[1][0]]), "reason": "Lauf"},
+        plan_sync_request(["intervals_sync"]),
+    )
+
+
+def _garmin_call(flow: CardFlow) -> dict[str, Any]:
+    return prepared_call(
+        flow,
+        "push_strength_to_garmin",
+        {"entries": [{"local_id": local_id} for local_id in STRENGTH_IDS]},
+        request_for(
+            "garmin",
+            ["garmin_sync", *(f"planned_unit:{local_id}" for local_id in STRENGTH_IDS)],
+            sync_scope=SELECTED,
+        ),
+    )
+
+
+def _competition_call(flow: CardFlow) -> dict[str, Any]:
+    return prepared_call(
+        flow,
+        "sync_competitions",
+        {"reason": "Wettkämpfe"},
+        request_for(
+            "intervals", ["local_competitions", "intervals_sync"], sync_scope=None
+        ),
+    )
+
+
+def _nutrition_call(flow: CardFlow) -> dict[str, Any]:
+    return prepared_call(
+        flow,
+        "sync_nutrition",
+        {"date": NUTRITION_DAY},
+        request_for(
+            "intervals", ["local_nutrition", "intervals_sync"], sync_scope=None
+        ),
+    )
+
+
+# Card kind -> (call builder, provider, job type, payload key the card binds).
+CARD_KINDS: dict[str, tuple[Any, str, str, str]] = {
+    "start_intervals_plan_sync": (_plan_sync_call, "intervals", "plan_push", "entries"),
+    "push_strength_to_garmin": (_garmin_call, "garmin", "plan_push", "entries"),
+    "sync_competitions": (
+        _competition_call,
+        "intervals",
+        "competition_push",
+        "approval_manifest",
+    ),
+    "sync_nutrition": (
+        _nutrition_call,
+        "intervals",
+        "nutrition_sync",
+        "approval_manifest",
+    ),
+}
+# Remote-write tools that queue no job of their own kind: a retry requeues an
+# existing job (tested below) and the adaptive apply changes local plans first.
+OTHER_CARDS: dict[str, str] = {
+    "resolve_training_sync_conflict": "retry of an existing job, below",
+    "apply_adaptive_replan": "tests/test_coach_adaptive_apply.py",
+}
+REFRESH_TARGETS = ("calendar", "garmin", "wahoo", "weather")
+WAITING_TARGETS = ("garmin", "wahoo")
+
+
+class EveryCardKindQueuesItsProviderJobTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.flow = wire_card_flow(self)
+
+    def test_the_covered_card_kinds_are_all_remote_write_tools(self) -> None:
+        self.assertEqual(REMOTE_COACH_WRITE_TOOLS, {*CARD_KINDS, *OTHER_CARDS})
+
+    def test_each_card_kind_queues_its_provider_job_only_after_approval(self) -> None:
+        for tool, (build, provider, job_type, bound) in CARD_KINDS.items():
+            with self.subTest(tool=tool):
+                self.flow = wire_card_flow(self)
+                card = create_card(self.flow, build(self.flow))
+
+                self.assertEqual("remote_coach_write", card["action_type"])
+                self.assertEqual(provider, card["target_system"])
+                self.assertEqual([], queued_jobs(self.flow))
+
+                result = approve_card(self.flow, card)
+
+                self.assertEqual("queued", result["status"], result)
+                jobs = queued_jobs(self.flow)
+                self.assertEqual(
+                    [(provider, job_type, "coach")],
+                    [(j["provider"], j["type"], j["requested_by"]) for j in jobs],
+                )
+                self.assertTrue(json.loads(jobs[0]["payload"])[bound])
+
+    def test_the_garmin_card_binds_each_selected_unit_to_its_payload_hash(self) -> None:
+        card = create_card(self.flow, _garmin_call(self.flow))
+        approve_card(self.flow, card)
+
+        queued = json.loads(queued_jobs(self.flow, "plan_push")[0]["payload"])[
+            "entries"
+        ]
+
+        self.assertEqual(unit_entries(self.flow, STRENGTH_IDS), queued)
+
+    def test_a_garmin_selection_outside_the_request_scope_is_rejected(self) -> None:
+        with self.assertRaises(AppError):
+            prepared_call(
+                self.flow,
+                "push_strength_to_garmin",
+                {"entries": [{"local_id": id_} for id_ in (*STRENGTH_IDS, OTHER_UNIT)]},
+                request_for(
+                    "garmin",
+                    ["garmin_sync", *(f"planned_unit:{id_}" for id_ in STRENGTH_IDS)],
+                    sync_scope=SELECTED,
+                ),
+            )
+
+        self.assertEqual([], queued_jobs(self.flow))
+
+    def test_the_competition_card_binds_the_dirty_competition(self) -> None:
+        card = create_card(self.flow, _competition_call(self.flow))
+        approve_card(self.flow, card)
+
+        manifest = json.loads(queued_jobs(self.flow, "competition_push")[0]["payload"])[
+            "approval_manifest"
+        ]
+
+        self.assertEqual(
+            [("competition", RACE)], [(m["type"], m["id"]) for m in manifest]
+        )
+
+    def test_a_failed_intervals_push_is_retried_through_its_card(self) -> None:
+        approve_card(self.flow, create_card(self.flow, _plan_sync_call(self.flow)))
+        job = queued_jobs(self.flow, "plan_push")[0]
+        with self.flow.database.unit_of_work() as db:
+            db.execute("UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],))
+        retry = prepared_call(
+            self.flow,
+            "resolve_training_sync_conflict",
+            {"job_id": job["id"]},
+            request_for(
+                "intervals",
+                [f"sync_job:{job['id']}", "intervals_sync"],
+                sync_scope=None,
+            ),
+        )
+
+        result = approve_card(self.flow, create_card(self.flow, retry))
+
+        self.assertEqual("queued", result["status"])
+        self.assertEqual(
+            [(job["id"], "queued")],
+            [(j["id"], j["status"]) for j in queued_jobs(self.flow, "plan_push")],
+        )
+
+    def test_a_model_call_without_a_card_queues_no_card_job(self) -> None:
+        for tool, (build, _provider, _job_type, _bound) in CARD_KINDS.items():
+            with self.subTest(tool=tool):
+                self.flow = wire_card_flow(self)
+                call = build(self.flow)
+
+                with self.assertRaises(AppError) as caught:
+                    self.flow.sync_tools.execute(
+                        tool,
+                        call["arguments"],
+                        intent=call["action"],
+                        sync_job_ids=[],
+                    )
+
+                self.assertIn(caught.exception.status, {403, 409})
+                self.assertEqual([], queued_jobs(self.flow))
+
+
+class ProviderRefreshByCoachTests(unittest.TestCase):
+    """A read-only refresh needs no card; each Coach refresh target reaches the queue."""
+
+    def test_the_refresh_targets_are_the_registry_coach_targets(self) -> None:
+        self.assertEqual(
+            REFRESH_TARGETS,
+            tuple(sorted(DEFAULT_PROVIDER_REGISTRY.coach_refresh_targets())),
+        )
+
+    def refresh(self, provider: str) -> tuple[dict[str, Any], list[str]]:
+        self.flow = wire_card_flow(self)
+        call = prepared_call(
+            self.flow,
+            "start_provider_refresh",
+            {"reason": "aktuelle Daten"},
+            request_for(
+                provider, [f"{provider}_refresh"], sync_scope=None, remote_write=False
+            ),
+        )
+        job_ids: list[str] = []
+        result = self.flow.sync_tools.execute(
+            "start_provider_refresh",
+            call["arguments"],
+            intent=call["action"],
+            sync_job_ids=job_ids,
+        )
+        assert result is not None
+        return result, job_ids
+
+    def test_the_providers_the_coach_waits_for_are_garmin_and_wahoo(self) -> None:
+        self.flow = wire_card_flow(self)
+        self.assertEqual(WAITING_TARGETS, tuple(sorted(self.flow.inline_refreshes)))
+
+    def test_each_other_target_queues_a_refresh_job_requested_by_the_coach(
+        self,
+    ) -> None:
+        for provider in sorted(set(REFRESH_TARGETS) - set(WAITING_TARGETS)):
+            with self.subTest(provider=provider):
+                result, job_ids = self.refresh(provider)
+
+                self.assertEqual("queued", result["status"])
+                jobs = queued_jobs(self.flow)
+                self.assertEqual(
+                    [(provider, "refresh", "coach")],
+                    [(j["provider"], j["type"], j["requested_by"]) for j in jobs],
+                )
+                self.assertEqual([jobs[0]["id"]], job_ids)
+
+    def test_a_waited_for_target_refreshes_inline_without_a_job(self) -> None:
+        for provider in WAITING_TARGETS:
+            with self.subTest(provider=provider):
+                result, job_ids = self.refresh(provider)
+
+                self.assertEqual("completed", result["status"])
+                self.flow.inline_refreshes[provider].refresh.assert_called_once()
+                self.assertEqual(([], []), (queued_jobs(self.flow), job_ids))
 
 
 if __name__ == "__main__":
