@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from types import MappingProxyType
-from typing import Final
+from typing import Final, cast
 
 from backend.canonical.records import Provenance
 from backend.canonical.validation import (
@@ -294,7 +294,7 @@ def without_positions(stream_set: ActivityStreamSet) -> ActivityStreamSet | None
     }
     if len(kept) < 2:
         return None
-    return replace(stream_set, channels=kept)
+    return cast(ActivityStreamSet, replace(stream_set, channels=kept))
 
 
 def _validated_series(

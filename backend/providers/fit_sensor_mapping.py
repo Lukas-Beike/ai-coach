@@ -102,25 +102,36 @@ def sensor_profile(
         sensor = _sensor(fields, role)
         if sensor is not None and len(sensors) < MAX_SENSORS:
             sensors.setdefault(f"{role.value}:{sensor.key}", sensor)
-    hr_source: HeartRateSource | None = None
-    if has_heart_rate:
-        if strap:
-            hr_source = HeartRateSource.CHEST_STRAP
-        elif devices and provider is ProviderId.GARMIN:
-            hr_source = HeartRateSource.OPTICAL
-        else:
-            hr_source = HeartRateSource.UNKNOWN
-    power_source: PowerSource | None = None
-    if has_power:
-        if meter:
-            power_source = PowerSource.POWER_METER
-        elif trainer:
-            power_source = PowerSource.TRAINER
-        elif devices and provider is ProviderId.GARMIN:
-            power_source = PowerSource.ESTIMATED
-        else:
-            power_source = PowerSource.UNKNOWN
+    garmin_device = bool(devices) and provider is ProviderId.GARMIN
+    hr_source = (
+        _heart_rate_source(strap=strap, garmin_device=garmin_device)
+        if has_heart_rate
+        else None
+    )
+    power_source = (
+        _power_source(meter=meter, trainer=trainer, garmin_device=garmin_device)
+        if has_power
+        else None
+    )
     return hr_source, power_source, tuple(sensors.values())
+
+
+def _heart_rate_source(*, strap: bool, garmin_device: bool) -> HeartRateSource:
+    if strap:
+        return HeartRateSource.CHEST_STRAP
+    if garmin_device:
+        return HeartRateSource.OPTICAL
+    return HeartRateSource.UNKNOWN
+
+
+def _power_source(*, meter: bool, trainer: bool, garmin_device: bool) -> PowerSource:
+    if meter:
+        return PowerSource.POWER_METER
+    if trainer:
+        return PowerSource.TRAINER
+    if garmin_device:
+        return PowerSource.ESTIMATED
+    return PowerSource.UNKNOWN
 
 
 def sensor_key(manufacturer: int | None, product: int | None, serial: int) -> str:

@@ -15,7 +15,6 @@ from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 from tests import run_tests
-from tools import bot_merge
 
 SPEC = importlib.util.spec_from_file_location(
     "release_source",
@@ -451,8 +450,10 @@ class WorkflowSourceTests(unittest.TestCase):
             publish.index("git apply --numstat"),
             publish.index("create-github-app-token"),
         )
-        # The workflow refuses the same files the bot merge would refuse.
-        self.assertIn(f"'^{bot_merge.OPENSPEC_FILES.pattern}$'", publish)
+        self.assertIn(
+            r"allowed='^\.agents/skills/(\.openspec-target|openspec-[a-z0-9-]+/SKILL\.md)$'",
+            publish,
+        )
         self.assertIn("core.hooksPath=/dev/null push", publish)
         self.assertIn("--base develop", workflow)
         self.assertIn("--auto --squash", workflow)

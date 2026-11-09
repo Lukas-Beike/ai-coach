@@ -37,6 +37,11 @@ GARMIN_INITIAL_SOURCE = "garmin-initial-sync"
 SPORT_DERIVATION_SHARE = 0.75
 SPORT_DERIVATION_MIN_ROWS = 3
 
+_UPSERT_KV = (
+    "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE "
+    "SET value=excluded.value,updated_at=excluded.updated_at"
+)
+
 
 class GearReader(Protocol):
     """Reads the canonical gear and gear-to-activity links."""
@@ -301,7 +306,7 @@ class EquipmentService:
             }
             _preserve_equipment_metadata(saved, previous, payload)
             db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                _UPSERT_KV,
                 (
                     EQUIPMENT_PREFIX + item_id,
                     json.dumps(saved, allow_nan=False),
@@ -371,7 +376,7 @@ class EquipmentService:
                 "observed_at": self._utc_now(),
             }
             db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                _UPSERT_KV,
                 (
                     "equipment_assignment:" + key,
                     json.dumps(saved),
@@ -416,7 +421,7 @@ class EquipmentService:
                 raise AppError(400, "Aktive Hauptausrüstung erforderlich.")
             now = self._utc_now()
             db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                _UPSERT_KV,
                 (
                     SENSOR_EQUIPMENT_PREFIX + key,
                     json.dumps({"equipment_id": equipment["id"], "observed_at": now}),

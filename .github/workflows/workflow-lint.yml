@@ -1,0 +1,25 @@
+name: Lint GitHub workflows
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate workflow syntax and triggers
+        # actionlint 1.7.12 does not know the newer concurrency `queue` key yet.
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo
+          rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+          -oneline -shellcheck= -pyflakes=
+          -ignore 'unexpected key "queue" for "concurrency" section'

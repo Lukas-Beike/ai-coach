@@ -250,6 +250,15 @@ def _rehash_stream_set(db: Any, provider: str, provider_activity_id: str) -> Non
     )
 
 
+def _validate_write_inputs(mapper_version: object, summary_sha256: str | None) -> None:
+    if isinstance(mapper_version, bool) or not isinstance(mapper_version, int):
+        raise TypeError("mapper_version must be an integer")
+    if mapper_version < 1:
+        raise ValueError("mapper_version must be at least 1")
+    if summary_sha256 is not None and not _SHA256_PATTERN.fullmatch(summary_sha256):
+        raise ValueError("summary_sha256 must be a lowercase SHA-256 hex digest")
+
+
 def replace_detail_set(
     db: Any,
     detail: ActivityDetailSet,
@@ -263,12 +272,7 @@ def replace_detail_set(
     The provider activity record must exist. Equal content only refreshes the
     fetch bookkeeping and returns UNCHANGED; changed content replaces all rows.
     """
-    if isinstance(mapper_version, bool) or not isinstance(mapper_version, int):
-        raise TypeError("mapper_version must be an integer")
-    if mapper_version < 1:
-        raise ValueError("mapper_version must be at least 1")
-    if summary_sha256 is not None and not _SHA256_PATTERN.fullmatch(summary_sha256):
-        raise ValueError("summary_sha256 must be a lowercase SHA-256 hex digest")
+    _validate_write_inputs(mapper_version, summary_sha256)
     if isinstance(detail, ActivityStreamSet) and not gps_tracks_enabled(db):
         stripped = without_positions(detail)
         if stripped is None:
