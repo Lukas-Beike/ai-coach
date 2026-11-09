@@ -89,6 +89,11 @@ class WellnessHistoryHooks:
     capability_success: Callable[[str], None] = lambda _source: None
 
 
+# Body Battery is optional (as in the regular sync): its pause or failure skips
+# it for the chunk instead of stopping the backfill of the other sources.
+OPTIONAL_WELLNESS_SOURCES = frozenset({"body_battery"})
+
+
 def collect_wellness_history(
     client: Any,
     start: date,
@@ -120,8 +125,13 @@ def collect_wellness_history(
     }
     pagination: dict[str, dict[str, Any]] = {}
     for source, read in readers.items():
+        optional = source in OPTIONAL_WELLNESS_SOURCES
         if not hooks.capability_allowed(source):
-            raise WellnessSourcePaused(source)
+            if not optional:
+                raise WellnessSourcePaused(source)
+            payload["skipped_sources"].append(source)
+            pagination[source] = {"records": 0}
+            continue
         try:
             records = read()
         except Exception as exc:
@@ -129,7 +139,8 @@ def collect_wellness_history(
                 # Only real provider failures count toward the shared pause; a
                 # skipped history window must not pause the hourly sync.
                 hooks.capability_failure(source, exc)
-                raise
+                if not optional:
+                    raise
             payload["skipped_sources"].append(source)
             pagination[source] = {"records": 0}
             continue

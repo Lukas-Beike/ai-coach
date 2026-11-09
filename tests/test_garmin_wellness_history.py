@@ -331,6 +331,43 @@ class CollectorTests(unittest.TestCase):
             )
         self.assertEqual(failures, ["hrv"])
 
+    def test_a_failing_body_battery_read_is_skipped_and_counted(self) -> None:
+        client = SdkClient()
+
+        def fail(*_: Any) -> Any:
+            raise RuntimeError("server error")
+
+        client.get_body_battery = fail  # type: ignore[method-assign,assignment]
+        failures: list[str] = []
+
+        payload = self.collect(
+            client,
+            WellnessHistoryHooks(
+                skippable=_skippable,
+                capability_failure=lambda source, _error: failures.append(source),
+            ),
+        )
+
+        self.assertEqual(failures, ["body_battery"])
+        self.assertEqual(payload["skipped_sources"], ["body_battery"])
+        self.assertNotIn("body_battery", payload)
+        self.assertIn("sleep", payload)
+        self.assertIn("weight", payload)
+
+    def test_a_paused_body_battery_is_skipped_without_a_call(self) -> None:
+        client = SdkClient()
+
+        payload = self.collect(
+            client,
+            WellnessHistoryHooks(
+                skippable=_skippable,
+                capability_allowed=lambda source: source != "body_battery",
+            ),
+        )
+
+        self.assertEqual(payload["skipped_sources"], ["body_battery"])
+        self.assertIn("sleep", payload)
+
     def test_a_paused_source_ends_the_read_before_any_call(self) -> None:
         client = SdkClient()
 
