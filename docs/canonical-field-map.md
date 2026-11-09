@@ -949,7 +949,7 @@ One external sensor a recording named. The serial number is only an input of the
 |---|---|---|---|
 | `role` | `SensorRole` | `fit_sensor_mapping.py` | From the ANT+ device type: 120 heart rate, 11 power meter, 17 trainer. |
 | `key` | text, SHA-256 hex | `fit_sensor_mapping.py` | Hash of manufacturer, product and serial number; the registry shows its first 16 characters. |
-| `connection` | text or `None` | `fit_sensor_mapping.py` | `antplus`, `ant`, `bluetooth` or `bluetooth_low_energy` from the file's `source_type`. |
+| `connection` | text or `None` | `fit_sensor_mapping.py` | `ant`, `antplus`, `bluetooth`, `bluetooth_low_energy` or `wifi` from the file's `source_type` (FIT SDK profile: 0 ant, 1 antplus, 2 bluetooth, 3 bluetooth_low_energy, 4 wifi, 5 local). |
 | `manufacturer` | int, 0 to 65,535, or `None` | `fit_sensor_mapping.py` | FIT manufacturer number. |
 | `product` | int, 0 to 65,535, or `None` | `fit_sensor_mapping.py` | FIT product number. |
 
@@ -1211,7 +1211,7 @@ Payload evidence for this scope: the sanitized payload files contain the Garmin 
 ### `garmin_activity_detail_mapping.py`
 
 Status: Live. Called by `_map_collected` in `backend/sync/garmin_activity_details.py` for every Garmin activity detail fetch and backfill; stored with `replace_detail_set(mapper_version=MAPPER_VERSION)`.
-Mapper version: **7**
+Mapper version: **8**
 Inputs: the dict from `collect_garmin_activity_detail` (`backend/providers/garmin.py`) with the parts `details`, `splits`, `hr_zones`, `power_zones`, `exercise_sets` (strength activities only) and `fit`. Transport: the Personal API serves `details` (with `maxChartSize` 2,000) and the original FIT file (`download_activity_fit`, unzipped by `fit_from_archive`); the unofficial login serves `splits`, the two zone parts and `exercise_sets`. A part that is absent gives no set and no issue; a present but malformed part gives one value-free issue and no set for it.
 Evidence: documented only (fixtures `tests/fixtures/providers/garmin/activity_detail/details.json`, `splits.json`, `hr_zones.json`, `power_zones.json`; strength and FIT cases are built inline in `tests/test_garmin_activity_detail_mapping.py`). The sanitized payload files `garmin_activity_detail_run_2026-11-03` and `garmin_personal_activity_detail_run_2026-11-03` hold the activity summary only.
 
@@ -1303,8 +1303,8 @@ Not mapped: `directDoubleCadence`, every other metric descriptor key (for exampl
 
 ### `fit_activity_detail_mapping.py`
 
-Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 7.
-Mapper version: **6**
+Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 8.
+Mapper version: **7**
 Inputs: the raw bytes of one FIT activity file (`bytes`); decoding and scaling by `fit_file.py` (`fit_messages`, `fit_field`). Anything else gives one `fit` `invalid_type` issue. The caller passes `provider_activity_id` (Garmin activity id or Wahoo workout id) and the provenance (see the provenance table).
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes built in `tests/test_fit_activity_detail_mapping.py` and `tests/test_fit_file.py`; there is no FIT file or Wahoo payload in the payload files).
 
@@ -1379,16 +1379,16 @@ Not mapped: the session (18), activity and file messages, developer fields (skip
 ### `fit_sensor_mapping.py`
 
 Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (6) and by `garmin_activity_detail_mapping.py` version 7.
-Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 6 and `garmin_activity_detail_mapping.py` v 7.
+Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 7 and `garmin_activity_detail_mapping.py` v 8.
 Inputs: the decoded FIT messages and the provenance provider; device information is message 23 (`device_index` 0, `device_type` 1, `manufacturer` 2, `serial_number` 3, `product` 4, `source_type` 25).
-Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_sensor_mapping.py`). Whether Garmin and Wahoo files list a strap paired to a watch this way, and the Bluetooth LE device type numbers (2 heart rate, 3 power meter from the FIT profile), are unverified on real files.
+Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_sensor_mapping.py`). Whether Garmin and Wahoo files list a strap paired to a watch this way, and the Bluetooth LE device type numbers (the Garmin FIT SDK profile: 1 heart_rate, 2 bike_power, 7 bike_trainer), are unverified on real files; only the antplus (or unnamed) and Bluetooth LE sources name roles.
 
 Record keywords set: stream set `hr_source`, `power_source`, `sensors`; sensor `role`, `key`, `connection`, `manufacturer`, `product`.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
-| `hr_source` | external device with `device_type` 120 (ANT+) or 2 (Bluetooth LE `ble_device_type`) | `chest_strap`; else `optical` for a `garmin` provenance that lists devices, else `unknown` | `HeartRateSource.CHEST_STRAP` / `OPTICAL` / `UNKNOWN`; `None` without a heart rate channel. Heuristic, not a vendor guarantee. |
-| `power_source` | external device with `device_type` 11 or 17 (ANT+), 3 (Bluetooth LE) | 11 or BLE 3 `power_meter`, 17 `trainer`; else `estimated` for a Garmin file that lists devices, else `unknown` | `PowerSource.POWER_METER` / `TRAINER` / `ESTIMATED` / `UNKNOWN`; `None` without a power channel. |
+| `hr_source` | external device with `device_type` 120 (ANT+) or 1 (Bluetooth LE `ble_device_type` heart_rate) | `chest_strap`; else `optical` for a `garmin` provenance that lists devices, else `unknown` | `HeartRateSource.CHEST_STRAP` / `OPTICAL` / `UNKNOWN`; `None` without a heart rate channel. Heuristic, not a vendor guarantee. |
+| `power_source` | external device with `device_type` 11 or 17 (ANT+), 2 or 7 (Bluetooth LE `ble_device_type` bike_power, bike_trainer) | 11 or BLE 2 `power_meter`, 17 or BLE 7 `trainer`; else `estimated` for a Garmin file that lists devices, else `unknown` | `PowerSource.POWER_METER` / `TRAINER` / `ESTIMATED` / `UNKNOWN`; `None` without a power channel. |
 | `sensors` | external devices of type 120, 11 and 17 with a serial number | `heart_rate`, `power_meter`, `trainer`; `key` is the SHA-256 of manufacturer, product and serial | A device whose `source_type` is local (5) or with `device_index` 0 is the recording device, not a sensor. A sensor without a serial number cannot be identified and is left out. |
 
 Not mapped: every other device type (cadence, speed, light and radar sensors), the device's software and battery fields, and the serial number itself.
@@ -1396,7 +1396,7 @@ Not mapped: every other device type (cadence, speed, light and radar sensors), t
 ### `fit_rr_mapping.py`
 
 Status: Live. Called by `_first_threshold` in `fit_activity_detail_mapping.py` for the stream set of every FIT file whose heart rate source is a chest strap (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (6) and by `garmin_activity_detail_mapping.py` version 7.
-Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 6 and `garmin_activity_detail_mapping.py` v 7.
+Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 7 and `garmin_activity_detail_mapping.py` v 8.
 Inputs: the decoded FIT messages; the hrv message is global number 78, field 0 `time`, an array of up to five uint16 values in seconds (scale 1000, 0xFFFF invalid). Garmin writes it only while HRV logging is enabled for the heart rate sensor.
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_rr_mapping.py` and `tests/test_fit_file.py`). Whether real Garmin and Wahoo files carry hrv messages this way is unverified.
 

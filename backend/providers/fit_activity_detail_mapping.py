@@ -91,7 +91,8 @@ from backend.providers.fit_sensor_mapping import sensor_profile
 # set, from the device information messages.
 # Version 6: the first threshold estimate (DFA-a1) of a chest-strap recording
 # that carries RR intervals (hrv messages); the intervals are not stored.
-MAPPER_VERSION: Final = 6
+# Version 7: Bluetooth LE sensor roles with the FIT SDK source type numbers.
+MAPPER_VERSION: Final = 7
 
 # Same limit as the Garmin and Intervals mappers, so issues stay bounded.
 MAX_FIT_ACTIVITY_ID_LENGTH: Final = 200
