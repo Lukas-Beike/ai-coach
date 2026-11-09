@@ -217,7 +217,7 @@ class FullProviderResyncService:
 
     def resync(self, provider: str, operation_id: str | None = None) -> dict[str, Any]:
         result = self._resync(provider, operation_id)
-        if result.get("status") == "ok":
+        if result.get("status") in {"ok", "partial"}:
             # After the gate is released: the passes read the resynced records.
             self._after_resync({"provider": provider, "type": "refresh"})
         return result

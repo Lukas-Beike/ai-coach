@@ -249,6 +249,16 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(requested, [{"provider": "garmin", "type": "refresh"}])
         self.assertEqual(gate_state, [False])
 
+    def test_a_partial_resync_requests_the_derived_passes(self):
+        requested = []
+        service = self._service(after_resync=requested.append)
+        self.garmin_service.sync = Mock(return_value={"status": "partial"})
+
+        result = service.resync("garmin")
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(requested, [{"provider": "garmin", "type": "refresh"}])
+
     def test_a_failed_resync_requests_no_derived_pass(self):
         requested = []
         service = self._service(after_resync=requested.append)
