@@ -60,7 +60,13 @@ _NO_TARGET: Final = {
     "workoutTargetTypeKey": "no.target",
     "displayOrder": 1,
 }
-# Garmin stores weightValue in grams tagged with the kilogram unit.
+# Bump when the workout document changes for the same unit: it enters the push
+# fingerprint, so units sent in the old form show as changed and can be re-sent.
+# 2: weightValue in kilograms (1 sent grams).
+PAYLOAD_VERSION: Final = 2
+# The workout-service payload takes weightValue in the tagged unit: kilograms.
+# (The factor is the unit's size in grams; sending grams showed 40 kg as
+# "40,000 kg" in Garmin Connect.)
 _WEIGHT_UNIT: Final = {"unitId": 8, "unitKey": "kilogram", "factor": 1000.0}
 
 # Garmin catalogue display name -> folded local names. Only common lifts whose
@@ -321,7 +327,7 @@ def _exercise_step(
         "exerciseName": exercise.exercise,
     }
     if item.get("kg") is not None and float(item["kg"]) > 0:
-        step["weightValue"] = float(item["kg"]) * 1000.0
+        step["weightValue"] = float(item["kg"])
         step["weightUnit"] = dict(_WEIGHT_UNIT)
     if note:
         step["description"] = note
