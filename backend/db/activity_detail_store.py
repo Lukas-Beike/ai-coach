@@ -241,11 +241,12 @@ def _rehash_stream_set(db: Any, provider: str, provider_activity_id: str) -> Non
             resolution=header["resolution"],
             lap_source=None,
             zone_boundary_source=None,
-            set_source=None,
-            hr_source=header["hr_source"],
-            power_source=header["power_source"],
-            sensors=header["sensors"],
-            dfa_alpha1=header["dfa_alpha1"],
+            optional={
+                "hr_source": header["hr_source"],
+                "power_source": header["power_source"],
+                "sensors": header["sensors"],
+                "dfa_alpha1": header["dfa_alpha1"],
+            },
         ),
         children,
     )
@@ -978,30 +979,45 @@ def _header(detail: ActivityDetailSet, mapper_version: int) -> dict[str, Any]:
             if isinstance(detail, ZoneDistribution)
             else None
         ),
-        set_source=(
-            detail.source.value if isinstance(detail, ActivityStrengthSetSet) else None
-        ),
-        hr_source=stream.hr_source.value if stream and stream.hr_source else None,
-        power_source=(
-            stream.power_source.value if stream and stream.power_source else None
-        ),
-        sensors=(
-            json.dumps(
-                [_sensor_json(sensor) for sensor in stream.sensors],
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            if stream and stream.sensors
-            else None
-        ),
-        dfa_alpha1=(
-            json.dumps(
-                _dfa_json(stream.dfa_alpha1), sort_keys=True, separators=(",", ":")
-            )
-            if stream and stream.dfa_alpha1 is not None
-            else None
-        ),
+        optional={
+            "set_source": (
+                detail.source.value
+                if isinstance(detail, ActivityStrengthSetSet)
+                else None
+            ),
+            "hr_source": stream.hr_source.value
+            if stream and stream.hr_source
+            else None,
+            "power_source": (
+                stream.power_source.value if stream and stream.power_source else None
+            ),
+            "sensors": (
+                json.dumps(
+                    [_sensor_json(sensor) for sensor in stream.sensors],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                if stream and stream.sensors
+                else None
+            ),
+            "dfa_alpha1": (
+                json.dumps(
+                    _dfa_json(stream.dfa_alpha1), sort_keys=True, separators=(",", ":")
+                )
+                if stream and stream.dfa_alpha1 is not None
+                else None
+            ),
+        },
     )
+
+
+_OPTIONAL_HEADER_KEYS = (
+    "set_source",
+    "hr_source",
+    "power_source",
+    "sensors",
+    "dfa_alpha1",
+)
 
 
 def _header_fields(
@@ -1015,11 +1031,7 @@ def _header_fields(
     resolution: str | None,
     lap_source: str | None,
     zone_boundary_source: str | None,
-    set_source: str | None,
-    hr_source: str | None,
-    power_source: str | None,
-    sensors: str | None,
-    dfa_alpha1: str | None,
+    optional: Mapping[str, str | None],
 ) -> dict[str, Any]:
     """The hashed header of a detail set, from values as they are stored.
 
@@ -1040,13 +1052,10 @@ def _header_fields(
     }
     # Only a set that carries a value has its key, so sets without them keep
     # their content hash.
-    for key, value in (
-        ("set_source", set_source),
-        ("hr_source", hr_source),
-        ("power_source", power_source),
-        ("sensors", sensors),
-        ("dfa_alpha1", dfa_alpha1),
-    ):
+    # ``optional`` carries set_source, hr_source, power_source, sensors and
+    # dfa_alpha1 as stored text.
+    for key in _OPTIONAL_HEADER_KEYS:
+        value = optional.get(key)
         if value:
             header[key] = value
     return header
