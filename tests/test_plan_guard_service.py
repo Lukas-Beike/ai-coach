@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from backend.activities.hr_cap import effective_caps
 from backend.activities.workout_load import AthleteThresholds
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import Sport
@@ -36,6 +37,14 @@ from backend.planning.planned_unit_load import estimate_planned_unit
 from backend.planning.sport import planned_sport_environment
 
 TODAY = date(2026, 11, 2)
+
+
+def _easy_run_cap(unit: dict[str, Any]) -> dict[str, Any]:
+    """The heart-rate cap an easy run unit needs (percentages from the cap table)."""
+    easy_run = planned_sport_environment(unit)[
+        0
+    ] is Sport.RUN and not plan_checks.is_hard(unit)
+    return {"hr_cap": effective_caps(None)["easy"]} if easy_run else {}
 
 
 def hard_pair() -> list[dict[str, Any]]:
@@ -109,6 +118,7 @@ class PlanGuardWriteTests(unittest.TestCase):
             {
                 **unit,
                 "session_focus": "threshold" if plan_checks.is_hard(unit) else "easy",
+                **_easy_run_cap(unit),
             }
             if self.default_focus
             and planned_sport_environment(unit)[0] in {Sport.RUN, Sport.RIDE}
@@ -487,7 +497,16 @@ class PlanGuardWriteTests(unittest.TestCase):
         swim = {**run, "local_id": "w", "sport": "swim"}
         self.units, self.write_units = (
             [run],
-            [run, swim, {**run, "local_id": "c", "session_focus": "easy"}],
+            [
+                run,
+                swim,
+                {
+                    **run,
+                    "local_id": "c",
+                    "session_focus": "easy",
+                    "hr_cap": effective_caps(None)["easy"],
+                },
+            ],
         )
         self.run_tool("apply_training_changes")
         self.assertEqual(1, self.stored())
