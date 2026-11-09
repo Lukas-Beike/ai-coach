@@ -25,8 +25,8 @@ from canonical_read_support import (
     make_selector,
     populate,
 )
+from canonical_recovery_support import NoActivityRows
 from performance_day_support import (
-    days_from_rows,
     garmin_body_from_payload,
     garmin_metrics_from_payload,
 )
@@ -173,7 +173,6 @@ def _body(
         GarminSyncStatus.from_state(garmin),
         TODAY,
         canonical=canonical,
-        wellness_days=_days(snapshot),
         garmin_ftp=garmin_metrics_from_payload(garmin or {}).performance_history.get(
             "cycling_ftp_watts", {}
         ),
@@ -185,13 +184,6 @@ def _payload_body(case: Any) -> dict[str, Any]:
     return _body(
         case.intervals, case.garmin, garmin_body_from_payload(case.garmin, TODAY)
     )
-
-
-def _days(snapshot: dict[str, Any]):
-    raw = snapshot.get("raw_provider_data")
-    rows = list(raw.get("wellness") or ()) if isinstance(raw, dict) else []
-    rows += list(snapshot.get("recent_wellness") or ())
-    return days_from_rows(rows)
 
 
 def _service(
@@ -420,21 +412,25 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
     def assert_wellness_boundary(
         self, legacy: dict[str, Any], state: dict[str, Any]
     ) -> None:
-        def intervals_values(result):
+        def weight_series(result):
             body = result["performance"]["history"]["body"]
-            series = next(
-                item
-                for item in body["windows"]["14d"]["metrics"]["weight_kg"]
-                if item["source"] == "Intervals.icu Wellness"
-            )
+            return body["windows"]["14d"]["metrics"]["weight_kg"]
+
+        def garmin_values(result):
             return [
                 point["value"]
-                for point in series["points"]
+                for item in weight_series(result)
+                if item["source"] == "Garmin Connect"
+                for point in item["points"]
                 if point["value"] is not None
             ]
 
-        self.assertEqual(intervals_values(legacy), [])
-        self.assertTrue(intervals_values(state))
+        for result in (legacy, state):
+            self.assertEqual(
+                ["Garmin Connect"], [item["source"] for item in weight_series(result)]
+            )
+        self.assertEqual(garmin_values(legacy), [])
+        self.assertTrue(garmin_values(state))
 
     def test_body_history_reads_inside_the_unit_of_work(self) -> None:
         case = CASES[0]
@@ -443,6 +439,7 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         source = CanonicalPerformanceSource(
             database_manager=lambda: RecordingManager(events),
             observation_reader=lambda: reader,
+            activity_summaries=lambda: NoActivityRows(),
         )
         state = _service(case.garmin, source).performance_state()
         legacy = _service(case.garmin, None).from_inputs(None)
@@ -465,6 +462,7 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         source = CanonicalPerformanceSource(
             database_manager=lambda: RecordingManager(events),
             observation_reader=lambda: reader,
+            activity_summaries=lambda: NoActivityRows(),
         )
         # The Garmin re-read raises, so the projection must use the captured value.
         state = _service(case.garmin, source, events=events).performance_state()
@@ -484,6 +482,7 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         source = CanonicalPerformanceSource(
             database_manager=lambda: RecordingManager(events),
             observation_reader=lambda: selector,
+            activity_summaries=lambda: NoActivityRows(),
         )
         _service(case.garmin, source).performance_state()
         # One choice per unit of work, made inside the lease and before any read.
@@ -509,45 +508,12 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
 
 
 class CanonicalBodyFallbackTests(unittest.TestCase):
-    """Intervals.icu values come from the wellness days, Garmin from canonical."""
+    """Garmin values come from the canonical inputs only."""
 
     @staticmethod
     def _values(output: dict[str, Any], metric: str) -> list[Any]:
         series = output["windows"]["14d"]["metrics"][metric]
         return [point.get("value") for entry in series for point in entry["points"]]
-
-    def test_comma_decimal_day_comes_from_the_wellness_days(self) -> None:
-        snapshot = {
-            "synced_at": "2026-10-11T06:00:00+00:00",
-            "raw_provider_data": {
-                "wellness": [{"id": DAY.isoformat(), "bodyFat": "14,5"}]
-            },
-        }
-        output = _body(snapshot, None, EMPTY_BODY_INPUTS)
-        self.assertIn(14.5, self._values(output, "body_fat_pct"))
-
-    def test_comma_decimal_weight_comes_from_the_wellness_days(self) -> None:
-        snapshot = {
-            "synced_at": "2026-10-11T06:00:00+00:00",
-            "raw_provider_data": {
-                "wellness": [{"id": DAY.isoformat(), "weight": "70,4"}]
-            },
-        }
-        output = _body(snapshot, None, EMPTY_BODY_INPUTS)
-        self.assertIn(70.4, self._values(output, "weight_kg"))
-
-    def test_intervals_body_values_come_from_the_history_wellness_days(
-        self,
-    ) -> None:
-        snapshot = {
-            "synced_at": "2026-10-11T06:00:00+00:00",
-            "raw_provider_data": {
-                "wellness": [{"id": DAY.isoformat(), "bodyFat": 14.0, "weight": 70.0}]
-            },
-        }
-        output = _body(snapshot, None, EMPTY_BODY_INPUTS)
-        self.assertIn(14.0, self._values(output, "body_fat_pct"))
-        self.assertIn(70.0, self._values(output, "weight_kg"))
 
     def test_snapshot_garmin_values_are_ignored_without_canonical_values(self) -> None:
         garmin = {"weight": [{"calendarDate": DAY.isoformat(), "weight": 80.4}]}
@@ -561,12 +527,6 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
     """The populated temporary database, read through the real selector."""
 
     def test_served_tables_match_the_directly_mapped_payload(self) -> None:
-        # The shared fixture carries no body fat, so give the wellness rows some in
-        # both the raw section (canonical source) and the compact projection.
-        for index, row in enumerate(self.intervals["raw_provider_data"]["wellness"]):
-            row["bodyFat"] = 14.0 + index
-        for index, row in enumerate(self.intervals["recent_wellness"]):
-            row["bodyFat"] = 14.0 + index
         populate(self)
         selector = make_selector(self)
         # The shared wellness rows are dated 2026-10-08..10, after the fixture clock
@@ -579,14 +539,12 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
                 GarminSyncStatus.from_state(self.garmin),
                 today,
                 canonical=garmin_body_from_payload(self.garmin, today),
-                wellness_days=_days(self.intervals),
                 garmin_ftp={},
             ),
             body_history(
                 GarminSyncStatus.from_state(self.garmin),
                 today,
                 canonical=inputs,
-                wellness_days=_days(self.intervals),
                 garmin_ftp={},
             ),
         )

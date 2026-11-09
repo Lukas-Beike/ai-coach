@@ -10,6 +10,8 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_plan_stub import intervals_ingest_plan
+
 from backend.activities import detail_contract
 from backend.activities.activity_summary import activity_summary
 from backend.canonical.activity_summary import summary_local_date
@@ -164,7 +166,7 @@ class ActivityDateTests(unittest.TestCase):
             timezone="Asia/Tokyo",
         )
 
-        (item,) = canonical_plans.intervals_ingest_plan(
+        (item,) = intervals_ingest_plan(
             raw, zone=BERLIN, retrieved_at=RETRIEVED_AT
         ).activities
 
@@ -176,7 +178,7 @@ class ActivityDateTests(unittest.TestCase):
             start_date="2026-10-11T00:00:00Z", start_date_local="2026-10-10T20:00:00"
         )
 
-        (item,) = canonical_plans.intervals_ingest_plan(
+        (item,) = intervals_ingest_plan(
             raw, zone=BERLIN, retrieved_at=RETRIEVED_AT
         ).activities
 
@@ -189,7 +191,7 @@ class ActivityDateTests(unittest.TestCase):
             canonical_plans.garmin_ingest_plan(
                 garmin_payload(startTimeLocal="2026-10-11 23:30:00"), zone=BERLIN
             ),
-            canonical_plans.intervals_ingest_plan(
+            intervals_ingest_plan(
                 intervals_raw(
                     start_date_local="2026-10-11T23:30:00", timezone="Asia/Tokyo"
                 ),

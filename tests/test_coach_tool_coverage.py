@@ -16,6 +16,7 @@ from canonical_detail_support import seed_intervals_activity
 from support import mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
 
+from backend.activities.hr_cap import effective_caps
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
 from backend.planning import library as planning_library
@@ -249,7 +250,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "moving_time": 1800,
             "distance": 5000,
         }
-        snapshot_seed.save_view(server.SYNC_PERSISTENCE.state_repository(), 
+        snapshot_seed.save_view(
+            server.SYNC_PERSISTENCE.state_repository(),
             {
                 "recent_activities": [activity],
                 "recent_wellness": [],
@@ -259,7 +261,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                         {**activity, "raw_detail": "Synthetic complete provider record"}
                     ]
                 },
-            }
+            },
         )
         # A snapshot sync also ingests the activity, so canonical reads find it
         # once the backfill has completed.
@@ -409,6 +411,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                         "sport": "Run",
                         "description": "- 30m 60% Synthetic easy instructions",
                         "duration_minutes": 30,
+                        "session_focus": "easy",
+                        "hr_cap": effective_caps(None)["easy"],
                     }
                 ]
             },
@@ -445,6 +449,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         planned_before = self.state()["planned_units"]
         self.assertEqual(len(planned_before), 1)
         self.assertEqual(planned_before[0]["date"], "2026-09-09")
+        # The template's focus travels with the scheduled unit.
+        self.assertEqual(
+            server.PLANNING_DATA.planned_unit().list()[0]["session_focus"], "easy"
+        )
         for action in ("archive", "restore", "delete"):
             self.run_tool(
                 "manage_training_templates",
@@ -709,7 +717,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(server.PLANNING_DATA.competition().list(), [])
         self.assertEqual(len(server.SYNC_JOB_QUEUE.service().list()), 1)
-
 
     @covers(
         "start_intervals_plan_sync:created",
@@ -1037,7 +1044,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 **{**common, "source": source},
             )
 
-
     @covers(
         "confirm_activity_session:success",
         "split_activity_session:success",
@@ -1084,7 +1090,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(merged["status"], "merged")
         self.assertEqual(len(sessions.bundle(first)["members"]), 2)
-
 
     @covers("clarify_coach_request:success", "cancel_coach_request:success")
     def test_clarification_and_cancellation_preserve_athlete_data(self):
@@ -1726,7 +1731,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 }
             ]
         )[0]
-        snapshot_seed.save_view(server.SYNC_PERSISTENCE.state_repository(), 
+        snapshot_seed.save_view(
+            server.SYNC_PERSISTENCE.state_repository(),
             {
                 "recent_activities": [
                     {
@@ -1752,7 +1758,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                         },
                     ]
                 },
-            }
+            },
         )
         before = self.athlete_state()
         records = self.run_tool("read_training_records", {})
@@ -1931,6 +1937,8 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "name": "Synthetic easy 8 km run",
             "description": "- 50m Z1 HR Synthetic very easy run",
             "duration_minutes": 50,
+            "session_focus": "easy",
+            "hr_cap": effective_caps(None)["easy"],
             "expected_payload_hash": next(
                 u["expected_payload_hash"]
                 for u in initial["planned_units"]
@@ -2116,7 +2124,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             json.loads(server.key_value_service().get("coach_pending_request"))
         )
 
-
     def test_adaptive_proposal_cannot_approve_itself_in_the_same_turn(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [{**self.workout(), "duration_minutes": 90}]
@@ -2198,6 +2205,15 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                             "local_id": unit["id"],
                             "action": "update",
                             field: sport,
+                            # A changed sport drops the focus; Run needs a new one.
+                            **(
+                                {
+                                    "session_focus": "easy",
+                                    "hr_cap": effective_caps(None)["easy"],
+                                }
+                                if sport == "Run"
+                                else {}
+                            ),
                             "expected_payload_hash": state["planned_units"][0][
                                 "expected_payload_hash"
                             ],

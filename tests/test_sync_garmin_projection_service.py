@@ -196,7 +196,6 @@ class GarminProjectionServiceTests(unittest.TestCase):
             redactor=redactor,
             local_now=lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
             canonical=GarminCanonicalSources(
-                activity_rows=lambda: object(),
                 observations=lambda: _MappedObservations(snapshot or {}),
                 activity_summaries=lambda: _Summaries(summaries),
             ),
@@ -435,7 +434,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self.assertNotIn("performance", basic)
         self.assertEqual(
             result["scope"],
-            "Kein Intervals.icu-Snapshot vorhanden; Garmin-Leistungswerte und der aktuellste Recovery-Datensatz werden als Fallback verwendet.",
+            "Garmin-Leistungswerte und der aktuellste Recovery-Datensatz.",
         )
         self.assertEqual(result["performance"], performance)
         self.assertEqual(context_projection.call_count, 1)

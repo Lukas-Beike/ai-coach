@@ -115,7 +115,7 @@ flow rather than demanding unrelated changes or a repository-wide redesign.
 
 ### Provider data and asynchronous work
 
-- Preserve source and freshness labels for Intervals.icu, Garmin, local feedback,
+- Preserve source and freshness labels for Garmin, Wahoo, local feedback,
   derived metrics, and AI estimates. Check units, athlete-local dates/time zones,
   missing versus zero values, and stale/partial snapshots where the PR touches
   aggregation or presentation. Do not silently promote estimates to measurements.

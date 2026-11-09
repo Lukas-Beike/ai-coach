@@ -25,7 +25,11 @@ Structured log formatting and diagnostic projections SHALL redact configured sec
 - **WHEN** a configured credential is replaced
 - **THEN** redaction refreshes its prepared patterns for current credential values
 
-Evidence: `backend/observability.py::Redactor`; `backend/observability.py::JsonLogFormatter`; `backend/observability.py::redact_request_query`. Tests: `tests/test_observability.py::test_redacts_nested_values_and_secret_variants`; `tests/test_observability.py::test_redacts_url_credentials_query_and_unguessable_path`; `tests/test_observability.py::test_formatter_redacts_traceback_and_context`; `tests/test_observability.py::test_access_log_masks_free_text_query_on_success_and_error_paths`.
+#### Scenario: Stored provider tokens
+- **WHEN** a Garmin or Wahoo token is stored, or a Wahoo login state is pending
+- **THEN** the redactor masks it in log output through the provider secret registry
+
+Evidence: `backend/observability.py::Redactor`; `backend/sync/wahoo_connection.py::WahooSecretRegistry`; `backend/observability.py::JsonLogFormatter`; `backend/observability.py::redact_request_query`. Tests: `tests/test_observability.py::test_redacts_nested_values_and_secret_variants`; `tests/test_observability.py::test_redacts_url_credentials_query_and_unguessable_path`; `tests/test_observability.py::test_formatter_redacts_traceback_and_context`; `tests/test_observability.py::test_access_log_masks_free_text_query_on_success_and_error_paths`; `tests/test_secret_exposure.py::DiagnosticsAndLogSecretTests::test_wahoo_tokens_are_redacted_from_logs`; `tests/test_wahoo_connection.py::WahooConnectionServiceTests::test_the_redactor_registry_follows_tokens_and_login_state`.
 
 ### Requirement: Bounded durable technical capture
 
@@ -78,6 +82,24 @@ The diagnostic report SHALL compose local configuration flags, provider/job stat
 - **AND** a failing count reports the section as `unavailable` without details instead of failing the report
 
 Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `backend/diagnostics/plan_sync.py::summarize_plan_sync`; `tests/test_diagnostic_plan_sync.py`; `backend/diagnostics/session_conflicts.py::summarize_session_conflicts`; `tests/test_diagnostic_session_conflicts.py`; `backend/diagnostics/provider_composition.py::summarize_provider_composition`; `tests/test_diagnostic_provider_composition.py`; `backend/diagnostics/canonical_counts.py`; `backend/diagnostics/canonical_coverage.py`; `backend/runtime/memory.py::process_memory`. Tests: `tests/test_diagnostic_report.py::test_report_shape_counts_redaction_and_privacy`; `tests/test_diagnostic_report.py::test_database_counts_and_kv_reads_share_one_read_snapshot`; `tests/test_diagnostic_report.py::test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload`.
+
+### Requirement: Content-free migration and method state in the report
+
+The diagnostic report SHALL include the state of the Garmin rating backfill and the local method passes as counts and state words only, and a failing read of the rating backfill state SHALL report that section as `unavailable` without failing the report.
+
+#### Scenario: Rating backfill state
+- **WHEN** the report is generated
+- **THEN** `rating_backfill` carries candidate, backfilled, skipped and already-rated counts with its cursor phase and finished flag
+
+#### Scenario: Local method passes
+- **WHEN** the report is generated
+- **THEN** `local_load`, `session_metrics` and `session_analysis` each carry the status, method version and counts of their last pass, never ids, dates, names or values
+
+#### Scenario: Failing section
+- **WHEN** reading the rating backfill state fails
+- **THEN** that section reports `{"status": "unavailable"}` and the rest of the report is still returned
+
+Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `backend/diagnostics/rating_backfill.py::summarize_rating_backfill`; `backend/sync/local_load.py::summarize_local_load`; `backend/sync/session_metrics.py::summarize_session_metrics`; `backend/sync/session_analysis_stage.py::summarize_session_analysis`. Tests: `tests/test_garmin_rating_backfill.py::DiagnosticsTests::test_the_section_carries_counts_only`; `tests/test_diagnostic_report.py::test_report_shape_counts_redaction_and_privacy`.
 
 ### Requirement: Sanitized log preview and download
 

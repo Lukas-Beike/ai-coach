@@ -553,50 +553,14 @@ class AliasResolutionTests(LinkingCase):
     def _references(self) -> ActivityReferences:
         return ActivityReferences(self.manager)
 
-    def test_an_intervals_alias_keeps_resolving_to_its_own_provider_id(self) -> None:
-        self._ingest_wahoo([wahoo_workout()], FIRST)
-        self._ingest_intervals([intervals_ride()], SECOND)
-        alias = self._sessions()[INTERVALS_ID]["activity_id"]
-        self.assertEqual(self._references().resolve(alias), INTERVALS_ID)
-
-    def test_a_wahoo_alias_resolves_to_the_intervals_survivor(self) -> None:
+    def test_a_wahoo_alias_resolves_to_its_own_session(self) -> None:
         self._ingest_all_three()
         wahoo_alias = self._sessions()[WAHOO_ID]["activity_id"]
-        garmin_alias = self._sessions()[GARMIN_ID]["activity_id"]
         reference = self._references().resolve_reference(wahoo_alias)
         # Athlete data is stored under the session it was written for.
         self.assertEqual(
             (reference.activity_id, reference.provider), (wahoo_alias, None)
         )
-        provider = self._references().provider_reference(wahoo_alias)
-        self.assertEqual(
-            (provider.activity_id, provider.provider),
-            (INTERVALS_ID, ProviderId.INTERVALS.value),
-        )
-        self.assertEqual(self._references().resolve(garmin_alias), INTERVALS_ID)
-
-    def test_a_chain_of_aliases_is_followed_to_the_intervals_session(self) -> None:
-        self._ingest_all_three()
-        survivor = self._sessions()[INTERVALS_ID]["activity_id"]
-        wahoo_id = self._sessions()[WAHOO_ID]["activity_id"]
-        garmin_id = self._sessions()[GARMIN_ID]["activity_id"]
-        self._set_session(GARMIN_ID, merged_into=wahoo_id)
-        self.assertEqual(self._references().resolve(garmin_id), INTERVALS_ID)
-        self.assertNotEqual(survivor, wahoo_id)
-
-    def test_an_alias_cycle_passes_through_unchanged(self) -> None:
-        self._ingest_all_three()
-        wahoo_id = self._sessions()[WAHOO_ID]["activity_id"]
-        garmin_id = self._sessions()[GARMIN_ID]["activity_id"]
-        self._set_session(WAHOO_ID, merged_into=garmin_id)
-        self._set_session(GARMIN_ID, merged_into=wahoo_id)
-        self.assertEqual(self._references().resolve(wahoo_id), wahoo_id)
-
-    def test_an_alias_of_a_deleted_session_passes_through_unchanged(self) -> None:
-        self._ingest_all_three()
-        wahoo_id = self._sessions()[WAHOO_ID]["activity_id"]
-        self._set_session(INTERVALS_ID, state="deleted")
-        self.assertEqual(self._references().resolve(wahoo_id), wahoo_id)
 
 
 class ReadersUnchangedTests(LinkingCase):
@@ -604,11 +568,14 @@ class ReadersUnchangedTests(LinkingCase):
         self._ingest_all_three()
         with self.manager.reader() as db:
             rows = canonical_store.active_activity_rows(db)
-            texts = canonical_store.active_activity_payload_texts(
-                db,
-                provider=ProviderId.INTERVALS.value,
-                record_kind=ACTIVITY_RECORD_KIND,
-            )
+            texts = [
+                row["payload"]
+                for row in db.execute(
+                    "SELECT payload FROM provider_records WHERE provider = ? "
+                    "AND record_kind = ? AND state = 'active'",
+                    (ProviderId.INTERVALS.value, ACTIVITY_RECORD_KIND),
+                )
+            ]
         self.assertEqual(
             sorted((row["provider"], row["provider_activity_id"]) for row in rows),
             [

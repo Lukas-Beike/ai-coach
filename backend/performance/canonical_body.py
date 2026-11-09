@@ -1,8 +1,5 @@
 """Canonical Garmin body weight and body-fat inputs read through the observation port.
 
-Intervals.icu weight and body fat reach body history through the provider-neutral
-wellness days (``backend.performance.wellness_days``), not through this module.
-
 The reader serves whichever source the unit of work chose; ``body_history``
 shows only the days this module returns.
 

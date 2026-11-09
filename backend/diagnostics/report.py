@@ -26,12 +26,12 @@ from backend.diagnostics.canonical_read import (
     summarize_canonical_read,
 )
 from backend.diagnostics.history import CoachDiagnosticHistoryService
-from backend.diagnostics.intervals_purge import summarize_intervals_purge
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.plan_sync import summarize_plan_sync
 from backend.diagnostics.provider_composition import summarize_provider_composition
 from backend.diagnostics.rating_backfill import summarize_rating_backfill
 from backend.diagnostics.session_conflicts import summarize_session_conflicts
+from backend.diagnostics.stream_backfill import summarize_stream_backfill
 from backend.observability import DiagnosticCapture, Redactor
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
@@ -49,7 +49,11 @@ from backend.sync.garmin import GarminFixtureLoader, GarminSyncStateService
 from backend.sync.garmin_projection_service import GarminProjectionService
 from backend.sync.library import WorkoutLibrarySyncStateService
 from backend.sync.local_load import summarize_local_load
+from backend.sync.profile_weekly_plan_removal import (
+    summarize_profile_weekly_plan_removal,
+)
 from backend.sync.session_analysis_stage import summarize_session_analysis
+from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.state import SyncStateRepository
 
@@ -86,8 +90,6 @@ class DiagnosticReportDependencies:
     canonical_read: CanonicalReadStatusReader | None = None
     activity_rows: ActivityRowAndSummaryReader | None = None
     observations: ObservationReader | None = None
-    # Whether the data directory holds the Intervals.icu purge marker file.
-    intervals_purge_marker: Callable[[], bool] = lambda: False
 
 
 class DiagnosticReportService:
@@ -224,13 +226,17 @@ class DiagnosticReportService:
                 "rating_backfill": summarize_rating_backfill(
                     deps.key_values, db, deps.config.sync_history_earliest_date
                 ),
-                "intervals_purge": summarize_intervals_purge(
-                    deps.key_values,
-                    db,
-                    marker_exists=deps.intervals_purge_marker(),
+                "stream_backfill": summarize_stream_backfill(
+                    deps.key_values, db, deps.config.sync_history_earliest_date
                 ),
                 "session_metrics": summarize_session_metrics(deps.key_values, db),
                 "session_analysis": summarize_session_analysis(deps.key_values, db),
+                "session_focus_backfill": summarize_session_focus_backfill(
+                    deps.key_values, db
+                ),
+                "profile_weekly_plan_removal": summarize_profile_weekly_plan_removal(
+                    deps.key_values, db
+                ),
                 "logs": deps.recent_logs.list(),
                 "debug_capture": {
                     **diagnostic_capture_status,

@@ -1,10 +1,9 @@
 """Deterministic character budget of the planning brief.
 
-Trims whole entries, never the JSON text: far-future free-time and calendar days
+Trims whole entries, never the JSON text: far-future calendar days
 first, then planned sessions and the planned distribution and strength weeks
 from the end, and the oldest completed weeks last. It names what it dropped
-in ``omitted``. ``lessons``, ``season_phase`` and
-``weekly_plan`` are never trimmed. No I/O.
+in ``omitted``. ``lessons`` and ``season_phase`` are never trimmed. No I/O.
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ def _trim_dict(target: Any, key: str) -> bool:
 def _steps(brief: dict[str, Any]) -> list[tuple[str, Any]]:
     """(omitted label, trim callable) in trimming order."""
     return [
-        ("free_time_minutes", lambda: _trim_dict(brief, "free_time_minutes")),
+        ("all_day_events", lambda: _trim_dict(brief, "all_day_events")),
         ("calendar_busy_minutes", lambda: _trim_dict(brief, "calendar_busy_minutes")),
         (
             "planned_sessions",

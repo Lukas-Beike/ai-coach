@@ -21,7 +21,7 @@ def freeze_targets(
     detail: dict[str, Any],
     observed_at: str,
 ) -> dict[str, Any] | None:
-    planned = canonical_planned_workouts([], local, 500)
+    planned = canonical_planned_workouts(local, 500)
     matches = match_planned_workouts(planned, activities)
     candidates = [
         (event, row)

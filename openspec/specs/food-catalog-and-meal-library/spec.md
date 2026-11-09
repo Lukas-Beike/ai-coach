@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe food lookup, permanent lookup mirrors, athlete-confirmed local products, trusted component calculations, and reusable meals. This documentation baseline inspects application revision `b8c911c9dda83a7920171916ace32681c0c38ba0`; cited tests are inspected unless listed as executed in the handoff. Consumption is governed by `nutrition-diary-and-targets`, label extraction by `nutrition-photo-analysis`, and remote diary export by `nutrition-provider-sync`.
+Describe food lookup, permanent lookup mirrors, athlete-confirmed local products, trusted component calculations, and reusable meals. Re-validated against application revision `d1beefd77`; cited tests are inspected unless listed as executed in the handoff. Consumption is governed by `nutrition-diary-and-targets`, label extraction by `nutrition-photo-analysis`, and remote diary export by `nutrition-provider-sync`.
 
 ## Requirements
 
@@ -15,7 +15,7 @@ The system SHALL search active saved products before fallback food lookup, retur
 
 #### Scenario: Unknown barcode
 - **WHEN** the barcode has no active local match
-- **THEN** the database lookup result identifies Open Food Facts, and the result remains a candidate rather than a saved product or consumed meal.
+- **THEN** the database lookup result identifies its source (Yazio when configured and matched, otherwise Open Food Facts), and the result remains a candidate rather than a saved product or consumed meal.
 
 #### Scenario: Flexible text search
 - **WHEN** saved name/brand words match in a different order, with supported plural, umlaut, separator, or typo normalization
@@ -24,7 +24,7 @@ The system SHALL search active saved products before fallback food lookup, retur
 Evidence: `backend/nutrition/catalog.py::ProductCatalogService.lookup_product`, `backend/nutrition/catalog.py::ProductCatalogService.list_products`, `backend/db/repositories.py::NutritionProductRepository.list`; `tests/test_nutrition_products.py::NutritionProductContractTests.test_barcode_lookup_prefers_local_product_and_never_calls_remote`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_search_tolerates_plurals_umlauts_and_typos_but_needs_every_word`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_unknown_barcode_falls_back_to_food_database_and_labels_source`.
 
 ### Requirement: Database foods preserve units and missing values
-The system SHALL support the bundled BLS database and explicit Open Food Facts lookup, preserve food identity and source, and calculate only from known quantities in the food's stated unit. Missing nutrients SHALL remain unknown.
+The system SHALL support the bundled BLS database, Open Food Facts and, when configured, Yazio, preserve food identity and source, and calculate only from known quantities in the food's stated unit. Missing nutrients SHALL remain unknown.
 
 #### Scenario: Offline BLS search
 - **WHEN** the athlete requests a supported BLS food query
@@ -41,11 +41,11 @@ The system SHALL support the bundled BLS database and explicit Open Food Facts l
 Evidence: `backend/nutrition/food_database.py::FoodDatabaseService.lookup`, `backend/nutrition/food_database.py::FoodDatabaseService.calculate`, `backend/nutrition/food_database.py::FoodDatabaseService._resolve_ingredient`; `tests/test_food_database.py::FoodDatabaseTests.test_bls_is_complete_offline_and_calculates_edible_grams`, `tests/test_food_database.py::FoodDatabaseTests.test_unknown_macros_are_not_zero_and_units_are_not_guessed`, `tests/test_food_database.py::FoodDatabaseTests.test_untrusted_numbers_and_ingredient_bounds`.
 
 ### Requirement: Permanent external-food mirror with honest fallback
-The system SHALL keep fetched external foods separately from athlete products and diary entries. Fresh mirrored barcode records SHALL avoid unnecessary provider reads; stale fallback SHALL remain visibly stale when a provider recheck fails.
+The system SHALL keep fetched external foods (Open Food Facts and Yazio) in their own `food_database_entries` table, separate from athlete products and diary entries. Fresh mirrored records SHALL avoid unnecessary provider reads; stale fallback SHALL remain visibly stale when a provider recheck fails.
 
 #### Scenario: Fresh cached barcode
-- **WHEN** a stored barcode record is younger than ninety days
-- **THEN** lookup uses the local database entry and returns its stored-time provenance.
+- **WHEN** a stored record is younger than ninety days
+- **THEN** lookup uses the local database entry without a provider request and returns its stored-time provenance.
 
 #### Scenario: Stale record during outage
 - **WHEN** a stale barcode record exists and the provider recheck fails
@@ -208,19 +208,29 @@ The system SHALL bound Open Food Facts transport and local request rates, separa
 Evidence: `backend/providers/open_food_facts.py::OpenFoodFactsClient._get`, `backend/providers/open_food_facts.py::OpenFoodFactsClient._request_response`, `backend/providers/open_food_facts.py::project_product`; `tests/test_food_database.py::OpenFoodFactsTests.test_cache_limits_and_privacy_safe_bounded_transport`, `tests/test_food_database.py::OpenFoodFactsTests.test_search_rate_limit_does_not_block_product_lookups`, `tests/test_food_database.py::OpenFoodFactsTests.test_provider_backoff_and_errors_do_not_expose_query_or_response`, `tests/test_food_database.py::FoodDatabaseTests.test_current_off_schema_uses_label_values_and_excludes_provider_estimates`.
 
 ### Requirement: Yazio is an optional prioritized external food source
-When Yazio is configured and a text or barcode lookup names no source, the system SHALL search saved products first, then Yazio, then Open Food Facts, then BLS for text queries and Yazio then Open Food Facts for barcodes. It SHALL advance to the next source when a source has no suitable match or is unavailable. A saved-product match SHALL prevent every external request. Without Yazio configuration the previous default SHALL apply unchanged.
+When Yazio is configured and a text or barcode lookup names no source, the system SHALL search saved products first, then fresh mirrored foods, then Yazio, then Open Food Facts, then BLS for text queries and Yazio then Open Food Facts for barcodes. It SHALL advance to the next source when a source has no suitable match or is unavailable. A saved-product or fresh mirror match SHALL prevent every external request. Without Yazio configuration the previous default SHALL apply unchanged.
 
 #### Scenario: Local match
 - **WHEN** a saved product matches the lookup
 - **THEN** it is returned and no Yazio, Open Food Facts or BLS lookup runs.
 
+#### Scenario: Fresh mirrored match
+- **WHEN** no saved product matches but a mirrored food of any source younger than ninety days contains every query word with a known energy value
+- **THEN** it is returned with local-database provenance, Yazio entries first, and no external request runs.
+
 #### Scenario: Yazio match
-- **WHEN** no saved product matches and Yazio returns a food containing every query word with a known energy value
+- **WHEN** no saved product or fresh mirrored food matches and Yazio returns a food containing every query word with a known energy value
 - **THEN** the Yazio foods are returned with source attribution and Open Food Facts is not queried.
 
 #### Scenario: Fallthrough
 - **WHEN** Yazio returns nothing suitable or fails, or Open Food Facts then does the same
 - **THEN** the next source in order is used, and BLS is the final fallback.
+
+#### Scenario: Explicit Yazio source
+- **WHEN** a lookup names Yazio without Yazio configuration
+- **THEN** it fails with a clear not-configured error and no fallback source is queried.
+
+Evidence: `backend/nutrition/food_database.py::FoodDatabaseService._search`, `backend/nutrition/food_database.py::FoodDatabaseService._chain_search`, `backend/nutrition/food_database.py::FoodDatabaseService._barcode_product`; `tests/test_food_lookup_chain.py::LookupChainTests.test_yazio_answers_first_with_source_and_origin`, `tests/test_food_lookup_chain.py::LookupChainTests.test_fresh_mirror_hit_prevents_every_external_request`, `tests/test_food_lookup_chain.py::LookupChainTests.test_empty_or_unsuitable_yazio_falls_through_to_open_food_facts`, `tests/test_food_lookup_chain.py::LookupChainTests.test_without_yazio_the_default_stays_bls_only`, `tests/test_food_lookup_chain.py::LookupChainTests.test_explicit_yazio_without_configuration_is_a_clear_error`, `tests/test_food_lookup_chain.py::LookupChainTests.test_barcode_prefers_mirror_then_yazio_then_open_food_facts`.
 
 #### Scenario: Yazio not configured
 - **WHEN** no Yazio credentials are configured
@@ -235,18 +245,30 @@ The system SHALL project each Yazio result to the existing food record with a st
 
 #### Scenario: Unusable record
 - **WHEN** a result lacks a name, reports an unsupported base unit, or has non-finite or implausible nutrient values
-- **THEN** the unit or value is unknown, or the record is dropped when it has no name, and it is never guessed.
+- **THEN** the unit or value is unknown, or the record is dropped when it has no name, an invalid id, is deleted or private, has neither energy nor a macro, or has macros summing above 110 g per 100 g, and it is never guessed.
 
 #### Scenario: Use in meals
 - **WHEN** a Yazio food id is used as a meal component or ingredient with an amount in its basis unit
 - **THEN** nutrition is calculated and frozen in the entry with the Yazio source, and a Yazio outage does not alter existing entries.
 
+Evidence: `backend/providers/yazio.py::project_product`, `backend/nutrition/food_database.py::FoodDatabaseService.resolve`; `tests/test_yazio.py::YazioProjectionTests.test_per_unit_values_become_per_100_with_source`, `tests/test_yazio.py::YazioProjectionTests.test_unusable_records_are_dropped`, `tests/test_yazio.py::YazioProjectionTests.test_implausible_scale_is_dropped_instead_of_guessed`, `tests/test_food_lookup_chain.py::LookupChainTests.test_yazio_food_resolves_for_calculation_and_survives_an_outage`.
+
 ### Requirement: Yazio transport is bounded and credential-safe
-The system SHALL authenticate with the configured account, hold tokens only in memory, and refresh or renew them before searching. It SHALL send only the food search term or barcode plus account authentication, and bound timeouts, response size and request rate.
+The system SHALL authenticate with the configured account email and password and the Yazio app's public client pair, hold tokens only in memory, and refresh or renew them before searching. It SHALL send only the food search term or barcode, the search region and locale, the profile sex when it is male or female, and account authentication, and bound timeouts (10 seconds), response size (500,000 bytes), request rate (20 per minute) and cache lifetime (24 hours).
 
 #### Scenario: Token expiry
 - **WHEN** the access token has expired
 - **THEN** it is refreshed, or a new login is made when refresh is rejected, before the search.
+
+#### Scenario: Profile sex in the search
+- **WHEN** a search runs and the athlete profile sex is male or female
+- **THEN** the search request carries that value as its sex parameter; when the sex is unset no sex parameter is sent.
+
+#### Scenario: Search region
+- **WHEN** a search runs
+- **THEN** the region is the configured two-letter country code, else DE, and the locale is derived from it.
+
+Evidence: `backend/providers/yazio.py::YazioClient.search`, `backend/providers/yazio.py::YazioClient._token`, `backend/nutrition/assembly.py::NutritionAssembly`; `tests/test_yazio.py::YazioClientTests.test_search_sends_the_profile_sex_and_none_when_unset`, `tests/test_yazio.py::YazioClientTests.test_country_is_configurable_and_validated`, `tests/test_yazio.py::YazioClientTests.test_expired_token_is_refreshed_then_login_is_the_fallback`.
 
 ### Requirement: Yazio failures are sanitized and isolated
 The system SHALL cache successful Yazio responses, back off after rate limits and rejected logins, and map every failure to a sanitized error disclosing neither credentials, tokens, queries nor response bodies. A Yazio failure SHALL NOT fail saved-product search, BLS or Open Food Facts lookup.
@@ -258,6 +280,8 @@ The system SHALL cache successful Yazio responses, back off after rate limits an
 #### Scenario: Rate limit or API change
 - **WHEN** Yazio returns 429, a version block, a server error, or a response of an unexpected shape
 - **THEN** the request fails safely, 429 starts a local backoff, and the chain continues.
+
+Evidence: `backend/providers/yazio.py::YazioClient._grant_rejected`, `backend/providers/yazio.py::YazioClient._raise_http_error`; `tests/test_yazio.py::YazioClientTests.test_rejected_login_pauses_further_attempts_without_leaking`, `tests/test_yazio.py::YazioClientTests.test_rate_limit_backs_off_locally`, `tests/test_yazio.py::YazioClientTests.test_version_block_server_error_and_bad_shape_are_sanitized`, `tests/test_food_lookup_chain.py::LookupChainTests.test_yazio_failure_does_not_block_barcode_lookup`.
 
 ### Requirement: Barcode result has an adjacent product editor
 The system SHALL present the editable product fields immediately alongside an online barcode result and require an explicit save to create a local product.
@@ -284,3 +308,24 @@ The system SHALL retain supported, valid label sugar, fibre and salt values with
 - **THEN** lookup preserves that authoritative product and does not overwrite it with an external result.
 
 Evidence: `backend/providers/open_food_facts.py`, `backend/providers/yazio.py`, `public/nutrition.js`; `tests/test_food_database.py::FoodDatabaseTests.test_additional_off_nutrients_preserve_label_values_and_unknowns`, `tests/test_yazio.py::YazioProjectionTests.test_additional_nutrients_are_scaled_and_invalid_values_remain_unknown`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_precise_label_values_survive_save_and_consumption_snapshot`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_legacy_barcode_entry_refreshes_once_and_falls_back_offline`, `tests/nutrition-lookup-status.test.cjs::online nutrients fill the product editor without replacing zero or local values`. Gap: actual provider field availability is unverified.
+
+### Requirement: Yazio authentication failure is honestly classified
+The system SHALL classify Yazio authentication and compatibility failures only as precisely as supported by safe evidence, and SHALL avoid presenting ambiguous rejection as a proven incorrect password or client version.
+
+#### Scenario: Ambiguous authentication rejection
+- **WHEN** an upstream rejection could result from account credentials, application credentials, or an unsupported client
+- **THEN** the athlete receives an actionable ambiguous authentication failure and no unsupported cause is asserted.
+
+#### Scenario: Reliably identified client version rejection
+- **WHEN** a supported, safely recognized response establishes a client version rejection
+- **THEN** the athlete is told that the client version needs attention without exposing the provider response.
+
+#### Scenario: Working authentication and lookup
+- **WHEN** a compatible provider accepts the configured credentials and returns a valid food response
+- **THEN** Yazio lookup can return the normalized food with its existing source provenance and no remote write.
+
+#### Scenario: Failed check or lookup
+- **WHEN** authentication fails or the provider is unavailable
+- **THEN** existing local and alternative food sources remain usable and retry/backoff limits remain effective.
+
+Evidence: `backend/providers/yazio.py::YazioClient._grant_rejected` (login 400/401/403 stays one ambiguous `food_database_auth_failed`), `backend/providers/yazio.py::YazioClient._raise_http_error` (only a bounded `version_blocked` body on a product request becomes `food_database_version_blocked`), `backend/nutrition/food_database.py::FoodDatabaseService._chain_search` (notices, fallback); `tests/test_yazio.py::YazioClientTests.test_rejected_login_pauses_further_attempts_without_leaking`, `tests/test_yazio.py::YazioClientTests.test_recognized_version_block_is_safe_and_distinct`, `tests/test_yazio.py::YazioClientTests.test_truncated_forbidden_response_is_sanitized`, `tests/test_food_lookup_chain.py::LookupChainTests.test_version_block_is_reported_while_fallback_remains_available`, `tests/test_food_lookup_chain.py::LookupChainTests.test_text_chain_names_rejected_yazio_credentials`. The incident's upstream response and actual cause stay unverified; no live account was used.

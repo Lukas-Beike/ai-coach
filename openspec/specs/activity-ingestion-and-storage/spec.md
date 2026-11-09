@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe durable provider activity ingestion, identity and session bundling, detail acquisition, pagination, corrections, and explicit deletion behavior.
+Describe durable provider activity ingestion, identity and session bundling, detail acquisition, pagination, corrections, and explicit deletion behavior. Garmin and Wahoo are the activity sources. Intervals.icu is an output target only (#1728): it is no longer read, and statements about Intervals.icu records describe copies stored earlier until the one-time purge removes them.
 
 ## Requirements
 
@@ -20,25 +20,36 @@ The system SHALL fetch Garmin through bounded provider collections with source o
 Evidence: `backend/providers/garmin.py:collect_garmin_data`, `backend/providers/wahoo_client.py:WahooClient`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_wahoo_sync.py:test_truncated_fetch_reports_partial`, `tests/test_wahoo_runtime_acceptance.py:test_the_owner_never_writes_to_wahoo`.
 
 ### Requirement: Garmin transports per data family
-The system SHALL read Garmin through the official read-only Personal API when its key is configured, and through the unofficial SDK login when that is connected. Every family the Personal API serves with the SDK's content SHALL use the Personal API when its key is configured: activity lists, activity details, sleep, HRV, daily summaries, resting heart rate, Body Battery, weight and heart-rate zones. Families the Personal API does not serve (readiness, training status, training load, load balance, VO2 max, FTP, lactate threshold, race predictions, endurance score, running tolerance, gear, activity splits and per-activity zone times) SHALL stay on the SDK. A family the configured transports do not serve SHALL be skipped as unsupported rather than reported as a failure. The Personal API key SHALL be stored server-side like the other provider credentials and exchanged for a bearer token on demand; neither SHALL be logged, exported or returned. Both transports SHALL write the same records: activities keyed by Garmin `activityId`, sleep nights keyed by their calendar date. With the Personal API key, a Garmin activity detail fetch SHALL also download the original FIT file and decode it with the stdlib FIT decoder; its full-resolution record streams and device laps SHALL replace the downsampled charts and the splits of that activity, which remain the fallback when the file yields no set of that kind.
+The system SHALL read Garmin through the official read-only Personal API when its key is configured, and through the unofficial SDK login when that is connected. Every family the Personal API serves with the SDK's content SHALL use the Personal API when its key is configured. A family the configured transports do not serve SHALL be skipped as unsupported rather than reported as a failure. Both transports SHALL write the same records.
 
 #### Scenario: Personal API key only
 - **WHEN** only the Personal API key is configured
-- **THEN** activities, sleep, HRV, daily summaries, resting heart rate, Body Battery, weight and heart-rate zones sync, and SDK-only families are absent without errors.
+- **THEN** activities, activity details, sleep, HRV, daily summaries, resting heart rate, Body Battery, weight and heart-rate zones sync, and SDK-only families are absent without errors.
+
+#### Scenario: SDK-only families
+- **WHEN** a Personal API key is configured
+- **THEN** readiness, training status, training load, load balance, VO2 max, FTP, lactate threshold, race predictions, endurance score, running tolerance, gear, activity splits and per-activity zone times stay on the SDK.
 
 #### Scenario: Both transports
 - **WHEN** the same Garmin activity or night was stored through one transport and is read through the other
-- **THEN** it exists once.
-
-#### Scenario: FIT detail through the Personal API
-- **WHEN** a Garmin activity detail is fetched with the Personal API key and its FIT file decodes
-- **THEN** the stored stream set has full resolution and the lap set holds the device laps from the file; an undecodable file keeps the charts and splits and reports one issue.
+- **THEN** it exists once, keyed by Garmin `activityId` or by the night's calendar date.
 
 #### Scenario: SDK login unavailable with a Personal API key
 - **WHEN** the SDK login fails or requires MFA while a Personal API key is configured
 - **THEN** the Personal API families still sync and only the SDK-only families are skipped.
 
-Evidence: `backend/providers/garmin_personal.py:GarminTransportClient`, `backend/providers/garmin_personal.py:wrap_daily_sleep`, `backend/sync/garmin_service.py:GarminRemoteReader._authenticated_client`, `backend/providers/garmin_activity_detail_mapping.py:map_garmin_activity_detail`; `tests/test_garmin_personal_transport.py`, `tests/test_garmin_personal_transport.py:test_heart_rate_zones_use_the_personal_api_when_a_key_exists`, `tests/test_garmin_personal_transport.py:test_sdk_only_families_stay_on_the_sdk_with_a_key`, `tests/test_garmin_health_mapping.py:test_personal_api_zones_map_like_the_sdk_zones`, `tests/test_garmin_activity_detail_mapping.py:GarminFitPartTests`.
+Detailed contract: The Personal API key SHALL be stored server-side like the other provider credentials and exchanged for a bearer token on demand; neither SHALL be logged, exported or returned.
+
+Evidence: `backend/providers/garmin_personal.py:GarminTransportClient`, `backend/providers/garmin_personal.py:PERSONAL_METHODS`, `backend/providers/garmin_personal.py:wrap_daily_sleep`, `backend/sync/garmin_service.py:GarminRemoteReader._authenticated_client`; `tests/test_garmin_personal_transport.py`, `tests/test_garmin_personal_transport.py:test_heart_rate_zones_use_the_personal_api_when_a_key_exists`, `tests/test_garmin_personal_transport.py:test_sdk_only_families_stay_on_the_sdk_with_a_key`, `tests/test_garmin_health_mapping.py:test_personal_api_zones_map_like_the_sdk_zones`.
+
+### Requirement: Garmin FIT detail through the Personal API
+With the Personal API key, a Garmin activity detail fetch SHALL also download the original FIT file and decode it with the stdlib FIT decoder. Its full-resolution record streams and device laps SHALL replace the downsampled charts and the splits of that activity, which remain the fallback when the file yields no set of that kind.
+
+#### Scenario: FIT detail through the Personal API
+- **WHEN** a Garmin activity detail is fetched with the Personal API key and its FIT file decodes
+- **THEN** the stored stream set has full resolution and the lap set holds the device laps from the file; an undecodable file keeps the charts and splits and reports one issue.
+
+Evidence: `backend/providers/garmin_activity_detail_mapping.py:map_garmin_activity_detail`, `backend/providers/fit_file.py:fit_messages`; `tests/test_garmin_activity_detail_mapping.py:GarminFitPartTests`.
 
 ### Requirement: Atomic canonical import and correction
 The system SHALL atomically store sanitized provider records and canonical projections within the owning ingest transaction. Repeated natural identities SHALL update or retain records without duplicate activities. Wahoo SHALL commit coverage and success markers with its ingest; Garmin SHALL commit canonical payload/state together, with later metadata, equipment, and cursor operations retaining their separate persistence boundaries.
@@ -56,10 +67,10 @@ Detailed contract: Fresh payloads replace their owned corrected values while ret
 Evidence: `backend/sync/canonical_ingest.py:ingest_plan`, `backend/sync/garmin_snapshot_writer.py:GarminSnapshotWriter`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_wahoo_sync.py:test_resync_is_idempotent`, `tests/test_wahoo_sync.py:test_coverage_failure_rolls_the_whole_ingest_back`, `tests/test_canonical_ingest.py:test_a_partial_refresh_keeps_the_fetch_time_of_retained_sections`.
 
 ### Requirement: Conservative disappearance reconciliation
-The system SHALL infer missing-activity deletion only from a completely read Intervals, Garmin or Wahoo activity list and only inside the safe inner days of the covered window. Edge days, historical Intervals chunks, incremental, failed, paused or truncated reads, and absent activity collections SHALL not delete activities merely because a response omits them. Deletion SHALL keep provider tombstone/state evidence through the one canonical delete path.
+The system SHALL infer missing-activity deletion only from a completely read Garmin or Wahoo activity list and only inside the safe inner days of the covered window. Edge days, incremental, failed, paused or truncated reads, and absent activity collections SHALL not delete activities merely because a response omits them. Deletion SHALL keep provider tombstone/state evidence through the one canonical delete path.
 
 #### Scenario: Complete interior disappearance
-- **WHEN** a complete eligible Intervals, Garmin or Wahoo activity list omits an existing activity of that provider within the safe covered interior
+- **WHEN** a complete eligible Garmin or Wahoo activity list omits an existing activity of that provider within the safe covered interior
 - **THEN** the activity can be marked deleted through canonical reconciliation.
 
 #### Scenario: Complete Garmin or Wahoo read
@@ -70,17 +81,17 @@ The system SHALL infer missing-activity deletion only from a completely read Int
 - **WHEN** an activity is missing from an incremental or historical response, an edge day, a failed, paused or rate-limited Garmin read, or a truncated Wahoo listing
 - **THEN** the system retains the stored activity rather than treating omission as deletion authorization.
 
-Evidence: `backend/sync/canonical_ingest.py:intervals_deletion_window`, `backend/sync/canonical_ingest.py:ingest_intervals_snapshot`, `backend/sync/canonical_ingest.py:ingest_garmin_payload`, `backend/sync/garmin.py:activity_deletion_window`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_canonical_ingest.py:test_full_fetch_never_deletes_on_the_edge_days_of_its_window`, `tests/test_canonical_ingest.py:test_historical_fetch_never_deletes`, `tests/test_canonical_ingest.py:test_a_complete_activity_read_tombstones_a_deleted_activity`, `tests/test_canonical_ingest.py:test_a_failed_or_paused_activity_read_deletes_nothing`, `tests/test_canonical_ingest.py:test_a_row_without_an_activity_id_blocks_the_deletion`, `tests/test_garmin_snapshot_writer.py:ActivityWindowTests`, `tests/test_wahoo_sync.py:test_a_complete_listing_tombstones_a_workout_deleted_in_wahoo`, `tests/test_wahoo_sync.py:test_a_truncated_unreadable_or_unidentified_listing_deletes_nothing`.
+Evidence: `backend/sync/canonical_ingest.py:fetch_deletion_window`, `backend/sync/canonical_ingest.py:ingest_garmin_payload`, `backend/sync/garmin.py:activity_deletion_window`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_canonical_ingest.py:test_full_fetch_never_deletes_on_the_edge_days_of_its_window`, `tests/test_canonical_ingest.py:test_a_complete_activity_read_tombstones_a_deleted_activity`, `tests/test_canonical_ingest.py:test_a_failed_or_paused_activity_read_deletes_nothing`, `tests/test_canonical_ingest.py:test_a_row_without_an_activity_id_blocks_the_deletion`, `tests/test_garmin_snapshot_writer.py:ActivityWindowTests`, `tests/test_wahoo_sync.py:test_a_workout_on_the_edge_day_of_the_window_is_never_deleted`, `tests/test_wahoo_sync.py:test_a_complete_listing_tombstones_a_workout_deleted_in_wahoo`, `tests/test_wahoo_sync.py:test_a_truncated_unreadable_or_unidentified_listing_deletes_nothing`.
 
 ### Requirement: Deterministic provider-copy session identity
-The system SHALL bundle supported provider copies into canonical sessions using deterministic start, sport-family, duration, distance, and recording-origin rules. The matching start window is 30 minutes, with duration tolerance at least 120 seconds or 10 percent and distance tolerance at least 500 metres or 10 percent under each implemented pairing rule. Intervals.icu is output only and ranks last: Wahoo leads a session, then Garmin; Wahoo-recorded rides can retain Garmin copies.
+The system SHALL bundle supported provider copies into canonical sessions using deterministic start, sport-family, duration, distance, and recording-origin rules. The matching start window is 30 minutes, with duration tolerance at least 120 seconds or 10 percent and distance tolerance at least 500 metres or 10 percent under each implemented pairing rule. Wahoo leads a session, then Garmin, then a stored Intervals.icu copy (output only, ranked last); Wahoo-recorded rides can retain Garmin copies.
 
 #### Scenario: Exact upstream reference
-- **WHEN** an Intervals copy with `source=GARMIN_CONNECT` or `WAHOO` names a stored upstream activity by `external_id`, even if trimmed, paused or shifted beyond the tolerances
+- **WHEN** a stored Intervals.icu copy with `source=GARMIN_CONNECT` or `WAHOO` names a stored upstream activity by `external_id`, even if trimmed, paused or shifted beyond the tolerances
 - **THEN** this exact link is applied before the heuristic rules, which decide only the records left without one: both join one session with link kind `exact`, an earlier heuristic merge of the same pair is upgraded to `exact`, and an unknown upstream id leaves the copy to the heuristic rules.
 
 #### Scenario: Several recordings of one ride
-- **WHEN** compatible Intervals, direct Wahoo, and Garmin records represent the same measured session
+- **WHEN** compatible direct Wahoo and Garmin records, and any stored Intervals.icu copy, represent the same measured session
 - **THEN** each input belongs to exactly one canonical session with deterministic primary and duplicate-link metadata; the Wahoo record leads, else the Garmin record, else the Intervals.icu record.
 
 #### Scenario: Ambiguous nearby activity
@@ -133,8 +144,27 @@ Detailed contract: Signed links SHALL be absent from stored raw rows, errors, an
 
 Evidence: `backend/sync/wahoo_activity_details.py:WahooActivityDetailImport.import_details`, `backend/providers/wahoo_fit_download.py:download_wahoo_fit`, `backend/providers/fit_file.py:fit_messages`, `backend/providers/fit_activity_detail_mapping.py:map_fit_activity_detail`; `tests/test_wahoo_activity_details.py:test_at_most_ten_downloads_run_per_sync`, `tests/test_wahoo_activity_details.py:test_download_link_is_absent_from_storage_and_logs`, `tests/test_wahoo_sync.py:test_a_failing_detail_import_keeps_the_sync_ok`.
 
+### Requirement: Stream history backfill
+The system SHALL re-fetch the original FIT files of past Garmin (Personal API) and Wahoo (workout list download links) activities that have no full-resolution stream set, newest first back to the history floor, and store their stream and device-lap sets exactly like the regular detail fetch, with the provider's provenance and the current summary hash. Manual and strength records SHALL be skipped, strength sets of a file SHALL never be stored, and nothing SHALL be written to a provider.
+
+#### Scenario: Missing streams are filled once
+- **WHEN** a live session's active Garmin or Wahoo record has no full-resolution stream set
+- **THEN** its file is downloaded, paced, and stored; a repeated run finds no candidate and downloads nothing.
+
+#### Scenario: A file is missing, empty or fails
+- **WHEN** the provider holds no file, the file holds no sensor records, a download fails three runs or answers with a client error
+- **THEN** only that record is counted and kept out of later runs, the rest of the batch goes on, and queuing a finished chain again without `end_date` lets failed records retry.
+
+#### Scenario: Rate limit or rejected key
+- **WHEN** the provider limits the requests or Garmin rejects the Personal API key
+- **THEN** the job fails with the cursor unchanged and the files stored before stay; a rejected key shows the key hint, and Garmin without a Personal API key stays blocked with the state in diagnostics.
+
+Detailed contract: Wahoo download links SHALL never be stored or logged. The backfill counts per provider (`candidates`, `with_streams`, `stored`, `no_file`, `no_streams`, `skipped_by_error`, `blocked`, `cursor`) SHALL appear in the diagnostic report without ids.
+
+Evidence: `backend/sync/stream_backfill.py:StreamBackfillService.backfill`, `backend/providers/garmin_fit_history.py:collect_activity_fit_files`, `backend/sync/wahoo_stream_backfill.py:WahooStreamSource.fetch`, `backend/diagnostics/stream_backfill.py:summarize_stream_backfill`; `tests/test_stream_backfill.py`.
+
 ### Requirement: Local activity reads and pagination
-The system SHALL read activity rows and sync metadata from one local read snapshot without refreshing providers, expose local activity references with feedback, and offer descending keyset pagination with versioned cursors and legacy cursor compatibility. Page limits SHALL default to 100 and clamp to 1 through 250. Reads SHALL retain summary rows whose detail failed and show only failure notes matching the current summary fingerprint.
+The system SHALL read activity rows and sync metadata from one local read snapshot without refreshing providers, expose local activity references with feedback, and offer descending keyset pagination with versioned cursors. Page limits SHALL default to 100 and clamp to 1 through 250. Reads SHALL be independent of detail acquisition: a session whose detail failed or is missing stays listed.
 
 #### Scenario: Next activity page
 - **WHEN** the athlete requests a page after a valid cursor
@@ -142,11 +172,11 @@ The system SHALL read activity rows and sync metadata from one local read snapsh
 
 #### Scenario: Detail failure or invalid cursor
 - **WHEN** detail is unavailable or a cursor cannot be decoded
-- **THEN** summary reading remains usable; a matching detail error is shown and an invalid cursor falls back to the first-page boundary.
+- **THEN** summary reading remains usable, no stored detail failure note marks a listed session, and an invalid or older-version cursor falls back to the first page.
 
 #### Scenario: Guarded kv detail access
 - **WHEN** the repository test suite runs
-- **THEN** a guard test fails if any production module outside the backfill and retirement modules references the `activity_detail:` kv record prefix or the legacy detail record reader.
+- **THEN** a guard test fails if any production module references the `activity_detail:` kv record prefix or the legacy detail record reader.
 
 #### Scenario: Activity list freshness from canonical coverage
 - **WHEN** the activity list is read and canonical coverage stores a current Garmin or Wahoo activity fetch time
@@ -156,61 +186,22 @@ The system SHALL read activity rows and sync metadata from one local read snapsh
 - **WHEN** no current Garmin or Wahoo activity fetch is stored
 - **THEN** `snapshot_synced_at` is null, the list still renders, and no snapshot timestamp is substituted.
 
-Detailed contract: The sync time reported with the activity list (`snapshot_synced_at`) SHALL be the activity sync time (the oldest current activity fetch of Garmin and Wahoo in the canonical provider coverage; a provider fetched more than 14 days before the newest one is left out, Intervals.icu copies never count) and SHALL be null when none is stored. A Garmin write moves its activity fetch time only for a complete activity list read that reaches today; a truncated or row-skipping Wahoo listing keeps the last one. Activity freshness SHALL remain independent of unrelated performance refresh timestamps. Production activity, detail, report and calendar reads SHALL NOT read `activity_detail:<sha>` kv records; only the backfill and retirement maintenance modules may read them. The key `snapshot_synced_at` keeps its name.
+Detailed contract: The sync time reported with the activity list (`snapshot_synced_at`) SHALL be the activity sync time (the oldest current activity fetch of Garmin and Wahoo in the canonical provider coverage; a provider fetched more than 14 days before the newest one is left out; Intervals.icu never counts) and SHALL be null when none is stored. A Garmin write moves its activity fetch time only for a complete activity list read that reaches today; a truncated or row-skipping Wahoo listing keeps the last one. Activity freshness SHALL remain independent of unrelated performance refresh timestamps. Production activity, detail, report and calendar reads SHALL NOT read `activity_detail:<sha>` kv records, and no production module does. The key `snapshot_synced_at` keeps its name.
 
-Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService._read`; `tests/test_activity_read_service.py:test_page_filters_orders_attaches_feedback_and_uses_cursor`, `tests/test_activity_read_service.py:test_page_keeps_activities_with_failed_details_and_names_the_error`, `tests/test_activity_read_service.py:test_activity_refresh_timestamp_is_independent_of_performance_refresh`. `tests/test_activity_detail_kv_guard.py:test_production_code_does_not_touch_kv_detail_records`. Missing evidence (planned in this change): tests that `snapshot_synced_at` comes from coverage, is null without coverage and is unchanged by a duplicate deletion; `public/activity-analysis.js:load` consumes the key unchanged (no frontend change planned).
+Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService.recent`, `backend/activities/sync_time.py:activities_synced_at`; `tests/test_activity_read_service.py:test_page_filters_orders_attaches_feedback_and_uses_cursor`, `tests/test_activity_read_service.py:test_activity_sync_time_comes_from_canonical_coverage`, `tests/test_activity_read_service.py:test_activity_sync_time_is_unknown_without_stored_coverage`, `tests/test_activity_detail_kv_guard.py:test_production_code_does_not_touch_kv_detail_records`.
 
-### Requirement: Verified kv detail retirement
-The canonical backfill runner SHALL run a retirement stage after the activity detail backfill. Per kv detail record it SHALL map the record with the legacy mapper, refill canonical lap metrics that are missing, compare the defined fields with the canonical rows, and delete the kv record in the same transaction only when every comparison passes. It SHALL NOT request provider data, and unverifiable records SHALL stay unchanged and be counted.
-
-#### Scenario: Verified record retired
-- **WHEN** a kv record maps to canonical sets and an analysis payload that match on every compared field
-- **THEN** the kv record is deleted in the batch transaction and the stage state counts it as retired.
-
-#### Scenario: Missing lap metric refilled
-- **WHEN** a canonical Intervals.icu lap set written before schema v13 has a NULL `max_speed_mps` or another NULL lap metric that the matching kv lap carries
-- **THEN** that NULL is filled from the kv lap before the comparison, and non-NULL canonical values are never overwritten.
-
-#### Scenario: Unverifiable record kept
-- **WHEN** a record has no active Intervals.icu activity record, has no canonical set, fails a compared field, or holds downsampled streams that cannot be proven against the canonical streams
-- **THEN** the kv record and its canonical rows are unchanged and the stage state counts it under its reason.
-
-#### Scenario: Interrupted batch
-- **WHEN** a retirement batch fails after some refills or deletions
-- **THEN** the whole batch transaction rolls back, the stage is marked failed in its own transaction, and no kv record is lost without its verified canonical copy.
-
-#### Scenario: Same-build restart
-- **WHEN** the application restarts after a completed or interrupted retirement
-- **THEN** the stage resumes from its stored cursor or reports completion, and repeating it changes no further rows.
-
-#### Scenario: Upgrade from supported released schemas
-- **WHEN** populated databases built from the frozen schema v21 fixture with seeded kv detail records are upgraded and the backfill and retirement stages run
-- **THEN** every seeded detail remains readable as `activity_detail.v1`, verified kv records are retired, and unverifiable ones remain stored.
-
-#### Scenario: Legacy target basis
-- **WHEN** a preserved kv detail record uses the former FTP key in its frozen target basis
-- **THEN** canonical backfill stores the equivalent neutral basis, and retirement compares normalized values without discarding conflicting data.
-
-#### Scenario: Backup, restore and privacy export
-- **WHEN** a database is backed up, restored or privacy-exported after retirement
-- **THEN** the canonical detail sets, stream channels, laps, zone times and analysis payloads are present, and retired kv records are absent from the exported application state.
-
-Evidence: `backend/sync/activity_detail_retirement.py:ActivityDetailRetirement`, `backend/db/activity_detail_store.py:refill_lap_metrics`, `backend/sync/canonical_backfill_assembly.py`; `tests/test_activity_detail_retirement.py:test_proven_record_is_deleted_and_other_keys_are_kept`, `tests/test_activity_detail_retirement.py:test_missing_lap_speed_is_refilled_before_the_record_is_retired`, `tests/test_activity_detail_retirement.py:test_lap_metric_that_differs`, `tests/test_activity_detail_retirement.py:test_failed_batch_rolls_back_refills_and_deletions`, `tests/test_activity_detail_retirement.py:test_restart_resumes_from_the_cursor_and_repeats_nothing`, `tests/test_activity_detail_retirement_upgrade.py:test_released_schemas_upgrade_and_retire_proven_records` (the SQLCipher variant is skipped without SQLCipher), `tests/test_activity_detail_retirement_backup.py:test_restored_backup_serves_the_same_document`, `tests/test_activity_detail_retirement_backup.py:test_privacy_export_holds_the_retired_detail_in_the_canonical_files`. Related existing behavior: `backend/sync/activity_detail_backfill.py:ActivityDetailBackfill`, `backend/sync/canonical_backfill_worker.py`.
-
-Additional evidence: `tests/test_activity_detail_canonical.py::test_legacy_target_basis_is_normalized_without_changing_source`; `tests/test_activity_detail_retirement.py::test_legacy_target_basis_is_compared_after_normalization`; `tests/test_activity_detail_retirement.py::test_conflicting_legacy_target_basis_is_not_retired`.
-
-### Requirement: Garmin status compares against canonical Intervals rows
-The system SHALL compute the Garmin status counts `activities` and `duplicate_activities_skipped` from the canonical sessions of the recent window only: a session with a Garmin Connect record counts as an activity, or as a skipped duplicate when an Intervals.icu record shares the session; a Garmin copy beside a Wahoo record alone stays an activity.
+### Requirement: Garmin status compares against canonical sessions
+The system SHALL compute the Garmin status counts `activities` and `duplicate_activities_skipped` from the canonical sessions of the recent window only: a session with a Garmin Connect record counts as an activity, or as a skipped duplicate when a stored Intervals.icu record shares the session; a Garmin copy beside a Wahoo record alone stays an activity.
 
 #### Scenario: Canonical source
 - **WHEN** the Garmin public state is built
 - **THEN** the counts come from the canonical activity summaries and neither the stored snapshot nor the raw Garmin view is read for activities.
 
 #### Scenario: No Intervals rows
-- **WHEN** no session bundles a Garmin record with an Intervals.icu record
+- **WHEN** no session bundles a Garmin record with an Intervals.icu record, as after the purge
 - **THEN** no Garmin activity is skipped as a duplicate.
 
-Evidence: `backend/sync/garmin_projection_service.py:GarminProjectionService._canonical_read`, `backend/sync/garmin_projection_service.py:_garmin_sessions`; `tests/test_garmin_canonical_reads.py`, `tests/test_sync_garmin_projection_service.py:test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors`, `tests/test_sync_garmin_projection_service.py:test_duplicates_are_counted_against_the_canonical_sessions_only`. Missing evidence (planned in this change): construction without canonical sources is rejected and no snapshot activity fallback remains.
+Evidence: `backend/sync/garmin_projection_service.py:GarminProjectionService._canonical_read`, `backend/sync/garmin_projection_service.py:_garmin_sessions`; `tests/test_garmin_canonical_reads.py`, `tests/test_sync_garmin_projection_service.py:test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors`, `tests/test_sync_garmin_projection_service.py:test_duplicates_are_counted_against_the_canonical_sessions_only`. `tests/test_sync_garmin_projection_service.py:test_the_projection_requires_the_canonical_sources`.
 
 ### Requirement: Athlete session corrections
 The system SHALL let the athlete confirm a canonical session's bundle, split one provider copy into its own session, merge two live sessions, and delete an activity locally, from the activity detail view or through local Coach tools. Each correction SHALL mark the resulting sessions athlete-confirmed, record a change-history receipt whose undo restores the touched session rows, and change no provider record, provider data or feedback row.
@@ -236,35 +227,10 @@ The system SHALL let the athlete confirm a canonical session's bundle, split one
 - **THEN** the recorded session rows are restored; a later change to them makes the undo conflict instead.
 
 #### Scenario: Feedback written before another copy arrives
-- **WHEN** feedback is saved on a Garmin-only session and the Intervals.icu copy is linked later
+- **WHEN** feedback is saved on a Garmin-only session and another provider's copy is linked later
 - **THEN** the feedback resolves through either id because it stays bound to the session it was written for.
 
 Detailed contract: the activity detail response carries `session_bundle` with the live session id, link kind, confirmation, the provider copies (`session_id`, provider label, recording origin, start, duration, and the provider's `native_type` with the terrain and assist it maps to) and the live sessions of the same local date as merge candidates. A correction touching more than 16 session rows is refused so its receipt stays restorable.
 
 Evidence: `backend/activities/session_corrections.py:SessionCorrectionService`, `backend/http_api/feedback_post.py:FeedbackPostRoutes`, `public/activity-details.js:renderBundle`; `tests/test_session_corrections.py`.
 
-### Requirement: One-time Intervals.icu ingest purge
-
-Once the Garmin rating backfill reports finished, the system SHALL remove the stored Intervals.icu ingest data once per purge version, in one transaction after a recovery copy: tombstone each Intervals.icu activity so a Garmin or Wahoo copy survives, move athlete notes, equipment assignments and target snapshots to that survivor (newest across its key family wins), delete the Intervals.icu rows and ingest state, keep output ids, and turn the ingest off.
-
-#### Scenario: Rating backfill not finished
-- **WHEN** the rating backfill has not finished
-- **THEN** nothing changes and diagnostics report `waiting_for_rating_backfill`.
-
-#### Scenario: Purge with bundled and Intervals.icu-only sessions
-- **WHEN** the purge runs
-- **THEN** feedback of a bundled session is read on its Garmin or Wahoo survivor, data of an Intervals.icu-only session is dropped and counted, earlier feedback changes are no longer undoable, and remote links and competition event ids are unchanged.
-
-#### Scenario: Failure or restart
-- **WHEN** the purge fails midway, runs again or the application restarts
-- **THEN** a failure leaves the database and the marker unchanged, and a completed purge is not repeated.
-
-#### Scenario: Ingest after the purge
-- **WHEN** the athlete turns the Intervals.icu ingest on or asks for a one-off read after the purge
-- **THEN** the switch refuses with 409 and the one-off read returns the ingest-off result without reading.
-
-#### Scenario: Restored pre-purge backup
-- **WHEN** the pre-purge recovery copy is restored while the purge marker file exists in the data directory
-- **THEN** it is not purged again automatically and diagnostics report `done_restored`.
-
-Evidence: `backend/sync/intervals_purge.py:run_purge`, `backend/sync/intervals_purge.py:IntervalsPurgeRunner`, `backend/db/canonical_store.py:tombstone_provider_activities`, `scripts/intervals_purge_dry_run.py`; `tests/test_intervals_purge.py`.

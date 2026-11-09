@@ -145,6 +145,12 @@ class StartupSyncSchedulerTests(unittest.TestCase):
                     {"days": 45, "reason": "startup rating backfill"},
                     "startup",
                 ),
+                (
+                    "garmin",
+                    "stream_backfill",
+                    {"days": 45, "reason": "startup stream backfill"},
+                    "startup",
+                ),
                 ("weather", "refresh", {"force": True, "reason": "startup"}, "startup"),
             ],
         )
@@ -154,6 +160,7 @@ class StartupSyncSchedulerTests(unittest.TestCase):
                 ("garmin", "historical"),
                 ("garmin", "wellness_history"),
                 ("garmin", "rating_history"),
+                ("garmin", "stream_history"),
             ],
         )
 
@@ -167,6 +174,7 @@ class StartupSyncSchedulerTests(unittest.TestCase):
                     "historical_backfill",
                     "wellness_backfill",
                     "rating_backfill",
+                    "stream_backfill",
                 ),
                 "weather": ("refresh",),
             }.items()
@@ -189,6 +197,7 @@ class StartupSyncSchedulerTests(unittest.TestCase):
                 ("garmin", "historical_backfill"),
                 ("garmin", "wellness_backfill"),
                 ("garmin", "rating_backfill"),
+                ("garmin", "stream_backfill"),
                 ("weather", "refresh"),
             ],
         )

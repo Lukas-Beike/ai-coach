@@ -26,6 +26,7 @@ from backend.planning.session_focus import (
     allowed_foci,
     carry_focus,
     session_focus,
+    unambiguous_values,
 )
 from backend.planning.workout_export import build_planned_workout_export
 from backend.planning.workouts import normalize_workout
@@ -380,6 +381,102 @@ class ExportTests(unittest.TestCase):
                 session_focus="legs",
                 strength_intensity="heavy",
             ),
+        )
+
+
+class UnambiguousValuesTests(unittest.TestCase):
+    @staticmethod
+    def step(zone, seconds):
+        return StepEstimate(
+            "work", "power", seconds, None, 1.0, zone, "high", None, None
+        )
+
+    def estimate(self, *steps, duration=1800.0, intensity=0.9):
+        return WorkoutEstimate(
+            "ride", steps, duration, None, None, intensity, None, None, (), {}
+        )
+
+    def test_one_keyword_is_unambiguous_several_are_not(self):
+        self.assertEqual(
+            unambiguous_values(unit("Run", name="Lockerer Lauf", description="")),
+            {"session_focus": "easy"},
+        )
+        for name in ("Schwelle und Intervalle", "Lange Grundlage", "Tempo, Schwelle"):
+            with self.subTest(name):
+                self.assertEqual(
+                    unambiguous_values(unit("Run", name=name, description="")), {}
+                )
+        self.assertEqual(
+            unambiguous_values(unit("Run", name="Lauf", description="")), {}
+        )
+
+    def test_steps_decide_unless_the_text_names_only_other_foci(self):
+        locker = unit("Ride", name="Locker", description="")
+        threshold = self.estimate(self.step(4, 1200))
+        self.assertEqual(
+            unambiguous_values(unit("Ride", name="Fahrt", description=""), threshold),
+            {"session_focus": "threshold"},
+        )
+        # Steps and text agree.
+        self.assertEqual(
+            unambiguous_values(
+                unit("Ride", name="Schwelle 4x8", description=""), threshold
+            ),
+            {"session_focus": "threshold"},
+        )
+        # Steps say threshold, the text says easy: contested.
+        self.assertEqual(unambiguous_values(locker, threshold), {})
+
+    def test_stored_and_unsupported_values_are_left_alone(self):
+        self.assertEqual(
+            unambiguous_values(
+                unit("Run", name="Lockerer Lauf", description="", session_focus="long")
+            ),
+            {},
+        )
+        self.assertEqual(unambiguous_values(unit("Swim", name="Locker")), {})
+
+    def test_strength_focus_and_intensity_need_one_answer(self):
+        legs = unit("WeightTraining", name="Kniebeuge schwer", description="")
+        self.assertEqual(
+            unambiguous_values(legs),
+            {"session_focus": "legs", "strength_intensity": "heavy"},
+        )
+        # Legs plus upper body is the one defined full-body case.
+        mixed = unit("WeightTraining", name="Kniebeuge und Bankdrücken", description="")
+        self.assertEqual(unambiguous_values(mixed), {"session_focus": "full_body"})
+        # The chip shows full body for legs plus upper plus core as well.
+        triple = unit(
+            "WeightTraining", name="Kniebeuge, Bankdrücken, Plank", description=""
+        )
+        self.assertEqual(unambiguous_values(triple), {"session_focus": "full_body"})
+        # Two unrelated groups, or two intensities, stay a suggestion.
+        for name in ("Beine und Core", "Kniebeuge leicht bis schwer"):
+            with self.subTest(name):
+                result = unambiguous_values(
+                    unit("WeightTraining", name=name, description="")
+                )
+                self.assertNotIn(
+                    "strength_intensity" if "leicht" in name else "session_focus",
+                    result,
+                )
+        # The intensity is filled on its own when the focus is already stored.
+        self.assertEqual(
+            unambiguous_values(
+                unit("WeightTraining", name="Core leicht", session_focus="core")
+            ),
+            {"strength_intensity": "light"},
+        )
+        self.assertEqual(
+            unambiguous_values(
+                unit(
+                    "WeightTraining",
+                    name="Core",
+                    session_focus="core",
+                    strength_intensity="heavy",
+                )
+            ),
+            {},
         )
 
 

@@ -54,6 +54,14 @@ REGISTERED_ELSEWHERE = {
         "feedback_post.py",
         '"/api/activities/([^/]+)/feedback"',
     ),
+    "/api/activities/{id}/session": (
+        "feedback_post.py",
+        '"/api/activities/([^/]+)/session"',
+    ),
+    "/api/planned-units/{id}/garmin-exercise": (
+        "planned_unit_focus_post.py",
+        '"/api/planned-units/([^/]+)/garmin-exercise"',
+    ),
     "/api/planned-units/{id}/focus": (
         "planned_unit_focus_post.py",
         '"/api/planned-units/([^/]+)/focus"',

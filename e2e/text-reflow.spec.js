@@ -17,16 +17,16 @@ test("@responsive navigation and banners keep their text inside at 200 % text si
   // Banner content and measurement share one evaluate so a sync poll cannot hide a banner in between.
   const measure = () => page.evaluate(() => {
     document.documentElement.style.fontSize = "200%";
-    const texts = {
-      "#statusTitle": "Das OpenAI-Guthaben ist aufgebraucht",
-      "#statusDetail": "Bitte im OpenAI-Billing Guthaben hinzufügen.",
-      "#connectivityNotice": "Offline – Änderungen können gerade nicht gespeichert werden.",
-      "#providerAttentionDetail": "2 Anbindungen benötigen manuelles Eingreifen.",
-      "#setupBannerDetail": "Garmin Connect und Intervals.icu fehlen",
-    };
-    for (const [selector, text] of Object.entries(texts)) document.querySelector(selector).textContent = text;
-    const banners = ["#statusCard", "#connectivityNotice", "#providerAttentionBanner", "#setupBanner"].map((selector) => document.querySelector(selector));
-    for (const banner of banners) banner.hidden = false;
+    const action = { href: "#more/connections", label: "Anbindungen öffnen" };
+    updateStatusSources({
+      offline: { level: "warning", title: "Offline", detail: "Änderungen können gerade nicht gespeichert werden.", stand: true },
+      coach_error: { level: "critical", title: "Coach benötigt Aufmerksamkeit", detail: "Das OpenAI-Guthaben ist aufgebraucht. Bitte im OpenAI-Billing Guthaben hinzufügen." },
+      provider: { level: "critical", title: "Anbindung benötigt Aufmerksamkeit", detail: "2 Anbindungen benötigen manuelles Eingreifen.", action },
+      intervals_key: { level: "info", title: "Intervals.icu-API-Schlüssel fehlt", action, dismiss() {} },
+    });
+    document.querySelector("#statusStrip").dataset.expanded = "true";
+    renderStatusStrip();
+    const banners = [document.querySelector("#statusStrip")];
     const nav = [".bottom-nav", ".desktop-nav"].map((selector) => document.querySelector(selector)).filter((element) => element.getClientRects().length);
     const problems = nav.length === 1 ? [] : [`${nav.length} navigation bars visible`];
     for (const container of [...nav, ...banners]) {
@@ -35,6 +35,8 @@ test("@responsive navigation and banners keep their text inside at 200 % text si
       if (box.left < 0 || box.right > document.documentElement.clientWidth + 1) problems.push(`${container.id || container.className} leaves the viewport`);
       for (const element of [container, ...container.querySelectorAll("*")]) {
         if (!element.getClientRects().length || element instanceof SVGElement) continue;
+        // The low-screen strip cuts its one line with an ellipsis on purpose; the button opens the full text.
+        if (getComputedStyle(element).textOverflow === "ellipsis") continue;
         // Inline labels report no scroll size, so their box must also stay inside the container.
         const inner = element.getBoundingClientRect();
         if (element.scrollWidth > element.clientWidth + 1 || inner.left < box.left - 1 || inner.right > box.right + 1) problems.push(`${container.id || container.className} > ${element.tagName.toLowerCase()}.${element.className} "${element.textContent.trim().slice(0, 30)}"`);

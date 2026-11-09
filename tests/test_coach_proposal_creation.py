@@ -68,28 +68,9 @@ class CoachProposalCreationTests(unittest.TestCase):
             "payload": {"change_id": "change-1", "secret": "private"},
         }
 
-
-    @staticmethod
-    def _delete_duplicate(synced_at: str) -> dict[str, object]:
-        return {
-            "action_type": "delete_duplicate_intervals_activity",
-            "target_system": "intervals",
-            "object_ids": {
-                "keep_activity_id": "wahoo-1",
-                "delete_activity_id": "garmin-1",
-            },
-            "diff": [{"type": "delete", "id": "garmin-1", "name": "Garmin"}],
-            "payload": {
-                "canonical_id": "wahoo-1",
-                "duplicate_id": "garmin-1",
-                "snapshot_synced_at": synced_at,
-            },
-        }
-
     def _rows(self) -> list[dict[str, object]]:
         with self.database_manager.reader() as db:
             return db.execute("SELECT * FROM coach_action_proposals").fetchall()
-
 
     def test_creation_prunes_expired_proposals_on_the_write_path(self) -> None:
         with self.database_manager.unit_of_work() as db:
@@ -659,12 +640,6 @@ class CoachProposalCreationTests(unittest.TestCase):
             {row["session_csrf_hash"] for row in self._rows()},
             {"session-a", "session-b"},
         )
-
-
-
-
-
-
 
     def test_database_failure_rolls_back_insert(self) -> None:
         with self.database_manager.unit_of_work() as db:

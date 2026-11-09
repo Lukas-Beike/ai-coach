@@ -23,6 +23,7 @@ from backend.planning import strength_structure
 from backend.planning.library import library_payload_hash
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_strength_workout import (
+    PAYLOAD_VERSION,
     GarminExercise,
     GarminStrengthMappingError,
     resolve_exercise,
@@ -49,6 +50,9 @@ def garmin_baselines(db: Any) -> dict[str, str | None]:
 def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
     """Fingerprint of what a Garmin push sends: name, date and the structure.
 
+    The workout document version is part of it, so a change in how the document
+    is built marks units sent in the old form as changed.
+
     Intervals.icu syncs and focus edits rewrite other payload fields, so the
     Garmin push state compares only this. ``None`` when the unit cannot be
     pushed (not strength, or no valid structure).
@@ -68,6 +72,7 @@ def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
         "name": str(payload.get("name") or ""),
         "date": str(payload.get("date") or "")[:10],
         "exercises": exercises,
+        "payload_version": PAYLOAD_VERSION,
     }
     serialized = json.dumps(content, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -123,17 +128,22 @@ def attach_push_state(
     pairs: Iterable[tuple[Any, dict[str, Any]]],
     baselines: dict[str, str | None],
     remembered: Mapping[str, GarminExercise] | None = None,
+    resync: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     """Add ``payload_hash``, ``push_pending`` and ``push_blocked`` to each pair.
 
-    ``push_blocked`` names why a strength unit cannot reach Garmin, so the
+    ``resync`` holds the local ids of synced units whose exported heart-rate range
+    moved only with the threshold HR. ``push_blocked`` names why a strength unit cannot reach Garmin, so the
     calendar says so instead of offering only Intervals.icu silently.
     """
     for row, payload in pairs:
         digest = library_payload_hash(row["payload"])
+        # A synced run unit whose heart-rate range moved with the threshold HR
+        # (the bpm path of the cap export) is changed too.
         pending: dict[str, bool] = {
             ProviderId.INTERVALS.value: str(row["sync_state"] or "local")
             in _INTERVALS_PENDING
+            or str(row["local_id"]) in resync
         }
         # A unit in a sync conflict needs the athlete's decision first; no
         # provider is offered, so the conflicted version never reaches the watch.

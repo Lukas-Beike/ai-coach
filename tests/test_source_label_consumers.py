@@ -24,7 +24,8 @@ class ExportedSourceConstantTests(unittest.TestCase):
 
     def test_season_preparation_activity_source_is_unchanged(self):
         self.assertEqual(
-            "Intervals.icu recorded activities", season_preparation.ACTIVITY_SOURCE
+            "Garmin Connect, Wahoo recorded activities",
+            season_preparation.ACTIVITY_SOURCE,
         )
 
     def test_current_metrics_source_constants_are_unchanged(self):
@@ -38,12 +39,10 @@ class ExportedSourceConstantTests(unittest.TestCase):
         self.assertEqual("Garmin Connect", garmin_weight.GARMIN_PERFORMANCE_SOURCE)
 
     def test_body_history_source_constants_are_unchanged(self):
-        self.assertEqual("Intervals.icu Wellness", body.INTERVALS_SOURCE)
         self.assertEqual("Garmin Connect", body.GARMIN_SOURCE)
 
 
 class EmittedSourceOutputTests(unittest.TestCase):
-
     def test_season_preparation_basis_names_the_local_curve(self):
         # Since #1726 the basis is yesterday's local fitness (M7), never
         # Intervals.icu recorded wellness.
@@ -51,6 +50,6 @@ class EmittedSourceOutputTests(unittest.TestCase):
             basis_day=date(2026, 10, 1), ctl=50.0, atl=60.0, completed_today=()
         )
         result = season_preparation.load_scenarios(
-            None, {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
+            {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
         )
         self.assertEqual("Lokal berechnet (M7)", result["basis"]["source"])

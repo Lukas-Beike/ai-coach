@@ -2,21 +2,33 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from intervals_activity_stub import map_intervals_activities
+from intervals_plan_stub import intervals_activity_rows
+
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
-from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
-from backend.providers.intervals_activity_mapping import map_intervals_activities
-from backend.providers.snapshot_projection import intervals_activity_rows
+
+
+def summary_fingerprint(row: dict[str, Any]) -> str:
+    """Stand-in for the stored summary hash of a raw row: a digest of its summary fields."""
+    summary = {
+        key: value for key, value in row.items() if key not in ("streams", "laps")
+    }
+    return hashlib.sha256(
+        json.dumps(summary, sort_keys=True, default=str).encode()
+    ).hexdigest()
 
 
 def summaries_of_rows(rows: Any) -> tuple[ActivitySummary, ...]:
@@ -44,22 +56,10 @@ def bounded(
 
 
 class _RowFingerprints:
-    """Serve fingerprints and single rows from ``activity_rows``, as the tables do."""
+    """Serve fingerprints from the held rows, as the tables do."""
 
-    def intervals_activity_payloads(self, db: Any) -> tuple[dict[str, Any], ...]:
+    def raw_rows(self, db: Any) -> tuple[dict[str, Any], ...]:
         raise NotImplementedError
-
-    def intervals_summary_row(
-        self, db: Any, provider_activity_id: str
-    ) -> dict[str, Any] | None:
-        return next(
-            (
-                row
-                for row in self.intervals_activity_payloads(db)
-                if str(row.get("id")) == provider_activity_id
-            ),
-            None,
-        )
 
     def summary_fingerprints(
         self, db: Any, keys: Iterable[tuple[str, str]]
@@ -67,7 +67,7 @@ class _RowFingerprints:
         wanted = set(keys)
         return {
             key: summary_fingerprint(row)
-            for row in self.intervals_activity_payloads(db)
+            for row in self.raw_rows(db)
             if (key := (ProviderId.INTERVALS.value, str(row.get("id")))) in wanted
         }
 
@@ -78,7 +78,7 @@ class SnapshotActivityRows(_RowFingerprints):
     def __init__(self, snapshot_reader: Any) -> None:
         self._snapshot_reader = snapshot_reader
 
-    def intervals_activity_payloads(
+    def raw_rows(
         self,
         db: Any,
         *,
@@ -97,7 +97,7 @@ class SnapshotActivityRows(_RowFingerprints):
         end: date | None = None,
         limit: int | None = None,
     ) -> tuple[ActivitySummary, ...]:
-        return bounded(summaries_of_rows(self.intervals_activity_payloads(db)), start, end, limit)
+        return bounded(summaries_of_rows(self.raw_rows(db)), start, end, limit)
 
 
 class FixedActivityRows(_RowFingerprints):
@@ -106,7 +106,7 @@ class FixedActivityRows(_RowFingerprints):
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         self.rows = tuple(rows or ())
 
-    def intervals_activity_payloads(
+    def raw_rows(
         self,
         db: Any,
         *,

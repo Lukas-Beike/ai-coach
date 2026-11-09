@@ -207,7 +207,7 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertEqual("derived from Garmin original streams", result["source"])
         self.assertNotIn("provider_decoupling", result)
         self.assertEqual(
-            "derived from Intervals.icu original streams",
+            "derived from Garmin Connect, Wahoo original streams",
             aerobic_analysis(ride())["source"],
         )
         activity = ride(list(range(121)))

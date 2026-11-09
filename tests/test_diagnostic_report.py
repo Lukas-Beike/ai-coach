@@ -193,9 +193,11 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "canonical_provider_composition",
                 "local_load",
                 "rating_backfill",
-                "intervals_purge",
+                "stream_backfill",
                 "session_metrics",
                 "session_analysis",
+                "session_focus_backfill",
+                "profile_weekly_plan_removal",
                 "logs",
                 "debug_capture",
                 "note",
@@ -285,8 +287,9 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         ]
         # The provider composition adds five reads (sessions, observations and
         # three domain tables) to the same snapshot; the rating backfill counts
-        # add three more (Intervals.icu and Garmin records, live sessions).
-        self.assertEqual(len(self.db.queries), 23)
+        # add three more (Intervals.icu and Garmin records, live sessions); the
+        # stream backfill counts add two (Garmin records, the stream cursor).
+        self.assertEqual(len(self.db.queries), 25)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
@@ -297,13 +300,15 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "activity_feedback",
                 "change_history",
                 "kv WHERE key = 'garmin_snapshot'",
+                "provider_sync_cursors WHERE provider=? AND stream=?",
             ],
         )
         # Two extra reads: the Garmin configured signal checks the token blob and
         # the disconnect marker inside the same snapshot (see transactions above).
         # One more reads the local load state (card M6), one the rating backfill state.
-        # The Intervals.icu purge reads its marker and the rating backfill state.
-        self.assertEqual(self.key_values.get.call_count, 12)
+        # The stream backfill reads its state once (the read stops at the fake db).
+        # The session focus backfill state and the weekly plan removal state are one more read each.
+        self.assertEqual(self.key_values.get.call_count, 13)
 
     def test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:

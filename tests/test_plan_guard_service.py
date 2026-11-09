@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from backend.activities.hr_cap import effective_caps
 from backend.activities.workout_load import AthleteThresholds
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import Sport
@@ -20,7 +21,7 @@ from backend.coach.tool_execution_service import CoachStructuredToolExecutionSer
 from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_schemas import ACCEPT_PLAN_FINDINGS
 from backend.db.manager import DatabaseManager
-from backend.planning import plan_checks
+from backend.planning import calendar_load, plan_checks
 from backend.planning.load_checks import LoadThresholds
 from backend.planning.plan_guard_service import (
     IllnessNotConfirmedError,
@@ -33,8 +34,17 @@ from backend.planning.plan_guard_service import (
     recent_illness,
 )
 from backend.planning.planned_unit_load import estimate_planned_unit
+from backend.planning.sport import planned_sport_environment
 
 TODAY = date(2026, 11, 2)
+
+
+def _easy_run_cap(unit: dict[str, Any]) -> dict[str, Any]:
+    """The heart-rate cap an easy run unit needs (percentages from the cap table)."""
+    easy_run = planned_sport_environment(unit)[
+        0
+    ] is Sport.RUN and not plan_checks.is_hard(unit)
+    return {"hr_cap": effective_caps(None)["easy"]} if easy_run else {}
 
 
 def hard_pair() -> list[dict[str, Any]]:
@@ -71,6 +81,7 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.completed: list[dict[str, Any]] = []
         self.published: list[str] = []
         self.write_units: list[dict[str, Any]] | None = None
+        self.default_focus = True
         # A reported illness makes the hard pair a blocking finding.
         self.illness = "Fieber"
         self.guard = PlanGuardService(
@@ -101,7 +112,20 @@ class PlanGuardWriteTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             db.execute("INSERT INTO synthetic_writes VALUES (?)", (name,))
         self.manager.after_commit(lambda: self.published.append(name))
-        self.units = self.write_units if self.write_units is not None else hard_pair()
+        written = self.write_units if self.write_units is not None else hard_pair()
+        # Run and ride units carry the focus a Coach write now has to name.
+        self.units = [
+            {
+                **unit,
+                "session_focus": "threshold" if plan_checks.is_hard(unit) else "easy",
+                **_easy_run_cap(unit),
+            }
+            if self.default_focus
+            and planned_sport_environment(unit)[0] in {Sport.RUN, Sport.RIDE}
+            and "session_focus" not in unit
+            else unit
+            for unit in written
+        ]
         self.seen_arguments = arguments
         return {"ok": True, "status": "applied"}
 
@@ -438,11 +462,107 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.run_tool("apply_training_changes")
         self.assertEqual(1, self.stored())
 
+    def test_coach_run_and_ride_units_need_a_session_focus(self) -> None:
+        self.illness = ""
+        self.default_focus = False
+        run = {
+            "local_id": "r",
+            "date": "2026-11-04",
+            "sport": "run",
+            "name": "Lockerer Lauf",
+            "planned_duration_s": 2700,
+        }
+        cases = {
+            "new run": ([], [run]),
+            "moved run": ([run], [{**run, "date": "2026-11-07"}]),
+            "new ride": ([], [{**run, "local_id": "b", "sport": "ride"}]),
+            "blank focus": ([], [{**run, "session_focus": " "}]),
+        }
+        for label, (before, after) in cases.items():
+            with self.subTest(label):
+                self.units, self.write_units = list(before), after
+                with self.assertRaises(PlanCheckError) as raised:
+                    # Data, not a training deviation: it can never be accepted.
+                    self.run_tool(
+                        "apply_training_changes", accept_plan_findings=["illness_hard"]
+                    )
+                self.assertEqual(
+                    ["focus_missing"],
+                    [item["code"] for item in raised.exception.findings],
+                )
+                self.assertIn("session_focus", raised.exception.findings[0]["message"])
+                self.assertEqual(0, self.stored())
+        # With a focus the write saves; an untouched older unit without one and a
+        # sport without a focus vocabulary do not block an unrelated write.
+        swim = {**run, "local_id": "w", "sport": "swim"}
+        self.units, self.write_units = (
+            [run],
+            [
+                run,
+                swim,
+                {
+                    **run,
+                    "local_id": "c",
+                    "session_focus": "easy",
+                    "hr_cap": effective_caps(None)["easy"],
+                },
+            ],
+        )
+        self.run_tool("apply_training_changes")
+        self.assertEqual(1, self.stored())
+
+    def test_waived_codes_neither_block_nor_report(self) -> None:
+        self.illness = ""
+        self.units = [
+            {
+                "local_id": "r",
+                "date": "2026-11-07",
+                "sport": "run",
+                "name": "Lockerer Lauf",
+                "planned_duration_s": 2700,
+            }
+        ]
+        with self.assertRaises(PlanCheckError):
+            self.guard.verify([], [])
+        self.assertEqual([], self.guard.verify([], [], waived=("focus_missing",)))
+
     def test_unchecked_tools_skip_the_guard(self) -> None:
         self.guard = Mock()
         self.run_tool("save_checkin")
         self.guard.findings.assert_not_called()
         self.assertEqual(1, self.stored())
+
+
+class AllDayEventsBriefTests(unittest.TestCase):
+    def test_all_day_events_are_listed_per_date_and_trimmed_last_day_first(self):
+        events = [
+            {
+                "name": "Reise",
+                "all_day": True,
+                "start_local": "2026-11-04T00:00:00",
+                "end_local": "2026-11-05T00:00:00",
+                "no_training": True,
+            },
+            {
+                "name": "Timed",
+                "start_local": "2026-11-04T09:00:00",
+                "end_local": "2026-11-04T10:00:00",
+            },
+        ]
+        listed = calendar_load.all_day_brief(events, TODAY, 7)
+        self.assertEqual(["2026-11-04"], list(listed))
+        self.assertEqual("Reise", listed["2026-11-04"][0]["name"])
+        self.assertTrue(listed["2026-11-04"][0]["no_training"])
+        brief = build_planning_brief(
+            progress={},
+            completed=[],
+            competitions=[],
+            training_model="pyramidal",
+            today=TODAY,
+            all_day_events=listed,
+        )
+        self.assertEqual(listed, brief["all_day_events"])
+        self.assertIn("never subtracted", brief["all_day_events_source"])
 
 
 class LastTestsTests(unittest.TestCase):

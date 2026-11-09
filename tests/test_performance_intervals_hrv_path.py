@@ -30,14 +30,6 @@ def _wellness_rows(count: int, *, with_sdnn: bool = True) -> list[dict[str, Any]
     return rows
 
 
-def _intervals_hrv_baselines(context: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {
-        row["measurement"]: row
-        for row in context["personal_recovery"]["baselines"]
-        if row["source"] == "Intervals.icu" and row["metric"] == "hrv"
-    }
-
-
 class IntervalsHrvPathTests(unittest.TestCase):
     def _context(
         self, rows: list[dict[str, Any]]
@@ -59,27 +51,6 @@ class IntervalsHrvPathTests(unittest.TestCase):
         )
         return snapshot, context
 
-    def test_rmssd_and_sdnn_form_separate_intervals_baselines(self) -> None:
-        snapshot, context = self._context(_wellness_rows(20))
-
-        baselines = _intervals_hrv_baselines(context)
-        self.assertEqual({"RMSSD", "SDNN"}, set(baselines))
-        for measurement in ("RMSSD", "SDNN"):
-            with self.subTest(measurement=measurement):
-                self.assertEqual("provisional", baselines[measurement]["status"])
-                self.assertEqual(19, baselines[measurement]["nights"])
-                self.assertEqual("ms", baselines[measurement]["unit"])
-
-        rmssd_values = {
-            point["date"]: point["value"] for point in baselines["RMSSD"]["history"]
-        }
-        sdnn_values = {
-            point["date"]: point["value"] for point in baselines["SDNN"]["history"]
-        }
-        for row in snapshot["recent_wellness"]:
-            self.assertEqual(row["hrv"], rmssd_values[row["id"]])
-            self.assertEqual(row["hrvSDNN"], sdnn_values[row["id"]])
-
     def test_hrv_sdnn_survives_compaction_and_unrelated_fields_do_not(self) -> None:
         snapshot, _ = self._context(_wellness_rows(20))
 
@@ -88,14 +59,6 @@ class IntervalsHrvPathTests(unittest.TestCase):
         self.assertEqual(55 + 19 % 4, latest["hrvSDNN"])
         self.assertEqual(40 + 19 % 5, latest["hrv"])
         self.assertNotIn("unrelatedField", latest)
-
-    def test_rows_with_only_rmssd_produce_no_sdnn_series(self) -> None:
-        snapshot, context = self._context(_wellness_rows(20, with_sdnn=False))
-
-        self.assertNotIn("hrvSDNN", snapshot["recent_wellness"][-1])
-        baselines = _intervals_hrv_baselines(context)
-        self.assertEqual({"RMSSD"}, set(baselines))
-        self.assertEqual("provisional", baselines["RMSSD"]["status"])
 
 
 if __name__ == "__main__":

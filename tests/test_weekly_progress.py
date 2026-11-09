@@ -38,7 +38,6 @@ class WeeklyProgressTests(unittest.TestCase):
 
     def _service(self, rows=(), plan=None, records=(), feedback=None):
         return TrainingReportReadService(
-            read_synced_at=lambda _db: None,
             read_plan=lambda: plan,
             read_checkins=list,
             read_feedback=lambda keys: [],

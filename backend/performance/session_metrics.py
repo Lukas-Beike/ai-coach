@@ -31,6 +31,7 @@ from backend.canonical.records import fingerprint_inputs
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance.session_analysis import METHOD as ANALYSIS_METHOD
 from backend.performance.session_analysis import aerobic_analysis
+from backend.providers.source_labels import SESSION_SOURCES_LABEL
 
 METHOD_ID: Final = "local-session-metrics"
 # v2: grade-adjusted Pa:HR of outdoor runs (#1770).
@@ -214,7 +215,7 @@ def _decoupling(
 ) -> tuple[float, dict[str, Any]] | None:
     if activity is None:
         return None
-    result = aerobic_analysis(dict(activity), source_label="")
+    result = aerobic_analysis(dict(activity), source_label=SESSION_SOURCES_LABEL)
     if result.get("status") != "ok":
         return None
     return float(result["drift_percent"]), {

@@ -11,6 +11,12 @@
 
 globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets, plannedPushTargetLabel, plannedGarminBlockedText });
 
+// One explicit plan_push job for one entry, carrying the hash it was shown with.
+async function runPlanPush(provider, entryId, payloadHash) {
+  const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entryId, expected_payload_hash: payloadHash }] } }) });
+  return globalThis.waitForSyncJob(job.id);
+}
+
 // What one successful push delivered: Garmin gets the structured workout,
 // Intervals.icu gets strength only as a calendar note.
 function plannedPushTargetLabel(provider, entry, ids = {}) {
@@ -539,12 +545,25 @@ function focusChipSpec(entry) {
   return { kind: derived ? "focus-derived" : "focus", text: [derived ? "≈" : null, label, intensity].filter(Boolean).join(" "), derived };
 }
 
+const HR_CAP_SOURCE_LABELS = { default: "Standard", measured: "gemessen" };
+
+function hrCapChipSpec(entry) {
+  const percent = Number(entry?.hr_cap?.percent_lthr);
+  const source = HR_CAP_SOURCE_LABELS[entry?.hr_cap?.source];
+  if (!Number.isFinite(percent) || !source) return null;
+  const high = entry?.hr_cap_bpm?.high;
+  const bpm = typeof high === "number" ? high : Number.NaN;
+  const parts = [`≤ ${percent} % LSHF`, Number.isFinite(bpm) ? `${bpm} bpm` : null, source];
+  return { kind: "focus", text: parts.filter(Boolean).join(" · "), derived: false };
+}
+
 function appendFocusChip(root, entry) {
   const chip = focusChipSpec(entry);
-  if (!chip) return;
-  const row = calendarBadgeRow([chip]);
-  row.dataset.focusChip = chip.derived ? "derived" : "set";
-  if (chip.derived) row.firstElementChild.setAttribute("aria-label", `${chip.text} (abgeleitet)`);
+  const cap = hrCapChipSpec(entry);
+  if (!chip && !cap) return;
+  const row = calendarBadgeRow([chip, cap].filter(Boolean));
+  row.dataset.focusChip = chip?.derived ? "derived" : "set";
+  if (chip?.derived) row.firstElementChild.setAttribute("aria-label", `${chip.text} (abgeleitet)`);
   root.append(row);
 }
 
@@ -687,14 +706,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   function renderExternalCalendar(data) {
     const calendar = data.external_calendar || {};
-    const status = $("#externalCalendarConnectionStatus");
     const syncButton = $("#externalCalendarSyncButton");
-    if (status) {
-      if (!calendar.configured) status.textContent = "Nicht konfiguriert";
-      else if (calendar.last_error) status.textContent = "Fehler bei letzter Aktualisierung";
-      else status.textContent = "Konfiguriert · nur lesend";
-      status.className = calendar.configured && !calendar.last_error ? "configured" : "not-configured";
-    }
+    setConnectionChip("#externalCalendarConnectionStatus", connectionKind({ configured: calendar.configured, error: Boolean(calendar.last_error) }));
+    const detail = $("#externalCalendarConnectionDetail");
+    if (detail) detail.textContent = calendar.last_error ? "Fehler bei letzter Aktualisierung · nur lesend" : "Nur lesen · Termine erscheinen im Tab „Kalender“ als Zeit- und Erholungssignal";
     if (syncButton) {
       syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
       syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";
@@ -951,7 +966,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const left = 54 - Math.max(0, item.value) / top * 50;
     const right = 54 - Math.max(0, item.end_value) / top * 50;
     const zone = Number.isInteger(item.zone) && item.zone >= 1 && item.zone <= 7 ? item.zone : "unknown";
-    return analysisSvg("polygon", { points: `${x},54 ${x},${left} ${x + width},${right} ${x + width},54`, "data-zone": zone });
+    // A hairline gap keeps neighbouring intervals apart without hiding a short one.
+    const gap = Math.min(0.6, width / 4);
+    const start = x + gap / 2, end = x + width - gap / 2;
+    return analysisSvg("polygon", { points: `${start},54 ${start},${left} ${end},${right} ${end},54`, "data-zone": zone });
   }
 
   function plannedFocusForm(entry) {
@@ -1030,8 +1048,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const reached = [];
       for (const provider of targets) {
         try {
-          const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }] } }) });
-          const done = await globalThis.waitForSyncJob(job.id);
+          const done = await runPlanPush(provider, entry.local_id, entry.payload_hash);
           if (done.status === "completed") reached.push(plannedPushTargetLabel(provider, entry, ids));
           else failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
         } catch (error) {
@@ -1144,9 +1161,12 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
     const title = actual?.name || entry.name || "Trainingseinheit";
+    // The sport line carries the chips and, only for a unit still to send, a compact sync button.
     cardSummary.append(plannedSessionHeader(entry, actual, title, (line) => {
       appendPlannedEntryStatus(line, entry, status, restDayLabel, dateKey, todayKey, weekHasPlan);
       appendFocusChip(line, entry);
+      const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
+      if (syncButton) line.append(syncButton);
     }), meta);
     appendPlannedExecution(cardSummary, entry, status);
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
@@ -1156,8 +1176,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const garminBlocked = plannedGarminBlocked(entry, dateKey, todayKey, actual);
     if (garminBlocked) cardSummary.append(garminBlocked);
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
-    const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
-    if (syncButton) cardSummary.append(syncButton);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
     const metrics = plannedSessionMetrics(entry, actual);
@@ -1396,6 +1414,47 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
   }
 
+  // Wahoo state of an exported library workout. A changed one offers the
+  // explicit send; the job carries the payload hash the server returned, so a
+  // workout edited meanwhile is refused instead of pushed.
+  function libraryWahooRow(workout) {
+    const wahoo = workout.wahoo_state;
+    if (!wahoo?.state || !workout.id) return null;
+    const changed = wahoo.state === "changed";
+    const row = document.createElement("div");
+    row.className = "library-wahoo";
+    const label = document.createElement("span");
+    label.className = `library-wahoo-state is-${changed ? "changed" : "synced"}`;
+    label.textContent = changed ? "Wahoo: geändert" : "Wahoo: synchron";
+    row.append(label);
+    if (!changed || !wahoo.payload_hash) return row;
+    state.librarySyncInFlight ||= new Set();
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button library-wahoo-send";
+    button.textContent = "Erneut senden";
+    button.setAttribute("aria-label", `${workout.name || "Einheit"} an Wahoo senden`);
+    button.disabled = state.librarySyncInFlight.has(workout.id);
+    button.addEventListener("click", async () => {
+      if (state.librarySyncInFlight.has(workout.id)) return;
+      state.librarySyncInFlight.add(workout.id);
+      button.disabled = true;
+      let failure = "";
+      try {
+        const done = await runPlanPush(providerIds().wahoo, workout.id, wahoo.payload_hash);
+        if (done.status !== "completed") failure = globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen";
+      } catch (error) {
+        failure = error.message;
+      }
+      state.librarySyncInFlight.delete(workout.id);
+      globalThis.toast?.(failure || "An Wahoo gesendet", Boolean(failure));
+      button.disabled = false;
+      await globalThis.load?.();
+    });
+    row.append(button);
+    return row;
+  }
+
   function renderLibrary(workouts) {
     const root = $("#library");
     if (!root) return;
@@ -1427,7 +1486,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
         const summary = document.createElement("summary");
         const title = document.createElement("strong");
         title.textContent = sport;
-        summary.append(title);
+        summary.append(title, Object.assign(document.createElement("span"), { textContent: `${sportWorkouts.length} Einheit${sportWorkouts.length === 1 ? "" : "en"}` }));
         section.append(summary);
         const cards = document.createElement("div");
         cards.className = "library-sport-cards";
@@ -1443,6 +1502,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
           const description = document.createElement("p");
           description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
           card.append(heading, description);
+          const wahoo = libraryWahooRow(workout);
+          if (wahoo) card.append(wahoo);
           cards.append(card);
         });
         section.append(cards);

@@ -1,7 +1,6 @@
 """Coach context domain sections: legacy aliases, source blocks, budgets and labels."""
 
 import unittest
-from dataclasses import replace
 from datetime import date
 from unittest.mock import Mock, patch
 
@@ -19,8 +18,6 @@ from backend.coach.context_selection import (
 )
 from backend.coach.read_tools import CoachReadToolService
 from backend.coach.tool_schemas import build_structured_tool_schemas
-from backend.performance.canonical_current import NO_CURRENT_INPUTS
-from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.providers.source_labels import SourceView, provider_label
 from tests import test_coach_structured_context as context_tests
 
@@ -161,14 +158,9 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
         reader = CoachPerformanceContextReader(
             Mock(), Mock(), projection_service, lambda: TODAY
         )
-        # Canonical reads (#1416): the coverage's Intervals.icu sync time, here of
-        # a sync without athlete-record observations, turns the Garmin
-        # performance fallback off; a stored snapshot does not.
-        synced = replace(EMPTY_PERFORMANCE_INPUTS, intervals_synced_at=SYNCED_AT)
-        self.assertEqual(synced.current, NO_CURRENT_INPUTS)
-        result = reader.recovery(synced)
+        result = reader.recovery()
         projection_service.coach_context.assert_called_once_with(
-            include_performance=False
+            include_performance=True
         )
         self.assertEqual(next(iter(result)), "source")
         self.assertEqual(
@@ -202,9 +194,11 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
     def test_source_policy_texts_are_built_from_labels(self):
         fixture = _populated_fixture()
         policy = fixture.service.build()["source_policy"]
-        self.assertIn(_label(ProviderId.INTERVALS), policy["activities"])
+        self.assertIn(_label(ProviderId.GARMIN), policy["activities"])
+        self.assertIn(_label(ProviderId.WAHOO), policy["activities"])
         self.assertIn(_label(ProviderId.GARMIN), policy["recovery"])
-        self.assertIn(_label(ProviderId.INTERVALS), policy["current_performance"])
+        for text in policy.values():
+            self.assertNotIn("Intervals", text)
         self.assertEqual(
             policy["durable_profile"],
             "Vom Athleten bestätigte Werte, lokal in SQLite gespeichert",

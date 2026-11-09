@@ -221,11 +221,17 @@ class ChangeHistoryTests(unittest.TestCase):
             {
                 change_history.audit_hash(value),
                 change_history.audit_hash(legacy),
+                # Released rows also carried the empty retired weekly plan.
+                change_history.audit_hash({**value, "weekly_plan": ""}),
+                change_history.audit_hash({**legacy, "weekly_plan": ""}),
             },
         )
         self.assertEqual(
             change_history.accepted_audit_hashes("profile", legacy),
-            {change_history.audit_hash(legacy)},
+            {
+                change_history.audit_hash(legacy),
+                change_history.audit_hash({**legacy, "weekly_plan": ""}),
+            },
         )
         self.assertEqual(
             change_history.accepted_audit_hashes("competition", value),
@@ -243,30 +249,34 @@ class ChangeHistoryTests(unittest.TestCase):
             "training_preferences_strength": "",
             "training_preferences_mobility": "",
             "training_model": "pyramidal",
-            "weekly_plan": "",
         }
-        before_weekly_plan = {
-            key: item for key, item in value.items() if key != "weekly_plan"
-        }
+        # Rows of released versions carried the empty retired weekly plan.
+        released = {**value, "weekly_plan": ""}
         before_training_model = {
-            key: item
-            for key, item in before_weekly_plan.items()
-            if key != "training_model"
+            key: item for key, item in value.items() if key != "training_model"
         }
         before_sport_preferences = {
             "name": "Ada",
             "sleep_target_hours": "7.5",
             "fueling_tolerance": "gel",
         }
-        self.assertEqual(
-            change_history.accepted_audit_hashes("profile", value),
-            {
-                change_history.audit_hash(value),
-                change_history.audit_hash(before_weekly_plan),
-                change_history.audit_hash(before_training_model),
-                change_history.audit_hash(before_sport_preferences),
-                change_history.audit_hash({"name": "Ada"}),
-            },
+        accepted = change_history.accepted_audit_hashes("profile", value)
+        for generation in (
+            value,
+            released,
+            before_training_model,
+            {**before_training_model, "weekly_plan": ""},
+            before_sport_preferences,
+            {"name": "Ada"},
+        ):
+            with self.subTest(generation=sorted(generation)):
+                self.assertIn(change_history.audit_hash(generation), accepted)
+        # A retired plan with content never matches the current projection.
+        self.assertNotIn(
+            change_history.audit_hash({**value, "weekly_plan": "{}"}), accepted
+        )
+        self.assertNotIn(
+            "weekly_plan", change_history.audit_projection_fields("profile")
         )
 
     def test_preferred_sources_are_audited_and_older_rows_stay_matchable(self):

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend import change_history
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import RemoteEntityKind, Sport
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, AppError
@@ -264,6 +265,12 @@ class WorkoutLibraryService:
                 "description": workout.get("description") or "",
                 "duration_minutes": duration,
                 "target": workout.get("target") or "AUTO",
+                # The focus and structure the Coach wrote stay with the template.
+                **{
+                    key: workout[key]
+                    for key in FOCUS_KEYS
+                    if workout.get(key) is not None
+                },
                 "source": "coach",
             }
         )
@@ -291,11 +298,11 @@ class WorkoutLibraryService:
             params.extend(cursor)
         return db.execute(
             "WITH templates AS ("
-            "SELECT id, payload, lower(COALESCE(json_extract(payload, '$.sport'), '')) AS sport_key, "
+            "SELECT id, local_id, payload, lower(COALESCE(json_extract(payload, '$.sport'), '')) AS sport_key, "
             "lower(COALESCE(json_extract(payload, '$.name'), '')) AS name_key "
             "FROM workout_library WHERE json_valid(payload) AND json_type(payload)='object' "
             "AND json_extract(payload, '$.date') IS NULL AND COALESCE(json_extract(payload, '$.archived'), 0)=0) "
-            f"SELECT id, payload, sport_key, name_key FROM templates {after_clause} "
+            f"SELECT id, local_id, payload, sport_key, name_key FROM templates {after_clause} "
             "ORDER BY sport_key, name_key, id LIMIT ?",
             (*params, limit),
         ).fetchall()

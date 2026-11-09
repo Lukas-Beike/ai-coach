@@ -57,6 +57,8 @@ class PublicBootstrapDependencies:
     provider_state_service: Callable[[], Any]
     provider_registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
     provider_credentials: Callable[[], Any] | None = None
+    # Stale-threshold warning for the status strip; null in the bootstrap when none.
+    threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None
 
 
 class PublicBootstrapService:
@@ -141,7 +143,7 @@ class PublicBootstrapService:
                 },
                 "activity_feedback": {
                     "recent": [],
-                    "scope": "Only athlete-entered notes, session RPE and deviation reasons about completed activities; this feedback is separate from daily check-ins and provider values.",
+                    "scope": "Only athlete-entered notes, session RPE, deviation reasons and the session purpose marking about completed activities; a marking wins over the provider event type and the race hint; this feedback is separate from daily check-ins and provider values.",
                 },
                 "planning": deps.planning_state(
                     deps.competition_service().list(),
@@ -262,6 +264,8 @@ class PublicBootstrapService:
                 ),
                 "usage": deps.provider_state_service().summary("openai"),
             }
+            # Always present, so a cleared warning also clears on a client that merges bootstraps.
+            state["threshold_warnings"] = deps.threshold_warnings() or None
             return neutral_calendar_state(state)
 
 

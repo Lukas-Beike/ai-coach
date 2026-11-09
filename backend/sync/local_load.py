@@ -278,7 +278,7 @@ SEX_ASSUMED_LABEL: Final = "Geschlecht nicht gesetzt, männliche Konstanten ange
 
 # Providers whose completed jobs can change a session or a threshold.
 LOAD_INPUT_PROVIDERS: Final = frozenset(
-    {ProviderId.INTERVALS.value, ProviderId.GARMIN.value, ProviderId.WAHOO.value}
+    {ProviderId.GARMIN.value, ProviderId.WAHOO.value}
 )
 
 

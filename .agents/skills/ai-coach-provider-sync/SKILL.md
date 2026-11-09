@@ -1,6 +1,6 @@
 ---
 name: ai-coach-provider-sync
-description: Implement or review provider field mappings, synchronization, cursors, reconciliation, provenance, and freshness in Pacecraft. Use for Intervals.icu, Garmin, calendar, weather, or other provider changes; use ai-coach-debugging first for an unexplained failure and ai-coach-pr-ci for hosted checks.
+description: Implement or review provider field mappings, synchronization, cursors, reconciliation, provenance, and freshness in Pacecraft. Use for Garmin, Wahoo, Intervals.icu export, calendar, weather, or other provider changes; use ai-coach-debugging first for an unexplained failure and ai-coach-pr-ci for hosted checks.
 ---
 
 # Provider and synchronization changes

@@ -12,6 +12,7 @@ snapshots. All storage is mocked and every provider payload is synthetic.
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
@@ -21,10 +22,12 @@ from canonical_recovery_support import (
     NoActivityRows,
     SnapshotActivityRows,
 )
+from intervals_plan_stub import project_intervals_snapshot
 from performance_day_support import snapshot_metrics
 
 from backend.canonical.records import FORM_METHOD, FORM_METHOD_VERSION, Observation
 from backend.canonical.vocabulary import MetricKind, SourceKind
+from backend.performance.canonical_body import CanonicalBodyInputs
 from backend.performance.canonical_current import NO_CURRENT_INPUTS
 from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
@@ -34,7 +37,6 @@ from backend.performance.canonical_inputs import (
 from backend.performance.chart_history import analysis_history
 from backend.performance.context import current_performance_context
 from backend.performance.freshness import GarminSyncStatus
-from backend.providers.snapshot_projection import project_intervals_snapshot
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 DAY = date(2026, 9, 20)
@@ -88,7 +90,12 @@ def _inputs(
 def _context(
     snapshot: dict[str, Any], carrier: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    canonical = _inputs(snapshot, carrier)
+    # A Garmin weight makes the context available, so the absent Intervals.icu
+    # load values show as unknown instead of the context being unavailable.
+    canonical = replace(
+        _inputs(snapshot, carrier),
+        body=CanonicalBodyInputs(garmin_weight_kg={DAY: 70.0}, garmin_body_fat_pct={}),
+    )
     return current_performance_context(
         GarminSyncStatus.from_state({}),
         {},
@@ -98,7 +105,6 @@ def _context(
 
 
 def _row(day: str, **fields: Any) -> dict[str, Any]:
-    # The stored weight makes each row a body-history day, so the inputs exist.
     return {"id": day, "weight": 70, **fields}
 
 
@@ -133,7 +139,14 @@ class FormTests(unittest.TestCase):
 
     def test_the_inputs_hold_no_load_or_form(self) -> None:
         inputs = _inputs(_snapshot([_row(_day(), ctl=50, atl=60, tsb=3)]))
-        for name in ("wellness_day", "ctl", "atl", "form_by_day", "wellness_days"):
+        for name in (
+            "wellness_day",
+            "ctl",
+            "atl",
+            "form_by_day",
+            "wellness_days",
+            "history_wellness_days",
+        ):
             self.assertFalse(hasattr(inputs, name), name)
 
     def test_intervals_form_never_feeds_the_current_load_or_comparison(

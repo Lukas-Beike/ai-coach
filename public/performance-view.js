@@ -284,6 +284,9 @@ function performanceDataStatus(performance) {
   return typeof performance?.status === "string" && performance.status ? [performance.status] : [];
 }
 
+// Device-computed estimates; thresholds are entered or device-reported values and carry no chip.
+const ESTIMATED_METRICS = new Set(["running_vo2max_ml_kg_min", "cycling_vo2max_ml_kg_min"]);
+
 function renderCurrentPerformance(metrics, history, status = []) {
   metrics = currentPerformanceValues(metrics, history);
   const root = document.getElementById("currentPerformance");
@@ -295,13 +298,13 @@ function renderCurrentPerformance(metrics, history, status = []) {
       ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
       ["run_threshold_watts", "Schwellenleistung"],
       ["run_threshold_hr_bpm", "Schwellen-Herzfrequenz"],
-      ["running_vo2max_ml_kg_min", "VO\u2082max \u00b7 Sch\u00e4tzung"],
+      ["running_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
     ["Radfahren", [
       ["cycling_ftp_watts", "FTP"],
       ["cycling_w_per_kg", "Leistung pro Gewicht"],
       ["bike_threshold_hr_bpm", "Schwellen-Herzfrequenz"],
-      ["cycling_vo2max_ml_kg_min", "VO\u2082max \u00b7 Sch\u00e4tzung"],
+      ["cycling_vo2max_ml_kg_min", "VO\u2082max"],
     ]],
   ];
   const grid = reportNode("div", null, "current-performance-groups");
@@ -314,6 +317,7 @@ function renderCurrentPerformance(metrics, history, status = []) {
       if (metric?.value == null) continue;
       const row = reportNode("tr"); row.dataset.metric = key;
       const heading = reportNode("th", label); heading.scope = "row";
+      if (ESTIMATED_METRICS.has(key)) heading.append(" ", createEstimateChip());
       row.append(heading, reportNode("td", analysisValue(metric.value, metric.unit || "")));
       body.append(row);
     }
@@ -343,7 +347,9 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   renderCurrentPerformance(values, performance?.history, performanceDataStatus(performance));
   const predictions = racePredictionRows(values);
   root.hidden = false;
-  root.append(reportNode("h4", "Laufprognosen"));
+  const predictionHeading = reportNode("h4", "Laufprognosen");
+  predictionHeading.append(" ", createEstimateChip());
+  root.append(predictionHeading);
   root.dataset.analysisEmpty = String(!predictions.length);
   if (!predictions.length) {
     root.append(reportNode("p", racePredictionEmptyReason(values), "muted"));
@@ -359,7 +365,7 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
     for (const { label, metric } of predictions) {
       const row = reportNode("tr");
       const distance = reportNode("th", label); distance.scope = "row";
-      row.append(distance, reportNode("td", formatDuration(metric.value)));
+      row.append(distance, reportNode("td", predictionTime(metric.value)));
       body.append(row);
     }
     table.append(body);
@@ -367,6 +373,13 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
     scroll.append(table); root.append(scroll);
   }
   renderAnalysisSegments(state.route);
+}
+
+// Model estimates are shown in whole minutes: "25 min", "3:55 h".
+function predictionTime(seconds) {
+  const minutes = Math.round(Number(seconds) / 60);
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} h`;
 }
 
 function racePredictionRows(metrics) {

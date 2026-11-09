@@ -1,8 +1,8 @@
 # Coach tool execution coverage
 
-This matrix covers the 41 tools currently offered to the conversational Coach.
-It builds on the profile/sync fix in `ebbe311`. It measures execution through
-`chat_with_coach`, not the accuracy of a language model's interpretation.
+This matrix covers the 54 tools currently offered to the conversational Coach.
+It measures execution through `chat_with_coach`, not the accuracy of a language
+model's interpretation.
 
 `tests/test_coach_tool_coverage.py` uses scripted model responses and disposable
 athlete state. Successful scenarios run the real request validator, dispatcher,
@@ -79,14 +79,14 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 ## Failure and conversation coverage
 
 - **Every write tool carrying `_request`:** `test_every_mutating_tool_rejects_missing_user_authorization_without_effect` drives the real chat loop with missing provenance and compares all affected athlete tables before/after. Clarification and cancellation have their distinct dialogue-only contracts.
-- **Invalid values, missing references, atomic rejection:** `test_invalid_arguments_and_missing_objects_do_not_partially_write` covers 20 tool-specific cases, including a template batch whose first valid item must roll back when a later item fails. Parameterless operations use authorization checks rather than invented invalid-field cases.
+- **Invalid values, missing references, atomic rejection:** `test_invalid_arguments_and_missing_objects_do_not_partially_write` covers the tool-specific cases, including a template batch whose first valid item must roll back when a later item fails. Parameterless operations use authorization checks rather than invented invalid-field cases.
 - **Wrong scope, stale profile fields, hashes and revisions:** the existing `test_coach_dialogue.py` regressions remain active, including `test_different_target_id_cannot_escape_action_scope`, `test_profile_patch_conflict_is_atomic_and_can_be_repaired`, `test_selected_sync_validates_hash_before_changing_state`, `test_failed_local_step_blocks_following_all_pending_push` and `test_stale_hash_rolls_back_whole_patch`.
 - **Plan correction and explicit follow-up sync:** `test_friday_correction_retry_and_sync_keep_sunday_unchanged` replaces Friday strength with an easy run, rejects an obsolete revision, rereads current state, applies once despite repeated calls/replayed turns, preserves Sunday, and queues only the selected unit on a later sync request.
-- **Short follow-up:** `test_short_answer_completes_persisted_clarification_after_an_intervening_read` resolves ?Die zweite? against a saved clarification and preserves the unselected unit.
+- **Short follow-up:** `test_short_answer_completes_persisted_clarification_after_an_intervening_read` resolves "Die zweite." against a saved clarification and preserves the unselected unit.
 - **Permanent facts:** `test_permanent_profile_acceptance_reads_and_preserves_existing_facts` accepts a visible proposal, reads the profile and appends information without losing existing fields or queuing remote writes.
 - **Advice, negation and cancellation:** scripted advice/negation leaves athlete state unchanged; cancellation clears only the pending request. Assistant/nonexistent message IDs cannot supply user provenance.
 - **Adaptive approval:** self-approval in the preview-generating turn is rejected; a later acceptance applies local changes, while illness sync additionally requires explicit Intervals authorization. A stale preview preserves an intervening workout edit.
-- **Read-only previews:** undo and duplicate inspection return previews without applying undo or deleting provider records. Existing API tests cover the separate explicit confirmation/execution paths.
+- **Read-only previews:** undo returns a bound preview without applying it (`test_undo_is_a_bound_preview_until_explicit_confirmation`). Existing API tests cover the separate explicit confirmation/execution paths.
 
 ## Defect found by the new conversation scenario
 
@@ -117,18 +117,15 @@ python -m unittest discover -s tests -v
 python -m compileall -q server.py backend tests
 ```
 
-The repository's standard discovery and CI sharding include the new module. The
-shared `DialogueHarness` is not a `TestCase`, so reusing it does not duplicate the
-55 existing dialogue tests.
+The repository's standard discovery and CI sharding include the module. The
+shared `DialogueHarness` (`tests/test_coach_dialogue.py`) is not a `TestCase`, so
+reusing it does not duplicate the dialogue tests.
 
 ## Validation results
 
-- 26 new tests pass, including 54 declared successful tool variants across all
-  33 tools, 20 invalid-argument/reference cases and missing-provenance checks
-  for every write tool carrying `_request`.
-- Together with the 55 existing dialogue tests, this provides 81 execution and
-  conversation tests. These are not 81 live language-model evaluations.
-- Full Python 3.13 suite: 599 tests, successful, 12 skipped.
-- Full Python 3.14/SQLCipher suite in an isolated container with networking
-  disabled and source mounted read-only: 599 tests, successful, 9 skipped.
-- Syntax compilation, Git whitespace checks and the Docker image build pass.
+- `tests/test_coach_tool_coverage.py` runs 43 tests (`python -m unittest
+  tests.test_coach_tool_coverage` passes), including declared successful tool
+  variants for every tool in `OWNER_TOOLS`, invalid-argument/reference cases and
+  missing-provenance checks for every write tool carrying `_request`.
+- These are execution and conversation tests, not live language-model
+  evaluations.

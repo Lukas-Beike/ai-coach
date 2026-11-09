@@ -12,6 +12,12 @@ feedback.
 New feedback is stored under the live local session id. Rows stored under a
 provider record id of the session are still found, by the group of their
 session or, without one, by the record ids of the session (``for_activity_ids``).
+
+The athlete's ``purpose`` marking (training, race, commute, warm-up, cool-down)
+lives on the same rows, so it shares their receipts, undo and merge groups. It is
+read from the effective row; a change sets every row of the group, so a hidden
+row never brings back an older marking. ``session_purpose_marks`` serves the
+markings to the activity summaries.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from backend.activities.activity_reference import (
     NoActivityReferences,
 )
 from backend.activities.activity_summary import stored_activity_key
+from backend.canonical.vocabulary import ActivityPurpose
 from backend.db import canonical_store
 from backend.errors import AppError
 
@@ -44,8 +51,10 @@ _STORED_FIELDS: Final = (
     "provider",
     "session_id",
     "session_rpe_rated_at",
+    "purpose",
 )
-FEEDBACK_CONTENT_FIELDS: Final = ("notes", "session_rpe", "deviation_reason")
+FEEDBACK_CONTENT_FIELDS: Final = ("notes", "session_rpe", "deviation_reason", "purpose")
+PURPOSES: Final = frozenset(purpose.value for purpose in ActivityPurpose)
 _PUBLIC_FIELDS: Final = (
     "activity_id",
     "activity_name",
@@ -56,6 +65,7 @@ _PUBLIC_FIELDS: Final = (
     "created_at",
     "updated_at",
     "session_rpe_rated_at",
+    "purpose",
 )
 
 ACTIVITY_FEEDBACK_TEXT_LIMITS = {
@@ -95,7 +105,17 @@ def normalize_activity_feedback(activity_id: Any, value: Any) -> dict[str, Any]:
         normalized["deviation_reason"] = str(
             value.get("deviation_reason") or ""
         ).strip()[:500]
+    if "purpose" in value:
+        normalized["purpose"] = _normalize_purpose(value["purpose"])
     return normalized
+
+
+def _normalize_purpose(purpose: Any) -> str | None:
+    if purpose in (None, ""):
+        return None
+    if isinstance(purpose, str) and purpose in PURPOSES:
+        return purpose
+    raise AppError(400, "Die Art der Einheit ist unbekannt.")
 
 
 def _activity_id(activity: Any) -> Any:
@@ -113,6 +133,64 @@ def _feedback_key(activity: Any) -> Any:
     if not isinstance(activity, dict):
         return None
     return stored_activity_key(activity) or _activity_id(activity)
+
+
+def _feedback_groups(
+    db: Any, rows: builtins.list[dict[str, Any]]
+) -> dict[tuple[str, str], builtins.list[dict[str, Any]]]:
+    """Group stored rows by the session they belong to.
+
+    Rows saved before sessions were stored sit under a record id: the id joins
+    its session only when exactly one record carries it.
+    """
+    attached = canonical_store.feedback_origin_sessions(
+        db,
+        [
+            (str(row["activity_id"]), row.get("provider"))
+            for row in rows
+            if not row.get("session_id")
+        ],
+    )
+    effective = canonical_store.effective_session_ids(
+        db,
+        [
+            str(row.get("session_id") or attached.get(str(row["activity_id"])))
+            for row in rows
+            if row.get("session_id") or str(row["activity_id"]) in attached
+        ],
+    )
+    groups: dict[tuple[str, str], builtins.list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(_group_key(row, effective, attached), []).append(row)
+    return groups
+
+
+def session_purpose_marks(db: Any) -> dict[str, str]:
+    """The athlete's purpose marking per live session id; unmarked sessions are absent.
+
+    A session group takes the marking of its effective row. Feedback that stands
+    alone, because its session is unknown or ambiguous, marks nothing.
+    """
+    if (
+        db.execute(
+            "SELECT 1 FROM activity_feedback WHERE purpose IS NOT NULL"
+        ).fetchone()
+        is None
+    ):
+        return {}
+    rows = [
+        dict(row)
+        for row in db.execute(
+            "SELECT activity_id, provider, session_id, updated_at, purpose "
+            "FROM activity_feedback"
+        )
+    ]
+    marks: dict[str, str] = {}
+    for key, group in _feedback_groups(db, rows).items():
+        purpose = _ordered(group, key)[0].get("purpose")
+        if key[0] == "session" and purpose:
+            marks[key[1]] = str(purpose)
+    return marks
 
 
 def _group_key(
@@ -146,11 +224,13 @@ def _audit_value(group: builtins.list[dict[str, Any]] | None) -> dict[str, Any] 
 
 
 def _audit_row(row: dict[str, Any]) -> dict[str, Any]:
-    """One stored row; an unknown rating time is left out, as rows recorded
-    before schema version 18 have no such field and keep their audit hash."""
+    """One stored row; an unknown rating time or no marking is left out, as rows
+    recorded before schema versions 18 and 23 have no such fields and keep their
+    audit hash."""
     recorded = {field: row.get(field) for field in _STORED_FIELDS}
-    if recorded["session_rpe_rated_at"] is None:
-        del recorded["session_rpe_rated_at"]
+    for optional in ("session_rpe_rated_at", "purpose"):
+        if recorded[optional] is None:
+            del recorded[optional]
     return recorded
 
 
@@ -189,9 +269,20 @@ def _keep_omitted_fields(
         "activity_date",
         "session_rpe",
         "deviation_reason",
+        "purpose",
     ):
         if field not in value and field in existing:
             feedback[field] = existing[field]
+
+
+def _require_session_for_marking(value: Any, group_key: tuple[str, str]) -> None:
+    """A marking needs the one session the activity leads to."""
+    if value.get("purpose") not in (None, "") and group_key[0] != "session":
+        raise AppError(
+            409,
+            "Die Aktivität lässt sich keiner Einheit eindeutig zuordnen; "
+            "die Art der Einheit kann nicht markiert werden.",
+        )
 
 
 def _is_cleared(feedback: dict[str, Any]) -> bool:
@@ -199,6 +290,7 @@ def _is_cleared(feedback: dict[str, Any]) -> bool:
         not feedback["notes"]
         and feedback.get("session_rpe") is None
         and not feedback.get("deviation_reason")
+        and feedback.get("purpose") is None
     )
 
 
@@ -220,6 +312,9 @@ def _effective_view(
 ) -> dict[str, Any]:
     chosen, *hidden = _ordered(group, key)
     view = {field: chosen.get(field) for field in _PUBLIC_FIELDS}
+    if view["purpose"] is None:
+        # An unmarked session keeps the view of rows written before schema v23.
+        del view["purpose"]
     conflicts = [
         {"activity_id": row["activity_id"], "updated_at": row["updated_at"]}
         for row in hidden
@@ -319,29 +414,23 @@ class ActivityFeedbackService:
         return found
 
     def _groups(self, db: Any) -> dict[tuple[str, str], builtins.list[dict[str, Any]]]:
-        rows = self._feedback_repository.all(db)
-        # Rows saved before sessions were stored sit under a record id: the id
-        # joins its session only when exactly one record carries it.
-        attached = canonical_store.feedback_origin_sessions(
-            db,
-            [
-                (str(row["activity_id"]), row.get("provider"))
-                for row in rows
-                if not row.get("session_id")
-            ],
-        )
-        effective = canonical_store.effective_session_ids(
-            db,
-            [
-                str(row.get("session_id") or attached.get(str(row["activity_id"])))
-                for row in rows
-                if row.get("session_id") or str(row["activity_id"]) in attached
-            ],
-        )
-        groups: dict[tuple[str, str], builtins.list[dict[str, Any]]] = {}
-        for row in rows:
-            groups.setdefault(_group_key(row, effective, attached), []).append(row)
-        return groups
+        return _feedback_groups(db, self._feedback_repository.all(db))
+
+    def _apply_marking_to_group(
+        self,
+        db: Any,
+        group: builtins.list[dict[str, Any]],
+        written: set[Any],
+        feedback: dict[str, Any],
+    ) -> None:
+        """One marking applies to the whole group, not to the shown row only."""
+        for row in group:
+            if row["activity_id"] not in written and row.get("purpose") != feedback.get(
+                "purpose"
+            ):
+                self._feedback_repository.set_purpose(
+                    db, row["activity_id"], feedback.get("purpose")
+                )
 
     def save(self, activity_id: Any, value: Any) -> dict[str, Any]:
         return self._save(self._references.resolve_reference(activity_id), value)
@@ -360,6 +449,7 @@ class ActivityFeedbackService:
             ).get(key)
             groups = self._groups(db)
             group_key = _save_group_key(db, key, origin, groups)
+            _require_session_for_marking(value, group_key)
             group = groups.get(group_key) or []
             if len(group) >= change_history.MAX_FEEDBACK_GROUP_ROWS:
                 raise AppError(
@@ -396,6 +486,12 @@ class ActivityFeedbackService:
                 feedback,
                 provider=reference.provider if own_row else None,
                 session_id=origin if own_row else None,
+            )
+            self._apply_marking_to_group(
+                db,
+                group,
+                {feedback["activity_id"], existing.get("activity_id")},
+                feedback,
             )
             after_groups = self._groups(db)
             saved_key = _group_containing(
@@ -506,6 +602,7 @@ class ActivityFeedbackService:
             not normalized["notes"]
             and normalized.get("session_rpe") is None
             and not normalized.get("deviation_reason")
+            and "purpose" not in normalized
         ):
             raise AppError(400, "Die Rückmeldung darf nicht leer sein.")
         with self._database_manager.reader() as db:
@@ -520,7 +617,7 @@ class ActivityFeedbackService:
     def context(self) -> dict[str, Any]:
         return {
             "recent": self.list(),
-            "scope": "Only athlete-entered notes, session RPE and deviation reasons about completed activities; this feedback is separate from daily check-ins and provider values.",
+            "scope": "Only athlete-entered notes, session RPE, deviation reasons and the session purpose marking about completed activities; a marking wins over the provider event type and the race hint; this feedback is separate from daily check-ins and provider values.",
         }
 
     def attach_to_activities(self, activities: Any) -> builtins.list[dict[str, Any]]:

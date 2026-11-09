@@ -236,6 +236,33 @@ class CssDesignTokenTests(unittest.TestCase):
                         _contrast_ratio(foreground, background), 4.5
                     )
 
+    def test_training_focus_percentages_use_neutral_text_in_both_themes(self):
+        declarations = _declarations(CSS_PATH.read_text(encoding="utf-8"))
+        # The zone colour sits on the swatch and the bar; the number stays neutral.
+        coloured = [
+            selector
+            for selector, name, _ in declarations
+            if name == "color"
+            and ".training-focus-legend" in selector
+            and "strong" in selector
+        ]
+        self.assertEqual(coloured, [])
+        tokens = {}
+        for theme in (":root", ':root[data-theme="light"]'):
+            tokens.update(
+                {
+                    name: value
+                    for selector, name, value in declarations
+                    if selector == theme
+                }
+            )
+            page = _colour(tokens, "--bg", (255, 255, 255))
+            surface = _colour(tokens, "--surface", page)
+            with self.subTest(theme=theme):
+                self.assertGreaterEqual(
+                    _contrast_ratio(_colour(tokens, "--ink", surface), surface), 4.5
+                )
+
     def test_stylesheet_uses_semantic_tokens_and_documented_status_roles(self):
         css = CSS_PATH.read_text(encoding="utf-8")
         self.assertNotIn("--palette-color-", css)

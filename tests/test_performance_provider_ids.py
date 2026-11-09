@@ -5,7 +5,6 @@ from datetime import date
 
 from canonical_recovery_support import mapped_personal_recovery
 from performance_day_support import (
-    days_from_rows,
     garmin_body_from_payload,
     garmin_metrics_from_payload,
     snapshot_metrics,
@@ -74,19 +73,15 @@ class ProviderIdPayloadTests(unittest.TestCase):
         self.assertEqual(result["preferred_providers"]["cycling_ftp_watts"], "garmin")
 
     def test_body_history_series_and_policy_carry_provider_ids(self):
-        snapshot = {
-            "synced_at": "2026-10-11T06:00:00Z",
-            "recent_wellness": [{"id": "2026-10-10", "weight": 80, "bodyFat": 15}],
-        }
         garmin = {
+            "weight": [{"date": "2026-10-10", "weightKg": 80, "bodyFat": 15}],
             "performance_history": [
                 {"date": "2026-10-10", "metrics": {"cycling_ftp_watts": 250}}
-            ]
+            ],
         }
         result = body_history(
             GarminSyncStatus.from_state(garmin),
             TODAY,
-            wellness_days=days_from_rows(snapshot["recent_wellness"]),
             canonical=garmin_body_from_payload(garmin, TODAY),
             garmin_ftp=garmin_metrics_from_payload(garmin).performance_history[
                 "cycling_ftp_watts"
@@ -94,12 +89,13 @@ class ProviderIdPayloadTests(unittest.TestCase):
         )
         metrics = result["windows"]["14d"]["metrics"]
 
-        weight = metrics["weight_kg"][0]
-        self.assertEqual(weight["source"], "Intervals.icu Wellness")
-        self.assertEqual(weight["source_provider"], "intervals")
-        body_fat = metrics["body_fat_pct"][0]
-        self.assertEqual(body_fat["source_provider"], "intervals")
-        self.assertEqual(metrics["body_fat_pct"][1]["source_provider"], "garmin")
+        self.assertEqual(
+            [item["source_provider"] for item in metrics["weight_kg"]], ["garmin"]
+        )
+        self.assertEqual(metrics["weight_kg"][0]["source"], "Garmin Connect")
+        self.assertEqual(
+            [item["source_provider"] for item in metrics["body_fat_pct"]], ["garmin"]
+        )
 
         ftp_series = {
             item["source_provider"]: item for item in metrics["cycling_w_per_kg"]
@@ -113,7 +109,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
             if item["date"] == "2026-10-10"
         )
         self.assertEqual(point["value"], 3.125)
-        self.assertEqual(point["weight_source"], "Intervals.icu Wellness")
+        self.assertEqual(point["weight_source"], "Garmin Connect")
         self.assertEqual(result["preferred_providers"]["weight_kg"], "garmin")
 
     def test_current_metrics_carry_provider_ids_and_manual_values_have_none(self):
@@ -162,10 +158,10 @@ class ProviderIdPayloadTests(unittest.TestCase):
         )
 
         for baseline in result["baselines"]:
-            self.assertEqual(baseline["source"], "Intervals.icu")
-            self.assertEqual(baseline["source_provider"], "intervals")
+            self.assertEqual(baseline["source"], "Garmin Connect")
+            self.assertEqual(baseline["source_provider"], "garmin")
         self.assertEqual(result["preferred_providers"]["hrv"], "garmin")
-        self.assertEqual(result["sleep_deficits"][0]["source"], "Intervals.icu")
+        self.assertEqual(result["sleep_deficits"][0]["source"], "Garmin Connect")
 
     def test_coach_projection_keeps_recovery_contract_with_additive_provider_ids(self):
         # backend/coach/context.py is unchanged (owned by U10); the projection
@@ -179,8 +175,8 @@ class ProviderIdPayloadTests(unittest.TestCase):
             "personal_recovery"
         ]
 
-        self.assertEqual(projected["baselines"][0]["source"], "Intervals.icu")
-        self.assertEqual(projected["baselines"][0]["source_provider"], "intervals")
+        self.assertEqual(projected["baselines"][0]["source"], "Garmin Connect")
+        self.assertEqual(projected["baselines"][0]["source_provider"], "garmin")
         self.assertIn("preferred_providers", projected)
         self.assertNotIn("history", projected["baselines"][0])
 

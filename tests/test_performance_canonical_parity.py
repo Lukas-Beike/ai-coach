@@ -28,6 +28,8 @@ from canonical_read_support import (
     populate,
     store_garmin,
 )
+from canonical_recovery_support import NoActivityRows
+from intervals_plan_stub import project_intervals_snapshot
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
@@ -56,7 +58,6 @@ from backend.performance.canonical_recovery import (
 from backend.performance.chart_history import analysis_history
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
-from backend.providers.snapshot_projection import project_intervals_snapshot
 from backend.runtime.ports import ObservationReader
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
@@ -179,11 +180,12 @@ def _assert_load_inputs(
 ) -> None:
     """The inputs hold no Intervals.icu load; the rest is extra."""
     case.assertEqual(
-        replace(
-            _present(inputs), current=NO_CURRENT_INPUTS, history_wellness_days=None
-        ),
+        replace(_present(inputs), current=NO_CURRENT_INPUTS),
         CanonicalPerformanceInputs(
-            recovery=_NO_RECOVERY, garmin=GarminCanonicalMetrics(), daily_health={}
+            recovery=_NO_RECOVERY,
+            activities=(),
+            garmin=GarminCanonicalMetrics(),
+            daily_health={},
         ),
     )
 
@@ -253,7 +255,9 @@ class CanonicalInputEdgeTests(unittest.TestCase):
             {"id": PARITY_DAY, "ctl": 50, "atl": 60, "tsb": -10},
         ]
         reader = StubObservationReader(_observations(_snapshot(rows)))
-        inputs = read_performance_inputs(reader, "db", as_of=PARITY_TODAY)
+        inputs = read_performance_inputs(
+            reader, "db", activity_reader=NoActivityRows(), as_of=PARITY_TODAY
+        )
         kinds = [kind for kind, _start, _end in reader.calls]
         # Each kind is read once and unbounded.
         self.assertEqual(len(kinds), len(set(kinds)))
@@ -273,20 +277,6 @@ class CanonicalInputEdgeTests(unittest.TestCase):
             read_performance_inputs(StubObservationReader(), "db", as_of=PARITY_TODAY)
         )
 
-    def test_stored_body_history_days_remain_the_history_only(self) -> None:
-        source = _snapshot([{"id": PARITY_DAY, "weight": 71.5, "ctl": 50, "atl": 60}])
-        inputs = read_performance_inputs(
-            StubObservationReader(_observations(source)), "db", as_of=PARITY_TODAY
-        )
-        self.assertEqual(
-            [
-                day.day.isoformat()
-                for day in _present(inputs).history_wellness_days or ()
-            ],
-            [PARITY_DAY],
-        )
-        self.assertEqual(_present(inputs).current, NO_CURRENT_INPUTS)
-
     def test_empty_performance_inputs_stand_for_no_canonical_values(self) -> None:
         self.assertEqual(EMPTY_PERFORMANCE_INPUTS, CanonicalPerformanceInputs())
         self.assertIsNone(EMPTY_PERFORMANCE_INPUTS.recovery)
@@ -301,6 +291,7 @@ class CanonicalWiringTests(unittest.TestCase):
         source = CanonicalPerformanceSource(
             database_manager=lambda: manager,
             observation_reader=lambda: reader,
+            activity_summaries=lambda: NoActivityRows(),
         )
         service = _service(source)
         with patch(
@@ -312,7 +303,9 @@ class CanonicalWiringTests(unittest.TestCase):
         self.assertEqual(reader.db_seen, ["db"] * _UNIT_READS)
         _assert_load_inputs(self, project.call_args.kwargs["canonical"])
 
-    def test_public_performance_keeps_the_legacy_call_without_wellness(self) -> None:
+    def test_public_performance_keeps_the_legacy_call_without_an_activity_reader(
+        self,
+    ) -> None:
         manager = RecordingManager()
         reader = StubObservationReader()
         source = CanonicalPerformanceSource(
@@ -334,8 +327,7 @@ class CanonicalWiringTests(unittest.TestCase):
             session_feedback=None,
         )
         self.assertEqual(manager.events, ["enter", "exit"])
-        # Only the unbounded wellness reads happen; no windowed read follows.
-        self.assertEqual({(s, e) for _k, s, e in reader.calls}, {(None, None)})
+        self.assertEqual(reader.calls, [])
 
     def test_public_performance_without_a_source_uses_no_unit_of_work(self) -> None:
         service = _service(None)
@@ -364,6 +356,7 @@ class CanonicalWiringTests(unittest.TestCase):
             canonical=CanonicalPerformanceSource(
                 database_manager=lambda: manager,
                 observation_reader=lambda: reader,
+                activity_summaries=lambda: NoActivityRows(),
             ),
         )
         canonical, _ = service._performance_inputs(PARITY_TODAY)
@@ -427,6 +420,7 @@ class CanonicalWiringTests(unittest.TestCase):
             CanonicalPerformanceSource(
                 database_manager=lambda: manager,
                 observation_reader=lambda: reader,
+                activity_summaries=lambda: NoActivityRows(),
             ),
         )
 
@@ -472,6 +466,7 @@ class CanonicalWiringTests(unittest.TestCase):
             CanonicalPerformanceSource(
                 database_manager=lambda: manager,
                 observation_reader=lambda: reader,
+                activity_summaries=lambda: NoActivityRows(),
             ),
         )
         prelude = _prelude(snapshot, manager, service.canonical_inputs).read(True)
@@ -588,6 +583,7 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         source = CanonicalPerformanceSource(
             database_manager=lambda: self.manager,
             observation_reader=lambda: counting,
+            activity_summaries=lambda: NoActivityRows(),
         )
         legacy = _service(None, self.garmin).performance_state()
         canonical = _service(source, self.garmin).performance_state()
@@ -604,6 +600,7 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         source = CanonicalPerformanceSource(
             database_manager=lambda: self.manager,
             observation_reader=lambda: selector,
+            activity_summaries=lambda: NoActivityRows(),
         )
         with patch.object(
             selector, "_read_state", wraps=selector._read_state
@@ -715,7 +712,6 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
         self.assertTrue(served["performance"]["available"])
         self.assertNotIn("reason", served["performance"])
         self.assertTrue(self._coach_performance(source)["available"])
-
 
     def test_activity_detail_inputs_carry_the_read_state(self) -> None:
         source = self._source()

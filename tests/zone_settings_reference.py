@@ -15,6 +15,11 @@ from datetime import UTC, date, datetime
 from itertools import pairwise
 from typing import Any
 
+from intervals_wellness_stub import (
+    map_intervals_athlete_thresholds,
+)
+from intervals_zone_stub import map_intervals_zone_configurations
+
 from backend.activities.zone_settings import (
     HR_ZONE_LIMITS,
     PACE_ZONE_LIMITS,
@@ -25,10 +30,6 @@ from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation
 from backend.canonical.sports import classify_sport_text
 from backend.canonical.vocabulary import Environment, MetricKind, Sport
-from backend.providers.intervals_wellness_mapping import (
-    map_intervals_athlete_thresholds,
-)
-from backend.providers.intervals_zone_mapping import map_intervals_zone_configurations
 
 RETRIEVED_AT = datetime(2026, 10, 11, 6, tzinfo=UTC)
 _MIN_ZONES = 3
@@ -46,14 +47,22 @@ def _number(value: Any) -> float | None:
     )
 
 
-def _limits(value: Any, divisor: float = 1.0) -> tuple[float, ...] | None:
-    """The ascending zone limits of an Intervals.icu zone list, or None."""
+def _limits(value: Any, threshold: float | None = None) -> tuple[float, ...] | None:
+    """The ascending zone limits of an Intervals.icu zone list, or None.
+
+    With a ``threshold`` the limits are percent of it, in the operation order of
+    the zone lookup (``value / threshold * 100``), so a value on a limit stays on it.
+    """
     if not isinstance(value, list) or not _MIN_ZONES <= len(value) <= _MAX_ZONES:
         return None
     numbers = [_number(item) for item in value[:-1]]
     if any(item is None for item in numbers):
         return None
-    limits = tuple(item / divisor for item in numbers if item is not None)
+    limits = tuple(
+        item if threshold is None else item / threshold * 100
+        for item in numbers
+        if item is not None
+    )
     ascending = all(left < right for left, right in pairwise(limits))
     return limits if ascending else None
 
@@ -64,7 +73,7 @@ def _from_setting(setting: dict[str, Any], environment: Environment) -> ZoneSett
     ftp = (_number(setting.get("indoor_ftp")) if indoor else None) or _number(
         setting.get("ftp")
     )
-    hr_limits = _limits(setting.get("hr_zones"), lthr / 100) if lthr else None
+    hr_limits = _limits(setting.get("hr_zones"), lthr) if lthr else None
     return ZoneSettings(
         ftp=ftp,
         lthr=lthr,

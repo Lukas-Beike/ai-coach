@@ -21,7 +21,7 @@ from backend.sync.metric_export import automatic_export_message
 
 _LOGGER = logging.getLogger("intervals_coach")
 # Wahoo jobs that read the athlete's FTP; a workout upload changes no threshold.
-_WAHOO_READ_JOBS: Final = frozenset({"refresh", "performance_refresh"})
+_WAHOO_READ_JOBS: Final = frozenset({"refresh"})
 DEFAULT_DELAY_SECONDS: Final = 5.0
 
 

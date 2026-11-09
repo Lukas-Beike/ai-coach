@@ -7,7 +7,6 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
-from backend.activities.sync_time import intervals_synced_at
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.diagnostics.readiness_probe import ReadinessProbeService
 from backend.http_api.analysis import AnalysisRoutes
@@ -217,6 +216,9 @@ class HttpAthleteServices:
 class HttpHistoryServices:
     change_history: Callable[[], Any]
     undo: Callable[[], Any]
+    session_focus_backfill_undo: Callable[[], Callable[[], dict[str, Any]]] | None = (
+        None
+    )
 
 
 @dataclass(frozen=True)
@@ -277,6 +279,8 @@ class HttpReadRouteServices:
     diagnostics: HttpDiagnosticsServices
     workout_library: Callable[[], Any]
     planned_unit: Callable[[], Any]
+    # Read-only Wahoo state of exported library workouts; absent without Wahoo.
+    wahoo_library_state: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -313,12 +317,6 @@ def _profile_text(profile_service: Any, key: str) -> str:
     return str(profile_service().get().get(key) or "")
 
 
-def _report_synced_at(canonical: Any, db: Any) -> str | None:
-    """The Intervals.icu sync time of the canonical coverage, for reports and season."""
-    coverage = None if canonical.coverage is None else canonical.coverage()
-    return intervals_synced_at(coverage, db)
-
-
 class HttpApiAssembly:
     """Own eager HTTP route composition and lazy request-handler creation."""
 
@@ -344,6 +342,7 @@ class HttpApiAssembly:
         history = dependencies.reads.history
         diagnostics = dependencies.reads.diagnostics
         workout_library = dependencies.reads.workout_library
+        self._wahoo_library_state = dependencies.reads.wahoo_library_state
         planned_unit_service = dependencies.reads.planned_unit
         privacy = dependencies.domains.privacy
         sync = dependencies.domains.sync
@@ -498,7 +497,6 @@ class HttpApiAssembly:
 
         def training_report_services() -> TrainingReportServices:
             canonical = public.canonical_performance_source()
-            report_synced_at = partial(_report_synced_at, canonical)
             records = TrainingRecordsService(
                 database_manager=database_manager(),
                 read_equipment=lambda: (
@@ -518,7 +516,6 @@ class HttpApiAssembly:
                 local_today, canonical=canonical, curves=power_curves
             )
             report_read = TrainingReportReadService(
-                read_synced_at=report_synced_at,
                 read_plan=report_plan,
                 read_checkins=report_checkins,
                 read_feedback=report_feedback,
@@ -548,7 +545,6 @@ class HttpApiAssembly:
                     canonical=canonical,
                 ),
                 season=TrainingSeasonReadService(
-                    read_synced_at=report_synced_at,
                     read_competitions=lambda: competition_service().list(100),
                     read_observations=records.observations,
                     today=local_today,
@@ -575,6 +571,7 @@ class HttpApiAssembly:
                 database_manager, database_lock(), history_undo_service
             ),
             session_rpe_load,
+            history.session_focus_backfill_undo,
         )
         self.coach_actions_post_routes = CoachActionsPostRoutes(
             proposal_confirmation_service,
@@ -779,7 +776,12 @@ class HttpApiAssembly:
         )
 
     def library_page_service(self) -> LibraryPageService:
-        return LibraryPageService(self._database_manager(), self._workout_library())
+        wahoo = self._wahoo_library_state
+        return LibraryPageService(
+            self._database_manager(),
+            self._workout_library(),
+            wahoo_states=(lambda rows: wahoo().states(rows)) if wahoo else None,
+        )
 
     def chat_history_page_service(self) -> ChatHistoryPageService:
         return ChatHistoryPageService(

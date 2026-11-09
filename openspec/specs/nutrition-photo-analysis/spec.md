@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe bounded packaging-label extraction and nutrition-related image intake at application revision `b8c911c9dda83a7920171916ace32681c0c38ba0`. A label extraction is a review candidate, not a durable product or meal. The product and consumption contracts are in `food-catalog-and-meal-library` and `nutrition-diary-and-targets`; general Coach attachment delivery and UI behavior are in `web-pwa-and-accessibility`. Evidence is inspected source and tests unless execution is explicitly recorded in the handoff.
+Describe bounded packaging-label extraction and nutrition-related image intake re-validated against application revision `d1beefd77`. A label extraction is a review candidate, not a durable product or meal. The product and consumption contracts are in `food-catalog-and-meal-library` and `nutrition-diary-and-targets`; general Coach attachment delivery and UI behavior are in `web-pwa-and-accessibility`. Evidence is inspected source and tests unless execution is explicitly recorded in the handoff.
 
 ## Requirements
 

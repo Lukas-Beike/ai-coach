@@ -281,57 +281,42 @@ function discardUnsavedChanges() {
 const SETUP_BANNER_DISMISSED_KEY = "intervalsCoachSetupBannerDismissed";
 
 
-function setupBannerDismissed() {
+function intervalsHintDismissed() {
   // Session-only: dismissal must not persist beyond the browser session.
   try { return sessionStorage.getItem(SETUP_BANNER_DISMISSED_KEY) === "1"; } catch { return false; }
 }
 
 
-function dismissSetupBanner() {
+function dismissIntervalsHint() {
   try { sessionStorage.setItem(SETUP_BANNER_DISMISSED_KEY, "1"); } catch { }
-  const banner = $("#setupBanner");
-  if (banner) banner.hidden = true;
-}
-
-
-function renderSetupBanner(missing) {
-  const banner = $("#setupBanner");
-  if (!banner) return;
-  banner.hidden = !missing.length || setupBannerDismissed();
-  const detail = $("#setupBannerDetail");
-  if (detail) detail.textContent = `${missing.join(" und ")} ${missing.length > 1 ? "fehlen" : "fehlt"}`;
+  updateStatusSources({ intervals_key: null });
 }
 
 
 function renderStatus(data) {
   const configured = data.configured;
   const morning = data.morning_checkin || {};
-  const missing = [];
-  // The OpenAI key is read from the server environment only; the Intervals.icu key can be entered in the app.
-  if (!configured.openai) missing.push("OpenAI-API-Schlüssel (Server)");
-  if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
-  // The setup state is shown by the page-wide setup banner on every tab, so the
-  // status card only reports runtime problems.
-  renderSetupBanner(missing);
   const openaiStatus = data.usage?.status || {};
   const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
-  const statusCard = $("#statusCard");
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
-  const hasProblem = Boolean(error);
-  statusCard.hidden = !hasProblem || activePanel === "settingsPanel";
-  statusCard.classList.toggle("warning", hasProblem);
-  let statusTitle = "Coach ist bereit";
-  let statusDetail = "Bereit für deine nächste Frage";
-  if (error) {
-    statusTitle = "Coach benötigt Aufmerksamkeit";
-    statusDetail = error;
-  } else if (morning.status === "ready") {
-    statusDetail = `Morgen-Check-in abgeschlossen: ${dateLabel(morning.date)}`;
-  }
-  if ($("#statusTitle").textContent !== statusTitle) $("#statusTitle").textContent = statusTitle;
-  if ($("#statusDetail").textContent !== statusDetail) $("#statusDetail").textContent = statusDetail;
-  statusCard.classList.remove("working");
+  const connections = { href: "#more/connections", label: "Anbindungen" };
+  // The OpenAI key is read from the server environment only. Intervals.icu only
+  // receives workouts, so its missing key is the slimmest line; more important
+  // notices replace it. The Mehr tab shows its problems on the cards themselves.
+  updateStatusSources({
+    loading: null,
+    load_failure: null,
+    openai: configured.openai ? null : { level: "critical", title: "OpenAI-API-Schlüssel (Server) fehlt", action: connections },
+    coach_error: error && activePanel !== "settingsPanel" ? { level: "critical", title: "Coach benötigt Aufmerksamkeit", detail: error } : null,
+    thresholds: thresholdStatusItem(data.threshold_warnings),
+    intervals_key: configured.intervals || intervalsHintDismissed() ? null : {
+      level: "info",
+      title: "Intervals.icu-API-Schlüssel fehlt",
+      action: { href: "#more/connections", label: "Jetzt einrichten" },
+      dismiss: dismissIntervalsHint,
+    },
+  });
 }
 
 

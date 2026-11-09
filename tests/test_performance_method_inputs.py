@@ -218,9 +218,14 @@ class M1SessionRpeInputs(linking.LinkingCase):
         session = self._sessions()[linking.INTERVALS_ID]["activity_id"]
         self.assertEqual(self._stored_feedback(session)[0]["session_rpe"], 5)
         with self.manager.reader() as db:
-            payloads = canonical_store.active_activity_payload_texts(
-                db, provider=INTERVALS, record_kind=ACTIVITY_RECORD_KIND
-            )
+            payloads = [
+                row["payload"]
+                for row in db.execute(
+                    "SELECT payload FROM provider_records WHERE provider = ? "
+                    "AND record_kind = ? AND state = 'active'",
+                    (INTERVALS, ACTIVITY_RECORD_KIND),
+                )
+            ]
             columns = [
                 row["name"] for row in db.execute("PRAGMA table_info(activity_records)")
             ]
@@ -287,14 +292,14 @@ def _baseline(
 
 
 class M2HrvRestingHrInputs(unittest.TestCase):
-    """Personal quartiles of Intervals.icu and Garmin HRV and resting HR."""
+    """Personal quartiles of Garmin HRV and resting HR."""
 
     def test_complete(self) -> None:
         result = mapped_personal_recovery(
             _wellness(28, hrv=60, restingHR=40), {}, {}, TODAY
         )
-        hrv = _baseline(result, "hrv", INTERVALS, "RMSSD")
-        resting = _baseline(result, "resting_hr", INTERVALS)
+        hrv = _baseline(result, "hrv", GARMIN, "RMSSD")
+        resting = _baseline(result, "resting_hr", GARMIN)
         self.assertEqual(
             (hrv["status"], hrv["nights"], hrv["position"]), ("ok", 28, "above")
         )
@@ -313,11 +318,11 @@ class M2HrvRestingHrInputs(unittest.TestCase):
         ):
             for metric in ("hrv", "resting_hr"):
                 with self.subTest(reason=reason, metric=metric):
-                    baseline = _baseline(result, metric, INTERVALS)
+                    baseline = _baseline(result, metric, GARMIN)
                     self.assertEqual(baseline["status"], "insufficient_data")
                     self.assertEqual(baseline["reason"], reason)
                     self.assertNotIn("position", baseline)
-        self.assertEqual(_baseline(short, "hrv", INTERVALS)["nights"], 13)
+        self.assertEqual(_baseline(short, "hrv", GARMIN)["nights"], 13)
 
         implausible = mapped_personal_recovery(
             [{"id": TODAY.isoformat(), "hrv": 0, "restingHR": 19}], {}, {}, TODAY
@@ -332,22 +337,21 @@ class M2HrvRestingHrInputs(unittest.TestCase):
                 for index, row in enumerate(wellness)
             ]
         }
-        result = mapped_personal_recovery(wellness, garmin, {}, TODAY)
-        rmssd = _baseline(result, "hrv", INTERVALS, "RMSSD")
-        sdnn = _baseline(result, "hrv", INTERVALS, "SDNN")
-        garmin_hrv = _baseline(result, "hrv", GARMIN)
-        self.assertEqual(
-            (rmssd["value"], sdnn["value"], garmin_hrv["value"]), (60.0, 45.0, 30.0)
+        # Intervals.icu rows beside Garmin HRV give no baseline of their own.
+        result = personal_recovery(
+            {}, TODAY, canonical=mapped_recovery_inputs(garmin, wellness)
         )
-        self.assertEqual([item["status"] for item in (rmssd, garmin_hrv)], ["ok", "ok"])
-        self.assertEqual(sdnn["status"], "insufficient_data")
+        garmin_hrv = _baseline(result, "hrv", GARMIN)
+        self.assertEqual((garmin_hrv["value"], garmin_hrv["status"]), (30.0, "ok"))
         self.assertEqual(
-            len([item for item in result["baselines"] if item["metric"] == "hrv"]), 3
+            [item["source_provider"] for item in result["baselines"]], [GARMIN]
         )
 
     def test_canonical_resting_hr_is_the_primary_input(self) -> None:
         wellness = _wellness(28, restingHR=45)
-        mapped = mapped_recovery_inputs(None, wellness)
+        mapped = mapped_recovery_inputs(
+            None, wellness, wellness_provider=ProviderId.GARMIN
+        )
         observations = [
             observation
             for kind in RECOVERY_KINDS
@@ -359,7 +363,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
         ]
         observations.append(
             recovery_observation(
-                MetricKind.RESTING_HR, 47.0, TODAY.isoformat(), ProviderId.INTERVALS
+                MetricKind.RESTING_HR, 47.0, TODAY.isoformat(), ProviderId.GARMIN
             )
         )
         canonical = recovery_inputs(observations)
@@ -367,7 +371,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
         served = personal_recovery({}, TODAY, canonical=canonical)
 
         # The raw row says 45; the canonical observation (47) is the input (#1411).
-        self.assertEqual(_baseline(served, "resting_hr", INTERVALS)["value"], 47.0)
+        self.assertEqual(_baseline(served, "resting_hr", GARMIN)["value"], 47.0)
 
     def test_canonical_hrv_is_read_per_provider(self) -> None:
         observation = recovery_observation(
@@ -419,16 +423,13 @@ class M3SleepInputs(unittest.TestCase):
             for index, hour in enumerate(hours)
         ]
         garmin = {"sleep": [_night(offset) for offset in range(29)]}
-        result = mapped_personal_recovery(wellness, garmin, self.profile, TODAY)
-        deficit = next(
-            item
-            for item in result["sleep_deficits"]
-            if item["source"] == "Intervals.icu"
-        )
+        deficits = mapped_personal_recovery(wellness, {}, self.profile, TODAY)
+        (deficit,) = deficits["sleep_deficits"]
         self.assertEqual(
             (deficit["known_nights"], deficit["deficit_hours"], deficit["status"]),
             (7, 8.0, "ok"),
         )
+        result = mapped_personal_recovery([], garmin, self.profile, TODAY)
         series = result["regularity"]["series"][0]
         self.assertEqual(
             (series["status"], series["coverage"]["baseline_nights"]), ("ok", 28)
@@ -483,18 +484,12 @@ class M3SleepInputs(unittest.TestCase):
             {"id": (TODAY - timedelta(days=1)).isoformat(), "sleepSecs": 25 * 3600},
         ]
         garmin = {"sleep": [_night(0, hours=6.0)]}
-        deficits = mapped_personal_recovery(wellness, garmin, self.profile, TODAY)[
-            "sleep_deficits"
-        ]
+        # The Intervals.icu nights beside Garmin's make no deficit of their own.
+        deficits = personal_recovery(
+            self.profile, TODAY, canonical=mapped_recovery_inputs(garmin, wellness)
+        )["sleep_deficits"]
         by_source = {item["source"]: item for item in deficits}
-        self.assertEqual(sorted(by_source), ["Garmin Connect", "Intervals.icu"])
-        self.assertEqual(
-            (
-                by_source["Intervals.icu"]["deficit_hours"],
-                by_source["Intervals.icu"]["known_nights"],
-            ),
-            (1.0, 1),
-        )
+        self.assertEqual(sorted(by_source), ["Garmin Connect"])
         self.assertEqual(by_source["Garmin Connect"]["deficit_hours"], 2.0)
 
         too_long = _night(0)

@@ -24,7 +24,8 @@ Athlete decisions (2026-11-06, comments on #1725):
   method and the local thresholds from the resolver.
 - Provider loads and intensities are never used as the load and are at most
   kept for cross-checking:
-  - Intervals.icu `icu_training_load` and `icu_intensity`;
+  - Intervals.icu `icu_training_load` and `icu_intensity` (no longer ingested,
+    #1728);
   - Wahoo `power_bike_tss_last`;
   - Garmin `activityTrainingLoad`, which is EPOC-based;
   - Garmin `trainingStressScore`/`intensityFactor`, which are not mapped.
@@ -103,9 +104,9 @@ uses only the fourth. The value records which branch gave it
 2. **Pace** (run only, without power):
    `IF = v / v_threshold`, `TSS = hours × IF² × 100`.
    - `v`: Garmin's grade-adjusted average speed (`avgGradeAdjustedSpeed`,
-     m/s), otherwise the average speed. The Garmin key is not mapped yet;
-     #1725 adds it in a new Garmin activity mapper version. Without it the
-     value is marked `pace_basis: average_speed`.
+     m/s, mapped since Garmin activity mapper version 15), otherwise the
+     average speed. Without it the value is marked
+     `pace_basis: average_speed`.
    - `v_threshold`: the resolver's run threshold pace on the day, stored as
      m/s.
 3. **Heart rate** (every sport except strength, yoga and alpine ski, without
@@ -376,7 +377,7 @@ hour, or a mix of branches on one scale.
 | Indoor ride FTP | local indoor power zone of the day, else the ride FTP | product assumption | Athlete decision 2026-11-06 after review; plans also apply local indoor zones. |
 | Threshold after the session | earliest later threshold, flagged | product assumption | Athlete decision 2026-11-06; fills history before the first stored threshold. |
 | Later threshold cap | observed at most 90 days after the session day, else missing | product assumption | A threshold from much later may not describe the athlete at the session; athlete decision 2026-11-08 (v5). |
-| Duration | moving, else elapsed | product assumption | `summary_duration_s` in `backend/canonical/activity_summary.py:117`. |
+| Duration | moving, else elapsed | product assumption | `summary_duration_s` in `backend/canonical/activity_summary.py`. |
 
 ## Allowed statements
 

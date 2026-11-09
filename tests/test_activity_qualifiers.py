@@ -8,6 +8,13 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
+from intervals_activity_stub import (
+    INTERVALS_ACTIVITY_QUALIFIERS,
+    INTERVALS_ACTIVITY_TYPES,
+    intervals_analysis_sport,
+    map_intervals_activities,
+)
+
 from backend.activities.activity_summary import activity_summary
 from backend.activities.session_corrections import _entry
 from backend.canonical.records import ActivityRecord
@@ -19,12 +26,6 @@ from backend.providers.garmin_activity_mapping import (
     GARMIN_ACTIVITY_QUALIFIERS,
     GARMIN_ACTIVITY_TYPES,
     map_garmin_activities,
-)
-from backend.providers.intervals_activity_mapping import (
-    INTERVALS_ACTIVITY_QUALIFIERS,
-    INTERVALS_ACTIVITY_TYPES,
-    intervals_analysis_sport,
-    map_intervals_activities,
 )
 from backend.providers.wahoo_activity_mapping import (
     WAHOO_WORKOUT_QUALIFIERS,

@@ -1,6 +1,7 @@
 # Method inputs, provenance and consumers (gate G1)
 
-Checked 2026-10-24 against `develop` at `3553c1597` for #1425. This page records
+Checked 2026-10-24 against `develop` at `3553c1597` for #1425; source names,
+versions and code references updated 2026-11-08 (#1738). This page records
 where each input of M1–M4 is stored today, how provenance is kept apart, which
 code reads it, and what is missing. Synthetic fixtures for every statement
 below are in `tests/test_performance_method_inputs.py`; a pinned gap there names
@@ -9,7 +10,8 @@ its issue and fails when the gap closes.
 Provenance has three separate parts. Fixtures check them separately:
 
 - **Transport provider:** `Provenance.provider` / the record's `provider`
-  (Intervals.icu, Garmin, Wahoo).
+  (Garmin, Wahoo; Intervals.icu only for rows stored before its ingest was
+  removed, which the one-time #1728 purge deletes).
 - **Recording origin:** `recorded_by` (`RecordingOrigin`, a brand) and, for
   activities, `device_type` (`DeviceType`, a class). A typed measurement
   context (device model, firmware, algorithm, sensor, window, protocol) is
@@ -23,15 +25,15 @@ Provenance has three separate parts. Fixtures check them separately:
 
 | Input | Canonical storage today | Evidence |
 | --- | --- | --- |
-| Elapsed duration | `elapsed_duration_s` in the record details JSON for every provider (Intervals elapsed time, Garmin `duration`, Wahoo `duration_total_accum`, since #1445); `duration_s` stays the provider summary duration and `moving_duration_s` separate. | `backend/providers/intervals_activity_mapping.py:427-446`, `backend/providers/garmin_activity_mapping.py:175-177`, `backend/providers/wahoo_activity_mapping.py:265-273`, `backend/db/canonical_store.py:34` |
+| Elapsed duration | `elapsed_duration_s` in the record details JSON for every provider (Garmin `elapsedDuration`, then `duration`; Wahoo `duration_total_accum`; since #1445); `duration_s` stays the provider summary duration and `moving_duration_s` separate. | `backend/providers/garmin_activity_mapping.py`, `backend/providers/wahoo_activity_mapping.py`, `backend/db/canonical_store.py` (`_ELAPSED_DURATION_KEY`) |
 | Local session RPE | `activity_feedback.session_rpe` (0–10) with `session_id` (#1423) and, since schema v18, `session_rpe_rated_at` | `backend/db/schema.py`, `backend/activities/feedback.py` |
-| Intervals `icu_rpe` | `ActivityRecord.rpe`, stored in the activity record details with provider provenance (#1510, closes #1446); the summary marks disagreeing records with `rpe_conflict` | `backend/providers/intervals_activity_mapping.py`, `backend/db/canonical_store.py`, `backend/activities/activity_summary.py` |
-| One session per ride | `bundle_sessions` groups records; `link_activity_sessions` marks the younger session `duplicate` with `merged_into` | `backend/activities/canonical_sessions.py:97`, `backend/activities/session_linking.py:47` |
+| Provider RPE (Garmin Connect) | `ActivityRecord.rpe`, stored in the activity record details with provider provenance (#1510, closes #1446); the summary marks disagreeing records with `rpe_conflict` | `backend/providers/garmin_activity_mapping.py`, `backend/db/canonical_store.py`, `backend/activities/activity_summary.py` |
+| One session per ride | `bundle_sessions` groups records; `link_activity_sessions` marks the younger session `duplicate` with `merged_into` | `backend/activities/canonical_sessions.py` (`bundle_sessions`), `backend/activities/session_linking.py` (`link_activity_sessions`) |
 
-Consumer trace (method `session-rpe-load-v1`, `backend/performance/session_rpe_load.py`, #1427):
+Consumer trace (method `session-rpe-load` v2, `backend/performance/session_rpe_load.py`, #1427):
 
 - Rating input: `public/activity-details.js` (CR-10 selection) → `POST /api/activities/{id}/feedback`
-  (`backend/http_api/feedback_post.py:24`) → `ActivityFeedbackService`
+  (`backend/http_api/feedback_post.py`) → `ActivityFeedbackService`
   (`backend/activities/feedback.py`).
 - Report: `training_report` carries `session_rpe_load` per session, day, week
   and sport from one summary per canonical session and the session's effective
@@ -42,17 +44,17 @@ Consumer trace (method `session-rpe-load-v1`, `backend/performance/session_rpe_l
   `backend/coach/tool_schemas.py`); `session_rpe_load` in `get_training_report`
   and `get_activity_details`. The planning context projects feedback with notes
   or a session RPE (`FEEDBACK_FIELDS`, `backend/planning/context.py`).
-- `athlete_checkins.session_rpe` (`backend/db/schema.py:1037`) is a daily
+- `athlete_checkins.session_rpe` (`backend/db/schema.py`) is a daily
   check-in value and is not an M1 input.
 
 ## M2 — HRV and resting HR
 
 | Input | Canonical storage today | Evidence |
 | --- | --- | --- |
-| HRV RMSSD | `MetricKind.HRV_RMSSD` from Intervals `hrv` and Garmin last-night HRV | `backend/canonical/vocabulary.py:86` |
-| HRV SDNN | `MetricKind.HRV_SDNN` from Intervals `hrvSDNN` only | `backend/canonical/vocabulary.py:87` |
-| Resting HR | `MetricKind.RESTING_HR` | `backend/canonical/vocabulary.py:85` |
-| Nightly or morning, window | Garmin HRV: `overnight` window in the measurement context; Intervals HRV: not reported | #1418, #1420 |
+| HRV RMSSD | `MetricKind.HRV_RMSSD` from Garmin last-night HRV (and Intervals `hrv` stored earlier) | `backend/canonical/vocabulary.py` (`MetricKind`) |
+| HRV SDNN | `MetricKind.HRV_SDNN` from Intervals `hrvSDNN` stored earlier only | `backend/canonical/vocabulary.py` (`MetricKind`) |
+| Resting HR | `MetricKind.RESTING_HR` | `backend/canonical/vocabulary.py` (`MetricKind`) |
+| Nightly or morning, window | Garmin HRV: `overnight` window in the measurement context; Intervals HRV stored earlier: not reported | #1418, #1420 |
 
 Consumer trace:
 
@@ -64,20 +66,20 @@ Consumer trace:
   builds one series per provider and measurement from the daily canonical
   observations and restarts the comparison at a change of method, aggregation
   or measurement context (#1428); no raw provider row or payload is read.
-- Report/context: `current_performance_context` (`backend/performance/context.py:167`).
-- HTTP: `GET /api/performance` (`backend/http_api/athlete_get.py:51`) and the
-  report services (`backend/http_api/assembly.py:430`).
-- UI: `renderPersonalRecovery` (`public/analysis.js:1192`, called from
-  `public/performance-view.js:311`).
-- Coach: `personal_recovery` projection (`backend/coach/context.py:423-455`).
+- Report/context: `current_performance_context` (`backend/performance/context.py`).
+- HTTP: `GET /api/performance` (`backend/http_api/athlete_get.py`) and the
+  report services (`backend/http_api/assembly.py`).
+- UI: `renderPersonalRecovery` (`public/analysis.js`, called from
+  `public/performance-view.js`).
+- Coach: `personal_recovery` projection (`coach_performance_projection` in `backend/coach/context.py`).
 
 ## M3 — Sleep duration, goal shortfall and timing
 
 | Input | Canonical storage today | Evidence |
 | --- | --- | --- |
-| Sleep duration | `MetricKind.SLEEP_DURATION` (s) from Intervals and Garmin | `backend/canonical/vocabulary.py:88` |
+| Sleep duration | `MetricKind.SLEEP_DURATION` (s) from Garmin (and Intervals stored earlier) | `backend/canonical/vocabulary.py` (`MetricKind`) |
 | Sleep start and end, night kind | canonical `sleep_periods` (schema v15): UTC bounds, ingest zone, wake date, NIGHT or UNKNOWN; naps out of scope | `backend/canonical/domain_records.py`, `backend/providers/sleep_period_mapping.py` |
-| Sleep goal | athlete profile `sleep_target_hours` | `backend/performance/personal_recovery.py:63` |
+| Sleep goal | athlete profile `sleep_target_hours` | `backend/performance/personal_recovery.py` (`_sleep_deficits`) |
 
 Consumer trace:
 
@@ -98,14 +100,14 @@ Consumer trace:
 | Input | Canonical storage today | Evidence |
 | --- | --- | --- |
 | Power, speed, distance, time streams | `activity_detail_sets` (with `resolution`) and `activity_stream_channels` | `backend/db/activity_detail_store.py` |
-| Resolution | Intervals fetch `full`, legacy cache `full` only when marked, Garmin `downsampled`, FIT (Wahoo) `full` | `backend/providers/intervals_activity_detail_mapping.py:195,227-230`, `backend/providers/garmin_activity_detail_mapping.py:207`, `backend/providers/fit_activity_detail_mapping.py:257` |
+| Resolution | Garmin Connect `details` charts `downsampled`; FIT files (Wahoo, and Garmin's original file) `full` | `backend/providers/garmin_activity_detail_mapping.py`, `backend/providers/fit_activity_detail_mapping.py` (`StreamResolution`) |
 | Effort windows | 5–3600 s for cycling including 180, 420 and 720 s; running 60–1200 s including 180, 420 and 720 s | `backend/performance/power_profile.py:POWER_DURATIONS`, `RUNNING_DURATIONS` |
 
-Consumer trace (method `mean-max-curve` version 1, fit `critical-power-speed` version 1):
+Consumer trace (method `mean-max-curve` version 2, fit `critical-power-speed` version 2):
 
 - Per activity: `CanonicalDetailReader.read`
-  (`backend/performance/canonical_detail.py:113`) follows a merged session
-  (`:68`), `merge_details` (`backend/activities/detail_merge.py:126`) prefers a
+  (`backend/performance/canonical_detail.py`) follows a merged session
+  (`read_reference`), `merge_details` (`backend/activities/detail_merge.py`) prefers a
   full-resolution stream set, then `power_profile` runs on the result and is
   labelled `stream_resolution` `full` or `downsampled`.
 - Reports: `SessionCurveReader.curves`
@@ -123,6 +125,18 @@ Consumer trace (method `mean-max-curve` version 1, fit `critical-power-speed` ve
   `critical_power` in the same payload, so the Analysis card line and the
   Coach tool show the same values.
 
+## M5 to M8 — derived local methods
+
+| Method | Inputs | Evidence |
+| --- | --- | --- |
+| M5 | The M1 daily AU of the canonical sessions; provider load and CTL never seed it. | `backend/performance/smoothed_load.py` |
+| M6 | The canonical session summary (power, pace, heart rate, durations) and the thresholds valid on the session's local day; stored as derived observations owned by the session. | `backend/performance/local_tss.py`, `backend/sync/local_load.py` |
+| M7 | The stored M6 loads summed per local day (`daily_local_loads`); computed on read, never stored. | `backend/performance/fitness_fatigue.py`, `backend/sync/local_load.py` |
+| M8 | The session summary and the full-resolution stream sets of the session (the session analysis); stored as derived observations owned by the session. | `backend/performance/session_metrics.py`, `backend/sync/session_metrics.py` |
+
+Their consumers (Coach training report, public performance history, PWA)
+are listed per method in `openspec/specs/performance-and-readiness/spec.md`.
+
 ## Data gaps and persistence needs
 
 | Gap | Method | Kind | Owner |
@@ -135,11 +149,11 @@ Consumer trace (method `mean-max-curve` version 1, fit `critical-power-speed` ve
 | Canonical resting HR only replaces an equal legacy value | M2 | read path | resolved by #1411 |
 | Method, aggregation and window stored; only Garmin HRV populates them | M2, M3 | mapping | #1418 (#1408) |
 | Device model and firmware unknown for Garmin HRV (no measurement-associated evidence) | M2, M3, M4 | mapping | #1420 (#1408) |
-| Timing deviations computed below 14 earlier intervals | M3 | method | resolved by #1429 (`sleep-timing-variability-v2`) |
+| Timing deviations computed below 14 earlier intervals | M3 | method | resolved by #1429 (`sleep-timing-variability-v2`, now v3) |
 | Labels "sleep deficit" and regularity | M3 | wording | resolved by #1426 |
-| No full-resolution filter and no 180/420/720 s windows | M4 | method | resolved by #1430 (`mean-max-curve` v1) |
+| No full-resolution filter and no 180/420/720 s windows | M4 | method | resolved by #1430 (`mean-max-curve` v1, now v2) |
 | Reports read stored analyses with kv fallback | M4 | read path | resolved by #1410 and #1430 |
-| No CP/CS fit | M4 | method | resolved by #1431 (`critical-power-speed` v1, experimental) |
+| No CP/CS fit | M4 | method | resolved by #1431 (`critical-power-speed` v1, experimental; now v2) |
 | No RR/NN stream | M2 | out of scope | #1428 |
 
 The canonical home for `icu_rpe` (#1446) was delivered by #1510, the

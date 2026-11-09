@@ -18,6 +18,7 @@ from unittest.mock import Mock
 from activity_row_support import summaries_of_rows
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 from intervals_compaction import compact_activity_rows
+from intervals_plan_stub import intervals_snapshot_coverage
 
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.context import CoachPerformanceContextReader
@@ -28,10 +29,7 @@ from backend.planning.compact_activities import (
     RECENT_ACTIVITY_LIMIT,
     ActivitySummarySource,
 )
-from backend.sync.canonical_coverage_store import (
-    CanonicalCoverageStore,
-    intervals_snapshot_coverage,
-)
+from backend.sync.canonical_coverage_store import CanonicalCoverageStore
 
 TODAY = date(2026, 10, 13)
 CANONICAL_SECTIONS = ("recent_activities", "recent_wellness", "raw_provider_data")
@@ -185,22 +183,6 @@ class CompactActivityTests(CanonicalContextReadCase):
         source = self._source(make_selector(self))
         with self.manager.unit_of_work() as db:
             self.assertEqual(source.compact(db), source.compact())
-
-
-class ActivityRowLimitTests(CanonicalContextReadCase):
-    def _limited(self, selector: Any, _snapshot: dict[str, Any]) -> tuple[Any, Any]:
-        with self.manager.reader() as db:
-            return (
-                selector.intervals_activity_payloads(db),
-                selector.intervals_activity_payloads(db, limit=1),
-            )
-
-    def test_limit_keeps_the_leading_rows_of_the_tables(self) -> None:
-        pending, (full, limited) = self._pending_and_tables(self._limited)
-
-        self.assertEqual(pending, ((), ()))
-        self.assertGreater(len(full), 1)
-        self.assertEqual(limited, full[:1])
 
 
 class CoachActivitiesContextTests(CanonicalContextReadCase):

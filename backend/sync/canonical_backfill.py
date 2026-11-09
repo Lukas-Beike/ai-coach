@@ -1,42 +1,10 @@
-"""Idempotent, resumable backfill of stored legacy data into the canonical tables.
+"""Idempotent, resumable re-projection of stored provider records into the canonical tables.
 
-Order of work: the newest stored Garmin payload first, then the snapshots by
-descending id. This deviates from the migration plan's oldest-first order on
-purpose: the coach reads the newest data, so it becomes canonical first, and a run
-that stops early still leaves the rows that matter most.
-
-Insert-only ingest: the ingest phase never updates or revives an existing canonical
-row, live or deleted. A row that already exists counts as ``already_present``. A
-new activity gets a single-link session, as in ``upsert_activity_record``. Backfill
-never deletes. A snapshot without ``raw_provider_data`` is not mapped, because its
-``recent_activities`` fallback is a compact read model with no mapper; such a
-snapshot counts as ``skipped_invalid``. The sleep, status, zone, gear and power curve
-rows of a raw record (its domain batch) are inserted only when that source record has
-no domain row at all, active or retired; otherwise the batch counts as
-``already_present``. An empty batch inserts nothing and counts nothing. Only the
-newest snapshot (the one that may insert activities) plans its power curve.
-
-Supersession: the newest snapshot present when the run starts is the only one that
-may insert activities. Its activities and their raw ``activity`` records are inserted
-when absent, as usual. Every older snapshot inserts no activity and no raw ``activity``
-record: each of its activities is skipped and counted as ``superseded``, not as
-``already_present``. The newest snapshot already carries every activity that still
-exists upstream within the synced range (an incremental sync merges with the previous
-snapshot, and a full sync replaces it), so an activity that only an older snapshot
-shows was deleted upstream or lies outside the configured range, and must not become
-canonical. If the newest snapshot is removed during the run, every remaining snapshot
-is older and supersedes its activities the same way. Older ``snapshots`` rows are
-never modified or deleted, so no stored data is lost. Observations, wellness and
-athlete records from older snapshots keep insert-if-absent. Whether an activity is
-inserted depends only on its snapshot's id, not on canonical state, so a batch
-boundary or a resume cannot change the outcome.
-
-Stripped snapshots: once the tables serve reads, a sync stores its snapshot without
-the activity sections and marks it (``canonical_sections``). Such a snapshot never
-counts as the newest one that may insert activities, counts as neither
-``skipped_invalid`` nor a deletion source, and maps only the wellness and athlete
-sections it still carries (insert-if-absent). The activities it lacks are already in
-the tables and their raw records.
+The backfill no longer ingests stored snapshots: Intervals.icu is an output target,
+its stored snapshots are not read, and a database restored from a release before
+2.0 keeps its Intervals.icu rows untouched. Garmin, Wahoo and the other providers
+write their canonical rows live. What remains is the re-projection of the active
+raw records those writers stored.
 
 Re-projection: when a mapper version is above the ``mapped_version`` of an active
 raw record, that record is mapped again from its stored payload and fetch time, its
@@ -52,8 +20,7 @@ restores it. In the same transaction, the sessions near the re-projected activit
 are re-checked (``split_unmatched_sessions``) and linked to duplicates from other
 providers (``link_activity_sessions``), so a mapper fix that lets two copies match
 merges stored history, and one that makes them stop matching splits it, without a
-new provider refresh. The first ingest links the same way when each source finishes, so copies
-stored by Garmin and Intervals.icu snapshots form one session. Each re-projected
+new provider refresh. Each re-projected
 observation records the raw row as its owner; on completion, the active observations
 that row owns and the new projection no longer emits are retired (counted as
 ``retired``). An observation without an owner, such as a Garmin value stored before
@@ -65,8 +32,9 @@ version, so a version bump during a partial run restarts that record from its fi
 item. Domain rows have exact ownership: on completion, in the transaction that advances
 ``mapped_version``, the rows of the re-projected source record are replaced by its new
 batch, and the rows it no longer emits are retired (counted as ``retired``). Other
-source records and providers are untouched. This is the only phase that updates
-existing canonical rows.
+source records and providers are untouched. A raw record of a provider without a
+mapper, such as a stored Intervals.icu row, is skipped and keeps its rows. This is the
+only phase that updates existing canonical rows.
 
 Time zone: the canonical tables store local dates computed in the athlete's zone at
 write time, so the state records the zone it projected with. A different current zone
@@ -87,11 +55,10 @@ until it does. Nothing is deleted.
 Each batch writes at most ``batch_size`` plan items in one writer transaction. The
 cursor and the content-free counters are one kv value written in that same
 transaction, so a failed batch leaves the last committed cursor in place and the
-next run resumes from it. Counters that describe a whole source (plan-level skips
-and duplicates) are added only when that source completes, so an aborted and
-resumed run reports the same totals as an uninterrupted one. A source that changes
-between batches (for example a new Garmin sync) restarts from its first item; rows
-already written then count as ``already_present``.
+next run resumes from it. Counters that describe a whole record (plan-level skips
+and duplicates) are added only when that record completes, so an aborted and
+resumed run reports the same totals as an uninterrupted one. A record that changes
+between batches restarts from its first item.
 """
 
 from __future__ import annotations
@@ -99,7 +66,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, tzinfo
 from enum import StrEnum
 from functools import partial
 from typing import Any, Final
@@ -111,7 +78,6 @@ from backend.activities.session_linking import (
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_domain_store, canonical_store
 from backend.db.repositories import KeyValueRepository
-from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
     ActivityItem,
@@ -120,14 +86,9 @@ from backend.providers.canonical_plans import (
     ObservationItem,
     RawRecord,
     current_mapper_versions,
-    intervals_snapshot_ingest_plan,
     observation_mapper_versions,
     reprojection_mapper_version,
     reprojection_plan,
-)
-from backend.providers.snapshot_projection import (
-    CANONICAL_SECTIONS_KEY,
-    stored_retrieved_at,
 )
 from backend.sync.canonical_ingest import stored_training_loads
 
@@ -135,21 +96,10 @@ STATE_KEY: Final = "canonical_backfill_state"
 DEFAULT_BATCH_SIZE: Final = 200
 MIN_BATCH_SIZE: Final = 100
 MAX_BATCH_SIZE: Final = 250
-COUNTER_NAMES: Final = (
-    "inserted",
-    "already_present",
-    "superseded",
-    "skipped_invalid",
-    "sessions_created",
-    "duplicates",
-    "reprojected",
-    "retired",
-)
+COUNTER_NAMES: Final = ("skipped_invalid", "duplicates", "reprojected", "retired")
 
-_INGEST: Final = "ingest"
 _REPROJECT: Final = "reproject"
 _GARMIN: Final = ProviderId.GARMIN.value
-_SNAPSHOT: Final = "snapshot"
 
 
 class BackfillStatus(StrEnum):
@@ -169,38 +119,25 @@ class BatchReport:
 
 @dataclass(frozen=True, slots=True)
 class _Item:
-    value: RawRecord | ActivityItem | ObservationItem | DomainBatch
+    value: ActivityItem | ObservationItem | DomainBatch | RawRecord
     fetched_at: str
 
 
 @dataclass(frozen=True, slots=True)
 class _Work:
-    """The ordered items of one source and the plan-level counts due when it completes."""
+    """The ordered items of one raw record and the plan-level counts due when it completes."""
 
     items: tuple[_Item, ...] = ()
     skipped_invalid: int = 0
     duplicates: int = 0
-    superseded: int = 0
-    # Re-projection only: the domain rows of the raw record, written on completion.
+    # The domain rows of the raw record, written on completion.
     domain_batches: tuple[DomainBatch, ...] = ()
-    # Re-projection only: the owning raw record ids and their days (see IngestPlan).
+    # The owning raw record ids and their days (see IngestPlan).
     observation_owners: Mapping[str, str] = field(default_factory=dict)
 
 
-# Wahoo is ingested live and has no legacy snapshot to backfill, so persisted
-# backfill counters stay limited to the providers that are actually backfilled.
-_BACKFILL_PROVIDERS = (ProviderId.INTERVALS, ProviderId.GARMIN)
-
-
 def _empty_counters() -> dict[str, dict[str, int]]:
-    return {
-        provider.value: dict.fromkeys(COUNTER_NAMES, 0)
-        for provider in _BACKFILL_PROVIDERS
-    }
-
-
-def _provider_of(source: str) -> str:
-    return ProviderId.GARMIN.value if source == _GARMIN else ProviderId.INTERVALS.value
+    return {_GARMIN: dict.fromkeys(COUNTER_NAMES, 0)}
 
 
 def read_status(key_values: KeyValueRepository, db: Any) -> str:
@@ -332,7 +269,11 @@ class CanonicalBackfill:
                 reproject_after=0,
                 reproject_current=None,
             )
-        if state["phase"] == _REPROJECT and state.get("reproject_versions") != versions:
+        if state.get("phase") != _REPROJECT:
+            # A state stored while the retired snapshot ingest ran continues with
+            # the re-projection; the snapshots it had not reached are not read.
+            state.update(phase=_REPROJECT, reproject_after=0, reproject_current=None)
+        if state.get("reproject_versions") != versions:
             # A new mapper must revisit rows already passed by an interrupted run,
             # not only restart the raw record at its current cursor.
             state.update(
@@ -342,19 +283,9 @@ class CanonicalBackfill:
             )
         state["status"] = BackfillStatus.RUNNING
         now = self._clock()
-        if state["phase"] == _INGEST:
-            written, ingest_done = self._ingest_step(
-                db, state, zone=zone, now=now, budget=self._batch_size
-            )
-            if ingest_done:
-                state.update(
-                    phase=_REPROJECT, reproject_after=0, reproject_current=None
-                )
-            done = False
-        else:
-            written, done = self._reproject_step(
-                db, state, zone=zone, now=now, budget=self._batch_size
-            )
+        written, done = self._reproject_step(
+            db, state, zone=zone, now=now, budget=self._batch_size
+        )
         if done:
             state.update(
                 status=BackfillStatus.COMPLETE, versions=versions, reproject_all=False
@@ -381,7 +312,7 @@ class CanonicalBackfill:
         self._save(db, state)
 
     def summary(self, db: Any) -> dict[str, Any]:
-        """Return content-free status, counters and the count of unresolved feedback."""
+        """Return content-free status and counters."""
         raw = self._key_values.get(db, STATE_KEY)
         state = json.loads(raw) if raw is not None else None
         return {
@@ -390,67 +321,7 @@ class CanonicalBackfill:
             else BackfillStatus.PENDING.value,
             "batches": state["batches"] if state is not None else 0,
             "providers": state["counters"] if state is not None else _empty_counters(),
-            "unresolved_feedback": canonical_store.count_unresolved_feedback(
-                db, ProviderId.INTERVALS.value
-            ),
         }
-
-    def _ingest_step(
-        self, db: Any, state: dict[str, Any], *, zone: tzinfo, now: str, budget: int
-    ) -> tuple[int, bool]:
-        """Write up to ``budget`` ingest items; return (items written, ingest finished)."""
-        counters = state["counters"]
-        written = 0
-        while True:
-            current = _ingest_cursor(db, state)
-            if current is None:
-                return written, True
-            work = self._ingest_source_work(db, state, current, zone)
-            if work is None:
-                _finish_source(state, current, _Work(), counters)
-                continue
-            count, finished = _drain(
-                work,
-                current,
-                budget - written,
-                partial(
-                    _write_ingest,
-                    db,
-                    provider=_provider_of(current["source"]),
-                    now=now,
-                    counters=counters,
-                ),
-            )
-            written += count
-            if not finished:
-                return written, False
-            # Copies another provider's source already stored join their session.
-            _link_work_sessions(db, work, zone=zone, now=now)
-            _finish_source(state, current, work, counters)
-
-    def _ingest_source_work(
-        self,
-        db: Any,
-        state: Mapping[str, Any],
-        current: dict[str, Any],
-        zone: tzinfo,
-    ) -> _Work | None:
-        """Return the items of the current source, or None when it no longer exists."""
-        text = self._source_text(db, current)
-        if text is None:
-            return None
-        return self._work_for(
-            f"{_source_key(current)}@{zone}",
-            current,
-            text,
-            partial(
-                _ingest_work,
-                current["source"],
-                text,
-                zone,
-                _may_insert_activities(state, current),
-            ),
-        )
 
     def _reproject_step(
         self, db: Any, state: dict[str, Any], *, zone: tzinfo, now: str, budget: int
@@ -507,14 +378,6 @@ class CanonicalBackfill:
             self._remember(key, fingerprint, work)
         return work
 
-    def _source_text(self, db: Any, current: Mapping[str, Any]) -> str | None:
-        if current["source"] == _GARMIN:
-            return None
-        row = db.execute(
-            "SELECT payload FROM snapshots WHERE id = ?", (current["id"],)
-        ).fetchone()
-        return None if row is None else str(row["payload"])
-
     def _cached_work(self, key: str, fingerprint: str) -> _Work | None:
         return self._cache if self._cache_key == f"{key}|{fingerprint}" else None
 
@@ -525,7 +388,7 @@ class CanonicalBackfill:
     def _load(self, db: Any, zone: tzinfo) -> dict[str, Any]:
         raw = self._key_values.get(db, STATE_KEY)
         if raw is None:
-            return self._fresh_state(db, zone)
+            return self._fresh_state(zone)
         return json.loads(raw)
 
     def _save(self, db: Any, state: dict[str, Any]) -> None:
@@ -534,26 +397,10 @@ class CanonicalBackfill:
         )
 
     @staticmethod
-    def _fresh_state(db: Any, zone: tzinfo) -> dict[str, Any]:
-        # Snapshots created after the run starts are written by dual-write already.
-        row = db.execute(
-            "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM snapshots"
-        ).fetchone()
-        # A snapshot stored without its activity sections must not become the
-        # only one that may insert activities, or every full snapshot would
-        # supersede its activities.
-        newest = db.execute(
-            "SELECT COALESCE(MAX(id), 0) AS newest_id FROM snapshots "
-            "WHERE json_extract(payload, ?) IS NULL",
-            (f"$.{CANONICAL_SECTIONS_KEY}",),
-        ).fetchone()
+    def _fresh_state(zone: tzinfo) -> dict[str, Any]:
         return {
             "status": BackfillStatus.PENDING.value,
-            "phase": _INGEST,
-            "garmin_done": True,
-            "snapshot_before": int(row["next_id"]),
-            "newest_id": int(newest["newest_id"]),
-            "current": None,
+            "phase": _REPROJECT,
             "reproject_after": 0,
             "reproject_current": None,
             "batches": 0,
@@ -564,13 +411,6 @@ class CanonicalBackfill:
             "completed_once": False,
             "first_completed_at": None,
         }
-
-
-def _ingest_cursor(db: Any, state: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the source in progress, starting the next one when none is."""
-    if state["current"] is None:
-        state["current"] = _next_source(db, state)
-    return state["current"]
 
 
 def _drain(
@@ -756,63 +596,6 @@ def _replace_domain_rows(
     ).retired
 
 
-def _next_source(db: Any, state: dict[str, Any]) -> dict[str, Any] | None:
-    # Garmin rows are stored per element since schema 12; its ingest phase is gone.
-    row = db.execute(
-        "SELECT id FROM snapshots WHERE id < ? ORDER BY id DESC LIMIT 1",
-        (state["snapshot_before"],),
-    ).fetchone()
-    if row is None:
-        return None
-    return {"source": _SNAPSHOT, "id": int(row["id"]), "fingerprint": "", "offset": 0}
-
-
-def _source_key(current: Mapping[str, Any]) -> str:
-    return _GARMIN if current["source"] == _GARMIN else f"snapshot:{current['id']}"
-
-
-def _finish_source(
-    state: dict[str, Any],
-    current: Mapping[str, Any],
-    work: _Work,
-    counters: dict[str, Any],
-) -> None:
-    bucket = counters[_provider_of(current["source"])]
-    bucket["skipped_invalid"] += work.skipped_invalid
-    bucket["duplicates"] += work.duplicates
-    bucket["superseded"] += work.superseded
-    if current["source"] == _GARMIN:
-        state["garmin_done"] = True
-    else:
-        state["snapshot_before"] = current["id"]
-    state["current"] = None
-
-
-def _may_insert_activities(
-    state: Mapping[str, Any], current: Mapping[str, Any]
-) -> bool:
-    """Garmin and the newest Intervals snapshot may insert activities; older snapshots may not."""
-    return current["source"] == _GARMIN or current["id"] == state["newest_id"]
-
-
-def _ingest_work(
-    source: str, text: str, zone: tzinfo, may_insert_activities: bool
-) -> _Work:
-    payload = json.loads(text)
-    if not isinstance(payload, dict):
-        return _Work(skipped_invalid=1)
-    # Only the newest snapshot plans the power curve: an older one's curve is
-    # superseded and must not fill the table with stale best efforts.
-    return _work_from_plan(
-        intervals_snapshot_ingest_plan(
-            payload, zone=zone, include_power_curve=may_insert_activities
-        ),
-        stored_retrieved_at(payload, zone=zone),
-        may_insert_activities=may_insert_activities,
-        domain_items=True,
-    )
-
-
 def _training_load_text(row: Mapping[str, Any], loads: Callable[[str], Any]) -> str:
     """The stored dedicated training-load row a Garmin activity re-projects with."""
     if row["provider"] != _GARMIN or row["record_kind"] != ACTIVITY_RECORD_KIND:
@@ -826,55 +609,40 @@ def _reprojection_work(
     plan = reprojection_plan(row, zone=zone, training_loads=loads)
     if plan is None:
         return _Work()
-    return _work_from_plan(plan, None, may_insert_activities=True, domain_items=False)
+    return _work_from_plan(plan)
 
 
-def _work_from_plan(
-    plan: IngestPlan,
-    fetched: datetime | None,
-    *,
-    may_insert_activities: bool,
-    domain_items: bool,
-) -> _Work:
-    """Flatten a plan into ordered items, dropping repeats within the same source.
+def _work_from_plan(plan: IngestPlan) -> _Work:
+    """Flatten a plan into ordered items, dropping repeats within the same record.
 
-    When the source may not insert activities, its activities and their raw records are
-    left out, and each distinct activity is counted once as superseded. Domain batches
-    follow the observations as items when ``domain_items`` is set (ingest); otherwise
-    they are kept aside for the completion of a re-projection.
+    Domain batches are kept aside for the completion of the re-projection.
     """
-    stamp = fetched.isoformat() if fetched is not None else ""
-    items, duplicates = _raw_items(
-        plan.raw_records, stamp, may_insert_activities=may_insert_activities
-    )
-    activities, repeats = _distinct(
+    activities, duplicates = _distinct(
         plan.activities, lambda item: item.record.provenance.source_record_id or ""
     )
-    duplicates += repeats
-    superseded = 0 if may_insert_activities else len(activities)
-    if may_insert_activities:
-        items.extend(
-            _Item(activity, _fetched_at(activity.retrieved_at, stamp))
-            for activity in activities
+    items = [
+        _Item(
+            activity,
+            activity.retrieved_at.isoformat()
+            if activity.retrieved_at is not None
+            else "",
         )
+        for activity in activities
+    ]
     observations, repeats = _distinct(
         plan.observations,
         lambda item: canonical_store.observation_natural_key(item.observation),
     )
     duplicates += repeats
-    items.extend(_Item(observation, stamp) for observation in observations)
+    items.extend(_Item(observation, "") for observation in observations)
     batches, repeats = _distinct(
         plan.domain_batches, lambda batch: batch.source_record_id
     )
     duplicates += repeats
-    if domain_items:
-        items.extend(_Item(batch, stamp) for batch in batches)
-        batches = []
     return _Work(
         items=tuple(items),
         skipped_invalid=plan.skipped_invalid,
         duplicates=duplicates,
-        superseded=superseded,
         domain_batches=tuple(batches),
         observation_owners=plan.observation_owners,
     )
@@ -890,89 +658,6 @@ def _distinct[T](values: Sequence[T], key: Callable[[T], str]) -> tuple[list[T],
             seen.add(identity)
             kept.append(value)
     return kept, len(values) - len(kept)
-
-
-def _raw_items(
-    raw_records: Sequence[RawRecord], stamp: str, *, may_insert_activities: bool
-) -> tuple[list[_Item], int]:
-    """Return the distinct raw records to write and the number of repeats."""
-    items: list[_Item] = []
-    seen: set[tuple[str, str]] = set()
-    duplicates = 0
-    for raw in raw_records:
-        key = (raw.record_kind, raw.source_record_id)
-        if key in seen:
-            duplicates += 1
-            continue
-        seen.add(key)
-        if raw.record_kind == ACTIVITY_RECORD_KIND and not may_insert_activities:
-            continue
-        items.append(_Item(raw, _fetched_at(raw.retrieved_at, stamp)))
-    return items, duplicates
-
-
-def _fetched_at(row_time: datetime | None, stamp: str) -> str:
-    return row_time.isoformat() if row_time is not None else stamp
-
-
-def _write_ingest(
-    db: Any, item: _Item, provider: str, now: str, counters: dict[str, Any]
-) -> None:
-    """Insert one item when absent. Existing rows are never changed."""
-    value = item.value
-    bucket = counters[provider]
-    if isinstance(value, RawRecord):
-        inserted = canonical_store.insert_provider_record_if_absent(
-            db,
-            provider=provider,
-            record_kind=value.record_kind,
-            source_record_id=value.source_record_id,
-            payload=sanitized_provider_payload(value.payload),
-            mapper_version=value.mapper_version,
-            fetched_at=item.fetched_at,
-            now=now,
-        )
-    elif isinstance(value, ActivityItem):
-        inserted = canonical_store.insert_activity_record_if_absent(
-            db,
-            value.record,
-            local_date=value.local_date,
-            mapper_version=value.mapper_version,
-            fetched_at=item.fetched_at,
-            now=now,
-        )
-        if inserted:
-            bucket["sessions_created"] += 1
-    elif isinstance(value, DomainBatch):
-        if value.is_empty:
-            return
-        inserted = not canonical_domain_store.has_source_rows(
-            db, provider=ProviderId(provider), source_record_id=value.source_record_id
-        )
-        if inserted:
-            canonical_domain_store.replace_source_rows(
-                db,
-                provider=ProviderId(provider),
-                source_record_id=value.source_record_id,
-                mapper_version=value.mapper_version,
-                now=now,
-                sleep_periods=value.sleep_periods,
-                categorical=value.categorical,
-                zones=value.zones,
-                gear_items=value.gear_items,
-                gear_links=value.gear_links,
-                power_curve=value.power_curve,
-                power_curve_fetch=value.power_curve_fetch,
-            )
-    else:
-        inserted = canonical_store.insert_observation_if_absent(
-            db,
-            value.observation,
-            mapper_version=value.mapper_version,
-            now=now,
-            owner=value.owner,
-        )
-    bucket["inserted" if inserted else "already_present"] += 1
 
 
 def _write_reprojection(db: Any, item: _Item, now: str) -> None:
@@ -997,8 +682,8 @@ def _write_reprojection(db: Any, item: _Item, now: str) -> None:
             owner=value.owner,
         )
     else:
-        # Re-projection plans carry activities and observations as items; raw records
-        # are never re-written and domain batches are written on completion.
+        # Re-projection plans carry activities and observations as items; domain
+        # batches are written on completion.
         raise TypeError("re-projection items must be activities or observations")
 
 

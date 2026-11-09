@@ -2,7 +2,7 @@
 
 After a Wahoo sync, each workout of the window with a download link and an
 active activity record is fetched once per summary hash. Its FIT file is mapped
-with Wahoo provenance and stored as stream, lap and zone sets. Failed and empty
+with Wahoo provenance and stored as stream, lap and strength-set details. Failed and empty
 downloads are counted per summary hash and stop after a bounded number of
 attempts. The download link is never stored, logged or returned, and nothing is
 written to Wahoo.
@@ -181,7 +181,7 @@ class WahooActivityDetailImport:
         mapped = map_fit_activity_detail(
             data,
             provider_activity_id=workout_id,
-            provenance=_provenance(workout_id, retrieved_at),
+            provenance=wahoo_fit_provenance(workout_id, retrieved_at),
         )
         found = len(mapped.issues)
         if mapped.records:
@@ -284,7 +284,8 @@ def _entry(summary_sha256: str, attempts: int, *, empty: bool) -> dict[str, Any]
     return {"summary_sha256": summary_sha256, "attempts": attempts, "empty": empty}
 
 
-def _provenance(workout_id: str, retrieved_at: datetime) -> Provenance:
+def wahoo_fit_provenance(workout_id: str, retrieved_at: datetime) -> Provenance:
+    """The provenance of a Wahoo FIT file's detail sets."""
     return Provenance(
         provider=ProviderId.WAHOO,
         source_kind=SourceKind.DEVICE_MEASURED,

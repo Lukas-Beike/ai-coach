@@ -5,15 +5,12 @@
 Pacecraft is a private, mobile-first PWA for one athlete, using Python
 `http.server`, SQLCipher, Intervals.icu, optional Garmin, and OpenAI Responses.
 Keep it standalone on a trusted LAN/private VPN, never directly on the internet.
-Use [README.md](README.md) for setup and operational commands.
+Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) and [docs/operations.md](docs/operations.md) for setup and operational commands.
 
 ## Release and database compatibility contract
 
 - Preserve all athlete data, including records, snapshots, tombstones, plans,
   sessions, settings, conversations, usage, and sync state, not just chat history.
-  Named exception: the #1728 purge removes the stored Intervals.icu ingest store
-  (provider/activity records, observations, snapshots, detail sets) after re-keying
-  athlete-entered data and writing a recovery backup; output ids stay.
 - Schema changes require versioned, transactional SQLCipher migrations from
   supported released schemas, including documented skipped-release upgrades.
   Release 1.13.44 (schema v21, the only production instance) is the oldest
@@ -27,6 +24,8 @@ Use [README.md](README.md) for setup and operational commands.
 - Keep one current Coach/API/persistence contract and the supported migrations.
   Preserve restart, backup/restore, provider sync, and editing existing records.
   Reject unknown/newer schemas without deletion, reset, or partial modification.
+  Named exception: the athlete's confirmed local data purge also deletes the
+  recovery copies and marker files that earlier releases left beside the database.
 
 ## Important boundaries
 
@@ -76,7 +75,8 @@ Use [README.md](README.md) for setup and operational commands.
 - Apply scoped [backend](backend/AGENTS.md), [frontend](public/AGENTS.md), and
   [test](tests/AGENTS.md) instructions, plus [browser fixtures](e2e/AGENTS.md)
   and [CI/release](.github/AGENTS.md), when working in those directories.
-- Keep `README.md` consistent with changed user-visible/configuration behavior.
+- Keep `README.md` and the `docs/` files it links consistent with changed
+  user-visible/configuration behavior.
 
 ## Behaviour requirements
 
@@ -140,7 +140,7 @@ outgoing commits for secrets; never bypass either.
   evidence, and unrun checks. Keep temporary plans and reports out of tracked
   source.
 - OpenSpec is optional, for larger features; see the
-  [README runbook](README.md#optional-local-openspec) and use
+  [OpenSpec runbook](docs/openspec.md) and use
   `npm run openspec -- <arguments>`.
 - Requested local security scans use `.agents/skills/ai-coach-codex-security/SKILL.md`
   with the Codex Security plugin or `--auth chatgpt`; no API key or GitHub
@@ -165,19 +165,19 @@ check login, fresh PWA install/offline assets, safe Markdown, Enter versus
 Shift+Enter, microphone, notifications, and the changed flow.
 
 Small synthetic provider probes may use the existing local CLIProxyAPI under the
-[proxy runbook](README.md#optional-local-cliproxyapi-probes): confirmed
+[proxy runbook](docs/cliproxyapi-probes.md): confirmed
 subscription/OAuth upstreams with paid API-key fallbacks disabled, no athlete
 data, never read the proxy's credential files, and no routing, provider, or
 billing changes. Normal tests stay mocked.
 
 CI and Docker use Python 3.14; change toolchain and CI together. Direct pins live
 in `requirements.in`/`requirements-dev.in`; regenerate the hash-locked `.txt`
-files with README's recipe.
+files with the [dependency recipe](docs/dependencies.md).
 
 ### Local runtime (Windows)
 
 Use Docker for application and UI integration: the pinned SQLCipher dependency
-has no Windows wheel. Never bypass encrypted startup. README is the single
+has no Windows wheel. Never bypass encrypted startup. [docs/setup.md](docs/setup.md) is the single
 runbook for setup and Garmin login. Browser checks prefer the disposable fixture
 in `.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md`. Rebuild
 the image after application, dependency, or startup changes; keep the data mount,

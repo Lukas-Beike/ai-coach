@@ -207,7 +207,8 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(enqueue.call_args.kwargs, {"requested_by": "coach"})
 
     def test_explicit_activity_detail_reads_only_the_requested_local_session(self):
-        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+        snapshot_seed.save_snapshot(
+            server.SYNC_PERSISTENCE.state_repository(),
             {
                 "synced_at": "2026-09-11T08:00:00+00:00",
                 "athlete": {},
@@ -591,9 +592,6 @@ class ServerCoachTests(ServerTestCase):
             compact_coach_activity,
             compact_coach_local_planned_workouts,
         )
-        from backend.providers.intervals_activity_detail_projection import (
-            detailed_activity,
-        )
 
         select = lambda value, fields: {
             key: value[key] for key in fields if key in value
@@ -623,23 +621,6 @@ class ServerCoachTests(ServerTestCase):
             ),
             100,
         )
-        detail = detailed_activity(
-            {
-                "id": "provider-id",
-                "average_watts": 245,
-                "icu_weighted_avg_watts": 300,
-                "provider_extra": "must not pass",
-                "streams": {"watts": list(range(2505)), "latlng": [[1, 2]]},
-            }
-        )
-        self.assertEqual(detail["average_watts"], 245)
-        self.assertEqual(detail["icu_weighted_avg_watts"], 300)
-        self.assertEqual(len(detail["streams"]["watts"]), 2000)
-        self.assertEqual(detail["streams"]["watts"][0], 0)
-        self.assertEqual(detail["streams"]["watts"][-1], 2504)
-        self.assertNotIn("id", detail)
-        self.assertNotIn("provider_extra", detail)
-        self.assertNotIn("latlng", detail["streams"])
 
     def test_coach_activity_feedback_is_persisted_and_attached_to_activity(self):
         store_canonical_snapshot(
@@ -737,7 +718,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertIn('activity_feedback: ["feedback", "plan", "performance"]', app)
         self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
 
-    def test_structured_context_keeps_garmin_value_in_performance_only(self):
+    def test_structured_context_carries_garmin_values_in_recovery_and_performance(self):
         payload = {
             "synced_at": "2026-10-11T08:00:00+00:00",
             "max_metrics": [
@@ -749,9 +730,7 @@ class ServerCoachTests(ServerTestCase):
         # Saving writes the canonical rows too; Garmin values are read only from
         # them (#1415), so the context reads the stored snapshot as production does.
         save_garmin(payload)
-        # Canonical reads (#1416): the Intervals.icu sync in the canonical
-        # coverage, here one without athlete-record values, turns the Garmin
-        # performance fallback off.
+        # Completes the first canonical backfill, so the tables serve the context.
         store_canonical_snapshot(
             server,
             {
@@ -764,7 +743,8 @@ class ServerCoachTests(ServerTestCase):
         )
         context = server.COACH_CONTEXT.structured_context_service().build()
 
-        self.assertNotIn("performance", context["recovery"])
+        # The recovery section always carries Garmin's performance values.
+        self.assertIn("performance", context["recovery"])
         self.assertNotIn("activities", context["recovery"])
         self.assertEqual(
             context["current_performance"]["metrics"]["running_vo2max_ml_kg_min"][
@@ -1139,7 +1119,9 @@ class ServerCoachTests(ServerTestCase):
             sort_keys=True,
             separators=(",", ":"),
         )
-        snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), intervals_snapshot)
+        snapshot_seed.save_snapshot(
+            server.SYNC_PERSISTENCE.state_repository(), intervals_snapshot
+        )
         save_garmin(garmin_snapshot)
         garmin_stored = read_garmin()
         self.assertEqual(garmin_stored["vendor_payload"], "kept in the full snapshot")
@@ -1484,7 +1466,7 @@ class ServerCoachTests(ServerTestCase):
             ),
         ):
             result = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", 
+                "test",
             )
 
         self.assertEqual(result["pushed"], 1)

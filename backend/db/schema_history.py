@@ -22,11 +22,14 @@ type SchemaSignature = tuple[tuple[str, str, str, str], ...]
 # Schema version 21, releases 1.13.41 to 1.13.44: the observation lifecycle and
 # the oldest supported schema.
 SHAPE_SCHEMA_V21: Final = "schema-v21"
+# Schema version 22: executed strength sets.
+SHAPE_SCHEMA_V22: Final = "schema-v22"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
 RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
     SHAPE_SCHEMA_V21: "2d81edf3d70d6b81e3eb9b048fc9fefb0c9c4a70885c14cd9848fd18b0cd2052",
+    SHAPE_SCHEMA_V22: "cfb3171eb12a18c5eaa91f1bd71458d00f4b60a17da28f5a0d674b2a49691faf",
 }
 
 # Releases before 1.13.41 wrote lower versions; they are rejected unchanged.
@@ -38,6 +41,7 @@ OLDEST_SUPPORTED_SCHEMA_VERSION: Final = 21
 # recognizable.
 ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
     21: frozenset({SHAPE_SCHEMA_V21}),
+    22: frozenset({SHAPE_SCHEMA_V22}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

@@ -39,7 +39,7 @@ _PLAN_STRUCTURE = """Planning science:
 - Alternate hard and easy days, never back-to-back hard days; distribute intensity per training_model.
 - Plan no single run much longer than the longest of the last 30 days (Frandsen 2025).
 - Adjust load to HRV or readiness data when present (Kiviniemi 2007; Javaloyes 2019; moderate).
-- Set session_focus on every new unit, named in the Typ column. Strength units you write need strength_structure (with garmin_exercise), session_focus and strength_intensity. Progress load or reps weekly, deload in the lighter week; strength_progress top sets at planned reps: progress, else hold.
+- Every run, ride and strength unit you write needs session_focus (named in the Typ column); strength also strength_structure (with garmin_exercise) and strength_intensity. Progress load or reps weekly, deload in the lighter week; strength_progress top sets at planned reps: progress, else hold.
 - Local units only; no Intervals.icu write."""
 
 _STRENGTH_LEGS = """- Heavy strength 2 times per week in base and build, 1 (maintenance) in peak and taper (Ronnestad & Mujika 2014; Blagrove 2018), 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): same counts, at most 3; after or on hard days, or 24 h or more before hard or long sessions. Name deviations."""
@@ -51,7 +51,7 @@ _TESTS = """Tests (session_focus test):
 - Every 2 to 4 weeks an easy run may be a control run at a fixed heart rate on one route (Buchheit 2014): session_focus easy, named in the description."""
 
 _THRESHOLDS = "- Watt, pace and heart-rate targets use current_performance.thresholds, the values plans use. If ftp_conflict, name the ftp_alternatives value once."
-_PRECEDENCE = "- Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations."
+_PRECEDENCE = "- Precedence: illness, competitions, calendar markers; science defaults; the athlete's availability (8b). Justify deviations."
 
 _CALENDAR = "- If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event."
 
@@ -78,7 +78,7 @@ _TASKS = {
 Task: analyze the requested completed session, by default the last one.
 - Load it with get_activity_details; its planned_units hold the local plan one day around that session, for plan versus actual. Rules 6d and 8c-8e stay. The context holds planned units up to two days ahead; read_coach_context loads more.
 - Judge it against its plan first: duration, structure, load and intensity; warm-up and cool-down long and easy enough.
-- Easy, recovery or long: steady pace or power and heart rate, heart-rate drift or decoupling at the same pace, really easy, cadence holding. Planned strides or a progression are intended, not faults.
+- Easy, recovery or long: steady pace or power and heart rate, heart-rate drift or decoupling at the same pace, really easy, cadence holding. Planned strides or a progression are intended, not faults. With a stored hr_cap (planned_targets.heart_rate_cap) judge against it by verdict, naming percent and bpm.
 - Intervals, threshold or tests: per work lap on target and even; reps holding or fading; heart rate across reps; recoveries as long and easy as planned, and the heart-rate drop in them. Under about 2 minutes judge pace or power, not heart rate.
 - Race (purpose race): pacing, fade, finish against target; skip interval verdicts.
 - Before calling a change fitness or fatigue, check heat, hills, wind, sleep, the days before and sensor errors (heart-rate spikes, GPS jumps).

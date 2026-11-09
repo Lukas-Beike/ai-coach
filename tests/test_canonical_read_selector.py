@@ -18,6 +18,13 @@ from canonical_read_support import (
     new_backfill,
     populate,
 )
+from intervals_plan_stub import (
+    ATHLETE_RECORD_KIND,
+    INTERVALS_WELLNESS_VERSION,
+    WELLNESS_RECORD_KIND,
+    intervals_snapshot_coverage,
+    intervals_test_world,
+)
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.diagnostics.canonical_read import summarize_canonical_read
@@ -30,10 +37,7 @@ from backend.sync.canonical_backfill import (
     read_status,
 )
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
-from backend.sync.canonical_coverage_store import (
-    CanonicalCoverageStore,
-    intervals_snapshot_coverage,
-)
+from backend.sync.canonical_coverage_store import CanonicalCoverageStore
 from backend.sync.canonical_read_selector import PENDING_READER
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
@@ -59,30 +63,16 @@ def ids(records: tuple[Any, ...]) -> list[tuple[str, str]]:
 
 @contextmanager
 def bumped_intervals_mappers() -> Iterator[None]:
-    """Raise the Intervals.icu wellness and athlete mapper version by one.
-
-    The version is both the expected one (the lookup table) and the one the
-    re-projection stamps on the rows it writes (the module constant).
-    """
-    observation_kinds = (
-        canonical_plans.WELLNESS_RECORD_KIND,
-        canonical_plans.ATHLETE_RECORD_KIND,
-    )
-    next_version = canonical_plans.INTERVALS_WELLNESS_VERSION + 1
-    bumped = {
-        key: next_version
-        if key[0] == ProviderId.INTERVALS.value and key[1] in observation_kinds
-        else version
-        for key, version in canonical_plans._MAPPER_VERSIONS.items()
-    }
-    with (
-        patch.dict(canonical_plans._MAPPER_VERSIONS, bumped),
-        patch.object(canonical_plans, "INTERVALS_WELLNESS_VERSION", next_version),
-    ):
+    """Raise the Intervals.icu wellness and athlete mapper version by one."""
+    with intervals_test_world(bump=1):
         yield
 
 
 class SelectorTests(CanonicalReadFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        self.enterContext(intervals_test_world(coverage=True))
+
     def _all_observations(self, reader: Any) -> dict[MetricKind, tuple[Any, ...]]:
         return {kind: self.read(reader.observations, kind) for kind in MetricKind}
 
@@ -126,7 +116,6 @@ class SelectorTests(CanonicalReadFixture):
         self.assertFalse(self.read(selector.serves_tables))
         self.assertIs(self.read(selector.reader_for), PENDING_READER)
         self.assertEqual(self.read(selector.activities), ())
-        self.assertEqual(self.read(selector.intervals_activity_payloads), ())
         self.assertEqual(self.read(selector.activity_summaries), ())
         self.assertEqual(
             self.read(selector.activity_max_hr, ProviderId.INTERVALS, low=0, high=1000),
@@ -151,15 +140,13 @@ class SelectorTests(CanonicalReadFixture):
 
     def test_first_completion_marker_is_written_with_the_completion(self) -> None:
         backfill = new_backfill(self)
-        with self.manager.unit_of_work() as db:
-            self.assertFalse(backfill.run_batch(db).done)
-        state = self._backfill_state()
-        self.assertFalse(state[COMPLETED_ONCE])
-        self.assertIsNone(state[FIRST_COMPLETED_AT])
+        self.assertIsNone(self.read(self.key_values.get, BACKFILL_STATE_KEY))
         self._assert_serves_nothing(make_selector(self))
 
         self._run_to_completion(backfill)
-        self.assertTrue(self._backfill_state()[COMPLETED_ONCE])
+        state = self._backfill_state()
+        self.assertTrue(state[COMPLETED_ONCE])
+        self.assertIsNotNone(state[FIRST_COMPLETED_AT])
 
     def test_first_backfill_not_complete_serves_nothing_from_filled_tables(
         self,
@@ -347,14 +334,14 @@ class SelectorTests(CanonicalReadFixture):
         intervals = ProviderId.INTERVALS.value
         self.assertEqual(
             self._completed_versions()[intervals],
-            canonical_plans.INTERVALS_WELLNESS_VERSION,
+            INTERVALS_WELLNESS_VERSION,
         )
         self._store_backfill_state(
             {
                 **self._backfill_state(),
                 "versions": {
-                    f"{intervals}.{canonical_plans.WELLNESS_RECORD_KIND}": "2",
-                    f"{intervals}.{canonical_plans.ATHLETE_RECORD_KIND}": True,
+                    f"{intervals}.{WELLNESS_RECORD_KIND}": "2",
+                    f"{intervals}.{ATHLETE_RECORD_KIND}": True,
                     f"{intervals}.{canonical_plans.ACTIVITY_RECORD_KIND}": 7,
                 },
             }
@@ -522,11 +509,6 @@ class SelectorTests(CanonicalReadFixture):
                     self.read(selector.observations, kind),
                     self.read(self.table.observations, kind),
                 )
-
-    def test_raw_snapshot_serves_its_activity_payloads_after_completion(self) -> None:
-        selector = make_selector(self)
-        populate(self)
-        self.assertTrue(self.read(selector.intervals_activity_payloads))
 
     def test_metric_windows_are_empty_before_the_first_backfill(self) -> None:
         self.assertEqual(self.read(make_selector(self).metric_windows), ())

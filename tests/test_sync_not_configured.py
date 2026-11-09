@@ -8,12 +8,9 @@ import unittest
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock
 
-from intervals_detail_refresh import ActivityDetailRefreshService
-
 from backend.errors import AppError, public_error_contract
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
-from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.full_resync import FullProviderResyncService
 from backend.sync.garmin_service import GarminSyncService
@@ -43,28 +40,8 @@ def _resync_service(
     return FullProviderResyncService(handlers, Mock(), Mock())
 
 
-def _full_resync_intervals_not_configured() -> None:
-    _resync_service(Mock(intervals_api_key="")).resync("intervals")
-
-
 def _full_resync_garmin_not_configured() -> None:
     _resync_service(Mock(intervals_api_key="")).resync("garmin")
-
-
-def _activity_details_not_configured() -> None:
-    service = ActivityDetailRefreshService(
-        api_client=Mock(),
-        database_manager=MagicMock(),
-        row_reader=Mock(
-            intervals_activity_payloads=Mock(return_value=({"id": "a1"},)),
-            activity_summaries=Mock(return_value=()),
-        ),
-        store=Mock(),
-        utc_now=Mock(return_value="2026-10-09T12:00:00+00:00"),
-        configured=False,
-        canonical=CanonicalDetailWriter(),
-    )
-    service.refresh("a1")
 
 
 def _external_calendar_not_configured() -> None:
@@ -124,7 +101,6 @@ def _declares_not_configured_reason(node: ast.Call) -> bool:
 
 
 class NotConfiguredClassificationTests(unittest.TestCase):
-
     def test_english_fallback_and_transient_failures_keep_classification(self):
         fallback = AppError(503, "Provider is not configured.")
         self.assertEqual(
@@ -144,7 +120,6 @@ class NotConfiguredClassificationTests(unittest.TestCase):
             503, "Intervals.icu ist nicht konfiguriert.", reason="not_configured"
         )
         self.assertEqual(public_error_contract(error), (503, "not_configured"))
-
 
 
 class NotConfiguredReasonContractTests(unittest.TestCase):
@@ -197,12 +172,10 @@ class NotConfiguredSyncRouteTests(unittest.TestCase):
         self.state.set_sync_period.assert_not_called()
         handler.send_json.assert_not_called()
 
-
     def test_manual_garmin_refresh_is_rejected_before_period_or_job(self):
         self.assert_rejected_before_mutation(
             "/api/garmin/sync", {"days": 7}, "Garmin ist nicht konfiguriert"
         )
-
 
     def test_garmin_job_is_rejected_before_enqueue(self):
         self.assert_rejected_before_mutation(
@@ -210,7 +183,6 @@ class NotConfiguredSyncRouteTests(unittest.TestCase):
             {"provider": "garmin", "type": "refresh", "payload": {"days": 7}},
             "Garmin ist nicht konfiguriert",
         )
-
 
 
 if __name__ == "__main__":

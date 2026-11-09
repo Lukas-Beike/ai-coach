@@ -41,13 +41,13 @@ document.querySelectorAll("[data-more-segment]").forEach((link) => link.addEvent
 document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", () => restoreDialogFocus(dialog)));
 
 $("#loginForm").addEventListener("submit", login);
+$("#loginPasswordToggle").addEventListener("click", toggleLoginPassword);
 installLoginDialogGuards();
 setupCoachEvents();
 $("#appearanceSelect").addEventListener("change", (event) => {
   const appearance = applyAppearance(event.currentTarget.value);
   try { localStorage.setItem(APPEARANCE_KEY, appearance); } catch { }
 });
-$("#setupBannerDismiss").addEventListener("click", dismissSetupBanner);
 // Setup links lead to the collapsed Anbindungen section; open it so the hints are visible.
 document.addEventListener("click", (event) => {
   if (!event.target.closest?.('a[href="#more/connections"]')) return;
@@ -56,6 +56,7 @@ document.addEventListener("click", (event) => {
 });
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 bindExternalCalendar(syncExternalCalendar);
+bindPlanRefresh();
 $("#weatherSyncButton").addEventListener("click", syncWeather);
 $("#yazioCheckButton").addEventListener("click", checkYazioConnection);
 bindProviderChecks();
@@ -78,6 +79,8 @@ $("#garminFullResyncButton").addEventListener("click", () => fullResync(provider
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#retryBodyGarmin").addEventListener("click", retryBodyGarmin);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
+// A closed profile section cannot show its invalid field: open it first.
+$("#profileForm").addEventListener("invalid", (event) => { event.target.closest?.("details")?.setAttribute("open", ""); }, true);
 $("#modelSelect").addEventListener("change", saveModel);
 $("#serviceTierSelect").addEventListener("change", saveServiceTier);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);

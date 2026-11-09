@@ -2,7 +2,8 @@
 
 Codes are kept as Garmin reports them and never turned into numbers:
 
-* ``hrv``: HRV_STATUS from ``hrvStatus``, such as ``BALANCED``.
+* ``hrv``: HRV_STATUS from ``hrvStatus`` or the Personal API's ``status``, such as
+  ``BALANCED``.
 * ``readiness`` and ``training_readiness_history``: READINESS_LEVEL from ``level``
   of the day's morning reading, the one READINESS is taken from.
 * ``daily_training_status``: TRAINING_STATUS from ``trainingStatus`` of the primary
@@ -46,6 +47,8 @@ _CODE: Final = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
 _DAY_TEXT_LENGTH: Final = 10
 _ROW_LIMIT: Final = 1000
 _DAILY_COMPARABLE: Final = ("calendarDate", "trainingStatus")
+# The SDK names the status ``hrvStatus``; the Personal API names it ``status``.
+_HRV_STATUS_FIELDS: Final = ("hrvStatus", "status")
 
 
 def _day(value: object) -> date | None:
@@ -78,17 +81,18 @@ def map_garmin_status_codes(
     retrieved_at: datetime,
 ) -> tuple[CategoricalObservation, ...]:
     """Return the status codes of one stored element of a Garmin section."""
+    fields: tuple[str, ...]
     if section == HRV_SECTION:
-        domain, field = CategoricalDomain.HRV_STATUS, "hrvStatus"
+        domain, fields = CategoricalDomain.HRV_STATUS, _HRV_STATUS_FIELDS
         rows = _rows(element)
     elif section == READINESS_SECTION:
-        domain, field = CategoricalDomain.READINESS_LEVEL, "level"
+        domain, fields = CategoricalDomain.READINESS_LEVEL, ("level",)
         rows = morning_readiness_records(_rows(element))
     elif section == TRAINING_READINESS_HISTORY:
-        domain, field = CategoricalDomain.READINESS_LEVEL, "level"
+        domain, fields = CategoricalDomain.READINESS_LEVEL, ("level",)
         rows = morning_readiness_records(history_rows(element))
     elif section == DAILY_TRAINING_STATUS:
-        domain, field = CategoricalDomain.TRAINING_STATUS, "trainingStatus"
+        domain, fields = CategoricalDomain.TRAINING_STATUS, ("trainingStatus",)
         record = primary_device_record(
             element,
             "mostRecentTrainingStatus",
@@ -109,7 +113,7 @@ def map_garmin_status_codes(
     )
     codes: dict[date, CategoricalObservation] = {}
     for row in rows:
-        code = row.get(field)
+        code = next((row[f] for f in fields if row.get(f) is not None), None)
         day = _day(row.get("calendarDate"))
         if day is None or not isinstance(code, str) or not _CODE.fullmatch(code):
             continue

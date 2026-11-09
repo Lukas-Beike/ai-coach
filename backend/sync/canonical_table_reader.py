@@ -5,7 +5,6 @@ configured and no sync performed. Served records:
 
 - activities: ``active`` activity records whose session is not ``deleted``. Invalid
   and deleted records are never served.
-- activity rows: the stored raw Intervals.icu payloads of those same activities.
 - observations: rows whose ``mapper_version`` equals the current version of their
   provider. Observations have no state column, so a row that an upgraded mapper no
   longer emits is recognised by its old version and is not served. While a
@@ -38,7 +37,6 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 
-from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.coverage import MetricWindow
 from backend.canonical.domain_records import (
     CategoricalObservation,
@@ -80,11 +78,10 @@ from backend.providers.canonical_plans import (
     current_observation_mapper_versions,
 )
 from backend.providers.garmin_activity_mapping import GARMIN_LABEL
-from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
+from backend.providers.source_labels import INTERVALS_LABEL
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
 from backend.runtime.ports import (
     ActivityReader,
-    ActivityRowReader,
     ActivitySessionReader,
     ObservationReader,
     PowerCurveReader,
@@ -101,12 +98,11 @@ _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
 
 class CanonicalTableReader(
     ActivityReader,
-    ActivityRowReader,
     ActivitySessionReader,
     ObservationReader,
     PowerCurveReader,
 ):
-    """Serves canonical activities, raw activity rows and observations from the tables."""
+    """Serves canonical activities and observations from the tables."""
 
     def __init__(
         self, *, oldest_versions: Callable[[Any], Mapping[str, int]] | None = None
@@ -195,70 +191,25 @@ class CanonicalTableReader(
             for session_id, records in grouped.items()
         )
 
-    def intervals_activity_payloads(
-        self,
-        db: Any,
-        *,
-        start: date | None = None,
-        end: date | None = None,
-        limit: int | None = None,
-    ) -> tuple[dict[str, Any], ...]:
-        """Return the stored raw Intervals.icu payloads of live activities.
-
-        Newest first, like the stored snapshot (activity start, then provider
-        activity id, both descending). The stored payload
-        is the ingest-sanitized one: credential-like keys and signed URLs are
-        already removed. ``limit`` is applied in SQL before any payload is read.
-        A payload that does not parse as a JSON object is skipped; its content
-        is never logged.
-        """
-        texts = canonical_store.active_activity_payload_texts(
-            db,
-            provider=ProviderId.INTERVALS.value,
-            record_kind=ACTIVITY_RECORD_KIND,
-            start=_iso(start),
-            end=_iso(end),
-            limit=limit,
-        )
-        parsed = (_payload_object(text) for text in texts)
-        return tuple(row for row in parsed if row is not None)
-
-    def intervals_summary_row(
-        self, db: Any, provider_activity_id: str
-    ) -> dict[str, Any] | None:
-        """Return the stored payload of one active Intervals.icu activity record."""
-        text = canonical_store.active_provider_records(
-            db,
-            ProviderId.INTERVALS.value,
-            ACTIVITY_RECORD_KIND,
-            [provider_activity_id],
-            payloads=True,
-        ).get(provider_activity_id)
-        return None if text is None else _payload_object(text)
-
     def summary_fingerprints(
         self, db: Any, keys: Iterable[ProviderActivityKey]
     ) -> dict[ProviderActivityKey, str]:
         """Return the current summary fingerprint of each requested activity.
 
-        Intervals.icu: ``summary_fingerprint`` of the stored payload, the value
-        stored detail sets and analyses were built with. Other providers: the
-        payload hash of the active raw record.
+        The payload hash of the active raw record. Intervals.icu is an output
+        target: its stored rows have no fingerprint.
         """
         requested: dict[str, list[str]] = {}
         for provider, activity_id in keys:
-            requested.setdefault(provider, []).append(activity_id)
+            if provider != ProviderId.INTERVALS.value:
+                requested.setdefault(provider, []).append(activity_id)
         fingerprints: dict[ProviderActivityKey, str] = {}
         for provider, ids in requested.items():
-            intervals = provider == ProviderId.INTERVALS.value
             stored = canonical_store.active_provider_records(
-                db, provider, ACTIVITY_RECORD_KIND, ids, payloads=intervals
+                db, provider, ACTIVITY_RECORD_KIND, ids
             )
             for activity_id, value in stored.items():
-                if not intervals:
-                    fingerprints[(provider, activity_id)] = value
-                elif (row := _payload_object(value)) is not None:
-                    fingerprints[(provider, activity_id)] = summary_fingerprint(row)
+                fingerprints[(provider, activity_id)] = value
         return fingerprints
 
     def observations(

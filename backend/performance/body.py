@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any
 
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance.canonical_body import (
-    BODY_FAT_BOUNDS,
-    WEIGHT_BOUNDS,
-    CanonicalBodyInputs,
-)
+from backend.performance.canonical_body import CanonicalBodyInputs
 from backend.performance.display_sources import preferred_providers
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.source_policy import (
@@ -21,15 +17,10 @@ from backend.performance.source_policy import (
     SourcePreferences,
     preferred_source,
 )
-from backend.performance.wellness_days import WellnessDay
 from backend.providers.source_labels import SourceView, provider_label
 
-INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
 GARMIN_SOURCE = provider_label(ProviderId.GARMIN, SourceView.BODY_HISTORY)
-_MEASUREMENT_SOURCES = {
-    ProviderId.INTERVALS: INTERVALS_SOURCE,
-    ProviderId.GARMIN: GARMIN_SOURCE,
-}
+_MEASUREMENT_SOURCES = {ProviderId.GARMIN: GARMIN_SOURCE}
 
 
 def _number(value: Any) -> float | None:
@@ -40,51 +31,11 @@ def _number(value: Any) -> float | None:
     return result if math.isfinite(result) else None
 
 
-def _bounded_weight(value: Any) -> float | None:
-    number = _number(value)
-    lower, upper = WEIGHT_BOUNDS
-    return round(number, 2) if number is not None and lower <= number <= upper else None
-
-
-def _bounded_body_fat(value: Any) -> float | None:
-    number = _number(value)
-    lower, upper = BODY_FAT_BOUNDS
-    return round(number, 2) if number is not None and lower <= number <= upper else None
-
-
 def _sync_timestamp(status: GarminSyncStatus, source: str) -> Any:
     details = status.source_freshness.get(source)
     if details is not None:
         return details.get("fetched_at") or details.get("synced_at") or status.synced_at
     return status.synced_at
-
-
-def _intervals_measurements(
-    today: date,
-    days: Sequence[WellnessDay],
-) -> dict[str, dict[date, tuple[float, str, Any]]]:
-    values: dict[str, dict[date, tuple[float, str, Any]]] = {
-        "weight_kg": {},
-        "body_fat_pct": {},
-    }
-    for item in days:
-        if item.day > today:
-            continue
-        for key, kind, bounded in (
-            ("weight_kg", MetricKind.WEIGHT, _bounded_weight),
-            ("body_fat_pct", MetricKind.BODY_FAT, _bounded_body_fat),
-        ):
-            observation = item.observations.get(kind)
-            value = None if observation is None else bounded(item.value(kind))
-            if observation is None or value is None:
-                continue
-            retrieved_at = observation.provenance.retrieved_at
-            values[key][item.day] = (
-                value,
-                item.day.isoformat(),
-                None if retrieved_at is None else retrieved_at.isoformat(),
-            )
-    return values
 
 
 def _garmin_ftp(
@@ -243,7 +194,6 @@ def body_history(
     today: date,
     *,
     canonical: CanonicalBodyInputs,
-    wellness_days: Sequence[WellnessDay],
     garmin_ftp: Mapping[date, float],
     preferences: SourcePreferences = NO_PREFERENCES,
 ) -> dict[str, Any]:
@@ -253,20 +203,16 @@ def body_history(
     to-weight points also retain separate FTP and weight dates, sync times, and
     weight age. Missing dates stay null; profile values are never observations.
 
-    Wellness measurements come solely from canonical days, Garmin weight, body fat
-    and FTP solely from canonical observations. The W/kg series divides Garmin's
-    dated FTP only. The Garmin sync status supplies only sync times.
+    Garmin weight, body fat and FTP come solely from canonical observations. The
+    W/kg series divides Garmin's dated FTP only. The Garmin sync status supplies
+    only sync times.
     """
-    intervals = _intervals_measurements(today, wellness_days)
     garmin_synced_at = _sync_timestamp(garmin, "weight")
     garmin_values = {
         "weight_kg": _stamped(canonical.garmin_weight_kg, garmin_synced_at),
         "body_fat_pct": _stamped(canonical.garmin_body_fat_pct, garmin_synced_at),
     }
-    weights = {
-        ProviderId.INTERVALS: intervals["weight_kg"],
-        ProviderId.GARMIN: garmin_values["weight_kg"],
-    }
+    weights = {ProviderId.GARMIN: garmin_values["weight_kg"]}
     ftp = _garmin_ftp(garmin, today, garmin_ftp)
     windows: dict[str, Any] = {}
     for key, days in (("14d", 14), ("12w", 84)):
@@ -281,13 +227,6 @@ def body_history(
                     for provider, values in weights.items()
                 ],
                 "body_fat_pct": [
-                    _series(
-                        ProviderId.INTERVALS,
-                        "%",
-                        intervals["body_fat_pct"],
-                        start,
-                        today,
-                    ),
                     _series(
                         ProviderId.GARMIN,
                         "%",

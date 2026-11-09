@@ -130,7 +130,7 @@ The system SHALL validate quantity-first machine-readable endurance steps, consi
 Evidence: `backend/planning/workout_validation.py:validate_workout_description`, `backend/planning/workout_validation.py:_validate_endurance_workout_steps`, `backend/planning/workout_validation.py:_validate_workout_duration_match`; `backend/planning/workouts.py:normalize_workout`; `tests/test_planning_workouts.py:test_ambiguous_steps_keep_german_message_and_reason`, `tests/test_planning_workouts.py:test_endurance_parser_preserves_missing_step_and_target_reasons`, `tests/test_planning_workouts.py:test_composite_time_and_thirty_second_tolerance`, `tests/test_planning_workouts.py:test_distance_steps_allow_estimated_total_but_preserve_timed_subtotal`, `tests/test_planning_workouts.py:test_normalize_canonicalizes_endurance_zones_and_keeps_non_endurance_prose`.
 
 ### Requirement: TL8 Local export preparation and explicit provider write boundary
-The system SHALL build validated provider-neutral planned workout exports and provider payloads without contacting providers, and SHALL reach outbound create/update/plan/delete only through the explicit synchronization use case.
+The system SHALL build validated provider-neutral planned workout exports and provider payloads without contacting providers, and SHALL reach outbound create/update/plan/delete (Intervals.icu) and plan pushes (Wahoo, Garmin strength) only through an explicit synchronization use case or job. Intervals.icu is an output target: nothing in the library or the plan is read back from it.
 
 #### Scenario: Local payload preparation
 - **WHEN** export serialization or readback validation is requested locally
@@ -165,11 +165,11 @@ The system SHALL preserve the local template UUID across explicit exports, reuse
 - **WHEN** readback or local identity/sync persistence fails after a remote write
 - **THEN** no verified sync is reported; local slot and link writes commit or roll back together, already persisted identity remains available for an update retry, and a later explicit retry without a usable identity searches for an exact recoverable remote match before creating another entry.
 
-#### Scenario: Provider refresh only
-- **WHEN** library refresh is requested while local entries are pending
-- **THEN** it reads through the target's cancellation-aware library path without implicitly uploading pending local entries or overwriting preserved dirty local content.
+#### Scenario: No remote library import
+- **WHEN** local entries are pending or the remote library holds other workouts
+- **THEN** nothing is imported into the local library and nothing is uploaded implicitly; the remote library is listed only inside an explicitly authorized library sync, to find an exact match for a lost remote identity.
 
-Evidence: `backend/planning/library.py:library_workout_matches`; `backend/sync/library.py:WorkoutLibrarySyncService.sync_entry`, `backend/sync/library.py:WorkoutLibrarySyncService._upsert_remote`, `backend/sync/library.py:WorkoutLibrarySyncService._sync_entry_unlocked`, `backend/sync/library.py:WorkoutLibrarySyncStateService.mark_remote_missing`, `backend/sync/library.py:WorkoutLibrarySyncStateService.store_remote_identity`, `backend/sync/library.py:WorkoutLibrarySyncStateService.finish`, `backend/sync/library.py:WorkoutLibraryRemoteReconciler.reconcile`, `backend/sync/library.py:WorkoutLibraryRemoteReconciler._preserved_dirty_library_workout`; `backend/db/remote_links.py:RemoteLinkRepository.refresh_from_slots`; `tests/test_sync_library.py:test_update_upstream_not_found_recreates_remote_workout`, `tests/test_sync_library.py:test_update_provider_http_not_found_recreates_remote_workout`, `tests/test_sync_library.py:test_update_upstream_failure_other_than_not_found_keeps_sync_error`, `tests/test_sync_library.py:test_update_provider_http_failure_other_than_not_found_keeps_sync_error`, `tests/test_sync_library.py:test_sync_entry_recovers_remote_missing_before_creating`, `tests/test_sync_library.py:test_retry_after_lost_identity_adopts_the_created_remote_workout`, `tests/test_sync_library.py:test_create_response_keeps_a_local_edit_made_during_upload`, `tests/test_sync_library.py:test_update_response_keeps_a_local_edit_made_during_upload`; `tests/test_workout_library_export.py:test_known_entry_is_updated_by_the_link_identity`, `tests/test_workout_library_export.py:test_recovered_remote_entry_is_adopted_without_creating`, `tests/test_workout_library_export.py:test_failed_readback_keeps_identity_in_slot_and_link_together`, `tests/test_workout_library_export.py:test_finish_failure_rolls_back_slot_and_link_in_one_transaction`; `tests/test_server_planning.py:test_unparsed_library_export_keeps_identity_and_retries_as_update`, `tests/test_server_planning.py:test_library_refresh_is_read_only_even_with_pending_local_entries`. Slot/link atomicity is local; these checks do not provide remote compare-and-swap or rollback of a completed provider write.
+Evidence: `backend/planning/library.py:library_workout_matches`; `backend/sync/library.py:WorkoutLibrarySyncService.sync_entry`, `backend/sync/library.py:WorkoutLibrarySyncService._upsert_remote`, `backend/sync/library.py:WorkoutLibrarySyncService._sync_entry_unlocked`, `backend/sync/library.py:WorkoutLibrarySyncStateService.mark_remote_missing`, `backend/sync/library.py:WorkoutLibrarySyncStateService.store_remote_identity`, `backend/sync/library.py:WorkoutLibrarySyncStateService.finish`; `backend/db/remote_links.py:RemoteLinkRepository.refresh_from_slots`; `tests/test_sync_library.py:test_update_upstream_not_found_recreates_remote_workout`, `tests/test_sync_library.py:test_update_provider_http_not_found_recreates_remote_workout`, `tests/test_sync_library.py:test_update_upstream_failure_other_than_not_found_keeps_sync_error`, `tests/test_sync_library.py:test_update_provider_http_failure_other_than_not_found_keeps_sync_error`, `tests/test_sync_library.py:test_sync_entry_recovers_remote_missing_before_creating`, `tests/test_sync_library.py:test_retry_after_lost_identity_adopts_the_created_remote_workout`, `tests/test_sync_library.py:test_create_response_keeps_a_local_edit_made_during_upload`, `tests/test_sync_library.py:test_update_response_keeps_a_local_edit_made_during_upload`; `tests/test_workout_library_export.py:test_known_entry_is_updated_by_the_link_identity`, `tests/test_workout_library_export.py:test_recovered_remote_entry_is_adopted_without_creating`, `tests/test_workout_library_export.py:test_failed_readback_keeps_identity_in_slot_and_link_together`, `tests/test_workout_library_export.py:test_finish_failure_rolls_back_slot_and_link_in_one_transaction`; `tests/test_server_planning.py:test_unparsed_library_export_keeps_identity_and_retries_as_update`. Slot/link atomicity is local; these checks do not provide remote compare-and-swap or rollback of a completed provider write.
 
 ### Requirement: TL10 Exact explicit sync selection and complete repair manifests
 The system SHALL bind explicit plan pushes to concrete local IDs/current hashes, resolve created/all-pending selections on the server, and require a complete future-period manifest for repair rather than widening a partial model selection.
@@ -194,6 +194,10 @@ Evidence: `backend/coach/tool_preparation.py:CoachStructuredToolPreparationServi
 
 ### Requirement: TL11 Planned-calendar upsert identity and in-flight local changes
 The system SHALL use stable Intervals planned-event identity for explicit dated-unit pushes, validate the returned event before marking the unchanged local unit synced, and preserve newer local content and recoverable remote identity when the upload races with local changes or result validation fails.
+
+#### Scenario: Strength units go as notes
+- **WHEN** a strength unit is pushed to the Intervals.icu calendar
+- **THEN** it is sent as a `NOTE` event (Intervals.icu forwards a workout event to Garmin as one unnamed step); only a note this app sent (external id `intervals-coach-<local_id>`) counts as a planned event, other notes never do. The structured strength workout reaches the watch only through the direct Garmin push.
 
 #### Scenario: Create and later update
 - **WHEN** an explicit normal push exports an active planned unit and a later push retries or updates it
@@ -221,7 +225,7 @@ Evidence: `backend/sync/planned_calendar.py:PlannedCalendarSyncService._event_pa
 The system SHALL reconcile an archived or locally deleted planned unit through the explicit sync path, checking the stored remote event ID and its current eligibility before deletion and rechecking local content before recording removal.
 
 #### Scenario: Remove a known eligible event
-- **WHEN** normal explicit sync removes an inactive unit with a remote_event_id and reading that ID returns the same ID as an unpaired WORKOUT dated today or later
+- **WHEN** normal explicit sync removes an inactive unit with a remote_event_id and reading that ID returns the same ID as an unpaired planned event (a WORKOUT, or this app's strength NOTE) dated today or later
 - **THEN** the service rechecks the local payload, deletes that concrete remote event and marks local removal synced only after another local-payload check.
 
 #### Scenario: No remote ID or already absent
@@ -229,14 +233,14 @@ The system SHALL reconcile an archived or locally deleted planned unit through t
 - **THEN** removal is treated as already satisfied without a remote delete and local removal is recorded subject to the final local-payload check.
 
 #### Scenario: Linked event is no longer eligible
-- **WHEN** the remote read is not an event object with the expected ID, is not a planned WORKOUT, is past, or is paired with an activity or event
+- **WHEN** the remote read is not an event object with the expected ID, is not a planned event, is past, or is paired with an activity or event
 - **THEN** normal removal fails with an identity conflict and issues no delete.
 
 #### Scenario: Local payload changes after the remote read
 - **WHEN** the unit changes before the pre-delete payload recheck
 - **THEN** deletion is blocked with a planning revision conflict; a change detected after a remote delete also blocks the final local success record without undoing that remote delete.
 
-Evidence: `backend/sync/planned_calendar.py:PlannedCalendarSyncService._delete_remote_event`, `backend/sync/planned_calendar.py:PlannedCalendarSyncService._mark_removed`, `backend/sync/planned_calendar.py:PlannedCalendarSyncService._remove_event`; `backend/sync/intervals_workout_export.py:IntervalsWorkoutExport.is_unpaired_future_planned`; `tests/test_sync_planned_calendar.py:test_delete_success_rechecks_and_persists_removed_state`, `tests/test_sync_planned_calendar.py:test_archived_or_deleted_without_remote_id_only_marks_local_sync`, `tests/test_sync_planned_calendar.py:test_delete_404_is_already_removed`, `tests/test_sync_planned_calendar.py:test_delete_treats_http_error_404_cause_as_already_removed`, `tests/test_sync_planned_calendar.py:test_delete_identity_conflicts`, `tests/test_sync_planned_calendar.py:test_payload_change_after_remote_read_blocks_delete`. The post-delete concurrent-edit branch is implementation-inspected; these cited tests do not inject an edit after deletion. Normal removal has no final collection readback; repair verification is covered by TL14.
+Evidence: `backend/sync/planned_calendar.py:PlannedCalendarSyncService._delete_remote_event`, `backend/sync/planned_calendar.py:PlannedCalendarSyncService._mark_removed`, `backend/sync/planned_calendar.py:PlannedCalendarSyncService._remove_event`; `backend/sync/intervals_workout_export.py:IntervalsWorkoutExport.is_unpaired_future_planned`, `backend/providers/intervals_workouts.py:intervals_event_is_planned`; `tests/test_sync_planned_calendar.py:test_delete_success_rechecks_and_persists_removed_state`, `tests/test_sync_planned_calendar.py:test_archived_or_deleted_without_remote_id_only_marks_local_sync`, `tests/test_sync_planned_calendar.py:test_delete_404_is_already_removed`, `tests/test_sync_planned_calendar.py:test_delete_treats_http_error_404_cause_as_already_removed`, `tests/test_sync_planned_calendar.py:test_delete_identity_conflicts`, `tests/test_sync_planned_calendar.py:test_payload_change_after_remote_read_blocks_delete`. The post-delete concurrent-edit branch is implementation-inspected; these cited tests do not inject an edit after deletion. Normal removal has no final collection readback; repair verification is covered by TL14.
 
 ### Requirement: TL13 Exact repair ownership and bounded duplicate cleanup
 The system SHALL repair selected planned units dated today or later using current local hashes and concrete remote identities, refuse identified unsafe or ambiguous candidates, and limit cleanup to identity-checked related events in the repair window.
@@ -247,7 +251,7 @@ The system SHALL repair selected planned units dated today or later using curren
 
 #### Scenario: Identify related events and refuse foreign ownership
 - **WHEN** the repair window contains an event with a concrete ID matching the unit's stored remote ID or a generated/stored external identity
-- **THEN** it is related only if it is an unpaired planned WORKOUT dated today or later and neither its ID nor external identity belongs to another local planned unit; an identified event failing those checks causes an identity conflict.
+- **THEN** it is related only if it is an unpaired planned event (WORKOUT or this app's strength NOTE) dated today or later and neither its ID nor external identity belongs to another local planned unit; an identified event failing those checks causes an identity conflict.
 
 #### Scenario: Known ID is absent from the window
 - **WHEN** the stored remote ID is not among the related events read from the repair window
@@ -295,9 +299,9 @@ The system SHALL execute the exact selected sync entries with per-entry outcomes
 - **WHEN** an Intervals plan_push job executes
 - **THEN** its concrete entries and repair flag are passed to selected synchronization; each entry is checked for existence and current payload hash, and planned units route to normal push or repair without widening the selection.
 
-#### Scenario: Shared repair snapshots and lock
+#### Scenario: Shared repair snapshots
 - **WHEN** a selected repair batch executes
-- **THEN** it waits for the Intervals sync lock or fails temporarily, shares its initial remote window snapshot and final collection read across deferred completions, and releases the lock on exit; final-read failures apply to each deferred completion instead of accepting its provisional result.
+- **THEN** it shares its initial remote window snapshot and final collection read across deferred completions; final-read failures apply to each deferred completion instead of accepting its provisional result. With no background Intervals.icu ingest left, the batch takes no shared Intervals.icu sync lock; the per-unit guard still rejects overlapping pushes.
 
 #### Scenario: Verification overrides a provisional result
 - **WHEN** an entry's repair operation or deferred verification fails
@@ -307,14 +311,14 @@ The system SHALL execute the exact selected sync entries with per-entry outcomes
 - **WHEN** the selected entries finish with successes and errors/conflicts
 - **THEN** the aggregate status is partial, or error if every entry failed, with failed_object_ids and retry_scope directing selection of only failed objects; an all-success result is ok with no retry scope. Completed remote effects for other entries remain in place even if a later entry fails.
 
-Evidence: `backend/sync/executor.py:IntervalsSyncJobOwner.execute_specific`; `backend/sync/selected.py:SelectedWorkoutSyncService.sync`, `backend/sync/selected.py:SelectedWorkoutSyncService._sync_unlocked`, `backend/sync/selected.py:SelectedWorkoutSyncService._sync_entry`, `backend/sync/selected.py:SelectedWorkoutSyncService._verify_repair`; `backend/sync/planned_calendar.py:PlannedCalendarRepairBatch.snapshot`, `backend/sync/planned_calendar.py:PlannedCalendarRepairBatch.verify`; `tests/test_sync_executor.py:test_dispatches_specific_intervals_jobs_and_preserves_plan_repair`; `tests/test_sync_selected.py:test_planned_normal_and_repair_paths`, `tests/test_sync_selected.py:test_hash_and_not_found_conflicts_are_aggregated`, `tests/test_sync_selected.py:test_partial_and_all_failure_aggregation`, `tests/test_sync_selected.py:test_repair_errors_are_recorded_and_verification_failure_overrides_result`, `tests/test_sync_selected.py:test_repair_lock_timeout_release_and_exception_cleanup`; `tests/test_sync_planned_calendar.py:test_repair_batch_shares_two_reads_and_deferred_verification`. Retry scope here is the selected operation's failed-object guidance; the separately authorized durable job retry in TL10 retains the original job selection. Evidence uses inspected implementation and synthetic/mocked tests, not a live provider or a distributed rollback guarantee.
+Evidence: `backend/sync/executor.py:IntervalsSyncJobOwner.execute_specific`; `backend/sync/selected.py:SelectedWorkoutSyncService.sync`, `backend/sync/selected.py:SelectedWorkoutSyncService._sync_entry`, `backend/sync/selected.py:SelectedWorkoutSyncService._verify_repair`; `backend/sync/planned_calendar.py:PlannedCalendarRepairBatch.snapshot`, `backend/sync/planned_calendar.py:PlannedCalendarRepairBatch.verify`; `tests/test_sync_executor.py:test_dispatches_specific_intervals_jobs_and_preserves_plan_repair`; `tests/test_sync_selected.py:test_planned_normal_and_repair_paths`, `tests/test_sync_selected.py:test_hash_and_not_found_conflicts_are_aggregated`, `tests/test_sync_selected.py:test_partial_and_all_failure_aggregation`, `tests/test_sync_selected.py:test_repair_errors_are_recorded_and_verification_failure_overrides_result`; `tests/test_sync_planned_calendar.py:test_repair_batch_shares_two_reads_and_deferred_verification`. Retry scope here is the selected operation's failed-object guidance; the separately authorized durable job retry in TL10 retains the original job selection. Evidence uses inspected implementation and synthetic/mocked tests, not a live provider or a distributed rollback guarantee.
 
 ### Requirement: TL16 Provider-neutral planning record fields
-Local planning records (planned units, workout-library entries, competitions, staged plan workouts and adaptive previews) SHALL store and return their local start as `starts_at_local` and their planned duration in seconds as `planned_duration_s`, in the HTTP API, Coach tools and Coach context alike. Only the Intervals.icu adapter SHALL map these fields to and from the Intervals.icu event and workout fields `start_date_local` and `moving_time`, so payloads sent to Intervals.icu stay unchanged.
+Local planning records (planned units, workout-library entries, competitions, staged plan workouts and adaptive previews) SHALL store and return their local start as `starts_at_local` and their planned duration in seconds as `planned_duration_s`, in the HTTP API, Coach tools and Coach context alike. Only the Intervals.icu adapter SHALL map these fields to the Intervals.icu event and workout fields `start_date_local` and `moving_time`, so payloads sent to Intervals.icu stay unchanged.
 
-#### Scenario: Remote workout import
-- **WHEN** an Intervals.icu planned event or library workout is imported
-- **THEN** the stored local record names its start and duration `starts_at_local` and `planned_duration_s`.
+#### Scenario: Provider response read back
+- **WHEN** the adapter reads an Intervals.icu event or library workout returned for an explicit export
+- **THEN** it names the start and duration `starts_at_local` and `planned_duration_s` before the readback validation.
 
 #### Scenario: Explicit export to Intervals.icu
 - **WHEN** an athlete explicitly synchronizes planned units, library workouts or competitions
@@ -324,15 +328,15 @@ Local planning records (planned units, workout-library entries, competitions, st
 - **WHEN** an athlete-started Coach turn saves a competition with `starts_at_local` and `planned_duration_s`
 - **THEN** the competition is stored with those values.
 
-Evidence: `backend/providers/intervals_workouts.py::planning_fields_from_intervals`, `backend/providers/intervals_workouts.py::intervals_fields_from_planning`, `backend/providers/intervals_workouts.py::intervals_event_payload`; `backend/sync/intervals_workout_export.py::IntervalsWorkoutExport`; `backend/sync/competitions.py::CompetitionSyncService.sync`; ; `backend/sync/reconcile.py`. Tests: `tests/test_workout_export_parity.py::test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_workout_export_intervals.py::test_library_workouts_cross_the_adapter_with_planning_field_names`; `tests/test_workout_export_intervals.py::test_library_readback_checks_the_remote_duration_under_its_wire_name`; `tests/test_planning_competitions.py::test_event_payload_fallbacks_limits_and_input_immutability`; `tests/test_sync_adaptive.py::test_sync_sends_the_illness_start_under_the_intervals_wire_name`; `tests/test_server_coach.py`.
+Evidence: `backend/providers/intervals_workouts.py::planning_fields_from_intervals`, `backend/providers/intervals_workouts.py::intervals_fields_from_planning`, `backend/providers/intervals_workouts.py::intervals_event_payload`; `backend/sync/intervals_workout_export.py::IntervalsWorkoutExport`; `backend/sync/competitions.py::CompetitionSyncService.sync`; `backend/sync/reconcile.py`. Tests: `tests/test_workout_export_parity.py::test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_workout_export_intervals.py::test_library_workouts_cross_the_adapter_with_planning_field_names`; `tests/test_workout_export_intervals.py::test_library_readback_checks_the_remote_duration_under_its_wire_name`; `tests/test_planning_competitions.py::test_event_payload_fallbacks_limits_and_input_immutability`; `tests/test_sync_adaptive.py::test_sync_sends_the_illness_start_under_the_intervals_wire_name`; `tests/test_server_coach.py`.
 
 ### Requirement: Provider-neutral planning metrics
 
 Local planning records SHALL use provider-neutral names for planned load, intensity and frozen target FTP. The Intervals.icu adapter SHALL translate its wire fields at the provider boundary.
 
-#### Scenario: Provider workout is imported
-- **WHEN** a provider workout has planned load or intensity
-- **THEN** its local record retains those values under provider-neutral names.
+#### Scenario: Local planned load and intensity
+- **WHEN** a local workout or library entry stores planned load or intensity
+- **THEN** it uses the provider-neutral names `planned_load` and `planned_intensity`.
 
 #### Scenario: Workout is exported
 - **WHEN** a local workout is explicitly synchronized to Intervals.icu
@@ -345,7 +349,7 @@ Local planning records SHALL use provider-neutral names for planned load, intens
 Evidence: `backend/planning/library.py`, `backend/planning/target_snapshot.py`, `backend/providers/intervals_workouts.py`; `tests/test_workout_export_intervals.py`, `tests/test_target_snapshot_summaries.py`.
 
 ### Requirement: Session focus of planned units and templates
-Planned units and library templates SHALL carry an optional local session focus, validated per sport, that no provider export writes.
+Planned units and library templates SHALL carry an optional local session focus, validated per sport, that no provider export writes. A Coach write that creates, moves or changes a strength unit without a strength structure, focus and strength intensity SHALL be blocked by the plan check `strength_incomplete`, which the Coach cannot accept away.
 
 #### Scenario: Valid focus
 - **WHEN** a unit or template sets a focus allowed for its sport (run and ride: recovery, easy, endurance, long, tempo, threshold, vo2max, anaerobic, race, test; ride also sweet_spot; strength: legs, upper, full_body, core, plyometrics, mobility with an optional light, moderate or heavy strength intensity)
@@ -361,19 +365,86 @@ Planned units and library templates SHALL carry an optional local session focus,
 
 #### Scenario: Export
 - **WHEN** a unit with a focus is exported to Intervals.icu
-- **THEN** the event payload is unchanged and a remote refresh keeps the local focus.
+- **THEN** the event payload is unchanged; the focus stays local (a run unit's `hr_cap` is the exception, see the heart-rate cap requirement).
 
-Evidence: `backend/planning/session_focus.py`; `tests/test_session_focus.py`, `e2e/session-focus.spec.js`.
+#### Scenario: Required focus
+- **WHEN** a Coach write creates, moves or changes a run or ride unit without a focus
+- **THEN** the plan check `focus_missing` blocks it like `strength_incomplete`, cannot be accepted away, and never blocks an unrelated write because of an untouched older unit; sports without a focus vocabulary are exempt.
+
+#### Scenario: One-time backfill of future units
+- **WHEN** the application starts and the versioned focus backfill has not run
+- **THEN** every future, non-archived unit without a focus (and every strength unit without an intensity) receives the derived value only if its sources agree: steps and text do not contradict, exactly one keyword group matches, and the strength intensity comes from the structure or from exactly one named level; contested units, past units and sports without a focus vocabulary stay untouched, no exercise structure is invented, the sync state is kept and no provider is written.
+- **AND** the changes are recorded in the change history and in the step's state (counts and change references only, reported by diagnostics), and `POST /api/change-history/undo-focus-backfill` restores all of them in one transaction, or none when a unit was edited since; a second run changes nothing.
+
+Evidence: `backend/planning/session_focus.py`, `backend/sync/session_focus_backfill.py`; `tests/test_session_focus.py`, `tests/test_session_focus_backfill.py`, `e2e/session-focus.spec.js`.
+
+### Requirement: Heart-rate caps of easy run units
+A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap.py`) SHALL carry a local `hr_cap` of percentages only (cap, exported lower bound, source). Bpm SHALL be resolved from the threshold HR on the unit's date wherever it is read, checked or exported, and never stored. A Coach write with a wrong cap SHALL be blocked by the plan check `hr_cap_invalid`; planned units are never rewritten.
+
+#### Scenario: Threshold source
+- **WHEN** a bpm is needed
+- **THEN** it is resolved from the run threshold HR in effect on the unit's date (local zones, then the dated Garmin watch zone set, then the other resolved thresholds); when none is known only the percent is shown, nothing is estimated, and the plan check does not depend on it.
+
+#### Scenario: Missing, too high or mismatched cap
+- **WHEN** the Coach writes a capped run unit without `hr_cap`, with a percent above the effective cap, or with a lower bound or source that does not belong to it
+- **THEN** the write fails with `hr_cap_invalid` naming the correct percentages and source, and nothing is saved.
+
+#### Scenario: Threshold change
+- **WHEN** the watch's threshold HR changes between two dated Garmin zone sets
+- **THEN** the stored percentages stay, the card, the Coach context, the analysis and the exports resolve the new bpm, and no unit is edited.
+
+#### Scenario: Measured first threshold
+- **WHEN** the athlete enters a measured first-threshold heart rate in bpm (profile form or API, never by the Coach)
+- **THEN** it is stored as percent of the run threshold HR in effect on the measurement date (`first_threshold_pct`), the easy and long cap becomes that percent minus a fixed margin and the recovery cap the lower of its default and the easy cap minus a fixed gap (constants in `backend/activities/hr_cap.py`), the cap source is `measured`, and a cap with another source than the current one is rejected like a wrong value.
+
+#### Scenario: Export to Wahoo
+- **WHEN** a run unit with a cap becomes a Wahoo plan
+- **THEN** every step with a heart-rate target, warm-up and cool-down included, is one wide range from the lower bound to the cap in percent of the threshold HR (`% LTHR`), resolved by the plan header's `threshold_hr`, which Pacecraft supplies from the current thresholds; a moved threshold changes the exported plan, so the existing push state shows the unit as changed.
+
+#### Scenario: Export to Garmin
+- **WHEN** a run unit with a cap is sent through the Intervals.icu calendar
+- **THEN** every heart-rate step, warm-up and cool-down included, is written as one wide `low-highbpm` range resolved at export time (no zone number, no narrow band, no percent: a Garmin workout step cannot hold a percent of the lactate threshold HR, and Intervals.icu would resolve a percent with its own, possibly stale, threshold); steps with a pace or power target keep theirs; the stored text stays as written; without a known threshold HR the text is sent unchanged.
+
+#### Scenario: Changed flag
+- **WHEN** only the threshold HR moved after a unit was synced
+- **THEN** the unit counts as changed (its resolved range differs from the one sent) and the calendar sync button offers it again; nothing is sent without that explicit sync.
+
+#### Scenario: Card and analysis
+- **WHEN** a unit has a cap
+- **THEN** its card shows the percent first, then the currently resolved bpm and the source (the form "≤ <percent> % LSHF · <bpm> bpm · <source>"), and the post-session analysis judges the run's heart rate against the stored cap resolved for the unit's date (`planned_targets.heart_rate_cap`: mean, time above the cap, verdict within_target, upper_edge or above_cap), not against the zones.
+
+Evidence: `backend/activities/hr_cap.py`, `backend/activities/hr_cap_export.py:capped_description`, `backend/planning/run_hr_cap.py`, `backend/planning/plan_checks.py:hr_cap_invalid`, `backend/planning/hr_cap_sync.py`, `backend/planning/push_state.py:attach_push_state`, `backend/athlete/profile.py:ProfileService`, `backend/performance/planned_targets.py:heart_rate_cap_execution`, `public/plan-views.js:hrCapChipSpec`; `tests/test_run_hr_cap.py`, `tests/test_hr_cap_export.py`, `tests/plan-views-hr-cap.test.cjs`.
 
 ### Requirement: Structured strength units
-Strength units and templates SHALL carry an optional local `strength_structure` (at most 12 exercises with name, sets, reps, optional kg, %1RM, RPE or RIR (one relative load) and rest) in the payload, validated server-side with `invalid_strength_structure`; free text stays the fallback.
+Strength units and templates SHALL carry an optional local `strength_structure` (at most 12 exercises with name, sets, reps, optional kg, %1RM, RPE or RIR (one relative load), rest, up to 5 warm-up sets with reps and optional kg, a short note and an optional Garmin catalogue exercise) in the payload, validated server-side with `invalid_strength_structure`; free text stays the fallback for units that have none.
 
 #### Scenario: Structure given
 - **WHEN** a strength unit or template is written with a structure
 - **THEN** its description is generated from it, a free-text description edit without a structure drops it, and `strength_intensity` and leg involvement are derived and labelled `derived` (heavy from 80 % 1RM, RPE 8 or 2 RIR) unless a focus or intensity is set.
 
-#### Scenario: Export and refresh
-- **WHEN** a structured unit is exported to Intervals.icu on an explicit sync
-- **THEN** only the readable description is sent, nothing implicit is written, and a remote refresh keeps the structure only while the remote description is unchanged.
+#### Scenario: Garmin catalogue exercise
+- **WHEN** an exercise names a Garmin catalogue exercise, or the athlete picks one of the suggested chips of an exercise without a match
+- **THEN** the name is checked against the catalogue and its category and exercise pair is derived on write, never taken from the request; an unknown name is rejected with suggestions; a pick through `POST /api/planned-units/<id>/garmin-exercise` needs the current payload hash, is refused for a unit in a sync conflict, is remembered for the same exercise name in other units and does not change the Intervals.icu sync state.
 
-Evidence: `backend/planning/strength_structure.py`, `backend/planning/session_focus.py`; `tests/test_strength_structure.py`.
+#### Scenario: Export
+- **WHEN** a structured unit is exported to Intervals.icu on an explicit sync
+- **THEN** only the readable description is sent, as a note event, and nothing implicit is written.
+
+Evidence: `backend/planning/strength_structure.py`, `backend/planning/session_focus.py`, `backend/planning/planned_unit_service.py:PlannedUnitService.assign_garmin_exercise`, `backend/http_api/planned_unit_focus_post.py`, `backend/planning/push_state.py:unmapped_exercises`, `backend/planning/plan_checks.py:strength_incomplete`, `backend/planning/plan_checks.py:focus_missing`; `tests/test_strength_structure.py`, `tests/test_planning_push_state.py`, `tests/test_plan_guard_service.py`.
+
+### Requirement: Wahoo sync state of library workouts
+The system SHALL show, for each library workout already delivered to Wahoo as a plan, whether Wahoo holds its current content (`synced` or `changed`), by comparing the plan the workout would be sent as now with the baseline stored by the last export. The read SHALL write nothing and contact no provider.
+
+#### Scenario: Meaning of the state
+- **WHEN** the workout text or a threshold behind a relative step changed since the last export, or the workout no longer maps to a Wahoo plan
+- **THEN** the state is `changed`, otherwise `synced`; workouts never sent get no state and none is returned while Wahoo is not connected.
+
+#### Scenario: Library page carries the state
+- **WHEN** the athlete browses `/api/library` with Wahoo connected
+- **THEN** each exported workout carries `wahoo_state` with `state` and the `payload_hash` of its stored text, and the PWA labels it "Wahoo: synchron" or "Wahoo: geändert".
+
+#### Scenario: Explicit resend
+- **WHEN** the workout is `changed` and the athlete taps the resend button
+- **THEN** a `plan_push` job for Wahoo is started with that payload hash, so a workout edited meanwhile is refused instead of pushed; nothing is sent implicitly.
+
+Evidence: `backend/sync/wahoo_library_state.py:WahooLibraryState.states`, `backend/http_api/library_page.py:LibraryPageService.page`, `backend/sync/wahoo_plan_push.py`, `public/plan-views.js:libraryWahooRow`; `tests/test_wahoo_library_state.py`.

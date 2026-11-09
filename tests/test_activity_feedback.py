@@ -15,6 +15,7 @@ from backend.activities.feedback import (
     normalize_activity_feedback,
 )
 from backend.canonical.vocabulary import ProviderId
+from backend.db import canonical_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
@@ -288,7 +289,10 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         service = ActivityFeedbackService(
             self.manager, self.feedback_repository, references=references
         )
-        intervals_session = references.local_ids(["i-1"])["i-1"]
+        with self.manager.reader() as db:
+            intervals_session = canonical_store.activity_local_ids(
+                db, ProviderId.INTERVALS.value, ["i-1"]
+            )["i-1"]
 
         # Intervals id, its local id, a Garmin-only local id and provider id:
         # every one is stored under the live session id.
@@ -328,7 +332,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(self.service.context()["recent"], self.service.list())
         self.assertEqual(
             self.service.context()["scope"],
-            "Only athlete-entered notes, session RPE and deviation reasons about completed activities; this feedback is separate from daily check-ins and provider values.",
+            "Only athlete-entered notes, session RPE, deviation reasons and the session purpose marking about completed activities; a marking wins over the provider event type and the race hint; this feedback is separate from daily check-ins and provider values.",
         )
 
     def test_attach_projects_only_dict_activities_without_mutating_input(self) -> None:

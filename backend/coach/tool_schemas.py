@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.activities.hr_cap import (
+    LOW_PERCENT_KEY,
+    PERCENT_KEY,
+    SOURCE_KEY,
+    SOURCES,
+    cap_table_text,
+)
+from backend.athlete.profile import COACH_READ_ONLY_FIELDS
 from backend.planning.plan_checks import BLOCKING_CODES
 from backend.planning.session_focus import (
     ALL_FOCI,
@@ -43,13 +51,13 @@ def _canonical_coach_tool(
 
 
 _FOCUS_DESCRIPTION = (
-    "Art der Einheit, set for every new unit. Run: "
+    "Art der Einheit, required for every run, ride and strength unit you create, move or change (the server rejects one without it). Run: "
     + ", ".join(ENDURANCE_FOCI)
     + ". Ride: "
     + ", ".join(RIDE_FOCI)
     + ". Strength: "
     + ", ".join(STRENGTH_FOCI)
-    + ". Null only for sports without focus."
+    + ". Null only for sports without a focus (e.g. swim)."
 )
 SESSION_FOCUS_SCHEMA: dict[str, Any] = {
     "type": ["string", "null"],
@@ -101,6 +109,27 @@ STRENGTH_STRUCTURE_SCHEMA: dict[str, Any] = {
         "additionalProperties": False,
         "required": list(_EXERCISE_PROPERTIES),
         "properties": _EXERCISE_PROPERTIES,
+    },
+}
+HR_CAP_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "required": [PERCENT_KEY, LOW_PERCENT_KEY, SOURCE_KEY],
+    "description": (
+        "Run units with a session_focus that has a heart-rate cap ("
+        + cap_table_text()
+        + " of the threshold HR by default) need it, required for every such unit you create, "
+        "move or change (the server rejects a unit without it, above the effective cap, or "
+        "with a lower bound or source that does not belong to it; the error names the value). "
+        "Percentages only, never bpm: write the percent_lthr, low_percent_lthr and source of "
+        "current_performance.thresholds.run_hr_caps for the unit's focus. The bpm follows the "
+        "athlete's current lactate threshold HR by itself. The athlete's measured first "
+        "threshold changes those caps; you never set or derive it. Null for other units."
+    ),
+    "properties": {
+        PERCENT_KEY: {"type": "number", "minimum": 20, "maximum": 120},
+        LOW_PERCENT_KEY: {"type": "number", "minimum": 20, "maximum": 120},
+        SOURCE_KEY: {"type": "string", "enum": list(SOURCES)},
     },
 }
 STRENGTH_INTENSITY_SCHEMA: dict[str, Any] = {
@@ -306,13 +335,20 @@ def build_structured_tool_schemas(
                 "changes": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": len(DEFAULT_PROFILE),
+                    "maxItems": len(DEFAULT_PROFILE) - len(COACH_READ_ONLY_FIELDS),
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
                         "required": ["field", "expected_value", "value"],
                         "properties": {
-                            "field": {"type": "string", "enum": list(DEFAULT_PROFILE)},
+                            "field": {
+                                "type": "string",
+                                "enum": [
+                                    name
+                                    for name in DEFAULT_PROFILE
+                                    if name not in COACH_READ_ONLY_FIELDS
+                                ],
+                            },
                             "expected_value": {"type": "string", "maxLength": 4000},
                             "value": {"type": "string", "maxLength": 4000},
                         },
@@ -446,6 +482,7 @@ def build_structured_tool_schemas(
                                     "session_focus",
                                     "strength_intensity",
                                     "strength_structure",
+                                    "hr_cap",
                                 ],
                                 "properties": {
                                     "date": {
@@ -479,6 +516,7 @@ def build_structured_tool_schemas(
                                     "session_focus": SESSION_FOCUS_SCHEMA,
                                     "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                                     "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
+                                    "hr_cap": HR_CAP_SCHEMA,
                                 },
                             },
                         },
@@ -526,6 +564,7 @@ def build_structured_tool_schemas(
                                     "session_focus",
                                     "strength_intensity",
                                     "strength_structure",
+                                    "hr_cap",
                                 ],
                                 "properties": {
                                     "date": {
@@ -552,6 +591,7 @@ def build_structured_tool_schemas(
                                     "session_focus": SESSION_FOCUS_SCHEMA,
                                     "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                                     "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
+                                    "hr_cap": HR_CAP_SCHEMA,
                                 },
                             },
                         },
@@ -597,6 +637,7 @@ def build_structured_tool_schemas(
                             "session_focus": SESSION_FOCUS_SCHEMA,
                             "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                             "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
+                            "hr_cap": HR_CAP_SCHEMA,
                         },
                         "additionalProperties": False,
                     },
@@ -665,6 +706,7 @@ def build_structured_tool_schemas(
                             "session_focus": SESSION_FOCUS_SCHEMA,
                             "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                             "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
+                            "hr_cap": HR_CAP_SCHEMA,
                         },
                     },
                 }
@@ -750,7 +792,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "save_activity_feedback",
-            "Save explicitly stated feedback for one existing completed activity, including optional session RPE 0-10 and deviation reason. Resolve its exact ID first. Omitted fields preserve existing values; only clear a field on explicit request. Never infer session RPE from a daily check-in, provider RPE or another activity. This cannot create completed activities.",
+            "Save explicitly stated feedback for one existing completed activity, including optional session RPE 0-10, deviation reason and the purpose the athlete names for the session (training, race, commute, warmup, cooldown). Resolve its exact ID first. Omitted fields preserve existing values; only clear a field on explicit request. Never infer session RPE from a daily check-in, provider RPE or another activity, and never infer a purpose from a title or a provider label. This cannot create completed activities.",
             {
                 "payload": {
                     "type": "object",
@@ -779,13 +821,25 @@ def build_structured_tool_schemas(
                             "type": ["string", "null"],
                             "maxLength": 500,
                         },
+                        "purpose": {
+                            "type": ["string", "null"],
+                            "enum": [
+                                "training",
+                                "race",
+                                "commute",
+                                "warmup",
+                                "cooldown",
+                                None,
+                            ],
+                            "description": "The athlete's own marking of what the session was; it wins over Garmin and over a competition hint. Marking training on a race removes its competition link. null removes the marking.",
+                        },
                     },
                 }
             },
         ),
         _canonical_coach_tool(
             "delete_activity_feedback",
-            "Delete the local feedback record for one completed activity. activity_id accepts the local ID (act_...) or the provider activity ID.",
+            "Delete the notes, session RPE and deviation reason of one completed activity. The athlete's purpose marking stays; remove it with save_activity_feedback and purpose null. activity_id accepts the local ID (act_...) or the provider activity ID.",
             {"activity_id": {"type": "string"}},
         ),
         _canonical_coach_tool(

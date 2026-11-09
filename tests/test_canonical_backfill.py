@@ -1,4 +1,4 @@
-"""Canonical backfill: ingest, resume, re-projection, diagnostics and the worker thread."""
+"""Canonical backfill: re-projection, resume, diagnostics and the worker thread."""
 
 from __future__ import annotations
 
@@ -18,6 +18,18 @@ from typing import Any
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+from intervals_compaction import ingest_intervals_partial_snapshot
+from intervals_plan_stub import (
+    ATHLETE_RECORD_ID,
+    ATHLETE_RECORD_KIND,
+    WELLNESS_RECORD_KIND,
+    intervals_snapshot_ingest_plan,
+    intervals_test_world,
+)
+from intervals_wellness_stub import (
+    map_intervals_athlete_thresholds,
+)
+
 from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ActivityLinkKind, MetricKind, ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
@@ -27,15 +39,9 @@ from backend.db.schema import initialize_schema
 from backend.diagnostics.canonical_backfill import summarize_canonical_backfill
 from backend.errors import AppError, DatabaseBusyError
 from backend.providers import canonical_plans
-from backend.providers.canonical_plans import (
-    intervals_snapshot_ingest_plan,
-    wahoo_ingest_plan,
-)
-from backend.providers.intervals_wellness_mapping import (
-    map_intervals_athlete_thresholds,
-)
-from backend.providers.snapshot_projection import strip_intervals_activity_sections
+from backend.providers.canonical_plans import wahoo_ingest_plan
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync import canonical_backfill as backfill_module
 from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
     STATE_KEY,
@@ -49,10 +55,10 @@ from backend.sync.canonical_backfill import (
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_ingest import ingest_plan
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 NOW = "2026-09-20T08:00:00+00:00"
-LATER = "2026-09-25T00:00:00+00:00"
 ZONE = ZoneInfo("Europe/Berlin")
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers"
 SECRET_ID = "secret-activity-42"
@@ -123,14 +129,6 @@ def synthetic_weights(count: int) -> list[dict[str, Any]]:
     ]
 
 
-def synthetic_wellness(days: int) -> list[dict[str, Any]]:
-    template = load_fixture("intervals", "wellness.json")[0]
-    start = date(2026, 1, 1)
-    return [
-        dict(template, id=(start + timedelta(days=i)).isoformat()) for i in range(days)
-    ]
-
-
 def garmin_payload(**sections: Any) -> dict[str, Any]:
     return {"synced_at": NOW, "provider_sync": {"pagination": {}}, **sections}
 
@@ -144,6 +142,8 @@ class FakeDatabase:
 
 class BackfillFixture(unittest.TestCase):
     def setUp(self) -> None:
+        # Provider-neutral re-projection runs over Intervals.icu-shaped records too.
+        self.enterContext(intervals_test_world())
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.key_values = KeyValueRepository(lambda: NOW)
@@ -169,12 +169,9 @@ class BackfillFixture(unittest.TestCase):
     def insert_snapshot(
         self, manager: DatabaseManager, payload: dict[str, Any]
     ) -> None:
+        """Store the Intervals.icu-shaped rows of ``payload`` as raw records and sessions."""
         with manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
-                "VALUES (?, ?, ?, 0)",
-                (json.dumps(payload), NOW, str(payload.get("synced_at", ""))),
-            )
+            ingest_intervals_partial_snapshot(db, payload, zone=ZONE)
 
     def set_kv(self, manager: DatabaseManager, key: str, value: str) -> None:
         with manager.unit_of_work() as db:
@@ -283,104 +280,13 @@ class BackfillFixture(unittest.TestCase):
 
 
 class PopulatedBackfillTests(BackfillFixture):
-    def test_populated_backfill_writes_canonical_rows_and_a_second_run_writes_nothing(
-        self,
-    ) -> None:
-        self.insert_snapshot(self.manager, intervals_fixture_snapshot())
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot([intervals_activity("900")], synced_at=LATER),
-        )
-        self.set_garmin(
-            self.manager,
-            garmin_payload(
-                activities=[garmin_activity(1), garmin_activity(2)],
-                weight=synthetic_weights(2),
-            ),
-        )
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        summary = self.summary(backfill)
-        self.assertEqual(summary["status"], "complete")
-        # Only the newest snapshot inserts activities. Its one activity is kept, and all
-        # five older fixture activities are superseded. Garmin's two activities are kept.
-        self.assertEqual(self.count("activity_records"), 1 + 2)
-        self.assertEqual(self.count("activity_sessions"), 1 + 2)
-        self.assertEqual(summary["providers"][INTERVALS]["superseded"], 5)
-        self.assertEqual(
-            sum(
-                counters["sessions_created"]
-                for counters in summary["providers"].values()
-            ),
-            1,
-        )
-        self.assertEqual(summary["providers"][INTERVALS]["skipped_invalid"], 0)
-        self.assertEqual(
-            self.state()["versions"], canonical_plans.current_mapper_versions()
-        )
-
-        before_state = self.raw_state()
-        sessions = self.rows(
-            "SELECT activity_id FROM activity_sessions ORDER BY activity_id"
-        )
-        report = self.run_batch(backfill)
-        self.assertEqual(report, BatchReport(items=0, done=True))
-        self.assertEqual(self.raw_state(), before_state)
-        self.assertEqual(
-            self.rows("SELECT activity_id FROM activity_sessions ORDER BY activity_id"),
-            sessions,
-        )
-
-    def test_stripped_newest_snapshot_does_not_supersede_the_full_one(self) -> None:
-        full = intervals_fixture_snapshot()
-        self.insert_snapshot(self.manager, full)
-        self.insert_snapshot(
-            self.manager,
-            strip_intervals_activity_sections({**full, "synced_at": LATER}),
-        )
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        counters = self.summary(backfill)["providers"][INTERVALS]
-        # The five activities come from the older, full snapshot: the stripped one
-        # is the newest row but lists none, so it is neither the activity source
-        # nor a reason to supersede the full snapshot.
-        self.assertEqual(self.count("activity_records"), 5)
-        self.assertEqual(counters["superseded"], 0)
-        self.assertEqual(counters["skipped_invalid"], 0)
-        self.assertEqual(
-            self.rows("SELECT state FROM activity_records GROUP BY state"),
-            [{"state": "active"}],
-        )
-
-    def test_stripped_snapshot_without_a_raw_block_is_not_skipped_invalid(
-        self,
-    ) -> None:
-        stripped = strip_intervals_activity_sections(
-            intervals_snapshot([intervals_activity("7")])
-        )
-        stripped.pop("raw_provider_data", None)
-        self.write_dual_write_activity(self.manager, "7", fetched_at=LATER)
-        self.insert_snapshot(self.manager, stripped)
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        counters = self.summary(backfill)["providers"][INTERVALS]
-        self.assertEqual(counters["skipped_invalid"], 0)
-        self.assertEqual(counters["inserted"], 0)
-        # A stripped snapshot is never a deletion source: the backfill keeps the row.
-        self.assertEqual(
-            self.rows("SELECT state FROM activity_records"), [{"state": "active"}]
-        )
-
     def test_pending_summary_before_any_run_has_zero_counters(self) -> None:
         backfill = self.make_backfill()
         summary = self.summary(backfill)
         self.assertEqual(summary["status"], "pending")
         self.assertEqual(summary["batches"], 0)
-        self.assertEqual(summary["unresolved_feedback"], 0)
-        self.assertEqual(set(summary["providers"]), {INTERVALS, GARMIN})
+        self.assertEqual(set(summary), {"status", "batches", "providers"})
+        self.assertEqual(set(summary["providers"]), {GARMIN})
         self.assertTrue(
             all(
                 value == 0
@@ -388,107 +294,6 @@ class PopulatedBackfillTests(BackfillFixture):
                 for value in counters.values()
             )
         )
-
-    def test_newer_dual_write_row_is_not_overwritten(self) -> None:
-        self.write_dual_write_activity(self.manager, "7", fetched_at=LATER)
-        self.insert_snapshot(
-            self.manager, intervals_snapshot([intervals_activity("7")])
-        )
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        counters = self.summary(backfill)["providers"][INTERVALS]
-        self.assertEqual(counters["inserted"], 0)
-        self.assertEqual(counters["already_present"], 2)
-        self.assertEqual(counters["sessions_created"], 0)
-        self.assertEqual(
-            self.rows("SELECT fetched_at FROM activity_records"),
-            [{"fetched_at": LATER}],
-        )
-        self.assertEqual(
-            self.rows("SELECT payload FROM provider_records")[0]["payload"],
-            '{"newer":true}',
-        )
-
-    def test_deleted_activity_is_not_revived(self) -> None:
-        self.write_dual_write_activity(self.manager, "7", fetched_at=LATER)
-        with self.manager.unit_of_work() as db:
-            db.execute("UPDATE activity_records SET state = 'deleted'")
-        self.insert_snapshot(
-            self.manager, intervals_snapshot([intervals_activity("7")])
-        )
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        self.assertEqual(
-            self.rows("SELECT state FROM activity_records"), [{"state": "deleted"}]
-        )
-        self.assertEqual(
-            self.rows("SELECT state FROM activity_sessions"), [{"state": "active"}]
-        )
-        self.assertEqual(
-            self.summary(backfill)["providers"][INTERVALS]["already_present"], 2
-        )
-
-    def test_feedback_is_unchanged_and_unresolved_feedback_is_counted(self) -> None:
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot([intervals_activity("1"), intervals_activity("2")]),
-        )
-        with self.manager.unit_of_work() as db:
-            for activity_id in ("1", "missing-9"):
-                db.execute(
-                    "INSERT INTO activity_feedback (activity_id, activity_name, activity_date, "
-                    "notes, session_rpe, deviation_reason, created_at, updated_at) "
-                    "VALUES (?, '', '', 'felt good', 6, '', ?, ?)",
-                    (activity_id, NOW, NOW),
-                )
-        before = self.rows("SELECT * FROM activity_feedback ORDER BY activity_id")
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        self.assertEqual(
-            self.rows("SELECT * FROM activity_feedback ORDER BY activity_id"), before
-        )
-        self.assertEqual(self.summary(backfill)["unresolved_feedback"], 1)
-
-    def test_failed_batch_leaves_the_cursor_and_resume_matches_the_uninterrupted_run(
-        self,
-    ) -> None:
-        payload = intervals_snapshot([intervals_activity(str(i)) for i in range(60)])
-        other = self.open_manager("resumed.db")
-        self.insert_snapshot(self.manager, payload)
-        self.insert_snapshot(other, payload)
-        uninterrupted = self.make_backfill(batch_size=100)
-        self.run_to_completion(uninterrupted)
-
-        interrupted = self.make_backfill(batch_size=100)
-        self.run_batch(interrupted, other)
-        with (
-            patch.object(
-                canonical_store,
-                "insert_activity_record_if_absent",
-                side_effect=RuntimeError("injected failure"),
-            ),
-            self.assertRaises(RuntimeError),
-        ):
-            self.run_batch(interrupted, other)
-        with other.unit_of_work() as db:
-            interrupted.mark_failed(db)
-
-        failed = self.state(other)
-        self.assertEqual(failed["status"], "failed")
-        self.assertEqual(failed["batches"], 1)
-        self.assertEqual(failed["current"]["offset"], 100)
-
-        resumed = self.make_backfill(batch_size=100)
-        self.run_to_completion(resumed, other)
-        self.assertEqual(self.state(other)["status"], "complete")
-        self.assertEqual(
-            self.summary(resumed, other)["providers"],
-            self.summary(uninterrupted)["providers"],
-        )
-        self.assertEqual(self.canonical_snapshot(other), self.canonical_snapshot())
 
     def test_batch_size_must_stay_within_the_documented_bounds(self) -> None:
         for size in (99, 251):
@@ -498,239 +303,44 @@ class PopulatedBackfillTests(BackfillFixture):
             self.assertEqual(self.make_backfill(batch_size=size)._batch_size, size)
         self.assertEqual(DEFAULT_BATCH_SIZE, 200)
 
-    def test_every_batch_writes_at_most_batch_size_items(self) -> None:
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot([intervals_activity(str(i)) for i in range(60)]),
-        )
-        reports = self.run_to_completion(self.make_backfill(batch_size=100))
-        self.assertGreater(len(reports), 2)
-        self.assertTrue(all(report.items <= 100 for report in reports))
-
-    def test_batch_boundaries_inside_one_large_snapshot_do_not_change_the_rows(
-        self,
-    ) -> None:
-        payload = intervals_snapshot([intervals_activity(str(i)) for i in range(250)])
-        other = self.open_manager("large.db")
-        self.insert_snapshot(self.manager, payload)
-        self.insert_snapshot(other, payload)
-        small = self.make_backfill(batch_size=100)
-        small_reports = self.run_to_completion(small)
-        large = self.make_backfill(batch_size=250)
-        large_reports = self.run_to_completion(large, other)
-
-        self.assertGreater(len(small_reports), len(large_reports))
-        self.assertTrue(all(report.items <= 100 for report in small_reports))
-        self.assertEqual(
-            self.summary(small)["providers"], self.summary(large, other)["providers"]
-        )
-        self.assertEqual(self.canonical_snapshot(), self.canonical_snapshot(other))
-        counters = self.summary(small)["providers"][INTERVALS]
-        self.assertEqual(counters["duplicates"], 0)
-        self.assertEqual(counters["already_present"], 0)
-        self.assertEqual(counters["sessions_created"], 250)
-
-    def test_snapshots_and_payloads_without_mapper_input_are_skipped_invalid(
-        self,
-    ) -> None:
-        self.insert_snapshot(
-            self.manager, {"synced_at": NOW, "recent_activities": [{"id": "x"}]}
-        )
-        self.insert_snapshot(
-            self.manager,
-            {"raw_provider_data": {"activities": [intervals_activity("1")]}},
-        )
+    def test_an_empty_database_completes_in_one_batch_and_stays_complete(self) -> None:
         backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        providers = self.summary(backfill)["providers"]
-        self.assertEqual(providers[INTERVALS]["skipped_invalid"], 2)
-        self.assertEqual(self.count("activity_records"), 0)
-
-    def test_duplicates_within_one_source_are_counted_once(self) -> None:
-        wellness = load_fixture("intervals", "wellness.json")
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot(
-                [intervals_activity("1"), intervals_activity("1")],
-                wellness=wellness + [wellness[0]],
-            ),
-        )
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        counters = self.summary(backfill)["providers"][INTERVALS]
-        self.assertGreaterEqual(counters["duplicates"], 1)
-        self.assertEqual(self.count("activity_records"), 1)
-
-    def test_snapshot_removed_mid_run_is_finished_as_empty(self) -> None:
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot([intervals_activity(str(i)) for i in range(60)]),
-        )
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot(
-                [intervals_activity(str(i)) for i in range(100, 160)], synced_at=LATER
-            ),
-        )
-        backfill = self.make_backfill(batch_size=100)
-        self.run_batch(backfill)
-        with self.manager.unit_of_work() as db:
-            db.execute("DELETE FROM snapshots WHERE id = 2")
-        self.run_to_completion(backfill)
-
-        # The newest snapshot was removed after its first batch. The older snapshot cannot
-        # take its place as authority, so its activities are superseded rather than revived.
-        self.assertEqual(self.count("activity_records"), 40)
-        self.assertEqual(
-            self.summary(backfill)["providers"][INTERVALS]["superseded"], 60
-        )
+        report = self.run_batch(backfill)
+        self.assertTrue(report.done)
         self.assertEqual(self.state()["status"], "complete")
+        self.assertTrue(self.state()["completed_once"])
+        self.assertEqual(self.run_batch(backfill).items, 0)
 
-
-class SupersessionTests(BackfillFixture):
-    """Only the newest snapshot may insert activities; older snapshots never do."""
-
-    def activity_ids(self, manager: DatabaseManager | None = None) -> list[str]:
-        rows = self.rows(
-            "SELECT provider_activity_id FROM activity_records ORDER BY provider_activity_id",
-            (),
-            manager,
-        )
-        return [str(row["provider_activity_id"]) for row in rows]
-
-    def raw_activity_ids(self, manager: DatabaseManager | None = None) -> list[str]:
-        rows = self.rows(
-            "SELECT source_record_id FROM provider_records WHERE record_kind = ? "
-            "ORDER BY source_record_id",
-            (ACTIVITY_KIND,),
-            manager,
-        )
-        return [str(row["source_record_id"]) for row in rows]
-
-    def test_older_activities_are_superseded_whatever_their_date(self) -> None:
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot(
-                [
-                    intervals_activity("early", day="2026-09-01"),
-                    intervals_activity("gone-same-day", day="2026-09-10"),
-                    intervals_activity("gone-later", day="2026-09-15"),
-                ]
-            ),
-        )
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot(
-                [
-                    intervals_activity("kept-first", day="2026-09-10"),
-                    intervals_activity("kept-last", day="2026-09-20"),
-                ],
-                synced_at=LATER,
-            ),
-        )
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        counters = self.summary(backfill)["providers"][INTERVALS]
-        self.assertEqual(self.activity_ids(), ["kept-first", "kept-last"])
-        self.assertEqual(self.raw_activity_ids(), ["kept-first", "kept-last"])
-        # The early activity lies before the newest snapshot's earliest one. It is still
-        # superseded, because only the newest snapshot may insert activities.
-        self.assertEqual(counters["superseded"], 3)
-        self.assertEqual(counters["already_present"], 0)
-        self.assertEqual(counters["sessions_created"], 2)
-
-    def test_older_snapshot_still_inserts_wellness_and_observations(self) -> None:
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot(
-                [intervals_activity("gone")], wellness=synthetic_wellness(2)
-            ),
-        )
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot([intervals_activity("kept")], synced_at=LATER),
-        )
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        counters = self.summary(backfill)["providers"][INTERVALS]
-        self.assertEqual(self.activity_ids(), ["kept"])
-        self.assertEqual(counters["superseded"], 1)
-        self.assertGreater(counters["inserted"], 0)
-        # The only observations come from the older snapshot's wellness.
-        self.assertGreater(self.count("observations"), 0)
-
-    def test_abort_and_resume_across_older_writes_matches_the_uninterrupted_run(
+    def test_a_state_stored_during_the_retired_snapshot_ingest_continues_with_reprojection(
         self,
     ) -> None:
-        older = intervals_snapshot(
-            [intervals_activity(f"old-{i}", day="2026-09-01") for i in range(60)],
-            wellness=synthetic_wellness(40),
-        )
-        newest = intervals_snapshot(
-            [intervals_activity("kept", day="2026-09-10")], synced_at=LATER
-        )
-        other = self.open_manager("resumed.db")
-        for manager in (self.manager, other):
-            self.insert_snapshot(manager, older)
-            self.insert_snapshot(manager, newest)
-        uninterrupted = self.make_backfill(batch_size=100)
-        # The older snapshot's wellness rows span several batches.
-        self.assertGreater(len(self.run_to_completion(uninterrupted)), 3)
-
-        interrupted = self.make_backfill(batch_size=100)
-        armed = {"on": False}
-
-        def failing(write: Callable[..., Any]) -> Callable[..., Any]:
-            def guarded(*args: Any, **kwargs: Any) -> Any:
-                if armed["on"]:
-                    raise RuntimeError("injected failure")
-                return write(*args, **kwargs)
-
-            return guarded
-
-        with (
-            patch.object(
-                canonical_store,
-                "insert_provider_record_if_absent",
-                side_effect=failing(canonical_store.insert_provider_record_if_absent),
+        # An ingest-phase cursor of an older release: its snapshots are not read.
+        self.set_kv(
+            self.manager,
+            STATE_KEY,
+            json.dumps(
+                {
+                    "status": "running",
+                    "phase": "ingest",
+                    "snapshot_before": 7,
+                    "newest_id": 6,
+                    "current": {"source": "snapshot", "id": 6, "fingerprint": "x"},
+                    "batches": 3,
+                    "counters": {
+                        INTERVALS: {"inserted": 4},
+                        GARMIN: {"inserted": 2},
+                    },
+                    "versions": {},
+                    "zone": str(ZONE),
+                }
             ),
-            patch.object(
-                canonical_store,
-                "insert_observation_if_absent",
-                side_effect=failing(canonical_store.insert_observation_if_absent),
-            ),
-        ):
-            self.run_batch(interrupted, other)
-            self.run_batch(interrupted, other)
-            # The third batch fails on its first write, so nothing in it is committed.
-            armed["on"] = True
-            with self.assertRaises(RuntimeError):
-                self.run_batch(interrupted, other)
-        with other.unit_of_work() as db:
-            interrupted.mark_failed(db)
-
-        failed = self.state(other)
-        self.assertEqual(failed["status"], "failed")
-        # The older snapshot has not finished, so its superseded count is not added yet.
-        self.assertEqual(failed["counters"][INTERVALS]["superseded"], 0)
-
-        resumed = self.make_backfill(batch_size=100)
-        self.run_to_completion(resumed, other)
-        self.assertEqual(self.state(other)["status"], "complete")
-        self.assertEqual(
-            self.summary(resumed, other)["providers"],
-            self.summary(uninterrupted)["providers"],
         )
-        self.assertEqual(self.canonical_snapshot(other), self.canonical_snapshot())
-        self.assertEqual(
-            self.summary(uninterrupted)["providers"][INTERVALS]["superseded"], 60
-        )
-        self.assertEqual(self.activity_ids(), ["kept"])
-        self.assertEqual(self.activity_ids(other), ["kept"])
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+        state = self.state()
+        self.assertEqual((state["status"], state["phase"]), ("complete", "reproject"))
+        self.assertEqual(state["batches"], 4)
+        self.assertEqual(self.count("provider_records"), 0)
 
 
 class ReprojectionTests(BackfillFixture):
@@ -983,7 +593,6 @@ class ReprojectionTests(BackfillFixture):
 
         self.assertEqual(providers[WAHOO]["reprojected"], 1)
         self.assertEqual(providers[WAHOO]["retired"], 0)
-        self.assertEqual(providers[INTERVALS]["reprojected"], 0)
         self.assertEqual(providers[GARMIN]["reprojected"], 0)
         self.assertEqual(self.count("activity_records"), 1)
 
@@ -992,13 +601,13 @@ class ReprojectionTests(BackfillFixture):
     ) -> None:
         # The previous mapper rejected "80,4", so its stored row has no weight yet.
         current = canonical_plans.current_mapper_versions()[
-            f"{INTERVALS}.{canonical_plans.WELLNESS_RECORD_KIND}"
+            f"{INTERVALS}.{WELLNESS_RECORD_KIND}"
         ]
         with self.manager.unit_of_work() as db:
             canonical_store.upsert_provider_record(
                 db,
                 provider=INTERVALS,
-                record_kind=canonical_plans.WELLNESS_RECORD_KIND,
+                record_kind=WELLNESS_RECORD_KIND,
                 source_record_id="2026-10-08",
                 payload={"id": "2026-10-08", "weight": "80,4", "ctl": "58,2"},
                 mapper_version=current - 1,
@@ -1033,7 +642,7 @@ class ReprojectionTests(BackfillFixture):
         self.assertEqual(
             self.rows(
                 "SELECT mapped_version FROM provider_records WHERE record_kind = ?",
-                (canonical_plans.WELLNESS_RECORD_KIND,),
+                (WELLNESS_RECORD_KIND,),
             ),
             [{"mapped_version": current}],
         )
@@ -1042,13 +651,13 @@ class ReprojectionTests(BackfillFixture):
         self,
     ) -> None:
         current = canonical_plans.current_mapper_versions()[
-            f"{INTERVALS}.{canonical_plans.WELLNESS_RECORD_KIND}"
+            f"{INTERVALS}.{WELLNESS_RECORD_KIND}"
         ]
         with self.manager.unit_of_work() as db:
             canonical_store.upsert_provider_record(
                 db,
                 provider=INTERVALS,
-                record_kind=canonical_plans.WELLNESS_RECORD_KIND,
+                record_kind=WELLNESS_RECORD_KIND,
                 source_record_id="2026-10-08",
                 payload={
                     "id": "2026-10-08",
@@ -1091,7 +700,7 @@ class ReprojectionTests(BackfillFixture):
     ) -> None:
         # The previous mapper wrote both ride settings to one key and kept the last.
         current = canonical_plans.current_mapper_versions()[
-            f"{INTERVALS}.{canonical_plans.ATHLETE_RECORD_KIND}"
+            f"{INTERVALS}.{ATHLETE_RECORD_KIND}"
         ]
         settings = [
             {"types": ["Ride"], "eftp": 250},
@@ -1107,8 +716,8 @@ class ReprojectionTests(BackfillFixture):
             canonical_store.upsert_provider_record(
                 db,
                 provider=INTERVALS,
-                record_kind=canonical_plans.ATHLETE_RECORD_KIND,
-                source_record_id=canonical_plans.ATHLETE_RECORD_ID,
+                record_kind=ATHLETE_RECORD_KIND,
+                source_record_id=ATHLETE_RECORD_ID,
                 payload={"sportSettings": settings},
                 mapper_version=current - 1,
                 fetched_at=NOW,
@@ -1458,7 +1067,7 @@ class ReprojectionTests(BackfillFixture):
 
     def plan_wrapper(self, transform: Callable[[Mapping[str, Any], Any], Any]) -> Any:
         """Patch the plan the backfill uses; the real mapper runs, then ``transform`` edits it."""
-        real = canonical_plans.reprojection_plan
+        real = backfill_module.reprojection_plan
 
         def plan(
             raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
@@ -2027,6 +1636,69 @@ class ReprojectionTests(BackfillFixture):
         )
 
 
+class RestoredIntervalsRowsTests(unittest.TestCase):
+    """Intervals.icu rows of a database restored from an older release stay inert."""
+
+    def test_stored_rows_are_neither_reprojected_nor_served(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        manager = DatabaseManager(
+            Path(directory.name) / "restored.db", sqlite3, row_factory=row_factory
+        )
+        self.addCleanup(manager.close)
+        with manager.unit_of_work() as db:
+            initialize_schema(db)
+            # Stored the way the retired mappers wrote them, outside the test world.
+            ingest_intervals_partial_snapshot(
+                db, intervals_fixture_snapshot(), zone=ZONE
+            )
+            before = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM observations ORDER BY id"
+                ).fetchall()
+            ]
+            records = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT id, mapped_version, payload FROM provider_records "
+                    "ORDER BY id"
+                ).fetchall()
+            ]
+        self.assertTrue(before)
+        self.assertTrue(records)
+        backfill = CanonicalBackfill(
+            key_values=KeyValueRepository(lambda: NOW),
+            zone_provider=lambda: ZONE,
+            clock=lambda: NOW,
+        )
+        with manager.unit_of_work() as db:
+            self.assertTrue(backfill.run_batch(db).done)
+        with manager.reader() as db:
+            after = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM observations ORDER BY id"
+                ).fetchall()
+            ]
+            self.assertEqual(after, before)
+            self.assertEqual(
+                records,
+                [
+                    dict(row)
+                    for row in db.execute(
+                        "SELECT id, mapped_version, payload FROM provider_records "
+                        "ORDER BY id"
+                    ).fetchall()
+                ],
+            )
+            reader = CanonicalTableReader()
+            served = [
+                item for kind in MetricKind for item in reader.observations(db, kind)
+            ]
+        self.assertEqual(served, [])
+
+
 class DiagnosticsSummaryTests(BackfillFixture):
     def test_summary_carries_counts_and_status_only(self) -> None:
         self.insert_snapshot(
@@ -2041,11 +1713,9 @@ class DiagnosticsSummaryTests(BackfillFixture):
         text = json.dumps(summary)
         for leaked in (SECRET_ID, f"Ride {SECRET_ID}", "2026-09-10"):
             self.assertNotIn(leaked, text)
-        self.assertEqual(
-            set(summary), {"status", "batches", "unresolved_feedback", "providers"}
-        )
+        self.assertEqual(set(summary), {"status", "batches", "providers"})
         self.assertEqual(summary["status"], "complete")
-        self.assertEqual(set(summary["providers"]), {INTERVALS, GARMIN})
+        self.assertEqual(set(summary["providers"]), {GARMIN})
 
     def test_unavailable_without_a_reader_or_when_the_read_fails(self) -> None:
         with self.manager.reader() as db:
@@ -2191,8 +1861,10 @@ class WorkerTests(BackfillFixture):
         self.assertFalse(worker._thread.is_alive())
 
     def test_retry_preserves_committed_cursor_and_finishes(self) -> None:
+        # More raw records than one batch scans, so the run takes several batches.
         self.insert_snapshot(
-            self.manager, intervals_snapshot([intervals_activity("1")])
+            self.manager,
+            intervals_snapshot([intervals_activity(str(i)) for i in range(250)]),
         )
         assembly = build_canonical_backfill(
             database=lambda: self.manager,
@@ -2234,7 +1906,7 @@ class WorkerTests(BackfillFixture):
             {k: v for k, v in cursors[1].items() if k != "status"},
         )
         self.assertEqual(self.summary(assembly.status_reader)["status"], "complete")
-        self.assertEqual(self.count("activity_records"), 1)
+        self.assertEqual(self.count("activity_records"), 250)
 
     def test_maintenance_refusal_waits_and_retries(self) -> None:
         backfill = Mock()

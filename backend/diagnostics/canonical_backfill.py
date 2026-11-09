@@ -1,7 +1,7 @@
 """Counts-only summary of the canonical backfill for diagnostics.
 
-The summary carries a status word, batch count, per-provider counters and the
-number of unresolved feedback rows. It never carries ids, dates, names or values.
+The summary carries a status word, batch count and per-provider counters. It never
+carries ids, dates, names or values.
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ def summarize_canonical_backfill(
         return {
             "status": str(summary["status"]),
             "batches": int(summary["batches"]),
-            "unresolved_feedback": int(summary["unresolved_feedback"]),
             "providers": providers,
         }
     except Exception:  # noqa: BLE001 - a failing status read must not break diagnostics.

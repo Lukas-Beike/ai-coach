@@ -16,7 +16,6 @@ from canonical_read_support import (
 from intervals_compaction import compact_activity_rows
 
 from backend.activities.activity_reference import ActivityReferences
-from backend.activities.detail_store import summary_fingerprint
 from backend.activities.read_service import ActivityReadService
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
@@ -87,17 +86,11 @@ class _ActivityCase(CanonicalReadFixture):
             _Feedback(),
         )
 
-
     def ids(self, rows: Any) -> set[str]:
         return {str(row["id"]) for row in rows}
 
 
 class DuplicateRemovalTests(_ActivityCase):
-
-
-
-
-
     def test_mark_activity_deleted_reports_whether_anything_changed(self) -> None:
         populate(self)
         kwargs = {
@@ -197,26 +190,19 @@ class PendingAndTableReadTests(_ActivityCase):
         )
 
 
-
 class SessionListFreshnessTests(_ActivityCase):
-    def test_fingerprints_keep_the_stored_values(self) -> None:
-        """Intervals keeps summary_fingerprint of its row, others the payload hash."""
+    def test_fingerprints_are_the_payload_hash_and_intervals_has_none(self) -> None:
+        """Garmin keeps the payload hash of its raw record; Intervals.icu has none."""
         populate(self)
         selector = make_selector(self)
         with self.manager.reader() as db:
-            rows = selector.intervals_activity_payloads(db)
-            keys = [("intervals", str(row["id"])) for row in rows]
-            keys += [("garmin", "910002"), ("intervals", "missing")]
+            keys = [("intervals", "i1"), ("garmin", "910002"), ("garmin", "missing")]
             current = selector.summary_fingerprints(db, keys)
             garmin_hash = canonical_store.active_provider_record_hash(
                 db, "garmin", ACTIVITY_RECORD_KIND, "910002"
             )
-        self.assertEqual(
-            {("intervals", str(row["id"])): summary_fingerprint(row) for row in rows}
-            | {("garmin", "910002"): garmin_hash},
-            current,
-        )
         self.assertIsNotNone(garmin_hash)
+        self.assertEqual({("garmin", "910002"): garmin_hash}, current)
 
     def test_garmin_only_session_is_listed_and_its_detail_loads(self) -> None:
         populate(self)
@@ -260,6 +246,3 @@ class SnapshotWithoutCanonicalSectionsTests(_ActivityCase):
 
         self.assertEqual(service.page(today=TODAY)["activities"], expected_page)
         self.assertEqual(service.recent(today=TODAY)["activities"], expected_recent)
-
-
-

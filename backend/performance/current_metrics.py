@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import date
 from typing import Any, Final
 
+from backend.activities.hr_cap import effective_caps, resolved_range
 from backend.activities.identity import activity_kind
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.records import Observation
@@ -52,7 +53,18 @@ LOCAL_SOURCE_LABEL = "Lokal"
 PROFILE_SOURCE_LABEL = "Manuell"
 
 
-def coach_thresholds(metrics: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+def _with_resolved_bpm(cap: dict[str, Any], lthr: float | None) -> dict[str, Any]:
+    """The stored cap value plus its current bpm range, when a threshold HR is known."""
+    resolved = resolved_range(cap, lthr)
+    if resolved is None:
+        return cap
+    return {**cap, "low_bpm": resolved[0], "bpm": resolved[1]}
+
+
+def coach_thresholds(
+    metrics: Mapping[str, Mapping[str, Any]],
+    first_threshold_pct: float | None = None,
+) -> dict[str, Any]:
     """Return the thresholds plans use, with the FTP's source and alternatives.
 
     FTP, LTHR and max heart rate are the source-policy current values, the same
@@ -67,6 +79,14 @@ def coach_thresholds(metrics: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]
         "max_hr": metrics["max_hr_bpm"]["value"],
         "lthr": metrics["bike_threshold_hr_bpm"]["value"],
         "run_lthr": metrics["run_threshold_hr_bpm"]["value"],
+    }
+    # The heart-rate cap of each easy run type, in percent (what the Coach writes,
+    # with its source), and the bpm it currently resolves to for the run LTHR.
+    run_lthr = result["run_lthr"]
+    lthr = run_lthr if isinstance(run_lthr, int | float) and run_lthr > 0 else None
+    result["run_hr_caps"] = {
+        focus: _with_resolved_bpm(cap, lthr)
+        for focus, cap in effective_caps(first_threshold_pct).items()
     }
     if ftp.get("alternatives"):
         result["ftp_alternatives"] = [

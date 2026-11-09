@@ -8,24 +8,6 @@ from typing import Any, Final
 from backend.canonical.vocabulary import ProviderId
 from backend.runtime.ports import ProviderCoverageReader
 
-
-def intervals_synced_at(coverage: ProviderCoverageReader | None, db: Any) -> str | None:
-    """Return when Intervals.icu data was last fetched, or None if unknown.
-
-    The time is the newest fetch persisted with the canonical coverage at ingest;
-    the stored snapshot's own timestamp is never consulted.
-    """
-    if coverage is None:
-        return None
-    for summary in coverage.coverage(db):
-        if (
-            summary.provider is ProviderId.INTERVALS
-            and summary.retrieved_at is not None
-        ):
-            return summary.retrieved_at.isoformat()
-    return None
-
-
 # Providers whose activity fetch bounds the days that may still lack sessions.
 # Intervals.icu is an output target; its stored copies never bound them.
 ACTIVITY_PROVIDERS: Final = (ProviderId.GARMIN, ProviderId.WAHOO)

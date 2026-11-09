@@ -114,8 +114,9 @@ athlete's power meter or GPS.
 ## Deviations from the studied procedure
 
 - Efforts from everyday files are not verified as maximal, unlike lab trials.
-- The best-effort curve (`mean-max-curve` v1) has 180, 420 and 720 s windows,
-  but its points are best values from everyday files, not CP test data.
+- The best-effort curve (`mean-max-curve` v2) has 180, 420, 720 and 1,200 s
+  windows among others, but its points are best values from everyday files,
+  not CP test data.
 - A freely chosen period such as "best of the last 90 days" is not one
   unchanged physiological state and is not used as a protocol.
 - No 3-min all-out test is offered as a substitute (R6).
@@ -186,8 +187,8 @@ athlete's power meter or GPS.
 - No comparison with published reference or controlled validation data yet;
   the estimate stays experimental (gate G4) and never feeds FTP or zones.
 - Athlete-marked protocol tests with recorded intent, sensor and calibration
-  are not stored; adding them needs a schema migration from v21, the current
-  baseline.
+  are not stored; adding them needs a schema migration from v21, the oldest
+  supported schema (current: v22).
 - R4 participant count and recovery for its repeated-effort protocol were not
   reachable.
 - Passive CS from everyday runs (R16) stays deferred to M5.

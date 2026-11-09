@@ -10,6 +10,7 @@ from unittest.mock import patch
 from support import parsed_workout_fixture
 from test_coach_dialogue import DialogueHarness, server
 
+from backend.activities.hr_cap import effective_caps
 from backend.calendar import external as calendar_external
 from backend.coach.authorization import require_coach_scope
 from backend.http_api import pagination as api_pagination
@@ -20,7 +21,6 @@ from backend.planning import planned_units as planning_planned_units
 from backend.planning import workouts as planning_workouts
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
-from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.planned_calendar import planned_unit_sync_guard
 
 
@@ -220,6 +220,8 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                             "local_id": local_id,
                             "action": "update",
                             "sport": "Run",
+                            "session_focus": "easy",
+                            "hr_cap": effective_caps(None)["easy"],
                             "description": "- 75m Z1 HR",
                             "expected_payload_hash": self.selection(local_id)[
                                 "expected_payload_hash"
@@ -277,10 +279,6 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             [value for kind, value in self.mutations if kind == "delete"], ["duplicate"]
         )
-
-
-
-
 
     def test_multi_unit_repair_reads_calendar_twice_and_checks_all_final_results(self):
         ids = []
@@ -915,7 +913,6 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             server.PLANNING_DATA.planned_unit().list()[0]["sync_status"], "sync_error"
         )
-        self.assertFalse(INTERVALS_SYNC_LOCK.locked())
 
 
 if __name__ == "__main__":

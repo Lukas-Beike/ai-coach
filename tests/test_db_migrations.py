@@ -24,6 +24,7 @@ from backend.db.schema import (
 from backend.db.schema_history import (
     SHAPE_CURRENT,
     SHAPE_SCHEMA_V21,
+    SHAPE_SCHEMA_V22,
     released_shape,
 )
 
@@ -33,8 +34,10 @@ OLDEST_SUPPORTED_VERSION = 21
 FIXTURES = Path(__file__).with_name("fixtures")
 # Schema v21, releases 1.13.41 to 1.13.44: the oldest supported schema.
 V21_FIXTURE = FIXTURES / "schema_v21.sql.txt"
+# Schema version 22, release 2.0.0 candidate: executed strength sets.
+V22_FIXTURE = FIXTURES / "schema_v22.sql.txt"
 OLDEST_SUPPORTED_FIXTURE = V21_FIXTURE
-RELEASED_FIXTURES = (V21_FIXTURE,)
+RELEASED_FIXTURES = (V21_FIXTURE, V22_FIXTURE)
 CURRENT_FIXTURE = FIXTURES / f"schema_v{CURRENT_SCHEMA_VERSION}.sql.txt"
 
 try:
@@ -209,6 +212,13 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         db.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
         self.assertEqual(
             released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V21
+        )
+
+    def test_frozen_v22_fixture_is_the_recorded_released_shape(self):
+        db = self.connect()
+        db.executescript(V22_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V22
         )
 
     def test_every_released_schema_upgrades_to_the_frozen_current_signature(self):

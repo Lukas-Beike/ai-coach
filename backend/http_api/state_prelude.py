@@ -76,7 +76,7 @@ class PublicStateLocalPrelude:
             )
             local_planned = self._planned_units.list(push_state=True)
             canonical_planned = calendar_canonical.canonical_planned_workouts(
-                [], local_planned
+                local_planned
             )
             provider_sync = sync_metadata["provider_sync"]
             calendar_window = (

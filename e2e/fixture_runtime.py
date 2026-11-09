@@ -48,12 +48,25 @@ os.environ.update(
 )
 sys.path.insert(0, "/app")
 import server
+from backend.canonical.local_time import parse_provider_datetime
+from backend.canonical.records import ActivityRecord, Provenance, activity_duration_s
+from backend.canonical.vocabulary import (
+    Environment,
+    LoadModel,
+    ProviderId,
+    RecordingOrigin,
+    SourceKind,
+    Sport,
+    StreamChannel,
+)
 from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
 from backend.providers.canonical_plans import (
-    INTERVALS_POWER_CURVE_KEY,
-    intervals_ingest_plan,
+    ACTIVITY_RECORD_KIND,
+    ActivityItem,
+    IngestPlan,
+    RawRecord,
 )
 from backend.providers.snapshot_projection import stored_retrieved_at
 from backend.sync.canonical_ingest import ingest_plan
@@ -509,6 +522,189 @@ def demo_performance_history(today):
     return history
 
 
+# Intervals.icu-shaped demo activities. Intervals.icu is output-only and the
+# application neither reads nor maps its activities; the demo keeps its history as
+# stored Intervals.icu rows, the way an older database holds them, next to the
+# Garmin copies. The fixture builds those canonical rows itself.
+FIXTURE_ACTIVITY_MAPPER_VERSION = 1
+FIXTURE_INTERVALS_LABEL = "Intervals.icu"
+_FIXTURE_SPORTS = {
+    "Ride": (Sport.RIDE, Environment.UNKNOWN),
+    "VirtualRide": (Sport.RIDE, Environment.VIRTUAL),
+    "Run": (Sport.RUN, Environment.UNKNOWN),
+    "Swim": (Sport.SWIM, Environment.UNKNOWN),
+    "WeightTraining": (Sport.STRENGTH, Environment.UNKNOWN),
+}
+_FIXTURE_STREAM_CHANNELS = {
+    "time": StreamChannel.TIME_S,
+    "distance": StreamChannel.DISTANCE_M,
+    "altitude": StreamChannel.ALTITUDE_M,
+    "grade_smooth": StreamChannel.GRADE_PCT,
+    "velocity_smooth": StreamChannel.SPEED_MPS,
+    "watts": StreamChannel.POWER_W,
+    "heartrate": StreamChannel.HEART_RATE_BPM,
+    "cadence": StreamChannel.CADENCE_RPM,
+    "temperature": StreamChannel.TEMPERATURE_C,
+    "moving": StreamChannel.MOVING,
+}
+
+
+def fixture_analysis_sport(row):
+    """The canonical sport, environment and trail flag of a fixture activity row."""
+    sport, environment = _FIXTURE_SPORTS.get(
+        str(row.get("type")), (Sport.OTHER, Environment.UNKNOWN)
+    )
+    return {"sport": sport.value, "environment": environment.value, "trail": False}
+
+
+def fixture_summary_hash(row):
+    """Digest of a fixture activity summary, without its streams and laps."""
+    summary = {
+        key: value for key, value in row.items() if key not in ("streams", "laps")
+    }
+    return hashlib.sha256(
+        json.dumps(summary, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+
+def _fixture_origin(row):
+    folded = " ".join(str(row.get(key) or "") for key in ("source", "device_name"))
+    folded = folded.casefold()
+    if "garmin" in folded:
+        return RecordingOrigin.GARMIN
+    if "wahoo" in folded or "elemnt" in folded:
+        return RecordingOrigin.WAHOO
+    if "zwift" in folded:
+        return RecordingOrigin.ZWIFT
+    return RecordingOrigin.UNKNOWN
+
+
+def _fixture_zone_seconds(value, *, positional):
+    if not isinstance(value, list):
+        return None
+    zones = []
+    for index, item in enumerate(value):
+        if positional:
+            zone_id, seconds = f"Z{index + 1}", item
+        elif isinstance(item, dict):
+            zone_id, seconds = str(item.get("id", "")), item.get("secs")
+        else:
+            continue
+        if zone_id.startswith("Z") and isinstance(seconds, int | float):
+            zones.append((zone_id, float(seconds)))
+    return tuple(zones) or None
+
+
+def _fixture_number(row, *keys, low=0.0):
+    """The first numeric value among ``keys`` at or above ``low``."""
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        return float(value) if value >= low else None
+    return None
+
+
+def _fixture_activity_record(row, retrieved_at):
+    """Map one fixture activity row to the Intervals.icu-provider record it stands for."""
+    started_at = parse_provider_datetime(row.get("start_date_local"), UTC)
+    activity_id = row.get("id")
+    if started_at is None or not isinstance(activity_id, str):
+        return None
+    type_name = str(row.get("type") or "")
+    sport, environment = _FIXTURE_SPORTS.get(
+        type_name, (Sport.OTHER, Environment.UNKNOWN)
+    )
+    moving = _fixture_number(row, "moving_time", low=1.0)
+    elapsed = _fixture_number(row, "elapsed_time", low=1.0)
+    load = _fixture_number(row, "icu_training_load")
+    device = row.get("device_name")
+    return ActivityRecord(
+        activity_id=activity_id,
+        provenance=Provenance(
+            provider=ProviderId.INTERVALS,
+            source_kind=SourceKind.PROVIDER_REPORTED,
+            source_record_id=activity_id,
+            recorded_by=_fixture_origin(row),
+            retrieved_at=retrieved_at,
+            label=FIXTURE_INTERVALS_LABEL,
+        ),
+        sport=sport,
+        environment=environment,
+        started_at=started_at,
+        duration_s=activity_duration_s(
+            sport, moving=moving, timer=None, elapsed=elapsed
+        ),
+        distance_m=_fixture_number(row, "distance"),
+        load=load,
+        load_model=(
+            LoadModel.INTERVALS_TRAINING_LOAD if load is not None else LoadModel.UNKNOWN
+        ),
+        avg_hr=_fixture_number(row, "average_heartrate"),
+        avg_power=_fixture_number(row, "average_watts", "average_power"),
+        max_hr=_fixture_number(row, "max_heartrate", "maxHR"),
+        max_speed_mps=_fixture_number(row, "max_speed"),
+        max_power_w=_fixture_number(row, "max_watts"),
+        elevation_gain_m=_fixture_number(row, "total_elevation_gain"),
+        normalized_power=_fixture_number(
+            row, "icu_weighted_avg_watts", "weighted_average_watts", "normalized_power"
+        ),
+        avg_cadence=_fixture_number(row, "average_cadence"),
+        intensity=_fixture_number(row, "icu_intensity"),
+        feel=_fixture_number(row, "feel"),
+        avg_speed_mps=_fixture_number(row, "average_speed"),
+        weighted_avg_speed_mps=_fixture_number(row, "icu_weighted_avg_speed"),
+        pace_mps=_fixture_number(row, "icu_pace"),
+        ftp_w=_fixture_number(row, "icu_ftp"),
+        eftp_w=_fixture_number(row, "icu_eftp", "eftp", "eFTP"),
+        avg_temp_c=_fixture_number(row, "average_temp", low=-60.0),
+        name=str(row["name"])[:200] if row.get("name") else None,
+        elapsed_duration_s=elapsed,
+        moving_duration_s=moving,
+        rpe=_fixture_number(row, "icu_rpe", "rpe"),
+        power_zone_times_s=_fixture_zone_seconds(
+            row.get("icu_zone_times"), positional=False
+        ),
+        hr_zone_times_s=_fixture_zone_seconds(
+            row.get("icu_hr_zone_times"), positional=True
+        ),
+        device_name=str(device)[:200] if isinstance(device, str) and device else None,
+        native_type=type_name[:64] or None,
+    )
+
+
+def _fixture_intervals_plan(raw, retrieved_at):
+    """Plan the stored Intervals.icu activity rows of a fixture snapshot."""
+    raw_records = []
+    items = []
+    for row in (raw or {}).get("activities") or []:
+        record = _fixture_activity_record(row, retrieved_at)
+        if record is None:
+            continue
+        day = record.started_at.date()
+        raw_records.append(
+            RawRecord(
+                ACTIVITY_RECORD_KIND,
+                record.activity_id,
+                row,
+                FIXTURE_ACTIVITY_MAPPER_VERSION,
+                observed_on=day.isoformat(),
+            )
+        )
+        items.append(
+            ActivityItem(
+                record=record,
+                local_date=day,
+                mapper_version=FIXTURE_ACTIVITY_MAPPER_VERSION,
+            )
+        )
+    return IngestPlan(
+        provider=ProviderId.INTERVALS,
+        raw_records=tuple(raw_records),
+        activities=tuple(items),
+    )
+
+
 def _save_intervals_snapshot(db, snapshot):
     """Store a fixture snapshot and ingest its raw block like a partial sync does.
 
@@ -519,12 +715,7 @@ def _save_intervals_snapshot(db, snapshot):
     server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
     retrieved_at = stored_retrieved_at(snapshot, zone=UTC)
     if retrieved_at is not None:
-        plan = intervals_ingest_plan(
-            snapshot.get("raw_provider_data"),
-            zone=UTC,
-            retrieved_at=retrieved_at,
-            power_curve=snapshot.get(INTERVALS_POWER_CURVE_KEY),
-        )
+        plan = _fixture_intervals_plan(snapshot.get("raw_provider_data"), retrieved_at)
         ingest_plan(db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=UTC)
     if stored_retrieved_at(
         snapshot, zone=UTC
@@ -607,22 +798,98 @@ def ensure_training_features():
 
 
 def _save_activity_detail(activity_id, record):
-    """Store one synthetic activity detail in the canonical tables."""
+    """Store one synthetic Intervals.icu detail and analysis in the canonical tables."""
     from backend.activities.workout_profile import recorded_profile
-    from backend.sync.activity_detail_canonical import (
-        CanonicalDetailWriter,
-        DetailWriteOutcome,
+    from backend.canonical.activity_detail import (
+        ActivityLap,
+        ActivityLapSet,
+        ActivityStreamSet,
     )
+    from backend.canonical.vocabulary import (
+        ActivityDetailOrigin,
+        LapKind,
+        LapSource,
+        StreamResolution,
+    )
+    from backend.db.activity_detail_store import replace_detail_set, save_analysis
+    from backend.db.canonical_store import activity_record_link
 
-    record = {**record, "calendar_profile": recorded_profile(record["activity"])}
+    now = server.runtime_clock.utc_now()
+    activity = record["activity"]
+    streams = activity.get("streams") or {}
+    channels = {
+        _FIXTURE_STREAM_CHANNELS[key]: tuple(
+            None if value is None else float(value) for value in values
+        )
+        for key, values in streams.items()
+        if key in _FIXTURE_STREAM_CHANNELS
+        and any(value is not None for value in values)
+    }
     with server.database_manager().unit_of_work() as db:
-        result = CanonicalDetailWriter().write_legacy(
-            db, record=record, now=server.runtime_clock.utc_now()
+        link = activity_record_link(db, ProviderId.INTERVALS.value, activity_id)
+        if link is None:
+            raise RuntimeError(f"Fixture detail for {activity_id} has no activity")
+        provenance = Provenance(
+            provider=ProviderId.INTERVALS,
+            source_kind=SourceKind.PROVIDER_REPORTED,
+            source_record_id=None,
+            recorded_by=RecordingOrigin(link["recorded_by"]),
+            retrieved_at=datetime.fromisoformat(record["observed_at"]),
+            label=FIXTURE_INTERVALS_LABEL,
         )
-    if result.outcome not in (DetailWriteOutcome.WRITTEN, DetailWriteOutcome.UNCHANGED):
-        raise RuntimeError(
-            f"Fixture detail for {activity_id} not stored: {result.outcome}"
+        summary = record.get("summary_sha256")
+        if StreamChannel.TIME_S in channels:
+            replace_detail_set(
+                db,
+                ActivityStreamSet(
+                    provider_activity_id=activity_id,
+                    provenance=provenance,
+                    origin=ActivityDetailOrigin.FETCH,
+                    resolution=StreamResolution.FULL,
+                    channels=channels,
+                ),
+                mapper_version=FIXTURE_ACTIVITY_MAPPER_VERSION,
+                summary_sha256=summary,
+                now=now,
+            )
+        laps = tuple(
+            ActivityLap(
+                index=index,
+                kind=LapKind.LAP,
+                start_offset_s=float(lap["start_time"]),
+                end_offset_s=float(lap["end_time"]),
+            )
+            for index, lap in enumerate(activity.get("laps") or [])
         )
+        if laps:
+            replace_detail_set(
+                db,
+                ActivityLapSet(
+                    provider_activity_id=activity_id,
+                    provenance=provenance,
+                    origin=ActivityDetailOrigin.FETCH,
+                    lap_source=LapSource.PROVIDER_INTERVALS,
+                    laps=laps,
+                ),
+                mapper_version=FIXTURE_ACTIVITY_MAPPER_VERSION,
+                summary_sha256=summary,
+                now=now,
+            )
+        if link["activity_id"] is not None:
+            save_analysis(
+                db,
+                link["activity_id"],
+                analysis_version=2,
+                input_sha256=fixture_summary_hash(activity),
+                payload={
+                    "target_snapshot": record.get("target_snapshot"),
+                    "session_analysis": record.get("session_analysis"),
+                    "calendar_profile": recorded_profile(activity),
+                    "summary_sha256": summary,
+                    "observed_at": record["observed_at"],
+                },
+                now=now,
+            )
 
 
 def _save_garmin_copy(activity_id, streams, hr_zone_seconds=None):
@@ -650,9 +917,6 @@ def _save_garmin_copy(activity_id, streams, hr_zone_seconds=None):
         ZoneMetric,
     )
     from backend.db.activity_detail_store import replace_detail_set
-    from backend.providers.intervals_activity_detail_mapping import (
-        STREAM_KEY_CHANNELS,
-    )
 
     now = server.runtime_clock.utc_now()
     garmin_id = f"garmin-{activity_id}"
@@ -697,7 +961,7 @@ def _save_garmin_copy(activity_id, streams, hr_zone_seconds=None):
                 origin=ActivityDetailOrigin.FETCH,
                 resolution=StreamResolution.FULL,
                 channels={
-                    STREAM_KEY_CHANNELS[key]: tuple(float(v) for v in values)
+                    _FIXTURE_STREAM_CHANNELS[key]: tuple(float(v) for v in values)
                     for key, values in streams.items()
                 },
             ),
@@ -759,12 +1023,8 @@ def _fixture_seed_fueling_ride(today):
 
 
 def seed_training_features():
-    from backend.activities.detail_store import summary_fingerprint
     from backend.performance.power_profile import power_profile
     from backend.performance.session_analysis import aerobic_analysis, interval_quality
-    from backend.providers.intervals_activity_mapping import (
-        intervals_analysis_sport,
-    )
 
     now = server.ATHLETE_CLOCK.now()
     rows = [
@@ -912,13 +1172,13 @@ def seed_training_features():
             },
             "laps": [{"start_time": 0, "end_time": 3600}],
         }
-        analysed = {**detailed, **intervals_analysis_sport(detailed)}
+        analysed = {**detailed, **fixture_analysis_sport(detailed)}
         _save_activity_detail(
             activity["id"],
             {
                 "activity_id": activity["id"],
                 "activity": detailed,
-                "summary_sha256": summary_fingerprint(activity),
+                "summary_sha256": fixture_summary_hash(activity),
                 "target_snapshot": targets,
                 "session_analysis": {
                     "aerobic": aerobic_analysis(analysed),
@@ -1804,12 +2064,8 @@ def _fixture_wave2_feedback(by_id):
 
 
 def _fixture_wave2_details(by_id):
-    from backend.activities.detail_store import summary_fingerprint
     from backend.performance.power_profile import power_profile, running_profile
     from backend.performance.session_analysis import aerobic_analysis, interval_quality
-    from backend.providers.intervals_activity_mapping import (
-        intervals_analysis_sport,
-    )
 
     targets = {
         "steps": [{"duration": 300, "target": "200W", "kind": "power"}],
@@ -1860,13 +2116,13 @@ def _fixture_wave2_details(by_id):
             "streams": streams,
             "laps": [{"start_time": 0, "end_time": n - 1}],
         }
-        analysed = {**detailed, **intervals_analysis_sport(detailed)}
+        analysed = {**detailed, **fixture_analysis_sport(detailed)}
         _save_activity_detail(
             activity["id"],
             {
                 "activity_id": activity["id"],
                 "activity": detailed,
-                "summary_sha256": summary_fingerprint(activity),
+                "summary_sha256": fixture_summary_hash(activity),
                 "target_snapshot": targets,
                 "session_analysis": {
                     "aerobic": aerobic_analysis(analysed),
@@ -2287,13 +2543,9 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
             return
         if self.path == "/api/fixture/activity":
             self.auth_service.require_auth(self)
-            from backend.activities.detail_store import summary_fingerprint
             from backend.performance.session_analysis import (
                 aerobic_analysis,
                 interval_quality,
-            )
-            from backend.providers.intervals_activity_mapping import (
-                intervals_analysis_sport,
             )
 
             today = server.ATHLETE_CLOCK.now().date().isoformat()
@@ -2328,14 +2580,14 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 {
                     "activity_id": activity["id"],
                     "activity": detailed,
-                    "summary_sha256": summary_fingerprint(activity),
+                    "summary_sha256": fixture_summary_hash(activity),
                     "session_analysis": {
                         "aerobic": aerobic_analysis(
-                            {**detailed, **intervals_analysis_sport(detailed)}
+                            {**detailed, **fixture_analysis_sport(detailed)}
                         ),
                         "interval_quality": interval_quality(detailed, None),
                     },
-                    "source": "Intervals.icu",
+                    "source": FIXTURE_INTERVALS_LABEL,
                     "observed_at": datetime.now(UTC).isoformat(),
                     "full_resolution": True,
                     "available_streams": [

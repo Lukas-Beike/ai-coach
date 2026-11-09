@@ -25,7 +25,6 @@ from backend.performance.morning_battery_service import MorningBodyBatteryServic
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
 from backend.runtime.ports import (
-    ActivityRowReader,
     ActivitySummaryReader,
     ObservationReader,
 )
@@ -47,7 +46,6 @@ COACH_RECOVERY_DAYS = 14
 class GarminCanonicalSources:
     """Lazy canonical readers; the selector decides per read whether tables serve."""
 
-    activity_rows: Callable[[], ActivityRowReader]
     observations: Callable[[], ObservationReader]
     activity_summaries: Callable[[], ActivitySummaryReader]
 
@@ -275,6 +273,6 @@ class GarminProjectionService:
                 )
             )
             context["scope"] = (
-                "Kein Intervals.icu-Snapshot vorhanden; Garmin-Leistungswerte und der aktuellste Recovery-Datensatz werden als Fallback verwendet."
+                "Garmin-Leistungswerte und der aktuellste Recovery-Datensatz."
             )
         return context

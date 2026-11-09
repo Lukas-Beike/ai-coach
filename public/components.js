@@ -25,6 +25,13 @@ function createStatusChip(label, status = "") {
   return chip;
 }
 
+// One chip marks every derived or estimated value (#1789).
+function createEstimateChip() {
+  const chip = createStatusChip("Schätzung", "estimate");
+  chip.classList.add("estimate-chip");
+  return chip;
+}
+
 function createEmptyState(title, description, action = null) {
   const root = document.createElement("div");
   root.className = "empty-state";

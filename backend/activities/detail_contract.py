@@ -36,17 +36,15 @@ from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     PROVIDER_PRECEDENCE,
     ProviderId,
+    RecordingOrigin,
     SourceKind,
     StreamChannel,
     ZoneMetric,
 )
 from backend.db.activity_detail_store import StoredDetailSet
-from backend.providers.intervals_activity_detail_projection import (
-    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
-    _downsample_series,
-)
 
 ACTIVITY_DETAIL_CONTRACT: Final = "activity_detail.v1"
+COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS: Final = 2000
 
 _ENVELOPE_KEYS: Final = (
     "activity_feedback",
@@ -109,13 +107,51 @@ class ProviderStatus:
     load_error: Mapping[str, Any] | None = None
 
 
+def _downsample_series(
+    values: Sequence[Any], *, limit: int = COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
+) -> list[Any]:
+    """Keep at most ``limit`` evenly spaced points, always including both ends.
+
+    Floats that are not finite and values other than numbers, booleans and
+    short text become None.
+    """
+    cleaned = [_series_scalar(value) for value in values]
+    if len(cleaned) <= limit:
+        return cleaned
+    indexes = {0, len(cleaned) - 1}
+    indexes.update(
+        round(index * (len(cleaned) - 1) / (limit - 1)) for index in range(limit)
+    )
+    return [cleaned[index] for index in sorted(indexes)]
+
+
+def _series_scalar(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:80]
+    return None
+
+
 def measured_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
     """Order records by how much their measured values win.
 
     The recording platform's own copy comes first, then the provider rank, then the
-    newest retrieval, then the provider activity id.
+    recording origin (the Wahoo recording leads its Garmin copy, as session bundling
+    decides), then the newest retrieval, then the provider activity id.
     """
-    return sorted(records, key=lambda record: (_own_rank(record), *_tie_break(record)))
+    return sorted(records, key=_measured_key)
+
+
+_ORIGIN_RANK: Final = {RecordingOrigin.WAHOO: 0, RecordingOrigin.GARMIN: 1}
+
+
+def _measured_key(record: ActivityRecord) -> tuple[int, int, int, float, str]:
+    rank, retrieved, activity_id = _tie_break(record)
+    origin = _ORIGIN_RANK.get(record.provenance.recorded_by, len(_ORIGIN_RANK))
+    return _own_rank(record), rank, origin, retrieved, activity_id
 
 
 # The provider where the athlete rates a session first; Intervals.icu copies it.

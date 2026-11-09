@@ -1,7 +1,7 @@
 # Dependency upgrade evidence
 
 Use this reference for dependency changes; keep the executable lock-regeneration
-recipe in [README.md](../../../../README.md#dependency-lock-maintenance).
+recipe in [docs/dependencies.md](../../../../docs/dependencies.md).
 
 1. Record old/new versions and inspect upstream release notes and migration
    guidance. Search actual imports and call sites, including startup, tests, and
@@ -10,7 +10,7 @@ recipe in [README.md](../../../../README.md#dependency-lock-maintenance).
    changes, licenses, and any Node/browser constraints relevant to the package.
    A successful resolver does not establish runtime compatibility.
 3. Change direct pins in `requirements.in` or `requirements-dev.in` and regenerate
-   the corresponding hash-locked outputs with the README recipe. Inspect the
+   the corresponding hash-locked outputs with the recipe there. Inspect the
    complete lock diff; do not manually substitute hashes or broaden unrelated pins.
    JavaScript dependencies use the existing package manifest and lock workflow.
 4. Run affected contract tests and the required Docker build for dependency

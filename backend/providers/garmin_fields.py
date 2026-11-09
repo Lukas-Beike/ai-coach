@@ -39,9 +39,7 @@ GARMIN_BODY_FAT_ALIASES = (
     "bodyFatPercentage",
     "fatPercent",
 )
-GARMIN_WEIGHT_ALIASES = ("weight", "weightKg", "weight_kg", "value")
 GARMIN_WEIGHT_UNIT_ALIASES = ("unitKey", "unit", "weightUnit")
-GARMIN_RUNNING_THRESHOLD_ALIASES = ("speed", "speedInMetersPerSecond", "thresholdPace")
 GARMIN_STEPS_ALIASES = ("totalSteps", "total_steps", "steps", "stepCount", "step_count")
 GARMIN_FLOORS_ALIASES = (
     "floorsAscended",

@@ -44,7 +44,7 @@ Use this as a coverage map, not as a request to manufacture one finding per sect
 
 ## 6. Provider clients and network security
 
-- For Intervals.icu, Garmin, iCalendar, weather, GitHub, and OpenAI, inspect URL construction, TLS expectations, authentication placement, timeouts, size limits, content types, status handling, pagination, rate limiting, retries/backoff, cancellation, and error classification.
+- For Garmin, Wahoo, Intervals.icu (output only), iCalendar, weather, GitHub, and OpenAI, inspect URL construction, TLS expectations, authentication placement, timeouts, size limits, content types, status handling, pagination, rate limiting, retries/backoff, cancellation, and error classification.
 - Ensure redirects cannot bypass host/scheme checks or expose credentials. Fully review calendar SSRF and DNS-rebinding defenses, including IPv4/IPv6, encoded/local addresses, resolution changes, and redirect targets.
 - Validate upstream schemas defensively. Partial, malformed, duplicated, out-of-order, or unexpectedly large data must not corrupt current state.
 - Confirm provider error messages and freshness/status values are accurate, source-labelled, durable where needed, and do not erase the last good data.
@@ -61,10 +61,10 @@ Use this as a coverage map, not as a request to manufacture one finding per sect
 
 ## 8. Coach context, provenance, and training correctness
 
-- Trace every context field to its source and freshness. Preserve labels for Intervals, Garmin, derived metrics, local feedback, and AI estimates; do not present estimates or stale values as measured/current.
+- Trace every context field to its source and freshness. Preserve labels for Garmin, Wahoo, derived metrics, local feedback, and AI estimates; do not present estimates or stale values as measured/current.
 - Verify confirmed local profile/competitions and current planning state override dialogue memory or conflicting provider prose.
 - Review sanitization and delimiting of external text against prompt injection. Provider content, calendar entries, stored chat, and workout descriptions must not gain tool authority.
-- Check context projection for token bounds, deterministic ordering, deduplication, and incremental value. Compact only the Coach projection: full Garmin data and the Intervals snapshot remain intact; recent activity projection keeps the five newest per sport when that is the current requirement.
+- Check context projection for token bounds, deterministic ordering, deduplication, and incremental value. Compact only the Coach projection: full Garmin and Wahoo data remain intact; recent activity projection keeps the five newest per sport when that is the current requirement.
 - Verify training dates, recent load, readiness, sleep, fatigue, illness/pain, availability, weather, and competition priorities are interpreted with freshness and uncertainty. Flag unsafe certainty or internally inconsistent advice paths, not mere stylistic preferences.
 - Review token/cost accounting, model and thinking-level selection, configured-model exposure, output limits, and daily timezone boundaries.
 

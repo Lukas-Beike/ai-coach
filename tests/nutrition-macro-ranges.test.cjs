@@ -9,7 +9,7 @@ const end = source.indexOf("function appendNutritionMacroNote(", start);
 const document = { createElement() { return { className: "", classes: [], classList: { add(value) { this.owner.classes.push(value); } }, append() {} }; } };
 const create = document.createElement;
 document.createElement = () => { const node = create(); node.classList.owner = node; return node; };
-const context = vm.createContext({ document, todayIso: () => "2026-11-02", nutritionNumber: String });
+const context = vm.createContext({ document, todayIso: () => "2026-11-02", nutritionNumber: String, setValueWithUnit: (node, text) => { node.textContent = text; } });
 vm.runInContext(source.slice(start, end), context);
 
 test("marks complete values outside a range and avoids premature low warnings", () => {

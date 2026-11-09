@@ -53,7 +53,6 @@ class AthleteProfileTests(unittest.TestCase):
                     )
                 },
                 "training_model": "pyramidal",
-                "weekly_plan": "",
                 "performance_notes": "",
                 "weight_kg": "",
                 "body_fat_pct": "",
@@ -64,6 +63,7 @@ class AthleteProfileTests(unittest.TestCase):
                 "weather_location": "",
                 "sleep_target_hours": "",
                 "fueling_tolerance": "",
+                "first_threshold_pct": "",
                 "preferred_source_thresholds": "",
                 "preferred_source_body": "",
                 "preferred_source_hrv": "",

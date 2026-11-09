@@ -11,11 +11,9 @@ from typing import Any
 
 from performance_day_support import (
     SYNCED_AT,
-    days_from_rows,
     garmin_body_from_payload,
     garmin_metrics_from_payload,
     intervals_activity_summaries,
-    snapshot_coverage_time,
 )
 
 from backend.performance import body as _body
@@ -26,7 +24,6 @@ from backend.performance.freshness import GarminSyncStatus
 TODAY = date(2026, 5, 4)
 SYNC_DAY_BEFORE = datetime(2026, 5, 3, 8, tzinfo=UTC)
 GARMIN = "Garmin Connect"
-INTERVALS = "Intervals.icu"
 INTERVALS_WELLNESS = "Intervals.icu Wellness"
 ANALYSIS_METRIC_KEYS = (
     "cycling_ftp_watts",
@@ -78,15 +75,9 @@ def _activity_summaries(snapshot: Any) -> tuple[Any, ...]:
 def body_history(
     snapshot: Any, garmin: Any, today: date, *, retrieved_at: datetime = SYNCED_AT
 ) -> dict[str, Any]:
-    rows: list[dict[str, Any]] = []
-    if isinstance(snapshot, dict):
-        raw = snapshot.get("raw_provider_data")
-        rows += raw.get("wellness", []) if isinstance(raw, dict) else []
-        rows += snapshot.get("recent_wellness", [])
     return _body.body_history(
         GarminSyncStatus.from_state(garmin),
         today,
-        wellness_days=days_from_rows(rows),
         canonical=garmin_body_from_payload(
             _payload(garmin), today, retrieved_at=retrieved_at
         ),
@@ -97,15 +88,7 @@ def body_history(
 
 
 def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
-    rows: list[dict[str, Any]] = []
-    if isinstance(snapshot, dict):
-        raw = snapshot.get("raw_provider_data")
-        rows += raw.get("wellness", []) if isinstance(raw, dict) else []
-        rows += snapshot.get("recent_wellness", [])
     canonical = CanonicalPerformanceInputs(
-        # The Intervals.icu coverage time the snapshot's sync stored.
-        intervals_synced_at=snapshot_coverage_time(snapshot),
-        history_wellness_days=days_from_rows(rows),
         activities=_activity_summaries(snapshot),
         garmin=garmin_metrics_from_payload(_payload(garmin)),
         body=garmin_body_from_payload(_payload(garmin), today),
@@ -170,24 +153,21 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
         self.assertEqual(point["weight_age_days"], 0)
         self.assertEqual(point["value"], round(300 / 72, 3))
 
-    def test_newer_intervals_weight_beats_older_garmin_weight_for_w_per_kg(
+    def test_newer_garmin_weight_beats_older_garmin_weight_for_w_per_kg(
         self,
     ) -> None:
-        snapshot = {
-            "recent_wellness": [
-                _wellness("2026-05-03", weight=70),
-                _wellness("2026-05-04", eftp=280),
-            ]
-        }
         garmin = {
-            "weight": [_garmin_weight("2026-05-02", 72)],
+            "weight": [
+                _garmin_weight("2026-05-02", 72),
+                _garmin_weight("2026-05-03", 70),
+            ],
             "performance_history": [_performance_ftp("2026-05-04", 300)],
         }
-        result = body_history(snapshot, garmin, TODAY)
+        result = body_history({}, garmin, TODAY)
         garmin_point = _point(
             _body_series(result, "14d", "cycling_w_per_kg", GARMIN), "2026-05-04"
         )
-        self.assertEqual(garmin_point["weight_source"], INTERVALS_WELLNESS)
+        self.assertEqual(garmin_point["weight_source"], GARMIN)
         self.assertEqual(garmin_point["weight_kg"], 70)
         self.assertEqual(garmin_point["weight_age_days"], 1)
         self.assertEqual(garmin_point["value"], round(300 / 70, 3))
@@ -258,34 +238,6 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
             )["ftp_watts"],
             300,
         )
-
-    def test_compact_wellness_row_overrides_raw_but_missing_compact_weight_keeps_raw(
-        self,
-    ) -> None:
-        snapshot = {
-            "synced_at": "sync",
-            "raw_provider_data": {
-                "wellness": [
-                    _wellness("2026-05-03", weight=70),
-                    _wellness("2026-05-04", weight=71),
-                ]
-            },
-            "recent_wellness": [
-                _wellness("2026-05-03", weight=69),
-                {"id": "2026-05-04", "bodyFat": 18},
-            ],
-        }
-        result = body_history(snapshot, {}, TODAY)
-        weights = _body_series(result, "14d", "weight_kg", INTERVALS_WELLNESS)
-        self.assertEqual(_point(weights, "2026-05-03")["value"], 69)
-        self.assertEqual(
-            _point(weights, "2026-05-03")["synced_at"], SYNCED_AT.isoformat()
-        )
-        # Quirk: "last valid value wins" per day, so a compact row without a
-        # weight does not clear the raw weight for the same date.
-        self.assertEqual(_point(weights, "2026-05-04")["value"], 71)
-        body_fat = _body_series(result, "14d", "body_fat_pct", INTERVALS_WELLNESS)
-        self.assertEqual(_point(body_fat, "2026-05-04")["value"], 18)
 
     def test_future_measurements_never_reach_any_body_output(self) -> None:
         # Output series end at today and W/kg only looks backward, so the future
@@ -450,7 +402,7 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             (GARMIN, "2026-02-04", "2026-05-04"),
         )
         self.assertEqual(len(result["load"]["points"]), 90)
-        self.assertEqual(result["training_time"]["source"], INTERVALS)
+        self.assertEqual(result["training_time"]["source"], "Garmin Connect, Wahoo")
         self.assertEqual(len(result["training_time"]["points"]), 90)
         self.assertEqual(set(result["metrics"]), set(ANALYSIS_METRIC_KEYS))
         for key in ANALYSIS_METRIC_KEYS:
@@ -469,7 +421,7 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
         self.assertEqual(
             body_sources,
             {
-                "weight_kg": sorted([INTERVALS_WELLNESS, GARMIN]),
+                "weight_kg": [GARMIN],
                 "cycling_w_per_kg": [GARMIN],
             },
         )

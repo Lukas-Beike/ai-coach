@@ -12,7 +12,6 @@ from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
 )
-from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.sync_time import activities_synced_at
 from backend.canonical.activity_summary import ActivitySummary
 from backend.runtime.ports import (
@@ -96,7 +95,6 @@ class ActivityReadService:
         database_manager: Any,
         summaries: ActivitySummarySource,
         feedback_service: Any,
-        detail_store: ActivityDetailStore | None = None,
         *,
         read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
@@ -105,7 +103,6 @@ class ActivityReadService:
         self._database_manager = database_manager
         self._summaries = summaries
         self._feedback_service = feedback_service
-        self._detail_store = detail_store
         self._read_equipment = read_equipment
         self._references = NoActivityReferences() if references is None else references
         # Where the activities' sync time comes from; without it the time is unknown.

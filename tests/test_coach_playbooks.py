@@ -57,7 +57,8 @@ BLOCK_WORD_BUDGETS = {
     "_ANSWER": 55,
     "_NUTRITION": 520,
 }
-TASK_WORD_BUDGET = 190
+# 205: the session analysis judges a run against its stored heart-rate cap.
+TASK_WORD_BUDGET = 205
 
 
 class PlaybookBudgetTests(unittest.TestCase):

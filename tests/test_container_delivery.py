@@ -20,7 +20,7 @@ DEMO_NAME = "pacecraft-demo"
 # Stand-in for the docker CLI. It records each argv as one JSON line and fails the
 # subcommands named in FAKE_DOCKER_FAIL, so the PowerShell script runs without a
 # daemon. Only this stub is executed; no real docker command or container is involved.
-FAKE_DOCKER_SHIM = r'''
+FAKE_DOCKER_SHIM = r"""
 import json
 import os
 import sys
@@ -38,7 +38,7 @@ if command == "ps":
 elif command == "run":
     sys.stdout.write("fake-container-id\n")
 sys.exit(0)
-'''
+"""
 
 
 def _write_fake_docker(bin_dir, shim_path):
@@ -48,7 +48,9 @@ def _write_fake_docker(bin_dir, shim_path):
         f'@"{python}" "{shim_path}" %*\r\n', encoding="ascii"
     )
     posix = bin_dir / "docker"
-    posix.write_text(f'#!/bin/sh\nexec "{python}" "{shim_path}" "$@"\n', encoding="utf-8")
+    posix.write_text(
+        f'#!/bin/sh\nexec "{python}" "{shim_path}" "$@"\n', encoding="utf-8"
+    )
     posix.chmod(posix.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -130,7 +132,9 @@ class DemoContainerScriptTests(unittest.TestCase):
         path_key = next((key for key in os.environ if key.upper() == "PATH"), "PATH")
         environment = {
             **os.environ,
-            path_key: os.pathsep.join([str(self.bin_dir), os.environ.get(path_key, "")]),
+            path_key: os.pathsep.join(
+                [str(self.bin_dir), os.environ.get(path_key, "")]
+            ),
             "FAKE_DOCKER_LOG": str(self.log),
             "FAKE_DOCKER_FAIL": ",".join(fail),
             "FAKE_DOCKER_PS": ps_output,
@@ -156,7 +160,15 @@ class DemoContainerScriptTests(unittest.TestCase):
         return result, self.calls()
 
     def test_refused_names_stop_before_any_docker_call(self):
-        for name in ("pacecraft", "PACECRAFT", "pacecraft-prod", "ai-coach", "AI-COACH", "ai-coach-prod", "production"):
+        for name in (
+            "pacecraft",
+            "PACECRAFT",
+            "pacecraft-prod",
+            "ai-coach",
+            "AI-COACH",
+            "ai-coach-prod",
+            "production",
+        ):
             with self.subTest(name=name):
                 result, calls = self.run_script("-Name", name)
                 self.assertNotEqual(result.returncode, 0)
@@ -166,9 +178,13 @@ class DemoContainerScriptTests(unittest.TestCase):
     def test_demo_and_fixture_names_pass_the_guard_before_docker_runs(self):
         for name in (DEMO_NAME, "ai-coach-demo", "fixture-check"):
             with self.subTest(name=name):
-                result, calls = self.run_script("-Name", name, "-SkipBuild", fail=("ps",))
+                result, calls = self.run_script(
+                    "-Name", name, "-SkipBuild", fail=("ps",)
+                )
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("Listing containers failed", result.stdout + result.stderr)
+                self.assertIn(
+                    "Listing containers failed", result.stdout + result.stderr
+                )
                 self.assertEqual([call[0] for call in calls], ["ps"])
 
     def test_build_failure_stops_before_any_container_change(self):
@@ -185,7 +201,11 @@ class DemoContainerScriptTests(unittest.TestCase):
 
     def test_stop_failure_keeps_the_existing_container(self):
         result, calls = self.run_script(
-            "-Name", DEMO_NAME, "-SkipBuild", ps_output="old-container\n", fail=("stop",)
+            "-Name",
+            DEMO_NAME,
+            "-SkipBuild",
+            ps_output="old-container\n",
+            fail=("stop",),
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Stopping container", result.stdout + result.stderr)
@@ -253,7 +273,9 @@ class DemoContainerScriptTests(unittest.TestCase):
         self.addCleanup(server.shutdown)
         port = server.server_address[1]
 
-        result, calls = self.run_script("-Name", DEMO_NAME, "-SkipBuild", "-Port", str(port))
+        result, calls = self.run_script(
+            "-Name", DEMO_NAME, "-SkipBuild", "-Port", str(port)
+        )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Demo ready", result.stdout)
@@ -274,15 +296,14 @@ class ContainerRuntimeTests(unittest.TestCase):
         dockerfile = _read("Dockerfile")
         self.assertIn("addgroup --system --gid 101 app", dockerfile)
         self.assertIn("adduser --system --uid 100 --ingroup app app", dockerfile)
-        readme = _read("README.md")
-        installation = readme.split("## Installation & Deployment\n", 1)[1]
+        setup = _read("docs/setup.md")
         for heading in (
-            "### Docker Run\n",
-            "### Docker Compose\n",
-            "### Unraid Deployment Guide\n",
+            "\n## Docker Run\n",
+            "\n## Docker Compose\n",
+            "\n## Unraid Deployment Guide\n",
         ):
             with self.subTest(section=heading.strip()):
-                section = installation.split(heading, 1)[1].split("\n### ", 1)[0]
+                section = setup.split(heading, 1)[1].split("\n## ", 1)[0]
                 self.assertIn("chown -R 100:101 ", section)
                 self.assertIn("UID 100", section)
                 self.assertIn("GID 101", section)

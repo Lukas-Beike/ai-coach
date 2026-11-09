@@ -34,26 +34,30 @@ test("a failed request without a server response shows an honest German message 
 
 test("the offline banner states that changes are not saved and promises no later delivery @responsive", async ({ page, context }) => {
   await ready(page);
-  const notice = page.locator("#connectivityNotice");
+  // Under 500 px height only critical notices show text (#1784); the offline notice needs a tall screen.
+  await page.setViewportSize({ width: page.viewportSize().width, height: 800 });
+  const notice = page.locator("#statusStrip .status-strip-main .status-strip-text");
   await context.setOffline(true);
   await expect(notice).toBeVisible();
-  await expect(notice).toHaveText("Offline – Änderungen können gerade nicht gespeichert werden. Bereits geladene Daten bleiben sichtbar.");
+  await expect(notice).toContainText("Offline Änderungen können gerade nicht gespeichert werden. Bereits geladene Daten bleiben sichtbar.");
+  await expect(notice).toContainText(/Stand (gerade eben|vor \d+ min)/);
   await expect(notice).not.toContainText(/warten|gesendet|sp[äa]ter|Warteschlange/i);
   await context.setOffline(false);
-  await expect(notice).toBeHidden();
+  await expect(page.locator("#statusStrip")).not.toContainText("Offline");
 });
 
 test("stale provider data is a polite status while real provider errors stay alerts @responsive", async ({ page }) => {
   await ready(page);
-  const banner = page.locator("#providerAttentionBanner");
+  const banner = page.locator("#statusStrip");
   await page.evaluate(() => renderProviderAttention({
     provider_freshness: [{ configured: true, state: "stale", label: "Garmin" }],
   }));
   await expect(banner).toBeVisible();
+  await expect(banner).toContainText("Garmin benötigt manuelles Eingreifen.");
   await expect(banner).toHaveAttribute("role", "status");
   await expect(banner).toHaveAttribute("aria-live", "polite");
   await page.evaluate(() => renderProviderAttention({
-    provider_freshness: [{ configured: true, state: "error", error_code: "auth_required", label: "Intervals.icu" }],
+    provider_freshness: [{ configured: true, state: "error", error_code: "auth_required", label: "Wahoo" }],
   }));
   await expect(banner).toHaveAttribute("role", "alert");
   await expect(banner).toHaveAttribute("aria-live", "assertive");

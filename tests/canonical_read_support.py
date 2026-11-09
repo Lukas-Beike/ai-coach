@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from intervals_compaction import compact_snapshot
+from intervals_compaction import compact_snapshot, ingest_intervals_partial_snapshot
+from intervals_plan_stub import intervals_test_world
 from support import (
     PROVIDER_SYNCED_TEXT,
     garmin_payload_fixture,
@@ -92,6 +93,8 @@ class FixtureProfile:
 
 class CanonicalReadFixture(unittest.TestCase):
     def setUp(self) -> None:
+        # Provider-neutral logic runs over Intervals.icu-shaped records as one provider.
+        self.enterContext(intervals_test_world())
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.key_values = KeyValueRepository(lambda: NOW)
@@ -145,13 +148,14 @@ def store_garmin(case: CanonicalReadFixture, db: Any, payload: dict[str, Any]) -
 
 
 def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
-    """Store the snapshot and Garmin payload, then backfill until complete."""
+    """Store the Intervals.icu-shaped snapshot and Garmin payload, then complete the backfill."""
     with case.manager.unit_of_work() as db:
         db.execute(
             "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
             "VALUES (?, ?, ?, 0)",
             (json.dumps(case.intervals), NOW, str(case.intervals["synced_at"])),
         )
+        ingest_intervals_partial_snapshot(db, case.intervals, zone=case.zone)
         store_garmin(case, db, case.garmin)
     backfill = new_backfill(case)
     for _ in range(MAX_BATCHES):

@@ -46,21 +46,53 @@ Evidence: `backend/backup/database.py::DatabaseBackupService._check_source_capac
 
 ### Requirement: Complete secret-filtered privacy exports
 
-Authenticated privacy exports SHALL include durable athlete/planning/provider/history state through the JSON and bounded ZIP/JSONL projections while excluding sessions and server credential material from the privacy projection.
+The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions, approval proposals and the planning-state revision counter, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are exported in `provider_settings.json`. The format version is currently 14.
 
 #### Scenario: Privacy archive requested
 - **WHEN** the authenticated athlete requests the archive export
 - **THEN** the archive includes its complete declared manifest and streams the durable collections
 
+#### Scenario: Data kinds added since release 1.13.40
+- **WHEN** the archive is exported
+- **THEN** it holds the derived session-load and session-metric observations, the Garmin RPE, feel and minimum-heart-rate ratings, the Garmin and FIT detail sets with the executed strength sets and their source, the heart-rate histogram and zone times of each session analysis, the remote links of every provider and entity kind, the field names of nutrition-entry changes, the backfill cursors, the athlete's session purpose marking, the profile sex and the consent, purge and stage state
+
 #### Scenario: Credential-bearing runtime state
-- **WHEN** stored application state contains sessions or provider credentials
-- **THEN** those values are excluded from the privacy JSON/archive projection
+- **WHEN** stored application state contains sessions, provider credentials, the Personal API key or its expiry date, or Garmin or Wahoo tokens
+- **THEN** those values are excluded from the archive
 
 #### Scenario: Unauthenticated download
 - **WHEN** a privacy download is requested without a valid session
 - **THEN** authentication fails before export streaming starts
 
-Evidence: `backend/privacy.py::PrivacyDataExportService.export`; `backend/backup/export.py::PrivacyArchiveExportService`; `backend/backup/export.py::PRIVACY_EXPORT_JSONL_FILES`; `backend/http_api/privacy_get.py`. Tests: `tests/test_server_database.py::test_privacy_export_contains_archived_and_provider_state_without_sessions_or_credentials`; `tests/test_server_database.py::test_privacy_export_zip_streams_collections_and_contains_complete_manifest`; `tests/test_server_database.py::test_privacy_download_routes_require_auth_before_streaming`.
+Evidence: `backend/backup/export.py::PrivacyArchiveExportService`; `backend/backup/export.py::PRIVACY_EXPORT_JSONL_FILES`; `backend/http_api/privacy_get.py`. Only the archive is served. `backend/provider_credentials.py::stored_visible_settings` selects the exported provider fields. Tests: `tests/test_data_safety_coverage.py::DataKindExportTests`; `tests/test_server_database.py::test_privacy_export_zip_streams_collections_and_contains_complete_manifest`; `tests/test_privacy_provider_data.py`; `tests/test_server_database.py::test_privacy_download_routes_require_auth_before_streaming`.
+
+### Requirement: Coverage guards for stored data kinds
+
+Every table in the current schema SHALL have a recorded export decision and a place in the erasure scope, every explicitly selected export column SHALL be exported or listed with its reason, and a schema change SHALL come with a decision on the export format version, so a new data kind cannot reach the database without a backup, export and erasure decision.
+
+#### Scenario: New table without a decision
+- **WHEN** a table is added to the schema without an export member, an exclusion reason or an erasure scope entry
+- **THEN** the coverage tests fail
+
+#### Scenario: New column of an exported table
+- **WHEN** a column is added to a table whose export lists its columns
+- **THEN** the coverage tests fail until the column is exported or listed as excluded
+
+Evidence: `backend/backup/export.py::PRIVACY_EXPORT_FORMAT_VERSION`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`. Tests: `tests/test_data_safety_coverage.py::CoverageGuardTests`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`.
+
+### Requirement: Secrets stay out of exports, reports and logs
+
+The privacy export, the diagnostics report and the log output SHALL NOT contain the Personal API key, provider API keys, Garmin or Wahoo tokens, session hashes or APP_PASSWORD, and the database backup SHALL keep stored credentials only inside the encrypted database.
+
+#### Scenario: Sentinel secrets in storage
+- **WHEN** distinctive secrets are placed in temporary configuration and credential storage
+- **THEN** none appears in the archive, the JSON projection, the diagnostics report, its log projection or a log line, and the only key/value rows holding one are the credential keys
+
+#### Scenario: Encrypted backup
+- **WHEN** the database is backed up with SQLCipher
+- **THEN** the backup bytes show neither a plain SQLite header nor a stored secret
+
+Evidence: `backend/provider_credentials.py::CREDENTIAL_KV_KEYS`; `backend/observability.py::Redactor`; `backend/diagnostics/report.py::DiagnosticReportService`. Tests: `tests/test_secret_exposure.py`; `tests/test_diagnostic_report.py::DiagnosticReportServiceTests::test_report_shape_counts_redaction_and_privacy`.
 
 ### Requirement: Stage and validate restore before promotion
 
@@ -78,7 +110,7 @@ Restore SHALL stage bounded input to a unique temporary file, migrate supported 
 - **WHEN** backup chunks are still arriving
 - **THEN** staging proceeds before taking the maintenance gate
 
-Evidence: `backend/backup/restore_validation.py::DatabaseRestoreValidationService.stage`; `backend/backup/restore_validation.py::DatabaseRestoreValidationService.validate`; `backend/backup/restore.py::DatabaseRestoreService.restore`. Tests: `tests/test_database_restore_validation.py::test_stage_streams_chunks_and_enforces_the_limit_while_writing`; `tests/test_database_restore_validation.py::test_validate_upgrades_a_populated_release_v21_backup`; `tests/test_database_restore_validation.py::test_validate_rejects_foreign_key_violations`; `tests/test_database_restore_service.py::test_invalid_backup_never_changes_live_database_and_cleans_stage`.
+Evidence: `backend/backup/restore_validation.py::DatabaseRestoreValidationService.stage`; `backend/backup/restore_validation.py::DatabaseRestoreValidationService.validate`; `backend/backup/restore.py::DatabaseRestoreService.restore`. Tests: `tests/test_data_safety_coverage.py::BackupRestoreRoundTripTests`; `tests/test_database_restore_validation.py::test_stage_streams_chunks_and_enforces_the_limit_while_writing`; `tests/test_database_restore_validation.py::test_validate_upgrades_a_populated_release_v21_backup`; `tests/test_database_restore_validation.py::test_validate_rejects_foreign_key_violations`; `tests/test_database_restore_service.py::test_invalid_backup_never_changes_live_database_and_cleans_stage`.
 
 ### Requirement: Authenticated session-scrubbing restore
 
@@ -122,13 +154,25 @@ Local privacy deletion SHALL require the exact backend confirmation text before 
 
 #### Scenario: Confirmed erasure
 - **WHEN** the exact confirmation is supplied
-- **THEN** the declared durable tables and KV state are cleared transactionally and the default profile/reset state is restored
+- **THEN** the declared durable tables and KV state, including the Personal API key, its expiry date, the consent and purge state and the profile sex, are cleared transactionally and the default profile/reset state is restored
+
+#### Scenario: Remote links in the preview
+- **WHEN** the preview counts the deletion scope
+- **THEN** remote links are counted under the group owning their entity kind (library, competitions, or provider data for metric-export observations), so the counts add up to every row the deletion removes
+
+#### Scenario: Files beside the database
+- **WHEN** local erasure completes
+- **THEN** recovery copies and the purge marker file beside the database stay, like the legacy Garmin token file
 
 #### Scenario: Delete fails midway
 - **WHEN** a table deletion fails within the local transaction
 - **THEN** earlier table deletes roll back rather than reporting successful erasure
 
-Evidence: `backend/privacy.py::PrivacyDeleteService.preview`; `backend/privacy.py::PrivacyDeleteService.delete`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`. Tests: `tests/test_privacy_delete_confirmation.py::test_missing_or_wrong_confirmation_fails_before_any_dependency_access`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`; `tests/test_server_database.py::test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure`.
+#### Scenario: Recovery copies beside the database
+- **WHEN** restores or the Intervals.icu purge of release 2.0.0 saved database recovery copies and a purge marker file in the data directory
+- **THEN** the preview counts them, the confirmed erasure deletes them after the transaction commits, and a copy that cannot be removed is reported without failing the erasure
+
+Evidence: `backend/privacy.py::PrivacyDeleteService.preview`; `backend/privacy.py::PrivacyDeleteService.delete`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`; `backend/backup/recovery_copies.py::RecoveryCopies`. Tests: `tests/test_data_safety_coverage.py::DataKindDeleteTests`; `tests/test_privacy_provider_data.py::test_preview_counts_remote_links_by_owning_group`; `tests/test_privacy_delete_confirmation.py::test_missing_or_wrong_confirmation_fails_before_any_dependency_access`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`; `tests/test_server_database.py::test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure`.
 
 ### Requirement: Remote-erasure and credential outcomes remain separate
 
@@ -158,12 +202,3 @@ Restore SHALL reject backups with schema versions older than v21 (releases befor
 
 Evidence: `backend/backup/restore_validation.py`; `tests/test_database_restore_validation.py::test_validate_rejects_a_pre_v21_backup_by_release_without_modifying_it`.
 
-### Requirement: Recovery copy before destructive maintenance
-
-Before a data maintenance step deletes stored records, the system SHALL write a consistent, encrypted copy of the database through the backup snapshot path, without the download size limit, to `<database>.<label>-<timestamp>-<id>` beside it. A later attempt of the same version SHALL reuse it, the startup cleanup of staging files SHALL keep it, and a failed copy SHALL stop the maintenance step before any change.
-
-#### Scenario: Intervals.icu purge
-- **WHEN** the Intervals.icu purge becomes due
-- **THEN** the copy with every Intervals.icu row is written first, then the purge runs.
-
-Evidence: `backend/backup/database.py:DatabaseBackupService.write_recovery_copy`, `backend/backup/staging_sweep.py`; `tests/test_intervals_purge.py`.

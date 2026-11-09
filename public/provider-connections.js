@@ -484,14 +484,16 @@ function invalidateYazioStatus() {
 }
 
 function renderYazioStatus(result) {
-  const labels = {
-    not_configured: "Nicht konfiguriert", unchecked: "Noch nicht geprüft",
+  const messages = {
+    unchecked: "Noch nicht geprüft",
     success: "Anmeldung erfolgreich", auth_failed: "Anmeldung abgelehnt – Zugangsdaten und App-Konfiguration prüfen",
     rate_limited: "Anfragen begrenzt – später erneut versuchen", unavailable: "Momentan nicht verfügbar – später erneut versuchen",
   };
-  setCredentialText("yazioConnectionStatus", labels[result?.status] || "Status nicht verfügbar");
+  setConnectionChip("#yazioConnectionStatus", yazioConnectionKind(result?.status));
   const date = result?.checked_at ? new Date(result.checked_at) : null;
-  setCredentialText("yazioConnectionDetail", date && !Number.isNaN(date.getTime()) ? `Geprüft: ${date.toLocaleString("de-DE")}` : "");
+  const checked = date && !Number.isNaN(date.getTime()) ? `Geprüft: ${date.toLocaleString("de-DE")}` : "";
+  const message = result ? messages[result.status] : "Status nicht verfügbar";
+  setCredentialText("yazioConnectionDetail", [message, checked].filter(Boolean).join(" · "));
   const button = $("#yazioCheckButton");
   if (button) button.disabled = providerCredentialBusy.has("yazio-check") || result?.status === "not_configured";
 }

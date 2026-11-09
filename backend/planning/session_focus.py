@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
+from backend.activities.hr_cap import HR_CAP_KEY, normalize_hr_cap
 from backend.activities.workout_load import WorkoutEstimate
 from backend.canonical import planning_fields
 from backend.canonical.planning_fields import (
@@ -115,6 +116,7 @@ def normalize_session_focus(record: dict[str, Any]) -> None:
     focus = _text_value(record, FOCUS_KEY)
     intensity = _text_value(record, INTENSITY_KEY)
     structure = record.get(STRENGTH_STRUCTURE)
+    cap = record.get(HR_CAP_KEY)
     for key in FOCUS_KEYS:
         record.pop(key, None)
     if focus is not None:
@@ -126,6 +128,19 @@ def normalize_session_focus(record: dict[str, Any]) -> None:
             raise _invalid("Ungültige Krafteinheit-Intensität.")
         record[INTENSITY_KEY] = intensity
     _set_structure(record, sport, structure)
+    _set_hr_cap(record, sport, cap)
+
+
+def _set_hr_cap(record: dict[str, Any], sport: Sport, cap: Any) -> None:
+    """Keep a valid heart-rate cap on a run unit; reject it anywhere else."""
+    if cap is None:
+        return
+    if sport is not Sport.RUN:
+        raise _invalid("Die Herzfrequenz-Obergrenze gilt nur für Laufeinheiten.")
+    try:
+        record[HR_CAP_KEY] = normalize_hr_cap(cap)
+    except ValueError as error:
+        raise _invalid(f"Ungültige Herzfrequenz-Obergrenze: {error}") from error
 
 
 # Strength keywords; the first matching group wins, legs plus upper is full body.
@@ -210,16 +225,22 @@ def _name_focus(unit: Mapping[str, Any]) -> str | None:
     return found[0] if len(found) == 1 else None
 
 
-def _keyword_focus(unit: Mapping[str, Any], sport: Sport) -> str | None:
+def _keyword_candidates(unit: Mapping[str, Any], sport: Sport) -> list[str]:
+    """Every focus the text names, best match first (several mean it is ambiguous)."""
     text = _affirmed(f"{unit.get('name') or ''} {unit.get('description') or ''}")
     if sport is Sport.STRENGTH:
         if (named := _name_focus(unit)) is not None:
-            return named
+            return [named]
         found = [f for f, rx in _COMPILED["strength"] if rx.search(text)]
         if "legs" in found and "upper" in found:
-            return "full_body"
-        return found[0] if found else None
-    return next((f for f, rx in _COMPILED["endurance"] if rx.search(text)), None)
+            return ["full_body"]
+        return found
+    return [f for f, rx in _COMPILED["endurance"] if rx.search(text)]
+
+
+def _keyword_focus(unit: Mapping[str, Any], sport: Sport) -> str | None:
+    candidates = _keyword_candidates(unit, sport)
+    return candidates[0] if candidates else None
 
 
 def structure_intensity(unit: Mapping[str, Any]) -> str | None:
@@ -227,13 +248,18 @@ def structure_intensity(unit: Mapping[str, Any]) -> str | None:
     return strength_structure.derived_intensity(_structure(unit))
 
 
+def _text_intensities(unit: Mapping[str, Any]) -> list[str]:
+    """Every intensity the name or description names, the hardest first."""
+    text = _affirmed(f"{unit.get('name') or ''} {unit.get('description') or ''}")
+    return [value for value, rx in _TEXT_INTENSITY if rx.search(text)]
+
+
 def text_intensity(unit: Mapping[str, Any]) -> str | None:
     """Intensity a strength unit's name or description names, the hardest first.
 
     Negated mentions do not count.
     """
-    text = _affirmed(f"{unit.get('name') or ''} {unit.get('description') or ''}")
-    return next((value for value, rx in _TEXT_INTENSITY if rx.search(text)), None)
+    return next(iter(_text_intensities(unit)), None)
 
 
 def _step_focus(estimate: WorkoutEstimate | None) -> str | None:
@@ -325,3 +351,45 @@ def carry_focus(target: dict[str, Any], source: Mapping[str, Any]) -> None:
     except AppError:
         return
     target.update({key: candidate[key] for key in FOCUS_KEYS if key in candidate})
+
+
+def _unambiguous_focus(
+    unit: Mapping[str, Any], estimate: WorkoutEstimate | None
+) -> str | None:
+    """The derived focus when its sources agree, else ``None``.
+
+    A focus from the parsed steps stands unless the text names only other foci;
+    without steps the text must name exactly one focus.
+    """
+    sport = planned_sport_environment(unit)[0]
+    candidates = _keyword_candidates(unit, sport)
+    stepped = None if sport is Sport.STRENGTH else _step_focus(estimate)
+    if stepped is not None:
+        return stepped if not candidates or stepped in candidates else None
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def unambiguous_values(
+    unit: Mapping[str, Any], estimate: WorkoutEstimate | None = None
+) -> dict[str, str]:
+    """Focus fields a unit lacks that can be derived without doubt.
+
+    Only keys not yet stored are returned: the focus (sport with a focus
+    vocabulary) and, for strength, the intensity (from the structure, else from
+    exactly one named level). Anything contested stays a suggestion.
+    """
+    sport = planned_sport_environment(unit)[0]
+    allowed = allowed_foci(sport)
+    values: dict[str, str] = {}
+    if allowed and _text_value(unit, FOCUS_KEY) not in allowed:
+        focus = _unambiguous_focus(unit, estimate)
+        if focus in allowed:
+            values[FOCUS_KEY] = str(focus)
+    if sport is Sport.STRENGTH and _text_value(unit, INTENSITY_KEY) not in (
+        STRENGTH_INTENSITIES
+    ):
+        named = _text_intensities(unit)
+        intensity = structure_intensity(unit) or (named[0] if len(named) == 1 else None)
+        if intensity in STRENGTH_INTENSITIES:
+            values[INTENSITY_KEY] = str(intensity)
+    return values

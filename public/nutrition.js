@@ -105,6 +105,15 @@ function nutritionComponentSource(basis) {
   return "Quelle unbekannt";
 }
 
+// "1890 kcal" keeps its text; the unit is set smaller than the value (#1789).
+function setValueWithUnit(element, text) {
+  const split = text.lastIndexOf(" ");
+  if (split < 1) { element.textContent = text; return element; }
+  const unit = document.createElement("span"); unit.className = "nutrition-unit"; unit.textContent = text.slice(split + 1);
+  element.replaceChildren(text.slice(0, split), " ", unit);
+  return element;
+}
+
 function nutritionBasisLabel(basis, item, sourceLabel) {
   if (basis?.kind === "composite") return "";
   if (basis?.kind === "database") {
@@ -164,7 +173,9 @@ function nutritionCard(item, template) {
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
   const basisLabel = nutritionBasisLabel(item.nutrition_basis, { template, syncLabel }, sourceLabel);
-  if (basisLabel) source.textContent = basisLabel + (template ? "" : syncLabel);
+  // The default (typed in by hand, stored locally) is not repeated under every meal; any other source or state is shown.
+  const isDefaultSource = !template && item.source === "manual" && item.sync_state !== "synced" && basisLabel === sourceLabel;
+  if (basisLabel && !isDefaultSource) source.textContent = basisLabel + (template ? "" : syncLabel);
   card.append(title, description, values);
   if (source.textContent) card.append(source);
   if (!template) {
@@ -246,12 +257,12 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   const kcalValue = (rawValue) => {
     const value = document.createElement("strong");
     const text = formatKcal(rawValue);
-    if (text == null) markValueMissing(value); else value.textContent = text;
+    if (text == null) markValueMissing(value); else setValueWithUnit(value, text);
     return value;
   };
   const totalValue = kcalValue(expenditure?.total_kcal);
   const totalCaption = document.createElement("span");
-  totalCaption.textContent = expenditure?.provisional ? "Tagesverbrauch (vorläufig)" : "Tagesverbrauch";
+  totalCaption.textContent = "Tagesverbrauch";
   totalTile.append(totalValue, totalCaption);
 
   const componentTile = (rawValue, caption) => {
@@ -265,13 +276,16 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   };
   const projected = expenditure?.projected_total_kcal;
   const hasProjection = projected != null && Number.isFinite(Number(projected));
-  const projectionTile = hasProjection ? componentTile(projected, "Prognose Tagesverbrauch (abgeleitet)") : null;
-  if (projectionTile) projectionTile.style.gridColumn = "1 / -1";
+  const projectionTile = hasProjection ? componentTile(projected, "Prognose Tagesverbrauch") : null;
+  if (projectionTile) {
+    projectionTile.style.gridColumn = "1 / -1";
+    projectionTile.lastElementChild.append(" ", createEstimateChip());
+  }
   totals.replaceChildren(
     totalTile,
     ...(projectionTile ? [projectionTile] : []),
     componentTile(expenditure?.active_kcal, "Aktivkalorien"),
-    componentTile(expenditure?.resting_kcal, expenditure?.provisional ? "Grundumsatz (vorläufig)" : "Grundumsatz"),
+    componentTile(expenditure?.resting_kcal, "Grundumsatz"),
   );
 
   const syncedAt = nutritionExpenditureTimestamp(expenditure?.synced_at);
@@ -288,7 +302,10 @@ function appendNutritionTotals(totals, day) {
   // Empty days report zero totals, which are unknown, so the tiles stay "nicht erfasst".
   const hasEntries = Number(day.entry_count) > 0;
   for (const [label, key, unit] of [["Kalorien", "kcal", "kcal"], ["Kohlenhydrate", "carbs_g", "g"], ["Protein", "protein_g", "g"], ["Fett", "fat_g", "g"], ["Zucker", "sugar_g", "g"], ["Salz", "salt_g", "g"]]) {
-    totals.append(nutritionTotalTile(label, key, unit, day, hasEntries));
+    const tile = nutritionTotalTile(label, key, unit, day, hasEntries);
+    if (key === "kcal") tile.classList.add("is-hero");
+    if (key === "sugar_g" || key === "salt_g") tile.classList.add("is-minor");
+    totals.append(tile);
   }
 }
 
@@ -305,7 +322,7 @@ function nutritionTotalTile(label, key, unit, day, hasEntries) {
   // A partial sum of known values is shown only with an explicit incompleteness label.
   const total = hasEntries ? (complete ?? day.known_macro_totals?.[key] ?? day.known_intake_totals?.[key]) : null;
   if (total == null) markValueMissing(value);
-  else value.textContent = `${nutritionNumber(total)} ${unit}`;
+  else setValueWithUnit(value, `${nutritionNumber(total)} ${unit}`);
   const caption = document.createElement("span");
   caption.textContent = label + (complete == null && total != null ? " · unvollständig" : "");
   tile.append(value, caption);
@@ -352,9 +369,58 @@ function nutritionChartDays(days) {
   });
 }
 
+// Days without intake and expenditure are shown as one row per run (#1789).
+function nutritionChartRows(chartDays) {
+  const rows = [];
+  for (const day of chartDays) {
+    if (Number.isFinite(day.intake_kcal) || Number.isFinite(day.expenditure_kcal)) { rows.push({ day }); continue; }
+    const last = rows.at(-1);
+    if (last?.empty) last.end = day.end_date || day.date;
+    else rows.push({ empty: true, start: day.date, end: day.end_date || day.date });
+  }
+  return rows;
+}
+
+function nutritionEmptyRunRow({ start, end }) {
+  const row = document.createElement("div"); row.className = "nutrition-week-chart-day is-empty";
+  const date = document.createElement("strong");
+  const first = nutritionExpenditureDate(start).slice(0, 5);
+  const last = nutritionExpenditureDate(end).slice(0, 5);
+  date.textContent = first === last ? first : `${first}–${last}`;
+  const text = document.createElement("span"); text.textContent = "keine Daten";
+  row.append(date, text);
+  return row;
+}
+
+function nutritionChartDayRow(day, scale) {
+  const row = document.createElement("div"); row.className = "nutrition-week-chart-day";
+  const date = document.createElement("strong"); date.textContent = nutritionExpenditureDate(day.date).slice(0, 5);
+  if (day.end_date) date.setAttribute("aria-label", `${nutritionExpenditureDate(day.date)} bis ${nutritionExpenditureDate(day.end_date)}`);
+  row.append(date);
+  for (const [key, label, kind] of [["intake_kcal", "Aufnahme", "intake"], ["expenditure_kcal", "Verbrauch", "expenditure"]]) {
+    const value = day[key];
+    const series = document.createElement("div"); series.className = `nutrition-week-chart-series is-${kind}`;
+    const track = document.createElement("span"); track.className = "nutrition-week-chart-track";
+    if (Number.isFinite(value) && value >= 0) {
+      const bar = document.createElement("span"); bar.className = "nutrition-week-chart-bar";
+      bar.style.width = `${value / scale * 100}%`;
+      track.append(bar);
+    } else track.classList.add("is-missing");
+    const amount = document.createElement("span"); amount.textContent = value == null ? "–" : `${nutritionWeekValue(value, "kcal")}`;
+    series.setAttribute("aria-label", `${label}: ${amount.textContent}${value == null ? " (keine Daten)" : ""}`);
+    if (day.end_date) {
+      const coverage = document.createElement("small");
+      coverage.textContent = `${day[key + "_days"]} von 7 Tagen`;
+      series.setAttribute("aria-label", `${label}: ${amount.textContent}, ${coverage.textContent}`);
+      amount.append(document.createElement("br"), coverage);
+    }
+    series.append(track, amount); row.append(series);
+  }
+  return row;
+}
+
 function renderNutritionWeek(week) {
   const dayCount = week.days.length;
-  document.querySelector("#nutritionWeekHeading").textContent = dayCount === 84 ? "Letzte 12 Wochen" : `Letzte ${dayCount} Tage`;
   document.querySelector("#nutritionWeekPeriod").textContent = `${nutritionExpenditureDate(week.start_date)} – ${nutritionExpenditureDate(week.end_date)}`;
   const totals = document.querySelector("#nutritionWeekTotals");
   const balance = week.balance_kcal;
@@ -363,7 +429,7 @@ function renderNutritionWeek(week) {
   totals.replaceChildren(...items.map(([label, value, unit, days, isBalance]) => {
     const tile = document.createElement("div"); tile.className = "nutrition-total";
     const number = document.createElement("strong");
-    if (value == null) markValueMissing(number); else number.textContent = nutritionWeekValue(value, unit, isBalance);
+    if (value == null) markValueMissing(number); else setValueWithUnit(number, nutritionWeekValue(value, unit, isBalance));
     const caption = document.createElement("span"); caption.textContent = label;
     const coverage = document.createElement("small"); coverage.textContent = `${days} von ${dayCount} Tagen${isBalance && days < dayCount ? " · Teilbilanz" : ""}`;
     tile.append(number, caption, coverage); return tile;
@@ -372,32 +438,7 @@ function renderNutritionWeek(week) {
   const chartDays = nutritionChartDays(week.days);
   document.querySelector("#nutritionWeekChartHeading").textContent = dayCount === 84 ? "Wochendurchschnitte" : "Tagesverlauf";
   const scale = Math.max(1, ...chartDays.flatMap((day) => [day.intake_kcal, day.expenditure_kcal].filter((value) => Number.isFinite(value) && value >= 0)));
-  document.querySelector("#nutritionWeekChart").replaceChildren(...chartDays.map((day) => {
-    const row = document.createElement("div"); row.className = "nutrition-week-chart-day";
-    const date = document.createElement("strong"); date.textContent = nutritionExpenditureDate(day.date).slice(0, 5);
-    if (day.end_date) date.setAttribute("aria-label", `${nutritionExpenditureDate(day.date)} bis ${nutritionExpenditureDate(day.end_date)}`);
-    row.append(date);
-    for (const [key, label, kind] of [["intake_kcal", "Aufnahme", "intake"], ["expenditure_kcal", "Verbrauch", "expenditure"]]) {
-      const value = day[key];
-      const series = document.createElement("div"); series.className = `nutrition-week-chart-series is-${kind}`;
-      const track = document.createElement("span"); track.className = "nutrition-week-chart-track";
-      if (Number.isFinite(value) && value >= 0) {
-        const bar = document.createElement("span"); bar.className = "nutrition-week-chart-bar";
-        bar.style.width = `${value / scale * 100}%`;
-        track.append(bar);
-      } else track.classList.add("is-missing");
-      const amount = document.createElement("span"); amount.textContent = value == null ? "–" : `${nutritionWeekValue(value, "kcal")}`;
-      series.setAttribute("aria-label", `${label}: ${amount.textContent}${value == null ? " (keine Daten)" : ""}`);
-      if (day.end_date) {
-        const coverage = document.createElement("small");
-        coverage.textContent = `${day[key + "_days"]} von 7 Tagen`;
-        series.setAttribute("aria-label", `${label}: ${amount.textContent}, ${coverage.textContent}`);
-        amount.append(document.createElement("br"), coverage);
-      }
-      series.append(track, amount); row.append(series);
-    }
-    return row;
-  }));
+  document.querySelector("#nutritionWeekChart").replaceChildren(...nutritionChartRows(chartDays).map((entry) => (entry.empty ? nutritionEmptyRunRow(entry) : nutritionChartDayRow(entry.day, scale))));
   document.querySelector("#nutritionWeekChartSection").hidden = false;
   document.querySelector("#nutritionWeekDays").replaceChildren(...week.days.map((day) => {
     const row = document.createElement("tr");

@@ -6,6 +6,10 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 from backend.canonical.activity_summary import summary_local_date
+from backend.canonical.first_threshold import (
+    FIRST_THRESHOLD_FIELD,
+    first_threshold_percent,
+)
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import comparisons as performance_comparisons
 from backend.performance import current_metrics as performance_current_metrics
@@ -29,9 +33,7 @@ from backend.performance.training_focus import training_focus
 # The reason an unavailable context gives while the canonical source serves nothing yet.
 REASON_CANONICAL_PENDING: Final = "canonical_pending"
 PENDING_STATUS: Final = "Daten werden vorbereitet"
-# The status while stored compact-only Intervals.icu activities are missing.
-# The source of a context with a canonical Intervals.icu sync.
-# The source of a context without an Intervals.icu sync, e.g. a Garmin-only setup.
+# The source of a context built from the stored provider values.
 STORED_PROVIDERS_SOURCE: Final = "Gespeicherte Provider-Daten"
 
 # Recovery sources whose freshness comes from the Garmin view, including the
@@ -73,7 +75,6 @@ def _has_provider_values(canonical: CanonicalPerformanceInputs) -> bool:
     recovery = canonical.recovery
     return bool(
         canonical.activities
-        or canonical.history_wellness_days
         or canonical.daily_health
         or canonical.current != NO_CURRENT_INPUTS
         or (recovery is not None and any(recovery.observations.values()))
@@ -146,8 +147,8 @@ def current_performance_context(
     ``session_feedback`` reads the local session feedback, so load rollups can
     report the session-RPE load of sessions without a TSS-scale load.
 
-    The canonical inputs supply activities, wellness, load, body, Garmin and
-    athlete-setting values and the Intervals.icu sync time;
+    The canonical inputs supply activities, load, body, Garmin and
+    athlete-setting values and the activity sync time;
     ``EMPTY_PERFORMANCE_INPUTS`` stands for none. ``garmin`` is the Garmin sync
     status and supplies only freshness. The context is unavailable without any
     provider value in the canonical inputs, also when only the athlete's own
@@ -244,7 +245,9 @@ def current_performance_context(
         **_sync_status(canonical),
         "metrics": metrics,
         "thresholds": {
-            **performance_current_metrics.coach_thresholds(metrics),
+            **performance_current_metrics.coach_thresholds(
+                metrics, first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD))
+            ),
             "weight": metrics["weight_kg"]["value"],
         },
         "current_load": load,

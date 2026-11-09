@@ -597,38 +597,6 @@ def activity_detail_backfill_candidates(
     ]
 
 
-def remove_detail_sets(
-    db: Any,
-    provider: str,
-    provider_activity_id: str,
-    *,
-    keep: Collection[ActivityDetailKind],
-) -> int:
-    """Delete the sets of one provider activity whose kind is not in ``keep``.
-
-    Child rows are deleted before each set header. Returns the number of sets
-    removed; sets of a kind in ``keep`` are left untouched.
-    """
-    kept = {kind.value for kind in keep}
-    removed = 0
-    for row in db.execute(
-        "SELECT detail_kind FROM activity_detail_sets "
-        "WHERE provider = ? AND provider_activity_id = ?",
-        (provider, provider_activity_id),
-    ).fetchall():
-        if row["detail_kind"] in kept:
-            continue
-        key = (provider, provider_activity_id, row["detail_kind"])
-        _delete_children(db, key)
-        db.execute(
-            "DELETE FROM activity_detail_sets "
-            "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
-            key,
-        )
-        removed += 1
-    return removed
-
-
 def stored_strength_source(
     db: Any, provider: str, provider_activity_id: str
 ) -> str | None:
@@ -656,87 +624,6 @@ def restamp_detail_set(
         "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
         (summary_sha256, fetched_at, provider, provider_activity_id, kind.value),
     )
-
-
-def refill_lap_metrics(
-    db: Any,
-    provider: str,
-    provider_activity_id: str,
-    values: Mapping[int, Mapping[str, float]],
-    *,
-    now: str,
-) -> int:
-    """Fill lap metrics that are NULL in the stored lap set; return how many were filled.
-
-    ``values`` maps a lap index to metric values. A stored value is never
-    overwritten. When anything was filled, the set's content hash and
-    ``updated_at`` are recomputed; origin, mapper version, fetch time and
-    summary hash stay as they are.
-    """
-    key = (provider, provider_activity_id, ActivityDetailKind.LAPS.value)
-    filled = 0
-    for lap_index, metrics in values.items():
-        unknown = set(metrics) - set(_LAP_METRIC_COLUMNS)
-        if unknown:
-            raise ValueError("values name a column that is not a lap metric")
-        current = db.execute(
-            f"SELECT {', '.join(_LAP_METRIC_COLUMNS)} FROM activity_laps "
-            "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ? "
-            "AND lap_index = ?",
-            (*key, lap_index),
-        ).fetchone()
-        if current is None:
-            continue
-        columns = [
-            column
-            for column in _LAP_METRIC_COLUMNS
-            if column in metrics
-            and metrics[column] is not None
-            and current[column] is None
-        ]
-        if not columns:
-            continue
-        db.execute(
-            "UPDATE activity_laps SET "
-            + ", ".join(f"{column} = COALESCE({column}, ?)" for column in columns)
-            + " WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ? "
-            "AND lap_index = ?",
-            (*(metrics[column] for column in columns), *key, lap_index),
-        )
-        filled += len(columns)
-    if filled:
-        row = db.execute(
-            "SELECT provider, provider_activity_id, detail_kind, mapper_version, "
-            "origin, source_kind, recorded_by, source_record_id, resolution, "
-            "lap_source, zone_boundary_source, fetched_at FROM activity_detail_sets "
-            "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
-            key,
-        ).fetchone()
-        detail = _rebuild(db, dict(row))
-        db.execute(
-            "UPDATE activity_detail_sets SET content_sha256 = ?, updated_at = ? "
-            "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
-            (
-                _content_hash(
-                    _header(detail, row["mapper_version"]), _child_rows(detail)
-                ),
-                now,
-                *key,
-            ),
-        )
-    return filled
-
-
-def detail_origins(db: Any, provider: str, provider_activity_id: str) -> set[str]:
-    """Return the origin values of the stored sets of one provider activity."""
-    return {
-        row["origin"]
-        for row in db.execute(
-            "SELECT origin FROM activity_detail_sets "
-            "WHERE provider = ? AND provider_activity_id = ?",
-            (provider, provider_activity_id),
-        ).fetchall()
-    }
 
 
 def save_analysis(

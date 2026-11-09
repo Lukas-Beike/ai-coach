@@ -1,13 +1,12 @@
-"""Domain rows (sleep, status, zones, gear) through the ingest and the backfill.
+"""Domain rows (sleep, status, zones, gear) through the ingest and the re-projection.
 
 Each test uses a temporary SQLite file with the schema initialized. Provider rows
-are synthetic; the domain batches come from patched plans, because no mapper
-emits them yet. No account, network or real data directory is used.
+are synthetic health records of one provider; the domain batches are built here or
+come from patched plans. No account, network or real data directory is used.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import tempfile
 import unittest
@@ -33,11 +32,11 @@ from backend.sync.canonical_ingest import ingest_plan
 ZONE = ZoneInfo("Europe/Berlin")
 NOW = "2026-09-20T08:00:00+00:00"
 RETRIEVED_AT = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
-INTERVALS = ProviderId.INTERVALS
-WELLNESS = canonical_plans.WELLNESS_RECORD_KIND
+PROVIDER = ProviderId.GARMIN
+HEALTH = canonical_plans.HEALTH_RECORD_KIND
 FIRST_DAY = date(2026, 1, 1)
-# The current wellness mapper, so a backfill does not re-project the records.
-VERSION = canonical_plans.INTERVALS_WELLNESS_VERSION
+# The current health mapper, so a backfill does not re-project the records.
+VERSION = canonical_plans.GARMIN_HEALTH_VERSION
 
 
 def day_id(offset: int) -> str:
@@ -45,11 +44,11 @@ def day_id(offset: int) -> str:
 
 
 def day_status(source_id: str, code: str = "PRODUCTIVE") -> Any:
-    """A status row owned by the wellness record ``source_id`` on its own day."""
+    """A status row owned by the health record ``source_id`` on its own day."""
     return status(
         code=code,
         observed_on=date.fromisoformat(source_id),
-        provenance=provenance(source_id, provider=INTERVALS),
+        provenance=provenance(source_id, provider=PROVIDER),
     )
 
 
@@ -62,7 +61,7 @@ def batch(source_id: str, *codes: str, version: int = VERSION) -> DomainBatch:
 
 
 def raw(source_id: str) -> RawRecord:
-    return RawRecord(WELLNESS, source_id, {"id": source_id}, VERSION)
+    return RawRecord(HEALTH, source_id, {"id": source_id}, VERSION)
 
 
 def rows(db: Any, table: str = "categorical_observations") -> list[tuple[Any, ...]]:
@@ -89,7 +88,7 @@ class IngestFixture(unittest.TestCase):
             raws if raws is not None else tuple(b.source_record_id for b in batches)
         )
         plan = IngestPlan(
-            provider=INTERVALS,
+            provider=PROVIDER,
             raw_records=tuple(raw(source) for source in sources),
             domain_batches=batches,
         )
@@ -112,7 +111,7 @@ class IngestDomainTests(IngestFixture):
                 VERSION,
                 categorical=(day_status(day_id(0)),),
                 gear_items=(
-                    gear_item(provenance=provenance(day_id(0), provider=INTERVALS)),
+                    gear_item(provenance=provenance(day_id(0), provider=PROVIDER)),
                 ),
             ),
             batch(day_id(1), "PEAKING"),
@@ -145,50 +144,14 @@ class IngestDomainTests(IngestFixture):
             self.ingest(batch(day_id(0), "PRODUCTIVE"), raws=(day_id(1),))
 
 
-def wellness_snapshot(days: int, *, synced_at: str = NOW) -> dict[str, Any]:
-    return {
-        "synced_at": synced_at,
-        "upcoming_calendar": [],
-        "provider_sync": {"pagination": {}},
-        "raw_provider_data": {
-            "activities": [],
-            "wellness": [{"id": day_id(i)} for i in range(days)],
-        },
-    }
-
-
-def with_batches(code: str) -> Any:
-    """Patch the snapshot plan so each wellness record also emits one status."""
-    real = canonical_plans.intervals_snapshot_ingest_plan
-
-    def plan(snapshot: Mapping[str, Any], *, zone: Any, **options: Any) -> IngestPlan:
-        result = real(snapshot, zone=zone, **options)
-        return replace(
-            result,
-            domain_batches=tuple(
-                batch(record.source_record_id, code)
-                for record in result.raw_records
-                if record.record_kind == WELLNESS
-            ),
-        )
-
-    return patch(
-        "backend.sync.canonical_backfill.intervals_snapshot_ingest_plan",
-        side_effect=plan,
-    )
-
-
 def reprojecting(codes: Mapping[str, tuple[str, ...]]) -> Any:
-    """Patch the re-projection plan: wellness record ``id`` emits ``codes[id]``."""
-    real = canonical_plans.reprojection_plan
+    """Patch the re-projection plan: health record ``id`` emits ``codes[id]``."""
 
     def plan(
         raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
     ) -> IngestPlan | None:
-        result = real(raw_row, zone=zone, training_loads=training_loads)
         source_id = str(raw_row["source_record_id"])
-        if result is None or raw_row["record_kind"] != WELLNESS:
-            return result
+        result = IngestPlan(provider=PROVIDER)
         if source_id not in codes:
             return result
         return replace(result, domain_batches=(batch(source_id, *codes[source_id]),))
@@ -196,8 +159,8 @@ def reprojecting(codes: Mapping[str, tuple[str, ...]]) -> Any:
     return patch("backend.sync.canonical_backfill.reprojection_plan", side_effect=plan)
 
 
-def bumped_wellness() -> Any:
-    key = (INTERVALS.value, WELLNESS)
+def bumped_health() -> Any:
+    key = (PROVIDER.value, HEALTH)
     return patch.dict(
         canonical_plans._MAPPER_VERSIONS,
         {key: canonical_plans._MAPPER_VERSIONS[key] + 1},
@@ -210,7 +173,7 @@ def mapped_versions(manager: Any) -> set[int]:
             int(row["mapped_version"])
             for row in db.execute(
                 "SELECT mapped_version FROM provider_records WHERE record_kind = ?",
-                (WELLNESS,),
+                (HEALTH,),
             )
         }
 
@@ -239,14 +202,6 @@ class BackfillFixture(unittest.TestCase):
             batch_size=batch_size,
         )
 
-    def insert_snapshot(self, payload: dict[str, Any], manager: Any = None) -> None:
-        with (manager or self.manager).unit_of_work() as db:
-            db.execute(
-                "INSERT INTO snapshots(payload, created_at, synced_at, "
-                "recent_activity_count) VALUES (?, ?, ?, 0)",
-                (json.dumps(payload), NOW, payload["synced_at"]),
-            )
-
     def complete(self, backfill: CanonicalBackfill, manager: Any = None) -> None:
         for _ in range(1000):
             with (manager or self.manager).unit_of_work() as db:
@@ -260,16 +215,17 @@ class BackfillFixture(unittest.TestCase):
 
     def counters(self, backfill: CanonicalBackfill) -> dict[str, int]:
         with self.manager.reader() as db:
-            return dict(backfill.summary(db)["providers"][INTERVALS.value])
+            return dict(backfill.summary(db)["providers"][PROVIDER.value])
 
 
-class BackfillIngestTests(BackfillFixture):
-    def live_ingest(self, *batches: DomainBatch) -> None:
+class BackfillReprojectionTests(BackfillFixture):
+    def populate(self) -> CanonicalBackfill:
+        batches = tuple(batch(day_id(i), "PRODUCTIVE") for i in range(3))
         with self.manager.unit_of_work() as db:
             ingest_plan(
                 db,
                 IngestPlan(
-                    provider=INTERVALS,
+                    provider=PROVIDER,
                     raw_records=tuple(raw(b.source_record_id) for b in batches),
                     domain_batches=batches,
                 ),
@@ -277,52 +233,14 @@ class BackfillIngestTests(BackfillFixture):
                 deletion_window=None,
                 zone=ZONE,
             )
-
-    def test_ingest_inserts_batches_and_never_changes_existing_rows(self) -> None:
-        self.live_ingest(batch(day_id(0), "PRODUCTIVE"))
-        self.insert_snapshot(wellness_snapshot(2))
-        backfill = self.backfill()
-        with with_batches("RECOVERY"):
-            self.complete(backfill)
-        self.assertEqual(
-            self.domain_rows(),
-            [(day_id(0), "PRODUCTIVE", "active"), (day_id(1), "RECOVERY", "active")],
-        )
-
-    def test_a_retired_source_is_not_revived_by_the_backfill(self) -> None:
-        self.live_ingest(batch(day_id(0), "PRODUCTIVE"))
-        self.live_ingest(DomainBatch(day_id(0), VERSION))
-        self.insert_snapshot(wellness_snapshot(1))
-        backfill = self.backfill()
-        with with_batches("RECOVERY"):
-            self.complete(backfill)
-        self.assertEqual(self.domain_rows(), [(day_id(0), "PRODUCTIVE", "retired")])
-
-    def test_a_resumed_run_writes_the_same_rows_as_an_uninterrupted_one(self) -> None:
-        self.insert_snapshot(wellness_snapshot(180))
-        with with_batches("PRODUCTIVE"):
-            self.complete(self.backfill(batch_size=250))
-            other = self.open_manager("resumed.db")
-            self.insert_snapshot(wellness_snapshot(180), other)
-            self.complete(self.backfill(batch_size=100), other)
-        self.assertEqual(len(self.domain_rows()), 180)
-        self.assertEqual(self.domain_rows(other), self.domain_rows())
-
-
-class BackfillReprojectionTests(BackfillFixture):
-    def populate(self) -> CanonicalBackfill:
-        self.insert_snapshot(wellness_snapshot(3))
-        backfill = self.backfill()
-        with with_batches("PRODUCTIVE"):
-            self.complete(backfill)
-        return backfill
+        return self.backfill()
 
     def test_reprojection_replaces_and_retires_rows_of_each_record(self) -> None:
         backfill = self.populate()
-        current = canonical_plans.INTERVALS_WELLNESS_VERSION
+        current = VERSION
         # Record 0 changes, record 1 no longer emits a batch, record 2 is unchanged.
         with (
-            bumped_wellness(),
+            bumped_health(),
             reprojecting({day_id(0): ("RECOVERY",), day_id(2): ("PRODUCTIVE",)}),
         ):
             self.complete(backfill)
@@ -341,7 +259,7 @@ class BackfillReprojectionTests(BackfillFixture):
         backfill = self.populate()
         before = self.domain_rows()
         with (
-            bumped_wellness(),
+            bumped_health(),
             reprojecting({day_id(0): ("RECOVERY",)}),
             patch.object(
                 canonical_store,
@@ -353,9 +271,7 @@ class BackfillReprojectionTests(BackfillFixture):
         ):
             backfill.run_batch(db)
         self.assertEqual(self.domain_rows(), before)
-        self.assertEqual(
-            mapped_versions(self.manager), {canonical_plans.INTERVALS_WELLNESS_VERSION}
-        )
+        self.assertEqual(mapped_versions(self.manager), {VERSION})
 
     def test_deleted_raw_records_keep_their_rows(self) -> None:
         backfill = self.populate()
@@ -364,7 +280,7 @@ class BackfillReprojectionTests(BackfillFixture):
                 "UPDATE provider_records SET state = 'deleted' WHERE source_record_id = ?",
                 (day_id(0),),
             )
-        with bumped_wellness(), reprojecting({}):
+        with bumped_health(), reprojecting({}):
             self.complete(backfill)
         self.assertEqual(
             self.domain_rows(),
@@ -382,11 +298,11 @@ class BackfillReprojectionTests(BackfillFixture):
             raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
         ) -> IngestPlan:
             return IngestPlan(
-                provider=INTERVALS, domain_batches=(batch(day_id(9), "PRODUCTIVE"),)
+                provider=PROVIDER, domain_batches=(batch(day_id(9), "PRODUCTIVE"),)
             )
 
         with (
-            bumped_wellness(),
+            bumped_health(),
             patch(
                 "backend.sync.canonical_backfill.reprojection_plan", side_effect=plan
             ),

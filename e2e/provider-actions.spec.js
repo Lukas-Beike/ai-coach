@@ -4,6 +4,11 @@ const { expandConnections } = require("./helpers/connections");
 // The fixture runtime has no Intervals.icu or Garmin credentials, so provider
 // actions must be disabled and the setup banner must be shown.
 
+// The slim line shows as text on a tall screen; under 500 px height it is only a count.
+async function tallScreen(page) {
+  await page.setViewportSize({ width: page.viewportSize().width, height: 800 });
+}
+
 test("@responsive provider sync actions are disabled with a setup hint without configuration", async ({ page }) => {
   await page.goto("/#more/connections");
   await expect(page.locator("#appShell")).toBeVisible();
@@ -21,13 +26,15 @@ test("@responsive provider sync actions are disabled with a setup hint without c
   await expect(page.locator("#garminSetupHint")).toBeVisible();
 });
 
-test("@responsive setup banner can be dismissed for the session and stays hidden after reload", async ({ page }) => {
+test("@responsive the missing Intervals.icu key is one slim line that can be dismissed for the session", async ({ page }) => {
+  await tallScreen(page);
   await page.goto("/#coach");
-  const banner = page.locator("#setupBanner");
-  await expect(banner).toBeVisible();
-  await expect(banner).toContainText("Intervals.icu-API-Schlüssel");
-  await banner.getByRole("button", { name: "Für diese Sitzung ausblenden" }).click();
-  await expect(banner).toBeHidden();
+  const strip = page.locator("#statusStrip");
+  await expect(strip).toBeVisible();
+  await expect(strip).toContainText("Intervals.icu-API-Schlüssel fehlt");
+  await expect(strip).toHaveAttribute("data-level", "info");
+  await strip.getByRole("button", { name: "Für diese Sitzung ausblenden" }).click();
+  await expect(strip).toBeHidden();
   expect(await page.evaluate(() => sessionStorage.getItem("intervalsCoachSetupBannerDismissed"))).toBe("1");
   expect(await page.evaluate(() => localStorage.getItem("intervalsCoachSetupBannerDismissed"))).toBeNull();
 
@@ -35,43 +42,34 @@ test("@responsive setup banner can be dismissed for the session and stays hidden
   await page.goto("/#more/connections");
   await expandConnections(page);
   await expect(page.locator("#intervalsConnectionStatus")).not.toHaveText("Status wird geprüft…");
-  await expect(banner).toBeHidden();
+  await expect(strip).toBeHidden();
   await expect(page.locator("#intervalsSetupHint")).toBeVisible();
 });
 
-test("@responsive setup banner is shown on every tab and Jetzt einrichten opens the connections segment", async ({ page }) => {
+test("@responsive the setup line is shown on every tab and Jetzt einrichten opens the connections segment", async ({ page }) => {
+  await tallScreen(page);
   await page.goto("/#plan/overview");
-  const banner = page.locator("#setupBanner");
-  await expect(banner).toBeVisible();
+  const strip = page.locator("#statusStrip");
+  await expect(strip).toBeVisible();
   await page.goto("/#more/profile");
-  await expect(banner).toBeVisible();
-  await banner.getByRole("link", { name: "Jetzt einrichten" }).click();
+  await expect(strip).toBeVisible();
+  await strip.getByRole("link", { name: "Jetzt einrichten" }).click();
   await expect(page).toHaveURL(/#more\/connections$/);
   await expect(page.locator('details[data-more-segment-panel="connections"]')).toHaveAttribute("open", "");
   await expect(page.locator("#intervalsSetupHint")).toBeVisible();
 });
 
-test("@responsive setup banner names the missing item compactly without server-configuration advice", async ({ page, context }) => {
+test("@responsive the setup line names the missing item compactly without server-configuration advice", async ({ page }) => {
+  await tallScreen(page);
   await page.goto("/#coach");
-  const banner = page.locator("#setupBanner");
-  await expect(banner).toBeVisible();
-  await expect(banner).toContainText("Intervals.icu-API-Schlüssel fehlt");
-  await expect(banner).not.toContainText(/Serverkonfiguration|Einrichtung nötig|Ergänze/);
-  await expect(banner.getByRole("link", { name: "Jetzt einrichten" })).toBeVisible();
-  const dismiss = banner.getByRole("button", { name: "Für diese Sitzung ausblenden" });
-  const [linkBox, dismissBox, bannerBox] = await Promise.all([
-    banner.getByRole("link", { name: "Jetzt einrichten" }).boundingBox(),
-    dismiss.boundingBox(),
-    banner.boundingBox(),
-  ]);
-  // Link and dismiss share one row, and the banner stays about one text line plus one touch row.
+  const strip = page.locator("#statusStrip");
+  await expect(strip).toBeVisible();
+  await expect(strip).toContainText("Intervals.icu-API-Schlüssel fehlt");
+  await expect(strip).not.toContainText(/Serverkonfiguration|Einrichtung nötig|Ergänze/);
+  const link = strip.getByRole("link", { name: "Jetzt einrichten" });
+  const dismiss = strip.getByRole("button", { name: "Für diese Sitzung ausblenden" });
+  const [linkBox, dismissBox, stripBox] = await Promise.all([link.boundingBox(), dismiss.boundingBox(), strip.boundingBox()]);
+  // Link and dismiss share one row, and the line stays about one text line plus one touch row.
   expect(Math.abs(linkBox.y - dismissBox.y)).toBeLessThan(4);
-  expect(bannerBox.height).toBeLessThanOrEqual(96);
-
-  await context.setOffline(true);
-  const notice = page.locator("#connectivityNotice");
-  await expect(notice).toBeVisible();
-  const [noticeBox, offlineBannerBox] = await Promise.all([notice.boundingBox(), banner.boundingBox()]);
-  expect(noticeBox.height + offlineBannerBox.height).toBeLessThanOrEqual(175);
-  await context.setOffline(false);
+  expect(stripBox.height).toBeLessThanOrEqual(96);
 });

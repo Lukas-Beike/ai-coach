@@ -205,7 +205,7 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(localGear).toContainText("Keine Wartung erfasst.");
 
   await page.evaluate(async () => { await AppRouter.navigate("more/profile", { historyMode: "replace" }); });
-  await expect(page.locator("#profilePanel").getByRole("heading", { name: "Profil", exact: true })).toBeVisible();
+  await expect(page.locator("#profilePanel").getByRole("heading", { name: "Mehr", exact: true })).toBeVisible();
   await expect(page.locator("#equipmentItems")).toBeHidden();
   await page.evaluate(async () => { await AppRouter.navigate("more/appearance", { historyMode: "replace" }); });
   const calendarSettings = page.locator("details").filter({ has: page.locator("#calendarDisplayForm") });

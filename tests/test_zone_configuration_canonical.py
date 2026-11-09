@@ -20,6 +20,7 @@ from typing import Any
 from unittest.mock import Mock
 
 from intervals_compaction import compact_sport_settings
+from intervals_zone_stub import map_intervals_zone_configurations
 from zone_settings_reference import (
     canonical_sport_inputs,
     canonical_zone_settings,
@@ -37,7 +38,6 @@ from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.planning import calendar_read_model
-from backend.providers.intervals_zone_mapping import map_intervals_zone_configurations
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 RETRIEVED_AT = datetime(2026, 10, 11, 6, tzinfo=UTC)
@@ -369,6 +369,9 @@ class LocalZoneEditTests(unittest.TestCase):
             threshold_warnings=lambda: warning,
         )
         self.assertEqual(service.read()["threshold_warnings"], warning)
+        # The status strip reads the same warning on every screen, and none when fresh.
+        self.assertEqual(service.threshold_warnings(), warning)
+        self.assertIsNone(self.service.threshold_warnings())
 
     def test_committed_save_and_removal_notify_the_change_hook(self) -> None:
         calls: list[bool] = []

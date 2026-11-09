@@ -190,15 +190,15 @@ def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -
     from zoneinfo import ZoneInfo
 
     from intervals_compaction import ingest_intervals_partial_snapshot
+    from intervals_plan_stub import intervals_snapshot_coverage
 
     from backend.athlete.profile import timezone_name
     from backend.providers.snapshot_projection import stored_retrieved_at
-    from backend.sync.canonical_coverage_store import (
-        CanonicalCoverageStore,
-        intervals_snapshot_coverage,
-    )
+    from backend.sync.canonical_coverage_store import CanonicalCoverageStore
 
-    snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), snapshot, **options)
+    snapshot_seed.save_snapshot(
+        server.SYNC_PERSISTENCE.state_repository(), snapshot, **options
+    )
     zone = ZoneInfo(timezone_name(server.ATHLETE_DATA.profile().get().get("timezone")))
     raw = dict(snapshot.get("raw_provider_data") or {})
     if not isinstance(raw.get("activities"), list):

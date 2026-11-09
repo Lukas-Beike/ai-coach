@@ -3,6 +3,17 @@
 Stand: 18. Oktober 2026. Grundlage: [Ideendokument](openai-decisions-coach-routing-idea.md).
 Status: Plan, nicht implementiert.
 
+> Status check 2026-11-08 (English, body stays German): Phase 0 is implemented,
+> Phases 1 and 2 are not. PR 0a (`coach_context_reload` log, #1269) is in
+> `backend/coach/structured_tool_round.py`; PR 0b (rule changes, #1271) is in
+> `backend/coach/context_selection.py` with `tests/fixtures/coach_context_scenarios.json`
+> (39 scenarios, none marked `expected_gap`) and `tests/test_coach_context_scenarios.py`.
+> Gate 0 to 1 (count-only log evaluation after about two weeks, athlete consent
+> given 2026-10-19) has no recorded result in the repository. No router,
+> `COACH_CONTEXT_ROUTER` setting or `/v1/decisions` transport exists. The plan
+> stays open and is not abandoned; the baseline and test counts below are as of
+> 2026-10-18.
+
 ## Entscheidungen
 
 - **Nur Kontextauswahl, keine Modellauswahl.** Automatische Modellwahl kollidiert

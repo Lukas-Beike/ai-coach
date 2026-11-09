@@ -43,6 +43,7 @@ PROVIDER_REJECTIONS = {
     "historical_backfill": "Historischer Backfill ist nur für Garmin zulässig.",
     "wellness_backfill": "Der Wellness-Backfill ist nur für Garmin zulässig.",
     "rating_backfill": "Der Bewertungs-Backfill ist nur für Garmin zulässig.",
+    "stream_backfill": "Der Stream-Backfill ist nur für Garmin und Wahoo zulässig.",
     "activity_details": "Ungültiger Aktivitätsdetailauftrag.",
     "nutrition_sync": "Ungültiger Ernährungssynchronisierungsauftrag.",
     "competition_push": "Dieser Job ist nur für Intervals.icu zulässig.",

@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
+const crypto = require("node:crypto");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -95,14 +96,32 @@ print(json.dumps({"baseline": baseline, "partitions": partitions, "commands": co
       cwd: root, input: JSON.stringify(report), encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
     }));
 
-    function reportIdentities(suite) {
+    function reportIdentities(suite, titles = []) {
+      if (!Array.isArray(titles)) titles = [];
+      const suiteTitle = suite.title;
+      const childTitles = !suiteTitle || suiteTitle === suite.file ? titles : [...titles, suiteTitle];
       return [
-        ...(suite.specs || []).flatMap((spec) => spec.tests.map((item) => ({
-          id: spec.id, project: item.projectName, project_id: item.projectId,
-          file: spec.file.startsWith("e2e/") ? spec.file : `e2e/${spec.file}`,
-          line: spec.line, title: spec.title,
-        }))),
-        ...(suite.suites || []).flatMap(reportIdentities),
+        ...(suite.specs || []).flatMap((spec) => {
+          const specTitles = [...childTitles, spec.title];
+          const specFile = spec.file.replace(/\\/g, "/");
+          return spec.tests.map((item, index) => {
+            let id = spec.id;
+            if (index > 0 || item.projectName !== spec.tests[0].projectName) {
+              const fileId = spec.id.split("-")[0];
+              const expr = `[project=${item.projectId || item.projectName}]${specFile}\x1e${specTitles.join("\x1e")}`;
+              id = `${fileId}-${crypto.createHash("sha1").update(expr).digest("hex").slice(0, 20)}`;
+            }
+            return {
+              id,
+              project: item.projectName,
+              project_id: item.projectId,
+              file: spec.file.startsWith("e2e/") ? spec.file : `e2e/${spec.file}`,
+              line: spec.line,
+              title: spec.title,
+            };
+          });
+        }),
+        ...(suite.suites || []).flatMap((child) => reportIdentities(child, childTitles)),
       ];
     }
     const key = (identity) => JSON.stringify([

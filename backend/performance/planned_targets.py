@@ -18,6 +18,12 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
+from backend.activities.hr_cap import (
+    PERCENT_KEY,
+    SOURCE_KEY,
+    cap_label,
+    resolve_bpm,
+)
 from backend.activities.workout_load import (
     AthleteThresholds,
     TargetRange,
@@ -112,6 +118,63 @@ def planned_target_execution(
         "below_target": sum(value < 0 for value in deviations),
     }
     return {**base, "status": "ok", "reps": compared, "summary": summary}
+
+
+HR_CAP_METHOD: Final = "heart-rate-cap-execution-v1"
+# More than this share of the time above the cap, or a mean above it, is above the cap.
+CAP_ABOVE_SHARE_PCT: Final = 10
+# A mean this close below the cap (share of the cap) sits at the upper edge.
+CAP_EDGE_SHARE: Final = 0.05
+
+
+def heart_rate_cap_execution(
+    cap: Mapping[str, Any], lthr: float | None, streams: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """The whole session's heart rate against the unit's stored cap.
+
+    The cap is stored in percent of the threshold HR; ``lthr`` is the threshold
+    HR in effect on the unit's date and resolves it to bpm. Descriptive: the
+    verdict is ``above_cap`` (mean above the cap or more than
+    ``CAP_ABOVE_SHARE_PCT`` of the time above it), ``upper_edge`` (the mean
+    within ``CAP_EDGE_SHARE`` below it) or ``within_target``. Judged against the
+    stored cap, not the zones. Pure.
+    """
+    percent = float(cap[PERCENT_KEY])
+    bpm = resolve_bpm(percent, lthr)
+    base: dict[str, Any] = {
+        "method": HR_CAP_METHOD,
+        "cap_percent_lthr": percent,
+        "cap_source": cap[SOURCE_KEY],
+        "cap_label": cap_label(cap, lthr),
+    }
+    if bpm is None:
+        return {
+            **base,
+            "status": "not_covered",
+            "reason": "Laktatschwelle (LSHF) unbekannt: Die Obergrenze lässt sich nicht in bpm umrechnen.",
+        }
+    base["cap_bpm"] = bpm
+    timeline = _Timeline(streams)
+    spans = timeline.spans("heartrate", float("-inf"), float("inf"))
+    total = sum(span for _, span in spans)
+    if total <= 0:
+        return {**base, "status": "not_covered", "reason": "Kein Herzfrequenzverlauf."}
+    mean = sum(value * span for value, span in spans) / total
+    above = sum(span for value, span in spans if value > bpm) / total * 100
+    if mean > bpm or above > CAP_ABOVE_SHARE_PCT:
+        verdict = "above_cap"
+    elif mean >= bpm * (1 - CAP_EDGE_SHARE):
+        verdict = "upper_edge"
+    else:
+        verdict = "within_target"
+    return {
+        **base,
+        "status": "ok",
+        "mean_bpm": round(mean),
+        "mean_percent_of_cap": round(mean / bpm * 100),
+        "time_above_cap_pct": round(above),
+        "verdict": verdict,
+    }
 
 
 def _levels(
@@ -287,6 +350,10 @@ class _Timeline:
         total = sum(span for _, span in spans)
         inside = sum(span for value, span in spans if low <= value <= high)
         return round(inside / total * 100) if total > 0 else None
+
+    def spans(self, metric: str, start: float, end: float) -> list[tuple[float, float]]:
+        """Each displayed value with the time it covers inside the window."""
+        return self._spans(metric, start, end)
 
     def mean(self, metric: str, start: float, end: float) -> float | None:
         spans = self._spans(metric, start, end)

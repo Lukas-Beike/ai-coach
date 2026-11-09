@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, tzinfo
+from datetime import date
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.session_corrections import SessionCorrectionService
-from backend.activities.session_linking import garmin_activity_matches
 from backend.athlete.checkins import CheckinService
-from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
@@ -51,6 +49,9 @@ class AthleteRuntime:
     thresholds_changed: Callable[[], None] = lambda: None
     # The stale-threshold and Garmin SDK warning shown with the zones (#1768).
     threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None
+    # The run threshold HR in effect on a date (None = today), for the measured
+    # first threshold the athlete enters in bpm; None when no threshold is known.
+    run_lthr_on: Callable[[date | None], float | None] = lambda _day: None
 
 
 class AthleteDataAssembly:
@@ -89,6 +90,7 @@ class AthleteDataAssembly:
         self._load_inputs_changed = runtime.load_inputs_changed
         self._thresholds_changed = runtime.thresholds_changed
         self._threshold_warnings = runtime.threshold_warnings
+        self._run_lthr_on = runtime.run_lthr_on
 
     def activity_summaries(self) -> tuple[ActivitySummary, ...]:
         with self._database_manager().unit_of_work() as db:
@@ -100,17 +102,7 @@ class AthleteDataAssembly:
             self.activity_summaries,
             self._local_date,
             self._utc_now,
-            resolve_activity=ActivityReferences(self._database_manager()).resolve,
             gear_reader=CanonicalTableReader(),
-            match_activities=self._garmin_activity_matches,
-        )
-
-    def _garmin_activity_matches(
-        self, db: Any, garmin_ids: Sequence[str], intervals_ids: Sequence[str]
-    ) -> dict[str, set[str]]:
-        """Pair Garmin and Intervals.icu activities on the athlete's wall clock."""
-        return garmin_activity_matches(
-            db, garmin_ids, intervals_ids, zone=self._athlete_zone()
         )
 
     def zones(self) -> ZoneConfigurationService:
@@ -133,10 +125,6 @@ class AthleteDataAssembly:
             references=ActivityReferences(self._database_manager()),
             on_change=self._load_inputs_changed,
         )
-
-    def _athlete_zone(self) -> tzinfo:
-        """The athlete's wall-clock zone from the saved profile."""
-        return AthleteLocalClock(self.profile()).now().tzinfo or UTC
 
     def session_corrections(self) -> SessionCorrectionService:
         return SessionCorrectionService(
@@ -162,6 +150,7 @@ class AthleteDataAssembly:
             self._key_value_repository,
             on_location_changed=self._profile_changed,
             mutation_coordinator=self._profile_mutation_coordinator,
+            run_lthr_on=self._run_lthr_on,
         )
 
     def _profile_changed(

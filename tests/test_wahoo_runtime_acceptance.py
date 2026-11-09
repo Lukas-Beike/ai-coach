@@ -140,7 +140,11 @@ class WahooOrchestrationCase(WahooSyncCase):
                 retry_max_seconds=60,
             ),
             all_sync_days=-1,
-            job_owners={WAHOO_ID: WahooJobAdapter(sync=self.service)},
+            job_owners={
+                WAHOO_ID: WahooJobAdapter(
+                    sync=self.service, stream_backfill=_IdleStreamBackfill()
+                )
+            },
             registry=REGISTRY,
         )
         sync_state = Mock()
@@ -242,6 +246,16 @@ class WahooOrchestrationCase(WahooSyncCase):
         return next(entry for entry in entries if entry["provider"] == WAHOO_ID)
 
 
+class _IdleStreamBackfill:
+    """The stream backfill of a fixture run: nothing to read."""
+
+    def available(self) -> bool:
+        return False
+
+    def backfill(self, end: Any) -> dict[str, Any]:
+        raise AssertionError("an unavailable backfill must not run")
+
+
 class WahooAcceptanceTests(WahooOrchestrationCase):
     def test_connected_account_flows_from_the_scheduler_to_the_status(self) -> None:
         self.transport.rows = [
@@ -253,7 +267,9 @@ class WahooAcceptanceTests(WahooOrchestrationCase):
         self._startup_scheduler().schedule()
 
         jobs = self._jobs()
-        self.assertEqual(["startup"], [job["requested_by"] for job in jobs])
+        # The refresh first, then the one-off stream backfill chain.
+        self.assertEqual(["refresh", "stream_backfill"], [job["type"] for job in jobs])
+        self.assertEqual(["startup", "startup"], [job["requested_by"] for job in jobs])
         self.assertEqual(
             {"days": 84, "reason": "startup"}, json.loads(jobs[0]["payload"])
         )
@@ -261,7 +277,9 @@ class WahooAcceptanceTests(WahooOrchestrationCase):
         self.advance(minutes=1)
         self._drain()
 
-        self.assertEqual(["completed"], [job["status"] for job in self._jobs()])
+        self.assertEqual(
+            ["completed", "completed"], [job["status"] for job in self._jobs()]
+        )
         rows = self._activity_rows()
         self.assertEqual({"wahoo"}, {row["provider"] for row in rows})
         self.assertEqual(
@@ -286,7 +304,7 @@ class WahooAcceptanceTests(WahooOrchestrationCase):
             ],
         )
         self.assertEqual(
-            ["completed"],
+            ["completed", "completed"],
             [job["status"] for job in state["jobs"] if job["provider"] == WAHOO_ID],
         )
 
@@ -321,7 +339,7 @@ class WahooAcceptanceTests(WahooOrchestrationCase):
         self.advance(hours=2)
         self.assertFalse(self.wahoo_connected())
         self._startup_scheduler().schedule()
-        self.assertEqual(1, len(self._jobs()), "an unconnected account is not queued")
+        self.assertEqual(2, len(self._jobs()), "an unconnected account is not queued")
         self.queue.enqueue(
             WAHOO_ID,
             "refresh",

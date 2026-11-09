@@ -444,6 +444,9 @@ class GarminPayloadService:
             today,
         )
         merge_sources(payload, previous, stored)
+        _stamp_changed_zone_sets(
+            payload, previous.get("heart_rate_zones"), today.isoformat()
+        )
         if not fixture:
             payload["activities"] = deduplicate_api_records(
                 payload.get("activities", [])
@@ -499,6 +502,56 @@ def _merge_garmin_source(
         source, previous_freshness, pagination, complete, payload, freshness
     )
     _merge_source_records(source, incoming, payload)
+
+
+def _zone_set_sport(item: Any) -> str:
+    sport = item.get("sport") if isinstance(item, dict) else None
+    return str(sport or "DEFAULT").upper()
+
+
+def _zone_set_content(item: Any) -> str:
+    content = {
+        key: value
+        for key, value in (item.items() if isinstance(item, dict) else ())
+        if key not in ("id", "fetchedOn")
+    }
+    return json.dumps(content, sort_keys=True, default=str)
+
+
+def _newest_zone_sets(stored: Any) -> dict[str, tuple[str, str]]:
+    """The content of the newest stored zone set of each sport, with its day."""
+    newest: dict[str, tuple[str, str]] = {}
+    for item in stored if isinstance(stored, list) else [stored]:
+        if not isinstance(item, dict):
+            continue
+        sport, stamp = _zone_set_sport(item), str(item.get("fetchedOn") or "")
+        if sport not in newest or stamp >= newest[sport][0]:
+            newest[sport] = (stamp, _zone_set_content(item))
+    return newest
+
+
+def _stamp_changed_zone_sets(payload: dict[str, Any], stored: Any, day: str) -> None:
+    """Keep only the watch zone sets that differ from the newest stored set of their sport.
+
+    A set is dated by the day it was first fetched: a changed one (a new
+    threshold or basis) is stored as a new element with that day, and the
+    earlier ones stay for the sessions of their days; an unchanged one is not
+    stored again. A set that returns to an earlier value counts as changed.
+    """
+    incoming = payload.get("heart_rate_zones")
+    if incoming is None:
+        return
+    newest = _newest_zone_sets(stored)
+    changed = [
+        {**item, "id": f"{day}-{_zone_set_sport(item).lower()}", "fetchedOn": day}
+        for item in (incoming if isinstance(incoming, list) else [incoming])
+        if isinstance(item, dict)
+        and newest.get(_zone_set_sport(item), ("", ""))[1] != _zone_set_content(item)
+    ]
+    if changed:
+        payload["heart_rate_zones"] = changed
+    else:
+        del payload["heart_rate_zones"]
 
 
 def _merge_gear_freshness(
@@ -588,7 +641,11 @@ def _merge_source_records(source: str, incoming: Any, payload: dict[str, Any]) -
         )
     elif source in GARMIN_COLLECTION_SOURCES and source in payload:
         payload[source] = merge_records(incoming, None)
-    elif isinstance(incoming, dict) and not incoming and source in REPLACE_SECTIONS:
+    elif (
+        isinstance(incoming, dict)
+        and not incoming
+        and (source in REPLACE_SECTIONS or source == "heart_rate_zones")
+    ):
         # An empty answer must not overwrite the stored record.
         del payload[source]
 
@@ -771,9 +828,10 @@ class GarminSyncStateService:
                     {"count": count, "at": self._utc_now()}, separators=(",", ":")
                 ),
             )
-        elif any(source in payload for source in SDK_THRESHOLD_SOURCES):
-            if self._get(SDK_THRESHOLD_FAILURES_KEY):
-                self._set(SDK_THRESHOLD_FAILURES_KEY, "")
+        elif any(source in payload for source in SDK_THRESHOLD_SOURCES) and self._get(
+            SDK_THRESHOLD_FAILURES_KEY
+        ):
+            self._set(SDK_THRESHOLD_FAILURES_KEY, "")
 
     def error_entries(self) -> list[dict[str, Any]]:
         try:

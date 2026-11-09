@@ -146,7 +146,12 @@ test("@responsive Garmin-only session shows per-provider notes and its own refre
   await expect(dialog.getByText("Garmin Connect: Die Zusammenfassung hat sich seit dem Laden geändert.", { exact: false })).toBeVisible();
   await expect(dialog.locator(".activity-analysis-error").filter({ hasText: "Garmin Connect: Garmin Connect lieferte keine Runden." })).toBeVisible();
   await expect(dialog.locator(".activity-analysis-error").filter({ hasText: "Wahoo: Wahoo-Datei unvollständig." })).toBeVisible();
-  await expect(dialog.getByText("Datenabdeckung Garmin Connect · power_w: 3/3 Messwerte")).toBeVisible();
+  // One muted source line; the per-provider facts sit in a folded section with readable channel names.
+  await expect(dialog.getByText("Quelle: Garmin Connect, Wahoo · Stand")).toBeVisible();
+  await expect(dialog.getByText("Datenabdeckung Garmin Connect")).toBeHidden();
+  await dialog.getByText("Herkunft im Detail").click();
+  await expect(dialog.getByText("Datenabdeckung Garmin Connect · Leistung: 3 von 3 Messwerten")).toBeVisible();
+  await expect(dialog).not.toContainText("power_w");
   await expect(dialog.getByRole("button", { name: /Wahoo/ })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Garmin Connect: Detaildaten aktualisieren" }).click();
   await expect.poll(() => page.evaluate(() => syntheticCalls.filter((call) => call.url === "/api/activities/act_garmin").length)).toBe(2);
@@ -201,30 +206,6 @@ test("@responsive analysis shows running step frequency and cycling cadence", as
   await ride.locator("summary").click();
   await expect(ride.locator(".activity-analysis-stats div").filter({ hasText: "Ø Kadenz" })).toContainText("86 rpm");
   await expect(ride.getByRole("img", { name: /^Kadenz: Ø 86/ })).toBeVisible();
-});
-
-test("@responsive analysis lists sessions whose details failed to load", async ({ page }) => {
-  const message = "Intervals.icu hat für diese Einheit keine Detaildaten geliefert.";
-  const summaries = [
-    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", sport: "ride", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3, detail_error: message },
-  ];
-  await page.route(/\/api\/activities(\?|\/)/, (route) => {
-    const id = new URL(route.request().url()).pathname.split("/")[3];
-    const body = id
-      ? { session: { activity_id: id, sport: "ride" }, metrics: {}, detail_data: { providers: [{ provider: "intervals", label: "Intervals.icu", kinds: [], fetched_at: null, refreshable: true, stale: false, load_error: { message, observed_at: "2026-10-17T09:00:00Z" }, coverage: {} }] } }
-      : { activities: summaries, snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null };
-    return route.fulfill({ json: body });
-  });
-  await page.goto("/#analysis/sessions");
-  await expect(page.locator("#appShell")).toBeVisible();
-  const item = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic failed <img src=x>" });
-  const flag = item.locator("summary > .activity-analysis-error");
-  await expect(flag).toHaveText("Details nicht geladen");
-  await expect(flag).toHaveAttribute("title", message);
-  await item.locator("summary").click();
-  await expect(item.locator(".activity-analysis-panel .activity-analysis-error")).toContainText(message);
-  expect(await item.locator("img").count()).toBe(0);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });
 
 test("@responsive analysis lists a Garmin-only indoor session and loads more", async ({ page }) => {
@@ -318,6 +299,43 @@ test("@responsive feedback save and undo show the returned load without a detail
   await expect(dialog.locator("[data-session-rpe-load]")).toBeHidden();
   expect(await page.evaluate(() => undoBody.activity_id)).toBe("load-1");
   expect(await page.evaluate(() => syntheticCalls.filter((url) => url === "/api/activities/load-1").length)).toBe(1);
+  await page.evaluate(() => ActivityDetails.close(false));
+});
+
+test("@responsive marking the session purpose sends it with a receipt whose undo restores the previous one", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(async () => {
+    const data = { session: { activity_id: "mark-1", name: "Synthetic marked ride", sport: "ride", purpose: "race" }, streams: { time_s: [0, 1, 2], channels: {} }, detail_data: { providers: [] }, activity_feedback: null, equipment: [], session_rpe_load: null };
+    globalThis.feedbackBodies = [];
+    const fakeApi = async (url, options) => {
+      if (url.endsWith("/feedback")) {
+        const body = JSON.parse(options.body);
+        feedbackBodies.push(body);
+        return { status: "ok", activity_feedback: body.purpose ? { purpose: body.purpose } : null, change: { id: "c1", after_hash: "h" } };
+      }
+      if (url === "/api/change-history/undo") return { status: "undone" };
+      return data;
+    };
+    await ActivityDetails.open({ id: "mark-1" }, { api: fakeApi, showDialog: (dialog) => dialog.showModal() });
+  });
+  const dialog = page.getByRole("dialog", { name: "Synthetic marked ride" });
+  const purpose = dialog.getByLabel("Art der Einheit");
+  await expect(purpose).toHaveValue("");
+  await expect(purpose.locator("option").first()).toHaveText("Automatisch · Wettkampf");
+  await purpose.selectOption("training");
+  await dialog.getByRole("button", { name: "Feedback speichern" }).click();
+  await expect(dialog.locator('[role="status"]').filter({ hasText: "Feedback gespeichert" })).toBeVisible();
+  expect(await page.evaluate(() => feedbackBodies.at(-1).purpose)).toBe("training");
+  await dialog.getByRole("button", { name: "Rückgängig" }).click();
+  await expect(purpose).toHaveValue("");
+  await purpose.selectOption("commute");
+  await dialog.getByRole("button", { name: "Feedback speichern" }).click();
+  await expect(purpose).toHaveValue("commute");
+  expect(await page.evaluate(() => feedbackBodies.at(-1).purpose)).toBe("commute");
+  await purpose.selectOption("");
+  await dialog.getByRole("button", { name: "Feedback speichern" }).click();
+  expect(await page.evaluate(() => feedbackBodies.at(-1).purpose)).toBeNull();
   await page.evaluate(() => ActivityDetails.close(false));
 });
 

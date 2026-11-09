@@ -53,7 +53,6 @@ class DiagnosticLocalProjections:
     canonical_read: Callable[[], Any] | None = None
     # Serve the activity and wellness counts of the sync summary.
     canonical_rows: Callable[[], Any] | None = None
-    intervals_purge_marker: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -106,7 +105,6 @@ class DiagnosticsAssembly:
         self._canonical_backfill = local.canonical_backfill
         self._canonical_read = local.canonical_read
         self._canonical_rows = local.canonical_rows
-        self._intervals_purge_marker = local.intervals_purge_marker
         self._diagnostic_capture = report.diagnostic_capture
         self._log_path = report.log_path
         self._receipt_parser = report.receipt_parser
@@ -161,6 +159,5 @@ class DiagnosticsAssembly:
                 ),
                 activity_rows=rows,
                 observations=rows,
-                intervals_purge_marker=self._intervals_purge_marker or (lambda: False),
             )
         )

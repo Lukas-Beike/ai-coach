@@ -84,11 +84,14 @@
   function chartRange(sorted, channel) {
     let low = channel.elevation ? sorted[0] : percentile(sorted, 0.01);
     let high = channel.elevation ? sorted.at(-1) : percentile(sorted, 0.99);
-    if (high - low < 1e-6) { low -= 1; high += 1; }
+    // A near-constant series would zoom into a solid block: the axis keeps a span of at least 5 % of the level (1 unit minimum).
+    const minimumSpan = Math.max(1, Math.abs(low + high) / 2 * 0.05);
+    const flat = high - low < minimumSpan;
+    if (flat) { const middle = (low + high) / 2; low = middle - minimumSpan / 2; high = middle + minimumSpan / 2; }
     const padding = (high - low) * 0.08;
     // Only non-negative channels clamp at zero; elevation, pace and temperature may go below it.
     low = channel.floorAtZero ? Math.max(0, low - padding) : low - padding;
-    return { low, high: high + padding };
+    return { low, high: high + padding, flat };
   }
 
   function chartSummary(channel, sorted, valid) {
@@ -171,7 +174,7 @@
     const valid = points.filter(([, value]) => finite(value));
     if (valid.length < 2) return null;
     const sorted = valid.map(([, value]) => value).sort((a, b) => a - b);
-    const { low, high } = chartRange(sorted, channel);
+    const { low, high, flat } = chartRange(sorted, channel);
     const start = points[0][0];
     const span = Math.max(1, points.at(-1)[0] - start);
     const share = (value) => (Math.min(high, Math.max(low, value)) - low) / (high - low);
@@ -193,7 +196,9 @@
     const svg = svgNode("svg", { viewBox: `0 0 ${WIDTH} ${HEIGHT}`, role: "img", "aria-label": `${channel.label}: ${summaryText}, über ${clock(span)}` });
     appendAxes(svg, channel, scale);
     const { line, area } = chartPaths(points, scale);
-    svg.append(svgNode("path", { d: area, class: "activity-analysis-area" }), svgNode("path", { d: line, class: "activity-analysis-line" }));
+    // A flat series is a line only; a filled area would read as a solid block.
+    if (!flat) svg.append(svgNode("path", { d: area, class: "activity-analysis-area" }));
+    svg.append(svgNode("path", { d: line, class: "activity-analysis-line" }));
     if (!channel.elevation) {
       const average = scale.y(chartAverage(channel, valid));
       svg.append(svgNode("line", { x1: LEFT, x2: WIDTH - RIGHT, y1: average, y2: average, class: "activity-analysis-average" }));
@@ -341,9 +346,6 @@
     if (!payload) return;
     if (streams && !charts.length) panel.append(node("p", "Keine darstellbaren Messreihen", "muted"));
     panel.append(...ActivityDetails.providerNotes(payload));
-    // A successful reload clears the list marker without reloading the list.
-    const failed = (payload.detail_data?.providers || []).some((entry) => entry.load_error);
-    panel.parentElement?.querySelector("summary > .activity-analysis-error")?.toggleAttribute("hidden", !failed);
     appendRefresh(panel, summary, payload, epoch);
   }
 
@@ -372,23 +374,35 @@
     if (epoch === list.epoch && panel.isConnected) renderPanel(panel, summary, payload, epoch);
   }
 
+  // Right-hand key metric of a list row: load, else average power, else average heart rate.
+  function keyMetric(activity) {
+    if (finite(activity.training_load)) return `${numberText(activity.training_load)} Last`;
+    if (finite(activity.avg_power)) return `Ø ${numberText(activity.avg_power)} W`;
+    if (finite(activity.avg_hr)) return `Ø ${numberText(activity.avg_hr)} bpm`;
+    return null;
+  }
+
   function item(activity) {
     const entry = node("details", null, "activity-analysis-item");
     entry.dataset.sport = sportKind(activity);
+    const sportName = activitySportLabel(activity);
+    entry.dataset.sportLabel = sportName;
     const summary = node("summary");
+    const icon = node("span", CALENDAR_SPORT_ICONS[sportName] || "•", "planned-session-icon");
+    icon.setAttribute("aria-hidden", "true");
     const text = node("span", null, "activity-analysis-title");
-    text.append(node("strong", activity.name || sportLabel(activity)));
+    const label = sportLabel(activity);
+    const title = activity.name || label;
+    text.append(node("strong", title));
     // Local start dates are already day keys; reparsing them as UTC instants could shift the day.
+    const start = String(activity.started_at_local || "");
     const day = String(activity.started_at_local || activity.started_at || "").slice(0, 10);
-    const facts = [day ? dateLabel(day) : null, sportLabel(activity), finite(activity.moving_duration_s) ? AppFormat.duration(activity.moving_duration_s) : null, AppFormat.distance(activity.distance_m)].filter(Boolean);
+    const time = /T\d{2}:\d{2}/.test(start) ? start.slice(11, 16) : null;
+    const facts = [day ? dateLabel(day) : null, time, title === label ? null : label, finite(activity.moving_duration_s) ? AppFormat.duration(activity.moving_duration_s) : null, AppFormat.distance(activity.distance_m)].filter(Boolean);
     text.append(node("span", facts.join(" · "), "muted"));
-    summary.append(text);
-    if (activity.detail_error) {
-      const flag = node("span", "Details nicht geladen", "activity-analysis-error");
-      flag.title = activity.detail_error;
-      summary.append(flag);
-    }
-    if (finite(activity.training_load)) summary.append(node("span", `${numberText(activity.training_load)} Last`, "activity-analysis-load"));
+    summary.append(icon, text);
+    const metric = keyMetric(activity);
+    if (metric) summary.append(node("span", metric, "activity-analysis-load"));
     const panel = node("div", null, "activity-analysis-panel");
     entry.append(summary, panel);
     entry.addEventListener("toggle", () => { if (entry.open && !panel.childElementCount) void loadPanel(panel, activity); });

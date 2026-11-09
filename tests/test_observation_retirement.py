@@ -18,6 +18,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import intervals_compaction as intervals_fixture
+from intervals_plan_stub import intervals_test_world
 
 from backend.db import canonical_store, garmin_store
 from backend.db.schema import initialize_schema
@@ -47,6 +48,7 @@ def garmin(synced_at: str = NOW, **sections: Any) -> dict[str, Any]:
 
 class ObservationRetirementTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.enterContext(intervals_test_world())
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.db = sqlite3.connect(Path(temporary.name) / "retire.db")

@@ -272,7 +272,8 @@ class StreamZoneTests(unittest.TestCase):
 
         source = doc["zones"]["heart_rate"]["source"]
         self.assertEqual(
-            ("derived", "Zoneneinstellungen"), (source["kind"], source["label"])
+            ("derived", "Zoneneinstellungen: Standardzonen"),
+            (source["kind"], source["label"]),
         )
         self.assertEqual("profile", doc["zones"]["heart_rate"]["boundary_source"])
 

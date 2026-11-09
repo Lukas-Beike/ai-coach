@@ -23,6 +23,8 @@ globalThis.AppState = (() => {
     // Background reloads waiting for a running Coach turn to finish.
     deferredLoad: null,
     replaceDataOnLoad: false,
+    // When the shown data was last loaded from the server (ms), for "Stand vor X min".
+    dataStandAt: null,
     sessionGeneration: 0,
     chatGeneration: 0,
     chatContentVersion: 0,

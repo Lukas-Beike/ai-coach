@@ -16,7 +16,6 @@ from zoneinfo import ZoneInfo
 
 from canonical_daily_health_support import mapped_expenditure
 from performance_day_support import (
-    days_from_rows,
     garmin_body_from_payload,
     garmin_inputs_from_payload,
     garmin_metrics_from_payload,
@@ -256,14 +255,12 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         self.assertEqual(unattributed, 0)
 
     def test_standard_dataset_covers_sparse_body_history_and_garmin_ftp(self):
-        wellness = fixture_runtime._fixture_demo_wellness(self.today)
         garmin = fixture_runtime._fixture_demo_garmin(
             self.today, fixture_runtime.demo_performance_history(self.today)
         )
         result = body_history(
             GarminSyncStatus.from_state(garmin),
             self.today,
-            wellness_days=days_from_rows(wellness),
             canonical=garmin_body_from_payload(garmin, self.today),
             garmin_ftp=garmin_metrics_from_payload(garmin).performance_history[
                 "cycling_ftp_watts"

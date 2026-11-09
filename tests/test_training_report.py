@@ -482,7 +482,6 @@ class TrainingReportTests(unittest.TestCase):
 
     def test_report_read_service_validates_period_and_preserves_timezone(self):
         service = TrainingReportReadService(
-            read_synced_at=lambda _db: None,
             read_plan=dict,
             read_checkins=list,
             read_feedback=lambda keys: [],
@@ -509,7 +508,6 @@ class TrainingReportTests(unittest.TestCase):
             {"status": "insufficient_data"}, derived.sleep_timing_variability()
         )
         season = TrainingSeasonReadService(
-            read_synced_at=lambda _db: None,
             read_competitions=list,
             read_observations=list,
             today=lambda: date(2026, 10, 2),
@@ -523,7 +521,6 @@ class TrainingReportTests(unittest.TestCase):
         # document what a stored snapshot would still hold.
         del snapshot_rows
         return TrainingReportReadService(
-            read_synced_at=lambda _db: None,
             read_plan=dict,
             read_checkins=list,
             read_feedback=lambda keys: [],

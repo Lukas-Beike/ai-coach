@@ -31,8 +31,6 @@ class CoachProposalExecutionTests(unittest.TestCase):
         self.addCleanup(self.manager.close)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
-        self.duplicate_service = Mock()
-        self.duplicate_service.delete.return_value = {"status": "deleted"}
         self.undo_service = Mock()
         self.undo_service.apply.return_value = {"status": "undone"}
         self.client = Mock()
@@ -62,9 +60,7 @@ class CoachProposalExecutionTests(unittest.TestCase):
                     "synthetic-proposal",
                     "owner-session",
                     action_type,
-                    "intervals"
-                    if action_type == "delete_duplicate_intervals_activity"
-                    else "local",
+                    "local",
                     "[]",
                     "[]",
                     json.dumps(payload),

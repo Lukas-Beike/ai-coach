@@ -3,8 +3,6 @@ import unittest
 from datetime import date
 
 from performance_day_support import (
-    SYNCED_AT,
-    days_from_rows,
     garmin_body_from_payload,
     garmin_metrics_from_payload,
 )
@@ -19,13 +17,8 @@ TODAY = date(2026, 10, 6)
 
 
 def body_history(snapshot, garmin, today, **kwargs):
-    raw = snapshot.get("raw_provider_data") if isinstance(snapshot, dict) else None
-    rows = list(raw.get("wellness") or ()) if isinstance(raw, dict) else []
-    rows += (
-        list(snapshot.get("recent_wellness") or ())
-        if isinstance(snapshot, dict)
-        else []
-    )
+    """The body history; the stored snapshot is not an input, so it is ignored."""
+    del snapshot
     kwargs.setdefault("canonical", garmin_body_from_payload(garmin, today))
     kwargs.setdefault(
         "garmin_ftp",
@@ -36,7 +29,6 @@ def body_history(snapshot, garmin, today, **kwargs):
     return _body_history(
         GarminSyncStatus.from_state(garmin),
         today,
-        wellness_days=days_from_rows(rows),
         **kwargs,
     )
 
@@ -50,16 +42,9 @@ def _series(result, window, metric, source):
 
 
 class BodyHistoryTests(unittest.TestCase):
-    def test_windows_gaps_and_last_valid_duplicate_per_provider(self):
+    def test_windows_and_gaps_come_from_garmin_alone(self):
         result = body_history(
-            {
-                "synced_at": "intervals-sync",
-                "recent_wellness": [
-                    {"id": "2026-10-05", "weight": 70, "bodyFat": 18},
-                    {"id": "2026-10-05", "weight": 71},
-                    {"id": "2026-10-06", "weight": math.nan, "bodyFat": 19},
-                ],
-            },
+            {},
             {
                 "synced_at": "garmin-sync",
                 "weight": [{"date": "2026-10-04", "weightKg": 72}],
@@ -69,18 +54,18 @@ class BodyHistoryTests(unittest.TestCase):
         )
         self.assertEqual(result["windows"]["14d"]["days"], 14)
         self.assertEqual(result["windows"]["12w"]["days"], 84)
-        intervals = _series(result, "14d", "weight_kg", "Intervals.icu Wellness")[
-            "points"
-        ]
-        self.assertEqual(intervals[-2]["value"], 71)
-        self.assertEqual(intervals[-2]["synced_at"], SYNCED_AT.isoformat())
-        self.assertIsNone(intervals[-1]["value"])
-        self.assertEqual(
-            _series(result, "14d", "body_fat_pct", "Intervals.icu Wellness")["points"][
-                -1
-            ]["value"],
-            19,
-        )
+        for metric in ("weight_kg", "body_fat_pct"):
+            self.assertEqual(
+                [
+                    item["source"]
+                    for item in result["windows"]["14d"]["metrics"][metric]
+                ],
+                ["Garmin Connect"],
+            )
+        points = _series(result, "14d", "weight_kg", "Garmin Connect")["points"]
+        self.assertEqual(points[-3]["value"], 72)
+        self.assertEqual(points[-3]["synced_at"], "garmin-fetch")
+        self.assertIsNone(points[-1]["value"])
 
     def test_ftp_sources_and_weight_age_limit(self):
         # #1727: the Intervals.icu eFTP is not read; W/kg divides Garmin FTP only.
@@ -168,14 +153,6 @@ class BodyHistoryTests(unittest.TestCase):
         self.assertTrue(
             all(
                 point["value"] is None
-                for point in _series(
-                    result, "14d", "weight_kg", "Intervals.icu Wellness"
-                )["points"]
-            )
-        )
-        self.assertTrue(
-            all(
-                point["value"] is None
                 for point in _series(result, "14d", "weight_kg", "Garmin Connect")[
                     "points"
                 ]
@@ -212,10 +189,7 @@ class BodyHistoryTests(unittest.TestCase):
     def test_a_stored_intervals_body_preference_is_ignored_for_the_w_per_kg_weight(
         self,
     ):
-        snapshot = {
-            "synced_at": "intervals-sync",
-            "recent_wellness": [{"id": "2026-10-04", "weight": 72}],
-        }
+        snapshot = {"synced_at": "intervals-sync"}
         garmin = {
             "weight": [{"date": "2026-10-06", "weightKg": 70}],
             "performance_history": [
@@ -249,21 +223,19 @@ class BodyHistoryTests(unittest.TestCase):
     def test_weekly_quotient_median_counts_dates_and_chart_history_integration(self):
         from backend.performance.chart_history import analysis_history
 
-        snapshot = {
-            "recent_wellness": [
-                {"id": "2026-10-05", "weight": 70},
-                {"id": "2026-10-06", "weight": 70},
-            ]
-        }
         garmin = {
+            "weight": [
+                {"date": "2026-10-05", "weightKg": 70},
+                {"date": "2026-10-06", "weightKg": 70},
+            ],
             "performance_history": [
                 {"date": "2026-10-05", "metrics": {"cycling_ftp_watts": 280}},
                 {"date": "2026-10-06", "metrics": {"cycling_ftp_watts": 300}},
-            ]
+            ],
         }
         canonical = CanonicalPerformanceInputs(
             garmin=garmin_metrics_from_payload(garmin),
-            history_wellness_days=days_from_rows(snapshot["recent_wellness"]),
+            body=garmin_body_from_payload(garmin, TODAY),
         )
         result = analysis_history(
             GarminSyncStatus.from_state({}), TODAY, canonical=canonical

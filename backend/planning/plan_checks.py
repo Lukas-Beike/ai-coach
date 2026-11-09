@@ -48,18 +48,22 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.planning_fields import STRENGTH_STRUCTURE
+from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.planning import (
     calendar_load,
-    free_allocation,
     leg_strength,
     load_checks,
+    run_hr_cap,
     strength_structure,
-    weekly_plan_checks,
 )
-from backend.planning.session_focus import FOCUS_KEY, INTENSITY_KEY, session_focus
+from backend.planning.session_focus import (
+    FOCUS_KEY,
+    INTENSITY_KEY,
+    allowed_foci,
+    session_focus,
+)
 from backend.planning.sport import planned_sport_environment
 
 ALL_DAY_EVENT = "all_day_event"
@@ -73,21 +77,24 @@ FINDING_CODES = (
     "missing_taper",
     "illness_hard",
     "strength_incomplete",
+    "focus_missing",
+    "hr_cap_invalid",
     "intensity_distribution",
     leg_strength.BEFORE_KEY,
     leg_strength.FREQUENCY,
     "calendar_load",
     ALL_DAY_EVENT,
-    *weekly_plan_checks.CODES,
 )
 # Only the health rule blocks a write. The load rules are notes the Coach must
 # name: their evidence is observational or practice-based, or (taper) the
 # evidence is strong but the 20 % floor is a local choice, not a proven limit.
 BLOCKING_CODES = ("illness_hard",)
 # Data the Coach must write, not a training rule: a strength unit it creates,
-# moves or changes needs its structure, focus and intensity. It blocks like the
-# health rule but can never be accepted, so it is not in BLOCKING_CODES.
-REQUIRED_CODES = ("strength_incomplete",)
+# moves or changes needs its structure, focus and intensity, any other unit with
+# a focus vocabulary (run, ride) its focus, and a capped run unit its heart-rate
+# cap. It blocks like the health rule but can never be accepted, so it is not in
+# BLOCKING_CODES.
+REQUIRED_CODES = ("strength_incomplete", "focus_missing", "hr_cap_invalid")
 EVIDENCE = {
     "run_spike": "observational, moderate (Frandsen 2025)",
     "load_spike": load_checks.LOAD_EVIDENCE,
@@ -98,12 +105,13 @@ EVIDENCE = {
     "missing_taper": "meta-analysis, strong (Bosquet 2007); 20 % floor is a local choice",
     "illness_hard": "medical caution",
     "strength_incomplete": "data completeness for the watch and the plan checks",
+    "focus_missing": "data completeness for the plan checks and the calendar",
+    "hr_cap_invalid": "data completeness for the watch and the analysis; the caps are the athlete's decision",
     "intensity_distribution": "practice-based reference ranges; pyramidal/polarized after Seiler 2010, Stoeggl & Sperlich 2014",
     leg_strength.BEFORE_KEY: "limited, residual fatigue after lower-body resistance training (Doma et al.)",
     leg_strength.FREQUENCY: "Ronnestad & Mujika 2014, Blagrove 2018 (2x/week build, 1x/week maintenance); thresholds practice-based",
     "calendar_load": "calendar overlap and locally chosen eight-hour busy-day threshold",
     ALL_DAY_EVENT: "calendar all-day event; soft context, not a block",
-    **dict.fromkeys(weekly_plan_checks.CODES, "athlete's own weekly plan"),
 }
 _RULE_TEXT = {
     "run_spike": "planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
@@ -115,16 +123,13 @@ _RULE_TEXT = {
     "missing_taper": "final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
     "illness_hard": "hard or 90+ minute session within 3 days of a reported illness.",
     "strength_incomplete": "a strength unit the Coach created, moved or changed without strength_structure, session_focus and strength_intensity.",
+    "focus_missing": "a run or ride unit the Coach created, moved or changed without session_focus.",
+    "hr_cap_invalid": "a recovery, easy or long run unit the Coach created or changed without a heart-rate cap (percentages and source) within the effective cap.",
     "intensity_distribution": "planned low/moderate/high time of a week clearly outside the training model's reference range (unknown time is uncovered, strength excluded).",
     leg_strength.BEFORE_KEY: "moderate or heavy leg strength less than about 24 h before a hard run or ride or the week's long one.",
     leg_strength.FREQUENCY: "more than 3 leg strength sessions or more than 2 heavy ones in a week, or none in a plan of 2+ weeks when strength is expected.",
     "calendar_load": "long or hard unit overlaps a calendar event or falls on a day with at least eight hours of events.",
     ALL_DAY_EVENT: "a hard or long unit on a day with an all-day calendar event (soft note; calendar markers still apply).",
-    weekly_plan_checks.FIXED_MISSING: "a fixed session of the profile weekly plan is not planned on its day.",
-    weekly_plan_checks.REST_DAY: "a unit on a rest day of the weekly plan.",
-    weekly_plan_checks.OUTSIDE_WINDOWS: "a unit outside the time windows set by the athlete (built-in fallback windows never trigger it).",
-    weekly_plan_checks.OVER_MAX: "planned minutes of a day above the weekly plan's maximum.",
-    weekly_plan_checks.NO_FREE_WINDOW: "a unit that does not fit the free blocks of the athlete's own windows after timed calendar events (longest contiguous block, several units of a day placed together, timed unit overlapping an event; fallback windows never trigger it).",
 }
 RULE_SUMMARY = {
     code: f"{'Blocks' if code in (*BLOCKING_CODES, *REQUIRED_CODES) else 'Note'}: {text}"
@@ -408,6 +413,16 @@ def _illness_hard(
     ]
 
 
+_HR_CAP_CONTENT = (
+    "name",
+    "description",
+    "date",
+    "starts_at_local",
+    "duration_minutes",
+    "planned_duration_s",
+    FOCUS_KEY,
+    HR_CAP,
+)
 _STRENGTH_CONTENT = (
     "name",
     "description",
@@ -436,6 +451,43 @@ def _missing_strength_fields(unit: Mapping[str, Any]) -> list[str]:
     return missing
 
 
+def _content_digest(unit: Mapping[str, Any], keys: Sequence[str]) -> str:
+    content = json.dumps(
+        {key: unit.get(key) for key in keys},
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+
+def hr_cap_invalid(
+    units: Sequence[Mapping[str, Any]], first_threshold_pct: float | None = None
+) -> list[dict]:
+    """One finding per capped run unit with a missing or wrong cap, keyed by content.
+
+    Only Coach writes run it (``PlanGuardService``). The content fingerprint
+    makes a write that creates, moves or edits the unit a new finding, so an
+    untouched older unit
+    never blocks an unrelated write and is never rewritten silently.
+    """
+    findings = []
+    for unit, problem in run_hr_cap.problems(units, first_threshold_pct):
+        findings.append(
+            _finding(
+                "hr_cap_invalid",
+                [unit],
+                run_hr_cap.message(problem),
+                {
+                    "name": str(unit.get("name") or ""),
+                    **problem,
+                    "content": _content_digest(unit, _HR_CAP_CONTENT),
+                },
+            )
+        )
+    return findings
+
+
 def strength_incomplete(units: Sequence[Mapping[str, Any]]) -> list[dict]:
     """One finding per incomplete strength unit, keyed by its content.
 
@@ -452,12 +504,6 @@ def strength_incomplete(units: Sequence[Mapping[str, Any]]) -> list[dict]:
         missing = _missing_strength_fields(unit)
         if not missing:
             continue
-        content = json.dumps(
-            {key: unit.get(key) for key in _STRENGTH_CONTENT},
-            sort_keys=True,
-            ensure_ascii=False,
-            default=str,
-        )
         findings.append(
             _finding(
                 "strength_incomplete",
@@ -471,7 +517,50 @@ def strength_incomplete(units: Sequence[Mapping[str, Any]]) -> list[dict]:
                 {
                     "name": str(unit.get("name") or ""),
                     "missing": missing,
-                    "content": hashlib.sha256(content.encode("utf-8")).hexdigest()[:16],
+                    "content": _content_digest(unit, _STRENGTH_CONTENT),
+                },
+            )
+        )
+    return findings
+
+
+_FOCUS_CONTENT = (
+    "name",
+    "description",
+    "date",
+    "starts_at_local",
+    "duration_minutes",
+    "planned_duration_s",
+    "target",
+    FOCUS_KEY,
+)
+# Units with a focus vocabulary other than strength, which has its own check.
+_FOCUS_SPORTS = frozenset({Sport.RUN, Sport.RIDE})
+
+
+def focus_missing(units: Sequence[Mapping[str, Any]]) -> list[dict]:
+    """One finding per run or ride unit without a stored ``session_focus``.
+
+    Keyed by content like ``strength_incomplete``: a Coach write that creates,
+    moves or edits the unit is a new finding, an untouched older unit never
+    blocks an unrelated write. Sports without a focus vocabulary are exempt.
+    """
+    findings = []
+    for unit in units:
+        sport = planned_sport_environment(unit)[0]
+        if sport not in _FOCUS_SPORTS or str(unit.get(FOCUS_KEY) or "").strip():
+            continue
+        findings.append(
+            _finding(
+                "focus_missing",
+                [unit],
+                "Unit without session_focus: set the type of the session ("
+                + ", ".join(allowed_foci(sport))
+                + ") on every unit you create, move or change.",
+                {
+                    "name": str(unit.get("name") or ""),
+                    "sport": sport.value,
+                    "content": _content_digest(unit, _FOCUS_CONTENT),
                 },
             )
         )
@@ -518,11 +607,10 @@ def _calendar_findings(
     units: Sequence[Mapping[str, Any]],
     events: Sequence[Mapping[str, Any]],
     today: date,
-) -> tuple[list[dict[str, Any]], set[int]]:
-    """Calendar notes for hard or long units; also the ids of the overlapping ones."""
+) -> list[dict[str, Any]]:
+    """Calendar notes for hard or long units."""
     occupied = calendar_load.busy_minutes(events, today, 56)
     findings: list[dict[str, Any]] = []
-    overlapped: set[int] = set()
     for unit in units:
         if not (is_hard(unit) or _duration_s(unit) >= LONG_SESSION_S):
             continue
@@ -536,8 +624,6 @@ def _calendar_findings(
                     {"overlap": overlap, "busy_minutes": minutes},
                 )
             )
-        if overlap:
-            overlapped.add(id(unit))
         try:
             day = date.fromisoformat(_day(unit))
         except ValueError:
@@ -551,17 +637,7 @@ def _calendar_findings(
                     {"events": all_day},
                 )
             )
-    return findings, overlapped
-
-
-def _duplicate_overlap(draft: load_checks.Draft, overlapped: set[int]) -> bool:
-    """A timed overlap that ``calendar_load`` already names for the same unit."""
-    code, units, _, evidence = draft
-    return (
-        code == weekly_plan_checks.NO_FREE_WINDOW
-        and evidence.get("reason") == free_allocation.OVERLAP
-        and id(units[0]) in overlapped
-    )
+    return findings
 
 
 def check_plan(
@@ -574,7 +650,6 @@ def check_plan(
     thresholds: load_checks.LoadThresholds | None = None,
     expects_strength: bool = False,
     calendar_events: Sequence[Mapping[str, Any]] = (),
-    weekly_plan: str = "",
 ) -> list[dict[str, Any]]:
     """Return all findings for the resulting future planned units.
 
@@ -584,7 +659,7 @@ def check_plan(
         units, thresholds or load_checks.LoadThresholds()
     )
     units = _with_computed_hard(units, sessions)
-    calendar_notes, overlapped = _calendar_findings(units, calendar_events, today)
+    calendar_notes = _calendar_findings(units, calendar_events, today)
     return [
         *calendar_notes,
         *_drafted(load_checks.run_distance_spikes(sessions, completed, today)),
@@ -599,13 +674,6 @@ def check_plan(
         *_drafted(leg_strength.frequency(units, today, expects_strength, completed)),
         *_missing_taper(units, completed, competitions, today),
         *_illness_hard(units, illness, today),
-        *_drafted(
-            draft
-            for draft in weekly_plan_checks.check(
-                weekly_plan, units, today, calendar_events
-            )
-            if not _duplicate_overlap(draft, overlapped)
-        ),
     ]
 
 
@@ -628,7 +696,7 @@ def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
     if finding["code"] == "weekly_load_rise":
         evidence = finding["evidence"]
         return (finding["code"], evidence["sport"], evidence["week_start"])
-    if finding["code"] == "strength_incomplete":
+    if finding["code"] in {"strength_incomplete", "focus_missing", "hr_cap_invalid"}:
         evidence = finding["evidence"]
         return (finding["code"], tuple(finding["local_ids"]), evidence["content"])
     if finding["code"] == "load_unknown":
@@ -653,11 +721,6 @@ def _risk(finding: Mapping[str, Any]) -> tuple[Any, ...]:
         return (max(evidence["deviating_bands"].values()),)
     if finding["code"] == "calendar_load":
         return (bool(evidence.get("overlap")), evidence.get("busy_minutes") or 0)
-    if finding["code"] in (
-        weekly_plan_checks.OVER_MAX,
-        weekly_plan_checks.NO_FREE_WINDOW,
-    ):
-        return (evidence["planned_minutes"],)
     return ()
 
 

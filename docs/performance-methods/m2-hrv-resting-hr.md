@@ -19,8 +19,8 @@ readiness or health state.
 
 `personal-quartiles-v1` (`backend/performance/personal_recovery.py`):
 
-- Series are kept per provider and field: RMSSD (`hrv`, ms), SDNN (`hrvSDNN`,
-  ms) and resting HR (bpm) are never merged.
+- Series are kept per provider and measurement: RMSSD (ms), SDNN (ms) and
+  resting HR (bpm) are never merged.
 - Comparison set: values on days from today − 42 to the day before the latest
   observation, and not before the latest measurement change (segment rule
   below). The latest value is excluded from its own baseline.
@@ -118,8 +118,8 @@ and no competing interests.
   4-week reference, and it prescribes nothing.
 - Series are separated by provider and field; within a series, the method,
   aggregation and measurement context (#1418, #1420) mark segments. Providers
-  rarely report them: Garmin HRV carries only the `overnight` window, Intervals
-  values carry nothing.
+  rarely report them: Garmin HRV carries only the `overnight` window, and values
+  stored earlier from Intervals.icu carry nothing.
 - HRV and resting HR come from canonical observations per provider and
   measurement (#1411); Garmin's weekly HRV average is not a baseline series.
 
@@ -155,14 +155,14 @@ and no competing interests.
 
 | Rule | Value | Tag | Rationale |
 | --- | --- | --- | --- |
-| Comparison window | 42 days | product assumption | Existing rule, `personal_recovery.py:83`; R9 names no single window, R7 used a 4-week reference. |
-| History loaded | 83 days | product assumption | Existing rule, `personal_recovery.py:84`; covers the 42-day window plus display history. |
-| Minimum earlier values for a position | 14 | product assumption | Existing rule, `personal_recovery.py:233`; no source fixes a minimum. |
-| Values for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:236`. |
-| Quartile method | inclusive, n = 4 | product assumption | Existing rule, `personal_recovery.py:234`; the middle quartiles hold about half of the values by definition, so "outside" is not rare. |
-| Current value counts as fresh | observed today or yesterday | product assumption | Existing rule, `personal_recovery.py:210`. |
-| Resting HR plausibility | 20 to 230 bpm | product assumption | Existing filter, `personal_recovery.py:144`; data-entry guard, not a physiological range. |
-| HRV plausibility | greater than 0 ms | product assumption | Existing filter, `personal_recovery.py:137`. |
+| Comparison window | 42 days | product assumption | Existing rule, `personal_recovery()` cutoff in `personal_recovery.py`; R9 names no single window, R7 used a 4-week reference. |
+| History loaded | 83 days | product assumption | Existing rule, `personal_recovery()` history start in `personal_recovery.py`; covers the 42-day window plus display history. |
+| Minimum earlier values for a position | 14 | product assumption | Existing rule, `_baseline` in `personal_recovery.py`; no source fixes a minimum. |
+| Values for status ok | 28 | product assumption | Existing rule, `_baseline` in `personal_recovery.py`. |
+| Quartile method | inclusive, n = 4 | product assumption | Existing rule, `_baseline` in `personal_recovery.py`; the middle quartiles hold about half of the values by definition, so "outside" is not rare. |
+| Current value counts as fresh | observed today or yesterday | product assumption | Existing rule, `_baseline` in `personal_recovery.py` (`current`). |
+| Resting HR plausibility | 20 to 230 bpm | product assumption | Existing filter, `_add_record` in `personal_recovery.py`; data-entry guard, not a physiological range. |
+| HRV plausibility | greater than 0 ms | product assumption | Existing filter, `_add_record` in `personal_recovery.py`. |
 | RMSSD and SDNN kept separate | yes | source | Different metrics; R8 pools them separately, R10 and R11 report RMSSD. |
 | Seven-day window | 7 days ending with the latest night | source | R7, R47 (7-day rolling mean of ln(RMSSD)). |
 | Minimum window nights | 3 | source | R48: at least 3 valid days per week. Chosen by the athlete 2026-11-07. |
@@ -170,7 +170,7 @@ and no competing interests.
 | Rolling baseline | 42 days before the window; 14 nights minimum, 28 for ok | product assumption | Same counts as the nightly comparison; R7 used a 4-week reference; the current week is excluded. Chosen by the athlete 2026-11-07. |
 | Range width | baseline mean ± 0.5 SD of ln(RMSSD) | source | R7, R47 (smallest worthwhile change). |
 | Seven-day CV | shown without rating | product assumption | R47 describes the CV as an additional observation; no threshold exists. Chosen by the athlete 2026-11-07. |
-| Measurement change | restart, 14 values since the change | product assumption | `_segment_start`, `personal_recovery.py:161`; R10 validates specific models and firmware; values across a device or window change are not assumed comparable. Chosen by the athlete 2026-11-01. |
+| Measurement change | restart, 14 values since the change | product assumption | `_segment_start` in `personal_recovery.py`; R10 validates specific models and firmware; values across a device or window change are not assumed comparable. Chosen by the athlete 2026-11-01. |
 
 ## Allowed statements
 

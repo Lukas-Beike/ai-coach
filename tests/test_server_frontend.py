@@ -37,6 +37,7 @@ def frontend_source():
         for name in (
             "shared.js",
             "auth.js",
+            "status-strip.js",
             "sync-status.js",
             "notifications.js",
             "performance-view.js",
@@ -506,7 +507,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(f'"{asset_ref("/views.js")}"', service_worker)
         self.assertIn(f'"{asset_ref("/forms.js")}"', service_worker)
         self.assertIn(f'"{asset_ref("/components.js")}"', service_worker)
-        self.assertIn('id="connectivityNotice"', index)
+        self.assertIn('id="statusStrip"', index)
         self.assertIn('id="coachActionReview"', index)
         self.assertIn('id="logsDownloadButton"', index)
         self.assertIn('id="logsDeleteButton"', index)
@@ -821,7 +822,9 @@ class ServerFrontendTests(ServerTestCase):
         plan_markup = index[
             index.index('id="workoutsPanel"') : index.index('id="dataPanel"')
         ]
-        self.assertEqual(plan_markup.count("<button"), 1)
+        # Read-only: the retry and the refresh button (reload + shared calendar sync) are the only buttons.
+        self.assertEqual(plan_markup.count("<button"), 2)
+        self.assertIn('id="planRefreshButton"', plan_markup)
         self.assertIn('id="competitionRetry" type="button"', plan_markup)
         self.assertNotIn("planningEditDirty", state)
         self.assertNotIn("plannedWeekOpen", state)
@@ -1301,7 +1304,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('provider === "weather"', app)
         self.assertIn(asset_ref("/icon.svg"), index)
         self.assertIn('id="connectionsSyncProgress"', index)
-        self.assertIn('id="providerAttentionBanner"', index)
+        self.assertNotIn('id="providerAttentionBanner"', index)
         self.assertIn("function renderConnectionsSyncProgress(data)", app)
         self.assertIn("function providerRequiresManualAttention(entry)", app)
         self.assertIn("function coachProviderLabel(provider)", app)

@@ -26,12 +26,8 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.openai_responses import response_text
 
-_READ_ONLY_JOB_TYPES = frozenset(
-    {"refresh", "performance_refresh", "activity_details", "historical_backfill"}
-)
-_READ_ONLY_REFRESH_TOOLS = frozenset(
-    {"start_provider_refresh"}
-)
+_READ_ONLY_JOB_TYPES = frozenset({"refresh", "activity_details", "historical_backfill"})
+_READ_ONLY_REFRESH_TOOLS = frozenset({"start_provider_refresh"})
 
 
 @dataclass(frozen=True)

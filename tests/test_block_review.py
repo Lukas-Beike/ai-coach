@@ -46,7 +46,6 @@ def _unit(day, sport="run", status="completed", focus=None, duration=3600):
 
 def _service(rows=(), plan=None, checkins=(), feedback=(), model="pyramidal"):
     return TrainingReportReadService(
-        read_synced_at=lambda _db: None,
         read_plan=lambda: plan,
         read_checkins=lambda: list(checkins),
         read_feedback=lambda keys: list(feedback),

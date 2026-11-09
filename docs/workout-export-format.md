@@ -6,9 +6,16 @@ self-generated `workout_doc` as evidence of successful parsing.
 
 Executable steps are required for endurance families such as cycling, running,
 swimming, walking/hiking, rowing, Nordic skiing and their indoor variants.
-Other supported activities, including strength, Yoga, Pilates, Golf and
-RockClimbing, retain prose instructions. Their exported sport is still checked
-on provider readback; no endurance graph or calculated load is required.
+Other supported activities, including Yoga, Pilates, Golf and RockClimbing,
+retain prose instructions. Their exported sport is still checked on provider
+readback; no endurance graph or calculated load is required.
+
+A strength unit goes to Intervals.icu as a `NOTE` calendar event (type
+`WeightTraining`), never as a `WORKOUT`, because Intervals.icu forwards workouts
+to Garmin as one unnamed step. Its text is generated from the unit's exercise
+structure (one line per exercise; free text without a structure), and readback requires the `NOTE` category.
+The structured strength workout reaches the watch only through the explicit
+Garmin push.
 
 References:
 
@@ -48,7 +55,8 @@ machine-readable target and may override the percentage target. Percentages
 use the athlete's current Intervals.icu FTP settings.
 
 `- 3x 8m ...` is not a repeat block. It can produce just one eight-minute
-effort. Together with the other reported steps that yields 43 minutes.
+effort. Together with the other reported steps that yields 43 minutes. The
+application rejects such a line as an ambiguous step.
 Native repeats instead use a separate `3x` header immediately before the
 steps, with blank lines around the block. Every contained step repeats, so
 putting a four-minute recovery in that block adds a third recovery too.
@@ -77,7 +85,7 @@ the missing four minutes or silently changing the training prescription.
 
 Local validation requires quantity-first steps, one intensity target per
 step, explicit HR/Pace suffixes, unambiguous repeat boundaries, and consistent
-timed totals. Strength descriptions remain unstructured. Distance-based steps
+timed totals. Strength notes carry prose only. Distance-based steps
 retain their distance; Intervals.icu estimates their time from athlete settings.
 
 During an explicitly requested synchronization, the provider's response must
@@ -130,12 +138,7 @@ index, but only the final provider snapshot can mark a unit synchronized. A
 failed final read leaves the affected units retryable, retaining remote IDs.
 
 Provider requests do not hold the database lock, so status polling remains
-available. Repair batches share the provider synchronization lock with snapshot
-refresh/import, preventing intermediate repaired events from creating false
-local conflicts. The durable queue also defers planned-unit snapshot imports
-between sibling jobs until all queued/running repair jobs finish, including
-after a restart; activity and wellness refreshes can continue between jobs.
-A per-unit guard excludes simultaneous pushes of the same workout.
+available. A per-unit guard excludes simultaneous pushes of the same workout.
 Payload hashes are rechecked before remote mutations and before recording
 success. An intervening local edit stays unsynchronized; a remote identity
 created before the edit was detected is retained for the next repair.
@@ -154,3 +157,42 @@ and other aerobic sports.
 The regression suite executes the real Coach tool and job path with synthetic
 responses for a run incorrectly stored as WeightTraining, two remote copies,
 sport correction, duplicate removal, and a second idempotent repair.
+
+## Native workout text syntax
+
+Endurance workouts synchronized to Intervals.icu must comply with its native workout builder syntax. The application validates the text locally before any remote synchronization.
+
+### Cycling Intervals (Power & Cadence Targets)
+```text
+Warmup
+- 15m ramp 50-70%
+- 3m 80%
+- 3m 50-60%
+
+Main Set
+3x
+- 8m 88-92% 85-95rpm
+- 4m 50-60%
+
+Cooldown
+- 10m 50-60%
+```
+
+### Running Workout (Pace & Heart Rate Targets)
+```text
+Warmup
+- 15m Z1 HR
+
+Main Set
+- 6km Z2 Pace
+- 1km 90-95% HR
+
+Cooldown
+- 10m Z1 HR
+```
+
+## Strict Validation Rules
+1. **Executable Steps Required**: Endurance workouts (Ride, Run, Swim, Row) require explicit step durations (`m`, `s`) or distances (`km`, `m`) paired with an intensity target.
+2. **Relative Targets Preferred**: Use percentage FTP (`88-92%`) or zones (`Z2 HR`). Do not hardcode absolute wattages into steps, as they conflict with dynamic FTP adjustments.
+3. **Repeat Block Formatting**: Multi-interval blocks must begin with a repeat line (e.g., `3x`) and must be surrounded by blank lines. All steps within the block repeat equally.
+4. **Non-Endurance Activities**: Strength training, yoga, and mobility workouts use free-text prose instructions and bypass step validation.

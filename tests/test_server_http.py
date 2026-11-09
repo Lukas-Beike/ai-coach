@@ -758,6 +758,7 @@ class ServerHttpTests(ServerTestCase):
                 "wahoo",
                 "credentials",
                 "usage",
+                "threshold_warnings",
             ],
         )
         self.assertEqual(bootstrap["schema_version"], 3)

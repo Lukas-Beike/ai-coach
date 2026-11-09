@@ -33,6 +33,7 @@ from backend.backup.export import (
     PrivacyArchiveExportConfig,
     PrivacyArchiveExportService,
 )
+from backend.backup.recovery_copies import RecoveryCopies
 from backend.canonical.activity_detail import (
     ActivityLap,
     ActivityLapSet,
@@ -47,6 +48,7 @@ from backend.canonical.vocabulary import (
     LapSource,
     ProviderId,
     RecordingOrigin,
+    RemoteEntityKind,
     SourceKind,
     StreamChannel,
     StreamResolution,
@@ -64,6 +66,7 @@ from backend.db.canonical_domain_store import (
 from backend.db.schema import initialize_schema
 from backend.observability import REDACTED_VALUE, sanitized_provider_payload
 from backend.privacy import (
+    _REMOTE_LINK_KINDS_BY_CATEGORY,
     PRIVACY_DELETE_SCOPE,
     PrivacyDeleteDependencies,
     PrivacyDeleteService,
@@ -276,6 +279,7 @@ def seed_remote_link_rows(db):
         ("competition", "1", "event-1"),
         ("library_workout", "lib-1", "event-2"),
         ("planned_unit", "u-1", "event-3"),
+        ("observation", "obs-1", "metric-1"),
     ):
         db.execute(
             "INSERT INTO remote_links(entity_kind, local_id, provider, remote_id, "
@@ -334,6 +338,10 @@ class ProviderDataFixture(unittest.TestCase):
 
 
 class PrivacyExportProviderTests(ProviderDataFixture):
+    def setUp(self):
+        super().setUp()
+        self.key_values_seed: dict[str, str] = {}
+
     def export(self):
         config = PrivacyArchiveExportConfig(
             data_dir=self.root,
@@ -346,9 +354,11 @@ class PrivacyExportProviderTests(ProviderDataFixture):
             monotonic=lambda: 0.0,
             disk_usage=lambda _path: SimpleNamespace(free=10**12),
         )
+        self.key_values = _KeyValues()
+        self.key_values.values.update(self.key_values_seed)
         service = PrivacyArchiveExportService(
             _Manager(self.db),
-            _KeyValues(),
+            self.key_values,
             _Profile(),
             _Competitions(),
             _Adaptive(),
@@ -366,7 +376,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
     def test_format_version_lists_provider_detail_domain_and_link_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 12)
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 14)
         expected = {
             *PROVIDER_FILES,
             *DETAIL_FILES,
@@ -376,9 +386,44 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 12)
+            self.assertEqual(manifest["format_version"], 14)
             self.assertLessEqual(expected, set(manifest["jsonl_files"]))
             self.assertLessEqual(expected, set(archive.namelist()))
+
+    def test_stored_non_secret_provider_fields_are_exported_without_secrets(self):
+        self.key_values_seed = {
+            "provider_credentials": json.dumps(
+                {
+                    "garmin_personal_api_key": "secret-personal-key",
+                    "garmin_personal_api_key_expires": "2027-01-31",
+                    "intervals_api_key": "secret-intervals-key",
+                    "intervals_athlete_id": "i12345",
+                    "wahoo_client_id": "wahoo-client-1",
+                    "wahoo_client_secret": "secret-wahoo-client",
+                    "openai_base_url": "https://llm.example.invalid/v1",
+                    "openai_api_key": "secret-openai-key",
+                    "garmin_email": "athlete@example.invalid",
+                }
+            )
+        }
+        with self.export() as archive:
+            raw = archive.read("provider_settings.json").decode("utf-8")
+            everything = b"".join(archive.read(name) for name in archive.namelist())
+        self.assertEqual(
+            json.loads(raw),
+            {
+                "garmin_personal_api_key_expires": "2027-01-31",
+                "intervals_athlete_id": "i12345",
+                "openai_base_url": "https://llm.example.invalid/v1",
+                "wahoo_client_id": "wahoo-client-1",
+            },
+        )
+        for secret in (b"secret-", b"athlete@example.invalid"):
+            self.assertNotIn(secret, everything)
+
+    def test_provider_settings_are_empty_without_stored_credentials(self):
+        with self.export() as archive:
+            self.assertEqual(json.loads(archive.read("provider_settings.json")), {})
 
     def test_remote_links_and_tombstone_providers_are_exported(self):
         seed_remote_link_rows(self.db)
@@ -390,6 +435,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
             [
                 ("competition", "1"),
                 ("library_workout", "lib-1"),
+                ("observation", "obs-1"),
                 ("planned_unit", "u-1"),
             ],
         )
@@ -553,9 +599,11 @@ class PrivacyExportProviderTests(ProviderDataFixture):
                 "provider",
                 "session_id",
                 "session_rpe_rated_at",
+                "purpose",
             },
         )
         self.assertEqual(rows[0]["notes"], "felt good")
+        self.assertIsNone(rows[0]["purpose"])
         self.assertEqual(rows[0]["provider"], "intervals")
         self.assertIsNone(rows[0]["session_id"])
         self.assertIsNone(rows[0]["session_rpe_rated_at"])
@@ -603,12 +651,13 @@ class SanitizedProviderPayloadTests(unittest.TestCase):
 class PrivacyDeleteProviderTests(ProviderDataFixture):
     def service(self, **extra):
         database = _Manager(self.db)
+        self.key_values = _KeyValues()
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
                 profile_mutation_coordinator=threading.RLock(),
                 database_manager=database,
                 database_lock=_Lock(),
-                key_value_repository=_KeyValues(),
+                key_value_repository=self.key_values,
                 maintenance_gate=_Gate(),
                 planning_revision_service=_PlanningRevision(),
                 openai_client=_OpenAI(),
@@ -625,6 +674,46 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         )
         self.assertEqual(cancelled, [True])
 
+    def seed_recovery_files(self):
+        stamp = "20261101120000-" + "a" * 32
+        names = (
+            f"{self.database_path.name}.pre-restore-{stamp}",
+            f"{self.database_path.name}.pre-intervals-purge-v1-{stamp}",
+            "intervals-purge-v1.done",
+        )
+        for name in names:
+            (self.root / name).write_bytes(b"synthetic")
+        return names
+
+    def test_the_preview_counts_recovery_copies_and_the_delete_erases_them(self):
+        names = self.seed_recovery_files()
+        keep = self.root / "unrelated.txt"
+        keep.write_text("keep")
+        copies = RecoveryCopies(self.root, self.database_path.name)
+        service = self.service(recovery_copies=copies)
+        counts = {
+            item["id"]: item["records"] for item in service.preview()["categories"]
+        }
+        self.assertEqual(counts["recovery_copies"], 3)
+        result = service.delete("LOKALE DATEN LÖSCHEN")
+        self.assertEqual(result["deleted_categories"]["recovery_copies"], 3)
+        self.assertEqual(result["recovery_copies_failed"], 0)
+        for name in names:
+            self.assertFalse((self.root / name).exists())
+        self.assertTrue(keep.exists())
+        self.assertTrue(self.database_path.exists())
+
+    def test_a_recovery_copy_that_cannot_be_removed_is_reported_not_raised(self):
+        self.seed_recovery_files()
+        service = self.service(
+            recovery_copies=RecoveryCopies(self.root, self.database_path.name)
+        )
+        with patch.object(Path, "unlink", side_effect=PermissionError("locked")):
+            result = service.delete("LOKALE DATEN LÖSCHEN")
+        self.assertEqual(result["recovery_copies_failed"], 3)
+        self.assertEqual(result["deleted_categories"]["recovery_copies"], 0)
+        self.assertTrue(result["local_data_deleted"])
+
     def test_provider_data_is_a_scope_category_with_children_first(self):
         scope = {category: tables for category, _label, tables in PRIVACY_DELETE_SCOPE}
         self.assertEqual(
@@ -636,6 +725,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
                 "activity_records",
                 "activity_sessions",
                 "provider_records",
+                "remote_links",
             },
         )
         order = scope["provider_data"].index
@@ -688,6 +778,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         scope = {category: tables for category, _label, tables in PRIVACY_DELETE_SCOPE}
         self.assertIn("remote_links", scope["library"])
         self.assertIn("remote_links", scope["competitions"])
+        self.assertIn("remote_links", scope["provider_data"])
 
     def test_preview_counts_remote_links_by_owning_group(self):
         seed_remote_link_rows(self.db)
@@ -696,12 +787,29 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         # Two library links, one competition link and one tombstone.
         self.assertEqual(counts["library"], 2)
         self.assertEqual(counts["competitions"], 2)
+        # The metric-export link counts as provider data (no other rows seeded).
+        self.assertEqual(counts["provider_data"], 1)
+
+    def test_the_privacy_preview_counts_every_remote_link_kind_it_deletes(self):
+        seed_remote_link_rows(self.db)
+        owners = [
+            kind for kinds in _REMOTE_LINK_KINDS_BY_CATEGORY.values() for kind in kinds
+        ]
+        self.assertCountEqual(owners, list(RemoteEntityKind))
+        counted = sum(
+            PrivacyDeleteService._table_count(self.db, category, "remote_links")
+            for category in _REMOTE_LINK_KINDS_BY_CATEGORY
+        )
+        total = self.db.execute("SELECT COUNT(*) FROM remote_links").fetchone()[0]
+        self.assertEqual(counted, total)
+        self.assertEqual(total, 4)
 
     def test_delete_removes_every_remote_link(self):
         seed_remote_link_rows(self.db)
         result = self.service().delete("LOKALE DATEN LÖSCHEN")
         self.assertEqual(result["deleted_categories"]["library"], 2)
         self.assertEqual(result["deleted_categories"]["competitions"], 2)
+        self.assertEqual(result["deleted_categories"]["provider_data"], 1)
         for table in ("remote_links", "competition_sync_tombstones"):
             with self.subTest(table=table):
                 self.assertEqual(

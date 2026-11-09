@@ -167,7 +167,8 @@ from backend.providers.wahoo_activity_mapping import wahoo_device_type
 # Version 19: a Wahoo or Zwift manufacturer names the recording origin, so such a
 # recording relayed through Garmin Connect is not a Garmin recording, and a
 # relayed Wahoo ride that is not indoor or virtual carries the bike computer device type (#1686).
-MAPPER_VERSION: Final = 19
+# Version 20: a bike cadence of 0 without a run cadence is no cadence (#1826).
+MAPPER_VERSION: Final = 20
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -738,7 +739,7 @@ def _cadence(
     steps = _optional_number(
         row, _RUN_CADENCE_KEYS, (0.0, 2 * MAX_ACTIVITY_CADENCE_RPM), ref, issues
     )
-    return bike if steps is None else steps / 2
+    return None if steps is None else steps / 2
 
 
 def _zone_times(

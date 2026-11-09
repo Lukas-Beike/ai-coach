@@ -271,6 +271,7 @@ from backend.planning.plan_guard_service import (
 )
 from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.revision import PlanningRevisionService
+from backend.planning.run_lthr import RunLthr
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
     PlanningChangeLimits,
@@ -381,9 +382,6 @@ from backend.sync.gates import (
     INTERVALS_RESYNC_GATE,
     WAHOO_RESYNC_GATE,
 )
-from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
-from backend.sync.intervals_purge import BACKUP_LABEL as INTERVALS_PURGE_BACKUP
-from backend.sync.intervals_purge import IntervalsPurgeRunner
 from backend.sync.library import workout_library_sync_running
 from backend.sync.library_assembly import (
     WorkoutLibraryProvider,
@@ -408,6 +406,7 @@ from backend.sync.planned_unit_assembly import (
     PlannedUnitRuntime,
     PlannedUnitSyncAssembly,
 )
+from backend.sync.profile_weekly_plan_removal import ProfileWeeklyPlanRemoval
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_resync_assembly import (
     CompetitionSyncOwners,
@@ -442,7 +441,9 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutProviders,
     SelectedWorkoutSyncAssembly,
 )
+from backend.sync.session_focus_backfill import SessionFocusBackfill
 from backend.sync.state import SyncStateRepository
+from backend.sync.wahoo_connection import WahooSecretRegistry
 from backend.sync.wahoo_connection_assembly import (
     WahooConnectionAssembly,
     WahooConnectionInputs,
@@ -473,12 +474,11 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
 PROVIDER_INTERVALS_NAME = "Intervals.icu"
-PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -504,11 +504,13 @@ CONFIG_GENERATION = 0
 
 LOGGER = logging.getLogger("intervals_coach")
 GARMIN_SECRET_REGISTRY = GarminSecretRegistry()
+WAHOO_SECRET_REGISTRY = WahooSecretRegistry()
 # Environment secrets stay redacted while a stored credential overrides them.
 REDACTOR = observability.Redactor(
     lambda: CONFIG,
     extra_secrets=lambda: (
         *GARMIN_SECRET_REGISTRY.values(),
+        *WAHOO_SECRET_REGISTRY.values(),
         *observability.config_secret_values(ENV_CONFIG),
     ),
 )
@@ -610,6 +612,7 @@ def provider_runtime() -> ProviderRuntimeRegistry:
                     sync_service=WAHOO_SYNC.sync_service,
                     plan_push_service=WAHOO_SYNC.plan_push_service,
                     resync_gate=WAHOO_RESYNC_GATE,
+                    stream_backfill_service=WAHOO_SYNC.stream_backfill_service,
                 ),
             )
         ),
@@ -682,6 +685,9 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
 
 PROFILE_MUTATION_COORDINATOR = threading.RLock()
 
+# Declared ahead of its first lambda reference; assigned before the plan guard.
+RUN_LTHR: RunLthr
+
 # Declared ahead of its first lambda reference; assigned after METRIC_EXPORT below.
 METRIC_EXPORT_RUNNER: MetricExportRunner
 # Declared ahead of its first lambda reference; assigned after METRIC_EXPORT_RUNNER.
@@ -710,6 +716,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             load_inputs_changed=lambda: start_canonical_backfill(),
             thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
             threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
+            run_lthr_on=lambda day: RUN_LTHR.on(day),
         ),
     )
 )
@@ -754,6 +761,7 @@ PLANNING_DATA = PlanningDataAssembly(
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             uuid_factory=uuid.uuid4,
             redact=REDACTOR.redact_text,
+            hr_cap_resync=lambda db, payloads: RUN_LTHR.resync(db, payloads),
         ),
         mutations=PlanningMutations(
             calendar_conflict_service=lambda: (
@@ -848,19 +856,14 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
     dependencies=PrivacyAssembly.Inputs(
         athlete=PrivacyAthleteSources(
             profile_service=ATHLETE_DATA.profile,
-            checkin_service=ATHLETE_DATA.checkin,
-            activity_feedback_service=ATHLETE_DATA.activity_feedback,
         ),
         planning=PrivacyPlanningSources(
-            workout_library_service=PLANNING_DATA.workout_library,
             competition_service=PLANNING_DATA.competition,
-            training_plan_service=PLANNING_DATA.training_plan,
         ),
         context=PrivacyContextSources(
             adaptive_preview_service=lambda: (
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
-            external_calendar_reader=lambda: EXTERNAL_CALENDAR.reader(),
         ),
         clock=PrivacyClock(
             local_now=lambda: ATHLETE_CLOCK.now(),
@@ -1075,7 +1078,6 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
             ),
         ),
         canonical=GarminCanonicalSources(
-            activity_rows=lambda: CANONICAL_READ,
             observations=lambda: CANONICAL_READ,
             activity_summaries=lambda: CANONICAL_READ,
         ),
@@ -1176,6 +1178,7 @@ WAHOO_CONNECTION = WahooConnectionAssembly(
         database_lock=lambda: DB_LOCK,
         key_values=KEY_VALUE_REPOSITORY,
         utc_now=runtime_clock.utc_now,
+        secret_registry=WAHOO_SECRET_REGISTRY,
     )
 )
 # The thresholds every outbound export sends (Intervals.icu metrics, Wahoo plan
@@ -1204,6 +1207,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         redactor=REDACTOR.redact_text,
         resync_gate=WAHOO_RESYNC_GATE,
         export_thresholds=EXPORT_THRESHOLDS,
+        history_earliest_date=SYNC_EARLIEST_DATE,
     )
 )
 NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
@@ -1331,6 +1335,8 @@ PLANNED_CALENDAR_SYNC = PlannedCalendarSyncAssembly(
             state_writer=PLANNED_UNIT_SYNC.state_writer,
             utc_now=runtime_clock.utc_now,
             today=lambda: ATHLETE_CLOCK.now().date(),
+            run_lthr_for=lambda unit: RUN_LTHR.resolver()(unit),
+            key_values=KEY_VALUE_REPOSITORY,
         ),
         future_days=PLANNED_CALENDAR_FUTURE_DAYS,
     )
@@ -1582,6 +1588,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
         strength_push_service=GARMIN_ASSEMBLY.strength_push_service,
         wellness_history_service=GARMIN_ASSEMBLY.wellness_history_service,
         rating_backfill_service=GARMIN_ASSEMBLY.rating_backfill_service,
+        stream_backfill_service=GARMIN_ASSEMBLY.stream_backfill_service,
     ),
     calendar_weather=CalendarWeatherJobDependencies(
         calendar_sync_service=EXTERNAL_CALENDAR.sync_service,
@@ -1689,18 +1696,36 @@ def _block_lessons() -> list[dict[str, object]]:
     )
 
 
+def _planned_unit_estimator() -> PlannedUnitEstimator:
+    """Estimator of planned units with the current local thresholds."""
+    return PlannedUnitEstimator(
+        database_manager=database_manager,
+        observation_reader=lambda: CANONICAL_READ,
+        zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+        today=lambda: ATHLETE_CLOCK.now().date(),
+        source_preferences=lambda db: preferences_from_profile(
+            ATHLETE_DATA.profile().get_from_db(db)
+        ),
+    )
+
+
+RUN_LTHR = RunLthr(
+    thresholds=lambda: read_load_thresholds(
+        database_manager(),
+        CANONICAL_READ,
+        ATHLETE_CLOCK.now().date(),
+        ATHLETE_DATA.zones().configurations(),
+        lambda db: preferences_from_profile(ATHLETE_DATA.profile().get_from_db(db)),
+    ),
+    today=lambda: ATHLETE_CLOCK.now().date(),
+    key_values=KEY_VALUE_REPOSITORY,
+)
+
+
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
     return PlanGuardService(
-        estimate_unit=PlannedUnitEstimator(
-            database_manager=database_manager,
-            observation_reader=lambda: CANONICAL_READ,
-            zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
-            today=lambda: ATHLETE_CLOCK.now().date(),
-            source_preferences=lambda db: preferences_from_profile(
-                ATHLETE_DATA.profile().get_from_db(db)
-            ),
-        ),
+        estimate_unit=_planned_unit_estimator(),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
         completed_activities=lambda: read_completed(
             database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
@@ -1713,9 +1738,7 @@ def _plan_guard_service() -> PlanGuardService:
         training_model=lambda: str(
             ATHLETE_DATA.profile().get().get("training_model") or ""
         ),
-        weekly_plan_text=lambda: str(
-            ATHLETE_DATA.profile().get().get("weekly_plan") or ""
-        ),
+        profile=lambda: ATHLETE_DATA.profile().get(),
         today=lambda: ATHLETE_CLOCK.now().date(),
         thresholds=lambda: read_load_thresholds(
             database_manager(),
@@ -2065,19 +2088,30 @@ THRESHOLD_WARNINGS = ThresholdStalenessService(
 )
 
 
-# Removes the stored Intervals.icu ingest data once the Garmin rating backfill is
-# finished (#1728), after an encrypted recovery copy beside the database.
-INTERVALS_PURGE = IntervalsPurgeRunner(
-    database=database_manager,
+SESSION_FOCUS_BACKFILL = SessionFocusBackfill(
     key_values=KEY_VALUE_REPOSITORY,
-    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
-    backup=lambda: BACKUP_ASSEMBLY.backup_service().write_recovery_copy(
-        INTERVALS_PURGE_BACKUP
-    ),
     clock=runtime_clock.utc_now,
-    data_dir=lambda: DATA_DIR,
-    sync_lock=INTERVALS_SYNC_LOCK,
+    future_units=lambda limit: PLANNING_DATA.planned_unit().list(
+        limit, future_only=True
+    ),
+    estimator=_planned_unit_estimator,
+    update_unit=lambda *args, **kwargs: PLANNING_DATA.planned_unit().update(
+        *args, **kwargs
+    ),
+    bump_planning_revision=PLANNING_REVISION_SERVICE.bump,
+    database_manager=database_manager,
+    history_undo=HISTORY.undo_service,
+    database_lock=DB_LOCK,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    publish_change=lambda: runtime_events.STATE_EVENT_BUFFER.publish(
+        "coach", {"status": "changed"}
+    ),
 )
+
+PROFILE_WEEKLY_PLAN_REMOVAL = ProfileWeeklyPlanRemoval(
+    key_values=KEY_VALUE_REPOSITORY, clock=runtime_clock.utc_now
+)
+
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -2095,7 +2129,8 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
     # The heart-rate branch's TRIMP constants follow the profile sex (M6 v3).
     athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
-    maintenance_steps=(INTERVALS_PURGE.run,),
+    # The one-time focus backfill of future units (#1849) runs after all stages.
+    extra_followups=(PROFILE_WEEKLY_PLAN_REMOVAL, SESSION_FOCUS_BACKFILL),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
@@ -2130,7 +2165,6 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
             canonical_read=lambda: CANONICAL_READ,
             canonical_rows=lambda: CANONICAL_READ,
-            intervals_purge_marker=INTERVALS_PURGE.marker_exists,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,
@@ -2265,9 +2299,11 @@ HTTP_API = HttpApiAssembly(
             history=HttpHistoryServices(
                 change_history=HISTORY.change_history_service,
                 undo=HISTORY.undo_service,
+                session_focus_backfill_undo=lambda: SESSION_FOCUS_BACKFILL.undo,
             ),
             workout_library=PLANNING_DATA.workout_library,
             planned_unit=PLANNING_DATA.planned_unit,
+            wahoo_library_state=WAHOO_SYNC.library_state,
         ),
         domains=HttpDomainRouteServices(
             privacy=HttpPrivacyServices(

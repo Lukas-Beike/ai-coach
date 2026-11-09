@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v22 and supports upgrades from v21 (releases 1.13.41 to 1.13.44); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v23 and supports upgrades from v21 (releases 1.13.41 to 1.13.44) and v22 (the 2.0.0 candidate); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from released schema v21 and the current schema v22, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from released schemas v21 and v22 and the current schema v23, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Released baseline upgrade
 - **WHEN** a populated released v21 database is opened by this build
@@ -119,6 +119,8 @@ The extended schema SHALL preserve all athlete records, feedback, snapshots, tom
 - **WHEN** a database has an unsupported version, unrecognized shape or mismatched version/shape pair
 - **THEN** initialization rejects it without deleting, resetting or partially modifying it.
 
+Evidence: `backend/db/migrations.py`; `tests/test_db_encrypted_upgrade_matrix.py::test_every_released_schema_upgrades_encrypted_like_the_plain_upgrade`, `tests/test_db_encrypted_upgrade_matrix.py::test_a_failing_upgrade_leaves_every_released_schema_unchanged`, `tests/test_db_encrypted_upgrade_matrix.py::test_an_encrypted_backup_of_an_upgrade_restores_the_same_rows`, `tests/test_database_restore_validation.py::test_validate_upgrades_a_populated_release_v21_backup`.
+
 ### Requirement: Retired schema rejection
 
 The database SHALL reject schema versions older than v21 (releases before 1.13.41) before changing their data or schema, with a message that names release 1.13.44 for the upgrade. Change-history entries written before v16 under the former planning field names are not translated and cannot be undone.
@@ -128,16 +130,6 @@ The database SHALL reject schema versions older than v21 (releases before 1.13.4
 - **THEN** startup rejects it with the release 1.13.44 hint and leaves its rows and version unchanged.
 
 Evidence: `backend/db/migrations.py::migrate_schema`, `backend/db/schema_history.py::OLDEST_SUPPORTED_SCHEMA_VERSION`; `tests/test_db_migrations.py::test_older_database_file_is_refused_at_startup_without_changes`, `tests/test_db_migrations.py::test_older_or_newer_schema_version_is_rejected_without_modification`, `tests/test_change_history.py::test_planning_field_names_before_schema_v16_are_not_translated`.
-
-### Requirement: Legacy detail target basis
-
-Canonical backfill SHALL normalize the former FTP target basis of a preserved legacy detail record without changing the source record until it is safely retired.
-
-#### Scenario: Retired detail record is backfilled
-- **WHEN** a preserved legacy detail record has a former FTP basis
-- **THEN** canonical analysis stores the equivalent neutral basis while the source record stays unchanged until safely retired.
-
-Evidence: `backend/canonical/legacy_planning_fields.py`, `backend/sync/activity_detail_canonical.py`, `backend/sync/activity_detail_retirement.py`; `tests/test_activity_detail_canonical.py`, `tests/test_activity_detail_retirement.py`.
 
 ### Requirement: Strength set storage upgrade
 
@@ -149,16 +141,12 @@ The v21 to v22 step SHALL rebuild the detail set tables so the kind CHECK accept
 
 Evidence: `backend/db/migrations.py:_upgrade_v21_to_v22`; `tests/test_db_strength_sets_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
 
-### Requirement: Versioned data maintenance after an upgrade
+### Requirement: Session purpose marking upgrade
 
-A data maintenance step that deletes stored records without a schema change, such as the Intervals.icu ingest purge, SHALL run once per version behind a completion marker, after an encrypted recovery copy, inside one writer transaction, and SHALL be provable on a populated released v21 database upgraded to the current schema.
+The v22 to v23 step SHALL add `activity_feedback.purpose` (NULL for every existing row, checked to the five purposes training, race, commute, warmup and cooldown) and keep every other row unchanged. A v21 database SHALL reach v23 through the v22 shape in the same transaction.
 
-#### Scenario: Populated v21 database
-- **WHEN** a populated v21 database is upgraded and the purge runs, fails midway or the application restarts
-- **THEN** athlete data is re-keyed, a failure rolls back to the upgraded state without the marker, and a restart repeats nothing.
+#### Scenario: Populated release upgrade
+- **WHEN** a populated v21 or v22 database is opened by this build
+- **THEN** every feedback row and every other table survive with no marking, a marking can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
 
-#### Scenario: Dry run on a copy
-- **WHEN** the dry-run script runs on a copy of the database
-- **THEN** it upgrades and purges inside one transaction, prints counts only, rolls back, and the file's hash is unchanged.
-
-Evidence: `backend/sync/intervals_purge.py`, `scripts/intervals_purge_dry_run.py`; `tests/test_intervals_purge.py`.
+Evidence: `backend/db/migrations.py:_upgrade_v22_to_v23`; `tests/test_db_feedback_purpose_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.

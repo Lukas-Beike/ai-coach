@@ -104,6 +104,12 @@ def stored_credentials(raw: str | None) -> dict[str, str]:
     }
 
 
+def stored_visible_settings(raw: str | None) -> dict[str, str]:
+    """The stored non-secret credential fields, safe to export."""
+    stored = stored_credentials(raw)
+    return {field: stored[field] for field in sorted(VISIBLE_FIELDS & stored.keys())}
+
+
 def _with_values(config: Config, values: Mapping[str, Any]) -> Config:
     # dataclasses.replace is typed as returning the generic dataclass protocol.
     return cast(Config, dataclasses.replace(config, **values))
@@ -224,16 +230,6 @@ def _validated_change(field: str, value: object) -> str | None:
     return text
 
 
-def _intervals_data_exists(db: Any) -> bool:
-    provider = ProviderId.INTERVALS.value
-    return any(
-        db.execute(
-            f"SELECT 1 FROM {table} WHERE provider = ? LIMIT 1", (provider,)
-        ).fetchone()
-        for table in ("provider_records", "provider_sync_cursors")
-    )
-
-
 def validated_changes(values: object) -> dict[str, str | None]:
     """Validate a whole submission before anything is written."""
     if not isinstance(values, dict):
@@ -336,12 +332,6 @@ class ProviderCredentialService:
                 self._apply_config(effective)
         return effective
 
-    def _athlete_id(self, stored: Mapping[str, str]) -> str:
-        value = (
-            stored.get("intervals_athlete_id") or self._env_config.intervals_athlete_id
-        )
-        return str(value or "").strip()
-
     def _reset_replaced_personal_key(
         self, db: Any, current: dict[str, str], changes: Mapping[str, str | None]
     ) -> None:
@@ -360,26 +350,12 @@ class ProviderCredentialService:
                 current = stored_credentials(
                     self._key_values.get(db, PROVIDER_CREDENTIALS_KEY)
                 )
-                previous_athlete = self._athlete_id(current)
                 self._reset_replaced_personal_key(db, current, changes)
                 for field, value in changes.items():
                     if value is None:
                         current.pop(field, None)
                     else:
                         current[field] = value
-                # Records and cursors are not scoped by athlete; syncing another
-                # athlete into them would mix both histories.
-                if (
-                    previous_athlete
-                    and self._athlete_id(current) != previous_athlete
-                    and _intervals_data_exists(db)
-                ):
-                    raise AppError(
-                        409,
-                        "Die Intervals.icu-Athlete-ID kann nicht geändert werden, "
-                        "solange Intervals.icu-Daten gespeichert sind. Lösche "
-                        "zuerst die lokalen Daten unter Datenschutz.",
-                    )
                 if current:
                     self._key_values.set(
                         db,
