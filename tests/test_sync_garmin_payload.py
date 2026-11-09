@@ -402,6 +402,32 @@ class GarminPayloadServiceTests(unittest.TestCase):
         )
         self.assertEqual(self.service.automatic_sync_window(2), (2, None))
 
+    def test_backfill_without_recovery_reads_keeps_lagging_sources_in_the_window(
+        self,
+    ):
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(self.sdk_payload("2026-06-21", "2026-09-12"))
+        )
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.sdk_payload("2026-09-12", "2026-09-20", failed="daily_stats")
+            )
+        )
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                {
+                    "start": "2026-01-01",
+                    "end": "2026-03-31",
+                    "synced_at": "2026-09-20T13:00:00",
+                    "activities": [],
+                    "provider_sync": {
+                        "pagination": {"activities": {"complete": True}}
+                    },
+                }
+            )
+        )
+        self.assertEqual(self.service.automatic_sync_window(2), (9, None))
+
     def test_long_outage_is_bounded_and_disjoint_windows_are_not_called_continuous(
         self,
     ):
