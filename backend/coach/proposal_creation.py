@@ -256,13 +256,15 @@ class CoachProposalCreationService:
             )
             preview_values.update(calculation)
             payload["arguments"]["_food_calculation"] = calculation
-        elif set(values) & {"kcal", "carbs_g", "protein_g", "fat_g"}:
-            if self._nutrition_meal_library_service is not None:
-                preview_values.update(
-                    self._nutrition_meal_library_service().prepare_values(
-                        preview_values
-                    )
+        elif (
+            set(values) & {"kcal", "carbs_g", "protein_g", "fat_g"}
+            and self._nutrition_meal_library_service is not None
+        ):
+            preview_values.update(
+                self._nutrition_meal_library_service().prepare_values(
+                    preview_values
                 )
+            )
 
     @staticmethod
     def _local_write_preview_diff(preview_values: dict[str, Any]) -> dict[str, str]:

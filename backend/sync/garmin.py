@@ -828,9 +828,10 @@ class GarminSyncStateService:
                     {"count": count, "at": self._utc_now()}, separators=(",", ":")
                 ),
             )
-        elif any(source in payload for source in SDK_THRESHOLD_SOURCES):
-            if self._get(SDK_THRESHOLD_FAILURES_KEY):
-                self._set(SDK_THRESHOLD_FAILURES_KEY, "")
+        elif any(source in payload for source in SDK_THRESHOLD_SOURCES) and self._get(
+            SDK_THRESHOLD_FAILURES_KEY
+        ):
+            self._set(SDK_THRESHOLD_FAILURES_KEY, "")
 
     def error_entries(self) -> list[dict[str, Any]]:
         try:
