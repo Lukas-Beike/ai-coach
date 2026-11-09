@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from typing import Any
 
+from backend.activities.hr_cap_export import capped_description
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
@@ -60,7 +61,11 @@ class WahooWorkoutExport:
         if not local_id:
             raise WahooPlanMappingError("Die Einheit hat keine lokale ID.")
         sport, environment = planned_sport_environment(workout)
-        description = str(workout.get("description") or "")
+        # The cap goes to Wahoo as percent of the threshold HR; the plan header carries
+        # the reference Pacecraft resolves from the current thresholds.
+        description = capped_description(
+            str(workout.get("description") or ""), workout, percent_basis=True
+        )
         try:
             steps = structured_steps(description, str(workout.get("target") or "AUTO"))
         except WorkoutTextError as exc:

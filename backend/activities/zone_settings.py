@@ -137,7 +137,8 @@ class ZoneSettings:
             chosen, ZoneConfigurationMetric.PACE, sport, indoor=indoor, day=day
         )
         ftp = _threshold(power, base.ftp, "threshold")
-        lthr = _threshold(heart_rate, base.lthr, "threshold")
+        # The watch's own lactate threshold HR (dated Garmin set) leads for heart rate.
+        lthr = _threshold(heart_rate, base.lthr, "threshold", watch_first=True)
         threshold_pace = base.threshold_pace
         # Limits are percent of the threshold the settings carry, so the zone of
         # a measured value is the one the provider reported in absolute terms.
@@ -184,11 +185,19 @@ class ZoneSettings:
 
 
 def _threshold(
-    configuration: ZoneConfiguration | None, fallback: float | None, field: str
+    configuration: ZoneConfiguration | None,
+    fallback: float | None,
+    field: str,
+    *,
+    watch_first: bool = False,
 ) -> float | None:
-    """A local configuration's value, else the fallback, else a provider's value.
+    """A local configuration's value, Garmin's dated zone-set threshold, else the fallback.
 
-    An Intervals.icu configuration gives its limits only, never a threshold.
+    The watch's own lactate threshold HR (``lactateThresholdHeartRateUsed`` of the
+    dated Garmin zone set valid on the day) leads the source-policy ``fallback``,
+    so the watch's automatic updates apply; another provider's value only fills a
+    gap the fallback leaves. An Intervals.icu configuration gives its limits
+    only, never a threshold.
     """
     if (
         configuration is None
@@ -196,11 +205,11 @@ def _threshold(
     ):
         return fallback
     value: float | None = getattr(configuration, field)
-    first, second = (
-        (value, fallback)
-        if configuration.provenance.provider is None
-        else (fallback, value)
-    )
+    provider = configuration.provenance.provider
+    if provider is None or (provider is ProviderId.GARMIN and watch_first):
+        first, second = (value, fallback)
+    else:
+        first, second = (fallback, value)
     return first if first is not None else second
 
 

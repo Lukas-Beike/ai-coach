@@ -11,6 +11,10 @@ from typing import Any
 
 from backend.athlete import weekly_plan
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.first_threshold import (
+    FIRST_THRESHOLD_FIELD,
+    first_threshold_percent,
+)
 from backend.canonical.stored_sports import resolve_competition_sport
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
@@ -407,11 +411,11 @@ class PlanGuardService:
         thresholds: Callable[[], LoadThresholds | None] = lambda: None,
         expects_strength: Callable[[], bool] = lambda: False,
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
-        weekly_plan_text: Callable[[], str] = lambda: "",
+        profile: Callable[[], Mapping[str, Any]] = dict,
         history: BriefHistory | None = None,
     ) -> None:
         self._history = history or BriefHistory()
-        self._weekly_plan = weekly_plan_text
+        self._profile = profile
         self._planned_units = planned_units
         self._completed = completed_activities
         self._competitions = competitions
@@ -466,7 +470,14 @@ class PlanGuardService:
             ),
             *plan_checks.strength_incomplete(units),
             *plan_checks.focus_missing(units),
+            *plan_checks.hr_cap_invalid(
+                units,
+                first_threshold_percent(self._profile().get(FIRST_THRESHOLD_FIELD)),
+            ),
         ]
+
+    def _weekly_plan(self) -> str:
+        return str(self._profile().get("weekly_plan") or "")
 
     def _reported_illness(self) -> str:
         """One snapshot per service: check-ins a write creates itself do not count."""

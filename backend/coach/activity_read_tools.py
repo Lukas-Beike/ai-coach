@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 
+from backend.activities.hr_cap import stored_cap
 from backend.activities.session_purpose import summary_is_not_training
 from backend.activities.strength_sets import plan_comparison
 from backend.activities.workout_text import WorkoutTextError, structured_steps
@@ -25,7 +26,10 @@ from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.comparable_sessions import comparable_sessions
 from backend.performance.pace_at_hr import COMPARE_DAYS, session_comparison
-from backend.performance.planned_targets import planned_target_execution
+from backend.performance.planned_targets import (
+    heart_rate_cap_execution,
+    planned_target_execution,
+)
 from backend.performance.report_service import PROFILE_WINDOW_DAYS
 from backend.planning import leg_strength
 from backend.planning.sport import planned_sport_environment
@@ -231,6 +235,14 @@ class CoachActivityReadToolService:
             targets = self._planned_targets(
                 detail, session, result.get("focus"), around
             )
+            cap = self._stored_heart_rate_cap(
+                detail, session, result.get("focus"), around
+            )
+            if cap is not None:
+                targets = {
+                    **(targets or {"status": "not_covered"}),
+                    "heart_rate_cap": cap,
+                }
             if targets is not None:
                 result["planned_targets"] = targets
             strength = _strength_plan(detail, session, result.get("focus"), around)
@@ -299,6 +311,27 @@ class CoachActivityReadToolService:
             return self._report_services.profiles.curve_records()
         except RuntimeError:
             return None
+
+    def _stored_heart_rate_cap(
+        self,
+        detail: dict[str, Any],
+        session: dict[str, Any],
+        focus: Any,
+        around: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        """The run's heart rate against the matched unit's stored cap, if it has one.
+
+        The cap is stored in percent; the threshold HR in effect on the unit's
+        date resolves it to bpm.
+        """
+        if session.get("sport") != "run" or self._unit_thresholds is None:
+            return None
+        unit = _matched_unit(session, focus, around)
+        cap = None if unit is None else stored_cap(unit)
+        if unit is None or cap is None:
+            return None
+        lthr = self._unit_thresholds.thresholds(unit).zones.lthr
+        return heart_rate_cap_execution(cap, lthr, detail.get("streams"))
 
     def _planned_targets(
         self,

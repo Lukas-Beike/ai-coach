@@ -37,6 +37,11 @@ class PlanningRuntime:
     local_date: Callable[[], Any]
     uuid_factory: Callable[[], Any]
     redact: Callable[[str], str]
+    # Local ids of synced capped run units whose exported bpm range moved with
+    # the threshold HR (see hr_cap_sync); evaluated on the caller's reader.
+    hr_cap_resync: Callable[[Any, list[dict[str, Any]]], set[str]] = (
+        lambda _db, _payloads: set()
+    )
 
 
 @dataclass(frozen=True)
@@ -73,6 +78,7 @@ class PlanningDataAssembly:
         self._local_date = runtime.local_date
         self._uuid_factory = runtime.uuid_factory
         self._redact = runtime.redact
+        self._hr_cap_resync = runtime.hr_cap_resync
         self._calendar_conflict_service = mutations.calendar_conflict_service
         self._publish_change = mutations.publish_change
         self._plan_adjustment_repository = repositories.plan_adjustments
@@ -102,6 +108,7 @@ class PlanningDataAssembly:
             self._redact,
             self._calendar_conflict_service(),
             self._publish_change,
+            self._hr_cap_resync,
         )
 
     def workout_library(self) -> WorkoutLibraryService:

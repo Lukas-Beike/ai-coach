@@ -128,17 +128,22 @@ def attach_push_state(
     pairs: Iterable[tuple[Any, dict[str, Any]]],
     baselines: dict[str, str | None],
     remembered: Mapping[str, GarminExercise] | None = None,
+    resync: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     """Add ``payload_hash``, ``push_pending`` and ``push_blocked`` to each pair.
 
-    ``push_blocked`` names why a strength unit cannot reach Garmin, so the
+    ``resync`` holds the local ids of synced units whose exported heart-rate range
+    moved only with the threshold HR. ``push_blocked`` names why a strength unit cannot reach Garmin, so the
     calendar says so instead of offering only Intervals.icu silently.
     """
     for row, payload in pairs:
         digest = library_payload_hash(row["payload"])
+        # A synced run unit whose heart-rate range moved with the threshold HR
+        # (the bpm path of the cap export) is changed too.
         pending: dict[str, bool] = {
             ProviderId.INTERVALS.value: str(row["sync_state"] or "local")
             in _INTERVALS_PENDING
+            or str(row["local_id"]) in resync
         }
         # A unit in a sync conflict needs the athlete's decision first; no
         # provider is offered, so the conflicted version never reaches the watch.

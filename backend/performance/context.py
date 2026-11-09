@@ -6,6 +6,10 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 from backend.canonical.activity_summary import summary_local_date
+from backend.canonical.first_threshold import (
+    FIRST_THRESHOLD_FIELD,
+    first_threshold_percent,
+)
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import comparisons as performance_comparisons
 from backend.performance import current_metrics as performance_current_metrics
@@ -241,7 +245,9 @@ def current_performance_context(
         **_sync_status(canonical),
         "metrics": metrics,
         "thresholds": {
-            **performance_current_metrics.coach_thresholds(metrics),
+            **performance_current_metrics.coach_thresholds(
+                metrics, first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD))
+            ),
             "weight": metrics["weight_kg"]["value"],
         },
         "current_load": load,

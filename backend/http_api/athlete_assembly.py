@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
@@ -48,6 +49,9 @@ class AthleteRuntime:
     thresholds_changed: Callable[[], None] = lambda: None
     # The stale-threshold and Garmin SDK warning shown with the zones (#1768).
     threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None
+    # The run threshold HR in effect on a date (None = today), for the measured
+    # first threshold the athlete enters in bpm; None when no threshold is known.
+    run_lthr_on: Callable[[date | None], float | None] = lambda _day: None
 
 
 class AthleteDataAssembly:
@@ -86,6 +90,7 @@ class AthleteDataAssembly:
         self._load_inputs_changed = runtime.load_inputs_changed
         self._thresholds_changed = runtime.thresholds_changed
         self._threshold_warnings = runtime.threshold_warnings
+        self._run_lthr_on = runtime.run_lthr_on
 
     def activity_summaries(self) -> tuple[ActivitySummary, ...]:
         with self._database_manager().unit_of_work() as db:
@@ -145,6 +150,7 @@ class AthleteDataAssembly:
             self._key_value_repository,
             on_location_changed=self._profile_changed,
             mutation_coordinator=self._profile_mutation_coordinator,
+            run_lthr_on=self._run_lthr_on,
         )
 
     def _profile_changed(

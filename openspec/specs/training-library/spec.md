@@ -365,7 +365,7 @@ Planned units and library templates SHALL carry an optional local session focus,
 
 #### Scenario: Export
 - **WHEN** a unit with a focus is exported to Intervals.icu
-- **THEN** the event payload is unchanged; the focus stays local.
+- **THEN** the event payload is unchanged; the focus stays local (a run unit's `hr_cap` is the exception, see the heart-rate cap requirement).
 
 #### Scenario: Required focus
 - **WHEN** a Coach write creates, moves or changes a run or ride unit without a focus
@@ -377,6 +377,43 @@ Planned units and library templates SHALL carry an optional local session focus,
 - **AND** the changes are recorded in the change history and in the step's state (counts and change references only, reported by diagnostics), and `POST /api/change-history/undo-focus-backfill` restores all of them in one transaction, or none when a unit was edited since; a second run changes nothing.
 
 Evidence: `backend/planning/session_focus.py`, `backend/sync/session_focus_backfill.py`; `tests/test_session_focus.py`, `tests/test_session_focus_backfill.py`, `e2e/session-focus.spec.js`.
+
+### Requirement: Heart-rate caps of easy run units
+A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap.py`) SHALL carry a local `hr_cap` of percentages only (cap, exported lower bound, source). Bpm SHALL be resolved from the threshold HR on the unit's date wherever it is read, checked or exported, and never stored. A Coach write with a wrong cap SHALL be blocked by the plan check `hr_cap_invalid`; planned units are never rewritten.
+
+#### Scenario: Threshold source
+- **WHEN** a bpm is needed
+- **THEN** it is resolved from the run threshold HR in effect on the unit's date (local zones, then the dated Garmin watch zone set, then the other resolved thresholds); when none is known only the percent is shown, nothing is estimated, and the plan check does not depend on it.
+
+#### Scenario: Missing, too high or mismatched cap
+- **WHEN** the Coach writes a capped run unit without `hr_cap`, with a percent above the effective cap, or with a lower bound or source that does not belong to it
+- **THEN** the write fails with `hr_cap_invalid` naming the correct percentages and source, and nothing is saved.
+
+#### Scenario: Threshold change
+- **WHEN** the watch's threshold HR changes between two dated Garmin zone sets
+- **THEN** the stored percentages stay, the card, the Coach context, the analysis and the exports resolve the new bpm, and no unit is edited.
+
+#### Scenario: Measured first threshold
+- **WHEN** the athlete enters a measured first-threshold heart rate in bpm (profile form or API, never by the Coach)
+- **THEN** it is stored as percent of the run threshold HR in effect on the measurement date (`first_threshold_pct`), the easy and long cap becomes that percent minus a fixed margin and the recovery cap the lower of its default and the easy cap minus a fixed gap (constants in `backend/activities/hr_cap.py`), the cap source is `measured`, and a cap with another source than the current one is rejected like a wrong value.
+
+#### Scenario: Export to Wahoo
+- **WHEN** a run unit with a cap becomes a Wahoo plan
+- **THEN** every step with a heart-rate target, warm-up and cool-down included, is one wide range from the lower bound to the cap in percent of the threshold HR (`% LTHR`), resolved by the plan header's `threshold_hr`, which Pacecraft supplies from the current thresholds; a moved threshold changes the exported plan, so the existing push state shows the unit as changed.
+
+#### Scenario: Export to Garmin
+- **WHEN** a run unit with a cap is sent through the Intervals.icu calendar
+- **THEN** every heart-rate step, warm-up and cool-down included, is written as one wide `low-highbpm` range resolved at export time (no zone number, no narrow band, no percent: a Garmin workout step cannot hold a percent of the lactate threshold HR, and Intervals.icu would resolve a percent with its own, possibly stale, threshold); steps with a pace or power target keep theirs; the stored text stays as written; without a known threshold HR the text is sent unchanged.
+
+#### Scenario: Changed flag
+- **WHEN** only the threshold HR moved after a unit was synced
+- **THEN** the unit counts as changed (its resolved range differs from the one sent) and the calendar sync button offers it again; nothing is sent without that explicit sync.
+
+#### Scenario: Card and analysis
+- **WHEN** a unit has a cap
+- **THEN** its card shows the percent first, then the currently resolved bpm and the source (the form "≤ <percent> % LSHF · <bpm> bpm · <source>"), and the post-session analysis judges the run's heart rate against the stored cap resolved for the unit's date (`planned_targets.heart_rate_cap`: mean, time above the cap, verdict within_target, upper_edge or above_cap), not against the zones.
+
+Evidence: `backend/activities/hr_cap.py`, `backend/activities/hr_cap_export.py:capped_description`, `backend/planning/run_hr_cap.py`, `backend/planning/plan_checks.py:hr_cap_invalid`, `backend/planning/hr_cap_sync.py`, `backend/planning/push_state.py:attach_push_state`, `backend/athlete/profile.py:ProfileService`, `backend/performance/planned_targets.py:heart_rate_cap_execution`, `public/plan-views.js:hrCapChipSpec`; `tests/test_run_hr_cap.py`, `tests/test_hr_cap_export.py`, `tests/plan-views-hr-cap.test.cjs`.
 
 ### Requirement: Structured strength units
 Strength units and templates SHALL carry an optional local `strength_structure` (at most 12 exercises with name, sets, reps, optional kg, %1RM, RPE or RIR (one relative load), rest, up to 5 warm-up sets with reps and optional kg, a short note and an optional Garmin catalogue exercise) in the payload, validated server-side with `invalid_strength_structure`; free text stays the fallback for units that have none.

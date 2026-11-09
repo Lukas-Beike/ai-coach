@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+from backend.activities.hr_cap_export import capped_description
 from backend.canonical.planned_workout import PlannedWorkoutExport
 from backend.canonical.stored_sports import WORKOUT_SPORT_TOKENS, StoredSport
 from backend.errors import AppError
@@ -19,9 +20,13 @@ WORKOUT_TARGET_TYPES = frozenset({"AUTO", "POWER", "HR", "PACE"})
 
 
 def build_planned_workout_export(
-    workout: dict[str, Any], *, today: date
+    workout: dict[str, Any], *, today: date, run_lthr: float | None = None
 ) -> PlannedWorkoutExport:
-    """Validate one planned unit and derive its provider-neutral export values."""
+    """Validate one planned unit and derive its provider-neutral export values.
+
+    ``run_lthr`` is the run threshold HR in effect on the unit's date; it resolves
+    a stored heart-rate cap (percent) to the bpm range the Garmin watch needs.
+    """
     structured_seconds = validate_workout_description(workout)
     try:
         workout_date = date.fromisoformat(str(workout["date"]))
@@ -45,7 +50,9 @@ def build_planned_workout_export(
         environment=stored.environment,
         sport_token=_export_sport_token(workout, stored),
         name=str(workout.get("name") or "Coach workout")[:200],
-        description=str(workout.get("description") or "")[:12000],
+        description=capped_description(
+            str(workout.get("description") or "")[:12000], workout, lthr=run_lthr
+        ),
         duration_seconds=round(structured_seconds)
         if structured_seconds is not None
         else duration * 60,

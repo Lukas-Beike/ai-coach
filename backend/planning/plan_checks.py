@@ -48,7 +48,7 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.planning_fields import STRENGTH_STRUCTURE
+from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.planning import (
@@ -56,6 +56,7 @@ from backend.planning import (
     free_allocation,
     leg_strength,
     load_checks,
+    run_hr_cap,
     strength_structure,
     weekly_plan_checks,
 )
@@ -79,6 +80,7 @@ FINDING_CODES = (
     "illness_hard",
     "strength_incomplete",
     "focus_missing",
+    "hr_cap_invalid",
     "intensity_distribution",
     leg_strength.BEFORE_KEY,
     leg_strength.FREQUENCY,
@@ -92,9 +94,10 @@ FINDING_CODES = (
 BLOCKING_CODES = ("illness_hard",)
 # Data the Coach must write, not a training rule: a strength unit it creates,
 # moves or changes needs its structure, focus and intensity, any other unit with
-# a focus vocabulary (run, ride) its focus. It blocks like the health rule but
-# can never be accepted, so it is not in BLOCKING_CODES.
-REQUIRED_CODES = ("strength_incomplete", "focus_missing")
+# a focus vocabulary (run, ride) its focus, and a capped run unit its heart-rate
+# cap. It blocks like the health rule but can never be accepted, so it is not in
+# BLOCKING_CODES.
+REQUIRED_CODES = ("strength_incomplete", "focus_missing", "hr_cap_invalid")
 EVIDENCE = {
     "run_spike": "observational, moderate (Frandsen 2025)",
     "load_spike": load_checks.LOAD_EVIDENCE,
@@ -106,6 +109,7 @@ EVIDENCE = {
     "illness_hard": "medical caution",
     "strength_incomplete": "data completeness for the watch and the plan checks",
     "focus_missing": "data completeness for the plan checks and the calendar",
+    "hr_cap_invalid": "data completeness for the watch and the analysis; the caps are the athlete's decision",
     "intensity_distribution": "practice-based reference ranges; pyramidal/polarized after Seiler 2010, Stoeggl & Sperlich 2014",
     leg_strength.BEFORE_KEY: "limited, residual fatigue after lower-body resistance training (Doma et al.)",
     leg_strength.FREQUENCY: "Ronnestad & Mujika 2014, Blagrove 2018 (2x/week build, 1x/week maintenance); thresholds practice-based",
@@ -124,6 +128,7 @@ _RULE_TEXT = {
     "illness_hard": "hard or 90+ minute session within 3 days of a reported illness.",
     "strength_incomplete": "a strength unit the Coach created, moved or changed without strength_structure, session_focus and strength_intensity.",
     "focus_missing": "a run or ride unit the Coach created, moved or changed without session_focus.",
+    "hr_cap_invalid": "a recovery, easy or long run unit the Coach created or changed without a heart-rate cap (percentages and source) within the effective cap.",
     "intensity_distribution": "planned low/moderate/high time of a week clearly outside the training model's reference range (unknown time is uncovered, strength excluded).",
     leg_strength.BEFORE_KEY: "moderate or heavy leg strength less than about 24 h before a hard run or ride or the week's long one.",
     leg_strength.FREQUENCY: "more than 3 leg strength sessions or more than 2 heavy ones in a week, or none in a plan of 2+ weeks when strength is expected.",
@@ -417,6 +422,16 @@ def _illness_hard(
     ]
 
 
+_HR_CAP_CONTENT = (
+    "name",
+    "description",
+    "date",
+    "starts_at_local",
+    "duration_minutes",
+    "planned_duration_s",
+    FOCUS_KEY,
+    HR_CAP,
+)
 _STRENGTH_CONTENT = (
     "name",
     "description",
@@ -453,6 +468,33 @@ def _content_digest(unit: Mapping[str, Any], keys: Sequence[str]) -> str:
         default=str,
     )
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+
+def hr_cap_invalid(
+    units: Sequence[Mapping[str, Any]], first_threshold_pct: float | None = None
+) -> list[dict]:
+    """One finding per capped run unit with a missing or wrong cap, keyed by content.
+
+    Only Coach writes run it (``PlanGuardService``). The content fingerprint
+    makes a write that creates, moves or edits the unit a new finding, so an
+    untouched older unit
+    never blocks an unrelated write and is never rewritten silently.
+    """
+    findings = []
+    for unit, problem in run_hr_cap.problems(units, first_threshold_pct):
+        findings.append(
+            _finding(
+                "hr_cap_invalid",
+                [unit],
+                run_hr_cap.message(problem),
+                {
+                    "name": str(unit.get("name") or ""),
+                    **problem,
+                    "content": _content_digest(unit, _HR_CAP_CONTENT),
+                },
+            )
+        )
+    return findings
 
 
 def strength_incomplete(units: Sequence[Mapping[str, Any]]) -> list[dict]:
@@ -684,7 +726,7 @@ def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
     if finding["code"] == "weekly_load_rise":
         evidence = finding["evidence"]
         return (finding["code"], evidence["sport"], evidence["week_start"])
-    if finding["code"] in {"strength_incomplete", "focus_missing"}:
+    if finding["code"] in {"strength_incomplete", "focus_missing", "hr_cap_invalid"}:
         evidence = finding["evidence"]
         return (finding["code"], tuple(finding["local_ids"]), evidence["content"])
     if finding["code"] == "load_unknown":

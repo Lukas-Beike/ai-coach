@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 import server_test_support as fixtures
 from support import isolated_server, reset_application_state
 
+from backend.activities.hr_cap import effective_caps
 from backend.coach import service as coach_service
 from backend.coach import streams as coach_streams
 from backend.coach import structured_tool_round
@@ -83,6 +84,8 @@ class DialogueHarness:
             workout["strength_intensity"] = "moderate"
         elif sport in {"Run", "Ride"}:
             workout["session_focus"] = "easy"
+            if sport == "Run":
+                workout["hr_cap"] = effective_caps(None)["easy"]
         return workout
 
     def request(
