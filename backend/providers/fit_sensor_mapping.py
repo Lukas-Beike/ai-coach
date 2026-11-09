@@ -1,18 +1,21 @@
 """Sensor sources of a FIT activity file, read from its device information.
 
 Message 23 (``device_info``) lists the recording device and every sensor it
-paired with: device_index (0), device_type (1, the ANT+ device type), manufacturer
-(2), serial_number (3), product (4) and source_type (25: 1 antplus, 2 ant, 3
-bluetooth, 4 bluetooth_low_energy, 5 local). A strap paired to a watch appears
+paired with: device_index (0), device_type (1), manufacturer (2), serial_number
+(3), product (4) and source_type (25: 1 antplus, 2 ant, 3 bluetooth, 4
+bluetooth_low_energy, 5 local). The device type is the ANT+ device type, except
+for a Bluetooth LE sensor, where it is the FIT ``ble_device_type`` (2 heart rate,
+3 power meter). A strap paired to a watch appears
 here as its own external device, which the activity summary does not show.
 
 Classification, a documented heuristic rather than a vendor guarantee:
 
-* heart rate: an external device of ANT+ type 120 is a ``chest_strap``; without
+* heart rate: an external heart rate device (ANT+ type 120, BLE type 2) is a
+  ``chest_strap``; without
   one, a Garmin file that lists its devices and has heart rate records names the
   recording device's own ``optical`` sensor; anything else is ``unknown``;
-* power: an external type 11 device is a ``power_meter``, type 17 (fitness
-  equipment) a ``trainer``; power records with devices listed but no such sensor
+* power: an external power device (ANT+ type 11, BLE type 3) is a
+  ``power_meter``, ANT+ type 17 (fitness equipment) a ``trainer``; power records with devices listed but no such sensor
   from Garmin are ``estimated`` (a watch's running power); anything else is
   ``unknown``.
 
@@ -45,6 +48,13 @@ _SOURCE_TYPE_FIELD: Final = 25
 _ANTPLUS_HEART_RATE: Final = 120
 _ANTPLUS_BIKE_POWER: Final = 11
 _ANTPLUS_FITNESS_EQUIPMENT: Final = 17
+_BLE: Final = 4
+_BLE_HEART_RATE: Final = 2
+_BLE_POWER: Final = 3
+_BLE_ROLES: Final[Mapping[int, SensorRole]] = {
+    _BLE_HEART_RATE: SensorRole.HEART_RATE,
+    _BLE_POWER: SensorRole.POWER_METER,
+}
 _ROLES: Final[Mapping[int, SensorRole]] = {
     _ANTPLUS_HEART_RATE: SensorRole.HEART_RATE,
     _ANTPLUS_BIKE_POWER: SensorRole.POWER_METER,
@@ -63,7 +73,7 @@ _LOCAL: Final = "local"
 def sensor_profile(
     messages: list[FitMessage],
     *,
-    provider: ProviderId,
+    provider: ProviderId | None,
     has_heart_rate: bool,
     has_power: bool,
 ) -> tuple[HeartRateSource | None, PowerSource | None, tuple[ActivitySensor, ...]]:
@@ -76,7 +86,8 @@ def sensor_profile(
     strap = meter = trainer = False
     for fields in devices:
         device_type = _whole(fields.get(_DEVICE_TYPE_FIELD))
-        role = None if device_type is None else _ROLES.get(device_type)
+        roles = _BLE_ROLES if _whole(fields.get(_SOURCE_TYPE_FIELD)) == _BLE else _ROLES
+        role = None if device_type is None else roles.get(device_type)
         if role is None or not _external(fields):
             continue
         strap = strap or role is SensorRole.HEART_RATE

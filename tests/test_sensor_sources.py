@@ -234,6 +234,15 @@ class StoreTests(StoreCase):
         self.assertIsNone(by_role["heart_rate"]["equipment_id"])
         self.assertEqual(power["id"], meter.key[:16])
 
+    def test_an_unreadable_sensor_list_does_not_hide_the_streams(self):
+        self.add("act_s1", "g1", "2026-11-01T07:00:00+00:00")
+        self.store(stream_set(sensors=[sensor(SensorRole.HEART_RATE, "a")]))
+        self.db.execute("UPDATE activity_detail_sets SET sensors = '[{\"role\":1}]'")
+        (stored,) = detail_sets_for(self.db, "garmin", "g1")
+        self.assertEqual(stored.detail.sensors, ())
+        self.assertIs(stored.detail.hr_source, HeartRateSource.CHEST_STRAP)
+        self.assertEqual(activity_detail_store.sensor_uses(self.db), [])
+
     def test_deleted_sessions_leave_the_registry(self):
         self.add("act_s1", "g1", "2026-11-01T07:00:00+00:00", state="deleted")
         self.store(stream_set(sensors=[sensor(SensorRole.HEART_RATE, "a")]))
@@ -285,6 +294,18 @@ class PowerMeterChangeTests(unittest.TestCase):
         (change,) = sensor_registry.power_meter_changes(uses)
         self.assertEqual(change["date"], "2026-11-01")
         self.assertEqual(len(change["sensor_ids"]), 2)
+
+    def test_alternating_between_two_metered_bikes_is_no_change(self):
+        uses = [
+            self.use("act_s1", "2026-09-01", "ride", "a"),
+            self.use("act_s2", "2026-09-05", "ride", "b"),
+            self.use("act_s3", "2026-09-10", "ride", "a"),
+            self.use("act_s4", "2026-09-15", "ride", "b"),
+            self.use("act_s5", "2026-10-15", "ride", "c"),
+        ]
+        # Only the first ride on each new meter is marked, not every switch back.
+        changes = sensor_registry.power_meter_changes(uses)
+        self.assertEqual([c["date"] for c in changes], ["2026-10-15", "2026-09-05"])
 
     def test_changes_since_filters_by_sport_and_day(self):
         changes = [

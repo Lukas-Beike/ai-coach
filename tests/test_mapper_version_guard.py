@@ -56,11 +56,11 @@ NOT_REPLAYED: Final[dict[str, str]] = {
 PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     "fit_activity_detail_mapping": (
         (5, 6),
-        "411ac89c8072cf3fba71932c7ffee58c1fb5ead234bb4d09be68b32328be7c57",
+        "8f61a5149cb2a3de3eb218315550fe95e602d6a2fd2c4ebb0232a6599c98f6dc",
     ),
     "fit_sensor_mapping": (
         (5, 6),
-        "e279b5357d8c9bb5af3414a8741473a020a7619f20f9de25b0a16ef5cebbeb45",
+        "2953aba79c668bb9ef9561fe5f80cea406b399d609301730fc8e79e95ef3626f",
     ),
     "garmin_activity_detail_mapping": (
         (6,),

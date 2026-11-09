@@ -1355,14 +1355,14 @@ Not mapped: the session (18), activity and file messages, developer fields (skip
 Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (5) and by `garmin_activity_detail_mapping.py` version 6.
 Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 5 and `garmin_activity_detail_mapping.py` v 6.
 Inputs: the decoded FIT messages and the provenance provider; device information is message 23 (`device_index` 0, `device_type` 1, `manufacturer` 2, `serial_number` 3, `product` 4, `source_type` 25).
-Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_sensor_mapping.py`). Whether Garmin and Wahoo files list a strap paired to a watch this way, and the Bluetooth device type numbers, are unverified on real files.
+Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_sensor_mapping.py`). Whether Garmin and Wahoo files list a strap paired to a watch this way, and the Bluetooth LE device type numbers (2 heart rate, 3 power meter from the FIT profile), are unverified on real files.
 
 Record keywords set: stream set `hr_source`, `power_source`, `sensors`; sensor `role`, `key`, `connection`, `manufacturer`, `product`.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
-| `hr_source` | external device with `device_type` 120 | `chest_strap`; else `optical` for a `garmin` provenance that lists devices, else `unknown` | `HeartRateSource.CHEST_STRAP` / `OPTICAL` / `UNKNOWN`; `None` without a heart rate channel. Heuristic, not a vendor guarantee. |
-| `power_source` | external device with `device_type` 11 or 17 | 11 `power_meter`, 17 `trainer`; else `estimated` for a Garmin file that lists devices, else `unknown` | `PowerSource.POWER_METER` / `TRAINER` / `ESTIMATED` / `UNKNOWN`; `None` without a power channel. |
+| `hr_source` | external device with `device_type` 120 (ANT+) or 2 (Bluetooth LE `ble_device_type`) | `chest_strap`; else `optical` for a `garmin` provenance that lists devices, else `unknown` | `HeartRateSource.CHEST_STRAP` / `OPTICAL` / `UNKNOWN`; `None` without a heart rate channel. Heuristic, not a vendor guarantee. |
+| `power_source` | external device with `device_type` 11 or 17 (ANT+), 3 (Bluetooth LE) | 11 or BLE 3 `power_meter`, 17 `trainer`; else `estimated` for a Garmin file that lists devices, else `unknown` | `PowerSource.POWER_METER` / `TRAINER` / `ESTIMATED` / `UNKNOWN`; `None` without a power channel. |
 | `sensors` | external devices of type 120, 11 and 17 with a serial number | `heart_rate`, `power_meter`, `trainer`; `key` is the SHA-256 of manufacturer, product and serial | A device whose `source_type` is local (5) or with `device_index` 0 is the recording device, not a sensor. A sensor without a serial number cannot be identified and is left out. |
 
 Not mapped: every other device type (cadence, speed, light and radar sensors), the device's software and battery fields, and the serial number itself.

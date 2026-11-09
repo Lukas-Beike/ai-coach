@@ -97,6 +97,25 @@ class FitSensorMappingTests(unittest.TestCase):
             [(SensorRole.HEART_RATE, "antplus", 1, 2000)],
         )
 
+    def test_bluetooth_sensors_use_the_ble_device_types(self):
+        data = fit_file(
+            [
+                device(0, 0, 1, 111, 3500, LOCAL),
+                device(1, 2, 107, SERIAL, 12, BLE),  # ble_device_type heart_rate
+                device(2, 3, 7, SERIAL + 1, 5, BLE),  # ble_device_type bike_power
+            ]
+        )
+        result = streams(data)
+        self.assertIs(result.hr_source, HeartRateSource.CHEST_STRAP)
+        self.assertIs(result.power_source, PowerSource.POWER_METER)
+        self.assertEqual(
+            sorted(s.role.value for s in result.sensors), ["heart_rate", "power_meter"]
+        )
+        # The ANT+ number 120 is not a heart rate device over Bluetooth.
+        other = streams(fit_file([device(1, 120, 1, SERIAL, 2000, BLE)]))
+        self.assertIsNot(other.hr_source, HeartRateSource.CHEST_STRAP)
+        self.assertEqual(other.sensors, ())
+
     def test_a_watch_alone_names_its_optical_heart_rate(self):
         result = streams(fit_file([device(0, 0, 1, 111, 3500, LOCAL)]))
         self.assertIs(result.hr_source, HeartRateSource.OPTICAL)
@@ -113,7 +132,7 @@ class FitSensorMappingTests(unittest.TestCase):
             fit_file(
                 [
                     device(1, 17, 32, SERIAL, 9, ANTPLUS),
-                    device(2, 11, 7, SERIAL + 1, 5, BLE),
+                    device(2, 3, 7, SERIAL + 1, 5, BLE),
                 ]
             )
         )
@@ -163,7 +182,7 @@ class FitSensorMappingTests(unittest.TestCase):
 
     def test_the_same_device_keeps_its_key_across_files(self):
         first = streams(fit_file([device(1, 11, 7, SERIAL, 5, ANTPLUS)]))
-        second = streams(fit_file([device(3, 11, 7, SERIAL, 5, BLE)]))
+        second = streams(fit_file([device(3, 3, 7, SERIAL, 5, BLE)]))
         self.assertEqual(first.sensors[0].key, second.sensors[0].key)
         other = streams(fit_file([device(1, 11, 7, SERIAL + 1, 5, ANTPLUS)]))
         self.assertNotEqual(first.sensors[0].key, other.sensors[0].key)

@@ -169,6 +169,18 @@ class SensorEquipmentTests(unittest.TestCase):
             self.assertEqual(caught.exception.status, status)
         self.assertIsNone(self.sensors()[0]["equipment_id"])
 
+    def test_a_link_to_unknown_equipment_is_not_reported(self):
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+                (
+                    f"sensor_equipment:{KEY}",
+                    json.dumps({"equipment_id": "gone"}),
+                    STAMP,
+                ),
+            )
+        self.assertIsNone(self.sensors()[0]["equipment_id"])
+
     def test_the_read_never_carries_a_serial_number(self):
         self.service.assign_sensor({"sensor_id": KEY[:16], "equipment_id": self.bike})
         self.assertNotIn(SERIAL, json.dumps(self.service.read()))

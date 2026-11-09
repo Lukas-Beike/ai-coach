@@ -348,7 +348,6 @@ def _stream_set(
         _add_channel(channels, ref, channel, degrees, issues)
     if len(channels) < 2:
         return None
-    assert provenance.provider is not None
     hr_source, power_source, sensors = sensor_profile(
         messages,
         provider=provenance.provider,

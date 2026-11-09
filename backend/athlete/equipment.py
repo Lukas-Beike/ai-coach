@@ -153,8 +153,14 @@ class EquipmentService:
                 items = [json.loads(selected["value"])]
             assignments = _effective_assignments(rows, explicit, links)
             maintenance = self._records(db, "equipment_maintenance", 1000)
+            known = {item["id"] for item in self._records(db, "equipment", None)}
             sensors = sensor_registry.registry(
-                activity_detail_store.sensor_uses(db), _sensor_assignments(db)
+                activity_detail_store.sensor_uses(db),
+                {
+                    key: equipment_id
+                    for key, equipment_id in _sensor_assignments(db).items()
+                    if equipment_id in known
+                },
             )
         for item in items:
             _update_usage(
@@ -404,7 +410,7 @@ class EquipmentService:
             equipment = json.loads(item["value"]) if item else None
             if (
                 not equipment
-                or equipment["status"] != "active"
+                or equipment.get("status") != "active"
                 or equipment.get("parent_id")
             ):
                 raise AppError(400, "Aktive Hauptausrüstung erforderlich.")

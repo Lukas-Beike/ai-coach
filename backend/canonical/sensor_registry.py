@@ -14,7 +14,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from itertools import pairwise
 from typing import Any, Final
 
 from backend.canonical.activity_detail import ActivitySensor
@@ -85,11 +84,14 @@ def registry(
 
 
 def power_meter_changes(uses: Iterable[SensorUse]) -> list[dict[str, Any]]:
-    """One marker per sport and day a recording's power meters share none with the last.
+    """One marker per sport and day a recording first uses a power meter never seen before.
 
-    Sessions without a named power meter are skipped, so a ride on another bike
-    or an indoor trainer does not end a meter's run. A replaced pair of pedals
-    shows as a change; swapping only one of two meters is not detected.
+    A change needs the recording's meters to share none with the previous
+    recording's and none with any earlier one, so alternating between two bikes
+    that each keep their meter is no change. Sessions without a named power meter
+    are skipped, so a ride on another bike or an indoor trainer does not end a
+    meter's run. A replaced pair of pedals shows as a change; swapping only one
+    of two meters is not detected.
     """
     by_sport: dict[str, list[tuple[datetime, frozenset[str]]]] = {}
     for use in uses:
@@ -103,8 +105,11 @@ def power_meter_changes(uses: Iterable[SensorUse]) -> list[dict[str, Any]]:
     changes: list[dict[str, Any]] = []
     for sport, sessions in by_sport.items():
         sessions.sort(key=lambda item: item[0])
-        for (_, before), (started_at, after) in pairwise(sessions):
-            if before.isdisjoint(after):
+        seen = set(sessions[0][1])
+        for started_at, after in (item for item in sessions[1:]):
+            new = after.isdisjoint(seen)
+            seen |= after
+            if new:
                 changes.append(
                     {
                         "sport": sport,

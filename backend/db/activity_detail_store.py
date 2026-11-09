@@ -720,10 +720,10 @@ def sensor_uses(db: Any) -> list[SensorUse]:
             ActivitySessionState.DELETED.value,
         ),
     ).fetchall():
+        sensors = stored_sensors(row["sensors"])
         try:
-            sensors = _stored_sensors(row["sensors"])
             started_at = datetime.fromisoformat(row["started_at"])
-        except TypeError, ValueError, KeyError, AttributeError:
+        except TypeError, ValueError:
             continue
         if sensors:
             uses.append(SensorUse(row["session_id"], row["sport"], started_at, sensors))
@@ -951,6 +951,14 @@ def _stored_sensors(text: object) -> tuple[ActivitySensor, ...]:
     )
 
 
+def stored_sensors(text: object) -> tuple[ActivitySensor, ...]:
+    """Decode a stored sensor list; an unreadable list yields no sensors."""
+    try:
+        return _stored_sensors(text)
+    except TypeError, ValueError, KeyError, AttributeError:
+        return ()
+
+
 def _child_rows(detail: ActivityDetailSet) -> list[tuple[object, ...]]:
     if isinstance(detail, ActivityStreamSet):
         rows: list[tuple[object, ...]] = []
@@ -1154,7 +1162,8 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
                 if row["power_source"] is None
                 else PowerSource(row["power_source"])
             ),
-            sensors=_stored_sensors(row["sensors"]),
+            # Optional metadata must never make the stream set unreadable.
+            sensors=stored_sensors(row["sensors"]),
         )
     if kind is ActivityDetailKind.LAPS:
         laps = tuple(
