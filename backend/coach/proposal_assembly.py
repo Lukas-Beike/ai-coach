@@ -6,6 +6,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from backend.coach.proposal_creation import CoachProposalCreationService
@@ -38,6 +39,8 @@ class ProposalClock:
     utc_now: Callable[[], str]
     now: Callable[[], float] = time.time
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4
+    # The athlete's local day; absent, the UTC day applies.
+    today: Callable[[], date] | None = None
 
 
 class CoachProposalAssembly:
@@ -69,6 +72,7 @@ class CoachProposalAssembly:
         self._now = clock.now
         self._utc_now = clock.utc_now
         self._uuid_factory = clock.uuid_factory
+        self._today = clock.today
 
     def read_service(self) -> CoachProposalReadService:
         return CoachProposalReadService(self._database_manager(), now=self._now)
@@ -82,6 +86,7 @@ class CoachProposalAssembly:
             uuid_factory=self._uuid_factory,
             nutrition_diary_service=self._nutrition_diary_service,
             nutrition_meal_library_service=self._nutrition_meal_library_service,
+            **({"today": self._today} if self._today else {}),
         )
 
     def confirmation_service(self) -> CoachProposalConfirmationService:

@@ -8,9 +8,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
-from unittest.mock import patch
 
-from backend.coach import proposal_creation
 from backend.coach.proposal_creation import (
     _approved_plan_sync_arguments,
     _plan_sync_approval_details,
@@ -78,7 +76,7 @@ class IntervalsOrphanTests(unittest.TestCase):
             ).fetchall()
         pairs = [(row, json.loads(row["payload"])) for row in rows]
 
-        attach_push_state(pairs, {}, intervals_orphans=orphans)
+        attach_push_state(pairs, {}, intervals_orphans=orphans, today=TODAY)
 
         self.assertEqual(
             {
@@ -94,10 +92,35 @@ class IntervalsOrphanTests(unittest.TestCase):
             pairs[0][1]["push_cleanup"],
         )
 
+    def test_the_nearest_events_are_removed_first_and_listed_once(self) -> None:
+        for index, day in enumerate(("2026-11-20", "2026-11-10", "2026-11-15")):
+            self.insert(
+                f"{index}" * 8 + "-1111-4111-8111-" + "9" * 12,
+                {**UNIT, "archived": True, "date": day},
+            )
+        self.insert(NEW, {**UNIT, "remote_event_id": "", "date": "2026-11-12"})
+        self.insert(LIVE, {**UNIT, "remote_event_id": "", "date": "2026-11-13"})
+        with self.manager.reader() as db:
+            capped, total = find_intervals_orphans(db, TODAY, limit=2)
+            orphans = find_intervals_orphans(db, TODAY)[0]
+            rows = db.execute(
+                "SELECT local_id, payload, sync_state FROM planned_units WHERE local_id IN (?, ?) ORDER BY local_id",
+                (NEW, LIVE),
+            ).fetchall()
+        pairs = [(row, json.loads(row["payload"])) for row in rows]
+
+        attach_push_state(pairs, {}, intervals_orphans=orphans, today=TODAY)
+
+        self.assertEqual(
+            (["2026-11-10", "2026-11-15"], 3), ([o.date for o in capped], total)
+        )
+        self.assertEqual(
+            [True, False], ["push_cleanup" in payload for _row, payload in pairs]
+        )
+
     def selected(self, intent: dict) -> dict:
         arguments = {"entries": [{"local_id": NEW, "expected_payload_hash": "c" * 64}]}
-        with patch.object(proposal_creation, "_utc_today", lambda: TODAY):
-            return _approved_plan_sync_arguments(arguments, intent, self.manager)
+        return _approved_plan_sync_arguments(arguments, intent, self.manager, TODAY)
 
     def test_a_selected_coach_card_adds_and_lists_the_removals(self) -> None:
         self.insert(NEW, {**UNIT, "remote_event_id": ""})
@@ -109,8 +132,7 @@ class IntervalsOrphanTests(unittest.TestCase):
         intent = {"request": {"sync_scope": "selected"}}
 
         approved = self.selected(intent)
-        with patch.object(proposal_creation, "_utc_today", lambda: TODAY):
-            details = _plan_sync_approval_details(approved, intent, self.manager)
+        details = _plan_sync_approval_details(approved, intent, self.manager, TODAY)
 
         self.assertEqual(
             [

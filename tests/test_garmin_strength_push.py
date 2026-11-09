@@ -819,9 +819,7 @@ class PushTests(unittest.TestCase):
     def test_a_unit_with_an_unreadable_payload_is_no_orphan(self) -> None:
         self.push((U1, self.insert(U1, UNIT)))
         with self.database_manager.unit_of_work() as db:
-            db.execute(
-                "UPDATE planned_units SET payload='[]' WHERE local_id=?", (U1,)
-            )
+            db.execute("UPDATE planned_units SET payload='[]' WHERE local_id=?", (U1,))
 
         self.assertEqual([], self.orphan_ids())
 
@@ -841,9 +839,11 @@ class PushTests(unittest.TestCase):
         self.retire(U1, UNIT)
 
         arguments = _approved_garmin_arguments(
-            {"entries": [{"local_id": U1, "remove": False}]}, self.database_manager
+            {"entries": [{"local_id": U1, "remove": False}]},
+            self.database_manager,
+            TODAY,
         )
-        details = _garmin_approval_details(arguments, self.database_manager)
+        details = _garmin_approval_details(arguments, self.database_manager, TODAY)
 
         self.assertEqual(
             [("Kraft A", "Kraft an Garmin")],
@@ -919,9 +919,11 @@ class PushTests(unittest.TestCase):
         digest = self.insert(U2, {**UNIT, "name": "Kraft B"})
 
         arguments = _approved_garmin_arguments(
-            {"entries": [{"local_id": U2, "remove": False}]}, self.database_manager
+            {"entries": [{"local_id": U2, "remove": False}]},
+            self.database_manager,
+            TODAY,
         )
-        details = _garmin_approval_details(arguments, self.database_manager)
+        details = _garmin_approval_details(arguments, self.database_manager, TODAY)
 
         self.assertEqual(
             [
@@ -947,7 +949,12 @@ class PushTests(unittest.TestCase):
             ).fetchall()
         pairs = [(row, json.loads(row["payload"])) for row in rows]
 
-        attach_push_state(pairs, {}, orphans=find_orphans_listed(self.database_manager))
+        attach_push_state(
+            pairs,
+            {},
+            orphans=find_orphans_listed(self.database_manager),
+            today=TODAY,
+        )
 
         self.assertEqual(
             {"garmin": [{"id": U1, "name": "Kraft A", "date": "2026-11-09"}]},
@@ -980,7 +987,7 @@ class PushTests(unittest.TestCase):
 
 def find_orphans_listed(database_manager: DatabaseManager) -> list:
     with database_manager.reader() as db:
-        return find_orphans(db, limit=None)[0]
+        return find_orphans(db, TODAY, limit=None)[0]
 
 
 if __name__ == "__main__":

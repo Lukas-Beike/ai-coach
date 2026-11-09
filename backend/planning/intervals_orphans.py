@@ -15,9 +15,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final
 
+from backend.planning.leftovers import MAX_CLEANUP, cap, nearest_first
 from backend.planning.library import library_payload_hash
 
-MAX_CLEANUP: Final = 20
 _OPEN_STATES: Final = ("local", "sync_error", "remote_missing")
 
 
@@ -32,7 +32,7 @@ class IntervalsOrphan:
 def find_intervals_orphans(
     db: Any, today: date, *, limit: int | None = MAX_CLEANUP
 ) -> tuple[list[IntervalsOrphan], int]:
-    """Return up to ``limit`` orphans, latest day first, and the total count."""
+    """Return up to ``limit`` orphans, nearest day first, and the total count."""
     orphans: list[IntervalsOrphan] = []
     marks = ", ".join("?" for _ in _OPEN_STATES)
     for row in db.execute(
@@ -64,8 +64,8 @@ def find_intervals_orphans(
                     library_payload_hash(row["payload"]),
                 )
             )
-    ordered = sorted(orphans, key=lambda item: item.date, reverse=True)
-    return (ordered if limit is None else ordered[:limit]), len(ordered)
+    ordered = nearest_first(orphans, today, lambda item: item.date)
+    return cap(ordered, limit), len(ordered)
 
 
 def sync_entries(orphans: list[IntervalsOrphan]) -> list[dict[str, Any]]:

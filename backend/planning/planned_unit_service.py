@@ -367,7 +367,7 @@ class PlannedUnitService:
             )
             baselines = garmin_baselines(db) if push_state else {}
             remembered = remembered_exercises(db) if push_state else {}
-            orphans = find_orphans(db)[0] if push_state else []
+            orphans = find_orphans(db, self._today())[0] if push_state else []
             intervals_orphans = (
                 find_intervals_orphans(db, self._today())[0] if push_state else []
             )
@@ -383,7 +383,13 @@ class PlannedUnitService:
             )
         if push_state:
             attach_push_state(
-                pairs, baselines, remembered, resync, orphans, intervals_orphans
+                pairs,
+                baselines,
+                remembered,
+                resync,
+                orphans,
+                intervals_orphans,
+                self._today(),
             )
         return [payload for _row, payload in pairs]
 

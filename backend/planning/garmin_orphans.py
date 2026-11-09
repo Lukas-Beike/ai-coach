@@ -17,10 +17,9 @@ from datetime import date
 from typing import Any, Final
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
+from backend.planning.leftovers import MAX_CLEANUP, cap, nearest_first
 from backend.planning.sport import planned_sport_environment
 
-# One sync job takes at most 28 entries; the rest waits for the next sync.
-MAX_CLEANUP: Final = 20
 _UNKNOWN_NAME: Final = "Gelöschte Einheit"
 
 
@@ -56,9 +55,9 @@ def _is_orphan(row: Any, payload: Any) -> bool:
 
 
 def find_orphans(
-    db: Any, *, limit: int | None = MAX_CLEANUP
+    db: Any, today: date, *, limit: int | None = MAX_CLEANUP
 ) -> tuple[list[GarminOrphan], int]:
-    """Return up to ``limit`` orphans, latest day first, and the total count."""
+    """Return up to ``limit`` orphans, nearest day first, and the total count."""
     orphans: list[GarminOrphan] = []
     for row in db.execute(
         "SELECT l.local_id AS link_id, p.local_id AS unit_id, p.payload, p.tombstone "
@@ -73,9 +72,8 @@ def find_orphans(
         if _is_orphan(row, payload):
             name, day = _label(payload)
             orphans.append(GarminOrphan(row["link_id"], name, day))
-    # Latest day first, so upcoming duplicates go before old history.
-    ordered = sorted(orphans, key=lambda item: item.date, reverse=True)
-    return (ordered if limit is None else ordered[:limit]), len(ordered)
+    ordered = nearest_first(orphans, today, lambda item: item.date)
+    return cap(ordered, limit), len(ordered)
 
 
 def removal_entries(orphans: list[GarminOrphan]) -> list[dict[str, Any]]:

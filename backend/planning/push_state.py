@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
+from datetime import date
 from typing import Any, Final
 
 from backend.canonical.planning_fields import STRENGTH_STRUCTURE
@@ -133,17 +134,35 @@ def attach_push_state(
     resync: frozenset[str] | set[str] = frozenset(),
     orphans: Sequence[GarminOrphan] = (),
     intervals_orphans: Sequence[IntervalsOrphan] = (),
+    today: date = date.min,
 ) -> None:
     """Add ``payload_hash``, ``push_pending`` and ``push_blocked`` to each pair.
 
-    A unit a provider still waits for also lists, per provider, the leftovers
-    its sync removes (``push_cleanup``): ``orphans`` are Garmin workouts,
-    ``intervals_orphans`` Intervals.icu events of deleted or replaced units.
+    The first upcoming unit a provider waits for also lists, per provider, the
+    leftovers its sync removes (``push_cleanup``): ``orphans`` are Garmin
+    workouts, ``intervals_orphans`` Intervals.icu events of deleted or replaced
+    units.
 
     ``resync`` holds the local ids of synced units whose exported heart-rate range
     moved only with the threshold HR. ``push_blocked`` names why a strength unit cannot reach Garmin, so the
     calendar says so instead of offering only Intervals.icu silently.
     """
+    lists: dict[str, list[dict[str, str]]] = {
+        ProviderId.GARMIN.value: [
+            {"id": item.local_id, "name": item.name, "date": item.date}
+            for item in orphans
+        ],
+        ProviderId.INTERVALS.value: [
+            {
+                "id": item.local_id,
+                "name": item.name,
+                "date": item.date,
+                "hash": item.payload_hash,
+            }
+            for item in intervals_orphans
+        ],
+    }
+    listed: set[str] = set()
     for row, payload in pairs:
         digest = library_payload_hash(row["payload"])
         # A synced run unit whose heart-rate range moved with the threshold HR
@@ -163,22 +182,14 @@ def attach_push_state(
             )
         payload["payload_hash"] = digest
         payload["push_pending"] = pending
+        # The leftovers are listed once per provider, on the first upcoming unit
+        # that provider waits for, so the calendar shows each note a single time.
         cleanup: dict[str, list[dict[str, str]]] = {}
-        if pending.get(ProviderId.GARMIN.value) and orphans:
-            cleanup[ProviderId.GARMIN.value] = [
-                {"id": item.local_id, "name": item.name, "date": item.date}
-                for item in orphans
-            ]
-        if pending.get(ProviderId.INTERVALS.value) and intervals_orphans:
-            cleanup[ProviderId.INTERVALS.value] = [
-                {
-                    "id": item.local_id,
-                    "name": item.name,
-                    "date": item.date,
-                    "hash": item.payload_hash,
-                }
-                for item in intervals_orphans
-            ]
+        if str(payload.get("date") or "")[:10] >= today.isoformat():
+            for provider, items in lists.items():
+                if pending.get(provider) and items and provider not in listed:
+                    listed.add(provider)
+                    cleanup[provider] = items
         if cleanup:
             payload["push_cleanup"] = cleanup
         payload["push_blocked"] = (

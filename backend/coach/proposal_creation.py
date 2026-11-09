@@ -39,6 +39,10 @@ _MAX_REMOTE_APPROVAL_DETAILS = 5000
 _MAX_GARMIN_ENTRIES = 28
 
 
+def _utc_today() -> date:
+    return datetime.now(UTC).date()
+
+
 def _approval_date(value: Any) -> str:
     if value in (None, ""):
         return "Datum unbekannt"
@@ -61,7 +65,9 @@ class CoachProposalCreationService:
         uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
         nutrition_diary_service: Callable[[], Any] | None = None,
         nutrition_meal_library_service: Callable[[], Any] | None = None,
+        today: Callable[[], date] = _utc_today,
     ) -> None:
+        self._today = today
         self._database_manager = database_manager
         self._ttl_seconds = ttl_seconds
         self._now = now
@@ -141,6 +147,7 @@ class CoachProposalCreationService:
             intent,
             database_manager=self._database_manager,
             nutrition_diary_service=self._nutrition_diary_service,
+            today=self._today(),
         )
         payload["intent"] = _card_authorized_intent(
             tool, payload["arguments"], intent, self._database_manager
@@ -152,7 +159,11 @@ class CoachProposalCreationService:
         )
         approval_manifest = payload["arguments"].get("_approval_manifest")
         approval_details = _remote_write_approval_details(
-            tool, payload["arguments"], intent, self._database_manager
+            tool,
+            payload["arguments"],
+            intent,
+            self._database_manager,
+            today=self._today(),
         )
         return self.create(
             {
@@ -310,11 +321,12 @@ def _approved_remote_arguments(
     *,
     database_manager: DatabaseManager,
     nutrition_diary_service: Callable[[], Any] | None,
+    today: date,
 ) -> dict[str, Any]:
     if tool == "start_intervals_plan_sync":
-        return _approved_plan_sync_arguments(arguments, intent, database_manager)
+        return _approved_plan_sync_arguments(arguments, intent, database_manager, today)
     if tool == "push_strength_to_garmin":
-        return _approved_garmin_arguments(arguments, database_manager)
+        return _approved_garmin_arguments(arguments, database_manager, today)
     if tool == "sync_competitions":
         with database_manager.reader() as db:
             return {**arguments, "_approval_manifest": competition_push_manifest(db)}
@@ -426,13 +438,16 @@ def _card_authorized_intent(
 
 
 def _approved_plan_sync_arguments(
-    arguments: dict[str, Any], intent: dict[str, Any], database_manager: DatabaseManager
+    arguments: dict[str, Any],
+    intent: dict[str, Any],
+    database_manager: DatabaseManager,
+    today: date,
 ) -> dict[str, Any]:
     approved = dict(arguments)
     if approved.get("repair") is True:
         return approved
     if approved.get("entries"):
-        return _with_intervals_leftovers(approved, intent, database_manager)
+        return _with_intervals_leftovers(approved, intent, database_manager, today)
     identifiers = [
         str(value)
         for key in ("_created_sync_entry_ids", "_changed_sync_entry_ids")
@@ -478,12 +493,11 @@ def _approved_plan_sync_arguments(
     return approved
 
 
-def _utc_today() -> date:
-    return datetime.now(UTC).date()
-
-
 def _with_intervals_leftovers(
-    approved: dict[str, Any], intent: dict[str, Any], database_manager: DatabaseManager
+    approved: dict[str, Any],
+    intent: dict[str, Any],
+    database_manager: DatabaseManager,
+    today: date,
 ) -> dict[str, Any]:
     """Add the Intervals.icu events of deleted or replaced units to a selected sync.
 
@@ -507,7 +521,7 @@ def _with_intervals_leftovers(
         for entry in entries
     }
     with database_manager.reader() as db:
-        orphans, _total = find_intervals_orphans(db, _utc_today())
+        orphans, _total = find_intervals_orphans(db, today)
     room = planning_library.LIBRARY_BULK_MAX_ENTRIES - len(approved["entries"])
     extra = [item for item in orphans if item.local_id not in chosen][: max(room, 0)]
     return {**approved, "entries": [*approved["entries"], *sync_entries(extra)]}
@@ -518,18 +532,20 @@ def _remote_write_approval_details(
     arguments: dict[str, Any],
     intent: dict[str, Any],
     database_manager: DatabaseManager,
+    *,
+    today: date,
 ) -> list[dict[str, str]]:
     if tool == "start_intervals_plan_sync":
-        return _plan_sync_approval_details(arguments, intent, database_manager)
+        return _plan_sync_approval_details(arguments, intent, database_manager, today)
     if tool == "sync_competitions":
         return _competition_approval_details(arguments, database_manager)
     if tool == "push_strength_to_garmin":
-        return _garmin_approval_details(arguments, database_manager)
+        return _garmin_approval_details(arguments, database_manager, today)
     return []
 
 
 def _approved_garmin_arguments(
-    arguments: dict[str, Any], database_manager: DatabaseManager
+    arguments: dict[str, Any], database_manager: DatabaseManager, today: date
 ) -> dict[str, Any]:
     """Bind each selected unit to its stored payload when the card is created.
 
@@ -574,7 +590,7 @@ def _approved_garmin_arguments(
     # The explicit Garmin sync also removes the workouts it sent for units that
     # no longer exist; the card lists them.
     with database_manager.reader() as db:
-        orphans, _total = find_orphans(db)
+        orphans, _total = find_orphans(db, today)
     chosen = {entry["library_workout_id"] for entry in entries}
     room = _MAX_GARMIN_ENTRIES - len(entries)
     entries.extend(
@@ -599,14 +615,16 @@ def _planned_rows(
 
 
 def _garmin_approval_details(
-    arguments: dict[str, Any], database_manager: DatabaseManager
+    arguments: dict[str, Any], database_manager: DatabaseManager, today: date
 ) -> list[dict[str, str]]:
     entries = arguments.get("entries") or []
     removals = {
         entry["library_workout_id"] for entry in entries if entry.get("remove") is True
     }
     with database_manager.reader() as db:
-        orphans = {item.local_id: item for item in find_orphans(db, limit=None)[0]}
+        orphans = {
+            item.local_id: item for item in find_orphans(db, today, limit=None)[0]
+        }
     listed = orphans.keys() & removals
     rows = _planned_rows(
         [
@@ -635,7 +653,10 @@ def _garmin_approval_details(
 
 
 def _plan_sync_approval_details(
-    arguments: dict[str, Any], intent: dict[str, Any], database_manager: DatabaseManager
+    arguments: dict[str, Any],
+    intent: dict[str, Any],
+    database_manager: DatabaseManager,
+    today: date,
 ) -> list[dict[str, str]]:
     repair_period = intent.get("_repair_period")
     if arguments.get("repair") is True and isinstance(repair_period, dict):
@@ -687,17 +708,18 @@ def _plan_sync_approval_details(
         with database_manager.reader() as db:
             rows = db.execute(query, (*identifiers, *identifiers)).fetchall()
     _check_approval_row_limit(rows)
-    return _label_intervals_removals(_plan_workout_details(rows), database_manager)
+    return _label_intervals_removals(
+        _plan_workout_details(rows), database_manager, today
+    )
 
 
 def _label_intervals_removals(
-    details: list[dict[str, str]], database_manager: DatabaseManager
+    details: list[dict[str, str]], database_manager: DatabaseManager, today: date
 ) -> list[dict[str, str]]:
     """Mark the listed units whose Intervals.icu event this sync deletes."""
     with database_manager.reader() as db:
         removed = {
-            item.local_id
-            for item in find_intervals_orphans(db, _utc_today(), limit=None)[0]
+            item.local_id for item in find_intervals_orphans(db, today, limit=None)[0]
         }
     for detail in details:
         if detail["id"] in removed:
