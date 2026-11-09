@@ -61,7 +61,11 @@ test("collapsible summary titles are never hidden by a merged selector list", ()
 });
 
 test("no font size below the legibility floor of .72rem is declared", () => {
-  const styles = read("styles.css");
+  // The only exception: five bottom-nav labels at 320 px width.
+  const narrowNav = /@media \(max-width: 340px\) \{\s*\.nav-item \{ font-size: \.66rem; letter-spacing: -\.01em; \}\s*\}/;
+  const all = read("styles.css");
+  assert.match(all, narrowNav);
+  const styles = all.replace(narrowNav, "");
   for (const match of styles.matchAll(/font(?:-size)?:\s*(\.?\d*\.?\d+)rem/g)) {
     assert.ok(Number(match[1]) >= 0.72, `font size ${match[1]}rem is below .72rem`);
   }

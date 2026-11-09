@@ -1375,6 +1375,11 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .nav-item { padding-right: 2px; padding-left: 2px; font-size: .72rem; }
 }
 
+/* Five labels in 320 px: "Ernährung" needs the one exception below the .72rem floor. */
+@media (max-width: 340px) {
+  .nav-item { font-size: .66rem; letter-spacing: -.01em; }
+}
+
 @media (min-width: 700px) {
   .shell { padding-right: max(28px, env(safe-area-inset-right)); padding-left: max(28px, env(safe-area-inset-left)); }
   .messages { min-height: 0; }
