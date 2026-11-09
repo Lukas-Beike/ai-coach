@@ -13,6 +13,7 @@ from backend.coach.authorization import (
 )
 from backend.db.manager import DatabaseManager
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
+from backend.planning import plan_checks
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.plan_guard_service import (
     PLAN_FINDINGS_ARGUMENT,
@@ -129,10 +130,12 @@ class CoachAdaptiveApplyService:
         with self._database_lock, self._database_manager.unit_of_work():
             before = guard.findings()
             applied = self._illness_sync.apply_local(adjustment_id)
-            # The replan moves or shortens existing units and cannot name a focus.
+            # The replan rewrites existing units but cannot author a focus,
+            # strength exercises or a heart-rate cap: a legacy unit that lacked
+            # them before passes, a unit the replan leaves without them blocks.
             notes = guard.verify(
                 before,
                 accepted if isinstance(accepted, list) else [],
-                waived=("focus_missing",),
+                inherited=plan_checks.REQUIRED_CODES,
             )
         return applied, notes

@@ -39,7 +39,7 @@ _PLAN_STRUCTURE = """Planning science:
 - Alternate hard and easy days, never back-to-back hard days; distribute intensity per training_model.
 - Plan no single run much longer than the longest of the last 30 days (Frandsen 2025).
 - Adjust load to HRV or readiness data when present (Kiviniemi 2007; Javaloyes 2019; moderate).
-- Every run, ride and strength unit you write needs session_focus (named in the Typ column); strength also strength_structure (with garmin_exercise) and strength_intensity. Progress load or reps weekly, deload in the lighter week; strength_progress top sets at planned reps: progress, else hold.
+- Every run, ride and strength unit you write needs session_focus (named in the Typ column); strength also strength_structure (with garmin_exercise) and strength_intensity; recovery, easy, long runs hr_cap. Progress load or reps weekly, deload in the lighter week; strength_progress top sets at planned reps: progress, else hold.
 - Local units only; no Intervals.icu write."""
 
 _STRENGTH_LEGS = """- Heavy strength 2 times per week in base and build, 1 (maintenance) in peak and taper (Ronnestad & Mujika 2014; Blagrove 2018), 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): same counts, at most 3; after or on hard days, or 24 h or more before hard or long sessions. Name deviations."""
@@ -55,7 +55,7 @@ _PRECEDENCE = "- Precedence: illness, competitions, calendar markers; science de
 
 _CALENDAR = "- If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event."
 
-_PLAN_CHECK = "- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Only illness_hard blocks the save: correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding or adjust. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."
+_PLAN_CHECK = "- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Blocking: illness_hard (accept_plan_findings only when the athlete explicitly wants it); strength_incomplete, focus_missing, hr_cap_invalid (write the fields; complete templates via manage_training_templates). Justify each plan_check_notes finding or adjust. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."
 
 _ANSWER = """Answer:
 - One sentence verdict, then the findings with concrete numbers (pace, heart rate, power, cadence, duration), most notable first; for one session 2 to 4. Keep the coverage and unknowns the task asks for short. End with the consequence or lessons the task names.

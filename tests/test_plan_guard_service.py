@@ -526,6 +526,51 @@ class PlanGuardWriteTests(unittest.TestCase):
             self.guard.verify([], [])
         self.assertEqual([], self.guard.verify([], [], waived=("focus_missing",)))
 
+    def test_inherited_gaps_pass_only_for_units_that_already_had_them(self) -> None:
+        # An approved replan rewrites a legacy easy run without hr_cap and a
+        # legacy strength unit without structure: the gaps are not its doing.
+        self.illness = ""
+        legacy_run = {
+            "local_id": "r",
+            "date": "2026-11-07",
+            "sport": "run",
+            "name": "Lockerer Lauf",
+            "session_focus": "easy",
+            "planned_duration_s": 2700,
+        }
+        legacy_strength = {
+            "local_id": "s",
+            "date": "2026-11-08",
+            "sport": "strength",
+            "name": "Kraft",
+            "description": "Kniebeuge schwer",
+            "planned_duration_s": 2700,
+        }
+        self.units = [legacy_run, legacy_strength]
+        before = self.guard.findings()
+        self.units = [
+            {**legacy_run, "planned_duration_s": 1800, "description": "- 30m Z1 HR"},
+            {**legacy_strength, "description": "- 30m Mobility"},
+        ]
+        codes = plan_checks.REQUIRED_CODES
+        self.assertEqual([], self.guard.verify(before, [], inherited=codes))
+        # A unit the write leaves without data it had still blocks.
+        complete = {
+            **legacy_strength,
+            "strength_structure": [{"name": "Kniebeuge", "sets": 3, "reps": 5}],
+            "session_focus": "legs",
+            "strength_intensity": "heavy",
+        }
+        self.units = [complete]
+        before = self.guard.findings()
+        self.units = [legacy_strength]
+        with self.assertRaises(PlanCheckError) as raised:
+            self.guard.verify(before, [], inherited=codes)
+        self.assertEqual(
+            ["strength_incomplete"],
+            [item["code"] for item in raised.exception.findings],
+        )
+
     def test_unchecked_tools_skip_the_guard(self) -> None:
         self.guard = Mock()
         self.run_tool("save_checkin")
