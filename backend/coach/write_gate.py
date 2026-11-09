@@ -189,11 +189,12 @@ def _words(text: str) -> list[str]:
 
 
 # Remote sync wording in normalized form; defense in depth for remote writes
-# only. A leading "^" anchors the stem at a word start.
-_REMOTE_STEMS = _words(
-    "intervals,kalender,sync,synchronisier,abgleich,konflikt,hochlad,upload,"
-    "duplikat,dublette,doppelt,calendar,resync,reparier"
-)
+# only. A sync verb or the provider name asks for the sync on its own; planning
+# words such as "Kalender", "doppelt" or "Konflikt" never do ("Trag den Lauf in
+# den Kalender ein" asks for no write to Intervals.icu). A leading "^" anchors a
+# stem at a word start.
+_SYNC_STEMS = _words("intervals,sync,synchronisier,abgleich,hochlad,upload,resync")
+_REMOTE_STEMS = [*_SYNC_STEMS, "reparier"]
 
 
 def _loose(normalized: str) -> str:
@@ -218,11 +219,9 @@ def _mentions_remote(text: str) -> bool:
     return bool(_REMOTE_PATTERN.search(_loose(normalize(text))))
 
 
-# What a repair sync leaves out ("..., ohne doppelte Einträge") is no sync target.
-_REPAIR_TOPICS = frozenset(_words("doppelt,duplikat,dublette,konflikt,reparier"))
-_SYNC_TARGET_PATTERN = _compile(
-    stem for stem in _REMOTE_STEMS if stem not in _REPAIR_TOPICS
-)
+# What a repair leaves out ("..., ohne doppelte Einträge") is no sync target, but
+# the calendar a sync writes to is.
+_SYNC_TARGET_PATTERN = _compile([*_SYNC_STEMS, "kalender", "calendar"])
 # An "ohne"/"without" phrase runs to the next comma, semicolon or colon.
 _WITHOUT = re.compile(r"(?<![a-z])(?:ohne|without)(?![a-z])([^,;:]*)")
 
@@ -361,10 +360,11 @@ def garmin_removal_requested(text: str) -> bool:
     return ProviderId.GARMIN in _provider_parts(text, _REMOVE_VERBS)
 
 
-def _offered_providers(previous_assistant_text: str) -> frozenset[str]:
-    """The providers the assistant's last question offers to send workouts to.
+def _last_question(previous_assistant_text: str) -> str:
+    """The assistant's last question in the reply tail, normalized, or ``""``.
 
-    A provider source label elsewhere in the reply is no offer.
+    A sync offer is the reply's closing question; a stem elsewhere in the reply
+    (a source label, a status line) is no offer.
     """
     questions = [
         sentence
@@ -373,9 +373,12 @@ def _offered_providers(previous_assistant_text: str) -> frozenset[str]:
         )
         if sentence.rstrip().endswith(("?", "？"))
     ]
-    if not questions:
-        return frozenset()
-    last = questions[-1]
+    return questions[-1] if questions else ""
+
+
+def _offered_providers(previous_assistant_text: str) -> frozenset[str]:
+    """The providers the assistant's last question offers to send workouts to."""
+    last = _last_question(previous_assistant_text)
     if not _PUSH_VERBS.search(_loose(last)) or _INTERVALS_NAME.search(last):
         return frozenset()
     return frozenset(str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(last))
@@ -490,14 +493,12 @@ def build_turn_authority(
     pending_origin: PendingOrigin | None = None,
 ) -> TurnAuthority:
     """Derive the turn's footing from the athlete's typed text only."""
-    remote = remote_requested(current_text) or (
-        _mentions_remote(previous_assistant_text[-_HISTORY_TAIL:])
-        and (
-            is_bare_affirmation(current_text) or is_contextual_affirmation(current_text)
-        )
-    )
     accepts_offer = is_bare_affirmation(current_text) or is_contextual_affirmation(
         current_text
+    )
+    # A yes grants the sync only when the assistant's last question offers it.
+    remote = remote_requested(current_text) or (
+        accepts_offer and remote_requested(_last_question(previous_assistant_text))
     )
     providers = requested_providers(current_text)
     if accepts_offer:

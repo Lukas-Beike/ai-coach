@@ -286,6 +286,30 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
             {"id": "template-1", "name": "Meal"}
         )
 
+    def test_template_update_needs_only_its_template_scope(self):
+        self.nutrition.save_template.return_value = {"id": "template-1"}
+        intent = {
+            "operation": "save_nutrition_template",
+            "authorization_scope": ["nutrition_template:template-1"],
+        }
+        result = self.service.execute(
+            "save_nutrition_template",
+            {"payload": {"id": "template-1", "name": "Meal"}},
+            intent,
+        )
+        self.assertEqual(result, {"ok": True, "template": {"id": "template-1"}})
+        CoachDialogueActionService._apply_nutrition_object_scope(
+            "save_nutrition_template",
+            {"payload": {"id": "template-1"}},
+            intent,
+        )
+        with self.assertRaises(AppError):
+            self.service.execute(
+                "save_nutrition_template",
+                {"payload": {"name": "Meal"}},
+                intent,
+            )
+
     def test_new_template_save_stays_within_local_nutrition_scope(self):
         self.nutrition.save_template.return_value = {"id": "template-2"}
         self.service.execute(

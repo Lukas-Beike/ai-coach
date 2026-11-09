@@ -177,6 +177,20 @@ class ChangeSummaryTests(unittest.TestCase):
 
         self.assertEqual(turn_changes(receipts), [_PROFILE_CHANGE, _LIBRARY_CHANGE])
 
+    def test_turn_changes_skip_metric_export_rows_of_a_refresh(self) -> None:
+        export = {
+            "id": "export-1",
+            "entity_type": "metric_export",
+            "action": "create",
+            "after_hash": "hash-3",
+        }
+        receipts = [
+            _step("start_provider_refresh", changes=[export]),
+            _step("update_profile", changes=[_PROFILE_CHANGE]),
+        ]
+
+        self.assertEqual(turn_changes(receipts), [_PROFILE_CHANGE])
+
     def test_the_model_never_receives_undo_references(self) -> None:
         steps = [_step("update_profile", changes=[_PROFILE_CHANGE])]
 

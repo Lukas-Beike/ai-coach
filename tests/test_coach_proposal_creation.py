@@ -153,7 +153,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         intent = {
             "operation": "save_nutrition_template",
             "target_system": "local",
-            "authorization_scope": ["local_nutrition"],
+            "authorization_scope": ["nutrition_template:template-1"],
             "request": {"source_message_ids": [7]},
         }
         result = self._service(
@@ -218,7 +218,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         intent = {
             "operation": "save_nutrition_template",
             "target_system": "local",
-            "authorization_scope": ["local_nutrition"],
+            "authorization_scope": ["nutrition_template:template-1"],
             "request": {"source_message_ids": [7]},
         }
         result = self._service(

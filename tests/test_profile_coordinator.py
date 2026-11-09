@@ -324,7 +324,7 @@ class ProfileCoordinatorTests(unittest.TestCase):
         change = self.change()
         receipt = {
             "change_summary": {"undoable": True},
-            "command_receipts": [{"changes": [change]}],
+            "command_receipts": [{"tool": "update_profile", "changes": [change]}],
         }
         with self.manager.unit_of_work() as db:
             db.execute(
