@@ -469,9 +469,6 @@ class ServerFrontendTests(ServerTestCase):
         views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(
             encoding="utf-8"
         )
-        forms = (Path(__file__).resolve().parents[1] / "public" / "forms.js").read_text(
-            encoding="utf-8"
-        )
         components = (
             Path(__file__).resolve().parents[1] / "public" / "components.js"
         ).read_text(encoding="utf-8")
@@ -494,7 +491,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("<script>", index)
         self.assertIn(asset_ref("/state.js"), index)
         self.assertIn(asset_ref("/views.js"), index)
-        self.assertIn(asset_ref("/forms.js"), index)
+        self.assertNotIn("/forms.js", index)
         self.assertIn(asset_ref("/components.js"), index)
         self.assertIn(asset_ref("/coach.js"), index)
         self.assertIn(asset_ref("/app.js"), index)
@@ -505,7 +502,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(f'"{asset_ref("/appearance.js")}"', service_worker)
         self.assertIn(f'"{asset_ref("/state.js")}"', service_worker)
         self.assertIn(f'"{asset_ref("/views.js")}"', service_worker)
-        self.assertIn(f'"{asset_ref("/forms.js")}"', service_worker)
+        self.assertNotIn("/forms.js", service_worker)
         self.assertIn(f'"{asset_ref("/components.js")}"', service_worker)
         self.assertIn('id="statusStrip"', index)
         self.assertIn('id="coachActionReview"', index)
@@ -605,9 +602,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("function syncNavigationRoute(", app)
         self.assertIn("function markdownToHtml(markdown)", views)
         self.assertNotIn("function markdownToHtml(markdown)", app)
-        self.assertIn("function contextField(", forms)
-        self.assertNotIn("function collectCompetitions()", forms)
-        self.assertNotIn("function availabilityInput(", forms)
+        self.assertFalse((root / "public" / "forms.js").exists())
         self.assertNotIn("function contextField(", app)
         plan_views = (root / "public" / "plan-views.js").read_text(encoding="utf-8")
         self.assertIn("function competitionCard(", plan_views)
@@ -621,7 +616,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("function showAccessibleDialog(", app)
         self.assertNotIn("function restoreDialogFocus(", app)
         self.assertLess(
-            index.index(asset_ref("/forms.js")),
+            index.index(asset_ref("/views.js")),
             index.index(asset_ref("/components.js")),
         )
         self.assertLess(
@@ -1258,9 +1253,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(f'"{asset_ref("/views.js")}"', source)
         self.assertIn(f'"{asset_ref("/plan-views.js")}"', source)
         self.assertIn('"/plan-views.js"', source)
-        self.assertIn(f'"{asset_ref("/forms.js")}"', source)
         self.assertIn(f'"{asset_ref("/components.js")}"', source)
-        self.assertIn('"/forms.js"', source)
+        self.assertNotIn("forms.js", source)
         self.assertIn(f'"{asset_ref("/coach.js")}"', source)
         self.assertIn(f'"{asset_ref("/app.js")}"', source)
         self.assertIn(f'"{asset_ref("/nutrition.js")}"', source)
@@ -1439,7 +1433,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("renderCompetitions(data.competitions)", loader)
         index = (public / "index.html").read_text(encoding="utf-8")
         self.assertIn('data-plan-segment="season">Wettkämpfe</a>', index)
-        self.assertIn("SEASON_PHASE_LABELS[next.phase]", plan_views)
+        self.assertNotIn("SEASON_PHASE_LABELS", plan_views)
 
     def test_ux_copy_labels_and_readable_context_preview(self):
         index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
@@ -1448,7 +1442,7 @@ class ServerFrontendTests(ServerTestCase):
         )
         coach = (server.PUBLIC_DIR / "coach.js").read_text(encoding="utf-8")
         analysis = (server.PUBLIC_DIR / "analysis.js").read_text(encoding="utf-8")
-        self.assertIn("Tab „Kalender“", index)
+        self.assertNotIn("Tab „Kalender“", index)
         self.assertNotIn("Tab „Plan“", index)
         self.assertNotIn("-1 = alle verfügbaren Daten", index)
         self.assertNotIn("Aktiviert", notifications)

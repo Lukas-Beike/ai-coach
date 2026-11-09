@@ -37,7 +37,7 @@ EDITABLE_SPORTS: Final = (Sport.RIDE, Sport.RUN, Sport.SWIM)
 _INVALID = "Die Zonen sind ungültig: {}."
 # Metrics whose zones are placed relative to the threshold, so it must be given.
 _THRESHOLD_REQUIRED: Final = {
-    ZoneConfigurationMetric.HEART_RATE: "LTHR fehlt",
+    ZoneConfigurationMetric.HEART_RATE: "Schwellenpuls (LSHF) fehlt",
     ZoneConfigurationMetric.POWER: "FTP fehlt",
 }
 

@@ -93,13 +93,13 @@ test("connected offers only Disconnect and never exposes the scope", () => {
   assert.ok(!JSON.stringify(view).includes("workouts_read"));
 });
 
-test("the card names the explicit plan export instead of claiming Wahoo is never written", () => {
+test("the card detail shows only the connection state, without a scope note", () => {
   const disconnected = wahooConnectionView({ wahoo: { configured: true, connected: false } });
-  assert.equal(disconnected.detail, "Importiert Einheiten · schreibt nur bei ausdrücklichem Plan-Export");
+  assert.equal(disconnected.detail, "");
   globalThis.AppFormat = { dateTime: () => "16.10.2026, 09:00" };
   try {
     const connected = wahooConnectionView({ wahoo: { configured: true, connected: true, connected_at: "2026-10-16T07:00:00Z" } });
-    assert.equal(connected.detail, "Verbunden seit 16.10.2026, 09:00 · Importiert Einheiten · schreibt nur bei ausdrücklichem Plan-Export");
+    assert.equal(connected.detail, "Verbunden seit 16.10.2026, 09:00");
   } finally {
     delete globalThis.AppFormat;
   }

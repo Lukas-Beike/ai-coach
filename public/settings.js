@@ -213,7 +213,7 @@ async function downloadDatabaseBackup() {
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.href = url;
-    link.download = `intervals-coach-database-${todayIso()}.backup`;
+    link.download = `pacecraft-database-${todayIso()}.backup`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Verschlüsseltes Backup heruntergeladen");
@@ -310,7 +310,7 @@ async function downloadPrivacyExport() {
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.href = url;
-    link.download = `intervals-coach-export-${todayIso()}.zip`;
+    link.download = `pacecraft-export-${todayIso()}.zip`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Datenexport erstellt");
@@ -420,7 +420,7 @@ async function saveServiceTier(event) {
 // Local zones win over provider zones; the editor shows both and saves local values only.
 const ZONE_METRIC_LABELS = {
   power: { threshold: "FTP (W)", limits: "Zonenobergrenzen (% der FTP)", key: "percent_limits" },
-  heart_rate: { threshold: "LTHR (bpm)", limits: "Zonenobergrenzen (bpm)", key: "limits" },
+  heart_rate: { threshold: "Schwellenpuls (LSHF, bpm)", limits: "Zonenobergrenzen (bpm)", key: "limits" },
   pace: { threshold: "", limits: "Zonenobergrenzen (% der Schwellenpace)", key: "percent_limits" },
 };
 let zoneConfigurations = [];

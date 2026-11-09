@@ -1160,12 +1160,12 @@ function renderBodyAnalysis(body) {
   table.append(rows); overview.append(table); root.append(overview);
   const key = bodyHistoryPeriod === "fortnight" ? "14d" : "12w";
   const window = body?.windows?.[key];
-  root.append(analysisPeriodControls("Zeitraum für Body", bodyHistoryPeriod, (period) => {
+  root.append(analysisPeriodControls("Zeitraum für Körper", bodyHistoryPeriod, (period) => {
     bodyHistoryPeriod = period;
     renderBodyAnalysis(body);
   }));
   if (!window?.start || !window?.end) {
-    root.append(reportNode("p", "Noch keine Body-Historie verfügbar.", "empty"));
+    root.append(reportNode("p", "Noch keine Körper-Historie verfügbar.", "empty"));
     return;
   }
   for (const [metric, title, unit] of metrics) {
@@ -1545,14 +1545,6 @@ function renderTrainingFocus(report) {
   appendTrainingFocusZones(report, zones);
   zones.dataset.analysisEmpty = String(!zones.childElementCount);
   renderAnalysisSegmentsIfActive();
-}
-
-function appendLocalEquipment(items, root) {
-  if (!items.length) return;
-  const details = reportNode("details", null, "training-focus-details");
-  details.append(reportNode("summary", "Lokale Ausr\u00fcstung und Wartung"));
-  for (const item of items) details.append(localEquipmentCard(item));
-  root.append(details);
 }
 
 function localEquipmentCard(item) {

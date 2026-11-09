@@ -82,9 +82,6 @@ class ServerRuntimeTests(ServerTestCase):
         app = (
             Path(__file__).resolve().parents[1] / "public" / "settings.js"
         ).read_text(encoding="utf-8")
-        forms = (Path(__file__).resolve().parents[1] / "public" / "forms.js").read_text(
-            encoding="utf-8"
-        )
         views = (Path(__file__).resolve().parents[1] / "public" / "views.js").read_text(
             encoding="utf-8"
         )
@@ -105,7 +102,6 @@ class ServerRuntimeTests(ServerTestCase):
         self.assertIn("function renderMoreSegments(segment)", views)
         self.assertIn("function profileFormValues(form)", app)
         self.assertIn('new FormData(form).getAll("sports")', app)
-        self.assertNotIn("function collectCompetitions()", forms)
         plan_views = (
             Path(__file__).resolve().parents[1] / "public" / "plan-views.js"
         ).read_text(encoding="utf-8")

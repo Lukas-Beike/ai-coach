@@ -64,8 +64,8 @@ REASON_SDK_FAILED: Final = "sdk_failed"
 CHECKED_THRESHOLDS: Final[tuple[tuple[ThresholdKey, str], ...]] = (
     ((MetricKind.FTP, Sport.RIDE), "FTP Rad"),
     ((MetricKind.FTP, Sport.RUN), "FTP Laufen"),
-    ((MetricKind.THRESHOLD_HR, Sport.RIDE), "LTHR Rad"),
-    ((MetricKind.THRESHOLD_HR, Sport.RUN), "LTHR Laufen"),
+    ((MetricKind.THRESHOLD_HR, Sport.RIDE), "Schwellenpuls (LSHF) Rad"),
+    ((MetricKind.THRESHOLD_HR, Sport.RUN), "Schwellenpuls (LSHF) Laufen"),
     ((MetricKind.THRESHOLD_PACE, Sport.RUN), "Schwellenpace"),
 )
 INDOOR_LABEL: Final = "Indoor-FTP"
