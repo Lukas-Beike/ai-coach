@@ -39,8 +39,8 @@
           </div>
         </div>
         <div class="phones">
-          <figure class="phone"><img src="assets/screens/coach.png" width="780" height="1400" alt="Coach chat on a phone: the athlete asks about the training week and the coach answers with the planned run, intervals and long ride."></figure>
-          <figure class="phone"><img src="assets/screens/calendar.png" width="780" height="1400" alt="Training calendar on a phone: the current week with completed and planned rides and runs, each with a workout profile."></figure>
+          <figure class="phone"><img src="assets/screens/coach.png" width="780" height="1400" alt=""></figure>
+          <figure class="phone"><img src="assets/screens/calendar.png" width="780" height="1400" alt=""></figure>
         </div>
       </div>
     </div>
@@ -92,13 +92,13 @@
     <section id="data">
       <div class="wrap">
         <h2>Data in, plans out</h2>
-        <p class="section-lede">Training data comes from Garmin and Wahoo. Plans and history live in your database. Nothing leaves it unless you ask.</p>
+        <p class="section-lede">Training data comes from Garmin and Wahoo. Plans and history live in your database. Intervals.icu is written only when you ask and never read; only the coach conversation goes to your configured OpenAI endpoint.</p>
         <div class="flow">
           <div><h3>Garmin · Wahoo</h3><p>Activities, sleep, HRV, daily health and thresholds are read and bundled into one session per workout.</p></div>
           <div class="arrow" aria-hidden="true">→</div>
           <div class="core"><h3>Your Pacecraft server</h3><p>An encrypted local database holds sessions, plans, check-ins and conversations. The coach and all analysis work from it.</p></div>
           <div class="arrow" aria-hidden="true">→</div>
-          <div><h3>Your devices</h3><p>Workouts go to Intervals.icu on request and from there to Garmin and Zwift. Strength workouts go straight to the Garmin watch.</p></div>
+          <div><h3>Your devices</h3><p>Workouts go to Intervals.icu on request, which keeps them right on Garmin and Zwift. Strength workouts go straight to the Garmin watch, and Wahoo gets plan export on request.</p></div>
         </div>
         <table>
           <caption>Providers and their role</caption>
@@ -128,7 +128,7 @@
             <a class="button button-quiet" href="https://github.com/Lukas-Beike/pacecraft/blob/develop/docs/setup.md">Setup guide</a>
           </div>
         </div>
-        <pre tabindex="0" aria-label="Docker run command"><code>mkdir -p data &amp;&amp; chown -R 100:101 data
+        <pre tabindex="0" role="region" aria-label="Docker run command"><code>mkdir -p data &amp;&amp; chown -R 100:101 data
 docker run -d --name pacecraft \
   --restart unless-stopped \
   --read-only --cap-drop=ALL \
