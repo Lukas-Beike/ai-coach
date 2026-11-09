@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 PASSING = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+NONE = "  none"
 SUBJECT_PR = re.compile(r"\(#(\d+)\)\s*$")
 
 
@@ -160,26 +161,26 @@ def render(snapshot: dict) -> str:
     lines += [
         f"  #{pr['number']} {pr['title']} ({pr['merged_at']})"
         for pr in snapshot["merged_since_release"]
-    ] or ["  none"]
+    ] or [NONE]
     lines.append(f"Open PRs ({len(snapshot['open_prs'])}):")
     for pr in snapshot["open_prs"]:
         auto = "auto-merge" if pr["auto_merge"] else "no auto-merge"
         checks = ", ".join(pr["open_checks"]) or "all checks passing"
         lines.append(f"  #{pr['number']} {pr['merge_state']}, {auto}: {checks}")
     if not snapshot["open_prs"]:
-        lines.append("  none")
+        lines.append(NONE)
     lines.append("Daily release runs:")
     lines += [
         f"  {run['created_at']} {run['event']} {run['status']}"
         f" {run['conclusion'] or '-'}"
         for run in snapshot["release_runs"]
-    ] or ["  none"]
+    ] or [NONE]
     for key, title in (
         ("release_blockers", "Release blockers"),
         ("in_progress", "In progress"),
     ):
         lines.append(f"{title}:")
-        lines += [f"  #{i['number']} {i['title']}" for i in snapshot[key]] or ["  none"]
+        lines += [f"  #{i['number']} {i['title']}" for i in snapshot[key]] or [NONE]
     return "\n".join(lines)
 
 
