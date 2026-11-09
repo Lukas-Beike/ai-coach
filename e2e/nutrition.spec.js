@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { waitForSettledState } = require("./helpers/settled-state");
 
 test("@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption", async ({ page }) => {
   const showNutrition = async (route) => {
@@ -270,13 +271,19 @@ test("@responsive composite meal shows immutable ingredient snapshots and proven
   await page.goto("/#coach");
   const receipt = page.locator("#messages .message.assistant .message-changes").last();
   await expect(receipt).toContainText("Ernährungseintrag");
-  await receipt.getByRole("button", { name: "Rückgängig" }).click();
+  const undoButton = receipt.getByRole("button", { name: "Rückgängig" });
+  await expect(undoButton).toBeVisible();
+  // A startup load that began before the undo would redraw the receipt from older messages.
+  await waitForSettledState(page);
+  await undoButton.click();
   const [undo] = await Promise.all([
     page.waitForResponse((response) => response.url().includes("/api/change-history/undo-turn")),
     page.locator("#confirmationDialogAccept").click(),
   ]);
   expect(undo.status(), await undo.text()).toBe(200);
-  await expect(page.locator("#messages .message.assistant .message-changes").last()).toContainText("Zurückgenommen");
+  // The HTTP answer only starts the update; the receipt itself shows the undone state.
+  await expect(receipt).toContainText("Zurückgenommen");
+  await expect(receipt.getByRole("button", { name: "Rückgängig" })).toHaveCount(0);
   await expect.poll(() => page.evaluate(async () => (await api("/api/nutrition/day")).entry_count)).toBe(initialEntries);
 });
 
