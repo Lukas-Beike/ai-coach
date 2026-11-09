@@ -19,7 +19,9 @@
       "Edit(//**/.env.*.local)",
       "Edit(./data/**)",
       "Edit(//**/ai-coach/data/**)",
-      "Edit(//**/pacecraft/data/**)"
+      "Edit(//**/pacecraft/data/**)",
+      "Bash(git reset --soft origin/*)",
+      "PowerShell(git reset --soft origin/*)"
     ]
   },
   "hooks": {
