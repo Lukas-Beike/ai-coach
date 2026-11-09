@@ -67,3 +67,9 @@ test("a form drift check that did not run shows nothing", () => {
   }
   assert.deepEqual(plain(formDriftLines({ status: "ok", flagged: false, metrics: { contact_time: { first: "x" } } })), []);
 });
+
+test("the analysis list panel renders the drift lines through the shared helper", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../public/activity-analysis.js"), "utf8");
+  assert.match(source, /ActivityDetails\.formDriftLines\(payload\?\.analysis\?\.form_drift\)/);
+  assert.match(source, /ActivityDetails\.runningDynamics\(metrics\)/);
+});

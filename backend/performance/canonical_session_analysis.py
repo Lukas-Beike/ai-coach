@@ -109,7 +109,7 @@ def session_analysis(
         quality["heart_rate_reliability"] = (
             "Optisch am Handgelenk gemessen: in Intervallen weniger zuverlässig."
         )
-    return {
+    result: dict[str, Any] = {
         "interval_quality": quality,
         "sensors": {
             "heart_rate": None if hr_source is None else hr_source.value,
@@ -141,16 +141,6 @@ def session_analysis(
                 merged.streams, StreamChannel.POWER_W, StreamChannel.MOVING
             ),
         },
-        "form_drift": form_drift(
-            activity,
-            source_label=adapted.label_for(
-                "velocity_smooth",
-                "moving",
-                "ground_contact_time",
-                "vertical_oscillation",
-                "step_length",
-            ),
-        ),
         "running_profile": {
             **running_profile(
                 activity,
@@ -164,6 +154,20 @@ def session_analysis(
             ),
         },
     }
+    drift = form_drift(
+        activity,
+        source_label=adapted.label_for(
+            "velocity_smooth",
+            "moving",
+            "ground_contact_time",
+            "vertical_oscillation",
+            "step_length",
+        ),
+    )
+    # Only non-trail runs carry the key.
+    if drift is not None:
+        result["form_drift"] = drift
+    return result
 
 
 def calendar_profile(

@@ -7,12 +7,13 @@ Expected values are worked out by hand in the comments, not recomputed.
 
 import json
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.activities.detail_contract import _coverage, _streams
-from backend.activities.detail_merge import merge_details
+from backend.activities.detail_merge import _populated_channel_count, merge_details
 from backend.canonical.activity_detail import CHANNEL_BOUNDS, ActivityStreamSet
 from backend.canonical.mapping import IssueReason, MappingIssue
 from backend.canonical.records import ActivityRecord, Provenance
@@ -29,6 +30,7 @@ from backend.canonical.vocabulary import (
     StreamResolution,
 )
 from backend.performance.analysis_input import analysis_input
+from backend.performance.canonical_session_analysis import session_analysis
 from backend.performance.form_drift import FLAG_LABEL, form_drift
 from backend.providers.fit_activity_detail_mapping import map_fit_activity_detail
 from backend.providers.garmin_activity_mapping import map_garmin_activities
@@ -98,6 +100,26 @@ class GarminRunningDynamicsTests(unittest.TestCase):
         )
 
         self.assertEqual(48.2, record.ground_contact_balance_pct)
+
+    def test_other_sports_carry_no_dynamics_and_no_issue(self) -> None:
+        for type_key, expected in (
+            ("cycling", False),
+            ("lap_swimming", False),
+            ("walking", True),
+            ("hiking", True),
+        ):
+            with self.subTest(type_key):
+                record, issues = map_run(
+                    activityType={"typeKey": type_key}, avgGroundContactTime=5000.0
+                )
+
+                self.assertIsNone(record.ground_contact_time_ms)
+                self.assertEqual(expected, bool(issues))
+        ride, issues = map_run(activityType={"typeKey": "cycling"})
+        self.assertEqual((), issues)
+        self.assertIsNone(ride.step_length_m)
+        walk, _ = map_run(activityType={"typeKey": "walking"})
+        self.assertEqual(264.5, walk.ground_contact_time_ms)
 
     def test_a_run_without_a_sensor_has_no_dynamics_and_no_issue(self) -> None:
         record, issues = map_run(
@@ -248,6 +270,18 @@ def run_record() -> ActivityRecord:
 
 
 class DynamicsReadModelTests(unittest.TestCase):
+    def test_only_a_run_analysis_carries_the_drift_key(self) -> None:
+        merged = merge_details(
+            [candidate(dynamics_set(ground_contact_time_ms=(251.0, 252.0, 253.0)))]
+        )
+        ride = replace(run_record(), sport=Sport.RIDE)
+
+        run_analysis = session_analysis([run_record()], merged, None)
+        ride_analysis = session_analysis([ride], merged, None)
+
+        self.assertEqual("insufficient_data", run_analysis["form_drift"]["status"])
+        self.assertNotIn("form_drift", ride_analysis)
+
     def test_the_document_and_the_coach_never_receive_the_series(self) -> None:
         detail = dynamics_set(
             ground_contact_time_ms=(251.0, 252.0, 253.0),
@@ -262,9 +296,21 @@ class DynamicsReadModelTests(unittest.TestCase):
         self.assertEqual({"heart_rate_bpm"}, set(served["channels"]))
         for needle in ("ground_contact", "vertical_oscillation", "251.0", "9.11"):
             self.assertNotIn(needle, text)
-        # Only the point counts of the coverage are served, never values.
+        # The coverage, shown with readable labels, leaves the series out as well.
         coverage = _coverage([candidate(detail).stored])
-        self.assertEqual(3, coverage["ground_contact_time_ms"]["points"])
+        self.assertEqual({"heart_rate_bpm"}, set(coverage))
+
+    def test_dynamics_never_decide_the_primary_stream(self) -> None:
+        plain = dynamics_set()
+        with_dynamics = dynamics_set(
+            ground_contact_time_ms=(251.0, 252.0, 253.0),
+            vertical_ratio_pct=(8.0, 8.0, 8.0),
+            step_length_m=(1.2, 1.2, 1.2),
+        )
+
+        self.assertEqual(
+            _populated_channel_count(plain), _populated_channel_count(with_dynamics)
+        )
 
     def test_the_analysis_input_carries_the_series_for_the_drift_check(self) -> None:
         detail = dynamics_set(
@@ -313,8 +359,14 @@ def steady_run(
     return {"sport": "run", "trail": False, "streams": streams, **extra}
 
 
-def drift(activity: dict[str, Any]) -> dict[str, Any]:
+def drift_or_none(activity: dict[str, Any]) -> dict[str, Any] | None:
     return form_drift(activity, source_label="Garmin Connect")
+
+
+def drift(activity: dict[str, Any]) -> dict[str, Any]:
+    result = drift_or_none(activity)
+    assert result is not None
+    return result
 
 
 class FormDriftTests(unittest.TestCase):
@@ -341,6 +393,10 @@ class FormDriftTests(unittest.TestCase):
         self.assertFalse(result["metrics"]["step_length"]["exceeds"])
         self.assertEqual(0.0, result["pace_change_percent"])
         self.assertEqual(1200.0, result["third_seconds"])
+        self.assertEqual(
+            "derived from Garmin Connect original streams", result["source"]
+        )
+        self.assertIn("heuristics", result["interpretation"])
 
     def test_the_threshold_itself_flags_and_below_it_does_not(self) -> None:
         # 250 -> 262.5 ms is exactly +5 %.
@@ -384,14 +440,22 @@ class FormDriftTests(unittest.TestCase):
         self.assertEqual("insufficient_data", result["status"])
         self.assertEqual("Keine Laufdynamik aufgezeichnet.", result["reason"])
 
-    def test_a_short_run_trail_run_or_other_sport_has_no_drift(self) -> None:
-        short = drift(steady_run(seconds=2400))
-        trail = drift(steady_run(trail=True))
-        ride = drift({**steady_run(), "sport": "ride"})
+    def test_a_trail_run_or_other_sport_has_no_drift_key_at_all(self) -> None:
+        trail = drift_or_none(steady_run(trail=True))
+        ride = drift_or_none({**steady_run(), "sport": "ride"})
 
-        for result in (short, trail, ride):
-            self.assertEqual("insufficient_data", result["status"])
+        self.assertIsNone(trail)
+        self.assertIsNone(ride)
+
+    def test_an_ineligible_run_gets_a_minimal_result(self) -> None:
+        short = drift(steady_run(seconds=2400))
+        pace = drift(steady_run(speed=(3.3, 3.2, 3.0)))
+        absent = drift(steady_run(contact=None, oscillation=None, step=None))
+
         self.assertEqual("Die Einheit ist kürzer als 45 Minuten.", short["reason"])
+        for result in (short, pace, absent):
+            self.assertEqual({"method", "status", "reason"}, set(result))
+            self.assertEqual("insufficient_data", result["status"])
 
     def test_a_third_without_enough_measured_time_is_not_compared(self) -> None:
         activity = steady_run()

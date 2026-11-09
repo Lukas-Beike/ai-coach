@@ -13,6 +13,7 @@ dict of ``analysis_input``; absent running dynamics are normal and give an
 from __future__ import annotations
 
 import math
+from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
@@ -39,60 +40,62 @@ _METRICS: Final[tuple[tuple[str, str, str, int, float], ...]] = (
     ("step_length", "step_length", "m", -1, STEP_LENGTH_FALL_PCT),
 )
 _SPEED_KEY: Final = "velocity_smooth"
-_BASE: Final = {
-    "method": METHOD,
-    "eligibility": "Runs of at least 45 minutes outside trails; first and last third at a speed within 5 %; each third needs 50 % measured time.",
-    "interpretation": "The thresholds (contact time +5 %, vertical oscillation +10 %, step length -5 %) are heuristics of this app, not validated cut-offs, and no injury-risk score. Only a rise of the contact time flags the run. Hills, surface and sensor placement can change the values.",
-}
+_INTERPRETATION: Final = "The thresholds (contact time +5 %, vertical oscillation +10 %, step length -5 %) are heuristics of this app, not validated cut-offs, and no injury-risk score. Only a rise of the contact time flags the run. Hills, surface and sensor placement can change the values."
+
+type _Window = tuple[float, float]
 
 
-def form_drift(activity: Mapping[str, Any], *, source_label: str) -> dict[str, Any]:
-    """The form drift of one run, or the reason why there is none."""
-    base = {**_BASE, "source": f"derived from {source_label} original streams"}
+def form_drift(
+    activity: Mapping[str, Any], *, source_label: str
+) -> dict[str, Any] | None:
+    """The form drift of one run, the reason why there is none, or None.
+
+    Sports other than non-trail runs have no form drift: None, so their stored
+    analysis does not carry the key. The method text is part of the result only
+    when the drift was computed.
+    """
+    if activity.get("sport") != "run" or activity.get("trail"):
+        return None
     reason = _ineligible(activity)
     if reason is not None:
-        return {**base, "status": "insufficient_data", "reason": reason}
+        return _insufficient(reason)
     streams = activity["streams"]
-    times = streams["time"]
-    span = float(times[-1]) - float(times[0])
+    times = [float(value) for value in streams["time"]]
+    span = times[-1] - times[0]
     first, last = (times[0], times[0] + span / 3), (times[-1] - span / 3, times[-1])
-    speeds = _thirds(streams, _SPEED_KEY, first, last)
+    speeds = _thirds(times, streams, _SPEED_KEY, first, last)
     if speeds is None:
-        return {
-            **base,
-            "status": "insufficient_data",
-            "reason": "Das Tempo ist in der ersten oder letzten Drittel nicht ausreichend gemessen.",
-        }
+        return _insufficient(
+            "Das Tempo ist im ersten oder letzten Drittel nicht ausreichend gemessen."
+        )
     pace_change = 100 * (speeds[1] / speeds[0] - 1)
     if abs(pace_change) > 100 * PACE_TOLERANCE:
-        return {
-            **base,
-            "status": "insufficient_data",
-            "reason": "Das Tempo des ersten und letzten Drittels ist nicht vergleichbar.",
-        }
-    metrics = _metrics(streams, first, last)
+        return _insufficient(
+            "Das Tempo des ersten und letzten Drittels ist nicht vergleichbar."
+        )
+    metrics = _metrics(times, streams, first, last)
     if not metrics:
-        return {
-            **base,
-            "status": "insufficient_data",
-            "reason": "Laufdynamik fehlt im ersten oder letzten Drittel.",
-        }
+        return _insufficient("Laufdynamik fehlt im ersten oder letzten Drittel.")
     flagged = bool(metrics.get("contact_time", {}).get("exceeds"))
     return {
-        **base,
+        "method": METHOD,
+        "source": f"derived from {source_label} original streams",
         "status": "ok",
         "third_seconds": round(span / 3, 1),
         "pace_change_percent": round(pace_change, 2),
         "metrics": metrics,
         "flagged": flagged,
         "label": FLAG_LABEL if flagged else None,
+        "interpretation": _INTERPRETATION,
     }
+
+
+def _insufficient(reason: str) -> dict[str, Any]:
+    return {"method": METHOD, "status": "insufficient_data", "reason": reason}
 
 
 def _ineligible(activity: Mapping[str, Any]) -> str | None:
     """Why the run cannot be analysed, or None when it can."""
-    if activity.get("sport") != "run" or activity.get("trail"):
-        return "Nur für Läufe außerhalb des Geländes."
     streams = activity.get("streams") or {}
     if not any(key in streams for _, key, _, _, _ in _METRICS):
         return "Keine Laufdynamik aufgezeichnet."
@@ -103,14 +106,15 @@ def _ineligible(activity: Mapping[str, Any]) -> str | None:
 
 
 def _metrics(
+    times: Sequence[float],
     streams: Mapping[str, Any],
-    first: tuple[float, float],
-    last: tuple[float, float],
+    first: _Window,
+    last: _Window,
 ) -> dict[str, dict[str, Any]]:
     """The change of each metric that both thirds measured."""
     metrics: dict[str, dict[str, Any]] = {}
     for name, key, unit, direction, threshold in _METRICS:
-        means = _thirds(streams, key, first, last)
+        means = _thirds(times, streams, key, first, last)
         if means is None:
             continue
         change = 100 * (means[1] / means[0] - 1)
@@ -126,15 +130,16 @@ def _metrics(
 
 
 def _thirds(
+    times: Sequence[float],
     streams: Mapping[str, Any],
     key: str,
-    first: tuple[float, float],
-    last: tuple[float, float],
+    first: _Window,
+    last: _Window,
 ) -> tuple[float, float] | None:
     """The time-weighted means of a positive channel in both windows, if covered."""
     means = []
     for start, end in (first, last):
-        covered, total = _weighted(streams, key, start, end)
+        covered, total = _weighted(times, streams, key, start, end)
         if covered < MIN_COVERAGE * (end - start) or total <= 0:
             return None
         means.append(total / covered)
@@ -142,21 +147,29 @@ def _thirds(
 
 
 def _weighted(
-    streams: Mapping[str, Any], key: str, start: float, end: float
+    times: Sequence[float],
+    streams: Mapping[str, Any],
+    key: str,
+    start: float,
+    end: float,
 ) -> tuple[float, float]:
-    """Covered seconds and the sum of value times seconds of the moving samples."""
-    times: Sequence[Any] = streams["time"]
+    """Covered seconds and the sum of value times seconds of the moving samples.
+
+    Only the sample intervals that overlap the window are visited.
+    """
     values: Sequence[Any] = streams.get(key) or []
     moving: Sequence[Any] | None = streams.get("moving")
     covered = total = 0.0
     if len(values) != len(times):
         return covered, total
-    for index in range(len(times) - 1):
-        weight = min(float(times[index + 1]), end) - max(float(times[index]), start)
+    low = max(bisect_right(times, start) - 1, 0)
+    high = min(bisect_left(times, end), len(times) - 1)
+    for index in range(low, high):
+        weight = min(times[index + 1], end) - max(times[index], start)
         value = values[index]
         if (
             weight <= 0
-            or float(times[index + 1]) - float(times[index]) > MAX_GAP_S
+            or times[index + 1] - times[index] > MAX_GAP_S
             or not _is_positive(value)
             or (moving and (index >= len(moving) or moving[index] is not True))
         ):

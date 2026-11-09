@@ -64,6 +64,7 @@ the same moment.
   ``avgVerticalRatio`` (percent) -> ``vertical_ratio_pct``;
   ``avgStrideLength`` (cm; the distance of one step) / 100 -> ``step_length_m``.
   Garmin writes 0 for a value it did not measure, so 0 is no value and no issue.
+  Only run, walk and hike records carry them.
 * ``averageBikingCadenceInRevPerMinute`` (rpm) -> ``avg_cadence``; else
   ``averageRunningCadenceInStepsPerMinute`` (steps/min) halved to one-leg rpm.
 * ``hrTimeInZone_<n>`` and ``powerTimeInZone_<n>`` (seconds, by Garmin's own
@@ -229,6 +230,7 @@ _TRAINING_LOAD_FIELDS: Final = (
 _RPE_BOUNDS: Final = (10.0, 100.0)
 _FEEL_BOUNDS: Final = (0.0, 100.0)
 _TRAINING_EFFECT_BOUNDS: Final = (0.0, MAX_TRAINING_EFFECT)
+_DYNAMICS_SPORTS: Final = frozenset({Sport.RUN, Sport.WALK, Sport.HIKE})
 # Running dynamics: (record field, Garmin keys, upper bound in the provider's unit,
 # divisor to the canonical unit). Garmin reports the step length in centimetres.
 _DYNAMICS_FIELDS: Final[tuple[tuple[str, tuple[str, ...], float, float], ...]] = (
@@ -494,7 +496,7 @@ def _map_row(
         max_temp_c=max_temp,
         water_estimated_ml=water,
         energy_kcal=calories or None,
-        **_running_dynamics(row, ref, issues),
+        **_running_dynamics(row, sport, ref, issues),
         lap_count=lap_count,
         avg_cadence=cadence,
         hr_zone_times_s=hr_zones,
@@ -782,10 +784,15 @@ def _cadence(
 
 
 def _running_dynamics(
-    row: dict[str, object], ref: str | None, issues: list[MappingIssue]
+    row: dict[str, object], sport: Sport, ref: str | None, issues: list[MappingIssue]
 ) -> dict[str, Any]:
-    """The running dynamics averages in canonical units; 0 means not measured."""
+    """The running dynamics averages in canonical units; 0 means not measured.
+
+    Only foot sports carry them; other sports get neither a value nor an issue.
+    """
     values: dict[str, Any] = {}
+    if sport not in _DYNAMICS_SPORTS:
+        return values
     for field, keys, upper, divisor in _DYNAMICS_FIELDS:
         number = _optional_number(row, keys, (0.0, upper), ref, issues)
         values[field] = number / divisor if number else None

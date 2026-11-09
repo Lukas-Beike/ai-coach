@@ -334,6 +334,12 @@
     if (payload?.metrics?.efficiency_factor?.unit) metrics.efficiency_factor_unit = payload.metrics.efficiency_factor.unit;
     const stats = overview(activity, metrics);
     if (stats) panel.append(stats);
+    const driftLines = ActivityDetails.formDriftLines(payload?.analysis?.form_drift);
+    if (driftLines.length) {
+      const drift = node("div");
+      drift.append(...driftLines.map((line) => node("p", line)));
+      panel.append(drift);
+    }
     const streams = payload?.streams;
     const charts = streams ? channels(activity, metrics, streams).map((channel) => chart(streams, channel)).filter(Boolean) : [];
     if (charts.length) {

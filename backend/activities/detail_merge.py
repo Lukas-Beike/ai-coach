@@ -27,6 +27,7 @@ from backend.canonical.activity_detail import (
 from backend.canonical.vocabulary import (
     POSITION_CHANNELS,
     PROVIDER_PRECEDENCE,
+    RUNNING_DYNAMICS_CHANNELS,
     DeviceType,
     HeartRateSource,
     LapSource,
@@ -352,6 +353,7 @@ def _populated_channel_count(streams: ActivityStreamSet) -> int:
         for channel, values in streams.channels.items()
         if channel is not StreamChannel.TIME_S
         and channel not in POSITION_CHANNELS
+        and channel not in RUNNING_DYNAMICS_CHANNELS
         and any(value is not None for value in values)
     )
 
