@@ -337,19 +337,38 @@ def parse_listing(report):
         raise RunnerError("Playwright listing failed")
     selected = {}
 
-    def walk(suite):
+    def walk(suite, titles=()):
+        suite_title = suite.get("title", "")
+        child_titles = (
+            titles
+            if not suite_title or suite_title == suite.get("file")
+            else titles + (suite_title,)
+        )
         for spec in suite.get("specs", []):
             file = spec["file"].replace("\\", "/")
             if not file.startswith("e2e/"):
                 file = "e2e/" + file
             if ".." in Path(file).parts or Path(file).is_absolute():
                 raise RunnerError("Playwright listed an unexpected path")
-            for test in spec.get("tests", []):
+            tests = spec.get("tests", [])
+            first_project = tests[0]["projectName"] if tests else None
+            spec_titles = child_titles + (spec.get("title", ""),)
+            spec_file = spec.get("file", "").replace("\\", "/")
+            for test in tests:
                 project = test["projectName"]
                 if not re.fullmatch(r"[a-z0-9-]+", project):
                     raise RunnerError("Playwright listed an unsafe project")
+                if len(tests) == 1 or project == first_project:
+                    test_id = spec["id"]
+                else:
+                    file_id = spec["id"].split("-", 1)[0]
+                    expr = (
+                        f"[project={test.get('projectId') or project}]{spec_file}\x1e"
+                        + "\x1e".join(spec_titles)
+                    )
+                    test_id = f"{file_id}-{hashlib.sha1(expr.encode('utf-8')).hexdigest()[:20]}"
                 identity = {
-                    "id": spec["id"],
+                    "id": test_id,
                     "project": project,
                     "project_id": test["projectId"],
                     "file": file,
@@ -358,7 +377,7 @@ def parse_listing(report):
                 }
                 selected.setdefault((project, file), []).append(identity)
         for child in suite.get("suites", []):
-            walk(child)
+            walk(child, child_titles)
 
     for suite in report.get("suites", []):
         walk(suite)
