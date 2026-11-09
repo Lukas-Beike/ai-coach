@@ -64,6 +64,7 @@ from backend.canonical.activity_detail import (
     clean_series,
     strength_set_accepts,
 )
+from backend.canonical.dfa_alpha1 import first_threshold
 from backend.canonical.mapping import IssueReason, MappingIssue, MappingResult
 from backend.canonical.records import Provenance
 from backend.canonical.validation import require_instance, require_text
@@ -78,7 +79,6 @@ from backend.canonical.vocabulary import (
     StrengthSetSource,
     StrengthSetType,
 )
-from backend.performance.dfa_alpha1 import first_threshold
 from backend.providers.fit_file import FitMessage, fit_field, fit_messages
 from backend.providers.fit_rr_mapping import rr_intervals_ms
 from backend.providers.fit_sensor_mapping import sensor_profile

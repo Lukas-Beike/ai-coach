@@ -46,6 +46,7 @@ class YazioRouteTests(unittest.TestCase):
             "history_undo",
             "privacy_delete",
             "diagnostics_delete",
+            "first_threshold",
         ):
             setattr(routes, name, Mock(handle=Mock(return_value=False)))
         routes.nutrition = nutrition

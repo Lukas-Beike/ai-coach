@@ -919,7 +919,7 @@ Equal-length channels on one strictly increasing `time_s` axis. At most 172,800 
 | `hr_source` | `HeartRateSource \| None` | FIT mapper (`fit_sensor_mapping.py`) | What measured the heart rate; `None` without a heart rate channel, for Garmin chart sets and for sets mapped before schema version 24. |
 | `power_source` | `PowerSource \| None` | FIT mapper (`fit_sensor_mapping.py`) | What measured the power; `None` without a power channel, for Garmin chart sets and for sets mapped before schema version 24. |
 | `sensors` | tuple of `ActivitySensor`, at most 16 | FIT mapper (`fit_sensor_mapping.py`) | The external heart rate, power meter and trainer sensors the recording named. |
-| `dfa_alpha1` | `ActivityDfaAlpha1 \| None` | FIT mapper (`fit_rr_mapping.py`, `backend/performance/dfa_alpha1.py`) | The first threshold estimate of a chest-strap recording that carried RR intervals; `None` otherwise, for Garmin chart sets and for sets mapped before schema version 25. The RR intervals themselves are never part of the set. |
+| `dfa_alpha1` | `ActivityDfaAlpha1 \| None` | FIT mapper (`fit_rr_mapping.py`, `backend/canonical/dfa_alpha1.py`) | The first threshold estimate of a chest-strap recording that carried RR intervals; `None` otherwise, for Garmin chart sets and for sets mapped before schema version 25. The RR intervals themselves are never part of the set. |
 
 Channel bounds (`CHANNEL_BOUNDS`) and producers:
 
@@ -1404,7 +1404,7 @@ Record keywords set: stream set `dfa_alpha1`.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
-| (RR series, not stored) | hrv message 78 field 0 | seconds, /1000 to milliseconds; at most 150,000 beats | Returned as gap-free segments: an invalid slot between valid ones, or more than 10 s of the file clock that the intervals do not account for, starts a new segment (trailing invalid slots only pad a message). Input of `backend/performance/dfa_alpha1.py`, which detrends each segment (smoothness priors, lambda 500) and never lets a window span two segments; never stored, logged or returned. |
+| (RR series, not stored) | hrv message 78 field 0 | seconds, /1000 to milliseconds; at most 150,000 beats | Returned as gap-free segments: an invalid slot between valid ones, or more than 10 s of the file clock that the intervals do not account for, starts a new segment (trailing invalid slots only pad a message). Input of `backend/canonical/dfa_alpha1.py`, which detrends each segment (smoothness priors, lambda 500) and never lets a window span two segments; never stored, logged or returned. |
 | `dfa_alpha1.estimate_bpm`, `windows`, `artifact_share`, `quality`, `method` | computed from the RR series | see `ActivityDfaAlpha1` | `None` unless artifact correction, smoothness-priors detrending (method version 2), enough steady windows and an alpha1 range that crosses 0.75 allow it. |
 
 Not mapped: the hrv timestamps (the message has none), RR values outside 300 to 2000 ms (dropped as artifacts), and every message other than 78.

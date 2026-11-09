@@ -6,8 +6,8 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any
 
-from backend.athlete.first_threshold import FirstThresholdService
 from backend.athlete.profile import ProfileService
+from backend.performance.first_threshold_service import FirstThresholdService
 
 ADOPT_PATH = "/api/profile/first-threshold/adopt"
 

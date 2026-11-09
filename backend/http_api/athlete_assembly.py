@@ -13,10 +13,10 @@ from backend.activities.session_corrections import SessionCorrectionService
 from backend.athlete.checkins import CheckinService
 from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
-from backend.athlete.first_threshold import FirstThresholdService
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
 from backend.canonical.activity_summary import ActivitySummary
+from backend.performance.first_threshold_service import FirstThresholdService
 from backend.performance.source_policy import PREFERENCE_PROFILE_FIELDS
 from backend.runtime.ports import ActivityRowAndSummaryReader, CanonicalTableServing
 from backend.sync.canonical_table_reader import CanonicalTableReader

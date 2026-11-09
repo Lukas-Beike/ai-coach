@@ -11,8 +11,8 @@ and the coefficient is 0.9 * (170 - HR) / 60, so the designed crossing is 153 bp
 import random
 import unittest
 
+from backend.canonical import dfa_alpha1 as dfa
 from backend.canonical.vocabulary import DfaQuality
-from backend.performance import dfa_alpha1 as dfa
 
 
 def ramp(seed, *, low=110, high=170, minutes=30, artifacts_every=0):

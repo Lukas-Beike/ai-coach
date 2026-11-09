@@ -165,7 +165,7 @@ The system SHALL show an estimated first threshold heart rate, derived from stor
 - **WHEN** the athlete adopts the shown estimate
 - **THEN** the profile stores the percent with the origin `estimated` as one change with receipt and undo; an estimate that changed since it was shown, or a missing one, is refused, and a measured value is replaced only when the request says so.
 
-Evidence: `backend/performance/first_threshold_estimate.py:first_threshold_estimate`, `backend/athlete/first_threshold.py:FirstThresholdService`; `tests/test_first_threshold_estimate.py`.
+Evidence: `backend/performance/first_threshold_estimate.py:first_threshold_estimate`, `backend/performance/first_threshold_service.py:FirstThresholdService`; `tests/test_first_threshold_estimate.py`.
 
 ### Requirement: Recorded sensors linked to equipment
 The system SHALL list the distinct heart rate, power meter and trainer sensors named by recordings, each with its hashed short id, role, manufacturer, product, first and last day and session count, and SHALL let the athlete link a sensor to an active main equipment item or remove the link. A serial number SHALL never be stored or shown.

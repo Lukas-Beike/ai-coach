@@ -21,7 +21,6 @@ from backend.activities.hr_cap import (
     hr_cap,
     normalize_hr_cap,
 )
-from backend.athlete.first_threshold import FirstThresholdService
 from backend.athlete.profile import (
     COACH_READ_ONLY_FIELDS,
     DEFAULT_PROFILE,
@@ -68,6 +67,7 @@ from backend.performance.first_threshold_estimate import (
     estimate_view,
     first_threshold_estimate,
 )
+from backend.performance.first_threshold_service import FirstThresholdService
 from backend.planning import run_hr_cap
 from tests.test_dfa_alpha1 import ramp
 from tests.test_fit_rr_mapping import fit_with_rr, streams
