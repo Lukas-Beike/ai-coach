@@ -67,10 +67,24 @@ def merge_state(branch: str, base: str) -> str | None:
     """Return how the branch counts as merged, or None."""
     if git("merge-base", "--is-ancestor", branch, base).returncode == 0:
         return "ancestor"
+    tip = git("rev-parse", branch).stdout.strip()
     done = run(
-        ["gh", "pr", "list", "--head", branch, "--state", "merged", "--json", "number"]
+        [
+            "gh",
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "merged",
+            "--json",
+            "headRefOid",
+            "--jq",
+            ".[].headRefOid",
+        ]  # fmt: skip
     )
-    if done.returncode == 0 and done.stdout.strip() not in ("", "[]"):
+    # A reused branch name must not match: the merged PR head has to be the local tip.
+    if done.returncode == 0 and tip and tip in done.stdout.split():
         return "pr-merged"
     return None
 

@@ -29,8 +29,11 @@ def done(stdout="", code=0, stderr=""):
 class FakeRepo:
     """Answers git/gh calls from a table; records every command."""
 
-    def __init__(self, tmp, dirty=(), merged=(), pr_merged=(), remove_fails=()):
+    def __init__(
+        self, tmp, dirty=(), merged=(), pr_merged=(), remove_fails=(), reused=()
+    ):
         self.tmp = Path(tmp)
+        self.reused = set(reused)
         self.dirty, self.merged = set(dirty), set(merged)
         self.pr_merged, self.remove_fails = set(pr_merged), set(remove_fails)
         self.calls = []
@@ -57,8 +60,10 @@ class FakeRepo:
             return done(self.porcelain())
         if args[0] == "rev-parse" and args[1] == "--show-toplevel":
             return done(str(self.tmp / "current"))
-        if args[0] == "rev-parse":
+        if args[:2] == ("rev-parse", "--absolute-git-dir"):
             return done(str(Path(cwd) / ".git"))
+        if args[0] == "rev-parse":
+            return done(f"tip-of-{args[1]}\n")
         if args[0] == "status":
             return done(" M file\n" if Path(cwd).name in self.dirty else "")
         if args[0] == "merge-base":
@@ -70,9 +75,12 @@ class FakeRepo:
 
     def run(self, args, cwd=None):
         self.calls.append(tuple(args))
-        listed = "[]"
-        if args[0] == "gh" and args[args.index("--head") + 1] in self.pr_merged:
-            listed = '[{"number": 5}]'
+        branch = args[args.index("--head") + 1]
+        listed = ""
+        if branch in self.pr_merged:
+            listed = f"tip-of-{branch}\n"
+        if branch in self.reused:
+            listed = "head-of-an-older-pr\n"
         return done(listed)
 
     def removed(self):
@@ -140,6 +148,13 @@ class PruneWorktreesTests(unittest.TestCase):
             self.assertNotIn(
                 protected, [c[-1] for c in repo.calls if "branch" in c[:2]]
             )
+
+    def test_reused_branch_name_with_new_commits_is_not_merged(self):
+        repo = self.make(reused={"feat/old"})
+        _, out, _ = self.run_main(repo, ["--apply"])
+        self.assertIn("branch not merged", out)
+        self.assertEqual(repo.removed(), [])
+        self.assertNotIn(("git", "branch", "-D", "feat/old"), repo.calls)
 
     def test_recently_modified_worktree_is_kept(self):
         repo = self.make(merged={"feat/old"})
