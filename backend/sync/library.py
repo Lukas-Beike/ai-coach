@@ -25,6 +25,7 @@ from backend.errors import (
 )
 from backend.observability import Redactor
 from backend.planning import library as planning_library
+from backend.planning import planned_units
 from backend.planning import workouts as planning_workouts
 from backend.providers.http import ProviderHTTPError
 from backend.sync.workout_export import WorkoutLibraryExportPort
@@ -427,7 +428,7 @@ class WorkoutLibrarySyncStateService:
                 "planned_date": planned_date or None,
                 "syncs_calendar": is_planned,
                 "entity": "planned_unit" if is_planned else "workout_library",
-                "payload_hash": hashlib.sha256(raw_payload.encode("utf-8")).hexdigest(),
+                "payload_hash": planned_units.plan_push_payload_hash(raw_payload),
             },
         )
 
