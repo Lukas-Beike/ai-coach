@@ -539,6 +539,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
                 # The athlete's own words, not the model-written request summary.
                 "summary": "Synthetic user request",
                 "source_message_ids": [17],
+                "origin_message_ids": [17],
                 "status": "failed",
                 "domain": "nutrition_or_profile",
                 "question": None,
@@ -570,6 +571,56 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(pending["summary"], "Schiebe den Donnerstag\nDer nächste")
         self.assertEqual(pending["source_message_ids"], [15, 17])
         self.assertNotIn("Delete", json.dumps(pending))
+
+    def test_clarified_request_that_fails_keeps_its_chain_through_a_retry(self):
+        server.key_value_service().set(
+            "coach_pending_request",
+            json.dumps(
+                {
+                    "summary": "Sync meinen Plan zu Intervals",
+                    "question": "Welche Woche?",
+                    "source_message_ids": [15],
+                    "origin_message_ids": [15],
+                    "status": "needs_clarification",
+                    "domain": None,
+                }
+            ),
+        )
+        request = {"summary": "Sync", "source_message_ids": [3, 15, 17]}
+        context = {
+            "current_user_message_id": 17,
+            "pending_request": json.loads(
+                server.key_value_service().get("coach_pending_request")
+            ),
+            "messages": [
+                {"id": 15, "role": "user", "content": "Sync meinen Plan zu Intervals"},
+                {"id": 16, "role": "assistant", "content": "Welche Woche?"},
+                {"id": 17, "role": "user", "content": "die nächste"},
+            ],
+        }
+        self.finalize(
+            self.response("Ignored"),
+            [self.failure(request=request)],
+            context=context,
+            message="die nächste",
+        )
+        pending = json.loads(server.key_value_service().get("coach_pending_request"))
+        # The model's cited id 3 never joins the server-recorded chain.
+        self.assertEqual(pending["origin_message_ids"], [15, 17])
+
+        context = {
+            "current_user_message_id": 19,
+            "pending_request": pending,
+            "messages": [{"id": 19, "role": "user", "content": "nochmal"}],
+        }
+        self.finalize(
+            self.response("Ignored"),
+            [self.failure(request={"summary": "x", "source_message_ids": [19]})],
+            context=context,
+            message="nochmal",
+        )
+        retried = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(retried["origin_message_ids"], [15, 17])
 
     def test_retry_of_failed_request_keeps_original_athlete_request(self):
         server.key_value_service().set(

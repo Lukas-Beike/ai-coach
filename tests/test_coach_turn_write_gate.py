@@ -350,7 +350,11 @@ class TurnWriteGateTests(unittest.TestCase):
             {"id": 5, "role": "assistant", "content": "Welches Rennen?"},
             {"id": 10, "role": "user", "content": "nochmal"},
         ]
-        pending = {"status": "needs_clarification", "source_message_ids": [2, 4]}
+        pending = {
+            "status": "needs_clarification",
+            "source_message_ids": [2, 4],
+            "origin_message_ids": [4],
+        }
         classifier = Mock(return_value=verdict(["competition"], delete=True))
         gate, _factory = make_gate(
             "nochmal", context(messages, pending=pending), classifier=classifier
@@ -360,6 +364,39 @@ class TurnWriteGateTests(unittest.TestCase):
         self.assertIsNone(gate.denial("delete_competition", {}))
         classifier.assert_called_once_with(
             "nochmal", "Welches Rennen?", "Lösch das Rennen"
+        )
+
+    def test_a_retried_clarified_request_keeps_the_original_wording(self) -> None:
+        messages = [
+            {"id": 2, "role": "user", "content": "Sync meinen Plan zu Intervals"},
+            {"id": 3, "role": "assistant", "content": "Welche Woche?"},
+            {"id": 4, "role": "user", "content": "die nächste"},
+            {"id": 5, "role": "assistant", "content": "Das hat nicht geklappt."},
+            {"id": 10, "role": "user", "content": "nochmal"},
+        ]
+        pending = {
+            "status": "failed",
+            "source_message_ids": [2, 4],
+            "origin_message_ids": [2, 4],
+        }
+        gate, _factory = make_gate("nochmal", context(messages, pending=pending))
+        self.assertIsNone(gate.denial("start_intervals_plan_sync", {}))
+
+        delete = [
+            {"id": 2, "role": "user", "content": "Lösch das Rennen"},
+            {"id": 4, "role": "user", "content": "das am 12.5."},
+            {"id": 5, "role": "assistant", "content": "Das hat nicht geklappt."},
+            {"id": 10, "role": "user", "content": "nochmal"},
+        ]
+        classifier = Mock(return_value=verdict(["competition"], delete=True))
+        gate, _factory = make_gate(
+            "nochmal", context(delete, pending=pending), classifier=classifier
+        )
+        self.assertIsNone(gate.denial("delete_competition", {}))
+        classifier.assert_called_once_with(
+            "nochmal",
+            "Das hat nicht geklappt.",
+            "Lösch das Rennen\ndas am 12.5.",
         )
 
     def test_cap_counts_allowed_calls_and_resumed_receipts(self) -> None:

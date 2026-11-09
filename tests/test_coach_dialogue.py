@@ -400,10 +400,42 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 "summary": summary,
                 "question": question,
                 "source_message_ids": list(range(1, 25)),
+                "origin_message_ids": [24],
                 "status": "needs_clarification",
                 "domain": None,
             },
         )
+
+    def test_clarification_chain_joins_a_retained_request_but_not_cited_old_ids(self):
+        prior = {
+            "summary": "Sync meinen Plan",
+            "question": "Welche Woche?",
+            "source_message_ids": [15],
+            "origin_message_ids": [15],
+            "status": "needs_clarification",
+            "domain": None,
+        }
+        context = {
+            "messages": [
+                {"id": 3, "role": "user", "content": "Altes Thema"},
+                {"id": 15, "role": "user", "content": "Sync meinen Plan"},
+                {"id": 16, "role": "assistant", "content": "Welche Woche?"},
+                {"id": 17, "role": "user", "content": "die nächste"},
+            ],
+            "current_user_message_id": 17,
+            "pending_request": prior,
+        }
+        server.COACH_LOCAL.clarification_service().save_question(
+            {
+                "source_message_ids": [3, 15, 17],
+                "summary": "Sync der nächsten Woche",
+                "question": "Alle Einheiten?",
+            },
+            context,
+        )
+        stored = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(stored["origin_message_ids"], [15, 17])
+        self.assertEqual(stored["source_message_ids"], [3, 15, 17])
 
     def test_clarification_service_rejects_unbound_message_ids_without_writing(self):
         context = {

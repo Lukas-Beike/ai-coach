@@ -8,8 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.coach.context_selection import (
+    extend_request_chain,
     infer_coach_domain,
     is_bare_follow_up,
+    request_chain_ids,
     select_coach_context,
 )
 from backend.coach.outcomes import (
@@ -240,23 +242,34 @@ def _pending_value(
             for entry in (failures + effects)
             if isinstance(entry, dict) and "tool" in entry
         ]
+        current_id = context["current_user_message_id"]
+        bare_retry = pending_request.get("status") == "failed" and is_bare_follow_up(
+            message
+        )
         request = _retried_request(command_receipts, pending_request, context)
         source_ids, summary = _athlete_request(
             request,
             context,
             message,
-            retained=(
-                pending_request
-                if pending_request.get("status") == "failed"
-                and is_bare_follow_up(message)
-                else None
-            ),
+            retained=pending_request if bare_retry else None,
         )
         domain = request.get("domain") or infer_coach_domain(summary, tools=tool_names)
         return json.dumps(
             {
                 "summary": summary,
                 "source_message_ids": source_ids,
+                # Server-recorded chain for the write gate: a bare retry re-runs
+                # the request it points at, any other turn joins the chain.
+                "origin_message_ids": (
+                    [
+                        item
+                        for item in request_chain_ids(pending_request)
+                        if item != current_id
+                    ]
+                    if bare_retry
+                    else extend_request_chain(pending_request, current_id)
+                )
+                or [current_id],
                 "status": "failed",
                 "domain": domain,
                 "question": None,

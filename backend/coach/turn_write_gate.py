@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from backend.coach.context_selection import select_coach_context
+from backend.coach.context_selection import request_chain_ids, select_coach_context
 from backend.coach.write_gate import (
     REMOTE_DENIALS,
     REMOTE_GARMIN,
@@ -114,15 +114,9 @@ def _pending_origin(
         or not select_coach_context(message, dict(context)).retain_pending_request
     ):
         return None
-    # The request is created by the athlete message it was asked for, the newest
-    # one it cites; older ids the model cited never widen the authority.
-    source_ids = pending.get("source_message_ids")
-    cited = [
-        value
-        for value in (source_ids if isinstance(source_ids, list) else [])
-        if type(value) is int
-    ]
-    wanted = {max(cited)} - {current_id} if cited else set()
+    # Only the server-recorded chain (the request and its clarification answers);
+    # older ids the model cited never widen the authority.
+    wanted = set(request_chain_ids(pending)) - {current_id}
     origins = [
         item
         for item in context.get("messages") or []

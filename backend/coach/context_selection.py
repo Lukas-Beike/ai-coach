@@ -720,6 +720,28 @@ def _source_message_ids(pending: dict[str, Any]) -> list[int]:
     return [item for item in ids if type(item) is int] if isinstance(ids, list) else []
 
 
+def request_chain_ids(pending: Mapping[str, Any] | None) -> list[int]:
+    """Athlete message ids the server recorded for a pending request's chain.
+
+    The chain is the original request plus the athlete's clarification answers.
+    Unlike ``source_message_ids``, the model never chooses these; a request
+    stored before the field existed falls back to its source ids.
+    """
+    if not isinstance(pending, Mapping):
+        return []
+    ids = pending.get("origin_message_ids")
+    if isinstance(ids, list):
+        return [item for item in ids if type(item) is int]
+    return _source_message_ids(dict(pending))
+
+
+def extend_request_chain(
+    pending: Mapping[str, Any] | None, current_id: int
+) -> list[int]:
+    """The chain of a retained pending request plus the athlete's current message."""
+    return sorted({*request_chain_ids(pending), current_id})
+
+
 def pending_origin_messages(
     pending: Mapping[str, Any], messages: object, current_id: object = None
 ) -> list[dict[str, Any]]:
