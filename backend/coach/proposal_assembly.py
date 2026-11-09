@@ -86,7 +86,7 @@ class CoachProposalAssembly:
             uuid_factory=self._uuid_factory,
             nutrition_diary_service=self._nutrition_diary_service,
             nutrition_meal_library_service=self._nutrition_meal_library_service,
-            **({"today": self._today} if self._today else {}),
+            today=self._today,
         )
 
     def confirmation_service(self) -> CoachProposalConfirmationService:

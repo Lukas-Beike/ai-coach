@@ -65,9 +65,9 @@ class CoachProposalCreationService:
         uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
         nutrition_diary_service: Callable[[], Any] | None = None,
         nutrition_meal_library_service: Callable[[], Any] | None = None,
-        today: Callable[[], date] = _utc_today,
+        today: Callable[[], date] | None = None,
     ) -> None:
-        self._today = today
+        self._today = today or _utc_today
         self._database_manager = database_manager
         self._ttl_seconds = ttl_seconds
         self._now = now
