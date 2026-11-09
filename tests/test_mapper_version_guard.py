@@ -59,20 +59,20 @@ NOT_REPLAYED: Final[dict[str, str]] = {
 # Module -> (replaying versions, code fingerprint).
 PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     "fit_activity_detail_mapping": (
-        (7, 8),
-        "eca8bad67f53708bc9beaf8e8894ee03f05a90a1137ee7a50c45dc2c48850078",
+        (8, 9),
+        "d0709ad79b3b29b34e1f8fc32e4d5623c0d1519191fcc4d05104139325b957fc",
     ),
     "fit_rr_mapping": (
-        (7, 8),
+        (8, 9),
         "4319aab924017281cffb92b24b53fa67ed8633d747b55e9f61f57b58821c6981",
     ),
     "fit_sensor_mapping": (
-        (7, 8),
-        "2953aba79c668bb9ef9561fe5f80cea406b399d609301730fc8e79e95ef3626f",
+        (8, 9),
+        "134b2316926293f83d911c1b3b6b88ba6d0a9d4ab900e97ec69b56c7788d19b1",
     ),
     "garmin_activity_detail_mapping": (
-        (8,),
-        "345306bbc8cd8924db2404e236f830903933fdbf486e86d2f83a64b9bf71f1a3",
+        (9,),
+        "a2ea798f22a734653349932c21b105749d702181513b875676322fa58ab1d8d0",
     ),
     "garmin_activity_mapping": (
         (21,),
