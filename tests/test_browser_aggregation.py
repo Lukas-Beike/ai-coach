@@ -100,6 +100,10 @@ class BrowserAggregationTests(unittest.TestCase):
         self.assertEqual(
             self.verify([first, failed, second], attempts=[1, 1, 2]), {"desktop": 2}
         )
+        # Multi-digit attempts compare numerically.
+        self.assertEqual(
+            self.verify([first, second, failed], attempts=[1, 10, 9]), {"desktop": 2}
+        )
 
     def test_failed_latest_attempt_or_missing_shard_still_fails(self):
         first, second = self.manifests()
