@@ -59,6 +59,32 @@ class HistoryUndoPostRoutesTests(unittest.TestCase):
             },
         )
 
+    def test_focus_backfill_undo_runs_the_owner_and_is_absent_without_it(self) -> None:
+        undo = Mock(return_value={"status": "undone", "restored": 3})
+        routes = HistoryUndoPostRoutes(
+            self.undo_factory,
+            self.proposal_factory,
+            self.turn_undo,
+            None,
+            lambda: undo,
+        )
+        self.handler.read_json.return_value = {}
+
+        handled = routes.handle(
+            self.handler, "/api/change-history/undo-focus-backfill", self.session
+        )
+
+        self.assertTrue(handled)
+        undo.assert_called_once_with()
+        self.handler.send_json.assert_called_once_with(
+            200, {"status": "undone", "restored": 3}
+        )
+        self.assertFalse(
+            self.routes.handle(
+                self.handler, "/api/change-history/undo-focus-backfill", self.session
+            )
+        )
+
     def test_apply_passes_whole_payload_and_sends_result(self) -> None:
         payload = {
             "change_id": "synthetic-change-id",

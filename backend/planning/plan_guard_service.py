@@ -465,6 +465,7 @@ class PlanGuardService:
                 self._training_model(), self._planned_weeks(units, today, completed)
             ),
             *plan_checks.strength_incomplete(units),
+            *plan_checks.focus_missing(units),
         ]
 
     def _reported_illness(self) -> str:
@@ -486,14 +487,25 @@ class PlanGuardService:
         return self._calendar_cache[0]
 
     def verify(
-        self, before: Sequence[Mapping[str, Any]], accepted: Sequence[str]
+        self,
+        before: Sequence[Mapping[str, Any]],
+        accepted: Sequence[str],
+        *,
+        waived: Sequence[str] = (),
     ) -> list[dict[str, Any]]:
         """Raise on new blocking findings that are not accepted; return the notes.
+
+        ``waived`` codes are neither blocking nor reported: a write that cannot
+        supply the data, such as an approved replan moving a unit, passes them.
 
         Notes are the new non-blocking findings plus accepted blocking ones; the
         Coach names and justifies them in its answer.
         """
-        new = plan_checks.new_findings(before, self.findings())
+        new = [
+            item
+            for item in plan_checks.new_findings(before, self.findings())
+            if item["code"] not in waived
+        ]
         blocking = [
             item
             for item in new

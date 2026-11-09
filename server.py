@@ -439,6 +439,7 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutProviders,
     SelectedWorkoutSyncAssembly,
 )
+from backend.sync.session_focus_backfill import SessionFocusBackfill
 from backend.sync.state import SyncStateRepository
 from backend.sync.wahoo_connection import WahooSecretRegistry
 from backend.sync.wahoo_connection_assembly import (
@@ -1686,18 +1687,23 @@ def _block_lessons() -> list[dict[str, object]]:
     )
 
 
+def _planned_unit_estimator() -> PlannedUnitEstimator:
+    """Estimator of planned units with the current local thresholds."""
+    return PlannedUnitEstimator(
+        database_manager=database_manager,
+        observation_reader=lambda: CANONICAL_READ,
+        zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+        today=lambda: ATHLETE_CLOCK.now().date(),
+        source_preferences=lambda db: preferences_from_profile(
+            ATHLETE_DATA.profile().get_from_db(db)
+        ),
+    )
+
+
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
     return PlanGuardService(
-        estimate_unit=PlannedUnitEstimator(
-            database_manager=database_manager,
-            observation_reader=lambda: CANONICAL_READ,
-            zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
-            today=lambda: ATHLETE_CLOCK.now().date(),
-            source_preferences=lambda db: preferences_from_profile(
-                ATHLETE_DATA.profile().get_from_db(db)
-            ),
-        ),
+        estimate_unit=_planned_unit_estimator(),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
         completed_activities=lambda: read_completed(
             database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
@@ -2062,6 +2068,26 @@ THRESHOLD_WARNINGS = ThresholdStalenessService(
 )
 
 
+SESSION_FOCUS_BACKFILL = SessionFocusBackfill(
+    key_values=KEY_VALUE_REPOSITORY,
+    clock=runtime_clock.utc_now,
+    future_units=lambda limit: PLANNING_DATA.planned_unit().list(
+        limit, future_only=True
+    ),
+    estimator=_planned_unit_estimator,
+    update_unit=lambda *args, **kwargs: PLANNING_DATA.planned_unit().update(
+        *args, **kwargs
+    ),
+    bump_planning_revision=PLANNING_REVISION_SERVICE.bump,
+    database_manager=database_manager,
+    history_undo=HISTORY.undo_service,
+    database_lock=DB_LOCK,
+    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
+    publish_change=lambda: runtime_events.STATE_EVENT_BUFFER.publish(
+        "coach", {"status": "changed"}
+    ),
+)
+
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -2079,6 +2105,8 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
     # The heart-rate branch's TRIMP constants follow the profile sex (M6 v3).
     athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
+    # The one-time focus backfill of future units (#1849) runs after all stages.
+    extra_followups=(SESSION_FOCUS_BACKFILL,),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
@@ -2247,6 +2275,7 @@ HTTP_API = HttpApiAssembly(
             history=HttpHistoryServices(
                 change_history=HISTORY.change_history_service,
                 undo=HISTORY.undo_service,
+                session_focus_backfill_undo=lambda: SESSION_FOCUS_BACKFILL.undo,
             ),
             workout_library=PLANNING_DATA.workout_library,
             planned_unit=PLANNING_DATA.planned_unit,

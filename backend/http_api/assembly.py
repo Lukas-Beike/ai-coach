@@ -216,6 +216,9 @@ class HttpAthleteServices:
 class HttpHistoryServices:
     change_history: Callable[[], Any]
     undo: Callable[[], Any]
+    session_focus_backfill_undo: Callable[[], Callable[[], dict[str, Any]]] | None = (
+        None
+    )
 
 
 @dataclass(frozen=True)
@@ -568,6 +571,7 @@ class HttpApiAssembly:
                 database_manager, database_lock(), history_undo_service
             ),
             session_rpe_load,
+            history.session_focus_backfill_undo,
         )
         self.coach_actions_post_routes = CoachActionsPostRoutes(
             proposal_confirmation_service,

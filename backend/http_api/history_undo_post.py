@@ -20,11 +20,14 @@ class HistoryUndoPostRoutes:
         coach_proposal_creation_service: Callable[[], CoachProposalCreationService],
         coach_turn_undo_service: CoachTurnUndoService,
         session_rpe_load: Callable[[str], Any] | None = None,
+        session_focus_backfill_undo: Callable[[], Callable[[], dict[str, Any]]]
+        | None = None,
     ) -> None:
         self._history_undo_service = history_undo_service
         self._coach_proposal_creation_service = coach_proposal_creation_service
         self._coach_turn_undo_service = coach_turn_undo_service
         self._session_rpe_load = session_rpe_load
+        self._session_focus_backfill_undo = session_focus_backfill_undo
 
     def handle(self, handler: Any, path: str, session: dict[str, Any]) -> bool:
         if path == "/api/change-history/undo/preview":
@@ -52,6 +55,12 @@ class HistoryUndoPostRoutes:
         elif path == "/api/change-history/undo-turn":
             client_turn_id = handler.read_json().get("client_turn_id")
             handler.send_json(200, self._coach_turn_undo_service.undo(client_turn_id))
+        elif (
+            path == "/api/change-history/undo-focus-backfill"
+            and self._session_focus_backfill_undo is not None
+        ):
+            handler.read_json()
+            handler.send_json(200, self._session_focus_backfill_undo()())
         else:
             return False
         return True
