@@ -92,7 +92,9 @@ class IntervalsOrphanTests(unittest.TestCase):
             pairs[0][1]["push_cleanup"],
         )
 
-    def test_the_nearest_events_are_removed_first_and_listed_once(self) -> None:
+    def test_the_nearest_events_come_first_and_every_upcoming_unit_carries_them(
+        self,
+    ) -> None:
         for index, day in enumerate(("2026-11-20", "2026-11-10", "2026-11-15")):
             self.insert(
                 f"{index}" * 8 + "-1111-4111-8111-" + "9" * 12,
@@ -115,7 +117,7 @@ class IntervalsOrphanTests(unittest.TestCase):
             (["2026-11-10", "2026-11-15"], 3), ([o.date for o in capped], total)
         )
         self.assertEqual(
-            [True, False], ["push_cleanup" in payload for _row, payload in pairs]
+            [True, True], ["push_cleanup" in payload for _row, payload in pairs]
         )
 
     def selected(self, intent: dict) -> dict:

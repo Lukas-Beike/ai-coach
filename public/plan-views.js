@@ -1035,13 +1035,22 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual), intervals: ids.intervals });
   }
 
+  // Every pending unit carries the leftovers its provider's sync removes, but only the first card
+  // that offers that sync claims them, so the note and the removal appear once.
+  const cleanupClaims = { data: null, owners: new Map() };
+  function claimCleanup(provider, localId) {
+    if (cleanupClaims.data !== state.data) Object.assign(cleanupClaims, { data: state.data, owners: new Map() });
+    if (!cleanupClaims.owners.has(provider)) cleanupClaims.owners.set(provider, localId);
+    return cleanupClaims.owners.get(provider) === localId;
+  }
+
   // The events of deleted or replaced units that the sync of this unit removes too, per provider.
   function plannedCleanup(entry, dateKey, todayKey, actual) {
     const lists = entry.push_cleanup;
     if (!lists || typeof lists !== "object") return [];
     const ids = providerIds();
     const targets = plannedTargets(entry, dateKey, todayKey, actual);
-    return targets.filter((provider) => (provider === ids.garmin || provider === ids.intervals) && Array.isArray(lists[provider]) && lists[provider].length).map((provider) => {
+    return targets.filter((provider) => (provider === ids.garmin || provider === ids.intervals) && Array.isArray(lists[provider]) && lists[provider].length && claimCleanup(provider, entry.local_id)).map((provider) => {
       const items = lists[provider];
       const names = items.slice(0, 3).map((item) => [item.name, item.date ? dateLabel(item.date) : ""].filter(Boolean).join(" "));
       const more = items.length > 3 ? " + " + (items.length - 3) + " weitere" : "";
@@ -1080,7 +1089,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
           const done = await runPlanPush(provider, [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }]);
           let label = plannedPushTargetLabel(provider, entry, ids);
           // The listed leftovers go in a job of their own, so one that cannot be removed never fails this unit.
-          const leftovers = (entry.push_cleanup?.[provider] || []).slice(0, 28);
+          const leftovers = claimCleanup(provider, entry.local_id) ? (entry.push_cleanup?.[provider] || []).slice(0, 28) : [];
           if (leftovers.length) {
             const cleaned = await runPlanPush(provider, leftovers.map((item) => leftoverEntry(provider, item, ids)));
             if (cleaned.status === "completed") label += ` · ${leftovers.length} alte entfernt`;

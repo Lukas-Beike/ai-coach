@@ -90,7 +90,7 @@ A saved workout whose exercise steps differ from the sent ones SHALL be deleted 
 Evidence: `backend/sync/garmin_strength_push.py`; `tests/test_garmin_strength_push.py`.
 
 ### Requirement: Garmin leftovers are removed by the explicit sync
-A link of provider `garmin` whose planned unit is missing, tombstoned, archived, deleted or no longer a strength unit SHALL count as an orphan. The explicit Garmin job SHALL carry up to 20 orphans as `remove` entries and the calendar and Coach cards SHALL list them ("Wird bei Garmin entfernt"); nothing SHALL be removed outside an explicit sync, and a Garmin workout without a link SHALL never be touched.
+A link of provider `garmin` whose planned unit is missing, tombstoned, archived, deleted or no longer a strength unit SHALL count as an orphan. The explicit Garmin job SHALL carry up to 20 orphans as `remove` entries and the calendar (once, on the first card offering the Garmin sync) and Coach cards SHALL list them ("Wird bei Garmin entfernt"); nothing SHALL be removed outside an explicit sync, and a Garmin workout without a link SHALL never be touched.
 
 #### Scenario: Kept link and marker
 - **WHEN** the creation of a unit is undone, or a workout is sent
@@ -108,4 +108,4 @@ A link of provider `garmin` whose planned unit is missing, tombstoned, archived,
 - **WHEN** the Garmin calendar holds a workout this app did not send
 - **THEN** no orphan removal reads, changes or deletes it.
 
-Evidence: `backend/planning/garmin_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/db/remote_links.py:RemoteLinkRepository.delete_for_entity`, `public/plan-views.js:plannedGarminCleanup`; `tests/test_garmin_strength_push.py` (PushTests orphan tests), `tests/plan-views-sync-button.test.cjs`, `tests/test_sync_jobs.py:test_one_stored_item_keeps_a_failure_among_several_results`.
+Evidence: `backend/planning/garmin_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/db/remote_links.py:RemoteLinkRepository.delete_for_entity`, `public/plan-views.js:plannedCleanup`; `tests/test_garmin_strength_push.py` (PushTests orphan tests), `tests/plan-views-sync-button.test.cjs`, `tests/test_sync_jobs.py:test_one_stored_item_keeps_a_failure_among_several_results`.

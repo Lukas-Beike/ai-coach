@@ -148,25 +148,24 @@ def _cleanup_lists(
     }
 
 
-def _first_cleanup(
+def _unit_cleanup(
     lists: dict[str, list[dict[str, str]]],
-    listed: set[str],
     pending: dict[str, bool],
     payload: dict[str, Any],
     today: date,
 ) -> dict[str, list[dict[str, str]]]:
-    """Give each provider's leftovers to the first upcoming unit it waits for.
+    """The leftovers each provider removes with the sync of this upcoming unit.
 
-    The calendar then shows each note a single time.
+    Every unit a provider waits for carries them; the calendar shows them once,
+    on the first card that really offers that provider's sync button.
     """
     if str(payload.get("date") or "")[:10] < today.isoformat():
         return {}
-    cleanup: dict[str, list[dict[str, str]]] = {}
-    for provider, items in lists.items():
-        if pending.get(provider) and items and provider not in listed:
-            listed.add(provider)
-            cleanup[provider] = items
-    return cleanup
+    return {
+        provider: items
+        for provider, items in lists.items()
+        if items and pending.get(provider)
+    }
 
 
 def attach_push_state(
@@ -180,7 +179,7 @@ def attach_push_state(
 ) -> None:
     """Add ``payload_hash``, ``push_pending`` and ``push_blocked`` to each pair.
 
-    The first upcoming unit a provider waits for also lists, per provider, the
+    An upcoming unit a provider waits for also lists, per provider, the
     leftovers its sync removes (``push_cleanup``): ``orphans`` are Garmin
     workouts, ``intervals_orphans`` Intervals.icu events of deleted or replaced
     units.
@@ -190,7 +189,6 @@ def attach_push_state(
     calendar says so instead of offering only Intervals.icu silently.
     """
     lists = _cleanup_lists(orphans, intervals_orphans)
-    listed: set[str] = set()
     for row, payload in pairs:
         digest = library_payload_hash(row["payload"])
         # A synced run unit whose heart-rate range moved with the threshold HR
@@ -210,7 +208,7 @@ def attach_push_state(
             )
         payload["payload_hash"] = digest
         payload["push_pending"] = pending
-        cleanup = _first_cleanup(lists, listed, pending, payload, today)
+        cleanup = _unit_cleanup(lists, pending, payload, today)
         if cleanup:
             payload["push_cleanup"] = cleanup
         payload["push_blocked"] = (

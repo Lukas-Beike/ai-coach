@@ -244,7 +244,7 @@ Evidence: `backend/sync/planned_calendar.py:PlannedCalendarSyncService._delete_r
 
 #### Scenario: Hidden units are removed by the next explicit sync
 - **WHEN** a unit that is archived or deleted (a replan archives the replaced unit) still holds a remote event ID in an open sync state and is dated today or later
-- **THEN** the calendar lists it ("Wird bei Intervals.icu entfernt") on each unit Intervals.icu waits for, the calendar sync button and a selected Coach card carry it (at most 20 per sync) as one more entry of the same job, and only the linked event is deleted; a sync bound to the units of one Coach turn and events without a stored unit are never touched.
+- **THEN** every upcoming unit Intervals.icu waits for carries it and the calendar lists it once ("Wird bei Intervals.icu entfernt"), on the first card that offers the sync button, the calendar sync button and a selected Coach card carry it (at most 20 per sync) as one more entry of the same job, and only the linked event is deleted; a sync bound to the units of one Coach turn and events without a stored unit are never touched.
 
 Evidence: `backend/planning/intervals_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_with_intervals_leftovers`, `public/plan-views.js:plannedCleanup`; `tests/test_intervals_orphans.py`, `tests/test_sync_planned_calendar.py:test_removing_a_replaced_unit_leaves_foreign_events_alone`.
 
