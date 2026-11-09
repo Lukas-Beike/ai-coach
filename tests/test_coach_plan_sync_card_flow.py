@@ -36,6 +36,7 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.planning.planned_units import plan_push_hash_matches
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.authority import PlanningAuthorityService
@@ -496,7 +497,21 @@ class EveryCardKindQueuesItsProviderJobTests(unittest.TestCase):
             "entries"
         ]
 
-        self.assertEqual(unit_entries(self.flow, STRENGTH_IDS), queued)
+        # The job binds each unit to the content hash its executor checks (#1916).
+        self.assertEqual(
+            STRENGTH_IDS, [entry["library_workout_id"] for entry in queued]
+        )
+        with self.flow.database.reader() as db:
+            stored = {
+                row["local_id"]: row["payload"]
+                for row in db.execute("SELECT local_id, payload FROM planned_units")
+            }
+        for entry in queued:
+            self.assertTrue(
+                plan_push_hash_matches(
+                    stored[entry["library_workout_id"]], entry["expected_payload_hash"]
+                )
+            )
 
     def test_a_garmin_selection_outside_the_request_scope_is_rejected(self) -> None:
         with self.assertRaises(AppError):
