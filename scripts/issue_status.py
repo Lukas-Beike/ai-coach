@@ -24,10 +24,15 @@ def gh_json(*args):
 
 
 def main(argv):
-    if len(argv) != 2 or not argv[1].isdigit():
+    try:
+        (argument,) = argv[1:]
+        issue = int(argument, 10)
+        if issue <= 0:
+            raise ValueError(argument)
+        number = str(issue)
+    except ValueError:
         print("usage: python scripts/issue_status.py <issue-number>", file=sys.stderr)
         return 2
-    number = argv[1]
     issue = gh_json("issue", "view", number, "--json", "state,body")
     pulls = gh_json(
         "pr",
