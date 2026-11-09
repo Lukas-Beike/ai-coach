@@ -58,7 +58,7 @@ activity IDs no longer resolve.
 | GET | `/api/change-history` | Local change history | Auth |
 | GET | `/api/state/events` | Authenticated state event stream | Auth |
 | GET | `/api/logs`, `/api/logs/download`, `/api/diagnostics` | Diagnostics and redacted logs | Auth |
-| GET | `/api/privacy/export`, `/api/privacy/delete/preview`, `/api/privacy/backup` | Privacy export, deletion preview and backup | Auth |
+| GET | `/api/privacy/export`, `/api/privacy/delete/preview`, `/api/privacy/backup`, `/api/privacy/gps` | Privacy export, deletion preview, backup, and the GPS-track setting with its stored-track count | Auth |
 | GET | `/api/analysis/endurance`, `/api/analysis/power-profiles`, `/api/analysis/season`, `/api/analysis/training-records` | Analysis projections | Auth |
 | GET | `/api/nutrition/day`, `/api/nutrition/range`, `/api/nutrition/templates`, `/api/nutrition/week`, `/api/nutrition/products` | Nutrition projections and product search | Auth |
 | GET | `/api/nutrition/yazio/status` | Read the last local Yazio authentication check without contacting Yazio | Auth |
@@ -82,8 +82,10 @@ activity IDs no longer resolve.
 | POST | `/api/change-history/undo/preview`, `/api/change-history/undo`, `/api/change-history/undo-turn` | Preview or apply an undo, or undo one Coach turn | CSRF |
 | POST | `/api/change-history/undo-focus-backfill` | Restore every unit the one-time session focus backfill changed, or none | CSRF |
 | POST | `/api/privacy/delete`, `/api/privacy/restore` | Delete or restore privacy data | CSRF |
+| POST | `/api/privacy/gps`, `/api/privacy/gps/delete` | Turn GPS-track storage on or off; delete every stored track after the typed confirmation | CSRF |
 | POST | `/api/logs/delete`, `/api/diagnostics/delete` | Clear diagnostics data | CSRF |
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |
+| POST | `/api/equipment/sensor` | Link a recorded sensor to equipment, or unlink it | CSRF |
 | POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/entry/add-product`, `/api/nutrition/sync` | Write, delete or synchronize nutrition entries, or add a saved product to a logged meal | CSRF |
 | POST | `/api/nutrition/yazio/check` | Explicitly check Yazio authentication and record an in-memory result | CSRF |
 | POST | `/api/providers/{id}/check` | Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result | CSRF |

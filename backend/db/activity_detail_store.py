@@ -28,24 +28,31 @@ from backend.canonical.activity_detail import (
     ActivityDetailSet,
     ActivityLap,
     ActivityLapSet,
+    ActivitySensor,
     ActivityStreamSet,
     ActivityStrengthSet,
     ActivityStrengthSetSet,
     ZoneBucket,
     ZoneDistribution,
+    without_positions,
 )
 from backend.canonical.records import Provenance
+from backend.canonical.sensor_registry import SensorUse
 from backend.canonical.vocabulary import (
+    POSITION_CHANNELS,
     ActivityDetailKind,
     ActivityDetailOrigin,
     ActivityRecordState,
     ActivitySessionState,
     ExerciseCategory,
+    HeartRateSource,
     LapKind,
     LapSource,
+    PowerSource,
     ProviderId,
     ProviderRecordState,
     RecordingOrigin,
+    SensorRole,
     SourceKind,
     Sport,
     StreamChannel,
@@ -157,6 +164,90 @@ def decode_series(
     return values
 
 
+GPS_TRACKS_KEY: Final = "gps_tracks_enabled"
+
+
+def gps_tracks_enabled(db: Any) -> bool:
+    """Whether new GPS tracks are stored; on unless the athlete turned it off."""
+    row = db.execute("SELECT value FROM kv WHERE key = ?", (GPS_TRACKS_KEY,)).fetchone()
+    return row is None or row["value"] != "0"
+
+
+def stored_track_count(db: Any) -> int:
+    """Count the stream sets that hold a stored GPS position."""
+    names = sorted(channel.value for channel in POSITION_CHANNELS)
+    row = db.execute(
+        "SELECT COUNT(DISTINCT provider || char(31) || provider_activity_id) AS total "
+        f"FROM activity_stream_channels WHERE channel IN ({', '.join('?' * len(names))})",
+        names,
+    ).fetchone()
+    return int(row["total"])
+
+
+def delete_stored_tracks(db: Any) -> int:
+    """Delete every stored GPS position channel; return the affected stream sets.
+
+    The sets keep their other channels and get the content hash of the
+    remaining channels, so later fetches compare against what is stored.
+    """
+    names = sorted(channel.value for channel in POSITION_CHANNELS)
+    marks = ", ".join("?" * len(names))
+    keys = [
+        (row["provider"], row["provider_activity_id"])
+        for row in db.execute(
+            "SELECT DISTINCT provider, provider_activity_id FROM activity_stream_channels "
+            f"WHERE channel IN ({marks})",
+            names,
+        )
+    ]
+    db.execute(
+        f"DELETE FROM activity_stream_channels WHERE channel IN ({marks})", names
+    )
+    for provider, activity_id in keys:
+        _rehash_stream_set(db, provider, activity_id)
+    return len(keys)
+
+
+def _rehash_stream_set(db: Any, provider: str, provider_activity_id: str) -> None:
+    key = (provider, provider_activity_id, ActivityDetailKind.STREAMS.value)
+    header = db.execute(
+        "SELECT mapper_version, origin, source_kind, recorded_by, source_record_id, "
+        "resolution FROM activity_detail_sets WHERE provider = ? "
+        "AND provider_activity_id = ? AND detail_kind = ?",
+        key,
+    ).fetchone()
+    if header is None:
+        return
+    children: list[tuple[object, ...]] = []
+    for row in db.execute(
+        "SELECT channel, point_count, valid_count, data FROM activity_stream_channels "
+        "WHERE provider = ? AND provider_activity_id = ? ORDER BY channel",
+        key[:2],
+    ):
+        values = decode_series(row["data"], row["point_count"], row["valid_count"])
+        points, valid = _pack_series(values)
+        children.append((row["channel"], row["point_count"], valid, points))
+    content = _content_hash(
+        {
+            "detail_kind": key[2],
+            "mapper_version": header["mapper_version"],
+            "origin": header["origin"],
+            "source_kind": header["source_kind"],
+            "recorded_by": header["recorded_by"],
+            "source_record_id": header["source_record_id"],
+            "resolution": header["resolution"],
+            "lap_source": None,
+            "zone_boundary_source": None,
+        },
+        children,
+    )
+    db.execute(
+        "UPDATE activity_detail_sets SET content_sha256 = ? WHERE provider = ? "
+        "AND provider_activity_id = ? AND detail_kind = ?",
+        (content, *key),
+    )
+
+
 def replace_detail_set(
     db: Any,
     detail: ActivityDetailSet,
@@ -176,6 +267,11 @@ def replace_detail_set(
         raise ValueError("mapper_version must be at least 1")
     if summary_sha256 is not None and not _SHA256_PATTERN.fullmatch(summary_sha256):
         raise ValueError("summary_sha256 must be a lowercase SHA-256 hex digest")
+    if isinstance(detail, ActivityStreamSet) and not gps_tracks_enabled(db):
+        stripped = without_positions(detail)
+        if stripped is None:
+            return WriteOutcome.UNCHANGED
+        detail = stripped
     provenance = detail.provenance
     if provenance.provider is None:
         raise ValueError("provenance.provider is required for activity details")
@@ -214,14 +310,18 @@ def replace_detail_set(
         summary_sha256,
         content_sha256,
         fetched_at,
+        header.get("hr_source"),
+        header.get("power_source"),
+        header.get("sensors"),
     )
     if existing is None:
         db.execute(
             "INSERT INTO activity_detail_sets(provider, provider_activity_id, "
             "detail_kind, mapper_version, origin, source_kind, recorded_by, "
             "source_record_id, resolution, lap_source, zone_boundary_source, "
-            "set_source, summary_sha256, content_sha256, fetched_at, created_at, "
-            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "set_source, summary_sha256, content_sha256, fetched_at, hr_source, "
+            "power_source, sensors, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (*key, *values, now, now),
         )
     else:
@@ -230,7 +330,8 @@ def replace_detail_set(
             "UPDATE activity_detail_sets SET mapper_version = ?, origin = ?, "
             "source_kind = ?, recorded_by = ?, source_record_id = ?, resolution = ?, "
             "lap_source = ?, zone_boundary_source = ?, set_source = ?, summary_sha256 = ?, "
-            "content_sha256 = ?, fetched_at = ?, updated_at = ? "
+            "content_sha256 = ?, fetched_at = ?, hr_source = ?, power_source = ?, "
+            "sensors = ?, updated_at = ? "
             "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
             (*values, now, *key),
         )
@@ -597,6 +698,38 @@ def activity_detail_backfill_candidates(
     ]
 
 
+def sensor_uses(db: Any) -> list[SensorUse]:
+    """Return the sensor lists of every live session's stream sets, oldest first.
+
+    Records of one session that name the same sensors are separate entries; the
+    registry de-duplicates by sensor key. Rows with an unreadable start or
+    sensor list are skipped.
+    """
+    uses: list[SensorUse] = []
+    for row in db.execute(
+        "SELECT r.activity_id AS session_id, r.sport, r.started_at, d.sensors "
+        "FROM activity_detail_sets AS d "
+        "JOIN activity_records AS r ON r.provider = d.provider "
+        "AND r.provider_activity_id = d.provider_activity_id "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE d.detail_kind = ? AND d.sensors IS NOT NULL AND r.state = ? "
+        "AND s.state <> ? ORDER BY julianday(r.started_at), r.provider_activity_id",
+        (
+            ActivityDetailKind.STREAMS.value,
+            ActivityRecordState.ACTIVE.value,
+            ActivitySessionState.DELETED.value,
+        ),
+    ).fetchall():
+        sensors = stored_sensors(row["sensors"])
+        try:
+            started_at = datetime.fromisoformat(row["started_at"])
+        except TypeError, ValueError:
+            continue
+        if sensors:
+            uses.append(SensorUse(row["session_id"], row["sport"], started_at, sensors))
+    return uses
+
+
 def stored_strength_source(
     db: Any, provider: str, provider_activity_id: str
 ) -> str | None:
@@ -777,7 +910,53 @@ def _header(detail: ActivityDetailSet, mapper_version: int) -> dict[str, Any]:
     if isinstance(detail, ActivityStrengthSetSet):
         # Only strength sets carry the key, so other kinds keep their content hash.
         header["set_source"] = detail.source.value
+    if isinstance(detail, ActivityStreamSet):
+        # Only a set that names a source or sensor carries the keys, so streams
+        # without them keep their content hash.
+        if detail.hr_source is not None:
+            header["hr_source"] = detail.hr_source.value
+        if detail.power_source is not None:
+            header["power_source"] = detail.power_source.value
+        if detail.sensors:
+            header["sensors"] = json.dumps(
+                [_sensor_json(sensor) for sensor in detail.sensors],
+                sort_keys=True,
+                separators=(",", ":"),
+            )
     return header
+
+
+def _sensor_json(sensor: ActivitySensor) -> dict[str, Any]:
+    return {
+        "role": sensor.role.value,
+        "key": sensor.key,
+        "connection": sensor.connection,
+        "manufacturer": sensor.manufacturer,
+        "product": sensor.product,
+    }
+
+
+def _stored_sensors(text: object) -> tuple[ActivitySensor, ...]:
+    if text is None:
+        return ()
+    return tuple(
+        ActivitySensor(
+            role=SensorRole(item["role"]),
+            key=item["key"],
+            connection=item.get("connection"),
+            manufacturer=item.get("manufacturer"),
+            product=item.get("product"),
+        )
+        for item in json.loads(str(text))
+    )
+
+
+def stored_sensors(text: object) -> tuple[ActivitySensor, ...]:
+    """Decode a stored sensor list; an unreadable list yields no sensors."""
+    try:
+        return _stored_sensors(text)
+    except TypeError, ValueError, KeyError, AttributeError:
+        return ()
 
 
 def _child_rows(detail: ActivityDetailSet) -> list[tuple[object, ...]]:
@@ -900,7 +1079,7 @@ def _read_sets(
         "SELECT d.provider, d.provider_activity_id, d.detail_kind, d.mapper_version, "
         "d.origin, d.source_kind, d.recorded_by, d.source_record_id, d.resolution, "
         "d.lap_source, d.zone_boundary_source, d.set_source, d.summary_sha256, "
-        "d.fetched_at, "
+        "d.fetched_at, d.hr_source, d.power_source, d.sensors, "
         "r.activity_id FROM activity_detail_sets AS d "
         "JOIN activity_records AS r ON r.provider = d.provider "
         "AND r.provider_activity_id = d.provider_activity_id "
@@ -975,6 +1154,16 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
             **common,
             resolution=StreamResolution(row["resolution"]),
             channels=channels,
+            hr_source=(
+                None if row["hr_source"] is None else HeartRateSource(row["hr_source"])
+            ),
+            power_source=(
+                None
+                if row["power_source"] is None
+                else PowerSource(row["power_source"])
+            ),
+            # Optional metadata must never make the stream set unreadable.
+            sensors=stored_sensors(row["sensors"]),
         )
     if kind is ActivityDetailKind.LAPS:
         laps = tuple(

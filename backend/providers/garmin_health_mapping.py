@@ -227,7 +227,10 @@ from backend.providers.garmin_weight_walk import (
 # Battery day keyed ``date`` (the SDK's own name) keeps its totals.
 # Version 20: the watch heart-rate zones also project zone configurations
 # (``garmin_zone_mapping``), dated by the day they were fetched.
-MAPPER_VERSION: Final = 20
+# Version 21: one readiness alias order (``score`` first), gear
+# ``maximumMeter`` beside ``maximumMeters``, and an endurance ``groupMap`` that
+# is a mapping keyed by day or a list of dated entries.
+MAPPER_VERSION: Final = 21
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"

@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v23 and supports upgrades from v21 (releases 1.13.41 to 1.13.44) and v22 (the 2.0.0 candidate); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v24 and supports upgrades from v21 (releases 1.13.41 to 1.13.44), v22 (the 2.0.0 candidate) and v23; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from released schemas v21 and v22 and the current schema v23, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from released schemas v21, v22 and v23 and the current schema v24, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Released baseline upgrade
 - **WHEN** a populated released v21 database is opened by this build
@@ -150,3 +150,13 @@ The v22 to v23 step SHALL add `activity_feedback.purpose` (NULL for every existi
 - **THEN** every feedback row and every other table survive with no marking, a marking can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
 
 Evidence: `backend/db/migrations.py:_upgrade_v22_to_v23`; `tests/test_db_feedback_purpose_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+
+### Requirement: Stream sensor source upgrade
+
+The v23 to v24 step SHALL add `activity_detail_sets.hr_source`, `power_source` and `sensors` (NULL for every existing row, checked to the heart rate sources chest_strap, optical and unknown, the power sources power_meter, trainer, estimated and unknown, and a JSON array) and keep every other row unchanged. A v21 or v22 database SHALL reach v24 through the later shapes in the same transaction.
+
+#### Scenario: Populated release upgrade
+- **WHEN** a populated v21, v22 or v23 database is opened by this build
+- **THEN** every detail row and every other table survive with no source, a source can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
+
+Evidence: `backend/db/migrations.py:_upgrade_v23_to_v24`; `tests/test_db_stream_sensors_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.

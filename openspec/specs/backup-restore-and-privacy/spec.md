@@ -46,7 +46,7 @@ Evidence: `backend/backup/database.py::DatabaseBackupService._check_source_capac
 
 ### Requirement: Complete secret-filtered privacy exports
 
-The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions, approval proposals and the planning-state revision counter, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are exported in `provider_settings.json`. The format version is currently 14.
+The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions, approval proposals and the planning-state revision counter, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are exported in `provider_settings.json`. The format version is currently 15.
 
 #### Scenario: Privacy archive requested
 - **WHEN** the authenticated athlete requests the archive export
@@ -79,6 +79,24 @@ Every table in the current schema SHALL have a recorded export decision and a pl
 - **THEN** the coverage tests fail until the column is exported or listed as excluded
 
 Evidence: `backend/backup/export.py::PRIVACY_EXPORT_FORMAT_VERSION`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`. Tests: `tests/test_data_safety_coverage.py::CoverageGuardTests`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`.
+
+### Requirement: GPS positions stay in storage
+
+Stored GPS position channels SHALL be part of the database backup, the privacy export and the local data purge, and SHALL NOT enter any read model, Coach context, diagnostics report, log line or structured log field. The athlete SHALL be able to turn off the storage of new tracks (default on); turning it off SHALL NOT delete stored tracks, which only a confirmed request with the exact phrase `GPS-SPUREN LÖSCHEN` removes.
+
+#### Scenario: Positions in a stored stream set
+- **WHEN** a stream set with latitude and longitude channels is merged, served as activity detail or summarized as coverage
+- **THEN** no position channel and no coordinate value appears in the result
+
+#### Scenario: Storage turned off
+- **WHEN** the athlete turned "GPS-Spuren speichern" off and a file with positions is fetched
+- **THEN** the stream set is stored without position channels and its content hash equals that of the stripped set
+
+#### Scenario: Confirmed track deletion
+- **WHEN** the athlete confirms `GPS-SPUREN LÖSCHEN`
+- **THEN** every position channel is deleted, the other channels stay and any other phrase is rejected
+
+Evidence: `backend/canonical/vocabulary.py::POSITION_CHANNELS`; `backend/db/activity_detail_store.py::replace_detail_set`; `backend/privacy.py::PrivacyDeleteService`. Tests: `tests/test_gps_position_privacy.py`.
 
 ### Requirement: Secrets stay out of exports, reports and logs
 

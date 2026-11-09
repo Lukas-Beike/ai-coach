@@ -84,7 +84,7 @@ Load, fitness/fatigue/form, critical power and speed, session efficiency, HRV an
 
 ## Backup, restore and upgrades
 
-Releases keep the athlete's encrypted database. Release 1.13.44 (schema v21) is the oldest schema the code still opens; the current schema is v23. Supported schemas are upgraded in place in one transaction; older, unknown or newer schemas are rejected unchanged. Keep the `/data` mount and `APP_PASSWORD` when recreating the container, and never reset the data directory to fix a rejected schema. Backup download, validated restore with a pre-restore copy, privacy export and local data purge are under **Mehr**; details in [docs/operations.md](docs/operations.md) and [docs/schema-history.md](docs/schema-history.md).
+Releases keep the athlete's encrypted database. Release 1.13.44 (schema v21) is the oldest schema the code still opens; the current schema is v23. Supported schemas are upgraded in place in one transaction; older, unknown or newer schemas are rejected unchanged. Keep the `/data` mount and `APP_PASSWORD` when recreating the container, and never reset the data directory to fix a rejected schema. Backup download, validated restore with a pre-restore copy, privacy export and local data purge are under **Mehr**. GPS tracks from Garmin and Wahoo files are stored in the encrypted database, backup and export, never shown to the Coach or in diagnostics and logs, and deleted by the local data purge; **Mehr** → privacy section has the "GPS-Spuren speichern" switch (default on) and, once it is off, a confirmed deletion of the stored tracks; details in [docs/operations.md](docs/operations.md) and [docs/schema-history.md](docs/schema-history.md).
 
 ## Further docs
 

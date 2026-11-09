@@ -35,6 +35,7 @@ SINT8 = fit_builder.SINT8
 UINT8 = fit_builder.UINT8
 UINT16 = fit_builder.UINT16
 UINT32 = fit_builder.UINT32
+SINT32 = 0x85
 
 ID = "fit-42"
 RETRIEVED = datetime(2026, 10, 19, 6, 0, tzinfo=UTC)
@@ -58,6 +59,8 @@ RECORD_FIELDS = [
     (53, UINT8),
     (7, UINT16),
     (13, SINT8),
+    (0, SINT32),
+    (1, SINT32),
 ]
 LAP_FIELDS = [
     (2, UINT32),
@@ -88,6 +91,8 @@ _RECORD_NAMES = {
     "fraction": 53,
     "power": 7,
     "temperature": 13,
+    "lat": 0,
+    "lon": 1,
 }
 _LAP_NAMES = {
     "start": 2,
@@ -216,6 +221,39 @@ class FitActivityDetailMappingTests(unittest.TestCase):
                 StreamChannel.TEMPERATURE_C: (20.0, 21.0, 22.0),
             },
         )
+
+    def test_semicircle_positions_map_to_degrees_and_invalid_points_are_gaps(self):
+        semicircles = 2**31 / 180.0
+        result = _map(
+            _fit(
+                records=[
+                    _record(
+                        1000,
+                        hr=100,
+                        lat=round(52.5 * semicircles),
+                        lon=round(-13.25 * semicircles),
+                    ),
+                    _record(1001, hr=101),
+                    _record(1002, hr=102, lat=-(2**31), lon=2**31 - 2),
+                ]
+            )
+        )
+        channels = _channels(result)
+        lat = channels[StreamChannel.LATITUDE_DEG]
+        lon = channels[StreamChannel.LONGITUDE_DEG]
+        self.assertAlmostEqual(lat[0], 52.5, places=6)
+        self.assertAlmostEqual(lon[0], -13.25, places=6)
+        self.assertIsNone(lat[1])
+        self.assertIsNone(lon[1])
+        # -2**31 semicircles are -180 degrees: out of range for latitude; 2**31-2 is valid for longitude.
+        self.assertIsNone(lat[2])
+        self.assertIsNotNone(lon[2])
+        self.assertIn(_issue("latitude_deg", IssueReason.OUT_OF_RANGE), result.issues)
+
+    def test_file_without_positions_has_no_position_channels(self):
+        result = _map(_fit(records=[_record(1000, hr=100), _record(1001, hr=101)]))
+        self.assertNotIn(StreamChannel.LATITUDE_DEG, _channels(result))
+        self.assertNotIn(StreamChannel.LONGITUDE_DEG, _channels(result))
 
     def test_enhanced_fields_win_per_record_and_fall_back_on_sentinel(self):
         result = _map(

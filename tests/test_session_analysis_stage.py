@@ -17,9 +17,11 @@ from backend.canonical.activity_detail import (
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
+    HeartRateSource,
     LapKind,
     LapSource,
     MetricKind,
+    PowerSource,
     ProviderId,
     RecordingOrigin,
     SourceKind,
@@ -78,6 +80,8 @@ def _streams(
     *,
     watts: tuple[float, ...] = WATTS,
     summary_sha256: str | None = None,
+    hr_source: HeartRateSource | None = None,
+    power_source: PowerSource | None = None,
 ) -> None:
     replace_detail_set(
         db,
@@ -91,6 +95,8 @@ def _streams(
                 StreamChannel.POWER_W: watts,
                 StreamChannel.HEART_RATE_BPM: HEART,
             },
+            hr_source=hr_source,
+            power_source=power_source,
         ),
         mapper_version=1,
         summary_sha256=summary_sha256,
@@ -237,6 +243,24 @@ class SessionAnalysisStageTests(unittest.TestCase):
         (summary,) = analysis_summaries(self.manager)
         self.assertEqual("act_g1", summary["session_id"])
         self.assertEqual(analysis["aerobic"], summary["aerobic"])
+
+    def test_the_analysis_names_the_sensor_sources(self) -> None:
+        self._write(
+            lambda db: _streams(
+                db,
+                GARMIN,
+                "g1",
+                hr_source=HeartRateSource.OPTICAL,
+                power_source=PowerSource.POWER_METER,
+            )
+        )
+        self._run()
+        row = self._row("act_g1")
+        assert row is not None
+        analysis = row["payload"]["session_analysis"]
+        self.assertEqual(
+            {"heart_rate": "optical", "power": "power_meter"}, analysis["sensors"]
+        )
 
     def test_unchanged_inputs_write_nothing_and_a_new_set_recomputes(self) -> None:
         self._write(lambda db: _streams(db, GARMIN, "g1"))

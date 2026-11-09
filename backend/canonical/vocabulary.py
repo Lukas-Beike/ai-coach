@@ -552,6 +552,18 @@ class StreamChannel(StrEnum):
     TEMPERATURE_C = "temperature_c"
     # 1 while moving, 0 while paused.
     MOVING = "moving"
+    # WGS84 position in degrees (schema-neutral; stored like every channel).
+    # Private: see POSITION_CHANNELS.
+    LATITUDE_DEG = "latitude_deg"
+    LONGITUDE_DEG = "longitude_deg"
+
+
+# Raw GPS positions stay in storage, backup and export only. They are never
+# merged into read models, so no Coach, API, diagnostics or log path can carry
+# them; weather and route features derive coarse values from the stored set.
+POSITION_CHANNELS: Final = frozenset(
+    {StreamChannel.LATITUDE_DEG, StreamChannel.LONGITUDE_DEG}
+)
 
 
 class StreamResolution(StrEnum):
@@ -559,6 +571,31 @@ class StreamResolution(StrEnum):
 
     FULL = "full"
     DOWNSAMPLED = "downsampled"
+
+
+class HeartRateSource(StrEnum):
+    """What measured the heart rate of a stream set (schema version 24)."""
+
+    CHEST_STRAP = "chest_strap"
+    OPTICAL = "optical"
+    UNKNOWN = "unknown"
+
+
+class PowerSource(StrEnum):
+    """What measured the power of a stream set (schema version 24)."""
+
+    POWER_METER = "power_meter"
+    TRAINER = "trainer"
+    ESTIMATED = "estimated"
+    UNKNOWN = "unknown"
+
+
+class SensorRole(StrEnum):
+    """The channel a recorded sensor reported (schema version 24)."""
+
+    HEART_RATE = "heart_rate"
+    POWER_METER = "power_meter"
+    TRAINER = "trainer"
 
 
 class LapKind(StrEnum):

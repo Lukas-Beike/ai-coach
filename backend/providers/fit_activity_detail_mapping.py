@@ -31,8 +31,10 @@ a newer number maps to ``other``, 65534 unknown to none) and wkt_step_index
 (11, the step number without the message-index flag bits). The per-category
 exercise subtype (8) is not mapped, so FIT sets carry no exercise name.
 
-Not mapped: positions (0, 1), session and activity messages, developer fields,
-device information, and lap run cadence.
+Device information (23) yields the heart rate and power source of the stream set
+and its external heart rate and power sensors, with the serial only as a hash
+(``fit_sensor_mapping``). Not mapped: session and activity messages,
+developer fields, and lap run cadence.
 
 The mapper is pure: it performs no I/O, logs nothing and never raises for
 malformed bytes. Issues name the activity, the FIT field and a reason only.
@@ -73,11 +75,15 @@ from backend.canonical.vocabulary import (
     StrengthSetType,
 )
 from backend.providers.fit_file import FitMessage, fit_field, fit_messages
+from backend.providers.fit_sensor_mapping import sensor_profile
 
 # Version 1: first mapping of FIT activity detail sets (streams and device laps).
 # Version 2: maximum speed per lap.
 # Version 3: executed strength sets from set messages.
-MAPPER_VERSION: Final = 3
+# Version 4: GPS position channels from the record semicircles.
+# Version 5: heart rate and power sources and the external sensors of a stream
+# set, from the device information messages.
+MAPPER_VERSION: Final = 5
 
 # Same limit as the Garmin and Intervals mappers, so issues stay bounded.
 MAX_FIT_ACTIVITY_ID_LENGTH: Final = 200
@@ -149,6 +155,12 @@ _RECORD_CHANNEL_FIELDS: Final[tuple[tuple[StreamChannel, int], ...]] = (
     (StreamChannel.HEART_RATE_BPM, 3),
     (StreamChannel.POWER_W, 7),
     (StreamChannel.TEMPERATURE_C, 13),
+)
+# FIT positions are signed 32-bit semicircles: 2**31 semicircles are 180 degrees.
+_SEMICIRCLE_DEG: Final = 180.0 / 2**31
+_POSITION_FIELDS: Final[tuple[tuple[StreamChannel, int], ...]] = (
+    (StreamChannel.LATITUDE_DEG, 0),
+    (StreamChannel.LONGITUDE_DEG, 1),
 )
 # Lap metric -> lap field number. Scaling and enhanced preference are in fit_file.
 _LAP_METRIC_FIELDS: Final[tuple[tuple[str, int], ...]] = (
@@ -326,8 +338,22 @@ def _stream_set(
         [_cadence(fields) for fields in rows],
         issues,
     )
+    for channel, field_number in _POSITION_FIELDS:
+        degrees = [
+            None if raw is None else raw * _SEMICIRCLE_DEG
+            for raw in (
+                fit_field(fields, _RECORD_MESSAGE, field_number) for fields in rows
+            )
+        ]
+        _add_channel(channels, ref, channel, degrees, issues)
     if len(channels) < 2:
         return None
+    hr_source, power_source, sensors = sensor_profile(
+        messages,
+        provider=provenance.provider,
+        has_heart_rate=StreamChannel.HEART_RATE_BPM in channels,
+        has_power=StreamChannel.POWER_W in channels,
+    )
     try:
         return ActivityStreamSet(
             provider_activity_id=ref,
@@ -335,6 +361,9 @@ def _stream_set(
             origin=ActivityDetailOrigin.FETCH,
             resolution=StreamResolution.FULL,
             channels=channels,
+            hr_source=hr_source,
+            power_source=power_source,
+            sensors=sensors,
         )
     except TypeError, ValueError:
         _add_issue(issues, ref, "record", IssueReason.OUT_OF_RANGE)

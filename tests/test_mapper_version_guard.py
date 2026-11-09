@@ -32,6 +32,10 @@ REPLAYED_BY: Final[dict[str, tuple[str, ...]]] = {
         "fit_activity_detail_mapping",
         "garmin_activity_detail_mapping",
     ),
+    "fit_sensor_mapping": (
+        "fit_activity_detail_mapping",
+        "garmin_activity_detail_mapping",
+    ),
     "garmin_activity_detail_mapping": ("garmin_activity_detail_mapping",),
     "garmin_activity_mapping": ("garmin_activity_mapping",),
     "garmin_gear_mapping": ("garmin_health_mapping",),
@@ -51,39 +55,43 @@ NOT_REPLAYED: Final[dict[str, str]] = {
 # Module -> (replaying versions, code fingerprint).
 PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     "fit_activity_detail_mapping": (
-        (3, 4),
-        "ad59a89971cf61873ce7bf11541bbe51486f72c68ea3c89f3dba6de75a6b3115",
+        (5, 6),
+        "8f61a5149cb2a3de3eb218315550fe95e602d6a2fd2c4ebb0232a6599c98f6dc",
+    ),
+    "fit_sensor_mapping": (
+        (5, 6),
+        "2953aba79c668bb9ef9561fe5f80cea406b399d609301730fc8e79e95ef3626f",
     ),
     "garmin_activity_detail_mapping": (
-        (4,),
-        "7dc66160746235e9c038571a1e142cd00bb7579effe96b6a9278f04233d00c25",
+        (6,),
+        "11c11e6384a73b1f38e970b639245c3b5bf110e710a48f14d5c3bb6b1c78d389",
     ),
     "garmin_activity_mapping": (
         (20,),
         "c1b26578d189a3b8afe775e9055fb5e2b78639e63c4eb061efcb376372e869ea",
     ),
     "garmin_gear_mapping": (
-        (20,),
-        "c1065949991a138dd91ec1b96da88939bf8c847e52ef550dc32a665cce0e1b7c",
+        (21,),
+        "b53d3b960450b21475f4f86a73c6be8ecd3d182afa0b73ed3055b535482d9028",
     ),
     "garmin_health_mapping": (
-        (20,),
-        "e655df5f9a2cf55a965d21b0d6e7d1c77185a9d230405513e99a729b05c930a3",
+        (21,),
+        "bfe33d8b57b66c70408db17c3e56a1e5756860c6a05b5a330f7e0d6852164d45",
     ),
     "garmin_status_mapping": (
-        (20,),
+        (21,),
         "5da9d6874214b0b966721bd1cdd155ffdb64dcc247c79db92c11739b112a1f96",
     ),
     "garmin_training_mapping": (
-        (20,),
-        "34fd2a6d7884c0b54f9b87ccba040fb83f5cc7c481c69776edbd71c30e87be0e",
+        (21,),
+        "39bfa63cd233c003f99a41fdd5eaac447bfc9373f3b13dda2084e7778e93aaa7",
     ),
     "garmin_zone_mapping": (
-        (20,),
+        (21,),
         "b06dffd17d1c09036a5ef7c1aab7695d56f0d5d8e2e4616238afc4a5f21dfeee",
     ),
     "sleep_period_mapping": (
-        (20,),
+        (21,),
         "77efab15de0cda5414ed02c0d5005a9fe6fb1a650ec103bdb40e01cef065cf0f",
     ),
     "wahoo_activity_mapping": (

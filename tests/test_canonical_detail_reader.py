@@ -48,6 +48,7 @@ WORK_LAPS = tuple(
 )
 ANALYSIS_KEYS = {
     "interval_quality",
+    "sensors",
     "execution",
     "aerobic",
     "power_profile",

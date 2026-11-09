@@ -522,7 +522,7 @@
           <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die bereinigten Einträge aus Fehler- und Laufzeitprotokoll.</p></div><div class="settings-inline-action"><button id="logsDownloadButton" type="button" class="secondary-button">Logs herunterladen</button><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button><button id="logsDeleteButton" type="button" class="secondary-button danger-button">Logs löschen</button></div></div>
           <pre id="logsOutput" class="logs-output">Logs werden beim Öffnen geladen…</pre>
         </details>
-        <details class="settings-section collapsible-section" data-more-segment-panel="operations">
+        <details id="privacySection" class="settings-section collapsible-section" data-more-segment-panel="operations">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Datenschutz &amp; Backup</span><span class="collapsible-summary-meta">Export, Löschung, Wiederherstellung</span></summary>
           <div class="settings-inline-action notification-actions">
             <div><strong>PWA-Benachrichtigungen</strong><span id="notificationStatus">Noch nicht aktiviert</span></div>
@@ -531,6 +531,10 @@
           <div class="settings-inline-action">
             <button id="privacyExportButton" type="button" class="secondary-button">Daten exportieren</button>
             <button id="privacyDeleteButton" type="button" class="secondary-button danger-button">Lokale Daten löschen</button>
+          </div>
+          <div class="settings-inline-action">
+            <label class="chip"><input type="checkbox" id="gpsTracksToggle"><span>GPS-Spuren speichern</span></label>
+            <button id="gpsTracksDeleteButton" type="button" class="secondary-button danger-button" hidden>GPS-Spuren löschen</button>
           </div>
           <div id="privacyDeleteNotice" class="remote-delete-notice" hidden role="alert"></div>
           <div id="privacyDeleteResult" class="fine-print" hidden aria-live="polite"></div>
@@ -656,7 +660,7 @@
   <script src="/wahoo-connection.js?v=6" defer></script>
   <script src="/provider-connections.js?v=13" defer></script>
   <script src="/provider-checks.js?v=4" defer></script>
-  <script src="/settings.js?v=21" defer></script>
-  <script src="/app.js?v=304" defer></script>
+  <script src="/settings.js?v=22" defer></script>
+  <script src="/app.js?v=305" defer></script>
 </body>
 </html>

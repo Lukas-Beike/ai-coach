@@ -17,6 +17,7 @@ from backend.activities.activity_summary import (
     summary_local_date,
 )
 from backend.activities.session_purpose import summary_is_not_training, summary_is_race
+from backend.canonical import sensor_registry
 from backend.canonical.stored_sports import resolve_workout_sport
 from backend.canonical.vocabulary import ProviderId
 from backend.db import activity_detail_store
@@ -252,13 +253,22 @@ class TrainingProfileSelectionService:
         cp_records = [
             row for row in eligible_records if cp_start <= str(row.get("date") or "")
         ]
+        changes = self._power_meter_changes()
+        critical_power = critical_power_speed(
+            cp_records, today, input_fingerprint=_records_fingerprint(cp_records)
+        )
+        in_window = sensor_registry.changes_since(
+            changes, "ride", today - timedelta(days=CP_WINDOW_DAYS - 1)
+        )
+        if in_window:
+            # The window's cycling efforts come from two power meters.
+            critical_power["power_meter_changes"] = in_window
         return {
             "status": "ok" if compatibility or valid else "insufficient_data",
             "best": compatibility,
             # Before the activity list, so a bounded Coach copy keeps it.
-            "critical_power": critical_power_speed(
-                cp_records, today, input_fingerprint=_records_fingerprint(cp_records)
-            ),
+            "critical_power": critical_power,
+            "power_meter_changes": changes,
             "activities": records,
             "windows": windows,
             "running": {
@@ -271,6 +281,15 @@ class TrainingProfileSelectionService:
             "input_fingerprint": _records_fingerprint(eligible_records),
             "scope": "Beobachtete Bestwerte der letzten 90 Tage aus lokal gespeicherten Messreihen in voller Auflösung; heruntergerechnete Reihen zählen nicht. Fehlende oder ungültige Fenster bleiben unbekannt. Bestwerte mit gleicher effort_group stammen aus derselben Belastung und sind voneinander abhängig. Keine FTP- oder Tempo-Schätzung; CP/CS nur als experimentelle Modellschätzung unter critical_power.",
         }
+
+    def _power_meter_changes(self) -> list[dict[str, Any]]:
+        """The days a sport's power meter changed, newest first (#1869)."""
+        if self._canonical is None:
+            return []
+        with self._canonical.database_manager().read_snapshot() as db:
+            return sensor_registry.power_meter_changes(
+                activity_detail_store.sensor_uses(db)
+            )
 
     @staticmethod
     def _compatibility_profiles(

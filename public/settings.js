@@ -256,6 +256,45 @@ async function downloadPrivacyExport() {
   } catch (error) { toast(error.message, true); }
 }
 
+let gpsTracksState = { confirmation_text: "" };
+
+function renderGpsTracks(gps) {
+  gpsTracksState = gps;
+  $("#gpsTracksToggle").checked = Boolean(gps.enabled);
+  const button = $("#gpsTracksDeleteButton");
+  button.hidden = gps.enabled || !gps.stored_tracks;
+  button.textContent = `GPS-Spuren löschen (${gps.stored_tracks || 0})`;
+}
+
+async function loadGpsTracks() {
+  try { renderGpsTracks(await api("/api/privacy/gps")); } catch (error) { toast(error.message, true); }
+}
+
+async function saveGpsTracks(event) {
+  const toggle = event.currentTarget;
+  try {
+    renderGpsTracks(await api("/api/privacy/gps", { method: "POST", body: JSON.stringify({ enabled: toggle.checked }) }));
+  } catch (error) {
+    toggle.checked = !toggle.checked;
+    toast(error.message, true);
+  }
+}
+
+async function deleteGpsTracks() {
+  try {
+    const expectedText = gpsTracksState.confirmation_text;
+    if (!expectedText) throw new Error("Die Löschbestätigung ist derzeit nicht verfügbar.");
+    const confirmation = await requestConfirmation(
+      `Alle gespeicherten GPS-Spuren (${gpsTracksState.stored_tracks}) werden unwiderruflich lokal gelöscht. Streckenerkennung und Wetter am Ort nutzen sie nicht mehr. Die übrigen Aufzeichnungen bleiben.`,
+      { title: "GPS-Spuren löschen?", inputLabel: "Bestätigungstext", expectedText, confirmLabel: "Löschen" },
+    );
+    if (!confirmation) return;
+    const result = await api("/api/privacy/gps/delete", { method: "POST", body: JSON.stringify({ confirm: confirmation }) });
+    renderGpsTracks(result);
+    toast("GPS-Spuren gelöscht");
+  } catch (error) { toast(error.message, true); }
+}
+
 async function deletePrivacyData() {
   try {
     const preview = await api("/api/privacy/delete/preview");

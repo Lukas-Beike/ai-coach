@@ -80,6 +80,12 @@ recreational marathon runners, no lab reference.
   is persisted and there is no schema change.
 - Every effort reports its context: `race` when the session is a race, else
   `training` (card 4). Test intent stays unknown.
+- A new power meter (#1869): when the external power meters named by consecutive
+  recordings of a sport share no sensor, the power profiles carry a marker with
+  the day, and the cycling fit lists it when it lies inside the 28-day window.
+  Efforts from before and after the marker come from different meters, and no
+  offset between meters is corrected. Wahoo and Garmin files name a strap or
+  meter only when the device lists it, so a meter is missed when the file omits it.
 - Running windows (`mean-max-curve` v2, card 4): an outdoor window counts only
   when its net altitude change is at most 1 % of its distance; an outdoor
   window without altitude at both ends does not count. Treadmill and virtual

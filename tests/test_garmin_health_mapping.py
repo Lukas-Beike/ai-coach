@@ -1882,7 +1882,7 @@ class PersonalApiShapeTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 20)
+        self.assertEqual(MAPPER_VERSION, 21)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):

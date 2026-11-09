@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from types import MappingProxyType
 from typing import Final
@@ -34,11 +34,15 @@ from backend.canonical.validation import (
     require_text,
 )
 from backend.canonical.vocabulary import (
+    POSITION_CHANNELS,
     ActivityDetailKind,
     ActivityDetailOrigin,
     ExerciseCategory,
+    HeartRateSource,
     LapKind,
     LapSource,
+    PowerSource,
+    SensorRole,
     StreamChannel,
     StreamResolution,
     StrengthSetSource,
@@ -61,6 +65,9 @@ MAX_STRENGTH_REPS: Final = 1_000
 MAX_STRENGTH_WEIGHT_KG: Final = 1_000.0
 MAX_WORKOUT_STEP_INDEX: Final = 999
 MAX_EXERCISE_NAME_LENGTH: Final = 64
+MAX_SENSORS: Final = 16
+SENSOR_KEY_PATTERN: Final = re.compile(r"[0-9a-f]{64}")
+SENSOR_ORIGIN_PATTERN: Final = re.compile(r"[a-z_]{1,24}")
 # Provider exercise codes such as ``BARBELL_BACK_SQUAT``: untrusted text, so only
 # upper-case identifiers are kept, never free text.
 EXERCISE_NAME_PATTERN: Final = re.compile(r"[A-Z0-9_]{1,64}")
@@ -76,6 +83,8 @@ CHANNEL_BOUNDS: Final[Mapping[StreamChannel, tuple[float, float]]] = {
     StreamChannel.CADENCE_RPM: (0.0, MAX_ACTIVITY_CADENCE_RPM),
     StreamChannel.TEMPERATURE_C: (-60.0, 70.0),
     StreamChannel.MOVING: (0.0, 1.0),
+    StreamChannel.LATITUDE_DEG: (-90.0, 90.0),
+    StreamChannel.LONGITUDE_DEG: (-180.0, 180.0),
 }
 
 ZONE_BOUNDARY_BOUNDS: Final[Mapping[ZoneMetric, tuple[float, float]]] = {
@@ -127,14 +136,53 @@ def _require_detail_header(
 
 
 @dataclass(frozen=True, slots=True)
+class ActivitySensor:
+    """One sensor a recording named, identified by a hash and never by its serial.
+
+    ``key`` is the SHA-256 of the manufacturer, product and serial number, so the
+    same device is recognized across activities while the serial stays unreadable.
+    ``connection`` is the transport the file names (``antplus``, ``bluetooth``,
+    ``local`` for the recording device itself).
+    """
+
+    role: SensorRole
+    key: str
+    connection: str | None = None
+    manufacturer: int | None = None
+    product: int | None = None
+
+    def __post_init__(self) -> None:
+        require_instance(self.role, SensorRole, "role")
+        if not isinstance(self.key, str) or not SENSOR_KEY_PATTERN.fullmatch(self.key):
+            raise ValueError("key must be a lowercase SHA-256 hex digest")
+        if self.connection is not None and (
+            not isinstance(self.connection, str)
+            or not SENSOR_ORIGIN_PATTERN.fullmatch(self.connection)
+        ):
+            raise ValueError("connection must be a short lower-case identifier")
+        for name in ("manufacturer", "product"):
+            value = getattr(self, name)
+            if value is not None:
+                bounded_number(value, name, 0, 65_535)
+
+
+@dataclass(frozen=True, slots=True)
 class ActivityStreamSet:
-    """Equal-length channels on one strictly increasing time axis (``time_s``)."""
+    """Equal-length channels on one strictly increasing time axis (``time_s``).
+
+    ``hr_source`` and ``power_source`` say what measured those channels when the
+    recording names it; None means the provider did not say (or the mapper
+    predates the field). ``sensors`` lists the sensors the recording named.
+    """
 
     provider_activity_id: str
     provenance: Provenance
     origin: ActivityDetailOrigin
     resolution: StreamResolution
     channels: Mapping[StreamChannel, tuple[float | None, ...]]
+    hr_source: HeartRateSource | None = None
+    power_source: PowerSource | None = None
+    sensors: tuple[ActivitySensor, ...] = ()
 
     @property
     def kind(self) -> ActivityDetailKind:
@@ -143,6 +191,16 @@ class ActivityStreamSet:
     def __post_init__(self) -> None:
         _require_detail_header(self.provider_activity_id, self.provenance, self.origin)
         require_instance(self.resolution, StreamResolution, "resolution")
+        if self.hr_source is not None:
+            require_instance(self.hr_source, HeartRateSource, "hr_source")
+        if self.power_source is not None:
+            require_instance(self.power_source, PowerSource, "power_source")
+        sensors = tuple(self.sensors)
+        if len(sensors) > MAX_SENSORS:
+            raise ValueError(f"sensors must hold at most {MAX_SENSORS} entries")
+        for sensor in sensors:
+            require_instance(sensor, ActivitySensor, "sensor")
+        object.__setattr__(self, "sensors", sensors)
         # Mapping is abstract, so it is checked here rather than via require_instance.
         channels = self.channels
         if not isinstance(channels, Mapping):
@@ -173,6 +231,20 @@ class ActivityStreamSet:
                 "channels must include at least one channel besides time_s"
             )
         object.__setattr__(self, "channels", MappingProxyType(frozen))
+
+
+def without_positions(stream_set: ActivityStreamSet) -> ActivityStreamSet | None:
+    """Return the set without GPS channels; None when nothing else is left."""
+    if not POSITION_CHANNELS.intersection(stream_set.channels):
+        return stream_set
+    kept = {
+        channel: values
+        for channel, values in stream_set.channels.items()
+        if channel not in POSITION_CHANNELS
+    }
+    if len(kept) < 2:
+        return None
+    return replace(stream_set, channels=kept)
 
 
 def _validated_series(

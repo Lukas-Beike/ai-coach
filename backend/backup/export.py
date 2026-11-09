@@ -67,7 +67,9 @@ TimeoutErrorFactory = Callable[[], Exception]
 # (schema v22).
 # Version 13 adds activity_feedback.purpose (schema v23).
 # Version 14 adds provider_settings.json, the stored non-secret provider fields.
-PRIVACY_EXPORT_FORMAT_VERSION = 14
+# Version 15 adds activity_detail_sets.hr_source, power_source and sensors
+# (schema v24).
+PRIVACY_EXPORT_FORMAT_VERSION = 15
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",

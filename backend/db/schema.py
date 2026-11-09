@@ -428,6 +428,9 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "fetched_at",
         "created_at",
         "updated_at",
+        "hr_source",
+        "power_source",
+        "sensors",
     },
     "activity_stream_channels": {
         "provider",
@@ -674,7 +677,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 23
+CURRENT_SCHEMA_VERSION = 24
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -1241,6 +1244,16 @@ FEEDBACK_PURPOSE_DDL = """
 """
 
 
+# Schema version 24: what measured the heart rate and power of a stream set, and
+# the external sensors its recording named (a JSON array of role, hashed key,
+# connection, manufacturer and product; the serial number is never stored). NULL
+# means the recording did not say, or was mapped before this version.
+STREAM_SENSORS_DDL = """
+    ALTER TABLE activity_detail_sets ADD COLUMN hr_source TEXT CHECK (hr_source IS NULL OR hr_source IN ('chest_strap', 'optical', 'unknown'));
+    ALTER TABLE activity_detail_sets ADD COLUMN power_source TEXT CHECK (power_source IS NULL OR power_source IN ('power_meter', 'trainer', 'estimated', 'unknown'));
+    ALTER TABLE activity_detail_sets ADD COLUMN sensors TEXT CHECK (sensors IS NULL OR (json_valid(sensors) AND json_type(sensors) = 'array'))"""
+
+
 # Schema version 21: the lifecycle of an observation. A sync that maps its owning
 # raw record again (``owner_record_id``, the provider's source record id) and no
 # longer emits it retires the row instead of deleting it; readers serve active
@@ -1594,6 +1607,7 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, PRODUCT_FAVORITE_DDL)
     execute_ddl(db, OBSERVATION_LIFECYCLE_DDL)
     execute_ddl(db, FEEDBACK_PURPOSE_DDL)
+    execute_ddl(db, STREAM_SENSORS_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 
