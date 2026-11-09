@@ -2443,7 +2443,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     ],
                 )
                 self.auto_approve_remote_proposals = previous_auto_approval
-                if kwargs.get("remote_write"):
+                # A selection with a malformed hash is refused when the card is
+                # created, so it never reaches approval.
+                if kwargs.get("remote_write") and name != "start_intervals_plan_sync":
                     self.assertEqual(
                         result["command_receipts"][0]["result"]["status"],
                         "approval_required",
