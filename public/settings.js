@@ -377,10 +377,13 @@ async function deletePrivacyData() {
     const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: confirmation }) });
     const notice = $("#privacyDeleteNotice");
     if (notice) {
-      notice.hidden = !(result.remote_delete_attempted && !result.remote_conversation_deleted);
-      notice.textContent = notice.hidden
-        ? ""
-        : "Lokale Daten wurden gelöscht, aber die OpenAI-Konversation konnte remote nicht bestätigt gelöscht werden. Prüfe den Anbieterstatus separat.";
+      const problems = [];
+      if (result.remote_delete_attempted && !result.remote_conversation_deleted) problems.push("die OpenAI-Konversation konnte remote nicht bestätigt gelöscht werden");
+      if (result.wahoo_revoke_attempted && !result.wahoo_revoked) problems.push("der Wahoo-Zugriff konnte bei Wahoo nicht widerrufen werden (in den Wahoo-Kontoeinstellungen entfernen)");
+      notice.hidden = !problems.length;
+      notice.textContent = problems.length
+        ? `Lokale Daten wurden gelöscht, aber ${problems.join(" und ")}. Prüfe den Anbieterstatus separat.`
+        : "";
     }
     const resultNotice = $("#privacyDeleteResult");
     if (resultNotice) {

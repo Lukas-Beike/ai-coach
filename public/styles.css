@@ -1102,6 +1102,7 @@ h2 {
 .credential-form h4 { margin: 0; color: var(--ink); font-size: .8rem; }
 .credential-form .credential-row-head h4 { flex: 1 1 auto; }
 .credential-row { display: grid; gap: 6px; }
+.credential-row[hidden] { display: none; }
 .credential-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--subtle); font-size: .73rem; font-weight: 500; }
 .credential-row-head label { min-width: 0; }
 .credential-row input { width: 100%; padding: 9px 10px; font-size: .8rem; }

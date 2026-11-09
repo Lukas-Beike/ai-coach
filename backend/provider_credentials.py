@@ -71,6 +71,9 @@ VISIBLE_FIELDS = frozenset(
 # Reported as configured only; the address itself is not echoed back.
 MASKED_FIELDS = frozenset({"garmin_email", "yazio_email"})
 CREDENTIAL_FIELDS = SECRET_FIELDS | VISIBLE_FIELDS | MASKED_FIELDS
+# Setting one of these redirects the OpenAI key or replaces the Wahoo OAuth app,
+# so it needs the APP_PASSWORD again on top of the session.
+REAUTH_FIELDS = frozenset({"openai_base_url", "wahoo_client_id", "wahoo_client_secret"})
 
 MAX_VALUE_LENGTH = 4096
 SOURCE_DB = "db"
@@ -228,6 +231,18 @@ def _validated_change(field: str, value: object) -> str | None:
         except ValueError as exc:
             raise AppError(400, "Ungültiges Ablaufdatum.") from exc
     return text
+
+
+def requires_password(values: object) -> bool:
+    """Whether a submission sets a value for a field that needs the APP_PASSWORD."""
+    if not isinstance(values, dict):
+        return False
+    return any(
+        field in REAUTH_FIELDS
+        and value is not None
+        and not (isinstance(value, str) and not value.strip())
+        for field, value in values.items()
+    )
 
 
 def validated_changes(values: object) -> dict[str, str | None]:

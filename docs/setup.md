@@ -132,7 +132,8 @@ Intervals.icu, OpenAI and Wahoo credentials can be entered under **Mehr > Anbind
 - **Badges:** each field shows "In der App gespeichert", "Aus Umgebung" or "Nicht gesetzt". "Entfernen" deletes only the value stored in the app and asks for confirmation.
 - **Secrets:** API keys and client secrets are never shown again after saving, and the form is cleared on submit. Non-secret values (OpenAI base URL, Intervals.icu athlete ID, Wahoo client ID) are shown as the current value.
 - **Timing:** changes apply without a container restart.
-- **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. A legacy token file at `/data/garmin_tokens` stays on disk, as every token store is preserved, but it is no longer used; delete it on the host if it should go too. It does not change the external Garmin, Intervals.icu or Wahoo accounts.
+- **Password re-entry:** setting the OpenAI base URL or the Wahoo client ID or secret asks for the `APP_PASSWORD` again, on top of the session, because these values decide where the OpenAI key is sent and which Wahoo app is used. A wrong or missing password changes nothing. Removing a stored value needs no password.
+- **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. A legacy token file at `/data/garmin_tokens` stays on disk, as every token store is preserved, but it is no longer used; delete it on the host if it should go too. It does not change the external Garmin or Intervals.icu accounts or the Wahoo account itself, but it revokes this app's Wahoo grant at Wahoo first (best effort, like "Wahoo trennen"); a failed revoke is reported after the purge, which completes either way.
 
 ## Connection checks
 

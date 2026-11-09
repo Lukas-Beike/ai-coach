@@ -127,6 +127,10 @@ return a secret: the response is the credential status only.
   environment `GARMIN_PASSWORD` fallback. A string
   stores the value; `null` or a blank string clears the value stored in the app,
   so the environment value applies again. Each field is validated server-side.
+  Setting `openai_base_url`, `wahoo_client_id` or `wahoo_client_secret` (not
+  clearing them) also needs the `APP_PASSWORD` in the body field `app_password`;
+  a missing or wrong password answers 403 and changes nothing. The password is
+  compared in constant time, rate limited and never stored.
   The response is the credential status: `fields` with per field `source`
   (`db`, `env` or `none`), `configured`, and `value` only for non-secret
   fields, plus `garmin_connected`, `garmin_connection_source`,
