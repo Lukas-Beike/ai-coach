@@ -514,7 +514,9 @@ class GuardTests(unittest.TestCase):
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
             estimate_unit=lambda item: estimate_planned_unit(item, AthleteThresholds()),
-            first_threshold_pct=lambda: first,
+            profile=lambda: (
+                {} if first is None else {FIRST_THRESHOLD_FIELD: str(first)}
+            ),
         )
 
     def test_a_coach_write_without_a_cap_is_rejected_with_the_percentages(self) -> None:

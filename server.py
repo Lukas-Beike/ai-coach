@@ -38,10 +38,6 @@ from backend.backup.assembly import (
 )
 from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.calendar import local as calendar_local
-from backend.canonical.first_threshold import (
-    FIRST_THRESHOLD_FIELD,
-    first_threshold_percent,
-)
 from backend.coach import attachments as coach_attachments
 from backend.coach import context as coach_context_module
 from backend.coach import limits as coach_limits
@@ -1741,12 +1737,7 @@ def _plan_guard_service() -> PlanGuardService:
         training_model=lambda: str(
             ATHLETE_DATA.profile().get().get("training_model") or ""
         ),
-        weekly_plan_text=lambda: str(
-            ATHLETE_DATA.profile().get().get("weekly_plan") or ""
-        ),
-        first_threshold_pct=lambda: first_threshold_percent(
-            ATHLETE_DATA.profile().get().get(FIRST_THRESHOLD_FIELD)
-        ),
+        profile=lambda: ATHLETE_DATA.profile().get(),
         today=lambda: ATHLETE_CLOCK.now().date(),
         thresholds=lambda: read_load_thresholds(
             database_manager(),
