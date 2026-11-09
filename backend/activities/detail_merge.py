@@ -307,6 +307,7 @@ def _populated_channel_count(streams: ActivityStreamSet) -> int:
         1
         for channel, values in streams.channels.items()
         if channel is not StreamChannel.TIME_S
+        and channel not in POSITION_CHANNELS
         and any(value is not None for value in values)
     )
 

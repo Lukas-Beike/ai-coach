@@ -98,6 +98,7 @@ from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 # Version 2: maximum speed per lap.
 # Version 3: FIT record streams and device laps win over charts and splits.
 # Version 4: executed strength sets from exercise sets, else FIT set messages.
+# Version 5: GPS position channels (directLatitude, directLongitude).
 MAPPER_VERSION: Final = 5
 
 # Same limit as the Intervals mapper; kept local so providers do not import each other.

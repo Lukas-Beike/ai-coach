@@ -92,6 +92,16 @@ class PositionChannelTests(unittest.TestCase):
             self.assertNotIn(needle, text)
 
 
+class PositionRankTests(unittest.TestCase):
+    def test_positions_do_not_change_the_primary_stream_choice(self):
+        from backend.activities.detail_merge import _populated_channel_count
+
+        self.assertEqual(
+            _populated_channel_count(track_set()),
+            _populated_channel_count(without_positions(track_set())),
+        )
+
+
 class StoredPositionTests(unittest.TestCase):
     add_session = store_tests.ActivityDetailStoreTests.add_session
     add_record = store_tests.ActivityDetailStoreTests.add_record

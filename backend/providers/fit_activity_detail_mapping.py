@@ -31,7 +31,7 @@ a newer number maps to ``other``, 65534 unknown to none) and wkt_step_index
 (11, the step number without the message-index flag bits). The per-category
 exercise subtype (8) is not mapped, so FIT sets carry no exercise name.
 
-Not mapped: positions (0, 1), session and activity messages, developer fields,
+Not mapped: session and activity messages, developer fields,
 device information, and lap run cadence.
 
 The mapper is pure: it performs no I/O, logs nothing and never raises for
@@ -77,6 +77,7 @@ from backend.providers.fit_file import FitMessage, fit_field, fit_messages
 # Version 1: first mapping of FIT activity detail sets (streams and device laps).
 # Version 2: maximum speed per lap.
 # Version 3: executed strength sets from set messages.
+# Version 4: GPS position channels from the record semicircles.
 MAPPER_VERSION: Final = 4
 
 # Same limit as the Garmin and Intervals mappers, so issues stay bounded.

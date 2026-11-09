@@ -1267,7 +1267,7 @@ Streams, record message 20 (`_stream_set`, `_kept_records`, `_RECORD_CHANNEL_FIE
 | `moving` | none | | Not produced. |
 | `resolution` | | `full` | Fixed. |
 
-Position fields (0, 1) and all other record fields are not read. A channel with no usable point is dropped; out-of-bounds points become gaps with an `out_of_range` issue named by the channel.
+Record fields not listed here are not read. A channel with no usable point is dropped; out-of-bounds points become gaps with an `out_of_range` issue named by the channel.
 
 Laps, lap message 19 (`_lap_set`, `_lap`, `_LAP_METRIC_FIELDS`, `_LAP_KINDS`):
 
@@ -1307,7 +1307,7 @@ Strength sets, set message 225 (`_strength_set_set`, `_strength_set`), in file o
 | `index` | position among kept sets | | |
 | `source` | | `fit_set_messages` | Fixed. |
 
-Not mapped: positions (record 0, 1), the session (18), activity and file messages, developer fields (skipped by `fit_file`), device information, lap run cadence, set `category_subtype` (8), `weight_display_unit`, `message_index`, set `timestamp`.
+Not mapped: the session (18), activity and file messages, developer fields (skipped by `fit_file`), device information, lap run cadence, set `category_subtype` (8), `weight_display_unit`, `message_index`, set `timestamp`.
 
 ### `wahoo_fit_download.py`
 
