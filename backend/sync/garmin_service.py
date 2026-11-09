@@ -1434,6 +1434,12 @@ class GarminSyncService:
             finally:
                 self._coordination.release()
 
+    def _body_battery_reconcile_days(self, end_date: date | None) -> int:
+        """The Body Battery span of a current run: once per local day, else none."""
+        if end_date is None and self._payload_service.body_battery_reconciliation_due():
+            return GARMIN_RECONCILIATION_DAYS
+        return 0
+
     def _execute(
         self,
         days: int,
@@ -1470,12 +1476,7 @@ class GarminSyncService:
             rated_activity_ids=self._payload_service.rated_activity_ids(days),
             # Body Battery is read once per local day over the reconciliation span,
             # so a missed morning or a partial day total is replaced by the full one.
-            body_battery_reconcile_days=(
-                GARMIN_RECONCILIATION_DAYS
-                if end_date is None
-                and self._payload_service.body_battery_reconciliation_due()
-                else 0
-            ),
+            body_battery_reconcile_days=self._body_battery_reconcile_days(end_date),
         )
         self._raise_if_cancelled(cancel_event)
         payload = (

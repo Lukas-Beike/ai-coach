@@ -1623,6 +1623,15 @@ def rating_row(value: Any, activity_id: str, started: str) -> dict[str, Any] | N
     }
 
 
+def _reconciles_body_battery(options: GarminCollectionOptions) -> bool:
+    """Body Battery is reconciled only by a current run that reads recovery."""
+    return (
+        options.body_battery_reconcile_days > 0
+        and options.include_recovery
+        and options.include_current_metrics
+    )
+
+
 def collect_garmin_data(
     client: Any,
     windows: Iterable[tuple[date, date]],
@@ -1682,12 +1691,7 @@ def collect_garmin_data(
             source="training_status",
             method="get_training_status",
         )
-    reconcile_body_battery = (
-        collection_options.body_battery_reconcile_days > 0
-        and collection_options.include_recovery
-        and collection_options.include_current_metrics
-    )
-    if reconcile_body_battery:
+    if _reconciles_body_battery(collection_options):
         _collect_body_battery(
             client,
             today,
@@ -1749,7 +1753,7 @@ def collect_garmin_data(
             capability_success,
         )
     provider_sync: dict[str, Any] = {"pagination": pagination}
-    if reconcile_body_battery and "body_battery" in pagination:
+    if _reconciles_body_battery(collection_options) and "body_battery" in pagination:
         provider_sync["body_battery_reconciled_on"] = today.isoformat()
     payload["provider_sync"] = provider_sync
     _validate_current_metrics(payload, redact, warn)
