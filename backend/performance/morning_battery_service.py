@@ -30,6 +30,8 @@ from backend.weather import history as weather_history
 
 MORNING_RETRY_SECONDS = 15 * 60
 MORNING_MAX_ATTEMPTS = 3
+# Garmin has usually published the night by noon; later refreshes stop polling.
+MORNING_SLEEP_WAIT_UNTIL_HOUR = 12
 MORNING_LOCK_POLL_SECONDS = 1
 
 MORNING_BATTERY_HISTORY_KEY = "morning_body_battery_history"
@@ -126,7 +128,6 @@ class MorningBatteryStore:
         records: Any,
         sleep_payload: Any = None,
     ) -> dict[str, Any]:
-        record["attempts"] = _attempts(existing, checkin_date)
         sections: dict[str, Any] = (
             {"body_battery": records} if isinstance(records, list) else {}
         )
@@ -146,14 +147,14 @@ class MorningBatteryStore:
                     allowed=MORNING_SOURCES,
                 )
                 sections = {}
-                attempts, attempted_at = record["attempts"], record["attempted_at"]
+                attempted_at = record["attempted_at"]
                 record.clear()
                 record.update(
                     self._canonical_record(
                         self._canonical, db, checkin_date, attempted_at=attempted_at
-                    ),
-                    attempts=attempts,
+                    )
                 )
+            record["attempts"] = _attempts(existing, checkin_date, record)
             view = record
             if self._canonical is not None:
                 # A failed refresh stores no values and retires the night's earlier
@@ -532,6 +533,7 @@ class MorningBodyBatteryService:
             now=self._clock.normalized_utc_now(),
             max_attempts=self._retry_policy.max_attempts,
             retry_seconds=self._retry_policy.retry_seconds,
+            sleep_wait_over=_sleep_wait_over(self._clock.local_now(), checkin_date),
         )
 
     def current(self) -> dict[str, Any] | None:
@@ -580,11 +582,32 @@ class MorningBodyBatteryServiceCache:
 MORNING_BODY_BATTERY_SERVICE_CACHE = MorningBodyBatteryServiceCache()
 
 
-def _attempts(existing: dict[str, Any] | None, checkin_date: date) -> int:
-    """Count this attempt on top of the earlier ones for the same night."""
-    if existing is None or existing.get("sleep_date") != checkin_date.isoformat():
-        return 1
-    return 1 + int(existing.get("attempts") or 1)
+def _attempts(
+    existing: dict[str, Any] | None, checkin_date: date, record: dict[str, Any]
+) -> int:
+    """Count this attempt on top of the earlier ones for the same night.
+
+    A refresh that found no sleep yet is not an attempt: Garmin publishes the
+    night only after the watch synced, so the wait for it is bounded by the
+    morning cutoff in ``cached_result`` instead of the attempt cap.
+    """
+    earlier = 0
+    if existing is not None and existing.get("sleep_date") == checkin_date.isoformat():
+        earlier = morning_battery.counted_attempts(existing)
+    waiting_for_sleep = (
+        record.get("status") != "ready"
+        and not record.get("error")
+        and not record.get("sleep_end_at")
+    )
+    return earlier + (0 if waiting_for_sleep else 1)
+
+
+def _sleep_wait_over(local_now: datetime, checkin_date: date) -> bool:
+    """Stop waiting for a missing night at noon of the check-in day."""
+    today = local_now.date()
+    return today > checkin_date or (
+        today == checkin_date and local_now.hour >= MORNING_SLEEP_WAIT_UNTIL_HOUR
+    )
 
 
 def _remember_ready(history: dict[str, Any], saved: Any) -> None:

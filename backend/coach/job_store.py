@@ -81,26 +81,47 @@ class CoachJobStore:
                     }
         return None
 
-    def requeue(self, client_turn_id: str, reason: str) -> None:
+    def requeue(
+        self,
+        client_turn_id: str,
+        reason: str,
+        *,
+        wait_seconds: int | None = None,
+        max_waits: int | None = None,
+    ) -> bool:
+        """Queue a running job again; contention backs off up to a minute.
+
+        A fixed ``wait_seconds`` waits for outside data instead and gives up
+        (returns ``False``) once ``max_waits`` such waits were used.
+        """
+        counter = (
+            "contention_attempts" if wait_seconds is None else "data_wait_attempts"
+        )
         with self._database_lock, self._database_manager().unit_of_work() as db:
             row = db.execute(
                 SELECT_RECEIPT_SQL,
                 (client_turn_id,),
             ).fetchone()
             if not row:
-                return
+                return False
             receipt = command_receipt(row.get("receipt"))
             try:
-                attempts = max(0, int(receipt.get("contention_attempts") or 0)) + 1
+                attempts = max(0, int(receipt.get(counter) or 0)) + 1
             except TypeError, ValueError:
                 attempts = 1
-            delay = min(60, 2 ** min(attempts, 5))
+            if max_waits is not None and attempts > max_waits:
+                return False
+            delay = (
+                min(60, 2 ** min(attempts, 5)) if wait_seconds is None else wait_seconds
+            )
             receipt.update(
                 {
                     "status": "queued",
-                    "phase": "waiting_for_coach_slot",
+                    "phase": "waiting_for_coach_slot"
+                    if wait_seconds is None
+                    else "waiting_for_data",
                     "retry_reason": reason,
-                    "contention_attempts": attempts,
+                    counter: attempts,
                     "retry_after": time.time() + delay,
                 }
             )
@@ -114,6 +135,7 @@ class CoachJobStore:
                 ),
             )
         self._wake_event.set()
+        return True
 
     def message(self, job: dict[str, Any]) -> str:
         receipt = job.get("receipt") if isinstance(job.get("receipt"), dict) else {}

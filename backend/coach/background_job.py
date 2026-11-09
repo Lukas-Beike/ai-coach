@@ -18,6 +18,10 @@ from backend.observability import Redactor
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.observation import operation_error_code
 
+# A morning check-in waits up to two hours, in quarter-hour steps, for the night.
+MORNING_SLEEP_WAIT_SECONDS = 15 * 60
+MORNING_SLEEP_MAX_WAITS = 8
+
 
 class CoachSessionBinding(Protocol):
     """Narrow session-key read needed by a claimed Coach job."""
@@ -191,8 +195,18 @@ class CoachBackgroundJobRunner:
     def _handle_app_error(
         self, client_turn_id: str, operation_id: str, exc: AppError
     ) -> None:
+        requeued = False
         if exc.reason in {"chat_queue_full", "chat_request_timeout"}:
             self._jobs.requeue(client_turn_id, exc.reason)
+            requeued = True
+        elif exc.reason == "garmin_sleep_not_ready":
+            requeued = self._jobs.requeue(
+                client_turn_id,
+                exc.reason,
+                wait_seconds=MORNING_SLEEP_WAIT_SECONDS,
+                max_waits=MORNING_SLEEP_MAX_WAITS,
+            )
+        if requeued:
             self._logger.warning(
                 "Persistent Coach background job requeued after contention",
                 extra={
