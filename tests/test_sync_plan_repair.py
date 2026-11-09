@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 from backend.db import DatabaseManager, row_factory
 from backend.errors import AppError
-from backend.planning.library import library_payload_hash
+from backend.planning.planned_units import plan_push_payload_hash
 from backend.sync.plan_repair import PlanRepairManifestService
 
 UNIT_A = "00000000-0000-0000-0000-000000000001"
@@ -58,7 +58,7 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
                 "INSERT INTO planned_units(local_id, payload) VALUES (?, ?)",
                 (local_id, raw),
             )
-        return library_payload_hash(raw)
+        return plan_push_payload_hash(raw)
 
     def selected(self, *items: tuple[str, str]) -> list[dict[str, str]]:
         return [
@@ -171,10 +171,13 @@ class PlanRepairManifestServiceTests(unittest.TestCase):
 
         self.authority.mark_planning_authoritative.side_effect = mark
         manifest = self.service.execute(prepared)
-        self.assertNotEqual(manifest[0]["expected_payload_hash"], payload_hash)
+        # The mark rewrites only the sync status, so the content hash stays.
+        self.assertEqual(manifest[0]["expected_payload_hash"], payload_hash)
         self.assertEqual(
             manifest[0]["expected_payload_hash"],
-            library_payload_hash(json.dumps(self.read_payload(UNIT_A), sort_keys=True)),
+            plan_push_payload_hash(
+                json.dumps(self.read_payload(UNIT_A), sort_keys=True)
+            ),
         )
 
     def test_toctou_change_between_prepare_and_execute_conflicts(self) -> None:

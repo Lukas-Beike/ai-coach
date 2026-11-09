@@ -31,9 +31,9 @@ STRENGTH = {
 RIDE = {"sport": "Ride", "date": "2026-11-09", "description": "- 30m 60%"}
 
 
-# sha256 of json.dumps(STRENGTH), the raw stored payload string.
+# Content-only plan push hash of STRENGTH; sync fields never move it.
 STRENGTH_PAYLOAD_HASH = (
-    "ceca587e328bdd0d119e9bc7a7ea56d3e82f5a7b7d01f900c18dadeb3f0d8dae"
+    "5e4ddd5f874ce338d22c1445f4b633a742d8f3e5629cee7e5a337fb95dfecad4"
 )
 
 

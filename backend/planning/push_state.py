@@ -23,7 +23,7 @@ from backend.errors import AppError
 from backend.planning import strength_structure
 from backend.planning.garmin_orphans import GarminOrphan
 from backend.planning.intervals_orphans import IntervalsOrphan
-from backend.planning.library import library_payload_hash
+from backend.planning.planned_units import plan_push_payload_hash
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_strength_workout import (
     PAYLOAD_VERSION,
@@ -190,7 +190,7 @@ def attach_push_state(
     """
     lists = _cleanup_lists(orphans, intervals_orphans)
     for row, payload in pairs:
-        digest = library_payload_hash(row["payload"])
+        digest = plan_push_payload_hash(row["payload"])
         # A synced run unit whose heart-rate range moved with the threshold HR
         # (the bpm path of the cap export) is changed too.
         pending: dict[str, bool] = {

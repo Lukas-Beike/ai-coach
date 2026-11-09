@@ -10,6 +10,7 @@ from backend.config import Config
 from backend.db import DatabaseManager
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import library as planning_library
+from backend.planning import planned_units
 from backend.sync.gates import INTERVALS_RESYNC_GATE, ProviderResyncGate
 from backend.sync.library import WorkoutLibrarySyncService
 from backend.sync.planned_calendar import (
@@ -190,9 +191,8 @@ class SelectedWorkoutSyncService:
                 "status": "conflict",
                 "error": "Einheit nicht gefunden",
             }
-        if (
-            planning_library.library_payload_hash(row["payload"])
-            != item["expected_payload_hash"]
+        if not planned_units.plan_push_hash_matches(
+            row["payload"], item["expected_payload_hash"]
         ):
             return {
                 "library_workout_id": local_id,

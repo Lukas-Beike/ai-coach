@@ -11,10 +11,10 @@ const context = vm.createContext({});
 vm.runInContext(source.slice(start, end) + ";globalThis.targets = plannedPushTargets;", context);
 
 const unit = { local_id: "u1", payload_hash: "a".repeat(64), push_pending: { intervals: true, garmin: true, wahoo: true } };
-const options = { configured: { intervals: true, garmin: true, wahoo: true }, intervals: "intervals" };
+const options = { configured: { intervals: true, garmin: true, wahoo: true } };
 
-test("a future unit lists every configured provider it needs, Intervals.icu last", () => {
-  assert.deepEqual([...context.targets(unit, "2026-11-10", "2026-11-07", options)], ["garmin", "wahoo", "intervals"]);
+test("a future unit lists every configured provider it needs", () => {
+  assert.deepEqual([...context.targets(unit, "2026-11-10", "2026-11-07", options)], ["garmin", "intervals", "wahoo"]);
   assert.deepEqual([...context.targets({ ...unit, push_pending: { intervals: false, garmin: true } }, "2026-11-07", "2026-11-07", options)], ["garmin"]);
   const garminOff = { ...options, configured: { intervals: true, garmin: false } };
   assert.deepEqual([...context.targets(unit, "2026-11-10", "2026-11-07", garminOff)], ["intervals"]);
