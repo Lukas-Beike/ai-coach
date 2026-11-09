@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 from backend import change_history
@@ -20,7 +21,8 @@ _OPTIONAL_FIELDS = (
     "notes",
     "description",
 )
-_MAX_COMPETITIONS = 20
+# Upcoming races only: past races stay as the archive and never count.
+_MAX_UPCOMING_COMPETITIONS = 20
 
 
 def _competition_id(value: Any, *, required: bool = False) -> str:
@@ -71,13 +73,35 @@ def _merge_update(
         value["environment"] = existing.get("environment")
         value["sport_detail"] = existing.get("sport_detail")
     for field in _OPTIONAL_FIELDS:
-        if value.get(field) in (None, "") and existing.get(field) not in (None, ""):
+        # A field sent empty (or null) is cleared; an absent one keeps its value.
+        if field not in arguments and existing.get(field) not in (None, ""):
             value[field] = existing[field]
     if (
         value.get("planned_duration_s") is None
         and existing.get("planned_duration_s") is not None
     ):
         value["planned_duration_s"] = existing["planned_duration_s"]
+
+
+def _with_derived_event_date(
+    value: dict[str, Any], arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """Take the race day from a sent start time; reject a different explicit day."""
+    start = value.get("starts_at_local")
+    if start in (None, ""):
+        return arguments
+    start_day = competitions.competition_start(start)[0]
+    sent_day = value.get("event_date")
+    if sent_day in (None, ""):
+        value["event_date"] = start_day
+        return {**arguments, "event_date": start_day}
+    if str(sent_day).strip()[:10] != start_day:
+        raise AppError(
+            400,
+            "Startzeit und Wettkampftag passen nicht zusammen: "
+            f"{start_day} statt {str(sent_day).strip()[:10]}.",
+        )
+    return arguments
 
 
 class CompetitionService:
@@ -88,10 +112,12 @@ class CompetitionService:
         database_manager: Any,
         repository: Any,
         now: Callable[[], str],
+        local_today: Callable[[], date],
     ):
         self._database_manager = database_manager
         self._repository = repository
         self._now = now
+        self._local_today = local_today
 
     def list(
         self, limit: int | None = None, *, db: Any | None = None
@@ -128,6 +154,7 @@ class CompetitionService:
         now = self._now()
         value = _coach_payload(arguments)
         competition_id = _competition_id(value.get("id"))
+        arguments = _with_derived_event_date(value, arguments)
         with self._database_manager.unit_of_work() as db:
             existing = (
                 self._repository.get(db, competition_id) if competition_id else None
@@ -142,9 +169,13 @@ class CompetitionService:
                 self._repository.update_local(db, normalized, now)
                 status = "updated"
             else:
-                if self._repository.count(db) >= _MAX_COMPETITIONS:
+                upcoming = self._repository.count_upcoming(
+                    db, self._local_today().isoformat()
+                )
+                if upcoming >= _MAX_UPCOMING_COMPETITIONS:
                     raise AppError(
-                        400, "Es können maximal 20 Wettkämpfe gespeichert werden."
+                        400,
+                        "Es können maximal 20 anstehende Wettkämpfe gespeichert werden.",
                     )
                 self._repository.create_local(db, normalized, now)
                 status = "created"

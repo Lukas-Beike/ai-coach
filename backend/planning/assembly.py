@@ -85,7 +85,10 @@ class PlanningDataAssembly:
 
     def competition(self) -> CompetitionService:
         return CompetitionService(
-            self._database_manager(), self._competition_repository, self._utc_now
+            self._database_manager(),
+            self._competition_repository,
+            self._utc_now,
+            self._local_date,
         )
 
     def training_plan(self) -> TrainingPlanService:

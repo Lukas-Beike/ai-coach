@@ -11,7 +11,6 @@ from backend.activities.activity_reference import ActivityReferences
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.session_corrections import SessionCorrectionService
 from backend.athlete.checkins import CheckinService
-from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
@@ -31,7 +30,6 @@ class AthleteRepositories:
     key_values: Any
     activity_rows: Callable[[], ActivityRowAndSummaryReader]
     table_serving: Callable[[], CanonicalTableServing]
-    competition: Any
 
 
 @dataclass(frozen=True)
@@ -39,9 +37,6 @@ class AthleteRuntime:
     utc_now: Callable[[], Any]
     local_date: Callable[[], Any]
     event_buffer: Any
-    normalize_profile: Callable[[Any], Any]
-    normalize_competition: Callable[[Any], Any]
-    uuid_factory: Callable[[], Any]
     read_planned_units: Callable[[], list[dict[str, Any]]] = list
     # Called when an input of the local session load (card M6) changes: a local
     # zone configuration, a session correction or a preferred threshold source.
@@ -87,10 +82,6 @@ class AthleteDataAssembly:
         self._utc_now = runtime.utc_now
         self._local_date = runtime.local_date
         self._event_buffer = runtime.event_buffer
-        self._competition_repository = repositories.competition
-        self._normalize_profile = runtime.normalize_profile
-        self._normalize_competition = runtime.normalize_competition
-        self._uuid_factory = runtime.uuid_factory
         self._read_planned_units = runtime.read_planned_units
         self._load_inputs_changed = runtime.load_inputs_changed
         self._thresholds_changed = runtime.thresholds_changed
@@ -181,14 +172,3 @@ class AthleteDataAssembly:
             for field in (*PREFERENCE_PROFILE_FIELDS.values(), "timezone", "sex")
         ):
             self._load_inputs_changed()
-
-    def context(self) -> AthleteContextService:
-        return AthleteContextService(
-            self._database_manager(),
-            self.profile(),
-            self._competition_repository,
-            self._normalize_profile,
-            self._normalize_competition,
-            self._utc_now,
-            self._uuid_factory,
-        )

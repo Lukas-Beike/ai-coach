@@ -401,7 +401,7 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         feedback = ActivityFeedbackService(manager, Mock())
         checkins = CheckinService(manager, Mock(), date.today)
         competitions = CompetitionService(
-            manager, Mock(), lambda: "2026-09-23T00:00:00Z"
+            manager, Mock(), lambda: "2026-09-23T00:00:00Z", date.today
         )
         service = CoachAthleteRecordToolService(checkins, feedback, competitions)
         invalid_ids = (

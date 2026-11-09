@@ -81,9 +81,6 @@ class CoachReviewTests(unittest.TestCase):
             "target": "AUTO",
         }
 
-
-
-
     def test_resumed_effect_is_preserved_but_incomplete_summary_is_partial(self):
         csrf_hash = server.session_auth_service().session_token_hash(
             "csrf-summary-recovery"
@@ -259,8 +256,8 @@ class CoachReviewTests(unittest.TestCase):
 
     def test_plan_draft_rejects_an_occupied_date_before_storing_artifact(self):
         workout = self.workout()
-        server.ATHLETE_DATA.context().save(
-            {}, [{"name": "Race", "event_date": workout["date"], "sport": "Ride"}]
+        server.PLANNING_DATA.competition().save(
+            {"name": "Race", "event_date": workout["date"], "sport": "Ride"}
         )
         intent = self.intent(
             "stage_training_plan", ["local_plan"], ("commit_training_plan",)

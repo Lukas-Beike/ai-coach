@@ -197,6 +197,29 @@ class ProfileServiceTests(unittest.TestCase):
         self.assertEqual(saved["timezone"], "UTC")
         self.assertEqual(saved["weight_kg"], "61.5")
 
+    def test_patch_validates_body_input_and_keeps_a_legacy_value_it_does_not_touch(
+        self,
+    ):
+        self.key_values.set(
+            self.db,
+            "profile",
+            json.dumps({**DEFAULT_PROFILE, "name": "Ada", "weight_kg": "72 kg"}),
+        )
+
+        renamed = self.service.patch({"name": "Ada B"})
+        self.assertEqual(renamed["weight_kg"], "72 kg")
+        with self.assertRaises(AppError):
+            self.service.patch({"weight_kg": "seventy"})
+        saved = self.service.patch(
+            {"weight_kg": None, "sleep_target_hours": "7,5", "height_cm": 180}
+        )
+
+        self.assertEqual(
+            (saved["weight_kg"], saved["sleep_target_hours"], saved["height_cm"]),
+            ("", "7.5", "180"),
+        )
+        self.assertEqual(self.service.get(), saved)
+
     def test_patch_rejects_non_object_payload(self):
         with self.assertRaises(AppError):
             self.service.patch(["name"])

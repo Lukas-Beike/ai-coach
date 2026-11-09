@@ -89,7 +89,6 @@ class ServerPlanningTests(ServerTestCase):
             enqueue.call_args.kwargs["item_operations"][0]["item_key"], local_id
         )
 
-
     def test_explicit_competition_push_preserves_provider_id_for_ordinary_edits(self):
         competition = server.PLANNING_DATA.competition().save(
             {
@@ -3039,50 +3038,43 @@ class ServerPlanningTests(ServerTestCase):
             revision,
         )
 
-
-
-
-
     def test_structured_athlete_context_persists_competitions(self):
         event_date = (
             _local_datetime.now().astimezone().date() + timedelta(days=60)
         ).isoformat()
-        result = server.ATHLETE_DATA.context().save(
+        profile = server.ATHLETE_DATA.profile().save(
             {
                 "name": "Ada",
                 "training_background": "Five years of cycling",
                 "typical_weekly_volume": "8 hours",
             },
-            [
-                {
-                    "name": "Münsterland Giro",
-                    "event_date": event_date,
-                    "sport": "Cycling",
-                    "priority": "A",
-                    "distance": "125 km",
-                    "target": "Finish with the front group",
-                    "course_profile": "Flat and fast",
-                    "notes": "",
-                }
-            ],
         )
-        self.assertEqual(
-            result["profile"]["training_background"], "Five years of cycling"
+        result = server.PLANNING_DATA.competition().save(
+            {
+                "name": "Münsterland Giro",
+                "event_date": event_date,
+                "sport": "Cycling",
+                "priority": "A",
+                "distance": "125 km",
+                "target": "Finish with the front group",
+                "course_profile": "Flat and fast",
+                "notes": "",
+            }
         )
+        self.assertEqual(profile["training_background"], "Five years of cycling")
         self.assertEqual(result["competitions"][0]["priority"], "A")
         context = server.COACH_CONTEXT.structured_context_service().build()
         self.assertEqual(context["target_competitions"][0]["name"], "Münsterland Giro")
         self.assertIn("bestätigte", context["source_policy"]["durable_profile"])
 
-
     def test_competition_removal_creates_remote_delete_tombstone(self):
         event_date = (
             _local_datetime.now().astimezone().date() + timedelta(days=60)
         ).isoformat()
-        saved = server.ATHLETE_DATA.context().save(
-            {}, [{"name": "Delete Race", "event_date": event_date}]
+        saved = server.PLANNING_DATA.competition().save(
+            {"name": "Delete Race", "event_date": event_date}
         )
-        local_id = saved["competitions"][0]["id"]
+        local_id = saved["competition"]["id"]
         deleted = []
 
         class FakeIntervalsClient:
@@ -3105,11 +3097,11 @@ class ServerPlanningTests(ServerTestCase):
             ),
         ):
             server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", 
+                "test",
             )
-            server.ATHLETE_DATA.context().save({}, [])
+            server.PLANNING_DATA.competition().delete(local_id)
             result = server.PROVIDER_RESYNC.competition_sync_service().sync(
-                "test", 
+                "test",
             )
 
         self.assertEqual(result["deleted_remote"], 1)

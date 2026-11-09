@@ -1,5 +1,6 @@
 """Synthetic Garmin export and real SQLite coordination checks."""
 
+import json
 import sqlite3
 import tempfile
 import threading
@@ -101,7 +102,12 @@ class BodyExportTests(unittest.TestCase):
 
     def test_invalid_fixture_and_superseded(self):
         for value in ("NaN", "inf", "19", "301", ""):
-            saved = self.profile.patch({"weight_kg": value})
+            # The profile no longer accepts these; the exporter still guards a stored one.
+            with self.db.unit_of_work() as db:
+                self.kv.set(
+                    db, "profile", json.dumps({**self.saved, "weight_kg": value})
+                )
+            saved = self.profile.get()
             self.assertEqual(
                 self.exporter.export(saved, self.profile.revision()), "invalid"
             )
@@ -134,9 +140,7 @@ class BodyExportTests(unittest.TestCase):
             "retry_body_to_garmin": True,
         }
         send = Mock(return_value="success")
-        routes = AthletePutRoutes(
-            Mock(), lambda: self.profile, threading.RLock(), None, send
-        )
+        routes = AthletePutRoutes(lambda: self.profile, threading.RLock(), None, send)
         routes.handle(handler, "/api/profile")
         send.assert_called_once()
         self.assertEqual(
@@ -232,7 +236,6 @@ class BodyExportTests(unittest.TestCase):
             "sync_body_to_garmin": True,
         }
         routes = AthletePutRoutes(
-            Mock(),
             lambda: self.profile,
             threading.RLock(),
             body_export=self.exporter.export,

@@ -26,10 +26,7 @@ from backend.athlete.checkins import (
     CHECKIN_TEXT_LIMITS,
 )
 from backend.athlete.clock import AthleteLocalClock
-from backend.athlete.profile import (
-    DEFAULT_PROFILE,
-    normalize_profile,
-)
+from backend.athlete.profile import DEFAULT_PROFILE
 from backend.athlete.sessions import AthleteSessionService
 from backend.backup.assembly import (
     BackupAssembly,
@@ -247,7 +244,6 @@ from backend.performance.morning_battery_service import (
 from backend.performance.source_policy import preferences_from_profile
 from backend.performance.threshold_staleness import ThresholdStalenessService
 from backend.planning import adaptive as planning_adaptive
-from backend.planning import competitions as planning_competitions
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning import training_plans as planning_training_plans
@@ -720,15 +716,11 @@ ATHLETE_DATA = AthleteDataAssembly(
             key_values=KEY_VALUE_REPOSITORY,
             activity_rows=lambda: CANONICAL_READ,
             table_serving=lambda: CANONICAL_READ,
-            competition=COMPETITION_REPOSITORY,
         ),
         runtime=AthleteRuntime(
             utc_now=runtime_clock.utc_now,
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            normalize_profile=normalize_profile,
-            normalize_competition=planning_competitions.normalize_competition,
-            uuid_factory=uuid.uuid4,
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
             load_inputs_changed=lambda: start_canonical_backfill(),
             thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
@@ -2354,7 +2346,6 @@ HTTP_API = HttpApiAssembly(
                     )
                 ),
                 checkin=ATHLETE_DATA.checkin,
-                context_service=ATHLETE_DATA.context,
                 clock=ATHLETE_CLOCK,
                 local_today=lambda: ATHLETE_CLOCK.now().date(),
                 state_event_buffer=runtime_events.STATE_EVENT_BUFFER,

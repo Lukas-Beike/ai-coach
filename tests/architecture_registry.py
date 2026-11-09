@@ -302,17 +302,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        "backend.athlete.context",
-        (
-            "AthleteContextService",
-            "_validated_athlete_context",
-            "_record_removed_competition_tombstones",
-            "_save_athlete_competition",
-            "_delete_removed_athlete_competitions",
-            "save_athlete_context",
-        ),
-    ),
-    (
         "backend.planning.competitions",
         (
             "COMPETITION_TEXT_LIMITS",

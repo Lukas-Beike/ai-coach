@@ -203,7 +203,6 @@ class HttpAthleteServices:
     competition: Callable[[], Any]
     activity_read: Callable[[], Any]
     checkin: Callable[[], Any]
-    context_service: Callable[[], Any]
     clock: Any
     local_today: Callable[[], Any]
     state_event_buffer: Any
@@ -395,7 +394,6 @@ class HttpApiAssembly:
         competition_service = athlete.competition
         activity_read_service = athlete.activity_read
         checkin_service = athlete.checkin
-        athlete_context_service = athlete.context_service
         athlete_clock = athlete.clock
         local_today = athlete.local_today
         state_event_buffer = athlete.state_event_buffer
@@ -622,7 +620,6 @@ class HttpApiAssembly:
         provider_credentials = dependencies.domains.provider_credentials
         self.credentials_put_routes = _when(provider_credentials, CredentialsPutRoutes)
         self.athlete_put_routes = AthletePutRoutes(
-            athlete_context_service,
             profile_service,
             database_lock(),
             athlete.zones,
