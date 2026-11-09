@@ -10,6 +10,8 @@ read them alike:
   SDK range returns only sleep statistics). Both transports serve both calls.
 * ``hrv``: the HRV range's last-night summaries.
 * ``daily_stats``: the daily summaries, read in ranges of at most 31 days.
+* ``body_battery``: the daily reports (charged, drained, levels), read in ranges
+  of at most 31 days.
 * ``resting_hr``: one ``{"calendarDate", "restingHeartRate"}`` row per summary day
   with a resting value, so the history needs no read per day.
 * ``weight``: the raw weigh-in range response.
@@ -37,6 +39,7 @@ from backend.providers.garmin import (
 from backend.providers.garmin_personal import wrap_daily_sleep
 
 DAILY_SUMMARY_RANGE_DAYS: Final = 31
+BODY_BATTERY_RANGE_DAYS: Final = 31
 # The sleep element fields that carry the night values (Garmin health mapper 18).
 SLEEP_NIGHT_FIELDS: Final = (
     "averageSpO2Value",
@@ -105,6 +108,9 @@ def collect_wellness_history(
         "sleep": lambda: _sleep_nights(client, start, end, external_call, hooks),
         "hrv": lambda: _hrv_summaries(client, start, end, external_call),
         "daily_stats": lambda: _daily_summaries(client, start, end, external_call),
+        "body_battery": lambda: _body_battery_reports(
+            client, start, end, external_call
+        ),
         "weight": lambda: _weigh_ins(client, start, end, external_call),
     }
     payload: dict[str, Any] = {
@@ -224,6 +230,29 @@ def _daily_summaries(
             rows.extend(
                 row
                 for row in normalize_range_records("daily_stats", data)
+                if _in_window(row, start, end)
+            )
+        first = last + timedelta(days=1)
+    return rows
+
+
+def _body_battery_reports(
+    client: Any, start: date, end: date, external_call: ExternalCall
+) -> list[Any]:
+    rows: list[Any] = []
+    first = start
+    while first <= end:
+        last = min(first + timedelta(days=BODY_BATTERY_RANGE_DAYS - 1), end)
+        value = external_call(
+            GARMIN_ID,
+            "body_battery",
+            partial(client.get_body_battery, first.isoformat(), last.isoformat()),
+            {"window_start": first.isoformat(), "window_end": last.isoformat()},
+        )
+        if value is not None:
+            rows.extend(
+                row
+                for row in normalize_range_records("body_battery", value)
                 if _in_window(row, start, end)
             )
         first = last + timedelta(days=1)

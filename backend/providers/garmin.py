@@ -56,7 +56,13 @@ class GarminCollectionOptions:
     known_activity_ids: frozenset[str] | None = None
     # Activities whose watch rating is already stored (``activity_ratings``).
     rated_activity_ids: frozenset[str] = frozenset()
+    # Days of Body Battery reports to read again, ending today; ``0`` reads none.
+    # Needs ``include_recovery`` and ``include_current_metrics``.
+    body_battery_reconcile_days: int = 0
 
+
+# Garmin serves at most this many days of Body Battery reports per request.
+BODY_BATTERY_RANGE_DAYS = 31
 
 # Metrics that change at most daily or after an activity: they are read once per
 # local day and after a new activity instead of on every refresh.
@@ -740,6 +746,67 @@ def _collect_ranges(
             ]
             for future in futures:
                 future.result()
+
+
+def _collect_body_battery(
+    client: Any,
+    today: date,
+    days: int,
+    payload: dict[str, Any],
+    pagination: dict[str, dict[str, Any]],
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None,
+    capability_allowed: CapabilityAllowed | None,
+    capability_failure: CapabilityFailure | None,
+    capability_success: CapabilitySuccess | None,
+) -> None:
+    """Read the last ``days`` days of Body Battery reports, ending today.
+
+    A report is the whole day's levels with its charged and drained totals, so a
+    later read replaces the partial report an earlier morning read stored. Body
+    Battery stays optional like the morning read: a failure or a paused source
+    adds no payload error and no incomplete range, so it does not mark the
+    Garmin sync partial. It counts toward the shared ``body_battery`` pause, and
+    the sync tries again until a read succeeds.
+    """
+    fetch = getattr(client, "get_body_battery", None)
+    if not callable(fetch):
+        return
+    if capability_allowed is not None and not capability_allowed("body_battery"):
+        return
+    first = today - timedelta(days=max(1, days) - 1)
+    records: list[dict[str, Any]] = []
+    try:
+        while first <= today:
+            last = min(first + timedelta(days=BODY_BATTERY_RANGE_DAYS - 1), today)
+            value = external_call(
+                "garmin",
+                "body_battery",
+                partial(fetch, first.isoformat(), last.isoformat()),
+                {
+                    "window_start": first.isoformat(),
+                    "window_end": last.isoformat(),
+                    "purpose": "reconciliation",
+                },
+            )
+            if value is not None:
+                records.extend(normalize_range_records("body_battery", value))
+            first = last + timedelta(days=1)
+    except Exception as exc:  # noqa: BLE001 - SDK errors vary; the other sources stay.
+        if capability_failure:
+            capability_failure("body_battery", exc)
+        if warn:
+            warn("body_battery", redact(str(exc))[:500], exc)
+        return
+    if capability_success:
+        capability_success("body_battery")
+    payload["body_battery"] = records
+    pagination["body_battery"] = {
+        "windows": 1,
+        "records": len(records),
+        "complete": True,
+    }
 
 
 def _daily_stats_records(value: Any, current: date) -> list[dict[str, Any]]:
@@ -1615,6 +1682,25 @@ def collect_garmin_data(
             source="training_status",
             method="get_training_status",
         )
+    reconcile_body_battery = (
+        collection_options.body_battery_reconcile_days > 0
+        and collection_options.include_recovery
+        and collection_options.include_current_metrics
+    )
+    if reconcile_body_battery:
+        _collect_body_battery(
+            client,
+            today,
+            collection_options.body_battery_reconcile_days,
+            payload,
+            pagination,
+            external_call,
+            redact,
+            warn,
+            capability_allowed,
+            capability_failure,
+            capability_success,
+        )
     if (
         collection_options.include_recovery
         or collection_options.include_current_metrics
@@ -1663,10 +1749,21 @@ def collect_garmin_data(
             capability_success,
         )
     provider_sync: dict[str, Any] = {"pagination": pagination}
+    if reconcile_body_battery and "body_battery" in pagination:
+        provider_sync["body_battery_reconciled_on"] = today.isoformat()
     payload["provider_sync"] = provider_sync
     _validate_current_metrics(payload, redact, warn)
     if collection_options.include_current_metrics:
-        _record_daily_metrics(payload, provider_sync, today, read_daily)
+        _record_daily_metrics(
+            payload,
+            provider_sync,
+            today,
+            read_daily,
+            body_battery_idle=(
+                collection_options.include_recovery
+                and collection_options.body_battery_reconcile_days <= 0
+            ),
+        )
     return payload
 
 
@@ -1675,15 +1772,28 @@ def _record_daily_metrics(
     provider_sync: dict[str, Any],
     today: date,
     read_daily: bool,
+    body_battery_idle: bool = False,
 ) -> None:
-    """Record the daily metric read; failed sources are read again next run."""
-    if not read_daily:
-        # Skipped, not failed: the stored values and their freshness stay.
-        provider_sync["skipped_sources"] = [
+    """Record the daily metric read; failed sources are read again next run.
+
+    ``body_battery_idle`` marks a run that had no Body Battery reconciliation due:
+    the stored reports and their freshness stay.
+    """
+    skipped = (
+        [
             source
             for source in GARMIN_DAILY_METRIC_SOURCES
             if source not in provider_sync["pagination"]
         ]
+        if not read_daily
+        else []
+    )
+    if body_battery_idle and "body_battery" not in provider_sync["pagination"]:
+        skipped.append("body_battery")
+    if skipped:
+        # Skipped, not failed: the stored values and their freshness stay.
+        provider_sync["skipped_sources"] = skipped
+    if not read_daily:
         return
     provider_sync["daily_metrics_on"] = today.isoformat()
     failed = {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, date, tzinfo
+from datetime import UTC, date, timedelta, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -51,7 +51,11 @@ def fetch_morning_body_battery(
         local_zone = ZoneInfo(profile_timezone)
     except ZoneInfoNotFoundError, ValueError:
         local_zone = fallback_zone or UTC
-    range_start = sleep_start.astimezone(local_zone).date()
+    # Sleep that starts after midnight dates its start on the check-in day; the
+    # evening before it still belongs to the report of the previous day.
+    range_start = min(
+        sleep_start.astimezone(local_zone).date(), checkin_date - timedelta(days=1)
+    )
     records = external_call(
         "garmin",
         "body_battery",

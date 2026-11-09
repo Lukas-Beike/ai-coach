@@ -63,6 +63,21 @@ def _bare_night(day: str, seconds: int) -> dict[str, Any]:
     return {"calendarDate": day, "values": {"totalSleepTimeInSeconds": seconds}}
 
 
+def _battery_report(
+    day: str, charged: int = 60, drained: int = 55, samples: int = 3
+) -> dict[str, Any]:
+    """One Body Battery report row shaped after the range answer."""
+    midday = int(datetime.fromisoformat(f"{day}T12:00:00+00:00").timestamp() * 1000)
+    return {
+        "date": day,
+        "charged": charged,
+        "drained": drained,
+        "bodyBatteryValuesArray": [
+            [midday + index * 180_000, 40 + index] for index in range(samples)
+        ],
+    }
+
+
 class SdkClient:
     """The SDK shape: the sleep range carries statistics only."""
 
@@ -109,6 +124,15 @@ class SdkClient:
                 {"calendarDate": "2021-03-02", "heartRate": {"restingValue": 0}},
             ]
         }
+
+    def get_body_battery(self, start: str, end: str) -> list[dict[str, Any]]:
+        self.calls.append(("get_body_battery", (start, end)))
+        return [
+            _battery_report("2021-03-01", charged=61, drained=52),
+            _battery_report("2021-03-02", charged=47, drained=44),
+            # Outside the window: never stored.
+            _battery_report("2021-02-27"),
+        ]
 
     def get_weigh_ins(self, start: str, end: str) -> dict[str, Any]:
         self.calls.append(("get_weigh_ins", (start, end)))
@@ -210,6 +234,36 @@ class CollectorTests(unittest.TestCase):
                 ("2021-02-01", "2021-03-03"),
                 ("2021-03-04", "2021-03-31"),
             ],
+        )
+
+    def test_body_battery_reports_are_read_in_ranges_of_at_most_31_days(self) -> None:
+        client = SdkClient()
+        collect_wellness_history(
+            client,
+            date(2021, 1, 1),
+            date(2021, 3, 31),
+            external_call=_external_call,
+            hooks=HOOKS,
+        )
+
+        self.assertEqual(
+            [args for name, args in client.calls if name == "get_body_battery"],
+            [
+                ("2021-01-01", "2021-01-31"),
+                ("2021-02-01", "2021-03-03"),
+                ("2021-03-04", "2021-03-31"),
+            ],
+        )
+
+    def test_body_battery_keeps_only_reports_inside_the_window(self) -> None:
+        payload = self.collect(SdkClient())
+
+        self.assertEqual(
+            [row["date"] for row in payload["body_battery"]],
+            ["2021-03-01", "2021-03-02"],
+        )
+        self.assertEqual(
+            payload["provider_sync"]["pagination"]["body_battery"], {"records": 2}
         )
 
     def test_a_range_without_weigh_ins_is_no_record(self) -> None:
@@ -432,6 +486,48 @@ class ServiceTests(unittest.TestCase):
             self.cursors.writes, [("garmin", "wellness_history", "2021-03-01")]
         )
         self.assertEqual(self.coordination.released, 1)
+
+    def test_backfill_stores_body_battery_history_and_its_totals(self) -> None:
+        result = self.service(SdkClient()).backfill(2, END)
+
+        self.assertEqual(result["written"]["body_battery"], 2)
+        stored = garmin_store.read_item(self.db, "body_battery", "2021-03-01")
+        self.assertEqual(stored, _battery_report("2021-03-01", charged=61, drained=52))
+        self.assertIsNone(garmin_store.read_item(self.db, "body_battery", "2021-02-27"))
+        metrics = self.metrics("2021-03-01")
+        self.assertEqual(metrics["body_battery_charged"], 61.0)
+        self.assertEqual(metrics["body_battery_drained"], 52.0)
+        self.assertEqual(self.metrics("2021-03-02")["body_battery_charged"], 47.0)
+
+    def test_a_repeated_backfill_run_writes_no_body_battery_again(self) -> None:
+        self.service(SdkClient()).backfill(2, END)
+        records = self.record_count()
+        observations = self.db.execute("SELECT COUNT(*) FROM observations").fetchone()[
+            0
+        ]
+
+        result = self.service(SdkClient()).backfill(2, END)
+
+        self.assertNotIn("body_battery", result["written"])
+        self.assertEqual(self.record_count(), records)
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM observations").fetchone()[0],
+            observations,
+        )
+
+    def test_a_stored_partial_body_battery_report_gets_the_completed_one(self) -> None:
+        self.store({"body_battery": [_battery_report("2021-03-01", 5, 3, samples=1)]})
+        self.assertEqual(self.metrics("2021-03-01")["body_battery_charged"], 5.0)
+
+        self.service(SdkClient()).backfill(2, END)
+
+        self.assertEqual(self.metrics("2021-03-01")["body_battery_charged"], 61.0)
+        self.assertEqual(self.metrics("2021-03-01")["body_battery_drained"], 52.0)
+        active = self.db.execute(
+            "SELECT COUNT(*) FROM observations WHERE metric = 'body_battery_charged' "
+            "AND observed_on = '2021-03-01' AND state = 'active'"
+        ).fetchone()[0]
+        self.assertEqual(active, 1)
 
     def test_stored_days_stay_untouched_and_nothing_is_deleted(self) -> None:
         stored_summary = {

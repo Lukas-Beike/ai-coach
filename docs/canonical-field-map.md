@@ -1645,7 +1645,7 @@ weight epoch milliseconds are read as a UTC date (`_epoch_day`).
 | `heart_rate_zones` | `get_heart_rate_zones()` (Personal `/biometric-service/heartRateZones/v2`) | `_map_heart_rate_zones` | documented, fixtures `heart_rate_zones`, `personal/heart_rate_zones` |
 | `weight` / `weigh_ins` / `weighIns` | `get_weigh_ins(start, end)` (Personal `/weight-service/weight/range/{s}/{e}?includeAll=true`) | `_map_weight`, `_WeightWalk` | observed `garmin_personal_weight_range` |
 | `daily_stats` | `get_daily_summaries(start, end)` (Personal `/usersummary-service/v2/dailysummaries`), per-day `get_user_summary(day)` fallback and `_with_resting_energy` | `_GROUPED_SECTIONS["daily_stats"]` after `flatten_daily_summary` | observed `garmin_personal_dailysummaries` |
-| `body_battery` | `get_body_battery(start, end)` (Personal `/wellness-service/wellness/bodyBattery/reports/daily`), read only by the morning flow (`garmin_morning.py`) | `_GROUPED_SECTIONS["body_battery"]` + `_map_body_battery_levels` | documented, fixture `body_battery` |
+| `body_battery` | `get_body_battery(start, end)` (Personal `/wellness-service/wellness/bodyBattery/reports/daily`), read by the morning flow (`garmin_morning.py`), by the first refresh of each local day over the last 7 days (`_collect_body_battery`) and by the wellness history backfill in ranges of at most 31 days | `_GROUPED_SECTIONS["body_battery"]` + `_map_body_battery_levels` | documented, fixture `body_battery` |
 | `race_predictions` | SDK `get_race_predictions()` | `_map_race_predictions` | documented, fixture `race_predictions` |
 | `endurance_score` | SDK `get_endurance_score(start, end, aggregation="daily")` | `_GROUPED_SECTIONS["endurance_score"]` | documented, fixture `endurance_score` |
 | `performance_history` | none: written by `append_garmin_performance_history` (90 days of `{date, metrics}`) | `_map_performance_history` | documented |
@@ -1924,8 +1924,8 @@ Not mapped: napping (`napTimeSeconds`), sleep stage times, `...Local` timestamps
 Status: Live (morning Body Battery refresh, `MorningBodyBatteryService`). Transport and record helpers, no
 mapper version and no canonical record constructed here.
 Inputs: `fetch_morning_body_battery` (login, `get_sleep_data(check-in date)`, then
-`get_body_battery(range_start, check-in date)` with `range_start` = local date of the sleep start in the profile
-timezone, else the athlete clock zone, else UTC); `morning_sleep_element`; `merge_garmin_records` (`merge_records`);
+`get_body_battery(range_start, check-in date)` with `range_start` = the earlier of the local date of the sleep start in the
+profile timezone (else the athlete clock zone, else UTC) and the day before the check-in date); `morning_sleep_element`; `merge_garmin_records` (`merge_records`);
 `latest_garmin_record` (fixture path). Callers: `garmin_service.py` and `morning_battery_service.py`.
 Evidence: documented only (fixture `body_battery`; the sleep night shape is observed in `garmin_sleep_daily_2026-11-03`).
 
