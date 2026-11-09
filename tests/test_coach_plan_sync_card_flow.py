@@ -36,6 +36,7 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.planning import planned_units
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.authority import PlanningAuthorityService
@@ -222,9 +223,10 @@ def unit_entries(flow: CardFlow, ids: list[str]) -> list[dict[str, str]]:
     return [
         {
             "library_workout_id": local_id,
-            "expected_payload_hash": hashlib.sha256(
-                payloads[local_id].encode()
-            ).hexdigest(),
+            # The content-only hash plan pushes record and check (#1916).
+            "expected_payload_hash": planned_units.plan_push_payload_hash(
+                payloads[local_id]
+            ),
         }
         for local_id in ids
     ]
