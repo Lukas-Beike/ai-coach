@@ -160,17 +160,7 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). The primary way to co
 
 An existing token file at `/data/garmin_tokens` is imported once when the database has no Garmin tokens yet. The file is left in place and is not deleted by the import. Because it is plaintext JSON protected only by owner-only file permissions, keep `/data` and every backup of it on encrypted host storage, and treat the file like a password.
 
-The bundled `garmin-login.py` helper is still available as an alternative for headless setups. It runs inside a temporary container attached to your data directory, which on a Linux host must already belong to UID 100 / GID 101 (`chown -R 100:101`, see [Docker Run](#docker-run)):
-
-```sh
-docker run --rm -it \
-  --env-file /mnt/user/appdata/ai-coach/.env \
-  -v /mnt/user/appdata/ai-coach/data:/data \
-  ghcr.io/lukas-beike/pacecraft:latest \
-  python /app/garmin-login.py
-```
-
-`GARMIN_EMAIL` and `GARMIN_PASSWORD` from `.env` remain a read-only fallback for the app's own Garmin login and for this helper. If you connect through the UI, you can remove `GARMIN_PASSWORD` from `.env`; the stored tokens are then used.
+`GARMIN_EMAIL` and `GARMIN_PASSWORD` from `.env` remain a read-only fallback for the app's own Garmin login. If you connect through the UI, you can remove `GARMIN_PASSWORD` from `.env`; the stored tokens are then used.
 
 ## Wahoo connection
 

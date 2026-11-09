@@ -225,7 +225,7 @@ def terminate_tree(process):
 
 def source_identity(root):
     # Hash only declared source inputs, including untracked source; never secrets.
-    allowed = (*INPUTS, "garmin-login.py", ".dockerignore")
+    allowed = (*INPUTS, ".dockerignore")
     listing = (
         subprocess.check_output(
             ["git", "ls-files", "-co", "--exclude-standard", "-z", "--", *allowed],

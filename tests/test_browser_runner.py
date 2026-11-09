@@ -420,6 +420,22 @@ class BrowserRunnerTests(unittest.TestCase):
                 )
             self.assertEqual(1, len(runner.failed_tests(output)))
 
+    def test_keep_going_runs_every_child_and_reports_all_failures(self):
+        code, value, _path = self.run_main(
+            FakeProcesses(fail_browser=True), extra_args=["--keep-going"]
+        )
+        self.assertNotEqual(code, 0)
+        statuses = [child["status"] for child in value["children"]]
+        self.assertEqual(statuses, ["failed"] * 3)
+        self.assertTrue(all(child.get("exit_code") for child in value["children"]))
+        self.assertIn("3 browser children failed", value["error"])
+
+    def test_without_keep_going_the_first_failure_stops_the_run(self):
+        code, value, _path = self.run_main(FakeProcesses(fail_browser=True))
+        self.assertNotEqual(code, 0)
+        ran = [child for child in value["children"] if child.get("exit_code")]
+        self.assertEqual(len(ran), 1)
+
     def test_child_without_test_report_says_it_failed_outside_a_test(self):
         code, value, _path = self.run_main(FakeProcesses(fail_browser=True))
         self.assertNotEqual(code, 0)

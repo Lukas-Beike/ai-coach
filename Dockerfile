@@ -8,7 +8,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY server.py /app/server.py
 COPY backend /app/backend
-COPY garmin-login.py /app/garmin-login.py
 COPY public /app/public
 COPY requirements.txt /app/requirements.txt
 
