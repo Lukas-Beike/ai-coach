@@ -170,7 +170,7 @@ class CoachProposalCreationService:
         return self.create(
             {
                 "action_type": "remote_coach_write",
-                "target_system": remote_write_target(tool),
+                "target_system": remote_write_target(tool, payload["intent"]),
                 "object_ids": {"operation": tool, "targets": targets},
                 "diff": remote_coach_write_diff(
                     tool, arguments, intent, approval_manifest, approval_details

@@ -98,7 +98,6 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         )
         self.assertEqual(jobs, ["job-2"])
 
-
     def test_plan_repair_checks_object_scopes_before_mutation(self):
         intent = {
             "operation": "start_intervals_plan_sync",
@@ -203,6 +202,68 @@ class CoachSyncToolServiceTests(unittest.TestCase):
         )
         self.conflicts.retry_job.assert_not_called()
 
+    def test_a_retry_takes_its_sync_scope_and_wording_from_the_job_provider(self):
+        for provider, wrong_scope in (
+            ("intervals", "garmin_sync"),
+            ("garmin", "intervals_sync"),
+            ("wahoo", "intervals_sync"),
+        ):
+            with self.subTest(provider=provider):
+                self.conflicts.reset_mock()
+                self.conflicts.job_state.return_value = {"provider": provider}
+                self.conflicts.is_push_job.return_value = True
+                self.conflicts.retry_job.return_value = {"ok": True}
+                intent = {
+                    "operation": "resolve_training_sync_conflict",
+                    "target_system": provider,
+                    "authorization_scope": ["sync_job:job-1", wrong_scope],
+                    "request": {"remote_write": True},
+                }
+                with self.assertRaises(AppError) as raised:
+                    self.service.execute(
+                        "resolve_training_sync_conflict",
+                        {"job_id": "job-1"},
+                        intent=intent,
+                        sync_job_ids=[],
+                    )
+                self.assertEqual(
+                    (raised.exception.status, raised.exception.reason),
+                    (403, "intent_scope_denied"),
+                )
+                self.conflicts.retry_job.assert_not_called()
+                intent["authorization_scope"] = ["sync_job:job-1", f"{provider}_sync"]
+                jobs = []
+                self.assertEqual(
+                    {"ok": True},
+                    self.service.execute(
+                        "resolve_training_sync_conflict",
+                        {"job_id": "job-1"},
+                        intent=intent,
+                        sync_job_ids=jobs,
+                    ),
+                )
+                self.assertEqual(["job-1"], jobs)
+
+    def test_a_retry_error_names_the_job_provider(self):
+        for provider, name in (("garmin", "Garmin"), ("wahoo", "Wahoo")):
+            with self.subTest(provider=provider):
+                self.conflicts.job_state.return_value = {"provider": provider}
+                self.conflicts.is_push_job.return_value = True
+                intent = {
+                    "operation": "resolve_training_sync_conflict",
+                    "target_system": "intervals",
+                    "authorization_scope": ["sync_job:job-1", f"{provider}_sync"],
+                    "request": {"remote_write": True},
+                }
+                with self.assertRaises(AppError) as raised:
+                    self.service.execute(
+                        "resolve_training_sync_conflict",
+                        {"job_id": "job-1"},
+                        intent=intent,
+                        sync_job_ids=[],
+                    )
+                self.assertIn(name, str(raised.exception))
+                self.assertNotIn("Intervals", str(raised.exception))
 
     def test_current_turn_job_can_be_read_without_extra_scope(self):
         self.queue.state.return_value = {"id": "job-1"}

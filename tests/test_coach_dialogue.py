@@ -980,6 +980,85 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             )
             self.assertEqual(result["sync_job_ids"], [job["id"]])
 
+    def retry_failed_job(self, provider, kind, message):
+        """One Coach turn retrying a failed job; returns the gate output or None."""
+        push = kind == "plan_push"
+        payload = {"reason": "Synthetic retry", "days": 7}
+        if push:
+            server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+                [self.workout()]
+            )
+            payload = {
+                "reason": "Synthetic retry",
+                "entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries(),
+            }
+        job = server.SYNC_JOB_QUEUE.service().enqueue(
+            provider, kind, payload, requested_by="coach"
+        )
+        with server.database_manager().unit_of_work() as db:
+            db.execute("UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],))
+        seen = []
+
+        def retry(_):
+            return self.call(
+                "resolve_training_sync_conflict",
+                {"job_id": job["id"]},
+                [
+                    f"sync_job:{job['id']}",
+                    f"{provider}_{'sync' if push else 'refresh'}",
+                ],
+                target=provider,
+                remote_write=push,
+            )
+
+        def answer(payload):
+            seen.append(json.loads(payload["input"][0]["output"]))
+            return {"output_text": "Fertig."}
+
+        result, _ = self.turn(message, [retry, answer])
+        status = server.SYNC_JOB_QUEUE.service().state(job["id"])["status"]
+        return result, seen[0], status
+
+    def test_a_garmin_or_wahoo_read_retry_needs_no_sync_wording(self):
+        for provider in ("garmin", "wahoo"):
+            with self.subTest(provider=provider):
+                result, output, status = self.retry_failed_job(
+                    provider,
+                    "refresh",
+                    "Der letzte Abruf ist fehlgeschlagen, nochmal bitte.",
+                )
+                self.assertNotEqual("not_performed", output.get("status"), output)
+                self.assertEqual("queued", status)
+                self.assertEqual(1, len(result["sync_job_ids"]))
+
+    def test_a_garmin_or_wahoo_plan_push_retry_needs_that_provider_named(self):
+        for provider, name, other in (
+            ("garmin", "Garmin", "Wahoo"),
+            ("wahoo", "Wahoo", "Garmin"),
+        ):
+            with self.subTest(provider=provider):
+                _, output, status = self.retry_failed_job(
+                    provider,
+                    "plan_push",
+                    "Der Versand ist fehlgeschlagen, nochmal bitte.",
+                )
+                self.assertEqual("not_performed", output["status"])
+                self.assertEqual(
+                    f"remote_{provider}_not_requested", output["gate_reason"]
+                )
+                self.assertIn(name, output["message"])
+                self.assertNotIn("Intervals", output["message"])
+                self.assertNotIn(other, output["message"])
+                self.assertEqual("failed", status)
+                result, output, status = self.retry_failed_job(
+                    provider,
+                    "plan_push",
+                    f"Sende die Einheiten nochmal an {name}.",
+                )
+                self.assertNotEqual("not_performed", output.get("status"), output)
+                self.assertEqual("queued", status)
+                self.assertEqual(1, len(result["sync_job_ids"]))
+
     def test_every_tool_exposes_nested_object_fields_and_rejects_advice_writes(self):
         def inspect(schema, name):
             if schema.get("type") == "object":

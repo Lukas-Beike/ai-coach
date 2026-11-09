@@ -20,6 +20,15 @@ PROVIDER_SHORT_LABELS: Final[Mapping[ProviderId, str]] = {
     ProviderId.INTERVALS: "Intervals.icu",
 }
 
+
+def provider_name(provider: str) -> str:
+    """The name a user-facing message gives a provider id, or the id itself."""
+    try:
+        return PROVIDER_SHORT_LABELS[ProviderId(provider)]
+    except ValueError, KeyError:
+        return str(provider)
+
+
 SPORT_LABELS_DE: Final[Mapping[Sport, str]] = {
     Sport.RIDE: "Radfahren",
     Sport.RUN: "Laufen",
