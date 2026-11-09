@@ -12,6 +12,7 @@ EXPECTED_LIBRARY_FIELDS = {
     "session_focus",
     "strength_intensity",
     "strength_structure",
+    "hr_cap",
     "name",
     "description",
     "type",

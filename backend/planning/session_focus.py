@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
+from backend.activities.hr_cap import HR_CAP_KEY, normalize_hr_cap
 from backend.activities.workout_load import WorkoutEstimate
 from backend.canonical import planning_fields
 from backend.canonical.planning_fields import (
@@ -115,6 +116,7 @@ def normalize_session_focus(record: dict[str, Any]) -> None:
     focus = _text_value(record, FOCUS_KEY)
     intensity = _text_value(record, INTENSITY_KEY)
     structure = record.get(STRENGTH_STRUCTURE)
+    cap = record.get(HR_CAP_KEY)
     for key in FOCUS_KEYS:
         record.pop(key, None)
     if focus is not None:
@@ -126,6 +128,19 @@ def normalize_session_focus(record: dict[str, Any]) -> None:
             raise _invalid("Ungültige Krafteinheit-Intensität.")
         record[INTENSITY_KEY] = intensity
     _set_structure(record, sport, structure)
+    _set_hr_cap(record, sport, cap)
+
+
+def _set_hr_cap(record: dict[str, Any], sport: Sport, cap: Any) -> None:
+    """Keep a valid heart-rate cap on a run unit; reject it anywhere else."""
+    if cap is None:
+        return
+    if sport is not Sport.RUN:
+        raise _invalid("Die Herzfrequenz-Obergrenze gilt nur für Laufeinheiten.")
+    try:
+        record[HR_CAP_KEY] = normalize_hr_cap(cap)
+    except ValueError as error:
+        raise _invalid(f"Ungültige Herzfrequenz-Obergrenze: {error}") from error
 
 
 # Strength keywords; the first matching group wins, legs plus upper is full body.

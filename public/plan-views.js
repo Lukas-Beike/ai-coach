@@ -545,12 +545,24 @@ function focusChipSpec(entry) {
   return { kind: derived ? "focus-derived" : "focus", text: [derived ? "≈" : null, label, intensity].filter(Boolean).join(" "), derived };
 }
 
+const HR_CAP_SOURCE_LABELS = { default: "Standard", measured: "gemessen" };
+
+function hrCapChipSpec(entry) {
+  const percent = Number(entry?.hr_cap?.percent_lthr);
+  const source = HR_CAP_SOURCE_LABELS[entry?.hr_cap?.source];
+  if (!Number.isFinite(percent) || !source) return null;
+  const bpm = Number(entry?.hr_cap_bpm?.high);
+  const parts = [`≤ ${percent} % LSHF`, Number.isFinite(bpm) ? `${bpm} bpm` : null, source];
+  return { kind: "focus", text: parts.filter(Boolean).join(" · "), derived: false };
+}
+
 function appendFocusChip(root, entry) {
   const chip = focusChipSpec(entry);
-  if (!chip) return;
-  const row = calendarBadgeRow([chip]);
-  row.dataset.focusChip = chip.derived ? "derived" : "set";
-  if (chip.derived) row.firstElementChild.setAttribute("aria-label", `${chip.text} (abgeleitet)`);
+  const cap = hrCapChipSpec(entry);
+  if (!chip && !cap) return;
+  const row = calendarBadgeRow([chip, cap].filter(Boolean));
+  row.dataset.focusChip = chip?.derived ? "derived" : "set";
+  if (chip?.derived) row.firstElementChild.setAttribute("aria-label", `${chip.text} (abgeleitet)`);
   root.append(row);
 }
 

@@ -38,6 +38,10 @@ from backend.backup.assembly import (
 )
 from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.calendar import local as calendar_local
+from backend.canonical.first_threshold import (
+    FIRST_THRESHOLD_FIELD,
+    first_threshold_percent,
+)
 from backend.coach import attachments as coach_attachments
 from backend.coach import context as coach_context_module
 from backend.coach import limits as coach_limits
@@ -271,6 +275,7 @@ from backend.planning.plan_guard_service import (
 )
 from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.revision import PlanningRevisionService
+from backend.planning.run_lthr import RunLthr
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
     PlanningChangeLimits,
@@ -683,6 +688,9 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
 
 PROFILE_MUTATION_COORDINATOR = threading.RLock()
 
+# Declared ahead of its first lambda reference; assigned before the plan guard.
+RUN_LTHR: RunLthr
+
 # Declared ahead of its first lambda reference; assigned after METRIC_EXPORT below.
 METRIC_EXPORT_RUNNER: MetricExportRunner
 # Declared ahead of its first lambda reference; assigned after METRIC_EXPORT_RUNNER.
@@ -711,6 +719,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             load_inputs_changed=lambda: start_canonical_backfill(),
             thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
             threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
+            run_lthr_on=lambda day: RUN_LTHR.on(day),
         ),
     )
 )
@@ -755,6 +764,7 @@ PLANNING_DATA = PlanningDataAssembly(
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             uuid_factory=uuid.uuid4,
             redact=REDACTOR.redact_text,
+            hr_cap_resync=lambda db, payloads: RUN_LTHR.resync(db, payloads),
         ),
         mutations=PlanningMutations(
             calendar_conflict_service=lambda: (
@@ -1328,6 +1338,8 @@ PLANNED_CALENDAR_SYNC = PlannedCalendarSyncAssembly(
             state_writer=PLANNED_UNIT_SYNC.state_writer,
             utc_now=runtime_clock.utc_now,
             today=lambda: ATHLETE_CLOCK.now().date(),
+            run_lthr_for=lambda unit: RUN_LTHR.resolver()(unit),
+            key_values=KEY_VALUE_REPOSITORY,
         ),
         future_days=PLANNED_CALENDAR_FUTURE_DAYS,
     )
@@ -1700,6 +1712,19 @@ def _planned_unit_estimator() -> PlannedUnitEstimator:
     )
 
 
+RUN_LTHR = RunLthr(
+    thresholds=lambda: read_load_thresholds(
+        database_manager(),
+        CANONICAL_READ,
+        ATHLETE_CLOCK.now().date(),
+        ATHLETE_DATA.zones().configurations(),
+        lambda db: preferences_from_profile(ATHLETE_DATA.profile().get_from_db(db)),
+    ),
+    today=lambda: ATHLETE_CLOCK.now().date(),
+    key_values=KEY_VALUE_REPOSITORY,
+)
+
+
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
     return PlanGuardService(
@@ -1718,6 +1743,9 @@ def _plan_guard_service() -> PlanGuardService:
         ),
         weekly_plan_text=lambda: str(
             ATHLETE_DATA.profile().get().get("weekly_plan") or ""
+        ),
+        first_threshold_pct=lambda: first_threshold_percent(
+            ATHLETE_DATA.profile().get().get(FIRST_THRESHOLD_FIELD)
         ),
         today=lambda: ATHLETE_CLOCK.now().date(),
         thresholds=lambda: read_load_thresholds(

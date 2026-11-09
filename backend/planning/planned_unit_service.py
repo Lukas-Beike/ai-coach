@@ -10,7 +10,11 @@ from typing import Any
 from backend import change_history
 from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
-from backend.canonical.planning_fields import FOCUS_ONLY_KEYS, STRENGTH_STRUCTURE
+from backend.canonical.planning_fields import (
+    FOCUS_ONLY_KEYS,
+    HR_CAP,
+    STRENGTH_STRUCTURE,
+)
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.db.remote_links import RemoteLinkRepository
@@ -54,7 +58,7 @@ def _without_unset_focus(
 
 def _differs_only_in_focus(restored: dict[str, Any], current: dict[str, Any]) -> bool:
     """Whether an undo changes nothing but the local focus (sync state stays)."""
-    ignored = {*FOCUS_KEYS, "sync_status"}
+    ignored = {*(key for key in FOCUS_KEYS if key != HR_CAP), "sync_status"}
 
     def comparable(payload: dict[str, Any]) -> dict[str, Any]:
         result = {key: value for key, value in payload.items() if key not in ignored}
@@ -84,6 +88,9 @@ class PlannedUnitService:
         redact: Callable[[str], str],
         calendar_conflict_service: Any,
         publish_change: Callable[[], None],
+        hr_cap_resync: Callable[[Any, list[dict[str, Any]]], set[str]] = (
+            lambda _db, _payloads: set()
+        ),
     ):
         self._database_manager = database_manager
         self._planning_revision_service = planning_revision_service
@@ -93,6 +100,7 @@ class PlannedUnitService:
         self._redact = redact
         self._calendar_conflict_service = calendar_conflict_service
         self._publish_change = publish_change
+        self._hr_cap_resync = hr_cap_resync
 
     def insert(
         self,
@@ -353,13 +361,18 @@ class PlannedUnitService:
             )
             baselines = garmin_baselines(db) if push_state else {}
             remembered = remembered_exercises(db) if push_state else {}
-        pairs = [
-            (row, payload)
-            for row in rows
-            if (payload := planned_unit_payload(row, include_archived)) is not None
-        ]
+            pairs = [
+                (row, payload)
+                for row in rows
+                if (payload := planned_unit_payload(row, include_archived)) is not None
+            ]
+            resync = (
+                self._hr_cap_resync(db, [payload for _row, payload in pairs])
+                if push_state
+                else set()
+            )
         if push_state:
-            attach_push_state(pairs, baselines, remembered)
+            attach_push_state(pairs, baselines, remembered, resync)
         return [payload for _row, payload in pairs]
 
     def list_for_coach(self, limit: int = 250) -> dict[str, Any]:

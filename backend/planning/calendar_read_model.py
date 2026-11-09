@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.activities import calendar_projection, grouping
+from backend.activities.hr_cap import resolved_range, stored_cap
 from backend.activities.workout_profile import planned_profile
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
@@ -131,7 +132,31 @@ def _with_session_focus(
         estimate = estimate_planned_unit(
             row, unit_thresholds(row, sport_thresholds, zone_configurations)
         )
-    return {**row, **session_focus(row, estimate).as_dict()}
+    return {
+        **row,
+        **session_focus(row, estimate).as_dict(),
+        **_resolved_hr_cap(row, sport_thresholds, zone_configurations),
+    }
+
+
+def _resolved_hr_cap(
+    row: dict[str, Any],
+    sport_thresholds: Sequence[Observation],
+    zone_configurations: Sequence[ZoneConfiguration],
+) -> dict[str, Any]:
+    """The stored cap's current bpm, from the threshold HR in effect on the unit's date.
+
+    The unit stores percentages only; its bpm follows the threshold HR whenever
+    the card is read. Without a known threshold HR only the percent is shown.
+    """
+    cap = stored_cap(row)
+    if cap is None:
+        return {}
+    lthr = _zone_settings(row, sport_thresholds, zone_configurations).lthr
+    resolved = resolved_range(cap, lthr)
+    if resolved is None:
+        return {}
+    return {"hr_cap_bpm": {"low": resolved[0], "high": resolved[1]}}
 
 
 def project_planning_calendar(

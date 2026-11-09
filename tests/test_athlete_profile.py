@@ -64,6 +64,7 @@ class AthleteProfileTests(unittest.TestCase):
                 "weather_location": "",
                 "sleep_target_hours": "",
                 "fueling_tolerance": "",
+                "first_threshold_pct": "",
                 "preferred_source_thresholds": "",
                 "preferred_source_body": "",
                 "preferred_source_hrv": "",

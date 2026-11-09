@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate, iso_date_prefix
+from backend.canonical.planning_fields import HR_CAP
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import (
@@ -55,6 +56,11 @@ def adopt_normalized_remote_planned_unit(
     return {**remote, "remote_event_external_id": identity}, identity
 
 
+# The focus keys no provider receives; the heart-rate cap reaches the watch, so a
+# change of it is a change of the exported unit.
+LOCAL_ONLY_KEYS = tuple(key for key in FOCUS_KEYS if key != HR_CAP)
+
+
 def planned_unit_payload_hash(payload: Any) -> str:
     if not isinstance(payload, dict):
         payload = {}
@@ -68,7 +74,7 @@ def planned_unit_payload_hash(payload: Any) -> str:
             "sync_conflict",
             "origin",
             "local_marked",
-            *FOCUS_KEYS,
+            *LOCAL_ONLY_KEYS,
         }
     }
     if "sport" in comparable or "type" in comparable:

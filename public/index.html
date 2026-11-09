@@ -257,6 +257,11 @@
               <label>Ruhepuls<select name="preferred_source_resting_hr"><option value="">Standard</option><option value="garmin">Garmin Connect</option></select></label>
               <label>Schlaf<select name="preferred_source_sleep"><option value="">Standard</option><option value="garmin">Garmin Connect</option></select></label>
             </fieldset>
+            <fieldset class="profile-subsection"><legend>Gemessene erste Schwelle</legend>
+              <label>Messwert (bpm)<input name="first_threshold_hr" type="number" min="60" max="220" step="1" inputmode="numeric" placeholder="Optional, aus Labortest"></label>
+              <label>Messdatum<input name="first_threshold_on" type="date"></label>
+              <label>Gespeichert (% LSHF)<input name="first_threshold_pct" type="number" min="40" max="100" step="0.1" inputmode="decimal" placeholder="Leer = Standard-Obergrenzen"></label>
+            </fieldset>
             <label>Persönliches Schlafziel (Stunden)<input name="sleep_target_hours" type="number" min="4" max="12" step="0.25" placeholder="Optional, zum Beispiel 8"></label>
             <div class="form-grid">
             <label>Coaching-Stil<input name="coaching_style" placeholder="Unterstützend, direkt und evidenzbasiert"></label>
@@ -630,7 +635,7 @@
   <script src="/navigation.js?v=236" defer></script>
   <script src="/state.js?v=228" defer></script>
   <script src="/views.js?v=239" defer></script>
-  <script src="/plan-views.js?v=33" defer></script>
+  <script src="/plan-views.js?v=34" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=219" defer></script>
   <script src="/connection-status.js?v=1" defer></script>

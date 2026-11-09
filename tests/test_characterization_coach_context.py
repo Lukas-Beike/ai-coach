@@ -349,6 +349,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "max_hr",
                 "lthr",
                 "run_lthr",
+                "run_hr_caps",
                 "weight",
             },
         )

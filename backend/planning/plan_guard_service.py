@@ -408,10 +408,12 @@ class PlanGuardService:
         expects_strength: Callable[[], bool] = lambda: False,
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
         weekly_plan_text: Callable[[], str] = lambda: "",
+        first_threshold_pct: Callable[[], float | None] = lambda: None,
         history: BriefHistory | None = None,
     ) -> None:
         self._history = history or BriefHistory()
         self._weekly_plan = weekly_plan_text
+        self._first_threshold_pct = first_threshold_pct
         self._planned_units = planned_units
         self._completed = completed_activities
         self._competitions = competitions
@@ -466,6 +468,7 @@ class PlanGuardService:
             ),
             *plan_checks.strength_incomplete(units),
             *plan_checks.focus_missing(units),
+            *plan_checks.hr_cap_invalid(units, self._first_threshold_pct()),
         ]
 
     def _reported_illness(self) -> str:

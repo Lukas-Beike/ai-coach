@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.athlete.profile import DEFAULT_PROFILE, ProfileService
+from backend.athlete.profile import (
+    COACH_READ_ONLY_FIELDS,
+    DEFAULT_PROFILE,
+    ProfileService,
+)
 from backend.coach.authorization import authorized_operations, require_coach_scope
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
@@ -56,6 +60,7 @@ class CoachProfileUpdateService:
                     or set(change) != {"field", "expected_value", "value"}
                     or not isinstance(change.get("field"), str)
                     or change["field"] not in DEFAULT_PROFILE
+                    or change["field"] in COACH_READ_ONLY_FIELDS
                     or change["field"] in seen
                     or any(
                         not isinstance(change.get(key), str) or len(change[key]) > 4000
