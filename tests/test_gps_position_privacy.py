@@ -6,23 +6,36 @@ import unittest
 
 from backend.activities.detail_contract import _coverage, _streams
 from backend.activities.detail_merge import merge_details
-from backend.canonical.activity_detail import ActivityStreamSet, without_positions
+from backend.canonical.activity_detail import (
+    ActivityDfaAlpha1,
+    ActivitySensor,
+    ActivityStreamSet,
+    without_positions,
+)
 from backend.canonical.vocabulary import (
     POSITION_CHANNELS,
     ActivityDetailOrigin,
+    DfaQuality,
+    HeartRateSource,
+    PowerSource,
     ProviderId,
+    SensorRole,
     StreamChannel,
     StreamResolution,
 )
 from backend.db import row_factory
 from backend.db.activity_detail_store import (
     GPS_TRACKS_KEY,
+    _child_rows,
+    _content_hash,
+    _header,
     delete_stored_tracks,
     detail_sets_for,
     gps_tracks_enabled,
     stored_track_count,
     stream_export_rows,
 )
+from backend.db.canonical_store import WriteOutcome
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.privacy import (
@@ -49,6 +62,37 @@ def track_set(activity_id="g1", provider=GARMIN):
             LAT: (52.5, 52.5001, None),
             LON: (13.4, 13.4001, None),
         },
+    )
+
+
+def sensor_track_set(activity_id="g1", provider=GARMIN):
+    """A track set that also names its heart rate and power sources and sensors."""
+    base = track_set(activity_id, provider)
+    return ActivityStreamSet(
+        provider_activity_id=base.provider_activity_id,
+        provenance=base.provenance,
+        origin=base.origin,
+        resolution=base.resolution,
+        channels=base.channels,
+        hr_source=HeartRateSource.CHEST_STRAP,
+        power_source=PowerSource.POWER_METER,
+        sensors=(
+            ActivitySensor(
+                role=SensorRole.HEART_RATE,
+                key="a" * 64,
+                connection="antplus",
+                manufacturer=1,
+                product=2,
+            ),
+            ActivitySensor(role=SensorRole.POWER_METER, key="b" * 64),
+        ),
+        dfa_alpha1=ActivityDfaAlpha1(
+            estimate_bpm=150,
+            windows=40,
+            artifact_share=0.01,
+            quality=DfaQuality.GOOD,
+            method=1,
+        ),
     )
 
 
@@ -161,6 +205,37 @@ class StoredPositionTests(unittest.TestCase):
         ).fetchone()["content_sha256"]
         self.assertEqual(rehashed, fresh)
         self.assertEqual(delete_stored_tracks(self.db), 0)
+
+    def stored_hash_and_updated_at(self):
+        row = self.db.execute(
+            "SELECT content_sha256, updated_at FROM activity_detail_sets"
+        ).fetchone()
+        return row["content_sha256"], row["updated_at"]
+
+    def test_deleting_tracks_of_a_set_with_sensors_hashes_like_a_fresh_write(self):
+        self.store(sensor_track_set())
+        self.assertEqual(delete_stored_tracks(self.db), 1)
+        rehashed, _updated = self.stored_hash_and_updated_at()
+        stripped = without_positions(sensor_track_set())
+        self.assertEqual(
+            rehashed, _content_hash(_header(stripped, 1), _child_rows(stripped))
+        )
+        # The same set stored fresh with the setting off hashes identically.
+        self.db.execute("DELETE FROM activity_stream_channels")
+        self.db.execute("DELETE FROM activity_detail_sets")
+        self.turn_setting_off()
+        self.store(sensor_track_set())
+        self.assertEqual(rehashed, self.stored_hash_and_updated_at()[0])
+
+    def test_second_pass_over_a_set_with_sensors_rewrites_nothing(self):
+        self.store(sensor_track_set())
+        delete_stored_tracks(self.db)
+        before = self.stored_hash_and_updated_at()
+        self.assertEqual(delete_stored_tracks(self.db), 0)
+        self.assertEqual(self.stored_hash_and_updated_at(), before)
+        # Re-storing the stripped set is recognized as unchanged: no rewrite.
+        self.turn_setting_off()
+        self.assertIs(self.store(sensor_track_set()), WriteOutcome.UNCHANGED)
 
 
 class _Context:

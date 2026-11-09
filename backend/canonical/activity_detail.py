@@ -150,10 +150,12 @@ def _require_detail_header(
 
 @dataclass(frozen=True, slots=True)
 class ActivitySensor:
-    """One sensor a recording named, identified by a hash and never by its serial.
+    """One sensor a recording named, identified by a pseudonymous hash.
 
-    ``key`` is the SHA-256 of the manufacturer, product and serial number, so the
-    same device is recognized across activities while the serial stays unreadable.
+    ``key`` is the unsalted SHA-256 of the manufacturer, product and serial number,
+    so the same device is recognized across activities. The serial itself is not
+    stored; the hash is a pseudonym, not anonymous, because a 32-bit serial can be
+    brute-forced from it.
     ``connection`` is the transport the file names (``antplus``, ``bluetooth``,
     ``local`` for the recording device itself).
     """

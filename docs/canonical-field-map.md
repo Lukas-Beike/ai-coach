@@ -965,7 +965,7 @@ The property `kind` is always `streams` (`ActivityDetailKind.STREAMS`), not a st
 
 ### `ActivitySensor`
 
-One external sensor a recording named. The serial number is only an input of the hash and is never stored or shown.
+One external sensor a recording named. The serial number is only an input of the hash and is not stored or shown; the unsalted hash is a pseudonym, not anonymous.
 
 | Field | Type & unit | Emitted by | Notes |
 |---|---|---|---|

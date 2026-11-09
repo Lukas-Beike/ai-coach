@@ -39,7 +39,7 @@ a newer number maps to ``other``, 65534 unknown to none) and wkt_step_index
 exercise subtype (8) is not mapped, so FIT sets carry no exercise name.
 
 Device information (23) yields the heart rate and power source of the stream set
-and its external heart rate and power sensors, with the serial only as a hash
+and its external heart rate and power sensors, with the serial only as a pseudonymous hash
 (``fit_sensor_mapping``). The hrv messages (78) of a chest-strap recording give
 the first threshold estimate of the stream set (``dfa_alpha1``); only that result
 is kept, never the RR intervals (``fit_rr_mapping``). Not mapped: session and
