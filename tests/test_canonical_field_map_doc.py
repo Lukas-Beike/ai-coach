@@ -32,6 +32,7 @@ NO_SECTION_NEEDED: Final = frozenset(NOT_MAPPERS)
 LOCAL_PRODUCERS: Final = (
     "backend/sync/local_load.py",
     "backend/sync/session_metrics.py",
+    "backend/sync/activity_weather.py",
     "backend/performance/session_metrics.py",
     "backend/performance/morning_battery_service.py",
     "backend/athlete/zones.py",

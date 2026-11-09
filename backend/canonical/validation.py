@@ -66,6 +66,11 @@ METRIC_BOUNDS: Final[Mapping[MetricKind, tuple[float, float]]] = {
     MetricKind.AEROBIC_DECOUPLING: (-100.0, 100.0),
     MetricKind.BODY_BATTERY_BEFORE_SLEEP: (0.0, 100.0),
     MetricKind.MORNING_BODY_BATTERY: (0.0, 100.0),
+    MetricKind.ACTIVITY_WEATHER_TEMPERATURE: (-90.0, 60.0),
+    MetricKind.ACTIVITY_WEATHER_APPARENT_TEMPERATURE: (-120.0, 80.0),
+    MetricKind.ACTIVITY_WEATHER_HUMIDITY: (0.0, 100.0),
+    MetricKind.ACTIVITY_WEATHER_WIND_SPEED: (0.0, 120.0),
+    MetricKind.ACTIVITY_WEATHER_PRECIPITATION: (0.0, 1_000.0),
     # Form (CTL minus ATL) is negative while fatigue outweighs fitness.
     MetricKind.FORM: (-10_000.0, 10_000.0),
     MetricKind.EFTP: (0.0, 2_500.0),

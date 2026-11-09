@@ -11,6 +11,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.performance.session_rpe_load import FeedbackLookup
 from backend.performance.source_policy import NO_PREFERENCES
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.activity_weather import ActivityWeatherStage, Fetch, HomeLocation
 from backend.sync.canonical_backfill import DEFAULT_BATCH_SIZE, CanonicalBackfill
 from backend.sync.canonical_backfill_worker import (
     BackfillStage,
@@ -28,6 +29,7 @@ class CanonicalBackfillAssembly:
     local_load: LocalLoadStage
     session_metrics: SessionMetricsStage
     session_analysis: SessionAnalysisStage
+    activity_weather: ActivityWeatherStage | None = None
 
 
 def build_canonical_backfill(
@@ -43,6 +45,8 @@ def build_canonical_backfill(
     planned_units: PlannedUnits = list,
     athlete_sex: Callable[[Any], str | None] = lambda _db: None,
     extra_followups: Sequence[BackfillStage] = (),
+    activity_weather_fetch: Fetch | None = None,
+    home_location: HomeLocation = lambda _db: None,
 ) -> CanonicalBackfillAssembly:
     backfill = CanonicalBackfill(
         key_values=key_values,
@@ -72,6 +76,18 @@ def build_canonical_backfill(
         planned_units=planned_units,
         preferences=source_preferences,
     )
+    # The weather during outdoor sessions (#1868); without a fetch there is none.
+    activity_weather = (
+        None
+        if activity_weather_fetch is None
+        else ActivityWeatherStage(
+            key_values=key_values,
+            zone_provider=zone_provider,
+            clock=clock,
+            fetch=activity_weather_fetch,
+            home_location=home_location,
+        )
+    )
     worker = CanonicalBackfillWorker(
         backfill=backfill,
         database=database,
@@ -80,6 +96,7 @@ def build_canonical_backfill(
             local_load,
             session_metrics,
             session_analysis,
+            *(() if activity_weather is None else (activity_weather,)),
             # Last, so a failing extra stage never blocks the canonical ones.
             *extra_followups,
         ),
@@ -90,4 +107,5 @@ def build_canonical_backfill(
         local_load=local_load,
         session_metrics=session_metrics,
         session_analysis=session_analysis,
+        activity_weather=activity_weather,
     )

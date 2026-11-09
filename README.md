@@ -13,7 +13,7 @@ It is standalone software for a trusted LAN or private VPN (WireGuard, Tailscale
 5. Structured strength workouts with named exercises, sent to the Garmin watch on request.
 6. Local performance methods M1-M8 (session load, fitness/fatigue/form, critical power/speed, HRV, sleep) with evidence cards.
 7. Analysis of load, performance, recovery and sessions with full-resolution charts.
-8. Weather, air quality, pollen and external calendars shape what the Coach plans.
+8. Weather, air quality, pollen and external calendars shape what the Coach plans; the weather during each outdoor session adds a heat note to its analysis.
 9. Nutrition diary with local food databases, saved meals and products, and Garmin energy use.
 10. Private by design: SQLCipher encryption, one athlete, installable and offline-capable PWA, privacy export and restorable backups.
 
@@ -84,7 +84,7 @@ Load, fitness/fatigue/form, critical power and speed, session efficiency, HRV an
 
 ## Backup, restore and upgrades
 
-Releases keep the athlete's encrypted database. Release 1.13.44 (schema v21) is the oldest schema the code still opens; the current schema is v23. Supported schemas are upgraded in place in one transaction; older, unknown or newer schemas are rejected unchanged. Keep the `/data` mount and `APP_PASSWORD` when recreating the container, and never reset the data directory to fix a rejected schema. Backup download, validated restore with a pre-restore copy, privacy export and local data purge are under **Mehr**. GPS tracks from Garmin and Wahoo files are stored in the encrypted database, backup and export, never shown to the Coach or in diagnostics and logs, and deleted by the local data purge; **Mehr** → privacy section has the "GPS-Spuren speichern" switch (default on) and, once it is off, a confirmed deletion of the stored tracks; details in [docs/operations.md](docs/operations.md) and [docs/schema-history.md](docs/schema-history.md).
+Releases keep the athlete's encrypted database. Release 1.13.44 (schema v21) is the oldest schema the code still opens; the current schema is v23. Supported schemas are upgraded in place in one transaction; older, unknown or newer schemas are rejected unchanged. Keep the `/data` mount and `APP_PASSWORD` when recreating the container, and never reset the data directory to fix a rejected schema. Backup download, validated restore with a pre-restore copy, privacy export and local data purge are under **Mehr**. GPS tracks from Garmin and Wahoo files are stored in the encrypted database, backup and export, never shown to the Coach or in diagnostics and logs, and deleted by the local data purge; the weather during an outdoor session is fetched from Open-Meteo with the start position rounded to two decimals (or the saved weather location) and stored without any coordinate; **Mehr** → privacy section has the "GPS-Spuren speichern" switch (default on) and, once it is off, a confirmed deletion of the stored tracks; details in [docs/operations.md](docs/operations.md) and [docs/schema-history.md](docs/schema-history.md).
 
 ## Further docs
 

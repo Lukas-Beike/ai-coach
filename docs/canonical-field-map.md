@@ -146,7 +146,7 @@ The upstream provider activity a record was copied from (an Intervals.icu copy o
 
 ## Metric kinds (`MetricKind`)
 
-Each kind has exactly one canonical unit (`MetricKind.unit`) and a plausibility range (`METRIC_BOUNDS` in `backend/canonical/validation.py`); an observation outside it is rejected. "Emitted by" lists the modules that construct observations of the kind (provider mappers and the three local derivations); "Status" comes from `UNPRODUCED_METRIC_KINDS` and `EXPORT_ONLY_METRIC_KINDS` in `backend/canonical/vocabulary.py`.
+Each kind has exactly one canonical unit (`MetricKind.unit`) and a plausibility range (`METRIC_BOUNDS` in `backend/canonical/validation.py`); an observation outside it is rejected. "Emitted by" lists the modules that construct observations of the kind (provider mappers and the local derivations); "Status" comes from `UNPRODUCED_METRIC_KINDS` and `EXPORT_ONLY_METRIC_KINDS` in `backend/canonical/vocabulary.py`.
 
 | Kind | Unit | Range | Meaning | Emitted by | Status |
 |---|---|---|---|---|---|
@@ -219,6 +219,11 @@ Each kind has exactly one canonical unit (`MetricKind.unit`) and a plausibility 
 | `aerobic_decoupling` | `%` | -100 to 100 | Local aerobic decoupling of one session (card M8). | `session_metrics.py` | unproduced by providers |
 | `body_battery_before_sleep` | `score` | 0 to 100 | Last Body Battery level up to four hours before sleep (derived locally). | `morning_battery_service.py` | unproduced by providers |
 | `morning_body_battery` | `score` | 0 to 100 | First Body Battery level after waking (derived locally). | `morning_battery_service.py` | unproduced by providers |
+| `activity_weather_temperature` | `C` | -90 to 60 | Air temperature during one outdoor ride or run (Open-Meteo model, derived locally). | `activity_weather.py` | unproduced by providers |
+| `activity_weather_apparent_temperature` | `C` | -120 to 80 | Apparent temperature during one outdoor ride or run; from 25 C the Coach names heat. | `activity_weather.py` | unproduced by providers |
+| `activity_weather_humidity` | `%` | 0 to 100 | Relative humidity during one outdoor ride or run. | `activity_weather.py` | unproduced by providers |
+| `activity_weather_wind_speed` | `m/s` | 0 to 120 | Wind speed at 10 m during one outdoor ride or run. | `activity_weather.py` | unproduced by providers |
+| `activity_weather_precipitation` | `mm` | 0 to 1,000 | Precipitation that fell during one outdoor ride or run. | `activity_weather.py` | unproduced by providers |
 
 ## Canonical vocabulary
 
@@ -2302,6 +2307,29 @@ Inputs: sessions with sport `ride` or `run` only (`METRIC_SPORTS`, `wants_metric
 
 Not mapped: calories (device `energy_kcal`, a separate summary value), EF/VI of other sports, trend or comparability across sessions, provider EF/VI/decoupling/joules.
 
+### `activity_weather.py`
+
+Status: Live. `ActivityWeatherStage` (`backend/sync/activity_weather.py`) is a follow-up stage of the canonical backfill worker, after `session_analysis`; it is the only stage with a `prefetch` step, which the worker runs before the writer transaction, so no request is made while the writer is held. The request is `ActivityWeatherClient` (`backend/providers/activity_weather.py`, service `open-meteo-historical-forecast`); the reduction, the heat threshold and the stored block are in `backend/weather/activity_weather.py` and `backend/weather/activity_weather_store.py`.
+Method: `METHOD_ID` = `open-meteo-activity-weather`, `METHOD_VERSION` = **1**. Evidence: Open-Meteo Historical Forecast API (stored forecasts of past model runs, about 2 km in Germany, no delay, from 2022); no payload file applies.
+Inputs: sessions with sport `ride` or `run`, environment `outdoor`, started on or after 2022-01-01 UTC (`FIRST_DAY`) and ended at least 48 hours ago (`SETTLE`, so the stored forecast hours are complete); the summary `started_at`, `elapsed_duration_s` (else `moving_duration_s`, else one minute); the first valid `latitude_deg`/`longitude_deg` pair of the session's own full-resolution stream sets (Garmin and Wahoo; Intervals.icu sets are never read); without one the saved home location (the cached geocoding of the profile `weather_location`, `home_coordinates`).
+
+| Canonical field | Derivation / formula | Unit | Notes |
+|---|---|---|---|
+| `activity_weather_temperature` | hourly `temperature_2m` | `C` | Mean over the activity, weighted by overlap. |
+| `activity_weather_apparent_temperature` | hourly `apparent_temperature` | `C` | Same; `heat_note` names heat from `HEAT_APPARENT_C` = 25.0. |
+| `activity_weather_humidity` | hourly `relative_humidity_2m` | `%` | Same. |
+| `activity_weather_wind_speed` | hourly `wind_speed_10m`, requested with `wind_speed_unit=ms` | `m/s` | Same. |
+| `activity_weather_precipitation` | hourly `precipitation` | `mm` | Amount that fell during the activity: the value at hour `h` is the sum of the preceding hour. |
+
+- Request: only the coordinates rounded to 2 decimals (`COORDINATE_DECIMALS`) and the UTC days `start_date`/`end_date` leave the server, with `timezone=GMT`; the response's own grid coordinates are dropped. Request URLs are never logged (the transport logs query keys only).
+- Reduction: an instantaneous value at hour `h` stands for `h - 30 min` to `h + 30 min`, so a one-hour activity at 05:00 averages the 05:00 and 06:00 rows equally; hours without a value are skipped; no value at all gives no row.
+- `Observation` arguments: `kind`, `value`, `observed_on`, `observed_at`, `sport`, `method` = `open-meteo-activity-weather`, `method_version`, `input_fingerprint`, `provenance` with `provider` none, `source_kind` `derived`, `source_record_id` (session id), `recorded_by` (summary `recorded_by`; `unknown` when it is not a `RecordingOrigin`), `retrieved_at` none and `label` = `Open-Meteo Modell, Startposition` or `Open-Meteo Modell, Wohnort`. The stage skips stream sets of provider `intervals`. `details.derivation` = `{"location_kind": "activity_start" | "home"}`; never a coordinate.
+- Fingerprint: `fingerprint_inputs` of the session times, the sorted stream content hashes, the location kind and, for `home`, the rounded home coordinates, computed before any stream is decoded. A start position is part of the streams, so a stream change (a new set, deleted tracks) looks the session up again. This is the cache: a session with a current fingerprint is never fetched again; a response without a value is remembered in the stage state (`empty`, session id, kind and fingerprint only).
+- Bounds: at most `DEFAULT_BATCH_SIZE` 20 sessions per batch, newest first. The first failed request ends the pass, writes no observation and delays that session (30 minutes, doubling, at most 24 hours; kept in memory).
+- Reads: `stored_activity_weather`, `weather_block` (values, `location_kind`, `source`, `heat_note`) in the activity detail document of the Coach tool `get_activity_details` as `weather`. Rows of sessions that are gone are retired by `retire_derived_observations`.
+
+Not mapped: radiation, pressure, cloud cover, air quality, wind direction, any elevation or route data, weather of indoor sessions, activities before 2022.
+
 ### `morning_battery_service.py`
 
 Status: Live. `MorningBatteryStore.persist` runs inside the morning Body Battery refresh (`MorningBodyBatteryService`, composed in `server.py` `morning_body_battery_service` with a `CanonicalTableReader`; the first refresh each day after 05:00 local time, or an explicit check-in date). Without a canonical reader `persist` stores no observation; production always passes one.
@@ -2386,7 +2414,7 @@ Not mapped: `resting`, `model` and the `reserve`/`maximum` percent bases are not
 
 Code: `backend/db/canonical_store.py`; replay in `backend/sync/canonical_backfill.py`; ingest in `backend/sync/canonical_ingest.py`.
 
-- Table `observations`: one row per natural key `provider|metric|sport|series|(observed_at or observed_on)` (`observation_natural_key`); empty parts are empty strings. `series` is `athlete` (Intervals.icu athlete profile weight/eFTP/body fat/sport-less VO2max) or `session:<id>` (the six local per-session kinds `session_load`, `intensity_factor`, `efficiency_factor`, `variability_index`, `mechanical_work`, `aerobic_decoupling`: `SESSION_SERIES_KINDS`), else empty.
+- Table `observations`: one row per natural key `provider|metric|sport|series|(observed_at or observed_on)` (`observation_natural_key`); empty parts are empty strings. `series` is `athlete` (Intervals.icu athlete profile weight/eFTP/body fat/sport-less VO2max) or `session:<id>` (the eleven local per-session kinds `session_load`, `intensity_factor`, `efficiency_factor`, `variability_index`, `mechanical_work`, `aerobic_decoupling` and the five `activity_weather_*` kinds: `SESSION_SERIES_KINDS`), else empty.
 - Columns: `metric`, `value`, `unit`, `source_kind`, `recorded_by`, `provider` (NULL for derived), `source_record_id`, `sport`, `observed_on`, `observed_at`, `retrieved_at`, `label`, `mapper_version`, `method`, `aggregation`, `details` (JSON: `context`, `method_version`, `input_fingerprint`, `period`, `derivation`), `state`, `owner_record_id`.
 - Write (`upsert_observation`): insert, or update by natural key when any column differs (then `UPDATED`; identical = `UNCHANGED`). The row always becomes `active` again. `fill_only` (history fills) never replaces an active row of another source record at the same or a newer `mapper_version`.
 - State (`ProjectionState`): `active` / `retired`. Retiring never deletes: the row stays for history, backups and export, and a later write of the same key makes it `active` again.

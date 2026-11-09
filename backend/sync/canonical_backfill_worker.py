@@ -11,6 +11,10 @@ Follow-up stages run one after another once the canonical backfill is complete. 
 keeps its own state, so a failed follow-up is recorded on its own and leaves the
 canonical backfill complete.
 
+A stage that reads external data defines ``prefetch(database)``: it runs inside the
+maintenance gate but before the writer transaction, so no request is made while
+the writer is held.
+
 A start() while the thread runs a pass requests one more pass instead of a second
 thread, so a restore that lands mid-pass is backfilled from the restored state.
 """
@@ -20,7 +24,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Sequence
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, cast
 
 from backend.db.manager import background_writer
 from backend.errors import AppError, DatabaseBusyError
@@ -38,6 +42,12 @@ class BatchStage(Protocol):
     def run_batch(self, db: Any) -> BatchReport: ...
 
     def mark_failed(self, db: Any) -> None: ...
+
+
+class PrefetchingStage(BatchStage, Protocol):
+    """A stage that makes its external requests before its writer transaction."""
+
+    def prefetch(self, database: Callable[[], Any]) -> None: ...
 
 
 class BackfillStage(BatchStage, Protocol):
@@ -148,8 +158,11 @@ class CanonicalBackfillWorker:
         return False
 
     def _run_batch(self, stage: BatchStage) -> BatchReport:
-        with self._maintenance_gate.operation(), self._database().unit_of_work() as db:
-            return stage.run_batch(db)
+        with self._maintenance_gate.operation():
+            if hasattr(type(stage), "prefetch"):
+                cast(PrefetchingStage, stage).prefetch(self._database)
+            with self._database().unit_of_work() as db:
+                return stage.run_batch(db)
 
     def _fail(self, stage: BatchStage, name: str, exc: BaseException) -> None:
         _LOGGER.error(

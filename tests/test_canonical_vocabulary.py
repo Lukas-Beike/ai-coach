@@ -145,6 +145,11 @@ class CanonicalVocabularyTests(unittest.TestCase):
                 "aerobic_decoupling": "%",
                 "body_battery_before_sleep": "score",
                 "morning_body_battery": "score",
+                "activity_weather_temperature": "C",
+                "activity_weather_apparent_temperature": "C",
+                "activity_weather_humidity": "%",
+                "activity_weather_wind_speed": "m/s",
+                "activity_weather_precipitation": "mm",
             },
             {kind.value: kind.unit for kind in MetricKind},
         )
