@@ -19,8 +19,8 @@ async function runPlanPush(provider, entries) {
 
 // The job entry that removes one listed leftover of a deleted or replaced unit:
 // a Garmin workout by a remove entry, an Intervals.icu event by the hidden unit's own entry.
-function leftoverEntry(provider, item) {
-  return provider === "garmin" ? { library_workout_id: item.id, remove: true } : { library_workout_id: item.id, expected_payload_hash: item.hash };
+function leftoverEntry(provider, item, ids) {
+  return provider === ids.garmin ? { library_workout_id: item.id, remove: true } : { library_workout_id: item.id, expected_payload_hash: item.hash };
 }
 
 // What one successful push delivered: Garmin gets the structured workout,
@@ -1040,14 +1040,13 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const lists = entry.push_cleanup;
     if (!lists || typeof lists !== "object") return [];
     const ids = providerIds();
-    const labels = { [ids.garmin]: "Garmin", [ids.intervals]: "Intervals.icu" };
     const targets = plannedTargets(entry, dateKey, todayKey, actual);
-    return targets.filter((provider) => labels[provider] && Array.isArray(lists[provider]) && lists[provider].length).map((provider) => {
+    return targets.filter((provider) => (provider === ids.garmin || provider === ids.intervals) && Array.isArray(lists[provider]) && lists[provider].length).map((provider) => {
       const items = lists[provider];
       const names = items.slice(0, 3).map((item) => `${item.name}${item.date ? ` ${dateLabel(item.date)}` : ""}`);
       const note = document.createElement("span");
       note.className = "planned-conflict planned-cleanup";
-      note.textContent = `Wird bei ${labels[provider]} entfernt: ${names.join(", ")}${items.length > 3 ? ` + ${items.length - 3} weitere` : ""}`;
+      note.textContent = `Wird bei ${plannedPushTargetLabel(provider, entry, ids).split(":")[0]} entfernt: ${names.join(", ")}${items.length > 3 ? ` + ${items.length - 3} weitere` : ""}`;
       return note;
     });
   }
@@ -1081,7 +1080,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
           // The listed leftovers go in a job of their own, so one that cannot be removed never fails this unit.
           const leftovers = (entry.push_cleanup?.[provider] || []).slice(0, 28);
           if (leftovers.length) {
-            const cleaned = await runPlanPush(provider, leftovers.map((item) => leftoverEntry(provider, item)));
+            const cleaned = await runPlanPush(provider, leftovers.map((item) => leftoverEntry(provider, item, ids)));
             if (cleaned.status === "completed") label += ` · ${leftovers.length} alte entfernt`;
             else failures.push(`Alte Einträge nicht entfernt: ${globalThis.providerJobErrorDetail?.(cleaned) || "Synchronisierung fehlgeschlagen"}`);
           }

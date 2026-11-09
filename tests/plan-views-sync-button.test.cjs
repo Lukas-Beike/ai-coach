@@ -67,6 +67,6 @@ test("a push job carries its entries; a leftover is removed by the entry its pro
   const hash = "a".repeat(64);
   await pushContext.run("garmin", [{ library_workout_id: "u1", expected_payload_hash: hash }]);
   assert.deepEqual(sent[0], { provider: "garmin", type: "plan_push", payload: { entries: [{ library_workout_id: "u1", expected_payload_hash: hash }] } });
-  assert.deepEqual({ ...pushContext.leftover("garmin", { id: "old-1", hash }) }, { library_workout_id: "old-1", remove: true });
-  assert.deepEqual({ ...pushContext.leftover("intervals", { id: "old-3", hash }) }, { library_workout_id: "old-3", expected_payload_hash: hash });
+  assert.deepEqual({ ...pushContext.leftover("garmin", { id: "old-1", hash }, ids) }, { library_workout_id: "old-1", remove: true });
+  assert.deepEqual({ ...pushContext.leftover("intervals", { id: "old-3", hash }, ids) }, { library_workout_id: "old-3", expected_payload_hash: hash });
 });
