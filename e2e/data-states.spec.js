@@ -1,5 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
+const { waitForSettledState } = require("./helpers/settled-state");
 
 // #1783: loading, not configured, no data yet and failed reads look different.
 const POWER_PROFILES = "/api/analysis/power-profiles";
@@ -13,7 +14,7 @@ const ANALYSIS_TABS = [
 async function openAnalysis(page, segment) {
   await page.goto(`/#analysis/${segment}`);
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.waitForFunction(() => AppState.state.initialStateLoaded);
+  await waitForSettledState(page);
 }
 
 test("@responsive an empty install shows one empty card with one action per analysis tab", async ({ page }) => {
@@ -57,6 +58,10 @@ test("@responsive a failed analysis read shows an error with retry instead of a 
   const profile = page.locator("#cyclingPowerProfile");
   const error = profile.locator(".error-state");
   await expect(error).toBeVisible();
+  // The page may read the profile again for each area its startup loads; count from the settled state.
+  await waitForSettledState(page);
+  const startupRequests = requests;
+  expect(startupRequests).toBeGreaterThanOrEqual(1);
   await expect(error).toHaveAttribute("role", "alert");
   await expect(error.locator("strong")).toHaveText("Konnte nicht geladen werden.");
   await expect(profile).not.toContainText("wird geladen");
@@ -69,7 +74,7 @@ test("@responsive a failed analysis read shows an error with retry instead of a 
   await expect(profile.locator("[data-power-duration='5'] td")).toHaveText("640 W");
   await expect(profile.locator("[data-power-duration='60'] td.value-missing")).toHaveText("nicht erfasst");
   await expect(profile.locator(".error-state")).toHaveCount(0);
-  expect(requests).toBe(2);
+  expect(requests - startupRequests, "the retry reads the profile once").toBe(1);
 });
 
 test("@responsive a hanging analysis read times out into the retry state", async ({ page }) => {

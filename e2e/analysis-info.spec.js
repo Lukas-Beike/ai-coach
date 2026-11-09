@@ -1,5 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
+const { waitForSettledState } = require("./helpers/settled-state");
 
 async function performanceFixture(page, changes, route = "performance") {
   await page.route("**/api/performance", async (request) => {
@@ -11,6 +12,9 @@ async function performanceFixture(page, changes, route = "performance") {
   await page.goto(`/#analysis/${route}`);
   await expect(page.locator("#appShell")).toBeVisible();
   await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise);
+  // A later reload of an area redraws every chart; start from the settled page, with the power profile read.
+  await waitForSettledState(page);
+  if (route === "performance") await expect(page.locator("#cyclingPowerProfile")).not.toHaveAttribute("data-analysis-empty", "loading");
 }
 
 async function localFitnessFixture(page) {
@@ -598,13 +602,26 @@ test("@responsive legend info buttons have a 44px layout box, a German name and 
   const root = page.locator("#analysisHistoryCharts");
   const button = root.getByRole("button", { name: "Erklärung zu FTP", exact: true });
   await expect(button).toHaveAttribute("aria-expanded", "false");
-  await button.evaluate((element) => element.scrollIntoView({ block: "center", inline: "center" }));
-  const box = await button.boundingBox();
-  expect(box.width).toBeGreaterThanOrEqual(44);
-  expect(box.height).toBeGreaterThanOrEqual(44);
-  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  const hits = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest(".analysis-legend-info")?.getAttribute("aria-label") ?? null, { x: center.x + 20, y: center.y });
-  expect(hits).toBe("Erklärung zu FTP");
+  // Scroll, measure and hit-test in one synchronous step, so no layout change can fall between them;
+  // the smooth-scroll preference is overridden so the button is at its final position at once.
+  const layout = await button.evaluate((element) => {
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    const box = element.getBoundingClientRect();
+    const hitLabel = (x, y) => document.elementFromPoint(x, y)?.closest(".analysis-legend-info")?.getAttribute("aria-label") ?? null;
+    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    return {
+      width: box.width,
+      height: box.height,
+      inViewport: box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight,
+      centerHit: hitLabel(center.x, center.y),
+      edgeHit: hitLabel(center.x + 20, center.y),
+    };
+  });
+  expect(layout.width).toBeGreaterThanOrEqual(44);
+  expect(layout.height).toBeGreaterThanOrEqual(44);
+  expect(layout.inViewport).toBe(true);
+  expect(layout.centerHit).toBe("Erklärung zu FTP");
+  expect(layout.edgeHit).toBe("Erklärung zu FTP");
   await button.click();
   const info = root.getByRole("tooltip").filter({ hasText: "FTP · Garmin Connect" });
   await expect(info).toBeVisible();
