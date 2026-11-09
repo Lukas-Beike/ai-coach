@@ -245,6 +245,7 @@ class HttpSyncServices:
     garmin_analysis_refresh: Callable[[], Any]
     wahoo_sync: Callable[[], Any] | None
     full_resync: Callable[[], Any]
+    provider_configured: Callable[[str], bool]
     period_defaults: Any
     all_sync_days: int
     uuid_factory: Callable[[], str]
@@ -407,6 +408,7 @@ class HttpApiAssembly:
         garmin_analysis_refresh_service = sync.garmin_analysis_refresh
         wahoo_sync_service = sync.wahoo_sync
         full_provider_resync_service = sync.full_resync
+        provider_configured = sync.provider_configured
         sync_period_defaults = sync.period_defaults
         all_sync_days = sync.all_sync_days
         uuid_factory = sync.uuid_factory
@@ -751,6 +753,7 @@ class HttpApiAssembly:
         self._sync_job_queue_service = sync_job_queue_service
         self._sync_state_repository = sync_state_repository
         self._full_provider_resync_service = full_provider_resync_service
+        self._provider_configured = provider_configured
         self._sync_period_defaults = sync_period_defaults
         self._all_sync_days = all_sync_days
         self._uuid_factory = uuid_factory
@@ -798,6 +801,7 @@ class HttpApiAssembly:
             self._uuid_factory,
             self._sync_period_defaults,
             self._all_sync_days,
+            provider_configured=self._provider_configured,
         )
 
     def request_handler_class(self) -> type[BaseHTTPRequestHandler]:

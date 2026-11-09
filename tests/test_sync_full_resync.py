@@ -375,7 +375,6 @@ class RegisteredOnlyProviderResyncTests(unittest.TestCase):
             list(state), ["running", "status", "last_resync_at", "last_error"]
         )
         self.assertEqual(state["last_resync_at"], NOW)
-        self.assertTrue(service.provider_configured(ACME_ID))
         self.assertFalse(self.gate.is_resetting())
         self.assertEqual(self.logger.events[-1][2]["event"], "operation_completed")
 
@@ -392,9 +391,6 @@ class RegisteredOnlyProviderResyncTests(unittest.TestCase):
         )
         with self.assertRaises(AppError) as caught:
             service.state(ACME_ID)
-        self.assertEqual(caught.exception.status, 400)
-        with self.assertRaises(AppError) as caught:
-            service.provider_configured(ACME_ID)
         self.assertEqual(caught.exception.status, 400)
         self.assertEqual(self.handler.calls, [])
         self.assertFalse(self.gate.is_resetting())

@@ -2321,6 +2321,9 @@ HTTP_API = HttpApiAssembly(
                 garmin_analysis_refresh=GARMIN_ASSEMBLY.analysis_refresh_service,
                 wahoo_sync=WAHOO_SYNC.sync_service,
                 full_resync=PROVIDER_RESYNC.full_resync_service,
+                provider_configured=lambda provider_id: (
+                    provider_runtime().provider_configured(provider_id)
+                ),
                 period_defaults=SYNC_PERIOD_DEFAULTS,
                 all_sync_days=ALL_SYNC_DAYS,
                 uuid_factory=lambda: uuid.uuid4().hex,

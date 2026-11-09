@@ -229,15 +229,15 @@ class AcmeOrchestrationCase(unittest.TestCase):
         self.period_state = Mock()
         self.period_state.sync_period.return_value = 14
         self.period_state.set_sync_period.side_effect = _set_period
-        self.full_resync = Mock()
-        self.full_resync.provider_configured.return_value = True
+        self.provider_configured = Mock(return_value=True)
         self.endpoint = SyncCommandEndpoint(
             self.queue,
             self.period_state,
-            self.full_resync,
+            Mock(),
             lambda: "operation-1",
             {ACME_ID: 14},
             -1,
+            provider_configured=self.provider_configured,
             registry=REGISTRY,
         )
         self.post_route = SyncCommandPostRoute(lambda: self.endpoint, registry=REGISTRY)
@@ -538,7 +538,7 @@ class AcmeHttpRouteTests(AcmeOrchestrationCase):
         self.assertEqual(job_rows(self), [])
 
     def test_unconfigured_provider_is_refused_with_409(self) -> None:
-        self.full_resync.provider_configured.return_value = False
+        self.provider_configured.return_value = False
         handler = Mock()
         handler.read_json.return_value = {"days": 7}
 

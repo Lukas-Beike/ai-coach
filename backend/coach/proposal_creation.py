@@ -123,11 +123,6 @@ class CoachProposalCreationService:
         )
         if not isinstance(source_ids, list) or not source_ids:
             raise AppError(403, "Die Remote-Aktion hat keinen gültigen Nutzerauftrag.")
-        targets = sorted(
-            value
-            for value in intent.get("authorization_scope", [])
-            if isinstance(value, str)
-        )
         payload: dict[str, Any] = {
             "tool": tool,
             "arguments": dict(arguments),
@@ -141,6 +136,14 @@ class CoachProposalCreationService:
             intent,
             database_manager=self._database_manager,
             nutrition_diary_service=self._nutrition_diary_service,
+        )
+        payload["intent"] = _card_authorized_intent(
+            tool, payload["arguments"], intent, self._database_manager
+        )
+        targets = sorted(
+            value
+            for value in payload["intent"].get("authorization_scope", [])
+            if isinstance(value, str)
         )
         approval_manifest = payload["arguments"].get("_approval_manifest")
         approval_details = _remote_write_approval_details(
@@ -261,9 +264,7 @@ class CoachProposalCreationService:
             and self._nutrition_meal_library_service is not None
         ):
             preview_values.update(
-                self._nutrition_meal_library_service().prepare_values(
-                    preview_values
-                )
+                self._nutrition_meal_library_service().prepare_values(preview_values)
             )
 
     @staticmethod
@@ -358,6 +359,70 @@ def _adaptive_approval_arguments(
             },
         },
     }
+
+
+def _card_authorized_intent(
+    tool: str,
+    arguments: dict[str, Any],
+    intent: dict[str, Any],
+    database_manager: DatabaseManager,
+) -> dict[str, Any]:
+    """Authorize exactly the units an Intervals.icu plan-sync card lists.
+
+    The athlete approves the card, which shows every listed unit. The model's
+    scope tokens are not what the athlete sees, so for a selected sync the
+    object tokens come from the card entries, each checked against local state.
+    The token is stored with the hashed card payload and grants nothing else.
+    """
+    entries = arguments.get("entries")
+    if (
+        tool != "start_intervals_plan_sync"
+        or arguments.get("repair") is True
+        or (intent.get("request") or {}).get("sync_scope") != "selected"
+        or not isinstance(entries, list)
+        or not entries
+    ):
+        return intent
+    identifiers = sorted(
+        {
+            str(item.get("library_workout_id") or item.get("local_id") or "")
+            for item in entries
+            if isinstance(item, dict)
+        }
+        - {""}
+    )
+    if (
+        len(identifiers) != len(entries)
+        or len(identifiers) > _MAX_REMOTE_APPROVAL_DETAILS
+    ):
+        raise AppError(
+            400,
+            "Jede ausgewählte Einheit benötigt eine eigene local_id.",
+            reason="request_scope",
+        )
+    placeholders = ",".join("?" for _ in identifiers)
+    tokens: set[str] = set()
+    with database_manager.reader() as db:
+        for kind, table in (
+            ("planned_unit", "planned_units"),
+            ("library_workout", "workout_library"),
+        ):
+            rows = db.execute(
+                f"SELECT local_id FROM {table} WHERE local_id IN ({placeholders})",
+                tuple(identifiers),
+            ).fetchall()
+            tokens.update(f"{kind}:{row['local_id']}" for row in rows)
+    found = {token.partition(":")[2] for token in tokens}
+    if found != set(identifiers):
+        raise AppError(
+            409,
+            "Das ausgewählte Objekt ist nicht mehr verfügbar. Lies den aktuellen Stand erneut.",
+            reason="request_object_missing",
+        )
+    scope = {
+        str(value) for value in intent.get("authorization_scope", []) if value
+    } | tokens
+    return {**intent, "authorization_scope": sorted(scope)}
 
 
 def _approved_plan_sync_arguments(

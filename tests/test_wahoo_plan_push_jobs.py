@@ -58,17 +58,16 @@ class HttpTargetTests(unittest.TestCase):
     def endpoint(self, *, connected: bool):
         self.queue = Mock()
         self.queue.enqueue.return_value = {"id": "job-1"}
-        full_resync = Mock()
-        full_resync.provider_configured.side_effect = lambda provider: (
-            connected if provider == "wahoo" else True
-        )
         return SyncCommandEndpoint(
             self.queue,
             Mock(),
-            full_resync,
+            Mock(),
             lambda: "operation-1",
             {"intervals": 90},
             -1,
+            provider_configured=lambda provider: (
+                connected if provider == "wahoo" else True
+            ),
         )
 
     def body(self, provider):

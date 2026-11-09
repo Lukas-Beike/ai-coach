@@ -209,9 +209,6 @@ class FullProviderResyncService:
         self._gates = gates
         self._registry = registry
 
-    def provider_configured(self, provider: str) -> bool:
-        return self._handler(provider).configured()
-
     def state(self, provider: str, db: Any | None = None) -> dict[str, Any]:
         self._handler(provider)
         return self._state_store.state(provider, self._gate(provider), db)

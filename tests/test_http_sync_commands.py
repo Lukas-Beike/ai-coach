@@ -27,6 +27,7 @@ class SyncCommandEndpointTests(unittest.TestCase):
             lambda: "operation-1",
             {"intervals": 90, "garmin": 30},
             -1,
+            provider_configured=lambda provider: True,
         )
 
     def test_body_policy_preserves_bodyless_routes_and_unknown_paths(self):
@@ -58,8 +59,6 @@ class SyncCommandEndpointTests(unittest.TestCase):
         self.queue.enqueue.assert_called_once_with(
             "garmin", "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
         )
-
-
 
     def test_job_request_and_conflict_resolution_keep_requested_by_and_status(self):
         self.queue.enqueue.return_value = {"id": "job-2"}
@@ -100,6 +99,7 @@ class SyncCommandEndpointTests(unittest.TestCase):
                     lambda: "operation-1",
                     {"intervals": 90, "garmin": 30},
                     -1,
+                    provider_configured=lambda provider: True,
                     registry=registry,
                 )
         self.assertEqual(build.call_count, 1)
