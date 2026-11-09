@@ -366,6 +366,17 @@ class TurnWriteGateTests(unittest.TestCase):
             "nochmal", "Welches Rennen?", "Lösch das Rennen"
         )
 
+    def test_a_pending_request_without_a_chain_trusts_only_its_newest_id(self) -> None:
+        messages = [
+            {"id": 2, "role": "user", "content": "Sync den Plan zu Intervals"},
+            {"id": 4, "role": "user", "content": "die nächste"},
+            {"id": 10, "role": "user", "content": "nochmal"},
+        ]
+        legacy = {"status": "failed", "source_message_ids": [2, 4]}
+        gate, _factory = make_gate("nochmal", context(messages, pending=legacy))
+        denial = denied(gate, "start_intervals_plan_sync", {})
+        self.assertEqual(denial["gate_reason"], "remote_not_requested")
+
     def test_a_retried_clarified_request_keeps_the_original_wording(self) -> None:
         messages = [
             {"id": 2, "role": "user", "content": "Sync meinen Plan zu Intervals"},

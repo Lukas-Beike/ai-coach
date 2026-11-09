@@ -725,14 +725,14 @@ def request_chain_ids(pending: Mapping[str, Any] | None) -> list[int]:
 
     The chain is the original request plus the athlete's clarification answers.
     Unlike ``source_message_ids``, the model never chooses these; a request
-    stored before the field existed falls back to its source ids.
+    stored before the field existed falls back to its newest source id only.
     """
     if not isinstance(pending, Mapping):
         return []
     ids = pending.get("origin_message_ids")
     if isinstance(ids, list):
         return [item for item in ids if type(item) is int]
-    return _source_message_ids(dict(pending))
+    return sorted(_source_message_ids(dict(pending)))[-1:]
 
 
 def extend_request_chain(
