@@ -81,7 +81,7 @@ def merge_state(branch: str, base: str) -> str | None:
             "headRefOid",
             "--jq",
             ".[].headRefOid",
-        ]  # fmt: skip
+        ]
     )
     # A reused branch name must not match: the merged PR head has to be the local tip.
     if done.returncode == 0 and tip and tip in done.stdout.split():
