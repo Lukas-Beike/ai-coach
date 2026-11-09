@@ -68,8 +68,10 @@ def _scheduled_provider_retry_at(
 
 
 def _provider_freshness_last_good_state(
-    stale_after_s: int, last_good: Any, *, now: datetime
+    stale_after_s: int | None, last_good: Any, *, now: datetime
 ) -> str:
+    if stale_after_s is None:
+        return "fresh"
     parsed = _parse_utc(last_good)
     if parsed is None:
         return "stale" if last_good else "error"
@@ -92,7 +94,7 @@ def _provider_freshness_error_code(
 
 
 def _provider_freshness_status(
-    stale_after_s: int,
+    stale_after_s: int | None,
     configured: bool,
     row: Mapping[str, Any] | None,
     last_good: Any,
@@ -145,8 +147,10 @@ def _provider_freshness_entry(
     last_attempt = row.get("started_at") if row else fallback
     last_good = (last_success["finished_at"] if last_success else None) or fallback
     scheduled_retry = _scheduled_provider_retry_at(db, provider_id, now=now)
+    # Output-only areas are written on explicit pushes only, so their last push
+    # never ages into "stale"; push failures still surface as errors.
     state, error_code = _provider_freshness_status(
-        area.stale_after_s,
+        area.stale_after_s if area.read_only else None,
         configured,
         row,
         last_good,
