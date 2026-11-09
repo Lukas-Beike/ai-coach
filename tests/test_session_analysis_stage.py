@@ -82,6 +82,8 @@ def _streams(
     summary_sha256: str | None = None,
     hr_source: HeartRateSource | None = None,
     power_source: PowerSource | None = None,
+    heart: tuple[float, ...] = HEART,
+    with_power: bool = True,
 ) -> None:
     replace_detail_set(
         db,
@@ -92,8 +94,8 @@ def _streams(
             resolution=StreamResolution.FULL,
             channels={
                 StreamChannel.TIME_S: TIME,
-                StreamChannel.POWER_W: watts,
-                StreamChannel.HEART_RATE_BPM: HEART,
+                **({StreamChannel.POWER_W: watts} if with_power else {}),
+                StreamChannel.HEART_RATE_BPM: heart,
             },
             hr_source=hr_source,
             power_source=power_source,
@@ -355,6 +357,52 @@ class SessionAnalysisStageTests(unittest.TestCase):
         segment = row["payload"]["calendar_profile"]["segments"][0]
         # 200 W at a Garmin FTP of 200 W is zone 4; 400 W would make it zone 1.
         self.assertEqual(4, segment["zone"])
+
+    def test_calendar_profile_uses_the_lthr_of_the_zone_times(self) -> None:
+        add_session_record(self.manager, GARMIN, "g2", "act_g2", sport="run")
+        self._write(
+            lambda db: _streams(
+                db,
+                GARMIN,
+                "g2",
+                heart=tuple(160.0 for _ in TIME),
+                with_power=False,
+            ),
+            lambda db: _threshold_hr(db, GARMIN, 150.0),
+            _watch_zones,
+        )
+
+        self._run()
+
+        row = self._row("act_g2")
+        assert row is not None
+        segment = row["payload"]["calendar_profile"]["segments"][0]
+        # The watch LTHR 166 leads the stored 150: 160 bpm is 96.4 % (zone 4),
+        # not 106.7 % (zone 5), and the zone times name the watch zones.
+        self.assertEqual(4, segment["zone"])
+        sources = row["payload"]["zone_times"]["sources"]
+        self.assertEqual("Garmin-Zonen", sources["heart_rate"])
+
+    def test_absolute_watch_zones_without_an_lthr_count_with_a_max_hr_basis(
+        self,
+    ) -> None:
+        add_session_record(self.manager, GARMIN, "g2", "act_g2", sport="run")
+        self._write(
+            lambda db: _streams(db, GARMIN, "g2", with_power=False),
+            lambda db: _watch_zones(db, lactateThresholdHeartRateUsed=None),
+        )
+
+        self._run()
+
+        row = self._row("act_g2")
+        assert row is not None
+        times = row["payload"]["zone_times"]
+        # Zone 2 spans 122-140 bpm in the watch's zones; 140 bpm falls in it.
+        seconds = {zone["id"]: zone["secs"] for zone in times["heart_rate"]}
+        self.assertEqual(float(SECONDS), seconds["Z2"])
+        self.assertEqual(
+            "Garmin-Zonen (Bezug 90 % der Max-HF)", times["sources"]["heart_rate"]
+        )
 
     def test_report_zone_times_use_the_local_zones_of_the_day(self) -> None:
         self._write(

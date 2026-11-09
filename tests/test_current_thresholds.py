@@ -29,7 +29,7 @@ from backend.performance.current_metrics import (
     current_performance_metrics,
 )
 from backend.performance.current_thresholds import (
-    local_thresholds,
+    configured_thresholds,
     provider_zone_thresholds,
     resolve_current_thresholds,
 )
@@ -399,8 +399,8 @@ class LocalThresholdTests(unittest.TestCase):
             resting=None,
             limits=(100.0, 200.0, 300.0, 400.0),
         )
-        self.assertEqual(local_thresholds([provider], AS_OF), ())
-        (local,) = local_thresholds([_local_power(300.0)], AS_OF)
+        self.assertEqual(configured_thresholds([provider], AS_OF), ())
+        (local,) = configured_thresholds([_local_power(300.0)], AS_OF)
         self.assertEqual(
             (local.kind, local.sport, local.value.value),
             (MetricKind.FTP, Sport.RIDE, 300.0),

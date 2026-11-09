@@ -163,10 +163,14 @@ class GarminZoneSettingsTests(unittest.TestCase):
                 self.assertEqual(zone, zones.absolute_zone("bpm", bpm))
         self.assertEqual("Garmin-Zonen", zones.hr_source)
 
-    def test_without_any_threshold_the_zones_stay_the_defaults(self) -> None:
+    def test_without_any_threshold_the_watch_limits_use_the_max_hr_basis(self) -> None:
         zones = settings_for(garmin(MAX_HR_SET), date(2026, 11, 8), lthr=None)
-        self.assertEqual("Standardzonen", zones.hr_source)
-        self.assertIsNone(zones.absolute_zone("bpm", 139))
+        # No LTHR is invented; the limits convert via 90 % of the max HR (#1892).
+        self.assertIsNone(zones.lthr)
+        self.assertEqual("Garmin-Zonen (Bezug 90 % der Max-HF)", zones.hr_source)
+        for bpm, zone in ((113, 1), (114, 2), (132, 2), (133, 3), (170, 4), (171, 5)):
+            with self.subTest(bpm=bpm):
+                self.assertEqual(zone, zones.absolute_zone("bpm", bpm))
 
     def test_a_confirmed_local_configuration_still_wins(self) -> None:
         local = local_zone_configuration(
