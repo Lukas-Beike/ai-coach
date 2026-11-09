@@ -94,6 +94,37 @@ test("Markdown links preserve URLs and format labels without interpreting markup
   expect(await page.evaluate(() => window.markdownInjection)).toBeUndefined();
 });
 
+test("@responsive Coach links are underlined, keep their contrast in both themes and show a differing host", async ({ page }) => {
+  await ready(page);
+  await page.evaluate(() => renderMessages([{
+    id: 900002,
+    role: "assistant",
+    content: "Siehe [die Quelle](https://www.example.invalid/a) oder [example.invalid/b](https://example.invalid/b) für Details.",
+  }]));
+  const message = page.locator('[data-message-id="900002"]');
+  const link = message.getByRole("link", { name: "die Quelle", exact: true });
+  await expect(message.locator(".link-host")).toHaveCount(1);
+  await expect(message.locator(".link-host")).toHaveText("(example.invalid)");
+  await expect(message.getByRole("link", { name: "example.invalid/b", exact: true })).toBeVisible();
+  for (const theme of ["dark", "light"]) {
+    await page.evaluate((selected) => { document.documentElement.dataset.theme = selected; }, theme);
+    const colors = await link.evaluate((anchor) => {
+      const paragraph = anchor.closest("p");
+      return {
+        decoration: getComputedStyle(anchor).textDecorationLine,
+        link: getComputedStyle(anchor).color,
+        text: getComputedStyle(paragraph).color,
+        host: getComputedStyle(paragraph.querySelector(".link-host")).color,
+        background: getComputedStyle(document.body).backgroundColor,
+      };
+    });
+    expect(colors.decoration, theme).toContain("underline");
+    expect(contrastRatio(colors.link, colors.text), `${theme} link against text`).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(colors.link, colors.background), `${theme} link against background`).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(colors.host, colors.background), `${theme} host against background`).toBeGreaterThanOrEqual(4.5);
+  }
+});
+
 test("appearance choice updates the theme and survives reload on this device", { tag: "@responsive" }, async ({ page }) => {
   await ready(page);
   await page.getByRole("link", { name: "Mehr", exact: true }).click();

@@ -101,5 +101,5 @@ async function deleteDiagnostics() {
 
 function renderDiagnosticCapture(capture = {}) {
   const status = $("#diagnosticCaptureStatus");
-  if (status) status.textContent = `Erweiterte technische Diagnose ist immer aktiv · ${Number(capture.entries || 0)} technische Einträge gespeichert.`;
+  if (status) status.textContent = `${Number(capture.entries || 0)} technische Einträge gespeichert.`;
 }

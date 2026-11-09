@@ -71,7 +71,7 @@ function profileContext({ server, baseline, stateProfile, exportStatus, error })
   });
   vm.runInContext(
     slice(settingsSource, "// Profile values as the form presents", "\n// Rejects when the backup fails")
-      + slice(performanceSource, "async function saveInlineMetric", "\nfunction performanceSection"),
+      + slice(performanceSource, "async function saveInlineMetric", "\nfunction currentPerformanceValues"),
     context,
   );
   return { context, state, calls, toasts, retryButton };

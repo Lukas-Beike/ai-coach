@@ -1448,14 +1448,11 @@ function coachActionReceipt(proposal, result) {
         : { message: "Die Mahlzeitvorlage wurde lokal gespeichert.", title: "Mahlzeitvorlage gespeichert", details: ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"] };
     }
     if (undo) return { message: "Die lokale Änderung wurde zurückgenommen.", title: "Änderung zurückgenommen" };
-    if (remoteWrite) {
-      const queued = ["queued", "running"].includes(result.status)
-        || Boolean(result.sync_job_id || result.sync_job_ids?.length);
-      return queued
-        ? { message: "Die freigegebene Änderung ist eingereiht; das Ergebnis steht noch aus.", title: "Remote-Änderung eingereiht" }
-        : { message: "Die freigegebene Remote-Änderung wurde ausgeführt.", title: "Remote-Änderung ausgeführt" };
-    }
-    return { message: `${result.local_planned} Einheit(en) lokal geplant.` };
+    const queued = ["queued", "running"].includes(result.status)
+      || Boolean(result.sync_job_id || result.sync_job_ids?.length);
+    return queued
+      ? { message: "Die freigegebene Änderung ist eingereiht; das Ergebnis steht noch aus.", title: "Remote-Änderung eingereiht" }
+      : { message: "Die freigegebene Remote-Änderung wurde ausgeführt.", title: "Remote-Änderung ausgeführt" };
   }
   const undo = proposal.action_type === "undo_change";
   const remoteWrite = proposal.action_type === "remote_coach_write";

@@ -62,7 +62,7 @@ function renderNutritionSegments(route) {
   const week = route === "nutrition/week";
   const products = route === "nutrition/products";
   const body = route === "nutrition/body";
-  const names = { "nutrition/diary": "Tagebuch", "nutrition/week": "Verlauf", "nutrition/body": "Body", "nutrition/products": "Produkte" };
+  const names = { "nutrition/diary": "Tagebuch", "nutrition/week": "Verlauf", "nutrition/body": "Körper", "nutrition/products": "Produkte" };
   document.querySelector("#nutritionRefreshButton").setAttribute("aria-label", `Ernährung aktualisieren: ${names[route] || "Tagebuch"}`);
   document.querySelector("#nutritionDiary").hidden = week || products || body;
   document.querySelector("#bodyAnalysisCharts").hidden = !body;

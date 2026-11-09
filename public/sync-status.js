@@ -310,12 +310,6 @@ function coachProviderLabel(provider) {
 }
 
 
-// Short name of a provider as shown in compact summaries: "Intervals.icu" -> "Intervals".
-function providerShortLabel(provider) {
-  return coachProviderLabel(provider).split(".")[0];
-}
-
-
 const NON_RETRYABLE_PROVIDER_ERRORS = Object.freeze(["auth_required", "invalid_configuration"]);
 
 
@@ -517,7 +511,7 @@ function renderProviderFreshness(data) {
       meta.className = "provider-freshness-meta";
       const attempt = entry.last_attempt_at ? `Letzter Versuch: ${formatTime(entry.last_attempt_at)}` : "Noch kein Versuch";
       const success = entry.last_success_at ? `Letzter Erfolg: ${formatTime(entry.last_success_at)}` : "Noch kein erfolgreicher Abruf";
-      const retry = entry.next_retry_at ? `Nächster Versuch ab: ${formatTime(entry.next_retry_at)}` : "Kein automatischer Retry terminiert";
+      const retry = entry.next_retry_at ? `Nächster Versuch ab: ${formatTime(entry.next_retry_at)}` : "Keine automatische Wiederholung geplant";
       meta.textContent = `${attempt} · ${success} · ${retry}`;
       item.append(header, meta);
     }

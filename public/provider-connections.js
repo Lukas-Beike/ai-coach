@@ -21,7 +21,7 @@ const CREDENTIAL_FIELD_LABELS = Object.freeze({
   wahoo_client_id: "Wahoo-Client-ID",
   wahoo_client_secret: "Wahoo-Client-Secret",
   yazio_email: "Yazio-E-Mail",
-  yazio_password: ["Yazio", "Kennwort"].join("-"),
+  yazio_password: ["Yazio", "Passwort"].join("-"),
 });
 
 // Non-secret values the server echoes back; they are shown as the current value.
@@ -259,7 +259,7 @@ function toggleMetricExport(button) {
 
 async function configureAutomaticMetricExport(enabled, button) {
   const message = enabled
-    ? "Schwellen-HF, maximale HF und Lauf-Schwellenpace künftig automatisch an Intervals.icu senden (lokale Zonen, sonst Garmin, sonst Wahoo)? Abweichende Werte dort werden überschrieben, die HF-Zonen neu berechnet."
+    ? "Schwellenpuls (LSHF), maximale HF und Lauf-Schwellenpace künftig automatisch an Intervals.icu senden (lokale Zonen, sonst Garmin, sonst Wahoo)? Abweichende Werte dort werden überschrieben, die HF-Zonen neu berechnet."
     : "Den automatischen Abgleich mit Intervals.icu deaktivieren?";
   if (!await requestConfirmation(message, { title: enabled ? "Automatischen Abgleich aktivieren?" : "Automatischen Abgleich deaktivieren?" })) return;
   button.disabled = true;
