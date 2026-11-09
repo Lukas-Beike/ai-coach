@@ -97,7 +97,7 @@ def performance_comparisons(
     load = load_context["load"]
     last_7 = load_context["last_7"]
     previous_7 = load_context["previous_7"]
-    previous_30 = load_context["previous_30"]
+    base_30 = load_context["base_30_before_7"]
 
     def trend(
         key: str, unit: str = "", higher_is_better: bool | None = True
@@ -163,7 +163,7 @@ def performance_comparisons(
         ),
         "training_volume_7d": wellness.comparison_value(
             last_7["duration_hours"],
-            previous_30["duration_hours"] * 7 / 30,
+            base_30["duration_hours"] * 7 / 30,
             "h",
             30,
             label="Schnitt der 30 Tage davor",
