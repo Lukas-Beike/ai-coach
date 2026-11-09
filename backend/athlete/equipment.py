@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.canonical import sensor_registry
 from backend.canonical.activity_summary import (
     ActivitySummary,
     stored_activity_key,
@@ -22,10 +23,11 @@ from backend.canonical.stored_sports import (
     resolve_equipment_sport,
 )
 from backend.canonical.vocabulary import ProviderId, Sport
-from backend.db import canonical_store, garmin_store
+from backend.db import activity_detail_store, canonical_store, garmin_store
 from backend.errors import AppError
 
 EQUIPMENT_PREFIX = "equipment:"
+SENSOR_EQUIPMENT_PREFIX = "sensor_equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
 GARMIN_GEAR_SOURCE = "garmin_gear"
 # The read lists at most this many assignments, whole activities only; usage
@@ -74,6 +76,21 @@ def canonical_garmin_gear(
         if item.activity_list_partial is not None
     }
     return items, listed
+
+
+def _sensor_assignments(db: Any) -> dict[str, str]:
+    """Full sensor key -> equipment id of every athlete link."""
+    assignments: dict[str, str] = {}
+    for row in db.execute(
+        "SELECT key, value FROM kv WHERE key LIKE ?", (SENSOR_EQUIPMENT_PREFIX + "%",)
+    ).fetchall():
+        try:
+            equipment_id = json.loads(row["value"]).get("equipment_id")
+        except TypeError, ValueError, AttributeError:
+            continue
+        if isinstance(equipment_id, str):
+            assignments[row["key"][len(SENSOR_EQUIPMENT_PREFIX) :]] = equipment_id
+    return assignments
 
 
 class EquipmentService:
@@ -136,6 +153,9 @@ class EquipmentService:
                 items = [json.loads(selected["value"])]
             assignments = _effective_assignments(rows, explicit, links)
             maintenance = self._records(db, "equipment_maintenance", 1000)
+            sensors = sensor_registry.registry(
+                activity_detail_store.sensor_uses(db), _sensor_assignments(db)
+            )
         for item in items:
             _update_usage(
                 item,
@@ -155,6 +175,7 @@ class EquipmentService:
                 for item in (_garmin_item(item) for item in gear)
                 if item["id"] not in {str(local.get("garmin_uuid")) for local in items}
             ],
+            "sensors": sensors,
             "garmin_synced_at": status.get("synced_at"),
             "garmin_freshness": (status.get("source_freshness") or {})
             .get("gear", {})
@@ -352,6 +373,56 @@ class EquipmentService:
                 ),
             )
         return {"ok": True, "stored_locally": True, "assignment": saved}
+
+    def assign_sensor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Link a recorded sensor to the athlete's equipment, or unlink it (None)."""
+        if not isinstance(payload, dict) or set(payload) != {
+            "sensor_id",
+            "equipment_id",
+        }:
+            raise AppError(400, "Sensor und Ausrüstung sind erforderlich.")
+        sensor_id = str(payload["sensor_id"])
+        with self._manager.unit_of_work() as db:
+            keys = {
+                sensor.key
+                for use in activity_detail_store.sensor_uses(db)
+                for sensor in use.sensors
+                if sensor_registry.sensor_id(sensor.key) == sensor_id
+            }
+            if len(keys) != 1:
+                raise AppError(404, "Sensor nicht gefunden.")
+            key = keys.pop()
+            equipment_id = payload["equipment_id"]
+            if equipment_id is None:
+                db.execute(
+                    "DELETE FROM kv WHERE key = ?", (SENSOR_EQUIPMENT_PREFIX + key,)
+                )
+                return {"ok": True, "stored_locally": True, "sensor_id": sensor_id}
+            item = db.execute(
+                SELECT_VALUE, (EQUIPMENT_PREFIX + str(equipment_id),)
+            ).fetchone()
+            equipment = json.loads(item["value"]) if item else None
+            if (
+                not equipment
+                or equipment["status"] != "active"
+                or equipment.get("parent_id")
+            ):
+                raise AppError(400, "Aktive Hauptausrüstung erforderlich.")
+            now = self._utc_now()
+            db.execute(
+                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                (
+                    SENSOR_EQUIPMENT_PREFIX + key,
+                    json.dumps({"equipment_id": equipment["id"], "observed_at": now}),
+                    now,
+                ),
+            )
+        return {
+            "ok": True,
+            "stored_locally": True,
+            "sensor_id": sensor_id,
+            "equipment_id": equipment["id"],
+        }
 
     def maintain(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict) or set(payload) - {

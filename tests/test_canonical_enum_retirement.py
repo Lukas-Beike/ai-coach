@@ -166,6 +166,9 @@ SNAPSHOT: Final[Mapping[str, frozenset[str]]] = {
         }
     ),
     "StreamResolution": frozenset({"full", "downsampled"}),
+    "HeartRateSource": frozenset({"chest_strap", "optical", "unknown"}),
+    "PowerSource": frozenset({"power_meter", "trainer", "estimated", "unknown"}),
+    "SensorRole": frozenset({"heart_rate", "power_meter", "trainer"}),
     "LapKind": frozenset({"lap", "work", "recovery", "warmup", "cooldown"}),
     "LapSource": frozenset({"provider_intervals", "device_laps", "splits"}),
     "ZoneMetric": frozenset({"heart_rate", "power"}),

@@ -85,6 +85,7 @@ activity IDs no longer resolve.
 | POST | `/api/privacy/gps`, `/api/privacy/gps/delete` | Turn GPS-track storage on or off; delete every stored track after the typed confirmation | CSRF |
 | POST | `/api/logs/delete`, `/api/diagnostics/delete` | Clear diagnostics data | CSRF |
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |
+| POST | `/api/equipment/sensor` | Link a recorded sensor to equipment, or unlink it | CSRF |
 | POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/entry/add-product`, `/api/nutrition/sync` | Write, delete or synchronize nutrition entries, or add a saved product to a logged meal | CSRF |
 | POST | `/api/nutrition/yazio/check` | Explicitly check Yazio authentication and record an in-memory result | CSRF |
 | POST | `/api/providers/{id}/check` | Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result | CSRF |

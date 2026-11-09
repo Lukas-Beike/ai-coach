@@ -53,6 +53,14 @@ Evidence: `backend/activities/detail_contract.py:activity_detail_contract`, `bac
 ### Requirement: Sample provenance and clock-aware detail merging
 The system SHALL merge alternative detail sets deterministically without mutating them, prefer full-resolution over downsampled streams, choose channels by device and source quality, and align them to a common clock only when supported. Provider ties follow Wahoo, Garmin, Intervals.icu; laps prefer device laps, then provider intervals, then splits; zones keep sensor and boundary-source identity. Downsampling keeps aligned equal-length channels and is flagged.
 
+#### Scenario: Sensor source decides the channel
+- **WHEN** two alternative sets carry the same heart rate or power channel and one names a chest strap or power meter while the other names optical heart rate or an estimate
+- **THEN** the channel comes from the set whose named source is better; the activity device class only ranks sets that name no source. The session analysis states the shown heart rate and power source and marks optical heart rate in intervals as less reliable.
+
+#### Scenario: Power meter change marker
+- **WHEN** the external power meters of a sport's consecutive recordings share no sensor
+- **THEN** a marker with the day and the hashed sensor ids is served with the power profiles and the Coach, and critical power inside its window carries it; a serial number is never stored, shown or logged.
+
 #### Scenario: Complementary sensors
 - **WHEN** a chest-strap heart-rate stream and a power-meter power stream can align to the selected axis
 - **THEN** each channel may use its better source while preserving its provenance.
@@ -61,7 +69,7 @@ The system SHALL merge alternative detail sets deterministically without mutatin
 - **WHEN** start times or overlap do not support clock alignment
 - **THEN** the alternative is skipped for that channel or retains its own lap clock, rather than combining unrelated sample positions.
 
-Evidence: `backend/activities/detail_merge.py:merge_details`, `backend/activities/detail_merge.py:clock_offset`, `backend/activities/detail_contract.py:activity_detail_contract`; `tests/test_activity_detail_merge.py:test_full_set_beats_downsampled_even_when_relayed`, `tests/test_activity_detail_merge.py:test_power_and_heart_rate_come_from_their_best_devices`, `tests/test_activity_detail_contract.py:test_unalignable_laps_keep_their_own_clock`.
+Evidence: `backend/activities/detail_merge.py:merge_details`, `backend/activities/detail_merge.py:clock_offset`, `backend/activities/detail_contract.py:activity_detail_contract`; `tests/test_activity_detail_merge.py:test_full_set_beats_downsampled_even_when_relayed`, `tests/test_activity_detail_merge.py:test_power_and_heart_rate_come_from_their_best_devices`, `tests/test_activity_detail_contract.py:test_unalignable_laps_keep_their_own_clock`, `backend/canonical/sensor_registry.py:power_meter_changes`; `tests/test_sensor_sources.py`.
 
 ### Requirement: Current cached analysis and truthful freshness
 The system SHALL read local details without implicit provider refresh, serve only the detail sets of the session's Garmin, Wahoo and local records, and compare each provider's stored canonical detail fingerprint with that provider's current summary fingerprint. The reader SHALL compute the canonical session analysis from that merged detail and SHALL withhold it while a provider contributing streams or laps is stale. Intervals.icu detail sets, summary rows and failure notes SHALL NOT be read.

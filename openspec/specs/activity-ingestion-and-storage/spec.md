@@ -49,7 +49,9 @@ With the Personal API key, a Garmin activity detail fetch SHALL also download th
 - **WHEN** a Garmin activity detail is fetched with the Personal API key and its FIT file decodes
 - **THEN** the stored stream set has full resolution and the lap set holds the device laps from the file; an undecodable file keeps the charts and splits and reports one issue.
 
-Evidence: `backend/providers/garmin_activity_detail_mapping.py:map_garmin_activity_detail`, `backend/providers/fit_file.py:fit_messages`; `tests/test_garmin_activity_detail_mapping.py:GarminFitPartTests`.
+A FIT stream set SHALL also name what measured its heart rate (chest strap, optical, unknown) and power (power meter, trainer, estimated, unknown) and the external heart rate, power meter and trainer sensors of the recording, read from the file's device information; a serial number SHALL only be kept as a hash.
+
+Evidence: `backend/providers/garmin_activity_detail_mapping.py:map_garmin_activity_detail`, `backend/providers/fit_file.py:fit_messages`, `backend/providers/fit_sensor_mapping.py:sensor_profile`; `tests/test_garmin_activity_detail_mapping.py:GarminFitPartTests`, `tests/test_fit_sensor_mapping.py`.
 
 ### Requirement: Atomic canonical import and correction
 The system SHALL atomically store sanitized provider records and canonical projections within the owning ingest transaction. Repeated natural identities SHALL update or retain records without duplicate activities. Wahoo SHALL commit coverage and success markers with its ingest; Garmin SHALL commit canonical payload/state together, with later metadata, equipment, and cursor operations retaining their separate persistence boundaries.

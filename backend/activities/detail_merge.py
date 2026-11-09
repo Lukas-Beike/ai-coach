@@ -28,7 +28,9 @@ from backend.canonical.vocabulary import (
     POSITION_CHANNELS,
     PROVIDER_PRECEDENCE,
     DeviceType,
+    HeartRateSource,
     LapSource,
+    PowerSource,
     StreamChannel,
     StreamResolution,
     ZoneBoundarySource,
@@ -73,6 +75,25 @@ _DEVICE_PREFERENCE: Final[Mapping[StreamChannel, tuple[DeviceType, ...]]] = {
     StreamChannel.DISTANCE_M: (DeviceType.BIKE_COMPUTER, DeviceType.WATCH),
     StreamChannel.ALTITUDE_M: (DeviceType.BIKE_COMPUTER, DeviceType.WATCH),
     StreamChannel.GRADE_PCT: (DeviceType.BIKE_COMPUTER, DeviceType.WATCH),
+}
+
+
+# Rank by what the recording says measured the channel (lower is better):
+# sources that are known to be good first, a missing or unknown source next, and
+# sources that are known to be weaker last. The activity device type breaks ties
+# and ranks recordings that name no source.
+_HR_SOURCE_RANK: Final[Mapping[HeartRateSource | None, int]] = {
+    HeartRateSource.CHEST_STRAP: 0,
+    HeartRateSource.UNKNOWN: 1,
+    None: 1,
+    HeartRateSource.OPTICAL: 2,
+}
+_POWER_SOURCE_RANK: Final[Mapping[PowerSource | None, int]] = {
+    PowerSource.POWER_METER: 0,
+    PowerSource.TRAINER: 1,
+    PowerSource.UNKNOWN: 2,
+    None: 2,
+    PowerSource.ESTIMATED: 3,
 }
 
 
@@ -259,10 +280,33 @@ def _channel_key(
 ) -> tuple[object, ...]:
     return (
         _RESOLUTION_RANK[_streams_of(candidate).resolution],
+        _source_rank(channel, _streams_of(candidate)),
         _device_rank(channel, candidate.device_type),
         _own_copy_rank(candidate),
         0 if candidate is primary else 1,
         *_tie_break(candidate),
+    )
+
+
+def _source_rank(channel: StreamChannel, streams: ActivityStreamSet) -> int:
+    if channel is StreamChannel.HEART_RATE_BPM:
+        return _HR_SOURCE_RANK[streams.hr_source]
+    if channel is StreamChannel.POWER_W:
+        return _POWER_SOURCE_RANK[streams.power_source]
+    return 0
+
+
+def channel_sources(
+    streams: MergedStreams | None,
+) -> tuple[HeartRateSource | None, PowerSource | None]:
+    """What measured the shown heart rate and power, as the chosen sets say."""
+    if streams is None:
+        return None, None
+    hr = streams.channels.get(StreamChannel.HEART_RATE_BPM)
+    power = streams.channels.get(StreamChannel.POWER_W)
+    return (
+        None if hr is None else _streams_of(hr.source).hr_source,
+        None if power is None else _streams_of(power.source).power_source,
     )
 
 
