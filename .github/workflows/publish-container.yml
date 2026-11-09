@@ -22,10 +22,11 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same PR replaces its run; pushes, releases and dispatches
-# always finish.
+# A newer push to the same PR replaces its run. Every other run gets its own
+# group, so pushes, releases and dispatches are never cancelled or dropped
+# from the queue.
 concurrency:
-  group: publish-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: publish-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

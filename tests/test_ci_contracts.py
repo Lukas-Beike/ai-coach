@@ -400,7 +400,7 @@ class WorkflowSourceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         head = workflow.split("\njobs:\n", 1)[0]
         self.assertIn(
-            "group: publish-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}",
+            "group: publish-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}",
             head,
         )
         self.assertIn(
