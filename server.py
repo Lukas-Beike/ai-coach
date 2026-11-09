@@ -406,6 +406,7 @@ from backend.sync.planned_unit_assembly import (
     PlannedUnitRuntime,
     PlannedUnitSyncAssembly,
 )
+from backend.sync.profile_weekly_plan_removal import ProfileWeeklyPlanRemoval
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.provider_resync_assembly import (
     CompetitionSyncOwners,
@@ -2107,6 +2108,10 @@ SESSION_FOCUS_BACKFILL = SessionFocusBackfill(
     ),
 )
 
+PROFILE_WEEKLY_PLAN_REMOVAL = ProfileWeeklyPlanRemoval(
+    key_values=KEY_VALUE_REPOSITORY, clock=runtime_clock.utc_now
+)
+
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -2125,7 +2130,7 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     # The heart-rate branch's TRIMP constants follow the profile sex (M6 v3).
     athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
     # The one-time focus backfill of future units (#1849) runs after all stages.
-    extra_followups=(SESSION_FOCUS_BACKFILL,),
+    extra_followups=(SESSION_FOCUS_BACKFILL, PROFILE_WEEKLY_PLAN_REMOVAL),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(

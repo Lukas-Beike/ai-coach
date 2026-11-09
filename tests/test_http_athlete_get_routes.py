@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
-from backend.athlete import weekly_plan
 from backend.http_api.athlete_get import AthleteGetRoutes
 
 
@@ -65,7 +64,6 @@ class AthleteGetRoutesTests(unittest.TestCase):
                 {
                     "profile": {"name": "Test Athlete"},
                     "competitions": [{"name": "Test Race"}],
-                    "weekly_fallback": weekly_plan.fallback_windows(),
                 },
             ),
             ("/api/feedback", {"feedback": []}),

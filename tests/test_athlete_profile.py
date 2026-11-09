@@ -53,7 +53,6 @@ class AthleteProfileTests(unittest.TestCase):
                     )
                 },
                 "training_model": "pyramidal",
-                "weekly_plan": "",
                 "performance_notes": "",
                 "weight_kg": "",
                 "body_fat_pct": "",
