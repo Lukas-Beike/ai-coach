@@ -442,9 +442,20 @@ def _resolved_metric(
     key: str,
     resolved: Resolved | None,
 ) -> dict[str, Any]:
-    """A threshold's source-policy winner as a metric (``_resolved_entry``)."""
+    """A threshold's source-policy winner as a metric (``_resolved_entry``).
+
+    Garmin's own metric (label, note, freshness) stands for a Garmin winner only
+    while it shows the same value; the watch zone set can lead a different one.
+    """
     _, unit, convert = _THRESHOLD_METRICS[key]
-    return _resolved_entry(resolved, unit, convert, garmin_metrics.get(key))
+    garmin = garmin_metrics.get(key)
+    if (
+        garmin
+        and resolved is not None
+        and garmin["value"] != convert(resolved.winner.value)
+    ):
+        garmin = None
+    return _resolved_entry(resolved, unit, convert, garmin)
 
 
 def _resolved_entry(
@@ -534,7 +545,7 @@ def current_performance_metrics(
     """
     thresholds = resolve_current_thresholds(
         (*canonical.threshold_candidates, *garmin_thresholds),
-        canonical.local_thresholds,
+        canonical.configured_thresholds,
         as_of=as_of,
         preferences=canonical.preferences,
     )

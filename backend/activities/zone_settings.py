@@ -3,7 +3,11 @@
 Power and pace defaults follow Intervals.icu's standard zones, heart rate
 Coggan's five zones. Canonical zone configurations replace them per metric: a
 confirmed local configuration valid on the day wins, then the provider's (Garmin's
-watch zones before Wahoo's). Absolute bpm, watt or speed limits are used as they
+watch zones before Wahoo's). ``configured_threshold`` is the one place that decides
+which stored configuration leads a threshold on a day (local first, then the dated
+Garmin watch zone set for the lactate threshold heart rate); every consumer of a
+dated threshold reads it, zones and the source-policy resolver alike. Absolute
+bpm, watt or speed limits are used as they
 are, whatever calculation basis the provider reports. A metric without any
 configuration keeps the sport's canonical thresholds (``from_thresholds``) and
 the default limits. ``power_source``, ``hr_source`` and ``pace_source`` name where
@@ -136,10 +140,11 @@ class ZoneSettings:
         pace = effective_zone_configuration(
             chosen, ZoneConfigurationMetric.PACE, sport, indoor=indoor, day=day
         )
-        ftp = _threshold(power, base.ftp, "threshold")
-        # The watch's own lactate threshold HR (dated Garmin set) leads for heart rate.
-        lthr = _threshold(heart_rate, base.lthr, "threshold", watch_first=True)
-        threshold_pace = base.threshold_pace
+        ftp = _threshold(power, base.ftp, MetricKind.FTP)
+        lthr = _threshold(heart_rate, base.lthr, MetricKind.THRESHOLD_HR)
+        threshold_pace = _threshold(
+            pace, base.threshold_pace, MetricKind.THRESHOLD_PACE
+        )
         # Limits are percent of the threshold the settings carry, so the zone of
         # a measured value is the one the provider reported in absolute terms.
         power_limits = _percent_limits(power, ftp)
@@ -148,8 +153,7 @@ class ZoneSettings:
         return cls(
             ftp=ftp,
             lthr=lthr,
-            max_hr=_threshold(heart_rate, base.max_hr, "maximum"),
-            # The threshold pace comes from the fallback only (resolved upstream).
+            max_hr=_threshold(heart_rate, base.max_hr, MetricKind.MAX_HR),
             threshold_pace=threshold_pace,
             power_limits=power_limits or base.power_limits,
             hr_limits=hr_limits or base.hr_limits,
@@ -184,33 +188,85 @@ class ZoneSettings:
         return None
 
 
+# The kinds whose threshold a Garmin configuration also leads: the watch's own
+# lactate threshold HR (``lactateThresholdHeartRateUsed``) updates automatically.
+_WATCH_FIRST_KINDS: Final = frozenset({MetricKind.THRESHOLD_HR})
+_KIND_METRICS: Final = {
+    MetricKind.FTP: ZoneConfigurationMetric.POWER,
+    MetricKind.THRESHOLD_PACE: ZoneConfigurationMetric.PACE,
+    MetricKind.THRESHOLD_HR: ZoneConfigurationMetric.HEART_RATE,
+    MetricKind.MAX_HR: ZoneConfigurationMetric.HEART_RATE,
+}
+
+
+def _value(configuration: ZoneConfiguration, kind: MetricKind) -> float | None:
+    return (
+        configuration.maximum if kind is MetricKind.MAX_HR else configuration.threshold
+    )
+
+
+def _leading_value(
+    configuration: ZoneConfiguration | None, kind: MetricKind
+) -> float | None:
+    """The value of a configuration that leads the source-policy values, else None.
+
+    A confirmed local configuration leads every kind; a Garmin configuration
+    leads the kinds in ``_WATCH_FIRST_KINDS``. Other providers only fill a gap.
+    """
+    if configuration is None:
+        return None
+    provider = configuration.provenance.provider
+    if provider is None or (
+        provider is ProviderId.GARMIN and kind in _WATCH_FIRST_KINDS
+    ):
+        return _value(configuration, kind) or None
+    return None
+
+
+def configured_threshold(
+    configurations: Iterable[ZoneConfiguration],
+    kind: MetricKind,
+    sport: Sport,
+    day: date | None,
+    *,
+    indoor: bool = False,
+) -> tuple[float, ZoneConfiguration] | None:
+    """The stored threshold that leads the source-policy values on ``day``, with its source.
+
+    The precedence for a sport and kind on a day: (1) the locally confirmed zone
+    configuration in effect, (2) the Garmin watch zone set in effect (lactate
+    threshold heart rate only), then, outside this function, (3) the source-policy
+    observations. Returns None when no stored configuration leads, so the caller
+    falls through to (3). Zone settings, session load, current metrics, plan load,
+    exports and the staleness hint all read the threshold through this function.
+    """
+    chosen = effective_zone_configuration(
+        configurations, _KIND_METRICS[kind], sport, indoor=indoor, day=day
+    )
+    value = _leading_value(chosen, kind)
+    return None if chosen is None or value is None else (float(value), chosen)
+
+
 def _threshold(
     configuration: ZoneConfiguration | None,
     fallback: float | None,
-    field: str,
-    *,
-    watch_first: bool = False,
+    kind: MetricKind,
 ) -> float | None:
-    """A local configuration's value, Garmin's dated zone-set threshold, else the fallback.
+    """The leading configured value (``configured_threshold``), else the fallback.
 
-    The watch's own lactate threshold HR (``lactateThresholdHeartRateUsed`` of the
-    dated Garmin zone set valid on the day) leads the source-policy ``fallback``,
-    so the watch's automatic updates apply; another provider's value only fills a
-    gap the fallback leaves. An Intervals.icu configuration gives its limits
+    A configuration that does not lead only fills a gap the fallback (the
+    source-policy winners) leaves. An Intervals.icu configuration gives its limits
     only, never a threshold.
     """
+    lead = _leading_value(configuration, kind)
+    if lead is not None:
+        return lead
     if (
         configuration is None
         or configuration.provenance.provider is ProviderId.INTERVALS
     ):
         return fallback
-    value: float | None = getattr(configuration, field)
-    provider = configuration.provenance.provider
-    if provider is None or (provider is ProviderId.GARMIN and watch_first):
-        first, second = (value, fallback)
-    else:
-        first, second = (fallback, value)
-    return first if first is not None else second
+    return fallback if fallback is not None else _value(configuration, kind)
 
 
 def _valid_on(configuration: ZoneConfiguration, day: date | None) -> bool:

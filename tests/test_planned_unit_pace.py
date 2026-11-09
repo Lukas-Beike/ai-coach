@@ -9,7 +9,6 @@ from typing import Any
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.planning.planned_unit_load import (
     estimate_planned_unit,
-    sport_threshold_speed,
     unit_thresholds,
 )
 
@@ -44,8 +43,9 @@ class PlannedUnitPaceTests(unittest.TestCase):
         self.assertEqual(("missing_threshold_pace",), estimate.unknown)
 
     def test_speed_is_per_sport(self) -> None:
-        self.assertEqual(4.0, sport_threshold_speed([RIDE_PACE, PACE], Sport.RUN))
-        self.assertIsNone(sport_threshold_speed([RIDE_PACE], Sport.RUN))
+        both = unit_thresholds(RUN, [RIDE_PACE, PACE], [])
+        self.assertEqual(4.0, both.threshold_speed_mps)
+        self.assertIsNone(unit_thresholds(RUN, [RIDE_PACE], []).threshold_speed_mps)
 
 
 if __name__ == "__main__":

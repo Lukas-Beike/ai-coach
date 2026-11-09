@@ -21,7 +21,9 @@ the thresholds in effect on its local day, with the first complete branch of:
 
 Only the power branch gives an intensity factor (percent of FTP). A provider
 load or intensity is never an input. ``DatedThresholds`` resolves the thresholds
-of a session day under the source policy of the current thresholds; a key with
+of a session day with the one dated precedence of ``current_thresholds``: the
+local zone configuration in effect, the Garmin watch zone set in effect (lactate
+threshold heart rate, v6, #1892), then the source-policy observations; a key with
 no value on the day takes the earliest later value observed within 90 days after
 the session, flagged ``after_session`` (v5), else it is missing.
 
@@ -57,14 +59,14 @@ from backend.canonical.vocabulary import (
     ZoneConfigurationMetric,
 )
 from backend.performance.current_thresholds import (
-    local_thresholds,
+    configured_thresholds,
     resolve_current_thresholds,
 )
 from backend.performance.session_rpe_load import session_load
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 
 METHOD_ID: Final = "local-tss-load"
-METHOD_VERSION: Final = 5
+METHOD_VERSION: Final = 6
 CARD: Final = "M6"
 
 POWER_BRANCH: Final = "power"
@@ -633,8 +635,9 @@ class DatedThresholds:
 
     ``observations`` are every stored provider threshold observation; on a day,
     each provider's newest value observed on or before it competes under the
-    source policy, with age limits counted from that day. Local confirmed zone
-    configurations in effect on the day win. A key without a value on the day
+    source policy, with age limits counted from that day. The configured values
+    of the day (``configured_thresholds``: the local confirmed zone configuration,
+    then the Garmin watch zone set) lead the observations. A key without a value on the day
     takes the earliest later value observed at most 90 days after the day,
     flagged ``after_session``; a later one does not stand in (v5).
     """
@@ -698,7 +701,7 @@ class DatedThresholds:
         ]
         resolved = resolve_current_thresholds(
             provider,
-            local_thresholds(self._configurations, day),
+            configured_thresholds(self._configurations, day),
             as_of=day,
             preferences=self._preferences,
         )

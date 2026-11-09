@@ -2329,12 +2329,12 @@ Stored extras: row column `mapper_version` = the module's method version, column
 ### `local_load.py`
 
 Status: Live. `LocalLoadStage` is a follow-up stage of the canonical backfill worker (`build_canonical_backfill` in `canonical_backfill_assembly.py`), run first after the backfill on every pass; `refresh_after_job` requests a pass after a completed sync job of provider `garmin` or `wahoo` (`LOAD_INPUT_PROVIDERS`), and a zone-configuration save, removal or undo requests one too.
-Method: `METHOD_ID` = `local-tss-load`, `METHOD_VERSION` = **5** (`local_tss.py`; `CARD` = `M6`; card `docs/performance-methods/m6-local-tss-load.md`). The numbers below are the code's.
+Method: `METHOD_ID` = `local-tss-load`, `METHOD_VERSION` = **6** (`local_tss.py`; `CARD` = `M6`; card `docs/performance-methods/m6-local-tss-load.md`). The numbers below are the code's.
 Inputs: per session the merged summary (`normalized_power`, `avg_hr`, `grade_adjusted_speed_mps`, `avg_speed_mps`, `moving_duration_s` else `elapsed_duration_s` via `summary_duration_s`, `sport`, `environment`, `id`, `started_at`, `recorded_by`); thresholds at the session day (`DatedThresholds`); resting heart rate observations; the profile sex (`athlete_sex`); the stored per-session heart-rate histogram (`stored_heart_rate_histogram`, analysis row `hr_histogram`, read only for sessions that reach the heart-rate branch); local session feedback and the Garmin RPE for strength (`feedback_by_session`, `session_load` of `session_rpe_load.py`). A provider load or intensity (Garmin `activityTrainingLoad`, Wahoo TSS, Intervals.icu) is never an input.
 
 | Canonical field | Derivation / formula | Unit | Notes |
 |---|---|---|---|
-| `session_load` | One value per session from the first branch that succeeds: power, pace, heart rate (not strength), or session RPE (strength only). Branch formulas below. Rounded to 4 decimals. | `load` (TSS scale; 60 min at threshold = 100); bounds 0..10,000 | `kind` = `session_load`, `method` = `local-tss-load`, `method_version` = 5, `aggregation` none, `period` none. |
+| `session_load` | One value per session from the first branch that succeeds: power, pace, heart rate (not strength), or session RPE (strength only). Branch formulas below. Rounded to 4 decimals. | `load` (TSS scale; 60 min at threshold = 100); bounds 0..10,000 | `kind` = `session_load`, `method` = `local-tss-load`, `method_version` = 6, `aggregation` none, `period` none. |
 | `intensity_factor` | Power branch only: `NP / FTP * 100`. | `%` of FTP; bounds 0..1,000; the branch rejects a factor above `MAX_INTENSITY_FACTOR` 2.0 (reason `implausible_intensity`), so a stored value is at most 200 % | Same envelope. No other branch writes it. |
 
 Branches (`session_local_load`):
