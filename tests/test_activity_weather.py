@@ -8,7 +8,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any, Self
+from typing import Any, Self, cast
 from urllib.parse import parse_qs, urlparse
 
 from canonical_detail_support import add_session_record, open_manager
@@ -257,7 +257,7 @@ class StageCase(unittest.TestCase):
                 finally:
                     self.transaction = False
 
-        self.manager.unit_of_work = tracked
+        setattr(self.manager, "unit_of_work", tracked)
         self.stage = ActivityWeatherStage(
             key_values=self.key_values,
             zone_provider=lambda: ZONE,
@@ -413,7 +413,9 @@ class StageTests(StageCase):
         with self.manager.reader() as db:
             self.assertEqual(
                 {},
-                json.loads(self.key_values.get(db, "activity_weather_state"))["empty"],
+                json.loads(self.key_values.get(db, "activity_weather_state") or "{}")[
+                    "empty"
+                ],
             )
         self._run_once()
         self.assertEqual(1, len(self.fetch.calls), "no retry before the backoff ends")
@@ -568,7 +570,7 @@ class _Capture:
         self.entries: list[Any] = []
 
     def capture(self, event: str, details: Any) -> None:
-        redactor = Redactor(lambda: SimpleNamespace())
+        redactor = Redactor(cast(Any, lambda: SimpleNamespace()))
         self.entries.append((event, redactor.sanitize_diagnostic_value(details)))
 
 
