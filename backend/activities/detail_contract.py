@@ -34,6 +34,7 @@ from backend.canonical.local_time import wall_time
 from backend.canonical.rating_scales import ACTIVITY_RATING_SCALES, rating_fields
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
+    POSITION_CHANNELS,
     PROVIDER_PRECEDENCE,
     ProviderId,
     RecordingOrigin,
@@ -493,7 +494,7 @@ def _coverage(sets: Sequence[StoredDetailSet]) -> dict[str, dict[str, int]]:
         if not isinstance(detail, ActivityStreamSet):
             continue
         for channel, values in detail.channels.items():
-            if channel is StreamChannel.TIME_S:
+            if channel is StreamChannel.TIME_S or channel in POSITION_CHANNELS:
                 continue
             entry = {
                 "points": len(values),

@@ -129,6 +129,31 @@ class GarminActivityDetailMappingTests(unittest.TestCase):
             stream.channels[StreamChannel.DISTANCE_M], (0.0, 3.4, 7.1, 11.2)
         )
 
+    def test_position_keys_map_to_degree_channels(self):
+        details = _fixture("details")
+        width = len(details["metricDescriptors"])
+        details["metricDescriptors"] += [
+            {"metricsIndex": width, "key": "directLatitude"},
+            {"metricsIndex": width + 1, "key": "directLongitude"},
+        ]
+        for row, (lat, lon) in zip(
+            details["activityDetailMetrics"],
+            [(52.5, 13.4), (52.5001, 13.4001), (None, None), (91.0, 200.0)],
+            strict=True,
+        ):
+            row["metrics"] += [lat, lon]
+
+        result = _map(_collected(details=details))
+        stream = _only(result, ActivityStreamSet)
+
+        self.assertEqual(
+            stream.channels[StreamChannel.LATITUDE_DEG], (52.5, 52.5001, None, None)
+        )
+        self.assertEqual(
+            stream.channels[StreamChannel.LONGITUDE_DEG], (13.4, 13.4001, None, None)
+        )
+        self.assertIn(_issue("directLatitude", IssueReason.OUT_OF_RANGE), result.issues)
+
     def test_bike_cadence_wins_over_run_cadence(self):
         details = _fixture("details")
         _set_rows(details, 7, [85.0, 88.0, 90.0, 92.0])

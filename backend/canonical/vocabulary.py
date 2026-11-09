@@ -552,6 +552,18 @@ class StreamChannel(StrEnum):
     TEMPERATURE_C = "temperature_c"
     # 1 while moving, 0 while paused.
     MOVING = "moving"
+    # WGS84 position in degrees (schema-neutral; stored like every channel).
+    # Private: see POSITION_CHANNELS.
+    LATITUDE_DEG = "latitude_deg"
+    LONGITUDE_DEG = "longitude_deg"
+
+
+# Raw GPS positions stay in storage, backup and export only. They are never
+# merged into read models, so no Coach, API, diagnostics or log path can carry
+# them; weather and route features derive coarse values from the stored set.
+POSITION_CHANNELS: Final = frozenset(
+    {StreamChannel.LATITUDE_DEG, StreamChannel.LONGITUDE_DEG}
+)
 
 
 class StreamResolution(StrEnum):
