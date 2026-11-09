@@ -62,7 +62,7 @@ RAW_COORDINATES = ("52.51234", "13.40567", "52.5123", "13.4056")
 HOURS = [f"2026-09-10T{hour:02d}:00" for hour in range(4, 8)]
 
 
-def payload(**overrides: list[float | None]) -> dict[str, Any]:
+def payload(**overrides: Any) -> dict[str, Any]:
     """Four hours around the session; the response also names its grid cell."""
     hourly: dict[str, Any] = {
         "time": HOURS,
@@ -240,8 +240,8 @@ class StageCase(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.manager = open_manager(directory.name)
         self.addCleanup(self.manager.close)
+        self.now: datetime = datetime(2026, 10, 18, 8, 0, tzinfo=UTC)
         self.key_values = KeyValueRepository(lambda: self.now.isoformat())
-        self.now = datetime(2026, 10, 18, 8, 0, tzinfo=UTC)
         self.home: tuple[float, float] | None = (51.1234, 6.5678)
         self.fetch = FakeFetch()
         self.transaction = False
@@ -290,9 +290,11 @@ class StageCase(unittest.TestCase):
                 )
             ]
 
-    def block(self, session: str = "act_g1") -> dict[str, Any] | None:
+    def block(self, session: str = "act_g1") -> dict[str, Any]:
         with self.manager.reader() as db:
-            return weather_block(stored_activity_weather(db).get(session, {}))
+            found = weather_block(stored_activity_weather(db).get(session, {}))
+        assert found is not None
+        return found
 
 
 class StageTests(StageCase):
@@ -580,8 +582,8 @@ class _Response:
     def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_args: object) -> bool:
-        return False
+    def __exit__(self, *_args: object) -> None:
+        return None
 
     def read(self, _size: int) -> bytes:
         return self.body
