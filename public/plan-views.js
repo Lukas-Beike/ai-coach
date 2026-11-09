@@ -1062,6 +1062,22 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     });
   }
 
+  // One provider's sync of a unit, then the listed leftovers in a job of their own, so one that
+  // cannot be removed never fails the unit.
+  async function pushToProvider(provider, entry, ids) {
+    const done = await runPlanPush(provider, [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }]);
+    const failures = [];
+    let label = plannedPushTargetLabel(provider, entry, ids);
+    const leftovers = claimCleanup(provider, entry.local_id) ? (entry.push_cleanup?.[provider] || []).slice(0, 28) : [];
+    if (leftovers.length) {
+      const cleaned = await runPlanPush(provider, leftovers.map((item) => leftoverEntry(provider, item, ids)));
+      if (cleaned.status === "completed") label += ` · ${leftovers.length} alte entfernt`;
+      else failures.push(`Alte Einträge nicht entfernt: ${globalThis.providerJobErrorDetail?.(cleaned) || "Synchronisierung fehlgeschlagen"}`);
+    }
+    if (done.status !== "completed") failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
+    return { label: done.status === "completed" ? label : "", failures };
+  }
+
   function plannedSyncButton(entry, dateKey, todayKey, actual) {
     const ids = providerIds();
     const targets = plannedTargets(entry, dateKey, todayKey, actual);
@@ -1086,17 +1102,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const reached = [];
       for (const provider of targets) {
         try {
-          const done = await runPlanPush(provider, [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }]);
-          let label = plannedPushTargetLabel(provider, entry, ids);
-          // The listed leftovers go in a job of their own, so one that cannot be removed never fails this unit.
-          const leftovers = claimCleanup(provider, entry.local_id) ? (entry.push_cleanup?.[provider] || []).slice(0, 28) : [];
-          if (leftovers.length) {
-            const cleaned = await runPlanPush(provider, leftovers.map((item) => leftoverEntry(provider, item, ids)));
-            if (cleaned.status === "completed") label += ` · ${leftovers.length} alte entfernt`;
-            else failures.push(`Alte Einträge nicht entfernt: ${globalThis.providerJobErrorDetail?.(cleaned) || "Synchronisierung fehlgeschlagen"}`);
-          }
-          if (done.status === "completed") reached.push(label);
-          else failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
+          const outcome = await pushToProvider(provider, entry, ids);
+          failures.push(...outcome.failures);
+          if (outcome.label) reached.push(outcome.label);
         } catch (error) {
           failures.push(error.message);
         }
