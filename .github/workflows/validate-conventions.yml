@@ -46,3 +46,17 @@ jobs:
           if [[ "$invalid" -ne 0 ]]; then
             exit 1
           fi
+
+      - name: Require an issue link in the PR body
+        if: github.event.pull_request.user.type != 'Bot'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Multi-PR issues use "Part of #N"; the last PR uses "Closes #N".
+          link_regex='(^|[^[:alnum:]_])([Cc]loses|[Ff]ixes|[Rr]esolves|[Pp]art of) #[0-9]+'
+          if [[ ! "${PR_BODY:-}" =~ $link_regex ]]; then
+            echo "The PR body must name its issue with 'Closes #N' (completes it) or 'Part of #N' (one of several PRs)."
+            exit 1
+          fi

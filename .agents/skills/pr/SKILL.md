@@ -91,7 +91,8 @@ confirmation. List every unfixed finding with its reason in the PR body.
   branch) with an English Conventional Commit title and a body covering the
   change, validation, and review results, plus a merge-danger line: one-way or
   two-way door (schema migrations and remote writes are usually one-way) and
-  the blast radius. Pass bodies with `--body-file`.
+  the blast radius. Name the issue with `Closes #N`, or `Part of #N` when more
+  PRs follow; CI rejects a body with neither. Pass bodies with `--body-file`.
   Link the PR with the host's PR-linking tool when available.
 - Enable `gh pr merge <number> --auto --squash` only when the base is `develop`
   and no feedback is open.
@@ -112,7 +113,9 @@ yield; otherwise poll about every 30 seconds. On each wake:
 - If the branch falls behind or conflicts, rebase (never a merge-style "Update
   branch") and push with `--force-with-lease`.
 - If checks fail, read the logs, fix the cause, and push. The `Gitar` check is
-  required (see `.github/AGENTS.md`); no bypass.
+  required (see `.github/AGENTS.md`); no bypass. If it never reports on an
+  otherwise green head, note the PR number in the issue (#1906 tracks its
+  reliability) and ask the user before any admin merge.
 - If Sonar reports new issues, list them for the PR with
   `sonar list issues --pull-request <number>`, fix the findings on changed lines,
   and push. Do not accept issues to clear the gate without an evidence line in
