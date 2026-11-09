@@ -15,11 +15,20 @@ from typing import Any, Final
 
 from backend.activities import stream_zones
 from backend.activities.detail_contract import measured_order
-from backend.activities.detail_merge import MergedDetail, MergedStreams
+from backend.activities.detail_merge import (
+    MergedDetail,
+    MergedStreams,
+    channel_sources,
+)
 from backend.activities.workout_profile import recorded_profile
 from backend.canonical.activity_detail import ActivityStreamSet
 from backend.canonical.records import ActivityRecord, fingerprint_inputs
-from backend.canonical.vocabulary import ProviderId, StreamChannel, StreamResolution
+from backend.canonical.vocabulary import (
+    HeartRateSource,
+    ProviderId,
+    StreamChannel,
+    StreamResolution,
+)
 from backend.performance import power_profile as power_profile_module
 from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
@@ -35,8 +44,9 @@ from backend.performance.session_execution import session_execution
 ANALYSIS_VERSION: Final = 3
 # Bump when the computation below changes, so the stage recomputes every row.
 # v3: grade-adjusted Pa:HR of outdoor runs (#1770).
+# v4: the heart rate and power source, and the optical heart rate warning (#1869).
 # The stored heart-rate histogram has its own version in the fingerprint.
-METHOD_VERSION: Final = 3
+METHOD_VERSION: Final = 4
 
 
 def analysis_records(records: Iterable[ActivityRecord]) -> tuple[ActivityRecord, ...]:
@@ -83,14 +93,25 @@ def session_analysis(
     ordered = measured_order(records)
     adapted = analysis_input(ordered[0], merged.streams, merged.laps, members=ordered)
     activity = adapted.activity
+    hr_source, power_source = channel_sources(merged.streams)
+    quality = interval_quality(
+        activity,
+        dict(targets) if isinstance(targets, Mapping) else None,
+        source_label=adapted.label_for("watts", "heartrate", "velocity_smooth", "laps"),
+    )
+    if hr_source is HeartRateSource.OPTICAL and quality.get("status") in (
+        "ok",
+        "partial",
+    ):
+        quality["heart_rate_reliability"] = (
+            "Optisch am Handgelenk gemessen: in Intervallen weniger zuverlässig."
+        )
     return {
-        "interval_quality": interval_quality(
-            activity,
-            dict(targets) if isinstance(targets, Mapping) else None,
-            source_label=adapted.label_for(
-                "watts", "heartrate", "velocity_smooth", "laps"
-            ),
-        ),
+        "interval_quality": quality,
+        "sensors": {
+            "heart_rate": None if hr_source is None else hr_source.value,
+            "power": None if power_source is None else power_source.value,
+        },
         "execution": session_execution(
             activity,
             source_label=adapted.label_for(

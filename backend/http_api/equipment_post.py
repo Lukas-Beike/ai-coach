@@ -15,7 +15,14 @@ class EquipmentPostRoutes:
         self._equipment_service = equipment_service
 
     def handle(self, handler: Any, path: str) -> bool:
-        if path != "/api/equipment/maintenance":
-            return False
-        handler.send_json(200, self._equipment_service().maintain(handler.read_json()))
-        return True
+        if path == "/api/equipment/maintenance":
+            handler.send_json(
+                200, self._equipment_service().maintain(handler.read_json())
+            )
+            return True
+        if path == "/api/equipment/sensor":
+            handler.send_json(
+                200, self._equipment_service().assign_sensor(handler.read_json())
+            )
+            return True
+        return False

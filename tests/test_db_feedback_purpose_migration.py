@@ -24,7 +24,11 @@ from backend.db.schema import (
     database_schema_signature,
     initialize_schema,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V21, SHAPE_SCHEMA_V22
+from backend.db.schema_history import (
+    SHAPE_SCHEMA_V21,
+    SHAPE_SCHEMA_V22,
+    SHAPE_SCHEMA_V23,
+)
 
 FIXTURES = Path(__file__).with_name("fixtures")
 RELEASES = {21: "schema_v21.sql.txt", 22: "schema_v22.sql.txt"}
@@ -157,7 +161,7 @@ class FeedbackPurposeMigrationTests(unittest.TestCase):
                 with (
                     mock.patch.dict(
                         migrations.UPGRADE_STEPS,
-                        {SHAPE_SCHEMA_V22: (SHAPE_CURRENT, failing_last_step)},
+                        {SHAPE_SCHEMA_V22: (SHAPE_SCHEMA_V23, failing_last_step)},
                     ),
                     self.assertRaisesRegex(RuntimeError, "injected"),
                 ):

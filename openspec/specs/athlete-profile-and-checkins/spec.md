@@ -154,6 +154,15 @@ The system SHALL save explicitly entered main equipment/components with validate
 
 Evidence: `backend/athlete/equipment.py:EquipmentService.save`, `backend/athlete/equipment.py:EquipmentService.sync_garmin_snapshot`; `backend/coach/tool_schemas.py:build_structured_tool_schemas` (equipment fields); `tests/test_coach_tool_coverage.py:test_training_records_and_equipment_tools_use_confirmed_local_state`; `tests/test_training_record_features.py:test_empty_initial_gear_snapshot_does_not_finalize_import`, `tests/test_training_record_features.py:test_legacy_empty_import_recovers_once_and_preserves_local_equipment`; `tests/test_coach_write_gate.py:test_archiving_equipment_is_a_delete`.
 
+### Requirement: Recorded sensors linked to equipment
+The system SHALL list the distinct heart rate, power meter and trainer sensors named by recordings, each with its hashed short id, role, manufacturer, product, first and last day and session count, and SHALL let the athlete link a sensor to an active main equipment item or remove the link. A serial number SHALL never be stored or shown.
+
+#### Scenario: Link a sensor
+- **WHEN** the athlete links a listed sensor to an active main equipment item
+- **THEN** the registry shows that equipment id for the sensor; an unknown sensor or an archived, component or unknown item is rejected, and a null equipment id removes the link.
+
+Evidence: `backend/athlete/equipment.py:EquipmentService.assign_sensor`, `backend/canonical/sensor_registry.py:registry`; `tests/test_sensor_equipment.py`.
+
 ### Requirement: AP9 Explicit equipment assignments and honest usage
 The system SHALL assign only resolved canonical completed activities to compatible active main equipment, allow explicit unassignment, and calculate usage from known assignments and supported Garmin links with coverage metadata. Usage, hours, distance, maintenance and sport derivation SHALL read canonical session summaries, so each session counts once whichever providers recorded it.
 

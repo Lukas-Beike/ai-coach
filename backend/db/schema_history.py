@@ -24,12 +24,15 @@ type SchemaSignature = tuple[tuple[str, str, str, str], ...]
 SHAPE_SCHEMA_V21: Final = "schema-v21"
 # Schema version 22: executed strength sets.
 SHAPE_SCHEMA_V22: Final = "schema-v22"
+# Schema version 23: the athlete's session purpose marking.
+SHAPE_SCHEMA_V23: Final = "schema-v23"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
 RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
     SHAPE_SCHEMA_V21: "2d81edf3d70d6b81e3eb9b048fc9fefb0c9c4a70885c14cd9848fd18b0cd2052",
     SHAPE_SCHEMA_V22: "cfb3171eb12a18c5eaa91f1bd71458d00f4b60a17da28f5a0d674b2a49691faf",
+    SHAPE_SCHEMA_V23: "86b67a1f09a92430e6cc939fe710cb38b04dba715d4e35d8edb7284a758d7082",
 }
 
 # Releases before 1.13.41 wrote lower versions; they are rejected unchanged.
@@ -42,6 +45,7 @@ OLDEST_SUPPORTED_SCHEMA_VERSION: Final = 21
 ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
     21: frozenset({SHAPE_SCHEMA_V21}),
     22: frozenset({SHAPE_SCHEMA_V22}),
+    23: frozenset({SHAPE_SCHEMA_V23}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

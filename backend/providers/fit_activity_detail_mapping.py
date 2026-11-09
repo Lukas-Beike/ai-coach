@@ -31,8 +31,10 @@ a newer number maps to ``other``, 65534 unknown to none) and wkt_step_index
 (11, the step number without the message-index flag bits). The per-category
 exercise subtype (8) is not mapped, so FIT sets carry no exercise name.
 
-Not mapped: session and activity messages, developer fields,
-device information, and lap run cadence.
+Device information (23) yields the heart rate and power source of the stream set
+and its external heart rate and power sensors, with the serial only as a hash
+(``fit_sensor_mapping``). Not mapped: session and activity messages,
+developer fields, and lap run cadence.
 
 The mapper is pure: it performs no I/O, logs nothing and never raises for
 malformed bytes. Issues name the activity, the FIT field and a reason only.
@@ -73,12 +75,15 @@ from backend.canonical.vocabulary import (
     StrengthSetType,
 )
 from backend.providers.fit_file import FitMessage, fit_field, fit_messages
+from backend.providers.fit_sensor_mapping import sensor_profile
 
 # Version 1: first mapping of FIT activity detail sets (streams and device laps).
 # Version 2: maximum speed per lap.
 # Version 3: executed strength sets from set messages.
 # Version 4: GPS position channels from the record semicircles.
-MAPPER_VERSION: Final = 4
+# Version 5: heart rate and power sources and the external sensors of a stream
+# set, from the device information messages.
+MAPPER_VERSION: Final = 5
 
 # Same limit as the Garmin and Intervals mappers, so issues stay bounded.
 MAX_FIT_ACTIVITY_ID_LENGTH: Final = 200
@@ -343,6 +348,12 @@ def _stream_set(
         _add_channel(channels, ref, channel, degrees, issues)
     if len(channels) < 2:
         return None
+    hr_source, power_source, sensors = sensor_profile(
+        messages,
+        provider=provenance.provider,
+        has_heart_rate=StreamChannel.HEART_RATE_BPM in channels,
+        has_power=StreamChannel.POWER_W in channels,
+    )
     try:
         return ActivityStreamSet(
             provider_activity_id=ref,
@@ -350,6 +361,9 @@ def _stream_set(
             origin=ActivityDetailOrigin.FETCH,
             resolution=StreamResolution.FULL,
             channels=channels,
+            hr_source=hr_source,
+            power_source=power_source,
+            sensors=sensors,
         )
     except TypeError, ValueError:
         _add_issue(issues, ref, "record", IssueReason.OUT_OF_RANGE)

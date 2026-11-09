@@ -573,6 +573,31 @@ class StreamResolution(StrEnum):
     DOWNSAMPLED = "downsampled"
 
 
+class HeartRateSource(StrEnum):
+    """What measured the heart rate of a stream set (schema version 24)."""
+
+    CHEST_STRAP = "chest_strap"
+    OPTICAL = "optical"
+    UNKNOWN = "unknown"
+
+
+class PowerSource(StrEnum):
+    """What measured the power of a stream set (schema version 24)."""
+
+    POWER_METER = "power_meter"
+    TRAINER = "trainer"
+    ESTIMATED = "estimated"
+    UNKNOWN = "unknown"
+
+
+class SensorRole(StrEnum):
+    """The channel a recorded sensor reported (schema version 24)."""
+
+    HEART_RATE = "heart_rate"
+    POWER_METER = "power_meter"
+    TRAINER = "trainer"
+
+
 class LapKind(StrEnum):
     LAP = "lap"
     WORK = "work"

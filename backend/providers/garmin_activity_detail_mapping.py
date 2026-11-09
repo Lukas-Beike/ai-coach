@@ -99,7 +99,8 @@ from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 # Version 3: FIT record streams and device laps win over charts and splits.
 # Version 4: executed strength sets from exercise sets, else FIT set messages.
 # Version 5: GPS position channels (directLatitude, directLongitude).
-MAPPER_VERSION: Final = 5
+# Version 6: heart rate and power sources and sensors of FIT stream sets.
+MAPPER_VERSION: Final = 6
 
 # Same limit as the Intervals mapper; kept local so providers do not import each other.
 MAX_GARMIN_ACTIVITY_ID_LENGTH: Final = 200
