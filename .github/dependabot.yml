@@ -3,6 +3,8 @@ updates:
   - package-ecosystem: npm
     directory: "/"
     target-branch: develop
+    cooldown:
+      default-days: 3
     schedule:
       interval: daily
     commit-message:
@@ -12,6 +14,8 @@ updates:
     target-branch: develop
     commit-message:
       prefix: build
+    cooldown:
+      default-days: 3
     schedule:
       interval: daily
     open-pull-requests-limit: 10
@@ -20,6 +24,8 @@ updates:
     target-branch: develop
     commit-message:
       prefix: build
+    cooldown:
+      default-days: 3
     schedule:
       interval: daily
   - package-ecosystem: github-actions
@@ -27,5 +33,7 @@ updates:
     target-branch: develop
     commit-message:
       prefix: ci
+    cooldown:
+      default-days: 3
     schedule:
       interval: weekly

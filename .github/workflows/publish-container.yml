@@ -22,6 +22,13 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR replaces its run. Every other run gets its own
+# group, so pushes, releases and dispatches are never cancelled or dropped
+# from the queue.
+concurrency:
+  group: publish-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -67,7 +74,14 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
       - name: Build shared CI image
-        run: docker build --tag pacecraft:ci .
+        env:
+          SOURCE_URL: https://github.com/${{ github.repository }}
+          REVISION: ${{ github.sha }}
+        # The release job pushes exactly this image, so it carries the labels.
+        run: >-
+          docker build --tag pacecraft:ci
+          --label "org.opencontainers.image.source=$SOURCE_URL"
+          --label "org.opencontainers.image.revision=$REVISION" .
       - name: Export shared CI image
         run: docker save pacecraft:ci | gzip > pacecraft-ci-image.tar.gz
       - name: Upload shared CI image
@@ -390,7 +404,7 @@ jobs:
 
   build-and-push:
     if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_container == true)
-    needs: [source, test, e2e, browser, quality]
+    needs: [source, test, e2e, browser, quality, image_sbom]
     runs-on: ubuntu-latest
     concurrency:
       group: container-publish
@@ -429,24 +443,45 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           cache-binary: false
-      - name: Build and push image
-        id: image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      # Publish the image the test, browser and SBOM jobs used; never rebuild it.
+      - name: Download tested CI image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          sbom: true
-          provenance: mode=max
+          name: pacecraft-ci-image
+      - name: Download tested image SBOM
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pacecraft-sbom
+      - name: Push tested image
+        id: image
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gunzip -c pacecraft-ci-image.tar.gz | docker load
+          image="${IMAGE,,}"
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            docker tag pacecraft:ci "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"
+          digest="$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' pacecraft:ci | awk -F@ -v image="$image" '$1 == image { print $2; exit }')"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Could not read the pushed digest of the tested image."
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
-      - name: Sign published image digest
+      - name: Sign published image digest and attach its SBOM
         env:
           COSIGN_YES: "true"
         run: |
           image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           cosign sign "${image,,}@${{ steps.image.outputs.digest }}"
+          cosign attest --type spdxjson --predicate pacecraft-sbom.spdx.json "${image,,}@${{ steps.image.outputs.digest }}"
       - name: Verify image signature
         env:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
