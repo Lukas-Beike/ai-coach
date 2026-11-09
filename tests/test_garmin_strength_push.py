@@ -820,7 +820,7 @@ class PushTests(unittest.TestCase):
         self.push((U1, self.insert(U1, UNIT)))
         with self.database_manager.unit_of_work() as db:
             db.execute(
-                "UPDATE planned_units SET payload='{broken' WHERE local_id=?", (U1,)
+                "UPDATE planned_units SET payload='[]' WHERE local_id=?", (U1,)
             )
 
         self.assertEqual([], self.orphan_ids())
@@ -950,7 +950,7 @@ class PushTests(unittest.TestCase):
         attach_push_state(pairs, {}, orphans=find_orphans_listed(self.database_manager))
 
         self.assertEqual(
-            [{"id": U1, "name": "Kraft A", "date": "2026-11-09"}],
+            {"garmin": [{"id": U1, "name": "Kraft A", "date": "2026-11-09"}]},
             pairs[0][1]["push_cleanup"],
         )
 

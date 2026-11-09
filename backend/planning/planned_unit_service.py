@@ -24,6 +24,7 @@ from backend.planning import planned_units, workouts
 from backend.planning.conflicts import calendar_item_window
 from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.garmin_orphans import find_orphans
+from backend.planning.intervals_orphans import find_intervals_orphans
 from backend.planning.library import library_payload_hash
 from backend.planning.push_state import attach_push_state, garmin_baselines
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
@@ -367,6 +368,9 @@ class PlannedUnitService:
             baselines = garmin_baselines(db) if push_state else {}
             remembered = remembered_exercises(db) if push_state else {}
             orphans = find_orphans(db)[0] if push_state else []
+            intervals_orphans = (
+                find_intervals_orphans(db, self._today())[0] if push_state else []
+            )
             pairs = [
                 (row, payload)
                 for row in rows
@@ -378,7 +382,9 @@ class PlannedUnitService:
                 else set()
             )
         if push_state:
-            attach_push_state(pairs, baselines, remembered, resync, orphans)
+            attach_push_state(
+                pairs, baselines, remembered, resync, orphans, intervals_orphans
+            )
         return [payload for _row, payload in pairs]
 
     def list_for_coach(self, limit: int = 250) -> dict[str, Any]:

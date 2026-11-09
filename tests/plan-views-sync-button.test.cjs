@@ -63,14 +63,19 @@ const pushContext = vm.createContext({
 });
 vm.runInContext(source.slice(pushStart, pushEnd) + ";globalThis.run = runPlanPush;", pushContext);
 
-test("a Garmin push carries the listed leftovers as removals in the same job", async () => {
+test("a push carries the listed leftovers in the same job, per provider", async () => {
   const hash = "a".repeat(64);
-  await pushContext.run("garmin", "u1", hash, ["old-1", "old-2"]);
+  await pushContext.run("garmin", "u1", hash, [{ id: "old-1", name: "A" }, { id: "old-2", name: "B" }]);
+  await pushContext.run("intervals", "u1", hash, [{ id: "old-3", name: "C", hash: "b".repeat(64) }]);
   await pushContext.run("intervals", "u1", hash);
   assert.deepEqual(sent[0].payload.entries, [
     { library_workout_id: "u1", expected_payload_hash: hash },
     { library_workout_id: "old-1", remove: true },
     { library_workout_id: "old-2", remove: true },
   ]);
-  assert.deepEqual(sent[1].payload.entries, [{ library_workout_id: "u1", expected_payload_hash: hash }]);
+  assert.deepEqual(sent[1].payload.entries, [
+    { library_workout_id: "u1", expected_payload_hash: hash },
+    { library_workout_id: "old-3", expected_payload_hash: "b".repeat(64) },
+  ]);
+  assert.deepEqual(sent[2].payload.entries, [{ library_workout_id: "u1", expected_payload_hash: hash }]);
 });

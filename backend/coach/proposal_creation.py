@@ -7,6 +7,7 @@ import json
 import time
 import uuid
 from collections.abc import Callable
+from datetime import UTC, date, datetime
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
@@ -29,6 +30,7 @@ from backend.db.repositories import PlanAdjustmentRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning.garmin_orphans import find_orphans, removal_entries
+from backend.planning.intervals_orphans import find_intervals_orphans, sync_entries
 from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
 
@@ -427,8 +429,10 @@ def _approved_plan_sync_arguments(
     arguments: dict[str, Any], intent: dict[str, Any], database_manager: DatabaseManager
 ) -> dict[str, Any]:
     approved = dict(arguments)
-    if approved.get("repair") is True or approved.get("entries"):
+    if approved.get("repair") is True:
         return approved
+    if approved.get("entries"):
+        return _with_intervals_leftovers(approved, intent, database_manager)
     identifiers = [
         str(value)
         for key in ("_created_sync_entry_ids", "_changed_sync_entry_ids")
@@ -472,6 +476,41 @@ def _approved_plan_sync_arguments(
         for row in rows
     ]
     return approved
+
+
+def _utc_today() -> date:
+    return datetime.now(UTC).date()
+
+
+def _with_intervals_leftovers(
+    approved: dict[str, Any], intent: dict[str, Any], database_manager: DatabaseManager
+) -> dict[str, Any]:
+    """Add the Intervals.icu events of deleted or replaced units to a selected sync.
+
+    The athlete cannot select a hidden unit, yet its event stays in the
+    calendar and keeps reaching Garmin. The card lists these units as removals.
+    A sync that must cover exactly the units of one Coach turn gets none.
+    """
+    if (intent.get("request") or {}).get("sync_scope") != "selected" or any(
+        intent.get(key)
+        for key in (
+            "_replacement_sync_entry_ids",
+            "_created_sync_entry_ids",
+            "_changed_sync_entry_ids",
+            "_sync_all_pending",
+        )
+    ):
+        return approved
+    entries = [entry for entry in approved["entries"] if isinstance(entry, dict)]
+    chosen = {
+        str(entry.get("library_workout_id") or entry.get("local_id") or "")
+        for entry in entries
+    }
+    with database_manager.reader() as db:
+        orphans, _total = find_intervals_orphans(db, _utc_today())
+    room = planning_library.LIBRARY_BULK_MAX_ENTRIES - len(approved["entries"])
+    extra = [item for item in orphans if item.local_id not in chosen][: max(room, 0)]
+    return {**approved, "entries": [*approved["entries"], *sync_entries(extra)]}
 
 
 def _remote_write_approval_details(
@@ -648,7 +687,22 @@ def _plan_sync_approval_details(
         with database_manager.reader() as db:
             rows = db.execute(query, (*identifiers, *identifiers)).fetchall()
     _check_approval_row_limit(rows)
-    return _plan_workout_details(rows)
+    return _label_intervals_removals(_plan_workout_details(rows), database_manager)
+
+
+def _label_intervals_removals(
+    details: list[dict[str, str]], database_manager: DatabaseManager
+) -> list[dict[str, str]]:
+    """Mark the listed units whose Intervals.icu event this sync deletes."""
+    with database_manager.reader() as db:
+        removed = {
+            item.local_id
+            for item in find_intervals_orphans(db, _utc_today(), limit=None)[0]
+        }
+    for detail in details:
+        if detail["id"] in removed:
+            detail["sport"] = "Wird bei Intervals.icu entfernt"
+    return details
 
 
 def _competition_approval_details(

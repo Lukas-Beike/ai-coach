@@ -497,6 +497,22 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertEqual(self.unit()["sync_state"], "synced")
         self.assertEqual(self.client.read_ids[0], "event-1")
 
+    def test_removing_a_replaced_unit_leaves_foreign_events_alone(self):
+        foreign = {
+            "id": "foreign-1",
+            "category": "WORKOUT",
+            "start_date_local": TODAY.isoformat() + "T06:00:00",
+        }
+        remote = {**foreign, "id": "event-1"}
+        self.add_unit(payload=self.workout(archived=True, remote_event_id="event-1"))
+        self.client.remote_event = remote
+        self.client.events = [remote, foreign]
+
+        self.assertIsNone(self.service.sync_entry(LOCAL_ID))
+
+        self.assertEqual(["event-1"], self.client.deleted)
+        self.assertEqual(["foreign-1"], [e["id"] for e in self.client.events])
+
     def test_delete_404_is_already_removed(self):
         self.add_unit(
             payload=self.workout(local_deleted=True, remote_event_id="event-1")
