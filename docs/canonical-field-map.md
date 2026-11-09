@@ -958,7 +958,7 @@ Channel bounds (`CHANNEL_BOUNDS`) and producers:
 | `vertical_ratio_pct` | percent | 0 to 30 | no | yes |
 | `step_length_m` | m | 0 to 4 | no | yes |
 
-The five running dynamics channels (`RUNNING_DYNAMICS_CHANNELS`) exist only with a supporting sensor (chest strap, running pod or a watch that measures them); absence is normal. They are stored and merged like every channel, but the `activity_detail.v1` document leaves their series out, so the Coach and the API receive the summary values and the form drift result, never the series (the coverage counts stay). The form drift analysis (`performance/form_drift.py`) reads them.
+The five running dynamics channels (`RUNNING_DYNAMICS_CHANNELS`) exist only with a supporting sensor (chest strap, running pod or a watch that measures them); absence is normal. They are stored and merged per channel, but they never decide the primary stream (`_populated_channel_count`), and the `activity_detail.v1` document leaves out both their series and their coverage, so the Coach and the API receive the summary values and the form drift result, never the series. The form drift analysis (`performance/form_drift.py`) reads them.
 
 The two position channels are stored, backed up and exported like every channel, but `POSITION_CHANNELS` keeps them out of `merge_details`, the `activity_detail.v1` contract, its coverage and every Coach read: raw positions never leave storage, and the athlete can switch their storage off (`gps_tracks_enabled`, privacy section under **Mehr**).
 The property `kind` is always `streams` (`ActivityDetailKind.STREAMS`), not a stored field.
@@ -1266,7 +1266,7 @@ Streams from `details` (`_stream_set`, `_metric_columns`). Columns are read by `
 | `cadence_rpm` | `directBikeCadence` → `directRunCadence` (`_cadence_points`) | rpm; none | The bike column wins; the run column is used only when the bike column has no usable point. `directRunCadence` already counts one leg, kept as reported. |
 | `grade_pct` | none | | Not produced. |
 | `moving` | none | | Not produced; averages and zone counting then use every point. |
-| `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m` | none | | Not produced from the chart: its running dynamics metric keys are unverified. Only the FIT file (mapper below) carries them; its sets ride on this mapper's version 8. |
+| `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m` | none | | Not produced from the chart: its running dynamics metric keys are unverified. Only the FIT file (mapper below) carries them; its sets ride on this mapper's version 9. |
 | `resolution` | | `downsampled` | Fixed. |
 | `origin` | | `fetch` | Fixed. |
 
