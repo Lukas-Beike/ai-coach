@@ -374,3 +374,16 @@ test("notification bodies omit competition names and provider error text", async
   assert.doesNotMatch(bodies, /Geheimer|Stadtlauf|tok_123|Token/);
   assert.equal(context.competitionCountdownText(3), "Der Wettkampf ist in 3 Tagen.");
 });
+
+test("first-threshold entry fields are not required in the profile confirmation", async () => {
+  const { context, state, toasts } = profileContext({ server: {}, baseline: { first_threshold_hr: "", first_threshold_on: "", first_threshold_pct: "", sports: "" }, stateProfile: {} });
+  context.api = async () => ({ first_threshold_pct: "82" });
+  await context.saveProfile(submitEvent([["first_threshold_hr", "150"], ["first_threshold_on", "2026-11-01"]]).event);
+  assert.equal(toasts.some((entry) => entry.isError), false);
+  assert.equal(state.profileBaseline.first_threshold_hr, "");
+  assert.equal(state.profileBaseline.first_threshold_pct, "82");
+  assert.equal(context.profileSaveConfirmed({ first_threshold_hr: "150", name: "A" }, {}), false);
+  assert.equal(context.profileSaveConfirmed({ first_threshold_hr: "150", first_threshold_on: "2026-11-01" }, {}), false);
+  assert.equal(context.profileSaveConfirmed({ first_threshold_hr: "150", first_threshold_on: "2026-11-01" }, { first_threshold_pct: "82" }), true);
+  assert.equal(context.profileSaveConfirmed({ first_threshold_on: "2026-11-01" }, {}), true);
+});

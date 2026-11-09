@@ -8,6 +8,31 @@ function profileFormValues(form) {
   return values;
 }
 
+// Entry-only fields: the server turns them into first_threshold_pct and never echoes them.
+const PROFILE_ENTRY_FIELDS = ["first_threshold_hr", "first_threshold_on"];
+
+function profileSaveConfirmed(changed, saved) {
+  // An entered bpm value must come back as the stored percent.
+  if (profileFieldText(changed.first_threshold_hr) && typeof saved.first_threshold_pct !== "string") return false;
+  return Object.keys(changed)
+    .filter((key) => !PROFILE_ENTRY_FIELDS.includes(key))
+    .every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string");
+}
+
+function clearProfileEntryFields(form) {
+  for (const key of PROFILE_ENTRY_FIELDS) {
+    const field = form.elements?.[key];
+    if (field) field.value = "";
+  }
+}
+
+// After a confirmed save: clear the entry and show the stored percent.
+function resetProfileEntryFields(form, savedPercent) {
+  clearProfileEntryFields(form);
+  const field = form.elements?.first_threshold_pct;
+  if (savedPercent !== undefined && field) field.value = savedPercent;
+}
+
 function profileFieldText(value) {
   return typeof value === "string" ? value : "";
 }
@@ -144,12 +169,15 @@ async function saveProfile(event) {
     if (bodyChanged && retryButton) retryButton.hidden = true;
     const requestBody = { ...changed, ...(bodyChanged ? { sync_body_to_garmin: true } : {}) };
     const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(requestBody) });
-    if (!Object.keys(changed).every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string")) {
+    if (!profileSaveConfirmed(changed, saved)) {
       throw new Error("Die Profilbestätigung ist unvollständig. Der Entwurf bleibt erhalten.");
     }
-    state.profileBaseline = { ...state.profileBaseline, ...changed };
+    const entryReset = Object.fromEntries(PROFILE_ENTRY_FIELDS.map((key) => [key, ""]));
+    const savedPercent = typeof saved.first_threshold_pct === "string" ? { first_threshold_pct: saved.first_threshold_pct } : {};
+    state.profileBaseline = { ...state.profileBaseline, ...changed, ...entryReset, ...savedPercent };
     if (generation !== state.sessionGeneration) return;
     state.profileDirty = JSON.stringify([...new FormData(form)]) !== submittedForm;
+    if (!state.profileDirty) resetProfileEntryFields(form, savedPercent.first_threshold_pct);
     setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
     invalidateContextPreview();
     handleProfileSaveOutcome(saved, bodyChanged, retryControl, retryBeforeSave);
