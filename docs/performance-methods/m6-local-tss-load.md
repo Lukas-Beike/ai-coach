@@ -97,6 +97,14 @@ Athlete decisions for v6 (2026-11-09, #1892):
   (about 9 % apart) while the zones and the Garmin export used 172. The values
   of the heart-rate branch are recomputed; the power and pace branches are
   unchanged.
+- Garmin's max HR of the default zone set carries no sport. It now applies to
+  all sports; a sport-specific max HR of the same day wins. Before v6 the
+  heart-rate branch found no max HR for walks, hikes, rows and other sports and
+  for runs without one of their own, so those sessions had no value.
+- A threshold HR from a Garmin zone set that starts only after the session day
+  never overrides a value dated for the day; sessions without any measured
+  threshold HR stay without a value (unknown, not zero), and the threshold HR is
+  not estimated from the max HR.
 
 ## Formula and units
 
@@ -284,6 +292,8 @@ hour, or a mix of branches on one scale.
      for FTP. Intervals.icu values are not a source (athlete decision
      2026-11-07).
   Each value keeps its source (local or Garmin) in the stored thresholds.
+  The max HR of Garmin's default zone set (no sport) stands for every sport
+  unless a sport-specific value of the same day exists (v6).
 - Resting HR comes from the recovery family on the session day or up to 7
   days earlier, else the earliest later value, flagged.
 - Each value covers one session; no history window is needed.
@@ -392,6 +402,7 @@ hour, or a mix of branches on one scale.
 | Calibration ratings | local feedback and Garmin device only | product assumption | Ratings relayed by Intervals.icu are left out; athlete decision 2026-11-06. |
 | HR thresholds of other sports | run values | product assumption | The resolver keeps HR thresholds for ride and run only. |
 | Indoor ride FTP | local indoor power zone of the day, else the ride FTP | product assumption | Athlete decision 2026-11-06 after review; plans also apply local indoor zones. |
+| Max HR without a sport | Garmin default zone set applies to all sports; a sport-specific value of the same day wins | product assumption | Walks, hikes, rows and runs without own max HR otherwise get no value; athlete decision 2026-11-09 (v6). |
 | Threshold precedence | local zones in effect, Garmin watch zone set (heart rate), then the source policy | product assumption | One accessor for load, zones, Coach, plan and exports; athlete decision 2026-11-09 (v6). |
 | Threshold after the session | earliest later threshold, flagged | product assumption | Athlete decision 2026-11-06; fills history before the first stored threshold. |
 | Later threshold cap | observed at most 90 days after the session day, else missing | product assumption | A threshold from much later may not describe the athlete at the session; athlete decision 2026-11-08 (v5). |

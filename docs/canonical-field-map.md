@@ -1558,7 +1558,7 @@ Only `stream_zones.py` builds a canonical detail record outside the provider map
 
 `session_zones.py` emits no detail record. It resolves the `ZoneSettings` (thresholds at the session's local day, `DatedThresholds`: local, then Garmin, then Wahoo; indoor and virtual rides take the indoor FTP; limits from the effective zone configuration) that `stream_zones.py` counts with. Intervals.icu thresholds and configurations are never read.
 
-`canonical_session_analysis.py` emits no `ZoneDistribution`, lap or stream record. It reads the merged streams and laps of the non-Intervals records. Versions as the code states: `ANALYSIS_VERSION` 3 (stored `analysis_version`), `METHOD_VERSION` 3 (v3: grade-adjusted Pa:HR of outdoor runs, #1770); its input fingerprint includes `stream_zones.ZONE_TIMES_VERSION` and the heart-rate histogram version. `stream_resolution` reports `full` or `downsampled` for the streams it read (`downsampled` if the time axis or any read channel comes from a `downsampled` set).
+`canonical_session_analysis.py` emits no `ZoneDistribution`, lap or stream record. It reads the merged streams and laps of the non-Intervals records. Versions as the code states: `ANALYSIS_VERSION` 3 (stored `analysis_version`), `METHOD_VERSION` 6 (v3: grade-adjusted Pa:HR of outdoor runs, #1770; v4: heart rate and power source, optical heart rate warning, #1869; v5: running form drift of long runs, #1870; v6: calendar profile thresholds as the zone times', #1892); its input fingerprint includes `stream_zones.ZONE_TIMES_VERSION` and the heart-rate histogram version. `stream_resolution` reports `full` or `downsampled` for the streams it read (`downsampled` if the time axis or any read channel comes from a `downsampled` set).
 
 ### Canonical fields not produced by this scope
 
@@ -1588,7 +1588,7 @@ Conventions used in the tables of this part:
 
 Status: Live. `map_garmin_health` is called per stored element by `canonical_plans.py` (ingest and re-projection,
 one-element list per list section, the record itself for single-record sections) and by `snapshot_projection.py`.
-Mapper version: **21** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
+Mapper version: **22** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
 training sections and the endurance `groupMap`, see "Training sections" below), which is replayed by this module.
 Inputs: the Garmin snapshot as a mapping section name → record or list of records (`GARMIN_HEALTH_SECTION_NAMES`);
 `zone` = athlete zone (`ZoneInfo`), `retrieved_at` = fetch time of that section (`garmin_section_retrieved_at`: the
@@ -1737,7 +1737,7 @@ mapping, list items capped at 100); every node yields at most one value.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
-| `max_hr` | `maxHeartRateUsed` → `maxHeartRate` → `maxHR` of the node | bpm, rounded to 2 decimals; below 80 `OUT_OF_RANGE` (field reported = `maxHeartRateUsed`); canonical bound 250 drops 251 to 260 | Src `provider_reported`. Sport from `sport` → `sportType` → `activityType` of the node by `_heart_rate_sport`: text containing `cycling`/`cycl`/`bike`/`ride` is `ride`, containing `running`/`run` is `run`, else none. Id suffix = node ordinal. Documented, fixtures `heart_rate_zones` and `personal/heart_rate_zones`. |
+| `max_hr` | `maxHeartRateUsed` → `maxHeartRate` → `maxHR` of the node | bpm, rounded to 2 decimals; below 80 `OUT_OF_RANGE` (field reported = `maxHeartRateUsed`); canonical bound 250 drops 251 to 260 | Src `provider_reported`. Sport from `sport` → `sportType` → `activityType` of the node by `_heart_rate_sport`: text containing `cycling`/`cycl`/`bike`/`ride` is `ride`, containing `running`/`run` is `run`, else none. Since mapper version 22 a node that names another category than `default`/`generic`/`all` (a swim set) is not mapped, so a sport-less value is the default set's; the local load carries it to all sports (card M6 v6). Id suffix = node ordinal. Documented, fixtures `heart_rate_zones` and `personal/heart_rate_zones`. |
 
 #### Weight and body fat (`weight`, `weigh_ins`, `weighIns`)
 
@@ -1832,7 +1832,7 @@ without its source type, so it is not claimed as a scale value). Id `performance
 
 Other `metrics` keys (including the activity-derived max heart rate keys) are not mapped.
 
-#### Training sections (delegated to `garmin_training_mapping.py`, ride on `MAPPER_VERSION` 21)
+#### Training sections (delegated to `garmin_training_mapping.py`, ride on `MAPPER_VERSION` 22)
 
 `TRAINING_SECTIONS` are mapped through `training_values` / `endurance_group_values` (another writer documents the
 reader). The health mapper emits each value Src `provider_reported`, no agg or window, number via `coerce_number`, id

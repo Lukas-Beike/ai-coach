@@ -123,7 +123,12 @@ def zone_times(
     if streams is None:
         return {}
     sensors: list[tuple[str, StreamChannel, float | None, tuple[float, ...]]] = [
-        ("heart_rate", StreamChannel.HEART_RATE_BPM, settings.lthr, settings.hr_limits),
+        (
+            "heart_rate",
+            StreamChannel.HEART_RATE_BPM,
+            settings.hr_zone_reference,
+            settings.hr_limits,
+        ),
         ("power", StreamChannel.POWER_W, settings.ftp, settings.power_limits),
     ]
     if pace:
@@ -182,7 +187,7 @@ def _limits(
     """The threshold, percent limits and source of one metric, if its threshold is known."""
     if metric is ZoneMetric.HEART_RATE:
         threshold, limits, source = (
-            settings.lthr,
+            settings.hr_zone_reference,
             settings.hr_limits,
             settings.hr_source,
         )

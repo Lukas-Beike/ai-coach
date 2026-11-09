@@ -48,6 +48,8 @@ _MAX_ZONES = 7
 # for thresholds).
 ZONE_STAND_IN_MAX_DAYS: Final = 90
 DEFAULT_ZONE_SOURCE: Final = "Standardzonen"
+# The basis named in the source of absolute heart-rate limits converted without an LTHR.
+HR_REFERENCE_BASIS: Final = "Bezug 90 % der Max-HF"
 _PROVIDER_ZONE_SOURCES: Final = {
     ProviderId.GARMIN: "Garmin-Zonen",
     ProviderId.WAHOO: "Wahoo-Zonen",
@@ -81,6 +83,9 @@ class ZoneSettings:
     max_hr: float | None = None
     # Threshold running speed in m/s; pace limits are percent of it.
     threshold_pace: float | None = None
+    # The bpm reference of absolute heart-rate limits when no LTHR is known: the
+    # share of the max HR that ``hr_zone_of_max`` assumes for the LTHR.
+    hr_reference_bpm: float | None = None
     power_limits: tuple[float, ...] = POWER_ZONE_LIMITS
     hr_limits: tuple[float, ...] = HR_ZONE_LIMITS
     pace_limits: tuple[float, ...] = PACE_ZONE_LIMITS
@@ -140,26 +145,29 @@ class ZoneSettings:
         pace = effective_zone_configuration(
             chosen, ZoneConfigurationMetric.PACE, sport, indoor=indoor, day=day
         )
-        ftp = _threshold(power, base.ftp, MetricKind.FTP)
-        lthr = _threshold(heart_rate, base.lthr, MetricKind.THRESHOLD_HR)
+        ftp = _threshold(power, base.ftp, MetricKind.FTP, day)
+        lthr = _threshold(heart_rate, base.lthr, MetricKind.THRESHOLD_HR, day)
+        max_hr = _threshold(heart_rate, base.max_hr, MetricKind.MAX_HR, day)
         threshold_pace = _threshold(
-            pace, base.threshold_pace, MetricKind.THRESHOLD_PACE
+            pace, base.threshold_pace, MetricKind.THRESHOLD_PACE, day
         )
+        hr_reference = _hr_reference(heart_rate, lthr, max_hr)
         # Limits are percent of the threshold the settings carry, so the zone of
         # a measured value is the one the provider reported in absolute terms.
         power_limits = _percent_limits(power, ftp)
-        hr_limits = _percent_limits(heart_rate, lthr)
+        hr_limits = _percent_limits(heart_rate, lthr or hr_reference)
         pace_limits = _percent_limits(pace, threshold_pace)
         return cls(
             ftp=ftp,
             lthr=lthr,
-            max_hr=_threshold(heart_rate, base.max_hr, MetricKind.MAX_HR),
+            max_hr=max_hr,
             threshold_pace=threshold_pace,
+            hr_reference_bpm=hr_reference if hr_limits else None,
             power_limits=power_limits or base.power_limits,
             hr_limits=hr_limits or base.hr_limits,
             pace_limits=pace_limits or base.pace_limits,
             power_source=zone_source_name(power) if power_limits else base.power_source,
-            hr_source=zone_source_name(heart_rate) if hr_limits else base.hr_source,
+            hr_source=_hr_source(heart_rate, hr_limits, hr_reference, base.hr_source),
             pace_source=zone_source_name(pace) if pace_limits else base.pace_source,
         )
 
@@ -168,6 +176,11 @@ class ZoneSettings:
 
     def pace_zone(self, percent_of_threshold: float) -> int:
         return percent_zone(percent_of_threshold, self.pace_limits)
+
+    @property
+    def hr_zone_reference(self) -> float | None:
+        """The bpm the heart-rate limits are percent of: the LTHR, else the max-HR share."""
+        return self.lthr or self.hr_reference_bpm
 
     def hr_zone_of_lthr(self, percent_of_lthr: float) -> int:
         return percent_zone(percent_of_lthr, self.hr_limits)
@@ -183,8 +196,8 @@ class ZoneSettings:
         """Zone of an absolute watt or bpm target; needs the matching threshold."""
         if unit == "W" and self.ftp:
             return self.power_zone(value / self.ftp * 100)
-        if unit == "bpm" and self.lthr:
-            return self.hr_zone_of_lthr(value / self.lthr * 100)
+        if unit == "bpm" and (reference := self.hr_zone_reference):
+            return self.hr_zone_of_lthr(value / reference * 100)
         return None
 
 
@@ -206,18 +219,22 @@ def _value(configuration: ZoneConfiguration, kind: MetricKind) -> float | None:
 
 
 def _leading_value(
-    configuration: ZoneConfiguration | None, kind: MetricKind
+    configuration: ZoneConfiguration | None, kind: MetricKind, day: date | None
 ) -> float | None:
     """The value of a configuration that leads the source-policy values, else None.
 
     A confirmed local configuration leads every kind; a Garmin configuration
-    leads the kinds in ``_WATCH_FIRST_KINDS``. Other providers only fill a gap.
+    leads the kinds in ``_WATCH_FIRST_KINDS`` only while it is valid on ``day``.
+    A later stand-in (``_later_stand_in``) and other providers only fill a gap
+    the source-policy values leave.
     """
     if configuration is None:
         return None
     provider = configuration.provenance.provider
     if provider is None or (
-        provider is ProviderId.GARMIN and kind in _WATCH_FIRST_KINDS
+        provider is ProviderId.GARMIN
+        and kind in _WATCH_FIRST_KINDS
+        and _valid_on(configuration, day)
     ):
         return _value(configuration, kind) or None
     return None
@@ -243,7 +260,7 @@ def configured_threshold(
     chosen = effective_zone_configuration(
         configurations, _KIND_METRICS[kind], sport, indoor=indoor, day=day
     )
-    value = _leading_value(chosen, kind)
+    value = _leading_value(chosen, kind, day)
     return None if chosen is None or value is None else (float(value), chosen)
 
 
@@ -251,6 +268,7 @@ def _threshold(
     configuration: ZoneConfiguration | None,
     fallback: float | None,
     kind: MetricKind,
+    day: date | None,
 ) -> float | None:
     """The leading configured value (``configured_threshold``), else the fallback.
 
@@ -258,7 +276,7 @@ def _threshold(
     source-policy winners) leaves. An Intervals.icu configuration gives its limits
     only, never a threshold.
     """
-    lead = _leading_value(configuration, kind)
+    lead = _leading_value(configuration, kind, day)
     if lead is not None:
         return lead
     if (
@@ -267,6 +285,44 @@ def _threshold(
     ):
         return fallback
     return fallback if fallback is not None else _value(configuration, kind)
+
+
+def _hr_reference(
+    configuration: ZoneConfiguration | None,
+    lthr: float | None,
+    max_hr: float | None,
+) -> float | None:
+    """The bpm reference of absolute heart-rate limits that have no LTHR to convert with.
+
+    ``max_hr`` times ``LTHR_SHARE_OF_MAX_HR``, as for a percent-of-max target;
+    None when the LTHR is known, the limits are percent of the threshold already
+    or there is no max HR.
+    """
+    if (
+        configuration is None
+        or lthr
+        or not max_hr
+        or configuration.limits is None
+        or (
+            configuration.percent_limits is not None
+            and configuration.percent_basis is ZonePercentBasis.THRESHOLD
+        )
+    ):
+        return None
+    return max_hr * LTHR_SHARE_OF_MAX_HR
+
+
+def _hr_source(
+    configuration: ZoneConfiguration | None,
+    limits: tuple[float, ...] | None,
+    reference: float | None,
+    default: str,
+) -> str:
+    """The source name of the heart-rate limits, marking a max-HR reference basis."""
+    if not limits:
+        return default
+    name = zone_source_name(configuration)
+    return name if reference is None else f"{name} ({HR_REFERENCE_BASIS})"
 
 
 def _valid_on(configuration: ZoneConfiguration, day: date | None) -> bool:

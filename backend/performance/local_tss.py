@@ -36,7 +36,7 @@ import bisect
 import math
 import statistics
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Any, Final
 
@@ -630,6 +630,23 @@ def _first_by_provider(
     return None
 
 
+def _projected_max_hr(observations: Iterable[Observation]) -> list[Observation]:
+    """Garmin's sport-less max HR (the default zone set) as ride and run values.
+
+    Every session reads the max HR of ride or run (``threshold_sport``), so this
+    carries the generic value to all sports; a sport-specific value of the same
+    day, listed after these, wins (v6, #1892).
+    """
+    return [
+        replace(item, sport=sport)
+        for item in observations
+        if item.kind is MetricKind.MAX_HR
+        and item.sport is None
+        and item.provenance.provider is ProviderId.GARMIN
+        for sport in (Sport.RIDE, Sport.RUN)
+    ]
+
+
 class DatedThresholds:
     """Thresholds in effect on a given day under the current-threshold policy.
 
@@ -650,15 +667,18 @@ class DatedThresholds:
         *,
         preferences: SourcePreferences = NO_PREFERENCES,
     ) -> None:
+        kept = [
+            item
+            for item in observations
+            if item.kind in THRESHOLD_KINDS
+            # Stored Intervals.icu thresholds are never a source.
+            and item.provenance.provider is not ProviderId.INTERVALS
+        ]
+        # A day's sport-specific value follows the projected generic one, so it
+        # is the one a bisection on that day finds.
         self._observations = tuple(
             sorted(
-                (
-                    item
-                    for item in observations
-                    if item.kind in THRESHOLD_KINDS
-                    # Stored Intervals.icu thresholds are never a source.
-                    and item.provenance.provider is not ProviderId.INTERVALS
-                ),
+                (*_projected_max_hr(kept), *kept),
                 key=lambda item: item.observed_on,
             )
         )

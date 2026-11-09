@@ -20,6 +20,7 @@ from canonical_domain_support import provenance as configuration_provenance
 from performance_day_support import SYNCED_AT, StubReader
 
 from backend.activities.hr_cap import effective_caps, resolved_range
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
     Environment,
@@ -335,6 +336,122 @@ class ThresholdPaceParityTests(unittest.TestCase):
         winners = provider_zone_thresholds((observation,), as_of=DAY)
         planned = resolve_thresholds(winners, (), Sport.RUN, Environment.OUTDOOR, DAY)
         self.assertEqual(planned.threshold_speed_mps, 3.8)
+
+
+def _walk(**values):
+    return {
+        "id": "walk_1",
+        "sport": "walk",
+        "started_at": "2026-11-07T06:00:00+00:00",
+        "started_at_local": "2026-11-07T07:00:00",
+        "moving_duration_s": 3600.0,
+        "avg_hr": 150.0,
+        **values,
+    }
+
+
+class SportlessMaxHrTests(unittest.TestCase):
+    """Garmin's default-set max HR has no sport and serves every sport (M6 v6)."""
+
+    resting = _obs(MetricKind.RESTING_HR, 50.0, GARMIN, None, DAY)
+    lthr = _obs(MetricKind.THRESHOLD_HR, 168.0, GARMIN, Sport.RUN, DAY)
+
+    def _thresholds(self, *max_hr):
+        return DatedThresholds([self.lthr, *max_hr], (), [self.resting])
+
+    def test_a_walk_gets_a_heart_rate_load_from_the_default_max_hr(self) -> None:
+        default = _obs(MetricKind.MAX_HR, 190.0, GARMIN, None, DAY)
+        loaded = session_local_load(
+            _walk(), self._thresholds(default).for_session(Sport.WALK, DAY)
+        )
+        assert isinstance(loaded, LocalLoad)
+        # One hour at 150 bpm, rest 50, max 190, LTHR 168: 66.2 TSS (hand-worked).
+        self.assertAlmostEqual(loaded.load, 66.2, places=1)
+        self.assertEqual(
+            session_local_load(
+                _walk(), self._thresholds().for_session(Sport.WALK, DAY)
+            ),
+            "no_max_hr",
+        )
+
+    def test_a_sport_specific_value_of_the_same_day_wins(self) -> None:
+        default = _obs(MetricKind.MAX_HR, 190.0, GARMIN, None, DAY)
+        run = _obs(MetricKind.MAX_HR, 180.0, GARMIN, Sport.RUN, DAY)
+        thresholds = self._thresholds(default, run)
+        walk = thresholds.for_session(Sport.WALK, DAY).max_hr
+        ride = thresholds.for_session(Sport.RIDE, DAY).max_hr
+        assert walk is not None and ride is not None
+        self.assertEqual((walk.value, ride.value), (180.0, 190.0))
+
+    def test_only_garmin_values_are_carried_over(self) -> None:
+        wahoo = _obs(MetricKind.MAX_HR, 190.0, ProviderId.WAHOO, None, DAY)
+        self.assertIsNone(self._thresholds(wahoo).for_session(Sport.WALK, DAY).max_hr)
+
+
+class LaterStandInTests(unittest.TestCase):
+    """A zone set that starts after the day never overrides a value dated for it."""
+
+    sets = (_watch(172.0, date(2026, 10, 15)),)
+
+    def _lthr(self, day, fallback):
+        return ZoneSettings.from_configurations(
+            self.sets,
+            Sport.RUN,
+            Environment.OUTDOOR,
+            day,
+            fallback=ZoneSettings(lthr=fallback),
+        ).lthr
+
+    def test_the_dated_value_stays_with_a_later_stand_in(self) -> None:
+        # 2026-08-01 is within 90 days of the set's start, 2026-05-01 is not.
+        for day in (date(2026, 8, 1), date(2026, 5, 1)):
+            with self.subTest(day=day):
+                self.assertEqual(self._lthr(day, 165.0), 165.0)
+
+    def test_the_stand_in_fills_a_missing_value(self) -> None:
+        self.assertEqual(self._lthr(date(2026, 8, 1), None), 172.0)
+        self.assertIsNone(self._lthr(date(2026, 5, 1), None))
+
+    def test_session_load_keeps_the_observation_dated_for_the_day(self) -> None:
+        dated = _obs(
+            MetricKind.THRESHOLD_HR, 165.0, GARMIN, Sport.RUN, date(2026, 7, 20)
+        )
+        used = DatedThresholds([dated], self.sets).for_session(
+            Sport.RUN, date(2026, 8, 1)
+        )
+        assert used.threshold_hr is not None
+        self.assertEqual(used.threshold_hr.value, 165.0)
+        self.assertEqual(configured_thresholds(self.sets, date(2026, 8, 1)), ())
+
+
+class AbsoluteLimitsWithoutLthrTests(unittest.TestCase):
+    """Absolute Garmin limits with no threshold convert via 90 % of the max HR."""
+
+    def _zones(self, threshold):
+        garmin = zone_configuration(
+            threshold=threshold,
+            maximum=190.0,
+            limits=(130.0, 145.0, 160.0, 170.0, 190.0),
+            provenance=configuration_provenance("zones", provider=GARMIN),
+        )
+        return ZoneSettings.from_configurations(
+            [garmin], Sport.RUN, Environment.OUTDOOR, DAY
+        )
+
+    def test_the_basis_is_the_marked_max_hr_share(self) -> None:
+        zones = self._zones(None)
+        self.assertIsNone(zones.lthr)
+        self.assertEqual(zones.hr_reference_bpm, 171.0)
+        self.assertEqual(zones.hr_source, "Garmin-Zonen (Bezug 90 % der Max-HF)")
+        # 140 bpm lies between the watch's 130 and 145 bpm limits: zone 2.
+        self.assertEqual(zones.absolute_zone("bpm", 140.0), 2)
+        self.assertEqual(zones.absolute_zone("bpm", 165.0), 4)
+
+    def test_a_known_lthr_needs_no_reference(self) -> None:
+        zones = self._zones(168.0)
+        self.assertIsNone(zones.hr_reference_bpm)
+        self.assertEqual(zones.hr_source, "Garmin-Zonen")
+        self.assertEqual(zones.absolute_zone("bpm", 140.0), 2)
 
 
 class MethodVersionTests(unittest.TestCase):
