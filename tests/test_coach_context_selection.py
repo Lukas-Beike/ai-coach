@@ -928,7 +928,17 @@ class CoachContextRuleTests(unittest.TestCase):
                 False,
             ),
             (
+                # A plan sync keeps the planning sections, not the full set.
                 "Synchronisiere den Plan",
+                "provider_refresh_or_sync",
+                planning,
+                14,
+                5,
+                True,
+                False,
+            ),
+            (
+                "Aktualisiere meine Garmin-Daten",
                 "provider_refresh_or_sync",
                 FULL_SECTIONS,
                 None,

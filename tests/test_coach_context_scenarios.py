@@ -90,7 +90,7 @@ class CoachContextScenarioTests(unittest.TestCase):
                 self.assertEqual(expected, selection.retain_pending_request)
 
     def test_full_context_scenarios_use_all_sections(self):
-        selection = select_coach_context("Synchronisiere den Plan", {})
+        selection = select_coach_context("Aktualisiere meine Garmin-Daten", {})
         self.assertIsNone(selection.horizon_days)
         self.assertEqual(FULL_SECTIONS, selection.sections)
 

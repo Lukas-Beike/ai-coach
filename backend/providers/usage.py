@@ -103,6 +103,13 @@ def usage_counts(response: Any, *, provider: str) -> dict[str, int]:
     }
 
 
+def openai_cached_input_tokens(response: Any) -> int:
+    """Return the prompt-cache hit count from a Responses API usage block."""
+    usage = response.get("usage") if isinstance(response, dict) else None
+    details = usage.get("input_tokens_details") if isinstance(usage, dict) else None
+    return _count(details.get("cached_tokens")) if isinstance(details, dict) else 0
+
+
 def recorded_usage(
     summary: Any,
     response: Any,

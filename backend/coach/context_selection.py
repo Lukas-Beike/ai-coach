@@ -648,9 +648,9 @@ def _message_selection(
     if planning:
         sections.update({"planning", "training_plans"})
     sections |= _daily_sections(normalized, matched, planning)
-    if "provider_refresh_or_sync" in matched or _requires_full_time_context(
-        planning, normalized
-    ):
+    # A plan sync names the plan; only a provider-data refresh needs every section.
+    provider_refresh = "provider_refresh_or_sync" in matched and not planning
+    if provider_refresh or _requires_full_time_context(planning, normalized):
         return CoachContextSelection(
             name, FULL_SECTIONS | food, retain_pending_request=is_pending_active
         )

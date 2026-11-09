@@ -235,7 +235,13 @@ class ProviderStateService:
                 "OpenAI usage recorded",
                 extra={
                     "event": "openai_usage",
-                    "context": {"operation": safe_operation, **counts},
+                    "context": {
+                        "operation": safe_operation,
+                        **counts,
+                        "cached_tokens": provider_usage.openai_cached_input_tokens(
+                            response
+                        ),
+                    },
                 },
             )
         return counts
