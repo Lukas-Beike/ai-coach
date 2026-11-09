@@ -522,6 +522,25 @@ class GarminHistoricMetricNormalizationTests(unittest.TestCase):
                 [row["values"]["groupAverage"] for row in points], [6850, 7000]
             )
 
+    def test_endurance_group_list_entry_with_two_date_keys_keeps_its_point(self):
+        points = metric_points(
+            {
+                "groupMap": [
+                    {
+                        "calendarDate": "2026-09-28T00:00:00",
+                        "summaryDate": "2026-09-29",
+                        "groupAverage": 6850,
+                    }
+                ]
+            },
+            start=START,
+            end=TODAY,
+        )
+        self.assertEqual(
+            [(row["date"], row["values"]["groupAverage"]) for row in points],
+            [("2026-09-28", 6850)],
+        )
+
     def test_wire_range_formats_preserve_ftp_and_endurance_weeks(self):
         points = ftp_points(
             [

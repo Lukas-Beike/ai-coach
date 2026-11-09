@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Mapping
+from itertools import islice
 from typing import Any
 
 GARMIN_CALENDAR_DATE_KEY = "calendarDate"
@@ -34,6 +35,8 @@ GARMIN_READINESS_ALIASES = (
 GARMIN_GEAR_MAX_DISTANCE_ALIASES = ("maximumMeters", "maximumMeter")
 GARMIN_GROUP_MAP_KEY = "groupMap"
 GARMIN_GROUP_MAP_DATE_ALIASES = ("date", "calendarDate", "summaryDate")
+GARMIN_GROUP_MAP_LIMIT = 1000
+_DAY_TEXT_LENGTH = 10
 GARMIN_VO2MAX_ALIASES = ("vo2MaxPreciseValue", "vo2MaxValue")
 GARMIN_FTP_ALIASES = ("functionalThresholdPower", "ftp")
 # A biometric range record (FTP history) gives its day in ``from`` and its FTP in
@@ -156,19 +159,22 @@ def group_map_entries(groups: Any) -> list[tuple[Any, Mapping[str, Any]]]:
     """Return the (day, entry) pairs of an endurance ``groupMap``.
 
     Accepts a mapping keyed by day and a list of entries that carry their own
-    day; other shapes give none. In a list the first entry of a day wins.
+    day (its first ten characters); other shapes give none. In a list the first
+    entry of a day wins. At most ``GARMIN_GROUP_MAP_LIMIT`` entries are read.
     """
     if isinstance(groups, Mapping):
         return [
-            (day, item) for day, item in groups.items() if isinstance(item, Mapping)
+            (day, item)
+            for day, item in islice(groups.items(), GARMIN_GROUP_MAP_LIMIT)
+            if isinstance(item, Mapping)
         ]
     if not isinstance(groups, list):
         return []
     entries: dict[Any, Mapping[str, Any]] = {}
-    for item in groups:
+    for item in groups[:GARMIN_GROUP_MAP_LIMIT]:
         day = first_present(item, GARMIN_GROUP_MAP_DATE_ALIASES)
         if day is not None:
-            entries.setdefault(str(day), item)
+            entries.setdefault(str(day)[:_DAY_TEXT_LENGTH], item)
     return list(entries.items())
 
 

@@ -128,9 +128,7 @@ _RESCORE_CONTEXTS: Final = frozenset(
 _LOCAL_TIME: Final = "timestampLocal"
 _UTC_TIME: Final = "timestamp"
 _CALENDAR_DATE: Final = "calendarDate"
-_READINESS_SCORE_KEYS: Final = tuple(
-    dict.fromkeys((*PLANNING_READINESS_ALIASES, *GARMIN_READINESS_ALIASES))
-)
+_READINESS_SCORE_KEYS: Final = GARMIN_READINESS_ALIASES
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,7 +383,7 @@ def endurance_group_values(payload: object) -> list[TrainingValue]:
     """Return the group average and maximum of each dated ``groupMap`` entry."""
     groups = payload.get(GARMIN_GROUP_MAP_KEY) if isinstance(payload, Mapping) else None
     values: list[TrainingValue] = []
-    for key, group in group_map_entries(groups)[:_ROW_LIMIT]:
+    for key, group in group_map_entries(groups):
         day = _iso_day(key) if len(str(key)) == _DAY_TEXT_LENGTH else None
         if day is None:
             continue

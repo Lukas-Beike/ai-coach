@@ -242,6 +242,21 @@ class HistoryTests(unittest.TestCase):
             [("endurance_score_group_average", 6800.0, DAY, "-")],
         )
 
+    def test_endurance_group_list_dates_use_their_first_ten_characters(self) -> None:
+        self.assertEqual(
+            rows(
+                {
+                    "endurance_score": {
+                        "groupMap": [
+                            {"calendarDate": f"{DAY}T00:00:00", "groupAverage": 6800},
+                            {"date": DAY, "groupAverage": 9000},
+                        ]
+                    }
+                }
+            ),
+            [("endurance_score_group_average", 6800.0, DAY, "-")],
+        )
+
     def test_readiness_alias_order_is_the_same_in_history_and_section(self) -> None:
         both = {"calendarDate": DAY, "score": 64, "trainingReadinessScore": 71}
         only_long = {"calendarDate": DAY, "trainingReadinessScore": 71}

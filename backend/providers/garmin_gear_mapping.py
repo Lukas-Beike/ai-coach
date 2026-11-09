@@ -2,7 +2,7 @@
 
 One element of the ``gear`` section is one gear item as the collector normalized
 it: ``gearUUID``, ``gearName``, ``gearTypeName``, ``activityTypeName``,
-``gearStatusName``, ``maximumMeters``, the usage ``stats`` (``totalDistance`` in
+``gearStatusName``, ``maximumMeters`` (or ``maximumMeter``), the usage ``stats`` (``totalDistance`` in
 metres, ``totalActivities``) and, when the link list was read, ``activity_ids``.
 A missing ``activity_ids`` means the links are unknown, so none are emitted. A
 list marked ``activity_ids_truncated`` or ``activity_ids_stale`` (kept from an
