@@ -1043,10 +1043,12 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const targets = plannedTargets(entry, dateKey, todayKey, actual);
     return targets.filter((provider) => (provider === ids.garmin || provider === ids.intervals) && Array.isArray(lists[provider]) && lists[provider].length).map((provider) => {
       const items = lists[provider];
-      const names = items.slice(0, 3).map((item) => `${item.name}${item.date ? ` ${dateLabel(item.date)}` : ""}`);
+      const names = items.slice(0, 3).map((item) => [item.name, item.date ? dateLabel(item.date) : ""].filter(Boolean).join(" "));
+      const more = items.length > 3 ? " + " + (items.length - 3) + " weitere" : "";
+      const providerName = plannedPushTargetLabel(provider, entry, ids).split(":")[0];
       const note = document.createElement("span");
       note.className = "planned-conflict planned-cleanup";
-      note.textContent = `Wird bei ${plannedPushTargetLabel(provider, entry, ids).split(":")[0]} entfernt: ${names.join(", ")}${items.length > 3 ? ` + ${items.length - 3} weitere` : ""}`;
+      note.textContent = "Wird bei " + providerName + " entfernt: " + names.join(", ") + more;
       return note;
     });
   }
@@ -1477,7 +1479,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       button.disabled = true;
       let failure = "";
       try {
-        const done = await runPlanPush(providerIds().wahoo, workout.id, wahoo.payload_hash);
+        const done = await runPlanPush(providerIds().wahoo, [{ library_workout_id: workout.id, expected_payload_hash: wahoo.payload_hash }]);
         if (done.status !== "completed") failure = globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen";
       } catch (error) {
         failure = error.message;

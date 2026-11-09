@@ -16,9 +16,11 @@ def nearest_first[T](
     """Upcoming days first, soonest first; then past days, newest first; undated last."""
     now = today.isoformat()
     upcoming = sorted((i for i in items if day_of(i) >= now), key=day_of)
-    past = sorted((i for i in items if day_of(i) and day_of(i) < now), key=day_of)
+    past = sorted(
+        (i for i in items if day_of(i) and day_of(i) < now), key=day_of, reverse=True
+    )
     undated = [i for i in items if not day_of(i)]
-    return [*upcoming, *reversed(past), *undated]
+    return [*upcoming, *past, *undated]
 
 
 def cap[T](items: list[T], limit: int | None) -> list[T]:

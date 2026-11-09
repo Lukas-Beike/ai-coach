@@ -29,41 +29,41 @@ class IntervalsOrphan:
     payload_hash: str
 
 
+def _orphan(row: Any, today: date) -> IntervalsOrphan | None:
+    """The orphan a stored unit makes, or None for a live, past or unlinked one."""
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except TypeError, ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    hidden = payload.get("local_deleted") or payload.get("archived")
+    remote_id = payload.get("remote_event_id")
+    if not hidden or isinstance(remote_id, bool) or not str(remote_id or "").strip():
+        return None
+    try:
+        day = date.fromisoformat(str(payload.get("date") or "")[:10])
+    except ValueError:
+        return None
+    if day < today:
+        return None
+    name = str(payload.get("name") or "").strip()[:120] or "Einheit"
+    return IntervalsOrphan(
+        row["local_id"], name, day.isoformat(), library_payload_hash(row["payload"])
+    )
+
+
 def find_intervals_orphans(
     db: Any, today: date, *, limit: int | None = MAX_CLEANUP
 ) -> tuple[list[IntervalsOrphan], int]:
     """Return up to ``limit`` orphans, nearest day first, and the total count."""
-    orphans: list[IntervalsOrphan] = []
     marks = ", ".join("?" for _ in _OPEN_STATES)
-    for row in db.execute(
+    rows = db.execute(
         "SELECT local_id, payload FROM planned_units "
         f"WHERE tombstone=0 AND sync_state IN ({marks})",
         _OPEN_STATES,
-    ).fetchall():
-        try:
-            payload = json.loads(row["payload"] or "{}")
-        except TypeError, ValueError:
-            continue
-        if not isinstance(payload, dict) or not (
-            payload.get("local_deleted") or payload.get("archived")
-        ):
-            continue
-        remote_id = payload.get("remote_event_id")
-        if isinstance(remote_id, bool) or not str(remote_id or "").strip():
-            continue
-        try:
-            day = date.fromisoformat(str(payload.get("date") or "")[:10])
-        except ValueError:
-            continue
-        if day >= today:
-            orphans.append(
-                IntervalsOrphan(
-                    row["local_id"],
-                    str(payload.get("name") or "").strip()[:120] or "Einheit",
-                    day.isoformat(),
-                    library_payload_hash(row["payload"]),
-                )
-            )
+    ).fetchall()
+    orphans = [item for row in rows if (item := _orphan(row, today))]
     ordered = nearest_first(orphans, today, lambda item: item.date)
     return cap(ordered, limit), len(ordered)
 

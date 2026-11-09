@@ -127,6 +127,48 @@ def unmapped_exercises(
     ]
 
 
+def _cleanup_lists(
+    orphans: Sequence[GarminOrphan], intervals_orphans: Sequence[IntervalsOrphan]
+) -> dict[str, list[dict[str, str]]]:
+    """The leftovers each provider's sync removes, as the calendar receives them."""
+    return {
+        ProviderId.GARMIN.value: [
+            {"id": item.local_id, "name": item.name, "date": item.date}
+            for item in orphans
+        ],
+        ProviderId.INTERVALS.value: [
+            {
+                "id": item.local_id,
+                "name": item.name,
+                "date": item.date,
+                "hash": item.payload_hash,
+            }
+            for item in intervals_orphans
+        ],
+    }
+
+
+def _first_cleanup(
+    lists: dict[str, list[dict[str, str]]],
+    listed: set[str],
+    pending: dict[str, bool],
+    payload: dict[str, Any],
+    today: date,
+) -> dict[str, list[dict[str, str]]]:
+    """Give each provider's leftovers to the first upcoming unit it waits for.
+
+    The calendar then shows each note a single time.
+    """
+    if str(payload.get("date") or "")[:10] < today.isoformat():
+        return {}
+    cleanup: dict[str, list[dict[str, str]]] = {}
+    for provider, items in lists.items():
+        if pending.get(provider) and items and provider not in listed:
+            listed.add(provider)
+            cleanup[provider] = items
+    return cleanup
+
+
 def attach_push_state(
     pairs: Iterable[tuple[Any, dict[str, Any]]],
     baselines: dict[str, str | None],
@@ -147,21 +189,7 @@ def attach_push_state(
     moved only with the threshold HR. ``push_blocked`` names why a strength unit cannot reach Garmin, so the
     calendar says so instead of offering only Intervals.icu silently.
     """
-    lists: dict[str, list[dict[str, str]]] = {
-        ProviderId.GARMIN.value: [
-            {"id": item.local_id, "name": item.name, "date": item.date}
-            for item in orphans
-        ],
-        ProviderId.INTERVALS.value: [
-            {
-                "id": item.local_id,
-                "name": item.name,
-                "date": item.date,
-                "hash": item.payload_hash,
-            }
-            for item in intervals_orphans
-        ],
-    }
+    lists = _cleanup_lists(orphans, intervals_orphans)
     listed: set[str] = set()
     for row, payload in pairs:
         digest = library_payload_hash(row["payload"])
@@ -182,14 +210,7 @@ def attach_push_state(
             )
         payload["payload_hash"] = digest
         payload["push_pending"] = pending
-        # The leftovers are listed once per provider, on the first upcoming unit
-        # that provider waits for, so the calendar shows each note a single time.
-        cleanup: dict[str, list[dict[str, str]]] = {}
-        if str(payload.get("date") or "")[:10] >= today.isoformat():
-            for provider, items in lists.items():
-                if pending.get(provider) and items and provider not in listed:
-                    listed.add(provider)
-                    cleanup[provider] = items
+        cleanup = _first_cleanup(lists, listed, pending, payload, today)
         if cleanup:
             payload["push_cleanup"] = cleanup
         payload["push_blocked"] = (
