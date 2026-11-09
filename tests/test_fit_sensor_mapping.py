@@ -36,7 +36,9 @@ DEVICE = [
     (25, ENUM),
 ]
 SERIAL = 3351234567
-ANTPLUS, LOCAL, BLE = 1, 5, 4
+# FIT SDK profile source_type: 0 ant, 1 antplus, 2 bluetooth, 3 bluetooth_low_energy,
+# 4 wifi, 5 local. ble_device_type: 1 heart_rate, 2 bike_power, 7 bike_trainer.
+ANT, ANTPLUS, BLUETOOTH, BLE, WIFI, LOCAL = 0, 1, 2, 3, 4, 5
 
 
 def provenance(provider: ProviderId, origin: RecordingOrigin) -> Provenance:
@@ -101,8 +103,8 @@ class FitSensorMappingTests(unittest.TestCase):
         data = fit_file(
             [
                 device(0, 0, 1, 111, 3500, LOCAL),
-                device(1, 2, 107, SERIAL, 12, BLE),  # ble_device_type heart_rate
-                device(2, 3, 7, SERIAL + 1, 5, BLE),  # ble_device_type bike_power
+                device(1, 1, 107, SERIAL, 12, BLE),  # ble_device_type heart_rate
+                device(2, 2, 7, SERIAL + 1, 5, BLE),  # ble_device_type bike_power
             ]
         )
         result = streams(data)
@@ -115,6 +117,35 @@ class FitSensorMappingTests(unittest.TestCase):
         other = streams(fit_file([device(1, 120, 1, SERIAL, 2000, BLE)]))
         self.assertIsNot(other.hr_source, HeartRateSource.CHEST_STRAP)
         self.assertEqual(other.sensors, ())
+
+    def test_a_ble_trainer_and_the_connection_labels_follow_the_sdk_profile(self):
+        result = streams(
+            fit_file(
+                [
+                    device(1, 7, 32, SERIAL, 9, BLE),  # ble_device_type bike_trainer
+                    device(2, 120, 1, SERIAL + 1, 2000, ANTPLUS),
+                ]
+            )
+        )
+        self.assertIs(result.power_source, PowerSource.TRAINER)
+        self.assertEqual(
+            sorted((s.role.value, s.connection) for s in result.sensors),
+            [("heart_rate", "antplus"), ("trainer", "bluetooth_low_energy")],
+        )
+
+    def test_other_source_types_name_no_roles(self):
+        for source in (ANT, BLUETOOTH, WIFI):
+            with self.subTest(source=source):
+                result = streams(fit_file([device(1, 120, 1, SERIAL, 2000, source)]))
+                self.assertEqual(result.sensors, ())
+                self.assertIsNot(result.hr_source, HeartRateSource.CHEST_STRAP)
+
+    def test_source_type_zero_is_ant_and_not_unknown(self):
+        # An ANT sensor is external even though its source type is 0.
+        data = fit_file(
+            [device(0, 0, 1, 111, 3500, LOCAL), device(1, 99, 1, SERIAL, 5, ANT)]
+        )
+        self.assertIs(streams(data).hr_source, HeartRateSource.OPTICAL)
 
     def test_a_watch_alone_names_its_optical_heart_rate(self):
         result = streams(fit_file([device(0, 0, 1, 111, 3500, LOCAL)]))
@@ -132,7 +163,7 @@ class FitSensorMappingTests(unittest.TestCase):
             fit_file(
                 [
                     device(1, 17, 32, SERIAL, 9, ANTPLUS),
-                    device(2, 3, 7, SERIAL + 1, 5, BLE),
+                    device(2, 2, 7, SERIAL + 1, 5, BLE),
                 ]
             )
         )
@@ -182,7 +213,7 @@ class FitSensorMappingTests(unittest.TestCase):
 
     def test_the_same_device_keeps_its_key_across_files(self):
         first = streams(fit_file([device(1, 11, 7, SERIAL, 5, ANTPLUS)]))
-        second = streams(fit_file([device(3, 3, 7, SERIAL, 5, BLE)]))
+        second = streams(fit_file([device(3, 2, 7, SERIAL, 5, BLE)]))
         self.assertEqual(first.sensors[0].key, second.sensors[0].key)
         other = streams(fit_file([device(1, 11, 7, SERIAL + 1, 5, ANTPLUS)]))
         self.assertNotEqual(first.sensors[0].key, other.sensors[0].key)

@@ -101,7 +101,8 @@ from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 # Version 5: GPS position channels (directLatitude, directLongitude).
 # Version 6: heart rate and power sources and sensors of FIT stream sets.
 # Version 7: the first threshold estimate (DFA-a1) of FIT stream sets.
-MAPPER_VERSION: Final = 7
+# Version 8: Bluetooth LE sensor roles with the FIT SDK source type numbers.
+MAPPER_VERSION: Final = 8
 
 # Same limit as the Intervals mapper; kept local so providers do not import each other.
 MAX_GARMIN_ACTIVITY_ID_LENGTH: Final = 200
