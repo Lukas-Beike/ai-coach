@@ -132,6 +132,9 @@ test("a Coach turn submitted elsewhere triggers one status check while idle @res
   await expect(page.locator("#appShell")).toBeVisible();
   await expect.poll(statusPolls).toBeGreaterThanOrEqual(1);
   await settleStatusPolls(page);
+  // Justified internal probe: the app ignores events until the stream's "ready" frame baselines it,
+  // and that frame is neither a DOM change nor a distinct network response.
+  await expect.poll(() => page.evaluate(() => state.stateEventBaselined)).toBe(true);
   const baseline = await statusPolls();
   await page.evaluate(() => handleStateEvent({ type: "coach", lastEventId: "", data: JSON.stringify({ role: "user", message_id: 1 }) }));
   await expect.poll(async () => await statusPolls() - baseline).toBe(1);
