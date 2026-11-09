@@ -32,6 +32,7 @@ class SyncCommandAssemblyTests(unittest.TestCase):
         self.adaptive_preview = Mock()
         self.redactor = Mock()
         self.today = Mock()
+        self.after_refresh = Mock()
         return SyncCommandAssembly(
             core=SyncCommandCore(
                 database_manager=self.database_manager,
@@ -42,6 +43,7 @@ class SyncCommandAssemblyTests(unittest.TestCase):
                 planning_revision=self.revision,
                 utc_now=self.clock,
                 training_change_limit=24,
+                after_refresh=self.after_refresh,
             ),
             illness_pause=IllnessPauseDependencies(
                 config=self.config,
@@ -81,7 +83,7 @@ class SyncCommandAssemblyTests(unittest.TestCase):
         ) as factory:
             self.assertIs(assembly.provider_refresh(), result)
 
-        factory.assert_called_once_with(self.queue, {})
+        factory.assert_called_once_with(self.queue, {}, self.after_refresh)
         self.queue_service.assert_called_once_with()
 
     def test_illness_pause_uses_current_config_and_sync_authority_dependencies(self):
