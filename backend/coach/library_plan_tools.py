@@ -24,7 +24,10 @@ def require_complete_template(template_id: str, template: dict[str, Any]) -> Non
     ]
     if plan_checks.focus_missing([template]):
         missing.append("session_focus")
-    if run_hr_cap.capped_focus(template) and template.get("hr_cap") is None:
+    # The cap source depends on the profile, so only a missing or unreadable
+    # cap is caught here; the plan guard still checks the rest after the write.
+    problem = run_hr_cap.cap_problem(template)
+    if problem and problem["reason"] in (run_hr_cap.MISSING, run_hr_cap.MALFORMED):
         missing.append("hr_cap")
     if missing:
         name = str(template.get("name") or "Vorlage")
