@@ -25,7 +25,7 @@ from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Final
+from typing import Any, Final, cast
 from unittest import mock
 
 from backend.db.manager import DatabaseManager
@@ -99,7 +99,7 @@ EXPECTED_PAIRS: Final = frozenset(
 CONFIGURABLE: Final = frozenset({INTERVALS_ID, GARMIN_ID, WAHOO_ID})
 
 # (provider, type) -> request payload and the provider service call it must reach.
-CASES: Final = {
+CASES: Final[dict[tuple[str, str], tuple[dict[str, Any], str]]] = {
     (INTERVALS_ID, "plan_push"): ({"entries": ENTRIES}, "intervals.plan"),
     (INTERVALS_ID, "competition_push"): (
         {"reason": "test", "approval_manifest": COMPETITIONS},
@@ -215,7 +215,7 @@ class Harness:
             intervals_api_key=intervals_key, calendar_ical_url="https://example.invalid"
         )
 
-        def service(name: str, result: dict[str, Any] = OK) -> _Service:
+        def service(name: str, result: dict[str, Any] = OK) -> Any:
             return _Service(name, self.calls, result)
 
         publisher = mock.Mock(spec=StateEventBuffer)
@@ -264,7 +264,7 @@ class Harness:
             selected_workout_sync_service=lambda: service("intervals.plan"),
             competition_sync_service=lambda: service("intervals.competitions"),
             nutrition_sync_service=lambda: service("intervals.nutrition"),
-            operation_observer=_Observer,
+            operation_observer=lambda: cast(Any, _Observer()),
             resync_gate=ProviderResyncGate("Intervals.icu"),
         )
         no_fixture = mock.Mock()
@@ -297,7 +297,7 @@ class Harness:
             garmin=garmin_deps,
             calendar_weather=calendar_weather,
             wahoo=WahooRuntimeDependencies(
-                sync_service=lambda: self.wahoo,
+                sync_service=lambda: cast(Any, self.wahoo),
                 plan_push_service=lambda: service("wahoo.plan"),
                 resync_gate=ProviderResyncGate("Wahoo"),
                 stream_backfill_service=lambda: service("wahoo.streams"),
