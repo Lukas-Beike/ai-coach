@@ -1,10 +1,9 @@
-"""Diagnostic projection of Intervals.icu plan-push jobs and unsynced plan units."""
+"""Diagnostic projection of plan-push jobs of every provider and unsynced plan units."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from backend.providers.descriptors import INTERVALS_ID
 from backend.sync.jobs import job_dto, read_job
 
 _JOB_LIMIT = 10
@@ -12,12 +11,16 @@ _UNIT_LIMIT = 50
 
 
 def summarize_plan_sync(db: Any) -> dict[str, Any]:
-    """Report plan_push outcomes by status and error class, never provider error text."""
+    """Report plan_push outcomes by status and error class, never provider error text.
+
+    The unsynced units are the local planned calendar, which only Intervals.icu
+    receives; the last plan sync of each provider is in ``sync.providers``.
+    """
 
     job_rows = db.execute(
-        "SELECT id FROM sync_jobs WHERE provider=? AND type='plan_push' "
+        "SELECT id FROM sync_jobs WHERE type='plan_push' "
         "ORDER BY created_at DESC LIMIT ?",
-        (INTERVALS_ID, _JOB_LIMIT),
+        (_JOB_LIMIT,),
     ).fetchall()
     jobs = [job_dto(*read_job(db, row["id"])) for row in job_rows]
     unsynced = "FROM planned_units WHERE tombstone=0 AND sync_state<>'synced'"
@@ -35,6 +38,7 @@ def summarize_plan_sync(db: Any) -> dict[str, Any]:
         "recent_jobs": [
             {
                 "id": job["id"],
+                "provider": job["provider"],
                 "status": job["status"],
                 "requested_by": job["requested_by"],
                 "entries": len(job["payload"].get("entries") or []),

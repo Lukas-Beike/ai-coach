@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import sqlite3
 import tempfile
@@ -14,7 +15,7 @@ from unittest.mock import MagicMock, call, patch
 from backend.db import DatabaseManager, row_factory
 from backend.errors import AppError
 from backend.planning import library as planning_library
-from backend.sync.gates import ProviderResyncGate
+from backend.sync.gates import INTERVALS_RESYNC_GATE, ProviderResyncGate
 from backend.sync.selected import SelectedWorkoutSyncService
 
 
@@ -113,12 +114,15 @@ class SelectedWorkoutSyncServiceTests(unittest.TestCase):
             self.calendar_sync,
             self.repair_sync,
             redactor or (lambda text: text),
-            **(
-                {"provider_resync_gate": provider_resync_gate}
-                if provider_resync_gate is not None
-                else {}
-            ),
+            provider_resync_gate or INTERVALS_RESYNC_GATE,
         )
+
+    def test_the_resync_gate_must_be_wired(self) -> None:
+        parameter = inspect.signature(SelectedWorkoutSyncService).parameters[
+            "provider_resync_gate"
+        ]
+
+        self.assertIs(parameter.default, inspect.Parameter.empty)
 
     def test_api_key_gate_precedes_request_normalization(self) -> None:
         service = self._service(api_key="")

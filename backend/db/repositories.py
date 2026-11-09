@@ -1109,7 +1109,8 @@ def nutrition_macro_totals(entries: list[dict[str, Any]]) -> dict[str, Any]:
     """Return complete daily macro totals and display-only sums of known values.
 
     A total_* field stays None unless every entry reports that macro, so sync,
-    approval and Coach context never treat a partial sum as a daily total.
+    approval and Coach context never treat a partial sum as a daily total. A day
+    without entries has no totals either: they are unknown, not zero.
     """
     totals: dict[str, Any] = {}
     known_totals: dict[str, float | None] = {}
@@ -1119,7 +1120,7 @@ def nutrition_macro_totals(entries: list[dict[str, Any]]) -> dict[str, Any]:
         ]
         known_totals[field] = round(sum(known), 1) if known else None
         totals[f"total_{field}"] = (
-            round(sum(known), 1) if len(known) == len(entries) else None
+            round(sum(known), 1) if entries and len(known) == len(entries) else None
         )
     totals["known_macro_totals"] = known_totals
     totals["entries_without_macros"] = sum(

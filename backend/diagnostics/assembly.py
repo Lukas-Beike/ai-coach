@@ -27,7 +27,6 @@ class DiagnosticRuntimeDependencies:
 
 @dataclass(frozen=True)
 class DiagnosticProviderHealth:
-    sync_state: Callable[[], Any]
     provider_state: Callable[[], Any]
     provider_freshness: Callable[[], Any]
     redactor: Any
@@ -51,8 +50,6 @@ class DiagnosticLocalProjections:
     canonical_coverage: Callable[[], Any]
     canonical_backfill: Callable[[], Any] | None = None
     canonical_read: Callable[[], Any] | None = None
-    # Serve the activity and wellness counts of the sync summary.
-    canonical_rows: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -88,7 +85,6 @@ class DiagnosticsAssembly:
         self._app_name = runtime.app_name
         self._app_version = runtime.app_version
         self._utc_now = report.utc_now
-        self._sync_state = provider.sync_state
         self._provider_state = provider.provider_state
         self._provider_freshness = provider.provider_freshness
         self._redactor = provider.redactor
@@ -104,7 +100,6 @@ class DiagnosticsAssembly:
         self._canonical_coverage = local.canonical_coverage
         self._canonical_backfill = local.canonical_backfill
         self._canonical_read = local.canonical_read
-        self._canonical_rows = local.canonical_rows
         self._diagnostic_capture = report.diagnostic_capture
         self._log_path = report.log_path
         self._receipt_parser = report.receipt_parser
@@ -122,7 +117,6 @@ class DiagnosticsAssembly:
         )
 
     def report_service(self) -> DiagnosticReportService:
-        rows = self._canonical_rows() if self._canonical_rows is not None else None
         return DiagnosticReportService(
             DiagnosticReportDependencies(
                 database_manager=self._database_manager(),
@@ -132,7 +126,6 @@ class DiagnosticsAssembly:
                 app_name=self._app_name,
                 app_version=self._app_version,
                 utc_now=self._utc_now,
-                sync_state=self._sync_state(),
                 garmin_projection=self._garmin_projection(),
                 garmin_client_factory=self._garmin_client_factory(),
                 garmin_fixture_loader=self._garmin_fixture_loader(),
@@ -157,7 +150,5 @@ class DiagnosticsAssembly:
                 canonical_read=(
                     self._canonical_read() if self._canonical_read is not None else None
                 ),
-                activity_rows=rows,
-                observations=rows,
             )
         )

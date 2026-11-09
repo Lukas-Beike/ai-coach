@@ -11,7 +11,7 @@ from backend.db import DatabaseManager
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units
-from backend.sync.gates import INTERVALS_RESYNC_GATE, ProviderResyncGate
+from backend.sync.gates import ProviderResyncGate
 from backend.sync.library import WorkoutLibrarySyncService
 from backend.sync.planned_calendar import (
     PlannedCalendarRepairBatch,
@@ -33,7 +33,7 @@ class SelectedWorkoutSyncService:
         planned_calendar_sync_service: PlannedCalendarSyncService,
         planned_calendar_repair_service: PlannedCalendarRepairService,
         redactor: Callable[[str], str],
-        provider_resync_gate: ProviderResyncGate = INTERVALS_RESYNC_GATE,
+        provider_resync_gate: ProviderResyncGate,
     ) -> None:
         self._config = config
         self._database_manager = database_manager

@@ -400,7 +400,6 @@ class DiagnosticsAndLogSecretTests(SecretFixture):
         log_path, _stream = self.log_everywhere()
         redactor = self._redactor()
         values = {
-            "last_sync_at": "sync-time",
             "last_sync_error": f"failed with {SENTINELS['openai_api_key']}",
             "last_external_calendar_sync_error": SENTINELS["intervals_api_key"],
             PROVIDER_CREDENTIALS_KEY: self.key_values.get(
@@ -410,15 +409,10 @@ class DiagnosticsAndLogSecretTests(SecretFixture):
         }
         key_values = Mock()
         key_values.get.side_effect = lambda _db, key: values.get(key)
-        sync_state = Mock()
-        sync_state.latest_snapshot.return_value = {}
-        canonical_rows = Mock()
-        canonical_rows.activity_summaries.return_value = ()
-        canonical_rows.observations.return_value = []
         garmin_projection = Mock()
         garmin_projection.public_state.return_value = {"configured": True}
         calendar_reader = Mock()
-        calendar_reader.list_events.return_value = []
+        calendar_reader.event_counts.return_value = {"total": 0, "upcoming": 0}
         profile = Mock()
         profile.get.return_value = {"name": "Synthetic athlete"}
         freshness = Mock()
@@ -452,7 +446,6 @@ class DiagnosticsAndLogSecretTests(SecretFixture):
                 app_name="Test Coach",
                 app_version="0.0.0",
                 utc_now=lambda: STAMP,
-                sync_state=sync_state,
                 garmin_projection=garmin_projection,
                 garmin_client_factory=SimpleNamespace(available=lambda: True),
                 garmin_fixture_loader=SimpleNamespace(path=lambda: None),
@@ -471,8 +464,6 @@ class DiagnosticsAndLogSecretTests(SecretFixture):
                 canonical_coverage=coverage,
                 recent_logs=RecentLogEntriesService(log_path, redactor, lambda: STAMP),
                 diagnostic_capture=capture,
-                activity_rows=canonical_rows,
-                observations=canonical_rows,
             )
         )
         report = service.report()

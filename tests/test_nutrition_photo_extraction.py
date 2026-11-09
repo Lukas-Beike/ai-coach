@@ -144,7 +144,7 @@ class NutritionPhotoRouteBodyTests(unittest.TestCase):
         library.extract_packaging_photo = PhotoExtractionService(
             extractor
         ).extract_packaging_photo
-        self.routes = NutritionPostRoutes(Mock, lambda: library, sync_job_queue=Mock)
+        self.routes = NutritionPostRoutes(Mock, lambda: library)
 
     def test_compressed_and_largest_valid_photos_are_extracted_once(self):
         for size in (1_200_000, MAX_IMAGE_BYTES):

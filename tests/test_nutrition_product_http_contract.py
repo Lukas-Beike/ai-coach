@@ -19,7 +19,6 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         self.auth = Mock()
         self.diary = Mock()
         self.meal_library = Mock()
-        self.queue = Mock()
         self.get_routes = NutritionGetRoutes(
             session_auth_service=lambda: self.auth,
             diary_service=lambda: self.diary,
@@ -29,7 +28,6 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         self.post_routes = NutritionPostRoutes(
             diary_service=lambda: self.diary,
             meal_library_service=lambda: self.meal_library,
-            sync_job_queue=lambda: self.queue,
         )
         self.put_routes = NutritionPutRoutes(
             diary_service=lambda: self.diary,

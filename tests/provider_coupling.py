@@ -231,7 +231,6 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/sync/state.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/backup/export.py"): _BACKUP,
     (RULE_SOURCE_LABEL, "backend/athlete/equipment.py"): _LEGACY_LABEL,
-    (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,
     (RULE_LEGACY_READ, "backend/athlete/equipment.py"): _SYNC_STATUS,
     (RULE_LEGACY_READ, "backend/nutrition/sync_status.py"): _SYNC_STATUS,
     (RULE_LEGACY_READ, "backend/performance/morning_battery_service.py"): (

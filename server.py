@@ -2258,7 +2258,6 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             app_version=APP_VERSION,
         ),
         provider_health=DiagnosticProviderHealth(
-            sync_state=sync_state_repository,
             provider_state=provider_state_service,
             provider_freshness=PROVIDER_SYNC.freshness_service,
             redactor=REDACTOR,
@@ -2278,7 +2277,6 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             canonical_coverage=lambda: CANONICAL_READ,
             canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
             canonical_read=lambda: CANONICAL_READ,
-            canonical_rows=lambda: CANONICAL_READ,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,

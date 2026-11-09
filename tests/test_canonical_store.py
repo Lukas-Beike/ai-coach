@@ -612,6 +612,76 @@ class MergedAliasDeletionTests(StoreFixture):
             ("active", None),
         )
 
+    def link_kind(self, activity_id: str) -> str:
+        return self.one(
+            "SELECT link_kind FROM activity_sessions WHERE activity_id = ?",
+            (activity_id,),
+        )[0]
+
+    def test_deleting_the_last_merged_alias_leaves_the_survivor_single(self) -> None:
+        keep_id, _ = self.merge_duplicate()
+        self.db.execute(
+            "UPDATE activity_sessions SET link_kind = 'heuristic' WHERE activity_id = ?",
+            (keep_id,),
+        )
+        self.assertEqual("heuristic", self.link_kind(keep_id))
+
+        canonical_store.mark_activity_deleted(
+            self.db,
+            "intervals",
+            record_kind=ACTIVITY_RECORD_KIND,
+            provider_activity_id="garmin-1",
+            now=LATER,
+        )
+
+        self.assertEqual("single", self.link_kind(keep_id))
+
+    def test_survivor_keeps_its_link_kind_while_another_alias_remains(self) -> None:
+        keep_id, _ = self.merge_duplicate()
+        other_id = self.seed("garmin-2", ProviderId.GARMIN)
+        canonical_store.merge_activity_session(
+            self.db, activity_id=other_id, into=keep_id, now=STAMP
+        )
+        self.db.execute(
+            "UPDATE activity_sessions SET link_kind = 'heuristic' WHERE activity_id = ?",
+            (keep_id,),
+        )
+
+        canonical_store.mark_activity_deleted(
+            self.db,
+            "intervals",
+            record_kind=ACTIVITY_RECORD_KIND,
+            provider_activity_id="garmin-1",
+            now=LATER,
+        )
+
+        self.assertEqual("heuristic", self.link_kind(keep_id))
+
+    def test_reset_repairs_stale_kinds_and_keeps_confirmed_ones(self) -> None:
+        keep_id, _ = self.merge_duplicate()
+        stale_id = self.seed("garmin-9", ProviderId.GARMIN)
+        confirmed_id = self.seed("garmin-8", ProviderId.GARMIN)
+        self.db.execute(
+            "UPDATE activity_sessions SET link_kind = 'exact' WHERE activity_id IN (?, ?)",
+            (keep_id, stale_id),
+        )
+        self.db.execute(
+            "UPDATE activity_sessions SET link_kind = 'confirmed', "
+            "athlete_confirmed = 1 WHERE activity_id = ?",
+            (confirmed_id,),
+        )
+
+        changed = canonical_store.reset_unbundled_link_kinds(self.db, now=LATER)
+
+        self.assertEqual(1, changed)
+        self.assertEqual("exact", self.link_kind(keep_id))
+        self.assertEqual("single", self.link_kind(stale_id))
+        # The athlete's confirmation is never touched.
+        self.assertEqual("confirmed", self.link_kind(confirmed_id))
+        self.assertEqual(
+            0, canonical_store.reset_unbundled_link_kinds(self.db, now=LATER)
+        )
+
     def test_missing_merged_alias_in_the_window_is_deleted_without_error(self) -> None:
         _, dup_id = self.merge_duplicate()
         deleted = canonical_store.mark_missing_deleted(

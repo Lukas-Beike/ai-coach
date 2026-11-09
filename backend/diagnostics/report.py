@@ -6,11 +6,12 @@ import logging
 import platform
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.calendar.external import ExternalCalendarReader
+from backend.canonical.garmin_payload import RETIRED_SNAPSHOT_KEY, STATE_KEY
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.morning import MorningCheckinStateService
 from backend.config import DEFAULT_OPENAI_BASE_URL, Config
@@ -20,7 +21,6 @@ from backend.diagnostics.canonical_backfill import (
     CanonicalBackfillStatusReader,
     summarize_canonical_backfill,
 )
-from backend.diagnostics.canonical_counts import activity_count, wellness_day_count
 from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
 from backend.diagnostics.canonical_read import (
     CanonicalReadStatusReader,
@@ -30,20 +30,21 @@ from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.plan_sync import summarize_plan_sync
 from backend.diagnostics.provider_composition import summarize_provider_composition
+from backend.diagnostics.provider_sync import summarize_provider_sync
 from backend.diagnostics.rating_backfill import summarize_rating_backfill
 from backend.diagnostics.session_conflicts import summarize_session_conflicts
 from backend.diagnostics.stream_backfill import summarize_stream_backfill
 from backend.diagnostics.wahoo_state import summarize_wahoo
-from backend.observability import DiagnosticCapture, Redactor
+from backend.observability import (
+    DIAGNOSTIC_CAPTURE_ENTRIES_KEY,
+    DiagnosticCapture,
+    Redactor,
+)
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.state import ProviderStateService
 from backend.runtime.memory import process_memory
-from backend.runtime.ports import (
-    ActivityRowAndSummaryReader,
-    ObservationReader,
-    ProviderCoverageReader,
-)
+from backend.runtime.ports import ProviderCoverageReader
 from backend.settings import SettingsService
 from backend.sync.activity_routes import summarize_activity_routes
 from backend.sync.activity_weather import summarize_activity_weather
@@ -60,7 +61,6 @@ from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.session_rebundle import summarize_session_rebundle
-from backend.sync.state import SyncStateRepository
 
 LOGGER = logging.getLogger("intervals_coach")
 
@@ -76,7 +76,6 @@ class DiagnosticReportDependencies:
     app_name: str
     app_version: str
     utc_now: Callable[[], str]
-    sync_state: SyncStateRepository
     garmin_projection: GarminProjectionService
     garmin_client_factory: GarminClientFactory
     garmin_fixture_loader: GarminFixtureLoader
@@ -95,8 +94,11 @@ class DiagnosticReportDependencies:
     diagnostic_capture: DiagnosticCapture
     canonical_backfill: CanonicalBackfillStatusReader | None = None
     canonical_read: CanonicalReadStatusReader | None = None
-    activity_rows: ActivityRowAndSummaryReader | None = None
-    observations: ObservationReader | None = None
+
+
+# Large kv values whose stored size the report shows: the Garmin state, the
+# retired Garmin snapshot a migrated database keeps, and the diagnostic capture.
+_PAYLOAD_KEYS = (STATE_KEY, RETIRED_SNAPSHOT_KEY, DIAGNOSTIC_CAPTURE_ENTRIES_KEY)
 
 
 class DiagnosticReportService:
@@ -121,16 +123,19 @@ class DiagnosticReportService:
             name: db.execute(query).fetchone()["count"]
             for name, query in queries.items()
         }
-        counts["garmin_snapshot_bytes"] = self._garmin_snapshot_bytes(db)
+        counts["stored_payload_bytes"] = self._stored_payload_bytes(db)
         return counts
 
     @staticmethod
-    def _garmin_snapshot_bytes(db: Any) -> int:
-        # octet_length uses stored byte lengths without fetching the JSON payload.
-        return db.execute(
-            "SELECT COALESCE(SUM(octet_length(value)), 0) AS count "
-            "FROM kv WHERE key = 'garmin_snapshot'"
-        ).fetchone()["count"]
+    def _stored_payload_bytes(db: Any) -> dict[str, int]:
+        # octet_length uses stored byte lengths without fetching the payloads.
+        rows = db.execute(
+            "SELECT key, octet_length(value) AS bytes FROM kv "
+            f"WHERE key IN ({', '.join('?' for _ in _PAYLOAD_KEYS)})",
+            _PAYLOAD_KEYS,
+        ).fetchall()
+        stored = {row["key"]: row["bytes"] for row in rows}
+        return {key: stored.get(key, 0) for key in _PAYLOAD_KEYS}
 
     def clear(self) -> dict[str, Any]:
         """Clear the captured technical diagnostic entries."""
@@ -168,6 +173,11 @@ class DiagnosticReportService:
                 ProviderId.GARMIN.value, deps.garmin_projection.public_state
             )
 
+            calendar_events = section(
+                "calendar_events",
+                lambda: deps.external_calendar_reader.event_counts(db),
+            )
+
             def configuration() -> dict[str, Any]:
                 return {
                     "openai_configured": bool(deps.config.openai_api_key),
@@ -188,24 +198,12 @@ class DiagnosticReportService:
                 }
 
             def sync() -> dict[str, Any]:
-                snapshot = deps.sync_state.latest_snapshot()
                 return {
-                    "last_success": self._get_value(db, "last_sync_at"),
                     "last_error": deps.redactor.redact_text(
                         self._get_value(db, "last_sync_error") or ""
                     )
                     or None,
-                    "snapshot_counts": {
-                        "activities": activity_count(deps.activity_rows, db),
-                        "wellness": wellness_day_count(
-                            deps.observations,
-                            db,
-                            date.fromisoformat(deps.utc_now()[:10]),
-                        ),
-                        "calendar_events": len(snapshot.get("upcoming_calendar", []))
-                        if snapshot
-                        else 0,
-                    },
+                    "providers": summarize_provider_sync(db),
                 }
 
             def provider_freshness() -> Any:
@@ -232,7 +230,7 @@ class DiagnosticReportService:
                     )
                     or None,
                     "running": deps.external_calendar_sync.running(),
-                    "events": len(deps.external_calendar_reader.list_events()),
+                    "events": calendar_events.get("upcoming"),
                 }
 
             def database() -> dict[str, Any]:
@@ -240,9 +238,7 @@ class DiagnosticReportService:
                     "schema_version": self._schema_version(db),
                     **self._database_counts(db),
                     "workout_library_state": deps.workout_library_sync_state.summary(),
-                    "external_calendar_events": len(
-                        deps.external_calendar_reader.list_events()
-                    ),
+                    "external_calendar_events": calendar_events.get("total"),
                 }
 
             key_values = deps.key_values

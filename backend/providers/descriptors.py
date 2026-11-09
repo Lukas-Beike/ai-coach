@@ -49,7 +49,7 @@ WAHOO_NOT_CONFIGURED_MESSAGE = (
     "Wahoo ist nicht verbunden. Bitte Wahoo in den Einstellungen verbinden."
 )
 
-_ALL_INTERVALS_JOB_TYPES = frozenset(
+_INTERVALS_OUTPUT_JOB_TYPES = frozenset(
     {
         "plan_push",
         "competition_push",
@@ -65,7 +65,6 @@ class Capability(StrEnum):
     BODY = "body"
     THRESHOLDS = "thresholds"
     GEAR = "gear"
-    PLANNED_EVENTS = "planned_events"
     COMPETITIONS = "competitions"
     WORKOUT_EXPORT = "workout_export"
     METRIC_EXPORT = "metric_export"
@@ -275,7 +274,7 @@ DEFAULT_PROVIDER_DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
         max_sync_days=_INTERVALS_MAX_SYNC_DAYS,
         resync_keys=(),
         # Accepted job types; backend/sync/jobs.py checks them via supports_job.
-        job_types=_ALL_INTERVALS_JOB_TYPES,
+        job_types=_INTERVALS_OUTPUT_JOB_TYPES,
         not_configured_message=_INTERVALS_NOT_CONFIGURED_MESSAGE,
         # Body metrics go to the wellness day, thresholds to the Ride or Run sport
         # settings; backend/sync/intervals_metric_export.py maps the fields.
