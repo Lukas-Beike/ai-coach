@@ -257,7 +257,7 @@ class StageCase(unittest.TestCase):
                 finally:
                     self.transaction = False
 
-        setattr(self.manager, "unit_of_work", tracked)
+        self.manager.unit_of_work = tracked  # type: ignore[method-assign]
         self.stage = ActivityWeatherStage(
             key_values=self.key_values,
             zone_provider=lambda: ZONE,
