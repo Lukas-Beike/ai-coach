@@ -1288,6 +1288,25 @@ def _note_omitted_sections(
         )
 
 
+def _log_budget_applied(
+    characters: int, budget: int, omitted: list[str], truncated: list[str]
+) -> None:
+    LOGGER.log(
+        logging.WARNING if set(omitted) & _HIGH_PRIORITY_SECTIONS else logging.INFO,
+        "Coach context exceeds projection budget",
+        extra={
+            "event": "coach_context_budget_applied",
+            "context": {
+                "characters": characters,
+                "budget": budget,
+                "omitted_section_count": len(omitted),
+                "omitted_sections": omitted,
+                "truncated_sections": truncated,
+            },
+        },
+    )
+
+
 class CoachTrainingContextService:
     """Assemble the exact bounded prompt context from local read services."""
 
@@ -1465,20 +1484,11 @@ class CoachTrainingContextService:
                 json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
             )
             context = context_prefix + structured_text + context_suffix
-            important = set(omitted_sections) & _HIGH_PRIORITY_SECTIONS
-            LOGGER.log(
-                logging.WARNING if important else logging.INFO,
-                "Coach context exceeds projection budget",
-                extra={
-                    "event": "coach_context_budget_applied",
-                    "context": {
-                        "characters": len(context),
-                        "budget": self._total_char_limit,
-                        "omitted_section_count": len(omitted_sections),
-                        "omitted_sections": omitted_sections,
-                        "truncated_sections": truncated_sections,
-                    },
-                },
+            _log_budget_applied(
+                len(context),
+                self._total_char_limit,
+                omitted_sections,
+                truncated_sections,
             )
         return context
 
