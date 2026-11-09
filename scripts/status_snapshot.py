@@ -159,7 +159,8 @@ def render(snapshot: dict) -> str:
         f"Merged on develop since release ({len(snapshot['merged_since_release'])}):",
     ]
     lines += [
-        f"  #{pr['number']} {pr['title']} ({pr['merged_at']})"
+        f"  {'#' + str(pr['number']) + ' ' if pr['number'] else ''}"
+        f"{pr['title']} ({pr['merged_at']})"
         for pr in snapshot["merged_since_release"]
     ] or [NONE]
     lines.append(f"Open PRs ({len(snapshot['open_prs'])}):")

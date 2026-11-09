@@ -154,6 +154,8 @@ class StatusSnapshotTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("release 1.2.0", text)
         self.assertIn("#11 fix(a): thing", text)
+        self.assertIn("  chore: direct commit (", text)
+        self.assertNotIn("#None", text)
         self.assertIn("Release blockers:\n  #3 Blocker", text)
 
     def test_gh_failure_exits_nonzero_with_clear_message(self):
