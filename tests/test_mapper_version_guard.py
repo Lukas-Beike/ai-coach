@@ -63,27 +63,27 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "c1b26578d189a3b8afe775e9055fb5e2b78639e63c4eb061efcb376372e869ea",
     ),
     "garmin_gear_mapping": (
-        (20,),
-        "c1065949991a138dd91ec1b96da88939bf8c847e52ef550dc32a665cce0e1b7c",
+        (21,),
+        "b53d3b960450b21475f4f86a73c6be8ecd3d182afa0b73ed3055b535482d9028",
     ),
     "garmin_health_mapping": (
-        (20,),
-        "e655df5f9a2cf55a965d21b0d6e7d1c77185a9d230405513e99a729b05c930a3",
+        (21,),
+        "bfe33d8b57b66c70408db17c3e56a1e5756860c6a05b5a330f7e0d6852164d45",
     ),
     "garmin_status_mapping": (
-        (20,),
+        (21,),
         "5da9d6874214b0b966721bd1cdd155ffdb64dcc247c79db92c11739b112a1f96",
     ),
     "garmin_training_mapping": (
-        (20,),
-        "34fd2a6d7884c0b54f9b87ccba040fb83f5cc7c481c69776edbd71c30e87be0e",
+        (21,),
+        "3a737700491e4f10047540b129b0c204891c076061eea69fe12da30bd1ee8156",
     ),
     "garmin_zone_mapping": (
-        (20,),
+        (21,),
         "b06dffd17d1c09036a5ef7c1aab7695d56f0d5d8e2e4616238afc4a5f21dfeee",
     ),
     "sleep_period_mapping": (
-        (20,),
+        (21,),
         "77efab15de0cda5414ed02c0d5005a9fe6fb1a650ec103bdb40e01cef065cf0f",
     ),
     "wahoo_activity_mapping": (

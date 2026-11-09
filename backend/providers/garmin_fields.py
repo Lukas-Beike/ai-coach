@@ -20,12 +20,20 @@ GARMIN_SLEEP_SCORE_ALIASES = ("sleepScore", "overallSleepScore")
 GARMIN_HRV_LAST_NIGHT_ALIASES = ("hrvLastNight", "lastNightAvg")
 GARMIN_HRV_WEEKLY_ALIASES = ("hrvWeeklyAvg", "weeklyAvg")
 GARMIN_RESTING_HR_ALIASES = ("restingHeartRate", "restingHR", "resting_heart_rate")
+# One order for every reader. Garmin's training-readiness endpoint sends ``score``
+# (garth's typed model, python-garminconnect-based MCP fixtures); the longer
+# spellings are tolerated aliases of derived or relayed payloads.
 GARMIN_READINESS_ALIASES = (
     "score",
     "trainingReadinessScore",
     "overallReadinessScore",
     "readinessScore",
+    "trainingReadiness",
 )
+# Public Garmin gear clients type ``maximumMeters``; ``maximumMeter`` is tolerated.
+GARMIN_GEAR_MAX_DISTANCE_ALIASES = ("maximumMeters", "maximumMeter")
+GARMIN_GROUP_MAP_KEY = "groupMap"
+GARMIN_GROUP_MAP_DATE_ALIASES = ("date", "calendarDate", "summaryDate")
 GARMIN_VO2MAX_ALIASES = ("vo2MaxPreciseValue", "vo2MaxValue")
 GARMIN_FTP_ALIASES = ("functionalThresholdPower", "ftp")
 # A biometric range record (FTP history) gives its day in ``from`` and its FTP in
@@ -142,6 +150,26 @@ def colon_time_parts(text: str) -> list[int] | None:
     ):
         return None
     return [int(part) for part in parts]
+
+
+def group_map_entries(groups: Any) -> list[tuple[Any, Mapping[str, Any]]]:
+    """Return the (day, entry) pairs of an endurance ``groupMap``.
+
+    Accepts a mapping keyed by day and a list of entries that carry their own
+    day; other shapes give none. In a list the first entry of a day wins.
+    """
+    if isinstance(groups, Mapping):
+        return [
+            (day, item) for day, item in groups.items() if isinstance(item, Mapping)
+        ]
+    if not isinstance(groups, list):
+        return []
+    entries: dict[Any, Mapping[str, Any]] = {}
+    for item in groups:
+        day = first_present(item, GARMIN_GROUP_MAP_DATE_ALIASES)
+        if day is not None:
+            entries.setdefault(str(day), item)
+    return list(entries.items())
 
 
 def first_present(item: Any, keys: tuple[str, ...]) -> Any:

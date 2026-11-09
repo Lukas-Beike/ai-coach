@@ -26,6 +26,10 @@ from backend.canonical.mapping import coerce_number
 from backend.canonical.records import Provenance
 from backend.canonical.validation import MAX_TEXT_LENGTH
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, SourceKind
+from backend.providers.garmin_fields import (
+    GARMIN_GEAR_MAX_DISTANCE_ALIASES,
+    first_present,
+)
 
 GARMIN_LABEL: Final = "Garmin Connect"
 _MAX_LINKS: Final = 1000
@@ -90,7 +94,9 @@ def map_garmin_gear(
             type_label=_text(element.get("gearTypeName"), 100),
             activity_type_label=_text(element.get("activityTypeName"), 100),
             status_label=_text(element.get("gearStatusName"), 100),
-            maximum_distance_m=_distance(element.get("maximumMeters")),
+            maximum_distance_m=_distance(
+                first_present(element, GARMIN_GEAR_MAX_DISTANCE_ALIASES)
+            ),
             total_distance_m=_distance(stats.get("totalDistance")),
             total_activities=_count(stats.get("totalActivities")),
             provenance=provenance,

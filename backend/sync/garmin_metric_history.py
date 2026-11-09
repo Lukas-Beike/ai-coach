@@ -10,6 +10,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.performance.garmin_load import acute_load_value
 from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.garmin_fields import GARMIN_GROUP_MAP_KEY, group_map_entries
 from backend.providers.garmin_training_mapping import (
     history_rows,
     morning_readiness_records,
@@ -44,13 +45,9 @@ def _records(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
-        groups = value.get("groupMap")
-        if isinstance(groups, dict) and groups:
-            return [
-                {**item, "date": day}
-                for day, item in groups.items()
-                if isinstance(item, dict)
-            ]
+        groups = group_map_entries(value.get(GARMIN_GROUP_MAP_KEY))
+        if groups:
+            return [{**item, "date": day} for day, item in groups]
         for key in ("enduranceScoreDTO", "enduranceScoreDTOList"):
             nested = value.get(key)
             if isinstance(nested, (dict, list)):

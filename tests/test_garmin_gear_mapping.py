@@ -77,6 +77,26 @@ class GearMappingTests(unittest.TestCase):
         self.assertIsNone(item.maximum_distance_m)
         self.assertIsNone(item.total_activities)
 
+    def test_maximum_distance_accepts_both_key_spellings(self) -> None:
+        plain = {key: v for key, v in GEAR.items() if key != "maximumMeters"}
+        for name, element, expected in (
+            ("maximumMeters", {**plain, "maximumMeters": 7_000}, 7_000),
+            ("maximumMeter", {**plain, "maximumMeter": 8_000}, 8_000),
+            (
+                "both: maximumMeters wins",
+                {**plain, "maximumMeters": 7_000, "maximumMeter": 8_000},
+                7_000,
+            ),
+            (
+                "empty maximumMeters falls back",
+                {**plain, "maximumMeters": None, "maximumMeter": 8_000},
+                8_000,
+            ),
+        ):
+            with self.subTest(name):
+                (item,), _links = gear(element)
+                self.assertEqual(item.maximum_distance_m, expected)
+
     def test_gear_without_an_id_is_not_mapped(self) -> None:
         for element in ({**GEAR, "gearUUID": ""}, "junk", {"gearName": "x"}):
             with self.subTest(element=element):

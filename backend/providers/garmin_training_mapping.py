@@ -15,7 +15,7 @@ locally. The fields are the ones today's readers show:
 * ``training_readiness_history``: READINESS from the readiness score aliases, of
   the day's morning reading (see ``morning_readiness``).
 * ``endurance_score``: ENDURANCE_SCORE_GROUP_AVERAGE and _MAX of each dated
-  ``groupMap`` entry.
+  ``groupMap`` entry, a mapping keyed by day or a list of dated entries.
 
 A device-keyed section whose devices disagree yields no value; the health mapper
 reports it as UNKNOWN_VALUE, so coverage shows the gap. History rows are dated by ``date``, ``calendarDate``, ``summaryDate`` or
@@ -32,7 +32,11 @@ from typing import Any, Final
 from backend.canonical.mapping import coerce_number
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.providers.garmin_device_records import primary_device_record
-from backend.providers.garmin_fields import GARMIN_READINESS_ALIASES
+from backend.providers.garmin_fields import (
+    GARMIN_GROUP_MAP_KEY,
+    GARMIN_READINESS_ALIASES,
+    group_map_entries,
+)
 from backend.providers.garmin_performance_fields import (
     METRIC_DATE_KEYS,
     PLANNING_READINESS_ALIASES,
@@ -379,13 +383,11 @@ def _history_value(
 
 def endurance_group_values(payload: object) -> list[TrainingValue]:
     """Return the group average and maximum of each dated ``groupMap`` entry."""
-    groups = payload.get("groupMap") if isinstance(payload, Mapping) else None
-    if not isinstance(groups, Mapping):
-        return []
+    groups = payload.get(GARMIN_GROUP_MAP_KEY) if isinstance(payload, Mapping) else None
     values: list[TrainingValue] = []
-    for key, group in list(groups.items())[:_ROW_LIMIT]:
+    for key, group in group_map_entries(groups)[:_ROW_LIMIT]:
         day = _iso_day(key) if len(str(key)) == _DAY_TEXT_LENGTH else None
-        if day is None or not isinstance(group, Mapping):
+        if day is None:
             continue
         for field, kind in _GROUP_FIELDS:
             if group.get(field) is not None:
