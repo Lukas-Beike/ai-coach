@@ -1,4 +1,9 @@
-"""Fail closed unless every declared browser shard supplies complete evidence."""
+"""Fail closed unless every declared browser shard supplies complete evidence.
+
+Evidence from all run attempts is accepted; for each shard only the manifests
+from its latest attempt count, so a partial rerun can replace a failed shard
+while a failing or missing latest result still fails.
+"""
 
 import argparse
 import json
@@ -88,11 +93,37 @@ def collect_children(manifest, project, key, files, actual):
         actual.setdefault(project, []).extend(identity(item) for item in child_ids)
 
 
-def verify(directory, expected):
-    manifests = [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in directory.rglob("manifest.json")
+ATTEMPT = re.compile(r"-attempt-([1-9]\d*)$")
+
+
+def attempt_of(path, directory):
+    """The run attempt named by the artifact directory, 0 when unnamed."""
+    match = ATTEMPT.search(path.relative_to(directory).parts[0])
+    return int(match.group(1)) if match else 0
+
+
+def latest_attempts(entries):
+    def key(manifest):
+        return manifest["selection"]["project"], manifest["selection"]["shard"]
+
+    latest = {}
+    for attempt, manifest in entries:
+        latest[key(manifest)] = max(attempt, latest.get(key(manifest), attempt))
+    return [
+        manifest for attempt, manifest in entries if attempt == latest[key(manifest)]
     ]
+
+
+def verify(directory, expected):
+    manifests = latest_attempts(
+        [
+            (
+                attempt_of(path, directory),
+                json.loads(path.read_text(encoding="utf-8")),
+            )
+            for path in sorted(directory.rglob("manifest.json"))
+        ]
+    )
     required = {
         (project, shard)
         for project, total in expected.items()
