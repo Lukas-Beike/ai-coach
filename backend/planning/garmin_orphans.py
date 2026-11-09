@@ -1,8 +1,9 @@
 """Garmin workouts this app sent for planned units that no longer exist.
 
 Read-only projection over ``remote_links`` (provider ``garmin``, entity
-``planned_unit``) and the stored units. A link is an orphan when its unit is
-missing, tombstoned, archived, deleted or no longer a strength unit, so the
+``planned_unit``) joined to the stored units. A link is an orphan when its unit is
+missing, tombstoned, archived, deleted or no longer a strength unit (a unit
+with an unreadable payload is damaged, not an orphan), so the
 workout and schedule it names would stay in Garmin Connect for good. Only
 linked ids are ever listed; a Garmin workout without a link is never a
 candidate. The explicit Garmin sync removes the listed orphans.
@@ -16,12 +17,10 @@ from datetime import date
 from typing import Any, Final
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
-from backend.db.remote_links import RemoteLinkRepository
 from backend.planning.sport import planned_sport_environment
 
 # One sync job takes at most 28 entries; the rest waits for the next sync.
 MAX_CLEANUP: Final = 20
-_REMOTE_LINKS = RemoteLinkRepository()
 _UNKNOWN_NAME: Final = "Gelöschte Einheit"
 
 
@@ -45,8 +44,11 @@ def _label(payload: Any) -> tuple[str, str]:
 
 
 def _is_orphan(row: Any, payload: Any) -> bool:
-    if row is None or row["tombstone"] or not isinstance(payload, dict):
+    if row["unit_id"] is None or row["tombstone"]:
         return True
+    if not isinstance(payload, dict):
+        # An unreadable payload is a damaged unit, not a deleted one.
+        return False
     if payload.get("local_deleted") or payload.get("archived"):
         return True
     sport, _environment = planned_sport_environment(payload)
@@ -58,20 +60,19 @@ def find_orphans(
 ) -> tuple[list[GarminOrphan], int]:
     """Return up to ``limit`` orphans, latest day first, and the total count."""
     orphans: list[GarminOrphan] = []
-    for link in _REMOTE_LINKS.list_for_provider(
-        db, ProviderId.GARMIN.value, RemoteEntityKind.PLANNED_UNIT
-    ):
-        row = db.execute(
-            "SELECT payload, tombstone FROM planned_units WHERE local_id=?",
-            (link.local_id,),
-        ).fetchone()
+    for row in db.execute(
+        "SELECT l.local_id AS link_id, p.local_id AS unit_id, p.payload, p.tombstone "
+        "FROM remote_links l LEFT JOIN planned_units p ON p.local_id = l.local_id "
+        "WHERE l.provider=? AND l.entity_kind=?",
+        (ProviderId.GARMIN.value, RemoteEntityKind.PLANNED_UNIT.value),
+    ).fetchall():
         try:
-            payload = json.loads(row["payload"] or "{}") if row else None
+            payload = json.loads(row["payload"] or "{}")
         except TypeError, ValueError:
             payload = None
         if _is_orphan(row, payload):
             name, day = _label(payload)
-            orphans.append(GarminOrphan(link.local_id, name, day))
+            orphans.append(GarminOrphan(row["link_id"], name, day))
     # Latest day first, so upcoming duplicates go before old history.
     ordered = sorted(orphans, key=lambda item: item.date, reverse=True)
     return (ordered if limit is None else ordered[:limit]), len(ordered)

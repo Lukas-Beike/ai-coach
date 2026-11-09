@@ -816,6 +816,40 @@ class PushTests(unittest.TestCase):
 
         self.assertEqual([U1], self.orphan_ids())
 
+    def test_a_unit_with_an_unreadable_payload_is_no_orphan(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        with self.database_manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET payload='{broken' WHERE local_id=?", (U1,)
+            )
+
+        self.assertEqual([], self.orphan_ids())
+
+    def test_a_listed_leftover_removed_meanwhile_is_not_a_failure(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        self.retire(U1, UNIT)
+        stale = removal_entries(find_orphans_listed(self.database_manager))
+        self.service.sync({"entries": stale})
+
+        result = self.service.sync({"entries": stale})
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("already_synced", result["results"][0]["status"])
+
+    def test_the_card_shows_a_selected_archived_unit_as_a_push(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        self.retire(U1, UNIT)
+
+        arguments = _approved_garmin_arguments(
+            {"entries": [{"local_id": U1, "remove": False}]}, self.database_manager
+        )
+        details = _garmin_approval_details(arguments, self.database_manager)
+
+        self.assertEqual(
+            [("Kraft A", "Kraft an Garmin")],
+            [(item["name"], item["sport"]) for item in details],
+        )
+
     def test_a_foreign_garmin_workout_is_never_touched(self) -> None:
         self.garmin.workouts["999"] = {"workoutName": "Mein eigenes"}
         self.garmin.schedules["998"] = ("999", "2026-11-09")
@@ -837,7 +871,11 @@ class PushTests(unittest.TestCase):
         original = self.garmin.delete_workout
         self.garmin.delete_workout = Mock(side_effect=_http_error(500))  # type: ignore[method-assign]
 
-        self.assertEqual("error", self.sync_with_cleanup()["status"])
+        failed = self.sync_with_cleanup()
+        self.assertEqual("error", failed["status"])
+        self.assertIn(
+            "Altes Garmin-Workout nicht entfernt", failed["results"][0]["error"]
+        )
         self.assertEqual([U1], self.orphan_ids())
 
         self.garmin.delete_workout = original  # type: ignore[method-assign]
@@ -929,12 +967,14 @@ class PushTests(unittest.TestCase):
             "Gelöschte Einheit", find_orphans_listed(self.database_manager)[0].name
         )
 
-    def test_remove_without_a_link_is_a_conflict(self) -> None:
+    def test_remove_without_a_link_has_nothing_left_to_do(self) -> None:
+        # e.g. a listed leftover another sync removed first
         result = self.service.sync(
             {"entries": [{"library_workout_id": U1, "remove": True}]}
         )
 
-        self.assertEqual("conflict", result["results"][0]["status"])
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("already_synced", result["results"][0]["status"])
         self.assertEqual(0, self.sessions)
 
 

@@ -33,6 +33,8 @@ from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
 
 _MAX_REMOTE_APPROVAL_DETAILS = 5000
+# Entries of one Garmin plan_push job (backend/sync/jobs.py).
+_MAX_GARMIN_ENTRIES = 28
 
 
 def _approval_date(value: Any) -> str:
@@ -265,7 +267,9 @@ class CoachProposalCreationService:
             and self._nutrition_meal_library_service is not None
         ):
             preview_values.update(
-                self._nutrition_meal_library_service().prepare_values(preview_values)
+                self._nutrition_meal_library_service().prepare_values(
+                    preview_values
+                )
             )
 
     @staticmethod
@@ -495,7 +499,7 @@ def _approved_garmin_arguments(
     makes the push a conflict.
     """
     raw = arguments.get("entries")
-    if not isinstance(raw, list) or not 1 <= len(raw) <= 28:
+    if not isinstance(raw, list) or not 1 <= len(raw) <= _MAX_GARMIN_ENTRIES:
         raise AppError(
             400, "Wähle 1 bis 28 Krafteinheiten.", reason="invalid_job_request"
         )
@@ -533,7 +537,7 @@ def _approved_garmin_arguments(
     with database_manager.reader() as db:
         orphans, _total = find_orphans(db)
     chosen = {entry["library_workout_id"] for entry in entries}
-    room = 28 - len(entries)
+    room = _MAX_GARMIN_ENTRIES - len(entries)
     entries.extend(
         removal_entries(
             [item for item in orphans if item.local_id not in chosen][:room]
@@ -564,11 +568,12 @@ def _garmin_approval_details(
     }
     with database_manager.reader() as db:
         orphans = {item.local_id: item for item in find_orphans(db, limit=None)[0]}
+    listed = orphans.keys() & removals
     rows = _planned_rows(
         [
             entry["library_workout_id"]
             for entry in entries
-            if entry["library_workout_id"] not in orphans
+            if entry["library_workout_id"] not in listed
         ],
         database_manager,
     )
@@ -585,7 +590,7 @@ def _garmin_approval_details(
             "id": item.local_id,
         }
         for local_id, item in orphans.items()
-        if local_id in removals
+        if local_id in listed
     )
     return details
 

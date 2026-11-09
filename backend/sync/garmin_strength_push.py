@@ -192,17 +192,20 @@ class GarminStrengthPushService:
                 )
             except _StopRun as exc:
                 stopped = True
-                results[unit.local_id] = _error_result(unit.local_id, str(exc))
+                results[unit.local_id] = _error_result(
+                    unit.local_id, _removal_context(unit, str(exc))
+                )
             except Exception as exc:  # noqa: BLE001 - isolate each selected unit
                 results[unit.local_id] = _error_result(
-                    unit.local_id, self._redact(str(exc))[:500]
+                    unit.local_id,
+                    _removal_context(unit, self._redact(str(exc))[:500]),
                 )
 
     def _prepare(self, item: dict[str, Any]) -> _Prepared | dict[str, Any]:
         local_id = item["library_workout_id"]
         if item.get("remove"):
             if self._link(local_id) is None:
-                return _error_result(local_id, "Nicht an Garmin gesendet.", "conflict")
+                return _already_removed(local_id)
             return _Prepared(local_id, None, True)
         with self._database_manager().unit_of_work() as db:
             row = db.execute(
@@ -399,7 +402,7 @@ class GarminStrengthPushService:
     def _remove(self, client: Any, unit: _Prepared) -> dict[str, Any]:
         link = self._link(unit.local_id)
         if link is None:
-            return _error_result(unit.local_id, "Nicht an Garmin gesendet.", "conflict")
+            return _already_removed(unit.local_id)
         self._discard(client, link.remote_id, link.remote_external_id)
         with self._database_manager().unit_of_work() as db:
             _REMOTE_LINKS.delete(
@@ -465,6 +468,16 @@ def _scheduled_on(client: Any, workout_id: str, day: str) -> str | None:
         if str(owner or "") == workout_id:
             return _schedule_id(item)
     return None
+
+
+def _already_removed(local_id: str) -> dict[str, Any]:
+    """Nothing is linked any more, e.g. a listed leftover removed by another sync."""
+    return {"library_workout_id": local_id, "status": "already_synced"}
+
+
+def _removal_context(unit: _Prepared, message: str) -> str:
+    """Say which write failed, since a job may mix a push with leftover removals."""
+    return f"Altes Garmin-Workout nicht entfernt: {message}" if unit.remove else message
 
 
 def _error_result(local_id: str, message: str, status: str = "error") -> dict[str, Any]:
