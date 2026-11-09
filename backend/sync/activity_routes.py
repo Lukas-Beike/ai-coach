@@ -8,8 +8,9 @@ placed, oldest first, so a pass without changes decodes nothing. Sessions that
 are gone and routes without a session leave the index, athlete names stay on
 the routes that remain. Nothing is requested remotely.
 
-With "GPS-Spuren speichern" off the stage keeps no route: the index is deleted
-and not rebuilt. Positions live only in local variables of the decoding; the
+Turning "GPS-Spuren speichern" off keeps the index. It is removed only with the
+confirmed GPS-track deletion or the purge (``route_store.clear_routes``).
+Positions live only in local variables of the decoding; the
 state and the log carry counts.
 """
 
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Callable, Mapping
 from datetime import UTC, tzinfo
 from typing import Any, Final
@@ -56,13 +58,19 @@ def _wants(summary: Mapping[str, Any]) -> bool:
     )
 
 
+def _finite(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
 def _input_hash(summary: Mapping[str, Any], stream_hashes: list[str]) -> str:
     """Every input of a session's fingerprint, known without decoding a stream."""
     return fingerprint_inputs(
         {
             "method_version": METHOD_VERSION,
             "started_at": summary.get("started_at"),
-            "distance_m": summary.get("distance_m"),
+            "distance_m": _finite(summary.get("distance_m")),
             "streams": sorted(stream_hashes),
         }
     )

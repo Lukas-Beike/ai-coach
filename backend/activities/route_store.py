@@ -33,6 +33,13 @@ def load_index(db: Any) -> dict[str, Any]:
         and isinstance(index.get("sessions"), dict)
         and isinstance(index.get("next"), int)
     ):
+        # A malformed entry is dropped so one bad row cannot fail a stage pass.
+        for part in ("routes", "sessions"):
+            index[part] = {
+                key: entry
+                for key, entry in index[part].items()
+                if isinstance(entry, dict)
+            }
         return index
     return routes.empty_index()
 

@@ -570,6 +570,20 @@ class PrivacyDeleteTests(StageCase):
         self.assertIsNotNone(self.block("act_g1"))
 
 
+class HardeningTests(StageCase):
+    def test_malformed_entries_and_a_nan_distance_do_not_fail_the_stage(self) -> None:
+        add_outdoor_session(self.manager, 1, loop(seed=1))
+        with self.manager.unit_of_work() as db:
+            self.key_values.set(
+                db,
+                route_store.INDEX_KEY,
+                json.dumps({"routes": {"r1": 5}, "sessions": {"x": "y"}, "next": 2}),
+            )
+        report = self.run_stage()
+        self.assertTrue(report.done)
+        self.assertIsNotNone(self.block("act_g1"))
+
+
 class RenameTests(StageCase):
     def setUp(self) -> None:
         super().setUp()
