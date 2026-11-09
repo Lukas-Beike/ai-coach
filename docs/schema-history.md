@@ -11,7 +11,7 @@ replace or reset the data directory to resolve a rejected schema. A fresh
 database is only required when the athlete explicitly chooses to start over.
 Future schema changes add explicit, versioned and transactional migrations from
 version 21 with upgrade regression tests.
-The current schema is version 23. Version 10 adds canonical activity detail
+The current schema is version 25. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
 `garmin_snapshot` value, version 13 adds the maximum speed of each lap, and
@@ -28,8 +28,12 @@ status and window of the latest fetch) as canonical rows, and version 22 stores
 executed strength sets (each set's type, exercise category and code,
 repetitions, weight, duration and planned workout step) as a detail kind, and
 version 23 adds the athlete's own marking of what a session was
-(`activity_feedback.purpose`). A
-version 21 or 22 database or backup is upgraded to it in place within one
+(`activity_feedback.purpose`), version 24 records what measured the heart
+rate and power of a stream set (chest strap or optical, power meter, trainer
+or estimate) and the external sensors its recording named (without serial
+numbers), and version 25 stores the first threshold estimate (DFA-a1) of a
+chest-strap stream set as a derived result only, never the RR intervals. A
+version 21 to 24 database or backup is upgraded to it in place within one
 transaction, and a failed upgrade leaves it unchanged. Change-history entries
 written before version 16 still name the former fields and can no longer be
 undone.
