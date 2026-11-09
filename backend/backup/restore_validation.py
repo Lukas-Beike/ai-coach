@@ -23,6 +23,7 @@ class DatabaseRestoreValidationConfig:
     configure_cipher: Callable[[Any, str], None]
     row_factory: Any
     schema_is_current: Callable[[Any], bool]
+    startup_invariants: Callable[[Any], None]
     migrate_schema: Callable[[Any], None] = migrate_schema
 
 
@@ -100,6 +101,8 @@ class DatabaseRestoreValidationService:
                 raise AppError(
                     400, "Die Integritätsprüfung des Backups ist fehlgeschlagen."
                 )
+            # A restored database needs the same invariants as a started one.
+            self._config.startup_invariants(connection)
             # Sessions from the backup must never survive a restore.
             connection.execute("DELETE FROM sessions")
             connection.commit()

@@ -124,6 +124,7 @@ class BackupAssemblyTests(unittest.TestCase):
                         configure_cipher=Mock(),
                         row_factory=Mock(),
                         schema_is_current=Mock(),
+                        startup_invariants=Mock(),
                     ),
                     lifecycle=RestoreLifecycleDependencies(
                         profile_mutation_coordinator=threading.RLock(),

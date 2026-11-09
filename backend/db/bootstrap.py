@@ -18,6 +18,26 @@ from backend.db.schema import (
 LOGGER = logging.getLogger("intervals_coach")
 
 
+def apply_startup_invariants(
+    db: Any,
+    *,
+    key_values: KeyValueRepository,
+    now: str,
+    default_profile_json: str,
+    provider_resync_keys: Iterable[Mapping[str, str]],
+) -> None:
+    """Idempotent state every running database needs; shared with restore."""
+    db.execute(
+        "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
+        (now,),
+    )
+    if key_values.get(db, "profile") is None:
+        key_values.set(db, "profile", default_profile_json)
+    for provider_keys in provider_resync_keys:
+        key_values.set(db, provider_keys["running"], "0")
+        key_values.set(db, provider_keys["status"], "")
+
+
 def initialize_application_database(
     db: Any,
     *,
@@ -36,21 +56,17 @@ def initialize_application_database(
     else:
         migrate_schema(db)
 
-    db.execute(
-        "INSERT OR IGNORE INTO planning_state(id, revision, updated_at) VALUES (1, 0, ?)",
-        (now,),
-    )
     if not database_schema_is_current(db):
         raise RuntimeError(
             "Die neue Datenbank konnte nicht mit dem aktuellen Schema initialisiert werden."
         )
-
-    if key_values.get(db, "profile") is None:
-        key_values.set(db, "profile", default_profile_json)
-
-    for provider_keys in provider_resync_keys:
-        key_values.set(db, provider_keys["running"], "0")
-        key_values.set(db, provider_keys["status"], "")
+    apply_startup_invariants(
+        db,
+        key_values=key_values,
+        now=now,
+        default_profile_json=default_profile_json,
+        provider_resync_keys=provider_resync_keys,
+    )
 
     # Values <= 0 (including the documented -1) retain data indefinitely.
     if retention_days > 0:

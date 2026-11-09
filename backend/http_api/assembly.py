@@ -235,8 +235,6 @@ class HttpDiagnosticsServices:
 class HttpPrivacyServices:
     backup: Callable[[], Any]
     export: Callable[[], Any]
-    monotonic: Callable[[], float]
-    export_time_limit_seconds: int
     delete: Callable[[], Any]
     restore: Callable[[], Any]
     max_backup_bytes: int
@@ -407,8 +405,6 @@ class HttpApiAssembly:
         diagnostic_report_service = diagnostics.report
         backup_service = privacy.backup
         privacy_export_service = privacy.export
-        monotonic = privacy.monotonic
-        export_time_limit_seconds = privacy.export_time_limit_seconds
         privacy_delete_service = privacy.delete
         backup_restore_service = privacy.restore
         max_backup_bytes = privacy.max_backup_bytes
@@ -766,8 +762,6 @@ class HttpApiAssembly:
         self._uuid_factory = uuid_factory
         self._backup_service = backup_service
         self._privacy_export_service = privacy_export_service
-        self._monotonic = monotonic
-        self._export_time_limit_seconds = export_time_limit_seconds
 
     def readiness_service(self) -> ReadinessService:
         return ReadinessService(
@@ -781,8 +775,6 @@ class HttpApiAssembly:
         return ExportStreamTransport(
             self._backup_service,
             self._privacy_export_service,
-            monotonic=self._monotonic,
-            time_limit_seconds=self._export_time_limit_seconds,
         )
 
     def library_page_service(self) -> LibraryPageService:

@@ -863,6 +863,7 @@ class BackupRestoreRoundTripTests(DataKindFixture):
                 configure_cipher=Mock(),
                 row_factory=sqlite3.Row,
                 schema_is_current=database_schema_is_current,
+                startup_invariants=lambda _db: None,
                 migrate_schema=migrate_schema,
             )
         ).validate(staged)

@@ -49,7 +49,7 @@ class ExportStreamTransportTests(unittest.TestCase):
             logging.getLogger(__name__),
         )
 
-    def test_database_backup_releases_database_lock_before_send_and_passes_deadline(
+    def test_database_backup_releases_database_lock_before_send(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -62,8 +62,6 @@ class ExportStreamTransportTests(unittest.TestCase):
             transport = ExportStreamTransport(
                 lambda: backup,
                 privacy_export_factory,
-                monotonic=lambda: 50,
-                time_limit_seconds=20,
             )
             handler = Mock()
 
@@ -74,7 +72,7 @@ class ExportStreamTransportTests(unittest.TestCase):
                     args[1:],
                     ("application/octet-stream", "pacecraft-database.backup"),
                 )
-                self.assertEqual(kwargs, {"deadline": 18})
+                self.assertEqual(kwargs, {})
                 self.assertTrue(Path(args[0]).exists())
 
             handler.send_file_stream.side_effect = send_file_stream
@@ -96,8 +94,6 @@ class ExportStreamTransportTests(unittest.TestCase):
                         "unused privacy export construction failed"
                     )
                 ),
-                monotonic=lambda: 50,
-                time_limit_seconds=20,
             )
             handler = Mock()
             handler.send_file_stream.side_effect = RuntimeError("send failed")
@@ -108,7 +104,7 @@ class ExportStreamTransportTests(unittest.TestCase):
             self.assertFalse(lock.held)
             self.assertFalse(list(root.glob(".database-backup-*.tmp")))
 
-    def test_privacy_export_uses_injected_deadline_and_cleans_up_on_send_failure(
+    def test_privacy_export_cleans_up_on_send_failure(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -122,8 +118,6 @@ class ExportStreamTransportTests(unittest.TestCase):
             transport = ExportStreamTransport(
                 database_backup_factory,
                 lambda: privacy_export,
-                monotonic=lambda: 12.5,
-                time_limit_seconds=7,
             )
             handler = Mock()
 
@@ -132,7 +126,7 @@ class ExportStreamTransportTests(unittest.TestCase):
                     args,
                     (archive_path, "application/zip", "pacecraft-export.zip"),
                 )
-                self.assertEqual(kwargs, {"deadline": 19.5, "cleanup": True})
+                self.assertEqual(kwargs, {"cleanup": True})
                 try:
                     raise BrokenPipeError("client disconnected")
                 finally:

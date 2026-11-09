@@ -45,6 +45,7 @@ class RestoreValidationDependencies:
     configure_cipher: Callable[[Any, str], None]
     row_factory: Any
     schema_is_current: Callable[[Any], bool]
+    startup_invariants: Callable[[Any], None]
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,7 @@ class BackupAssembly:
         self._configure_cipher = validation.configure_cipher
         self._row_factory = validation.row_factory
         self._schema_is_current = validation.schema_is_current
+        self._startup_invariants = validation.startup_invariants
         self._maintenance_gate = lifecycle.maintenance_gate
         self._profile_mutation_coordinator = lifecycle.profile_mutation_coordinator
         self._sync_jobs = lifecycle.sync_jobs
@@ -126,6 +128,7 @@ class BackupAssembly:
                 configure_cipher=self._configure_cipher,
                 row_factory=self._row_factory,
                 schema_is_current=self._schema_is_current,
+                startup_invariants=self._startup_invariants,
             )
         )
 

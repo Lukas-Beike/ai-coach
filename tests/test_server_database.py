@@ -971,8 +971,6 @@ class ServerDatabaseTests(ServerTestCase):
             transport = ExportStreamTransport(
                 Mock(side_effect=RuntimeError("unused database backup")),
                 lambda: service,
-                monotonic=time.monotonic,
-                time_limit_seconds=30,
             )
             with configured:
                 transport.stream_privacy_export(handler)

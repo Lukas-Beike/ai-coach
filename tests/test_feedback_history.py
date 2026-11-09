@@ -185,6 +185,7 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
                 configure_cipher=configure_cipher,
                 row_factory=row_factory,
                 schema_is_current=database_schema_is_current,
+                startup_invariants=lambda _db: None,
             )
         )
         staged = validation.stage(backup)
