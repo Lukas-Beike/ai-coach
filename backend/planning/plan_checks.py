@@ -46,6 +46,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.athlete.checkins import reports_complaint
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE
@@ -153,10 +154,6 @@ _HARD_ZONE = re.compile(
 )
 # "maximal" is left out: in German it mostly means "at most".
 _HEAVY = re.compile(r"\b(?:heavy|schwer|[1-6]\s*rm)\b", re.IGNORECASE)
-# Check-in answers that report no illness.
-_NO_ILLNESS = frozenset(
-    {"", "-", "keine", "kein", "nein", "nichts", "gesund", "none", "no", "n/a"}
-)
 
 
 def intensity_factor(unit: Mapping[str, Any]) -> float | None:
@@ -391,7 +388,7 @@ def _missing_taper(
 def _illness_hard(
     units: Sequence[Mapping[str, Any]], illness: str, today: date
 ) -> list[dict]:
-    if illness.strip().casefold() in _NO_ILLNESS:
+    if not reports_complaint(illness):
         return []
     last = (today + timedelta(days=ILLNESS_DAYS)).isoformat()
     # One finding per session, so making a flagged session harder or longer

@@ -8,6 +8,18 @@ from typing import Any
 from backend.db.repositories import CheckinRepository
 from backend.errors import AppError
 
+# Check-in answers that report no complaint (pain or illness).
+NO_COMPLAINT = frozenset(
+    {"", "-", "keine", "kein", "nein", "nichts", "gesund", "none", "no", "n/a"}
+)
+
+
+def reports_complaint(text: Any) -> bool:
+    """Whether a pain or illness answer reports a complaint, not "keine"/"nein"."""
+    answer = str(text or "").strip().strip(".!,;:").strip().casefold()
+    return answer not in NO_COMPLAINT
+
+
 CHECKIN_TEXT_LIMITS = {
     "day_form": 2000,
     "illness": 1000,

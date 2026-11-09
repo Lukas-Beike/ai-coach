@@ -14,7 +14,10 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import PlanAdjustmentRepository
 from backend.errors import AppError
 from backend.planning import adaptive, adaptive_preview_service, calendar
-from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
+from backend.planning.adaptive_preview_service import (
+    AdaptivePreviewLimits,
+    AdaptiveReplanPreviewService,
+)
 
 
 class _Checkins:
@@ -100,10 +103,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
             lambda: self.today,
             lambda: self.now_value,
             self._next_id,
-            56,
-            1000,
-            3,
-            90,
+            AdaptivePreviewLimits(56, 1000, 3, 90),
         )
 
     def _next_id(self):

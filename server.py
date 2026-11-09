@@ -275,6 +275,7 @@ from backend.planning.plan_guard_service import (
 )
 from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.revision import PlanningRevisionService
+from backend.planning.run_hr_cap import profile_run_caps
 from backend.planning.run_lthr import RunLthr
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -813,6 +814,7 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
                 ATHLETE_DATA.profile().get_from_db(db)
             ),
             timezone=lambda: str(ATHLETE_DATA.profile().get().get("timezone") or "UTC"),
+            run_caps=lambda: profile_run_caps(ATHLETE_DATA.profile().get()),
         ),
         runtime=PlanningRuntime(
             sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
