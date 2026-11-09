@@ -331,6 +331,7 @@ class ServerCoachTests(ServerTestCase):
                 "name": "Local tempo",
                 "description": "- 60m 85%",
                 "duration_minutes": 60,
+                "session_focus": "tempo",
             }
         )
         tomorrow = (server.ATHLETE_CLOCK.now().date() + timedelta(days=1)).isoformat()
