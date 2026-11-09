@@ -387,11 +387,6 @@ const SDK_FAILURE_TEXT = {
 
 // Pure: one line per stale threshold with value, source and age (#1768).
 function zoneWarningLine(item) {
-  if (item.reason === "indoor_missing") {
-    return item.value_text
-      ? `${item.label} fehlt – Indoor-Fahrten nutzen FTP Rad ${item.value_text}`
-      : `${item.label} fehlt`;
-  }
   const unit = item.age_days === 1 ? "Tag" : "Tage";
   const age = item.age_days == null ? "" : ` · ${item.age_days} ${unit} alt`;
   const suffix = { expired: " – nicht mehr verwendet", sdk_failed: " – wird nicht aktualisiert" }[item.reason] || "";
@@ -403,14 +398,14 @@ function zoneWarningTitle(warnings) {
   return `${sdk}Schwellen prüfen und neue Werte hier lokal speichern`;
 }
 
-// Pure: the status strip notice for stale or missing thresholds (#1768), or null.
+// Pure: the status strip notice for stale thresholds (#1768), or null.
 function thresholdStatusItem(warnings) {
   const items = Array.isArray(warnings?.items) ? warnings.items : [];
   if (!items.length) return null;
   return {
     level: "warning",
     title: "Schwellenwerte prüfen",
-    detail: items.length === 1 ? zoneWarningLine(items[0]) : `${items.length} Werte sind veraltet oder fehlen.`,
+    detail: items.length === 1 ? zoneWarningLine(items[0]) : `${items.length} Werte sind veraltet.`,
     action: { href: "#more/profile", label: "Prüfen" },
   };
 }

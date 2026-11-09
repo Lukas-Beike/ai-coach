@@ -12,8 +12,8 @@ day. A local value is dated by its ``valid_from``, else by its last save; a
 provider value by the day the provider reports for it. A provider value beyond
 its source-policy age limit is no longer used and is reported as expired. While
 the Garmin SDK fails, Garmin values stop updating, so each active Garmin value
-is listed even when it is still fresh. Indoor rides in the window without a
-local indoor FTP read the outdoor FTP, which is reported too.
+is listed even when it is still fresh. Indoor rides read the ride FTP unless the
+athlete set a local indoor FTP; only that explicit value can be reported stale.
 
 No value is estimated here. This module must not import ``server.py``.
 """
@@ -23,11 +23,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from typing import Any, Final
 
 from backend.activities.zone_settings import effective_zone_configuration
-from backend.canonical.activity_summary import summary_is_indoor, summary_local_date
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.labels import PROVIDER_SHORT_LABELS
 from backend.canonical.records import Observation
@@ -55,7 +54,6 @@ STALE_AFTER_DAYS: Final = 56
 REASON_STALE: Final = "stale"
 REASON_EXPIRED: Final = "expired"
 REASON_SDK_FAILED: Final = "sdk_failed"
-REASON_INDOOR_MISSING: Final = "indoor_missing"
 
 # The thresholds the local load and the zones read, with their German label.
 CHECKED_THRESHOLDS: Final[tuple[tuple[ThresholdKey, str], ...]] = (
@@ -68,7 +66,6 @@ CHECKED_THRESHOLDS: Final[tuple[tuple[ThresholdKey, str], ...]] = (
 INDOOR_LABEL: Final = "Indoor-FTP"
 # The item key of the local indoor FTP; no provider indoor FTP is read here.
 INDOOR_METRIC: Final = "indoor_ftp"
-RIDE_FTP: Final[ThresholdKey] = (MetricKind.FTP, Sport.RIDE)
 _METRIC: Final = {
     MetricKind.FTP: ZoneConfigurationMetric.POWER,
     MetricKind.THRESHOLD_HR: ZoneConfigurationMetric.HEART_RATE,
@@ -154,30 +151,15 @@ def _threshold_item(
 
 
 def _indoor_item(
-    outdoor: DatedThreshold | None, indoor_local: DatedThreshold | None, today: date
+    indoor_local: DatedThreshold | None, today: date
 ) -> dict[str, Any] | None:
-    """The indoor FTP item: missing (naming the outdoor FTP used) or stale."""
-    if indoor_local is not None:
-        if not _stale(indoor_local, today):
-            return None
-        item = _item(
-            MetricKind.FTP, Sport.RIDE, INDOOR_LABEL, indoor_local, REASON_STALE, today
-        )
-        return {**item, "metric": INDOOR_METRIC}
-    return {
-        "metric": INDOOR_METRIC,
-        "sport": Sport.RIDE.value,
-        "label": INDOOR_LABEL,
-        "value": None if outdoor is None else outdoor.value,
-        "value_text": None
-        if outdoor is None
-        else value_text(MetricKind.FTP, outdoor.value),
-        "source": None,
-        "source_label": None,
-        "dated_on": None,
-        "age_days": None,
-        "reason": REASON_INDOOR_MISSING,
-    }
+    """The stale item of an explicitly set local indoor FTP; none otherwise."""
+    if indoor_local is None or not _stale(indoor_local, today):
+        return None
+    item = _item(
+        MetricKind.FTP, Sport.RIDE, INDOOR_LABEL, indoor_local, REASON_STALE, today
+    )
+    return {**item, "metric": INDOOR_METRIC}
 
 
 def assess_thresholds(
@@ -186,16 +168,14 @@ def assess_thresholds(
     *,
     today: date,
     sdk_failure: Mapping[str, Any] | None = None,
-    indoor_rides: bool = False,
     indoor_local: DatedThreshold | None = None,
     local_undated: frozenset[ThresholdKey] = frozenset(),
 ) -> dict[str, Any] | None:
     """Return the warning, or None when every checked threshold is fresh.
 
     ``active`` holds the value in effect per threshold, ``last_provider`` the
-    newest provider value per threshold whatever its age. ``indoor_rides`` says
-    whether indoor rides fall into the window, ``indoor_local`` is the local
-    indoor FTP in effect. ``local_undated`` names thresholds whose local value
+    newest provider value per threshold whatever its age. ``indoor_local`` is the
+    local indoor FTP in effect, if the athlete set one. ``local_undated`` names thresholds whose local value
     is in effect without a date; they are not judged.
     """
     checked = [
@@ -217,9 +197,7 @@ def assess_thresholds(
             )
         )
     ]
-    if indoor_rides and (
-        indoor := _indoor_item(active.get(RIDE_FTP), indoor_local, today)
-    ):
+    if indoor := _indoor_item(indoor_local, today):
         items.append(indoor)
     if not items:
         return None
@@ -309,8 +287,7 @@ class ThresholdStalenessService:
         preferences: Callable[[Any], SourcePreferences],
         sdk_failure: Callable[[], Mapping[str, Any] | None] = lambda: None,
     ) -> None:
-        """``reader`` serves observations and activity summaries; the stored zone
-        configurations come from ``zone_configurations``."""
+        """``reader`` serves observations; the stored zone configurations come from ``zone_configurations``."""
         self._database_manager = database_manager
         self._reader = reader
         self._zone_configurations = zone_configurations
@@ -349,8 +326,6 @@ class ThresholdStalenessService:
                 *((wahoo,) if (wahoo := newest_wahoo_ftp(reader, db)) else ()),
             )
             saved_on = canonical_domain_store.local_zone_saved_days(db)
-            start = today - timedelta(days=STALE_AFTER_DAYS)
-            summaries = reader.activity_summaries(db, start=start)
         local = [item for item in configurations if item.provenance.provider is None]
         active, local_undated = _active_thresholds(winners, local, saved_on, today)
         last_provider = {
@@ -370,12 +345,6 @@ class ThresholdStalenessService:
             last_provider,
             today=today,
             sdk_failure=self._sdk_failure(),
-            indoor_rides=any(
-                str(summary.get("sport")) == Sport.RIDE.value
-                and summary_is_indoor(summary)
-                and summary_local_date(summary) >= start.isoformat()
-                for summary in summaries
-            ),
             indoor_local=indoor_local,
             local_undated=local_undated,
         )

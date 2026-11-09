@@ -80,5 +80,5 @@ test("a stale threshold becomes one warning line that points to the profile", ()
   assert.match(one.detail, /FTP Rad 250 W · Lokal · 70 Tage alt/);
   assert.equal(one.action.href, "#more/profile");
   const many = thresholdStatusItem({ items: [{ label: "FTP Rad", value_text: "250 W", source_label: "Lokal" }, { label: "LTHR", value_text: "170 bpm", source_label: "Lokal" }] });
-  assert.equal(many.detail, "2 Werte sind veraltet oder fehlen.");
+  assert.equal(many.detail, "2 Werte sind veraltet.");
 });
