@@ -68,10 +68,11 @@ def _scheduled_provider_retry_at(
 
 
 def _provider_freshness_last_good_state(
-    stale_after_s: int | None, last_good: Any, *, now: datetime
+    stale_after_s: int | None, last_good: Any, fallback_error: bool, *, now: datetime
 ) -> str:
     if stale_after_s is None:
-        return "fresh"
+        # Output-only: a stored push error still needs attention.
+        return "stale" if fallback_error else "fresh"
     parsed = _parse_utc(last_good)
     if parsed is None:
         return "stale" if last_good else "error"
@@ -114,10 +115,8 @@ def _provider_freshness_status(
         if status == "partial":
             return "partial", _provider_fallback_error_code(fallback_error)
     if last_good:
-        if stale_after_s is None and fallback_error:
-            return "stale", "provider_error"
         return _provider_freshness_last_good_state(
-            stale_after_s, last_good, now=now
+            stale_after_s, last_good, fallback_error, now=now
         ), _provider_fallback_error_code(fallback_error)
     if fallback_error:
         return "error", "provider_error"
