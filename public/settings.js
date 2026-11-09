@@ -24,6 +24,13 @@ function clearProfileEntryFields(form) {
   }
 }
 
+// After a confirmed save: clear the entry and show the stored percent.
+function resetProfileEntryFields(form, savedPercent) {
+  clearProfileEntryFields(form);
+  const field = form.elements?.first_threshold_pct;
+  if (savedPercent !== undefined && field) field.value = savedPercent;
+}
+
 function profileFieldText(value) {
   return typeof value === "string" ? value : "";
 }
@@ -168,10 +175,7 @@ async function saveProfile(event) {
     state.profileBaseline = { ...state.profileBaseline, ...changed, ...entryReset, ...savedPercent };
     if (generation !== state.sessionGeneration) return;
     state.profileDirty = JSON.stringify([...new FormData(form)]) !== submittedForm;
-    if (!state.profileDirty) {
-      clearProfileEntryFields(form);
-      if (savedPercent.first_threshold_pct !== undefined && form.elements?.first_threshold_pct) form.elements.first_threshold_pct.value = savedPercent.first_threshold_pct;
-    }
+    if (!state.profileDirty) resetProfileEntryFields(form, savedPercent.first_threshold_pct);
     setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
     invalidateContextPreview();
     handleProfileSaveOutcome(saved, bodyChanged, retryControl, retryBeforeSave);
