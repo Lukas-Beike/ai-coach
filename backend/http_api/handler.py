@@ -360,7 +360,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         content_type: str,
         filename: str,
         *,
-        deadline: float | None = None,
         cleanup: bool = False,
     ) -> None:
         self.dependencies.response_transport.send_file_stream(
@@ -368,7 +367,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             path,
             content_type,
             filename,
-            deadline=deadline,
             cleanup=cleanup,
         )
 

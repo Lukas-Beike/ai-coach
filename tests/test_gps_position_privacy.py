@@ -206,6 +206,9 @@ class _Keys:
             (key, value, STAMP),
         )
 
+    def delete(self, db, key):
+        db.execute("DELETE FROM kv WHERE key = ?", (key,))
+
 
 class _Dependencies:
     def __init__(self, db):

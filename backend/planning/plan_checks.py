@@ -462,7 +462,9 @@ def _content_digest(unit: Mapping[str, Any], keys: Sequence[str]) -> str:
 
 
 def hr_cap_invalid(
-    units: Sequence[Mapping[str, Any]], first_threshold_pct: float | None = None
+    units: Sequence[Mapping[str, Any]],
+    first_threshold_pct: float | None = None,
+    estimated: bool = False,
 ) -> list[dict]:
     """One finding per capped run unit with a missing or wrong cap, keyed by content.
 
@@ -472,7 +474,7 @@ def hr_cap_invalid(
     never blocks an unrelated write and is never rewritten silently.
     """
     findings = []
-    for unit, problem in run_hr_cap.problems(units, first_threshold_pct):
+    for unit, problem in run_hr_cap.problems(units, first_threshold_pct, estimated):
         findings.append(
             _finding(
                 "hr_cap_invalid",

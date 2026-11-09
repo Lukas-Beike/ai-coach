@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.diagnostics.readiness_probe import ReadinessProbeService
+from backend.http_api.activity_route_post import ActivityRoutePostRoutes
 from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
@@ -25,6 +26,7 @@ from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.feedback_post import FeedbackPostRoutes
+from backend.http_api.first_threshold_post import FirstThresholdPostRoutes
 from backend.http_api.garmin_post import GarminPostRoutes
 from backend.http_api.handler import (
     HttpRequestHandlerDependencies,
@@ -206,9 +208,11 @@ class HttpAthleteServices:
     local_today: Callable[[], Any]
     state_event_buffer: Any
     equipment: Callable[[], Any] | None = None
+    activity_routes: Callable[[], Any] | None = None
     activity_feedback: Callable[[], Any] | None = None
     session_corrections: Callable[[], Any] | None = None
     zones: Callable[[], Any] | None = None
+    first_threshold: Callable[[], Any] | None = None
     body_export: Callable[[dict[str, str], str | None, float], str] | None = None
 
 
@@ -231,8 +235,6 @@ class HttpDiagnosticsServices:
 class HttpPrivacyServices:
     backup: Callable[[], Any]
     export: Callable[[], Any]
-    monotonic: Callable[[], float]
-    export_time_limit_seconds: int
     delete: Callable[[], Any]
     restore: Callable[[], Any]
     max_backup_bytes: int
@@ -245,6 +247,7 @@ class HttpSyncServices:
     garmin_analysis_refresh: Callable[[], Any]
     wahoo_sync: Callable[[], Any] | None
     full_resync: Callable[[], Any]
+    provider_configured: Callable[[str], bool]
     period_defaults: Any
     all_sync_days: int
     uuid_factory: Callable[[], str]
@@ -297,6 +300,11 @@ class HttpDomainRouteServices:
 
 def _present(route: Any) -> tuple[Any, ...]:
     return (route,) if route is not None else ()
+
+
+def _when(service: Any, route: Callable[..., Any], *args: Any) -> Any:
+    """The optional route built over ``service``, or None when it is not configured."""
+    return route(service, *args) if service else None
 
 
 def _provider_connection_routes(
@@ -397,8 +405,6 @@ class HttpApiAssembly:
         diagnostic_report_service = diagnostics.report
         backup_service = privacy.backup
         privacy_export_service = privacy.export
-        monotonic = privacy.monotonic
-        export_time_limit_seconds = privacy.export_time_limit_seconds
         privacy_delete_service = privacy.delete
         backup_restore_service = privacy.restore
         max_backup_bytes = privacy.max_backup_bytes
@@ -407,6 +413,7 @@ class HttpApiAssembly:
         garmin_analysis_refresh_service = sync.garmin_analysis_refresh
         wahoo_sync_service = sync.wahoo_sync
         full_provider_resync_service = sync.full_resync
+        provider_configured = sync.provider_configured
         sync_period_defaults = sync.period_defaults
         all_sync_days = sync.all_sync_days
         uuid_factory = sync.uuid_factory
@@ -453,6 +460,7 @@ class HttpApiAssembly:
                 local_today(),
                 activity_read_service().summaries_on_days,
             ),
+            first_threshold_service=athlete.first_threshold,
         )
         self.diagnostics_get_routes = DiagnosticsGetRoutes(
             session_auth_service,
@@ -612,9 +620,7 @@ class HttpApiAssembly:
         )
         self.settings_put_routes = SettingsPutRoutes(settings)
         provider_credentials = dependencies.domains.provider_credentials
-        self.credentials_put_routes = (
-            CredentialsPutRoutes(provider_credentials) if provider_credentials else None
-        )
+        self.credentials_put_routes = _when(provider_credentials, CredentialsPutRoutes)
         self.athlete_put_routes = AthletePutRoutes(
             athlete_context_service,
             profile_service,
@@ -632,9 +638,7 @@ class HttpApiAssembly:
             session_rpe_load,
             athlete.session_corrections,
         )
-        self.equipment_post_routes = (
-            EquipmentPostRoutes(athlete.equipment) if athlete.equipment else None
-        )
+        self.equipment_post_routes = _when(athlete.equipment, EquipmentPostRoutes)
         self.chat_cancel_post_routes = ChatCancelPostRoutes(
             coach_job_cancellation_service
         )
@@ -671,24 +675,14 @@ class HttpApiAssembly:
         self.provider_connection_get_routes, self.provider_connection_post_routes = (
             _provider_connection_routes(session_auth_service, connection_checks)
         )
-        self.wahoo_get_routes = (
-            WahooGetRoutes(wahoo_connection_service, maintenance_gate)
-            if wahoo_connection_service
-            else None
+        self.wahoo_get_routes = _when(
+            wahoo_connection_service, WahooGetRoutes, maintenance_gate
         )
-        self.wahoo_post_routes = (
-            WahooPostRoutes(wahoo_connection_service)
-            if wahoo_connection_service
-            else None
-        )
+        self.wahoo_post_routes = _when(wahoo_connection_service, WahooPostRoutes)
         garmin_login_service = dependencies.domains.garmin_login
-        self.garmin_post_routes = (
-            GarminPostRoutes(garmin_login_service) if garmin_login_service else None
-        )
-        self.metric_export_post_routes = (
-            MetricExportPostRoutes(metric_export_service)
-            if metric_export_service
-            else None
+        self.garmin_post_routes = _when(garmin_login_service, GarminPostRoutes)
+        self.metric_export_post_routes = _when(
+            metric_export_service, MetricExportPostRoutes
         )
         self.route_dispatcher = HttpRouteDispatcher(
             (
@@ -739,6 +733,17 @@ class HttpApiAssembly:
             self.garmin_post_routes,
             self.provider_connection_post_routes,
             PlannedUnitFocusPostRoutes(planned_unit_service, database_lock()),
+            _when(
+                athlete.first_threshold,
+                FirstThresholdPostRoutes,
+                profile_service,
+                database_lock(),
+            ),
+            (
+                ActivityRoutePostRoutes(athlete.activity_routes)
+                if athlete.activity_routes
+                else None
+            ),
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,
@@ -751,13 +756,12 @@ class HttpApiAssembly:
         self._sync_job_queue_service = sync_job_queue_service
         self._sync_state_repository = sync_state_repository
         self._full_provider_resync_service = full_provider_resync_service
+        self._provider_configured = provider_configured
         self._sync_period_defaults = sync_period_defaults
         self._all_sync_days = all_sync_days
         self._uuid_factory = uuid_factory
         self._backup_service = backup_service
         self._privacy_export_service = privacy_export_service
-        self._monotonic = monotonic
-        self._export_time_limit_seconds = export_time_limit_seconds
 
     def readiness_service(self) -> ReadinessService:
         return ReadinessService(
@@ -771,8 +775,6 @@ class HttpApiAssembly:
         return ExportStreamTransport(
             self._backup_service,
             self._privacy_export_service,
-            monotonic=self._monotonic,
-            time_limit_seconds=self._export_time_limit_seconds,
         )
 
     def library_page_service(self) -> LibraryPageService:
@@ -798,6 +800,7 @@ class HttpApiAssembly:
             self._uuid_factory,
             self._sync_period_defaults,
             self._all_sync_days,
+            provider_configured=self._provider_configured,
         )
 
     def request_handler_class(self) -> type[BaseHTTPRequestHandler]:

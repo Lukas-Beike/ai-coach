@@ -896,6 +896,8 @@ h2 {
 .adaptive-planning-button:active { transform: scale(.98); }
 .adaptive-planning-button:disabled { cursor: wait; opacity: .65; }
 .weather-icon { flex: 0 0 auto; font-size: 1rem; line-height: 1; }
+.profile-estimate { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.profile-estimate output { flex: 1 1 12rem; font-size: .8rem; line-height: 1.4; }
 .profile-help {
   margin: 0;
   color: var(--muted);

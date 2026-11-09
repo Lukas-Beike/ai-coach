@@ -32,6 +32,10 @@ REPLAYED_BY: Final[dict[str, tuple[str, ...]]] = {
         "fit_activity_detail_mapping",
         "garmin_activity_detail_mapping",
     ),
+    "fit_rr_mapping": (
+        "fit_activity_detail_mapping",
+        "garmin_activity_detail_mapping",
+    ),
     "fit_sensor_mapping": (
         "fit_activity_detail_mapping",
         "garmin_activity_detail_mapping",
@@ -55,20 +59,24 @@ NOT_REPLAYED: Final[dict[str, str]] = {
 # Module -> (replaying versions, code fingerprint).
 PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     "fit_activity_detail_mapping": (
-        (5, 6),
-        "8f61a5149cb2a3de3eb218315550fe95e602d6a2fd2c4ebb0232a6599c98f6dc",
+        (8, 9),
+        "d0709ad79b3b29b34e1f8fc32e4d5623c0d1519191fcc4d05104139325b957fc",
+    ),
+    "fit_rr_mapping": (
+        (8, 9),
+        "4319aab924017281cffb92b24b53fa67ed8633d747b55e9f61f57b58821c6981",
     ),
     "fit_sensor_mapping": (
-        (5, 6),
-        "2953aba79c668bb9ef9561fe5f80cea406b399d609301730fc8e79e95ef3626f",
+        (8, 9),
+        "134b2316926293f83d911c1b3b6b88ba6d0a9d4ab900e97ec69b56c7788d19b1",
     ),
     "garmin_activity_detail_mapping": (
-        (6,),
-        "11c11e6384a73b1f38e970b639245c3b5bf110e710a48f14d5c3bb6b1c78d389",
+        (9,),
+        "a2ea798f22a734653349932c21b105749d702181513b875676322fa58ab1d8d0",
     ),
     "garmin_activity_mapping": (
-        (20,),
-        "c1b26578d189a3b8afe775e9055fb5e2b78639e63c4eb061efcb376372e869ea",
+        (21,),
+        "adb059dae3b2103933de835f3cec94d2abf0a2e9d76e2898d394f1b015a27f8b",
     ),
     "garmin_gear_mapping": (
         (21,),
@@ -95,7 +103,7 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "77efab15de0cda5414ed02c0d5005a9fe6fb1a650ec103bdb40e01cef065cf0f",
     ),
     "wahoo_activity_mapping": (
-        (8, 20),
+        (8, 21),
         "9b74c3dca726d23d18e782b7dd8f351572a6a24c2230187db13a5cb5ba181312",
     ),
     "wahoo_threshold_mapping": (

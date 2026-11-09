@@ -80,6 +80,12 @@ _FIT_FIELD_SCALES: Final[Mapping[tuple[int, int], tuple[str, int, int]]] = {
     (20, 7): ("power_w", 1, 0),
     (20, 13): ("temperature_c", 1, 0),
     (20, 53): ("fractional_cadence_rpm", 128, 0),
+    # running dynamics (FIT SDK profile; not checked against a recorded file)
+    (20, 39): ("vertical_oscillation_mm", 10, 0),
+    (20, 41): ("stance_time_ms", 10, 0),
+    (20, 83): ("vertical_ratio_pct", 100, 0),
+    (20, 84): ("stance_time_balance_pct", 100, 0),
+    (20, 85): ("step_length_mm", 10, 0),
     (20, 73): ("enhanced_speed_m_s", 1000, 0),
     (20, 78): ("enhanced_altitude_m", 5, -500),
     # lap message
@@ -103,6 +109,8 @@ _FIT_FIELD_SCALES: Final[Mapping[tuple[int, int], tuple[str, int, int]]] = {
     (225, 3): ("repetitions", 1, 0),
     (225, 4): ("weight_kg", 16, 0),
     (225, 6): ("start_time", 1, 0),
+    # hrv message: beat-to-beat intervals, an array of up to five values per message
+    (78, 0): ("rr_interval_s", 1000, 0),
     # session message
     (18, 2): ("timestamp", 1, 0),
     (18, 7): ("elapsed_time_s", 1000, 0),
@@ -443,3 +451,23 @@ def fit_scaled(
         if value is not None:
             values.append(value)
     return values
+
+
+def fit_scaled_array(
+    fields: Mapping[int, object], message_number: int, field_number: int
+) -> list[float | None]:
+    """Return one array field's scaled slots; an invalid or non-numeric slot is None.
+
+    A single-element array decodes as a scalar, which is returned as one slot.
+    """
+    value = fields.get(field_number)
+    items = value if isinstance(value, list) else [value]
+    _, scale, offset = _FIT_FIELD_SCALES.get((message_number, field_number), ("", 1, 0))
+    return [
+        (item / scale) + offset
+        if isinstance(item, (int, float))
+        and not isinstance(item, bool)
+        and math.isfinite(item)
+        else None
+        for item in items
+    ]

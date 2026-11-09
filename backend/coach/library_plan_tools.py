@@ -6,7 +6,38 @@ from typing import Any
 
 from backend.coach.authorization import authorized_operations, require_coach_scope
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
+from backend.planning import plan_checks, run_hr_cap
 from backend.planning.library_plan_service import WorkoutLibraryPlanService
+
+
+def require_complete_template(template_id: str, template: dict[str, Any]) -> None:
+    """Reject a template whose units would miss data the plan guard requires.
+
+    The tool takes only an id and a date, so the Coach cannot supply the
+    missing focus, strength structure or heart-rate cap here: it must complete
+    the template first.
+    """
+    missing = [
+        field
+        for item in plan_checks.strength_incomplete([template])
+        for field in item["evidence"]["missing"]
+    ]
+    if plan_checks.focus_missing([template]):
+        missing.append("session_focus")
+    # The cap source depends on the profile, so only a missing or unreadable
+    # cap is caught here; the plan guard still checks the rest after the write.
+    problem = run_hr_cap.cap_problem(template)
+    if problem and problem["reason"] in (run_hr_cap.MISSING, run_hr_cap.MALFORMED):
+        missing.append("hr_cap")
+    if missing:
+        name = str(template.get("name") or "Vorlage")
+        raise AppError(
+            409,
+            f"Vorlage „{name}“ ({template_id}) fehlt: {', '.join(missing)}. "
+            "Zuerst die Vorlage mit manage_training_templates ergänzen, dann "
+            "erneut einplanen.",
+            reason="library_template_incomplete",
+        )
 
 
 class CoachLibraryPlanToolService:
@@ -41,5 +72,7 @@ class CoachLibraryPlanToolService:
         return {
             "ok": True,
             "stored_locally": True,
-            **self._library_plan_service.apply(entries),
+            **self._library_plan_service.apply(
+                entries, check_template=require_complete_template
+            ),
         }

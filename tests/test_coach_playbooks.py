@@ -83,6 +83,14 @@ class PlaybookBudgetTests(unittest.TestCase):
         self.assertEqual(blocks, set(BLOCK_WORD_BUDGETS))
         self.assertEqual(set(playbooks._BLOCKS), set(REQUEST_KINDS))
 
+    def test_plan_check_names_every_blocking_check(self) -> None:
+        from backend.planning import plan_checks
+
+        for code in (*plan_checks.BLOCKING_CODES, *plan_checks.REQUIRED_CODES):
+            with self.subTest(code=code):
+                self.assertIn(code, playbooks._PLAN_CHECK)
+        self.assertIn("hr_cap", playbooks._PLAN_STRUCTURE)
+
     def test_kinds_carry_only_the_blocks_they_need(self) -> None:
         for kind in ("session_analysis", "progress_review", "block_review"):
             text = playbook_for(kind)

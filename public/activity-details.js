@@ -75,12 +75,14 @@
     content.replaceChildren();
     const session = payload.session || {};
     renderMetadata(session, metricValues(payload), content);
+    renderRoute(payload.route, api, content);
     content.append(...providerNotes(payload));
     renderSeries(session, payload.streams, content);
     renderLaps(payload.laps, content);
     renderStrengthSets(payload.strength_sets, content);
     renderIntervalQuality(payload, content);
     renderAerobic(payload, content);
+    renderRunningForm(payload, content);
     renderPower(payload, content);
     for (const item of payload.equipment || []) content.append(node("p", `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
     renderBundle(payload.session_bundle, api, content, reload, notice);
@@ -283,6 +285,34 @@
     content.append(node("p", values.join(" · ")));
   }
 
+  // The recognised route of the session as "label, n. Mal"; the athlete can rename it.
+  function renderRoute(route, api, content) {
+    if (!route) return;
+    const line = node("p");
+    let label = route.label;
+    const show = () => {
+      const rename = node("button", "Umbenennen", "secondary-button"); rename.type = "button";
+      rename.addEventListener("click", edit);
+      line.replaceChildren(`${label}, ${route.repeat_index}. Mal `, rename);
+    };
+    const edit = () => {
+      const form = document.createElement("form");
+      const input = document.createElement("input"); input.maxLength = 60; input.required = true; input.value = label; input.setAttribute("aria-label", "Streckenname");
+      const save = node("button", "Speichern"); save.type = "submit";
+      const cancel = node("button", "Abbrechen", "secondary-button"); cancel.type = "button"; cancel.addEventListener("click", show);
+      const status = node("span", null, "muted"); status.setAttribute("role", "status");
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
+        try {
+          const result = await api("/api/routes/rename", { method: "POST", body: JSON.stringify({ route_id: route.route_id, name: input.value }) });
+          label = result.label; show();
+        } catch (error) { status.textContent = error.message; save.disabled = false; }
+      });
+      form.append(input, " ", save, " ", cancel, " ", status); line.replaceChildren(form); input.focus();
+    };
+    show(); content.append(line);
+  }
+
   const COVERAGE_LABELS = { power_w: "Leistung", heart_rate_bpm: "Herzfrequenz", speed_mps: "Geschwindigkeit", altitude_m: "Höhe", distance_m: "Distanz", grade_pct: "Steigung", cadence_rpm: "Kadenz", temperature_c: "Temperatur" };
 
   // Per provider: the load state and the data coverage, with readable channel names.
@@ -362,6 +392,47 @@
   function cadenceDisplay(activity) {
     if (["run", "walk", "hike"].includes(activity?.sport)) return { label: "Schrittfrequenz", unit: "spm", factor: 2 };
     return { label: "Kadenz", unit: "rpm", factor: 1 };
+  }
+
+  // Running dynamics averages (#1870): label, unit and decimals per served metric key.
+  const RUNNING_DYNAMICS = [
+    ["ground_contact_time_ms", "Bodenkontaktzeit", "ms", 0],
+    ["ground_contact_balance_pct", "Bodenkontakt links", "%", 1],
+    ["vertical_oscillation_cm", "Vertikale Oszillation", "cm", 1],
+    ["vertical_ratio_pct", "Vertikales Verhältnis", "%", 1],
+    ["step_length_m", "Schrittlänge", "m", 2],
+  ];
+  const DRIFT_METRICS = { contact_time: ["Bodenkontaktzeit", 0], vertical_oscillation: ["Vertikale Oszillation", 1], step_length: ["Schrittlänge", 2] };
+  const decimal = (value, digits) => value.toLocaleString("de-DE", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
+
+  // Label and text of each running dynamics average a sensor measured; none when the device had no sensor.
+  function runningDynamics(metrics) {
+    return RUNNING_DYNAMICS
+      .filter(([key]) => isNumber(metrics?.[key]))
+      .map(([key, label, unit, digits]) => [label, `${decimal(metrics[key], digits)} ${unit}`]);
+  }
+
+  // Lines of the form drift check, led by its label when the run is flagged; none unless the check ran.
+  function formDriftLines(drift) {
+    if (drift?.status !== "ok") return [];
+    const lines = Object.entries(drift.metrics || {})
+      .filter(([name, metric]) => DRIFT_METRICS[name] && isNumber(metric?.first) && isNumber(metric?.last) && isNumber(metric?.change_percent))
+      .map(([name, metric]) => {
+        const [label, digits] = DRIFT_METRICS[name];
+        const sign = metric.change_percent > 0 ? "+" : "";
+        return `${label} ${decimal(metric.first, digits)} → ${decimal(metric.last, digits)} ${metric.unit} (${sign}${decimal(metric.change_percent, 1)} %)`;
+      });
+    return drift.flagged && typeof drift.label === "string" ? [drift.label, ...lines] : lines;
+  }
+
+  function renderRunningForm(payload, content) {
+    const dynamics = runningDynamics(metricValues(payload));
+    const drift = formDriftLines(payload.analysis?.form_drift);
+    if (!dynamics.length && !drift.length) return;
+    content.append(node("h3", "Laufdynamik"));
+    if (dynamics.length) content.append(node("p", dynamics.map(([label, text]) => `${label} ${text}`).join(" · ")));
+    for (const line of drift) content.append(node("p", line));
   }
 
   function renderSeries(session, streams, content) {
@@ -584,5 +655,5 @@
 
   globalThis.addEventListener("popstate", () => { if (dialog) close(false); });
 
-  globalThis.ActivityDetails = { open, close, requestDetails, cadenceDisplay, metricValues, providerNotes, refreshActions };
+  globalThis.ActivityDetails = { open, close, requestDetails, cadenceDisplay, metricValues, runningDynamics, formDriftLines, providerNotes, refreshActions };
 })();

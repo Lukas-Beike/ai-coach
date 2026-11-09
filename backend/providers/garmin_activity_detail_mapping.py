@@ -100,7 +100,10 @@ from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 # Version 4: executed strength sets from exercise sets, else FIT set messages.
 # Version 5: GPS position channels (directLatitude, directLongitude).
 # Version 6: heart rate and power sources and sensors of FIT stream sets.
-MAPPER_VERSION: Final = 6
+# Version 7: the first threshold estimate (DFA-a1) of FIT stream sets.
+# Version 8: Bluetooth LE sensor roles with the FIT SDK source type numbers.
+# Version 9: running dynamics channels of FIT stream sets (#1870).
+MAPPER_VERSION: Final = 9
 
 # Same limit as the Intervals mapper; kept local so providers do not import each other.
 MAX_GARMIN_ACTIVITY_ID_LENGTH: Final = 200

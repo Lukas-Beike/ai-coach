@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import nullcontext
 from dataclasses import replace
@@ -73,12 +75,88 @@ class DatabaseBackupServiceTests(unittest.TestCase):
 
     def test_stream_uses_complete_snapshot_without_holding_database_lock(self) -> None:
         service = self.service()
-        with service.stream_file() as (path, deadline):
+        with service.stream_file() as path:
             self.lock.assert_not_called()
-            self.assertEqual(deadline, 15.0)
             self.assert_snapshot_has_wal_data(path)
             self.assertNotEqual(path, self.path)
         self.assertFalse(path.exists())
+
+    def test_backup_completes_while_a_writer_commits_continuously(self) -> None:
+        with self.manager.unit_of_work() as db:
+            db.execute("CREATE TABLE busy (payload BLOB NOT NULL)")
+            db.executemany(
+                "INSERT INTO busy VALUES (?)", [(b"x" * 4000,) for _ in range(6000)]
+            )
+        stop = threading.Event()
+        commits = []
+
+        def write() -> None:
+            writer = sqlite3.connect(self.path, timeout=5)
+            writer.execute("PRAGMA synchronous = OFF")
+            try:
+                while not stop.is_set():
+                    writer.execute("INSERT INTO busy VALUES (?)", (b"y",))
+                    writer.commit()
+                    commits.append(1)
+            finally:
+                writer.close()
+
+        thread = threading.Thread(target=write)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(stop.set)
+        try:
+            # About 6000 pages, 128 per copy step; each concurrent commit restarts an
+            # unpinned backup, so only a pinned snapshot can finish in time.
+            config = replace(
+                self.config,
+                maximum_bytes=100_000_000,
+                monotonic=time.monotonic,
+                time_limit_seconds=5,
+                disk_usage=lambda _path: SimpleNamespace(free=10**12),
+            )
+            started = time.monotonic()
+            with self.service(config).stream_file() as path:
+                self.assertLess(time.monotonic() - started, 5)
+                self.assertGreater(len(commits), 0)
+                snapshot = sqlite3.connect(path)
+                try:
+                    self.assertEqual(
+                        snapshot.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+                    )
+                    self.assertEqual(
+                        snapshot.execute("SELECT value FROM records").fetchone()[0],
+                        "saved in wal",
+                    )
+                    self.assertGreaterEqual(
+                        snapshot.execute("SELECT count(*) FROM busy").fetchone()[0],
+                        6000,
+                    )
+                finally:
+                    snapshot.close()
+        finally:
+            stop.set()
+            thread.join()
+
+    def test_backup_with_a_foreign_key_orphan_fails_and_is_logged(self) -> None:
+        with self.manager.unit_of_work() as db:
+            db.execute("CREATE TABLE parents (id INTEGER PRIMARY KEY)")
+            db.execute(
+                "CREATE TABLE children (parent_id INTEGER REFERENCES parents(id))"
+            )
+            db.execute("PRAGMA foreign_keys = OFF")
+            db.execute("INSERT INTO children VALUES (404)")
+
+        with self.assertRaises(AppError) as raised, self.service().stream_file():
+            self.fail("a backup with a foreign-key orphan must not stream")
+
+        self.assertEqual(raised.exception.status, 503)
+        self.logger.warning.assert_called_once()
+        self.assertEqual(
+            self.logger.warning.call_args.kwargs["extra"],
+            {"event": "database_backup_snapshot_failed", "error_class": "RuntimeError"},
+        )
+        self.assertFalse(list(self.root.glob(".database-backup-*.tmp")))
 
     def test_read_bytes_contains_wal_changes(self) -> None:
         backup = self.service().read_bytes()

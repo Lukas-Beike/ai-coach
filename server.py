@@ -20,6 +20,7 @@ from pathlib import Path
 
 from backend import config as app_config
 from backend import observability
+from backend.activities.route_store import ActivityRouteService
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -133,7 +134,10 @@ from backend.config import (
 )
 from backend.db import manager as database_manager_runtime
 from backend.db import row_factory as database_row_factory
-from backend.db.bootstrap import initialize_application_database
+from backend.db.bootstrap import (
+    apply_startup_invariants,
+    initialize_application_database,
+)
 from backend.db.key_value import KeyValueService
 from backend.db.manager import (
     DATABASE_LOCK as DB_LOCK,
@@ -290,6 +294,7 @@ from backend.privacy import (
     PrivacyStateDependencies,
 )
 from backend.provider_credentials import GARMIN_SOURCE_DB, ProviderCredentialService
+from backend.providers import activity_weather as activity_weather_provider
 from backend.providers import air_quality as air_quality_provider
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
@@ -452,6 +457,7 @@ from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
+from backend.weather.activity_weather_store import home_coordinates
 from backend.weather.assembly import (
     WeatherAssembly,
     WeatherProviderRuntime,
@@ -478,7 +484,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.3"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -717,6 +723,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
             threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
             run_lthr_on=lambda day: RUN_LTHR.on(day),
+            run_lthr_resolver=lambda: RUN_LTHR.day_resolver(),
         ),
     )
 )
@@ -725,6 +732,9 @@ ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
 )
 # Declared ahead of its first lambda reference; assigned by build_canonical_read below.
 CANONICAL_READ: CanonicalReadSelector
+
+# Renames a recognised route of outdoor sessions (#1868); only the label is exposed.
+ACTIVITY_ROUTES = ActivityRouteService(database_manager, DB_LOCK, KEY_VALUE_REPOSITORY)
 
 ACTIVITY_READS = ActivityReadAssembly(
     database_manager,
@@ -909,6 +919,13 @@ BACKUP_ASSEMBLY = BackupAssembly(
             configure_cipher=configure_cipher,
             row_factory=database_row_factory,
             schema_is_current=database_schema_is_current,
+            startup_invariants=lambda db: apply_startup_invariants(
+                db,
+                key_values=KEY_VALUE_REPOSITORY,
+                now=runtime_clock.utc_now(),
+                default_profile_json=json.dumps(DEFAULT_PROFILE),
+                provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
+            ),
         ),
         lifecycle=RestoreLifecycleDependencies(
             maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
@@ -1439,6 +1456,7 @@ COACH_CONTEXT = CoachContextAssembly(
             ),
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
             threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
+            first_threshold_estimate=lambda: ATHLETE_DATA.first_threshold().estimate(),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -1525,6 +1543,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
             now=lambda: time.time(),
             utc_now=runtime_clock.utc_now,
             uuid_factory=uuid.uuid4,
+            today=lambda: ATHLETE_CLOCK.now().date(),
         ),
     )
 )
@@ -2131,6 +2150,17 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
     # The one-time focus backfill of future units (#1849) runs after all stages.
     extra_followups=(PROFILE_WEEKLY_PLAN_REMOVAL, SESSION_FOCUS_BACKFILL),
+    # Weather during outdoor sessions (#1868); only 2-decimal coordinates leave.
+    activity_weather_fetch=lambda *position: (
+        activity_weather_provider.ActivityWeatherClient(
+            PROVIDER_TRANSPORT.json_http_client().request
+        ).fetch(*position)
+    ),
+    home_location=lambda db: home_coordinates(
+        KEY_VALUE_REPOSITORY,
+        db,
+        ATHLETE_DATA.profile().get_from_db(db).get("weather_location", ""),
+    ),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
@@ -2278,9 +2308,11 @@ HTTP_API = HttpApiAssembly(
                 competition=PLANNING_DATA.competition,
                 activity_read=ACTIVITY_READS.activity_read,
                 equipment=ATHLETE_DATA.equipment,
+                activity_routes=lambda: ACTIVITY_ROUTES,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
                 session_corrections=ATHLETE_DATA.session_corrections,
                 zones=ATHLETE_DATA.zones,
+                first_threshold=ATHLETE_DATA.first_threshold,
                 body_export=lambda profile, revision, deadline: (
                     GARMIN_ASSEMBLY.body_export(ATHLETE_DATA.profile()).export(
                         profile, revision, deadline
@@ -2309,8 +2341,6 @@ HTTP_API = HttpApiAssembly(
             privacy=HttpPrivacyServices(
                 backup=BACKUP_ASSEMBLY.backup_service,
                 export=PRIVACY_ASSEMBLY.archive_export_service,
-                monotonic=time.monotonic,
-                export_time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
                 delete=PRIVACY_ASSEMBLY.delete_service,
                 restore=BACKUP_ASSEMBLY.restore_service,
                 max_backup_bytes=MAX_BACKUP_BYTES,
@@ -2321,6 +2351,9 @@ HTTP_API = HttpApiAssembly(
                 garmin_analysis_refresh=GARMIN_ASSEMBLY.analysis_refresh_service,
                 wahoo_sync=WAHOO_SYNC.sync_service,
                 full_resync=PROVIDER_RESYNC.full_resync_service,
+                provider_configured=lambda provider_id: (
+                    provider_runtime().provider_configured(provider_id)
+                ),
                 period_defaults=SYNC_PERIOD_DEFAULTS,
                 all_sync_days=ALL_SYNC_DAYS,
                 uuid_factory=lambda: uuid.uuid4().hex,

@@ -242,6 +242,12 @@ The system SHALL reconcile an archived or locally deleted planned unit through t
 
 Evidence: `backend/sync/planned_calendar.py:PlannedCalendarSyncService._delete_remote_event`, `backend/sync/planned_calendar.py:PlannedCalendarSyncService._mark_removed`, `backend/sync/planned_calendar.py:PlannedCalendarSyncService._remove_event`; `backend/sync/intervals_workout_export.py:IntervalsWorkoutExport.is_unpaired_future_planned`, `backend/providers/intervals_workouts.py:intervals_event_is_planned`; `tests/test_sync_planned_calendar.py:test_delete_success_rechecks_and_persists_removed_state`, `tests/test_sync_planned_calendar.py:test_archived_or_deleted_without_remote_id_only_marks_local_sync`, `tests/test_sync_planned_calendar.py:test_delete_404_is_already_removed`, `tests/test_sync_planned_calendar.py:test_delete_treats_http_error_404_cause_as_already_removed`, `tests/test_sync_planned_calendar.py:test_delete_identity_conflicts`, `tests/test_sync_planned_calendar.py:test_payload_change_after_remote_read_blocks_delete`. The post-delete concurrent-edit branch is implementation-inspected; these cited tests do not inject an edit after deletion. Normal removal has no final collection readback; repair verification is covered by TL14.
 
+#### Scenario: Hidden units are removed by the next explicit sync
+- **WHEN** a unit that is archived or deleted (a replan archives the replaced unit) still holds a remote event ID in an open sync state and is dated today or later
+- **THEN** every upcoming unit Intervals.icu waits for carries it and the calendar lists it once ("Wird bei Intervals.icu entfernt"), on the first card that offers the sync button, the calendar sync button and a selected Coach card carry it (at most 20 per sync) as one more entry of the same job, and only the linked event is deleted; a sync bound to the units of one Coach turn and events without a stored unit are never touched.
+
+Evidence: `backend/planning/intervals_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_with_intervals_leftovers`, `public/plan-views.js:plannedCleanup`; `tests/test_intervals_orphans.py`, `tests/test_sync_planned_calendar.py:test_removing_a_replaced_unit_leaves_foreign_events_alone`.
+
 ### Requirement: TL13 Exact repair ownership and bounded duplicate cleanup
 The system SHALL repair selected planned units dated today or later using current local hashes and concrete remote identities, refuse identified unsafe or ambiguous candidates, and limit cleanup to identity-checked related events in the repair window.
 
@@ -396,6 +402,10 @@ A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap
 #### Scenario: Measured first threshold
 - **WHEN** the athlete enters a measured first-threshold heart rate in bpm (profile form or API, never by the Coach)
 - **THEN** it is stored as percent of the run threshold HR in effect on the measurement date (`first_threshold_pct`), the easy and long cap becomes that percent minus a fixed margin and the recovery cap the lower of its default and the easy cap minus a fixed gap (constants in `backend/activities/hr_cap.py`), the cap source is `measured`, and a cap with another source than the current one is rejected like a wrong value.
+
+#### Scenario: Adopted first threshold estimate
+- **WHEN** the athlete adopts the first threshold estimate from chest-strap RR intervals (`POST /api/profile/first-threshold/adopt`, never by the Coach)
+- **THEN** it is stored as `first_threshold_pct` with the origin `estimated` (`first_threshold_origin`) through the profile save path with change receipt and undo, the caps follow it like a measured value, the cap source is `estimated` (label `geschätzt`), a stored measured value is replaced only when the request says so, and a later manual entry sets the origin back to `measured`.
 
 #### Scenario: Export to Wahoo
 - **WHEN** a run unit with a cap becomes a Wahoo plan

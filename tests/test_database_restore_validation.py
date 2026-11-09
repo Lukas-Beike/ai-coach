@@ -11,13 +11,18 @@ from backend.backup.restore_validation import (
     DatabaseRestoreValidationConfig,
     DatabaseRestoreValidationService,
 )
+from backend.db import row_factory
+from backend.db.bootstrap import apply_startup_invariants
 from backend.db.migrations import migrate_schema
+from backend.db.repositories import KeyValueRepository, PlanningStateRepository
 from backend.db.schema import CURRENT_SCHEMA_VERSION, database_schema_is_current
 from backend.errors import AppError
+from backend.planning.revision import PlanningRevisionService
 
 V21_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v21.sql.txt"
 V22_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v22.sql.txt"
 V23_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v23.sql.txt"
+V24_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v24.sql.txt"
 
 
 def service(data_dir: Path, **overrides: object) -> DatabaseRestoreValidationService:
@@ -30,6 +35,7 @@ def service(data_dir: Path, **overrides: object) -> DatabaseRestoreValidationSer
         "configure_cipher": Mock(),
         "row_factory": sqlite3.Row,
         "schema_is_current": lambda _connection: True,
+        "startup_invariants": lambda _connection: None,
         "migrate_schema": Mock(),
     }
     values.update(overrides)
@@ -136,7 +142,7 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 )
 
     def test_validate_upgrades_a_populated_released_backup(self) -> None:
-        for fixture in (V21_FIXTURE, V22_FIXTURE, V23_FIXTURE):
+        for fixture in (V21_FIXTURE, V22_FIXTURE, V23_FIXTURE, V24_FIXTURE):
             with (
                 self.subTest(fixture=fixture.name),
                 tempfile.TemporaryDirectory() as directory,
@@ -168,6 +174,57 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                         ],
                         "Hallo",
                     )
+
+    def test_validate_applies_startup_invariants_to_the_restored_database(self) -> None:
+        # A backup taken mid-resync, after a privacy purge, before any planning write.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.db"
+            with closing(sqlite3.connect(path)) as connection:
+                connection.executescript(V24_FIXTURE.read_text(encoding="utf-8"))
+                connection.execute("DELETE FROM planning_state")
+                connection.execute("DELETE FROM kv WHERE key = 'profile'")
+                connection.execute(
+                    "INSERT INTO kv(key, value, updated_at) VALUES "
+                    "('garmin_full_resync_running', '1', 'then'), "
+                    "('garmin_full_resync_status', 'running', 'then')"
+                )
+                connection.commit()
+            key_values = KeyValueRepository(lambda: "2026-11-09T08:00:00+00:00")
+            service(
+                Path(directory),
+                maximum_bytes=10_000_000,
+                schema_is_current=database_schema_is_current,
+                migrate_schema=migrate_schema,
+                startup_invariants=lambda db: apply_startup_invariants(
+                    db,
+                    key_values=key_values,
+                    now="2026-11-09T08:00:00+00:00",
+                    default_profile_json='{"name": "Synthetic"}',
+                    provider_resync_keys=(
+                        {
+                            "running": "garmin_full_resync_running",
+                            "status": "garmin_full_resync_status",
+                        },
+                    ),
+                ),
+                row_factory=row_factory,
+            ).validate(path)
+            with closing(sqlite3.connect(path)) as connection:
+                connection.row_factory = row_factory
+                self.assertEqual(
+                    key_values.get(connection, "garmin_full_resync_running"), "0"
+                )
+                self.assertEqual(
+                    key_values.get(connection, "garmin_full_resync_status"), ""
+                )
+                self.assertEqual(
+                    key_values.get(connection, "profile"), '{"name": "Synthetic"}'
+                )
+                revision = PlanningRevisionService(
+                    PlanningStateRepository(), lambda: "2026-11-09T09:00:00+00:00"
+                )
+                revision.bump(connection)
+                self.assertEqual(revision.read(connection), 1)
 
     def test_validate_rejects_a_pre_v21_backup_by_release_without_modifying_it(
         self,

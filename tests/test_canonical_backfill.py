@@ -770,6 +770,40 @@ class ReprojectionTests(BackfillFixture):
             {INTERVALS: 171.0, GARMIN: 168.0},
         )
 
+    def test_reprojected_garmin_runs_gain_their_running_dynamics(self) -> None:
+        run = {
+            **garmin_activity(7),
+            "activityType": {"typeKey": "running"},
+            "avgGroundContactTime": 264.5,
+            "avgGroundContactBalance": 49.6,
+            "avgVerticalOscillation": 0,
+            "avgVerticalRatio": 8.04,
+            "avgStrideLength": 116.4,
+        }
+        self.set_garmin(self.manager, garmin_payload(activities=[run]))
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+        with self.manager.unit_of_work() as db:
+            # The state the previous activity mapper left: no running dynamics.
+            db.execute("UPDATE activity_records SET details = '{}'")
+
+        key = (GARMIN, ACTIVITY_KIND)
+        with patch.dict(
+            canonical_plans._MAPPER_VERSIONS,
+            {key: canonical_plans._MAPPER_VERSIONS[key] + 1},
+        ):
+            self.run_to_completion(backfill)
+
+        values = canonical_store.activity_summary_values(
+            self.rows("SELECT details FROM activity_records")[0]["details"]
+        )
+        self.assertEqual(264.5, values["ground_contact_time_ms"])
+        self.assertEqual(49.6, values["ground_contact_balance_pct"])
+        self.assertEqual(8.04, values["vertical_ratio_pct"])
+        self.assertAlmostEqual(1.164, values["step_length_m"])
+        # Garmin sends 0 for a value it did not measure: absent, not zero.
+        self.assertNotIn("vertical_oscillation_cm", values)
+
     def test_garmin_health_stored_at_the_previous_version_gains_run_power(
         self,
     ) -> None:

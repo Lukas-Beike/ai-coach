@@ -32,6 +32,7 @@ NO_SECTION_NEEDED: Final = frozenset(NOT_MAPPERS)
 LOCAL_PRODUCERS: Final = (
     "backend/sync/local_load.py",
     "backend/sync/session_metrics.py",
+    "backend/sync/activity_weather.py",
     "backend/performance/session_metrics.py",
     "backend/performance/morning_battery_service.py",
     "backend/athlete/zones.py",
@@ -45,6 +46,7 @@ NOT_PRODUCERS: Final[dict[str, str]] = {
     "backend/sync/canonical_table_reader.py": "decodes stored rows",
     "backend/performance/current_thresholds.py": "transient observation of a zone",
     "backend/sync/wahoo_activity_details.py": "stores sets the FIT mapper produced",
+    "backend/canonical/dfa_alpha1.py": "computes the result fit_rr_mapping.py documents",
 }
 PATH_TOKEN = re.compile(r"^(?:backend|tests|scripts|public|docs)/[\w./-]+\.\w+$")
 MODULE_TOKEN = re.compile(r"^[a-z][a-z0-9_]*\.py$")

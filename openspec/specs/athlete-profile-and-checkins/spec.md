@@ -154,6 +154,19 @@ The system SHALL save explicitly entered main equipment/components with validate
 
 Evidence: `backend/athlete/equipment.py:EquipmentService.save`, `backend/athlete/equipment.py:EquipmentService.sync_garmin_snapshot`; `backend/coach/tool_schemas.py:build_structured_tool_schemas` (equipment fields); `tests/test_coach_tool_coverage.py:test_training_records_and_equipment_tools_use_confirmed_local_state`; `tests/test_training_record_features.py:test_empty_initial_gear_snapshot_does_not_finalize_import`, `tests/test_training_record_features.py:test_legacy_empty_import_recovers_once_and_preserves_local_equipment`; `tests/test_coach_write_gate.py:test_archiving_equipment_is_a_delete`.
 
+### Requirement: Estimated first threshold from chest-strap RR intervals
+The system SHALL show an estimated first threshold heart rate, derived from stored chest-strap RR results, as an estimate and SHALL store it only when the athlete explicitly adopts it. The Coach SHALL have no tool that adopts it.
+
+#### Scenario: Athlete-level estimate
+- **WHEN** at least three good-quality run sessions of the last 60 days hold a DFA-a1 result
+- **THEN** the profile shows the median of their values, each as percent of the run threshold HR in effect on its day, with quality, session count and date range, and the Coach sees it in its performance context labelled a research-grade estimate.
+
+#### Scenario: Adopt the estimate
+- **WHEN** the athlete adopts the shown estimate
+- **THEN** the profile stores the percent with the origin `estimated` as one change with receipt and undo; an estimate that changed since it was shown, or a missing one, is refused, and a measured value is replaced only when the request says so.
+
+Evidence: `backend/performance/first_threshold_estimate.py:first_threshold_estimate`, `backend/performance/first_threshold_service.py:FirstThresholdService`; `tests/test_first_threshold_estimate.py`.
+
 ### Requirement: Recorded sensors linked to equipment
 The system SHALL list the distinct heart rate, power meter and trainer sensors named by recordings, each with its hashed short id, role, manufacturer, product, first and last day and session count, and SHALL let the athlete link a sensor to an active main equipment item or remove the link. A serial number SHALL never be stored or shown.
 
@@ -217,11 +230,11 @@ The athlete SHALL be able to read and explicitly edit local zones and thresholds
 - **THEN** the request is rejected unless it carries an explicit confirmation, the provider zones apply again afterwards, and the removal produces an undoable receipt.
 
 #### Scenario: Stale threshold warning
-- **WHEN** an active FTP, lactate-threshold heart rate or threshold pace is older than 56 days, is past its source's age limit, comes from Garmin while the unofficial Garmin SDK is failing, or indoor rides lack a local indoor FTP
-- **THEN** the zone view lists one line per threshold with its value, source and age (or the reason it is no longer used), asks to save new values locally, and opens the section; fresh thresholds and an undated local value produce no warning, and no value is estimated.
+- **WHEN** an active FTP, lactate-threshold heart rate or threshold pace is older than 56 days, is past its source's age limit, comes from Garmin while the unofficial Garmin SDK is failing, or a locally saved indoor FTP is older than 56 days
+- **THEN** the zone view lists one line per threshold with its value, source and age (or the reason it is no longer used), asks to save new values locally, and opens the section; fresh thresholds, an undated local value, and indoor rides without a saved indoor FTP (they use the cycling FTP) produce no warning, and no value is estimated.
 
 #### Scenario: Undo after provider refresh
 - **WHEN** a saved local zone edit is undone after a provider refresh
 - **THEN** the previous local state is restored and effective selection follows local authority or the applicable provider alternative when no local configuration remains.
 
-Evidence: `backend/athlete/zones.py:ZoneConfigurationService.save`, `backend/athlete/zones.py:ZoneConfigurationService.remove`, `backend/athlete/zones.py:ZoneConfigurationService.restore_in_transaction`, `backend/athlete/zones.py:local_configuration`, `backend/http_api/athlete_put.py:AthletePutRoutes._handle_zones`, `backend/activities/zone_settings.py`, `backend/performance/threshold_staleness.py`, `public/settings.js::saveZones`, `public/settings.js::removeZones`, `public/settings.js::zoneWarningLine`; `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_save_keeps_provider_alternatives_and_survives_a_refresh`, `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_undo_restores_the_previous_local_state_after_a_refresh`, `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_removal_needs_confirmation_and_can_be_undone`, `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_an_invalid_edit_changes_nothing`, `tests/test_threshold_staleness.py:AssessTests.test_stale_threshold_names_value_source_and_age`, `tests/test_threshold_staleness.py:AssessTests.test_indoor_rides_without_local_indoor_ftp`, `tests/zone-warnings.test.cjs`, `tests/test_zone_settings.py`. Backup/restore of local zones has no dedicated test.
+Evidence: `backend/athlete/zones.py:ZoneConfigurationService.save`, `backend/athlete/zones.py:ZoneConfigurationService.remove`, `backend/athlete/zones.py:ZoneConfigurationService.restore_in_transaction`, `backend/athlete/zones.py:local_configuration`, `backend/http_api/athlete_put.py:AthletePutRoutes._handle_zones`, `backend/activities/zone_settings.py`, `backend/performance/threshold_staleness.py`, `public/settings.js::saveZones`, `public/settings.js::removeZones`, `public/settings.js::zoneWarningLine`; `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_save_keeps_provider_alternatives_and_survives_a_refresh`, `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_undo_restores_the_previous_local_state_after_a_refresh`, `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_removal_needs_confirmation_and_can_be_undone`, `tests/test_zone_configuration_canonical.py:LocalZoneEditTests.test_an_invalid_edit_changes_nothing`, `tests/test_threshold_staleness.py:AssessTests.test_stale_threshold_names_value_source_and_age`, `tests/test_threshold_staleness.py:AssessTests.test_indoor_ftp_is_judged_only_when_the_athlete_set_one`, `tests/test_threshold_staleness.py:ServiceTests.test_indoor_rides_use_the_ride_ftp_without_a_warning`, `tests/zone-warnings.test.cjs`, `tests/test_zone_settings.py`. Backup/restore of local zones has no dedicated test.

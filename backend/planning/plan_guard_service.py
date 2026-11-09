@@ -12,6 +12,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.first_threshold import (
     FIRST_THRESHOLD_FIELD,
+    first_threshold_estimated,
     first_threshold_percent,
 )
 from backend.canonical.stored_sports import resolve_competition_sport
@@ -468,11 +469,16 @@ class PlanGuardService:
             ),
             *plan_checks.strength_incomplete(units),
             *plan_checks.focus_missing(units),
-            *plan_checks.hr_cap_invalid(
-                units,
-                first_threshold_percent(self._profile().get(FIRST_THRESHOLD_FIELD)),
-            ),
+            *self._hr_cap_findings(units),
         ]
+
+    def _hr_cap_findings(self, units: Sequence[Mapping[str, Any]]) -> list[dict]:
+        profile = self._profile()
+        return plan_checks.hr_cap_invalid(
+            units,
+            first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD)),
+            first_threshold_estimated(profile),
+        )
 
     def _reported_illness(self) -> str:
         """One snapshot per service: check-ins a write creates itself do not count."""
@@ -498,19 +504,34 @@ class PlanGuardService:
         accepted: Sequence[str],
         *,
         waived: Sequence[str] = (),
+        inherited: Sequence[str] = (),
     ) -> list[dict[str, Any]]:
         """Raise on new blocking findings that are not accepted; return the notes.
 
         ``waived`` codes are neither blocking nor reported: a write that cannot
         supply the data, such as an approved replan moving a unit, passes them.
+        ``inherited`` codes pass only for units that already had a finding of
+        the same code before the write: the write did not originate the gap
+        (a legacy unit without the field), but a unit it leaves without data
+        it had still blocks.
 
         Notes are the new non-blocking findings plus accepted blocking ones; the
         Coach names and justifies them in its answer.
         """
+        gaps = {
+            (item["code"], local_id)
+            for item in before
+            if item["code"] in inherited
+            for local_id in item.get("local_ids") or ()
+        }
         new = [
             item
             for item in plan_checks.new_findings(before, self.findings())
             if item["code"] not in waived
+            and not (
+                item.get("local_ids")
+                and all((item["code"], i) in gaps for i in item["local_ids"])
+            )
         ]
         blocking = [
             item

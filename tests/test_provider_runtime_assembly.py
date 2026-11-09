@@ -55,13 +55,6 @@ from backend.sync.executor import dispatch_provider_job
 from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
-from backend.sync.provider_resync_assembly import (
-    CompetitionSyncOwners,
-    ProviderResyncAssembly,
-    ProviderResyncPersistence,
-    ProviderResyncRuntime,
-    ResyncProviderOwners,
-)
 from backend.sync.provider_runtime import (
     ProviderRuntimeBinding,
     ProviderRuntimeRegistry,
@@ -484,43 +477,16 @@ class PlanPushAdmissionTests(unittest.TestCase):
         runtime = build_provider_runtime(
             DEFAULT_PROVIDER_REGISTRY, builtin_bindings(deps)
         )
-        full_resync = ProviderResyncAssembly(
-            dependencies=ProviderResyncAssembly.Inputs(
-                competition=CompetitionSyncOwners(
-                    config=mock.Mock(return_value=mock.Mock()),
-                    intervals_client=mock.Mock(),
-                    competition_service=mock.Mock(),
-                ),
-                resync=ResyncProviderOwners(
-                    garmin_sync_service=mock.Mock(),
-                    garmin_resync_gate=ProviderResyncGate("Garmin"),
-                    all_sync_days=-1,
-                ),
-                persistence=ProviderResyncPersistence(
-                    database_manager=mock.Mock(),
-                    key_values=mock.Mock(),
-                    event_buffer=mock.Mock(),
-                    redactor=mock.Mock(),
-                ),
-                runtime=ProviderResyncRuntime(
-                    logger=logging.getLogger("test.plan_push.admission"),
-                    utc_now=mock.Mock(),
-                    uuid_factory=mock.Mock(),
-                    monotonic=mock.Mock(),
-                    operation_observer=mock.Mock(),
-                ),
-            ),
-            provider_runtime=lambda: runtime,
-        ).full_resync_service()
         self.queue = mock.Mock()
         self.queue.enqueue.return_value = {"id": "job-1"}
         return SyncCommandEndpoint(
             self.queue,
             mock.Mock(),
-            full_resync,
+            mock.Mock(),
             lambda: "operation-1",
             {"intervals": 90},
             -1,
+            provider_configured=runtime.provider_configured,
             registry=DEFAULT_PROVIDER_REGISTRY,
         )
 
@@ -531,7 +497,7 @@ class PlanPushAdmissionTests(unittest.TestCase):
             "payload": {"entries": [{"hash": "h1", "date": "2026-10-12"}]},
         }
 
-    def test_connected_wahoo_plan_push_is_admitted_through_the_real_resync(
+    def test_connected_wahoo_plan_push_is_admitted_through_the_runtime(
         self,
     ) -> None:
         status, _ = self._endpoint(connected=True).execute(

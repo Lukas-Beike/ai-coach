@@ -36,7 +36,13 @@ class WorkoutLibraryPlanService:
         self._calendar_conflict_service = calendar_conflict_service
         self._publish_change = publish_change
 
-    def apply(self, entries: Any) -> dict[str, Any]:
+    def apply(
+        self,
+        entries: Any,
+        *,
+        check_template: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        """Plan the entries atomically; ``check_template`` may reject a template."""
         if not isinstance(entries, list) or not entries:
             raise AppError(400, "Mindestens eine Bibliothekseinheit ist erforderlich.")
         if len(entries) > 14:
@@ -47,6 +53,9 @@ class WorkoutLibraryPlanService:
 
         with self._database_manager.unit_of_work() as db:
             requested = [self._library_plan_request(db, item) for item in entries]
+            if check_template is not None:
+                for request in requested:
+                    check_template(request["library_workout_id"], request["workout"])
             self._raise_conflicts(self._library_plan_conflicts(requested))
             planned = [self._apply_request(db, request) for request in requested]
 

@@ -8,6 +8,31 @@ function profileFormValues(form) {
   return values;
 }
 
+// Entry-only fields: the server turns them into first_threshold_pct and never echoes them.
+const PROFILE_ENTRY_FIELDS = ["first_threshold_hr", "first_threshold_on"];
+
+function profileSaveConfirmed(changed, saved) {
+  // An entered bpm value must come back as the stored percent.
+  if (profileFieldText(changed.first_threshold_hr) && typeof saved.first_threshold_pct !== "string") return false;
+  return Object.keys(changed)
+    .filter((key) => !PROFILE_ENTRY_FIELDS.includes(key))
+    .every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string");
+}
+
+function clearProfileEntryFields(form) {
+  for (const key of PROFILE_ENTRY_FIELDS) {
+    const field = form.elements?.[key];
+    if (field) field.value = "";
+  }
+}
+
+// After a confirmed save: clear the entry and show the stored percent.
+function resetProfileEntryFields(form, savedPercent) {
+  clearProfileEntryFields(form);
+  const field = form.elements?.first_threshold_pct;
+  if (savedPercent !== undefined && field) field.value = savedPercent;
+}
+
 function profileFieldText(value) {
   return typeof value === "string" ? value : "";
 }
@@ -49,6 +74,39 @@ async function retryBodyGarmin(event) {
       toast(error.message, true);
     } else reportBodyExport("uncertain");
   } finally { button.disabled = false; profileSaveInFlight = false; }
+}
+
+// The adopted value reaches the open form even while it holds unsaved edits: only the
+// stored-percent input and the estimate block change, every other edit stays.
+function applyAdoptedFirstThreshold(result) {
+  const form = $("#profileForm");
+  const stored = profileFieldText(result.profile?.first_threshold_pct);
+  if (form?.elements.first_threshold_pct) form.elements.first_threshold_pct.value = stored;
+  if (state.profileBaseline) state.profileBaseline = { ...state.profileBaseline, first_threshold_pct: stored };
+  if (state.data) state.data = { ...state.data, profile: { ...state.data.profile, ...result.profile }, first_threshold_estimate: result.first_threshold_estimate };
+  renderFirstThresholdEstimate(result.first_threshold_estimate, result.profile);
+  if (state.profileDirty && form && state.profileBaseline) {
+    state.profileDirty = Object.keys(determineChangedProfileFields(profileFormValues(form), state.profileBaseline)).length > 0;
+    setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
+  }
+}
+
+async function adoptFirstThreshold(event) {
+  const button = event.currentTarget;
+  const percent = Number($("#firstThresholdEstimate").dataset.percent);
+  if (!Number.isFinite(percent) || button.disabled) return;
+  const profile = state.data?.profile || {};
+  const replacesMeasured = Boolean(profile.first_threshold_pct) && profile.first_threshold_origin === "measured";
+  if (replacesMeasured && !(await requestConfirmation("Der gemessene Wert wird durch die Schätzung ersetzt.", { title: "Gemessenen Wert ersetzen?", confirmLabel: "Ersetzen" }))) return;
+  button.disabled = true;
+  try {
+    const result = await api("/api/profile/first-threshold/adopt", { method: "POST", body: JSON.stringify({ percent_lthr: percent, ...(replacesMeasured ? { replace_measured: true } : {}) }) });
+    applyAdoptedFirstThreshold(result);
+    invalidateContextPreview();
+    toast(result.adopted === false ? "Schätzung ist bereits übernommen" : "Erste Schwelle übernommen");
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
 }
 
 function determineChangedProfileFields(formValues, baseline) {
@@ -111,12 +169,15 @@ async function saveProfile(event) {
     if (bodyChanged && retryButton) retryButton.hidden = true;
     const requestBody = { ...changed, ...(bodyChanged ? { sync_body_to_garmin: true } : {}) };
     const saved = await api("/api/profile", { method: "PUT", body: JSON.stringify(requestBody) });
-    if (!Object.keys(changed).every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string")) {
+    if (!profileSaveConfirmed(changed, saved)) {
       throw new Error("Die Profilbestätigung ist unvollständig. Der Entwurf bleibt erhalten.");
     }
-    state.profileBaseline = { ...state.profileBaseline, ...changed };
+    const entryReset = Object.fromEntries(PROFILE_ENTRY_FIELDS.map((key) => [key, ""]));
+    const savedPercent = typeof saved.first_threshold_pct === "string" ? { first_threshold_pct: saved.first_threshold_pct } : {};
+    state.profileBaseline = { ...state.profileBaseline, ...changed, ...entryReset, ...savedPercent };
     if (generation !== state.sessionGeneration) return;
     state.profileDirty = JSON.stringify([...new FormData(form)]) !== submittedForm;
+    if (!state.profileDirty) resetProfileEntryFields(form, savedPercent.first_threshold_pct);
     setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
     invalidateContextPreview();
     handleProfileSaveOutcome(saved, bodyChanged, retryControl, retryBeforeSave);
@@ -387,11 +448,6 @@ const SDK_FAILURE_TEXT = {
 
 // Pure: one line per stale threshold with value, source and age (#1768).
 function zoneWarningLine(item) {
-  if (item.reason === "indoor_missing") {
-    return item.value_text
-      ? `${item.label} fehlt – Indoor-Fahrten nutzen FTP Rad ${item.value_text}`
-      : `${item.label} fehlt`;
-  }
   const unit = item.age_days === 1 ? "Tag" : "Tage";
   const age = item.age_days == null ? "" : ` · ${item.age_days} ${unit} alt`;
   const suffix = { expired: " – nicht mehr verwendet", sdk_failed: " – wird nicht aktualisiert" }[item.reason] || "";
@@ -403,14 +459,14 @@ function zoneWarningTitle(warnings) {
   return `${sdk}Schwellen prüfen und neue Werte hier lokal speichern`;
 }
 
-// Pure: the status strip notice for stale or missing thresholds (#1768), or null.
+// Pure: the status strip notice for stale thresholds (#1768), or null.
 function thresholdStatusItem(warnings) {
   const items = Array.isArray(warnings?.items) ? warnings.items : [];
   if (!items.length) return null;
   return {
     level: "warning",
     title: "Schwellenwerte prüfen",
-    detail: items.length === 1 ? zoneWarningLine(items[0]) : `${items.length} Werte sind veraltet oder fehlen.`,
+    detail: items.length === 1 ? zoneWarningLine(items[0]) : `${items.length} Werte sind veraltet.`,
     action: { href: "#more/profile", label: "Prüfen" },
   };
 }

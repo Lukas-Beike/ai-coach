@@ -451,6 +451,49 @@ class MorningBodyBatteryServiceTests(unittest.TestCase):
         self.assertEqual(service.sync(CHECKIN_DATE)["status"], "attempts_exhausted")
         self.assertEqual(harness.lock.acquire_calls, 1)
 
+    def test_missing_night_does_not_use_up_attempts(self) -> None:
+        harness = Harness()
+        harness.is_remote_configured = True
+        harness.remote_payload = ({}, [])
+        service = harness.make_service()
+        for minutes in (60, 45, 30, 15):
+            snapshot = json.loads(harness.values["garmin_snapshot"])
+            record = snapshot.get("morning_body_battery")
+            if record:
+                record["attempted_at"] = (NOW - timedelta(minutes=minutes)).isoformat()
+                harness.values["garmin_snapshot"] = json.dumps(snapshot)
+            self.assertEqual(
+                service.sync(CHECKIN_DATE)["status"], "not_available_today"
+            )
+        saved = json.loads(harness.values["garmin_snapshot"])["morning_body_battery"]
+        self.assertEqual(saved["attempts"], 0)
+
+        saved["attempted_at"] = (NOW - timedelta(minutes=20)).isoformat()
+        harness.values["garmin_snapshot"] = json.dumps(
+            {
+                **json.loads(harness.values["garmin_snapshot"]),
+                "morning_body_battery": saved,
+            }
+        )
+        harness.remote_payload = (sleep_payload(), body_battery_records())
+        self.assertEqual(service.sync(CHECKIN_DATE)["status"], "ready")
+        self.assertEqual(len(harness.remote_calls), 5)
+
+    def test_missing_night_stops_polling_at_noon(self) -> None:
+        record = {
+            "sleep_date": CHECKIN_DATE.isoformat(),
+            "status": "not_available_today",
+            "attempted_at": (NOW - timedelta(hours=1)).isoformat(),
+            "attempts": 0,
+        }
+        harness = Harness(snapshot={"morning_body_battery": record})
+        harness.is_remote_configured = True
+        service = harness.make_service(
+            local_now=lambda: datetime(2026, 9, 4, 12, 0, tzinfo=UTC)
+        )
+        self.assertEqual(service.sync(CHECKIN_DATE)["status"], "attempts_exhausted")
+        self.assertEqual(harness.remote_calls, [])
+
     def test_non_list_body_battery_is_never_merged(self) -> None:
         harness = Harness(snapshot={"body_battery": [{"id": "saved"}]})
         harness.is_remote_configured = True

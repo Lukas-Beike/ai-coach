@@ -109,5 +109,4 @@ class MorningCheckinStateService:
             "status": status,
             "date": completed_date,
             "current_for_today": current,
-            "last_error": None,
         }

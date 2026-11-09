@@ -27,6 +27,12 @@ MAX_ACTIVITY_SPEED_MPS: Final = 100.0
 MIN_ACTIVITY_ALTITUDE_M: Final = -500.0
 MAX_ACTIVITY_ALTITUDE_M: Final = 9_000.0
 MAX_ACTIVITY_STEPS: Final = 1_000_000.0
+# Running dynamics (#1870). A value of zero means "not measured" and is never kept.
+MAX_GROUND_CONTACT_TIME_MS: Final = 2_000.0
+MAX_PERCENT: Final = 100.0
+MAX_VERTICAL_OSCILLATION_CM: Final = 30.0
+MAX_VERTICAL_RATIO_PCT: Final = 30.0
+MAX_STEP_LENGTH_M: Final = 4.0
 
 # Seconds, as accepted by the legacy Garmin race-prediction reader.
 RACE_PREDICTION_BOUNDS: Final = (60.0, 100_000.0)
@@ -66,6 +72,11 @@ METRIC_BOUNDS: Final[Mapping[MetricKind, tuple[float, float]]] = {
     MetricKind.AEROBIC_DECOUPLING: (-100.0, 100.0),
     MetricKind.BODY_BATTERY_BEFORE_SLEEP: (0.0, 100.0),
     MetricKind.MORNING_BODY_BATTERY: (0.0, 100.0),
+    MetricKind.ACTIVITY_WEATHER_TEMPERATURE: (-90.0, 60.0),
+    MetricKind.ACTIVITY_WEATHER_APPARENT_TEMPERATURE: (-120.0, 80.0),
+    MetricKind.ACTIVITY_WEATHER_HUMIDITY: (0.0, 100.0),
+    MetricKind.ACTIVITY_WEATHER_WIND_SPEED: (0.0, 120.0),
+    MetricKind.ACTIVITY_WEATHER_PRECIPITATION: (0.0, 1_000.0),
     # Form (CTL minus ATL) is negative while fatigue outweighs fitness.
     MetricKind.FORM: (-10_000.0, 10_000.0),
     MetricKind.EFTP: (0.0, 2_500.0),

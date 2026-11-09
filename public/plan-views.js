@@ -11,10 +11,16 @@
 
 globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets, plannedPushTargetLabel, plannedGarminBlockedText });
 
-// One explicit plan_push job for one entry, carrying the hash it was shown with.
-async function runPlanPush(provider, entryId, payloadHash) {
-  const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entryId, expected_payload_hash: payloadHash }] } }) });
+// One explicit plan_push job, carrying the hashes the entries were shown with.
+async function runPlanPush(provider, entries) {
+  const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries } }) });
   return globalThis.waitForSyncJob(job.id);
+}
+
+// The job entry that removes one listed leftover of a deleted or replaced unit:
+// a Garmin workout by a remove entry, an Intervals.icu event by the hidden unit's own entry.
+function leftoverEntry(provider, item, ids) {
+  return provider === ids.garmin ? { library_workout_id: item.id, remove: true } : { library_workout_id: item.id, expected_payload_hash: item.hash };
 }
 
 // What one successful push delivered: Garmin gets the structured workout,
@@ -545,7 +551,7 @@ function focusChipSpec(entry) {
   return { kind: derived ? "focus-derived" : "focus", text: [derived ? "≈" : null, label, intensity].filter(Boolean).join(" "), derived };
 }
 
-const HR_CAP_SOURCE_LABELS = { default: "Standard", measured: "gemessen" };
+const HR_CAP_SOURCE_LABELS = { default: "Standard", measured: "gemessen", estimated: "geschätzt" };
 
 function hrCapChipSpec(entry) {
   const percent = Number(entry?.hr_cap?.percent_lthr);
@@ -1023,10 +1029,58 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   // One explicit sync per pending provider; each job carries the unit's current
   // payload hash, so a unit edited meanwhile is refused instead of pushed.
-  function plannedSyncButton(entry, dateKey, todayKey, actual) {
+  function plannedTargets(entry, dateKey, todayKey, actual) {
     const ids = providerIds();
     const configured = { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured) };
-    const targets = plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual), intervals: ids.intervals });
+    return plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual), intervals: ids.intervals });
+  }
+
+  // Every pending unit carries the leftovers its provider's sync removes, but only the first card
+  // that offers that sync claims them, so the note and the removal appear once.
+  const cleanupClaims = { data: null, owners: new Map() };
+  function claimCleanup(provider, localId) {
+    if (cleanupClaims.data !== state.data) Object.assign(cleanupClaims, { data: state.data, owners: new Map() });
+    if (!cleanupClaims.owners.has(provider)) cleanupClaims.owners.set(provider, localId);
+    return cleanupClaims.owners.get(provider) === localId;
+  }
+
+  // The events of deleted or replaced units that the sync of this unit removes too, per provider.
+  function plannedCleanup(entry, dateKey, todayKey, actual) {
+    const lists = entry.push_cleanup;
+    if (!lists || typeof lists !== "object") return [];
+    const ids = providerIds();
+    const targets = plannedTargets(entry, dateKey, todayKey, actual);
+    return targets.filter((provider) => (provider === ids.garmin || provider === ids.intervals) && Array.isArray(lists[provider]) && lists[provider].length && claimCleanup(provider, entry.local_id)).map((provider) => {
+      const items = lists[provider];
+      const names = items.slice(0, 3).map((item) => [item.name, item.date ? dateLabel(item.date) : ""].filter(Boolean).join(" "));
+      const more = items.length > 3 ? " + " + (items.length - 3) + " weitere" : "";
+      const providerName = plannedPushTargetLabel(provider, entry, ids).split(":")[0];
+      const note = document.createElement("span");
+      note.className = "planned-conflict planned-cleanup";
+      note.textContent = "Wird bei " + providerName + " entfernt: " + names.join(", ") + more;
+      return note;
+    });
+  }
+
+  // One provider's sync of a unit, then the listed leftovers in a job of their own, so one that
+  // cannot be removed never fails the unit.
+  async function pushToProvider(provider, entry, ids) {
+    const done = await runPlanPush(provider, [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }]);
+    const failures = [];
+    let label = plannedPushTargetLabel(provider, entry, ids);
+    const leftovers = claimCleanup(provider, entry.local_id) ? (entry.push_cleanup?.[provider] || []).slice(0, 28) : [];
+    if (leftovers.length) {
+      const cleaned = await runPlanPush(provider, leftovers.map((item) => leftoverEntry(provider, item, ids)));
+      if (cleaned.status === "completed") label += ` · ${leftovers.length} alte entfernt`;
+      else failures.push(`Alte Einträge nicht entfernt: ${globalThis.providerJobErrorDetail?.(cleaned) || "Synchronisierung fehlgeschlagen"}`);
+    }
+    if (done.status !== "completed") failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
+    return { label: done.status === "completed" ? label : "", failures };
+  }
+
+  function plannedSyncButton(entry, dateKey, todayKey, actual) {
+    const ids = providerIds();
+    const targets = plannedTargets(entry, dateKey, todayKey, actual);
     if (!targets.length) return null;
     // A re-render during a running push must not offer a second click.
     state.plannedSyncInFlight ||= new Set();
@@ -1048,9 +1102,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const reached = [];
       for (const provider of targets) {
         try {
-          const done = await runPlanPush(provider, entry.local_id, entry.payload_hash);
-          if (done.status === "completed") reached.push(plannedPushTargetLabel(provider, entry, ids));
-          else failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
+          const outcome = await pushToProvider(provider, entry, ids);
+          failures.push(...outcome.failures);
+          if (outcome.label) reached.push(outcome.label);
         } catch (error) {
           failures.push(error.message);
         }
@@ -1175,6 +1229,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (conflict) cardSummary.append(conflict);
     const garminBlocked = plannedGarminBlocked(entry, dateKey, todayKey, actual);
     if (garminBlocked) cardSummary.append(garminBlocked);
+    cardSummary.append(...plannedCleanup(entry, dateKey, todayKey, actual));
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
@@ -1441,7 +1496,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       button.disabled = true;
       let failure = "";
       try {
-        const done = await runPlanPush(providerIds().wahoo, workout.id, wahoo.payload_hash);
+        const done = await runPlanPush(providerIds().wahoo, [{ library_workout_id: workout.id, expected_payload_hash: wahoo.payload_hash }]);
         if (done.status !== "completed") failure = globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen";
       } catch (error) {
         failure = error.message;

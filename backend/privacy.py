@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.activities.route_store import clear_routes
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService
 from backend.backup.export import (
     PrivacyArchiveExportConfig,
@@ -245,7 +246,7 @@ class PrivacyDeleteService:
         return {"status": "ok", **self.gps_state()}
 
     def delete_gps_tracks(self, confirm: Any) -> dict[str, Any]:
-        """Delete every stored GPS position after an explicit confirmation."""
+        """Delete every stored GPS position and the derived routes after confirmation."""
         if confirm != GPS_TRACKS_DELETE_CONFIRMATION_TEXT:
             raise AppError(400, "Zum Löschen muss GPS-SPUREN LÖSCHEN bestätigt werden.")
         dependencies = self._dependencies
@@ -255,6 +256,7 @@ class PrivacyDeleteService:
             dependencies.database_manager.unit_of_work() as db,
         ):
             deleted = activity_detail_store.delete_stored_tracks(db)
+            clear_routes(dependencies.key_value_repository, db)
         return {"status": "ok", "deleted_tracks": deleted, **self.gps_state()}
 
     def delete(self, confirm: Any) -> dict[str, Any]:

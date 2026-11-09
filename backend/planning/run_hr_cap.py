@@ -46,13 +46,15 @@ def capped_focus(unit: Mapping[str, Any]) -> str | None:
 
 
 def cap_problem(
-    unit: Mapping[str, Any], first_threshold_pct: float | None = None
+    unit: Mapping[str, Any],
+    first_threshold_pct: float | None = None,
+    estimated: bool = False,
 ) -> dict[str, Any] | None:
     """The problem of one run unit's cap with the value to write, or None if right."""
     focus = capped_focus(unit)
     if focus is None:
         return None
-    percents, source = cap_percents(first_threshold_pct)
+    percents, source = cap_percents(first_threshold_pct, estimated)
     limit = percents[focus]
     base: dict[str, Any] = {
         "focus": focus,
@@ -82,12 +84,14 @@ def cap_problem(
 
 
 def problems(
-    units: Iterable[Mapping[str, Any]], first_threshold_pct: float | None = None
+    units: Iterable[Mapping[str, Any]],
+    first_threshold_pct: float | None = None,
+    estimated: bool = False,
 ) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
     """Each capped run unit with a wrong cap, with its problem."""
     found = []
     for unit in units:
-        problem = cap_problem(unit, first_threshold_pct)
+        problem = cap_problem(unit, first_threshold_pct, estimated)
         if problem is not None:
             found.append((unit, problem))
     return found

@@ -487,7 +487,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) "
-                "VALUES ('unit-1', 'unit-1', ?, 'now', 'now')",
+                "VALUES ('11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', ?, 'now', 'now')",
                 (raw_payload,),
             )
         intent = {
@@ -506,7 +506,7 @@ class CoachProposalCreationTests(unittest.TestCase):
             {
                 "entries": [
                     {
-                        "library_workout_id": "unit-1",
+                        "library_workout_id": "11111111-1111-4111-8111-111111111111",
                         "expected_payload_hash": hashlib.sha256(
                             raw_payload.encode()
                         ).hexdigest(),
@@ -525,10 +525,16 @@ class CoachProposalCreationTests(unittest.TestCase):
                     "name": "Tempo ride",
                     "date": "2026-10-02",
                     "sport": "Ride",
-                    "id": "unit-1",
+                    "id": "11111111-1111-4111-8111-111111111111",
                 }
             ],
         )
+        stored = json.loads(str(self._rows()[0]["payload"]))["intent"]
+        self.assertEqual(
+            ["intervals_sync", "planned_unit:11111111-1111-4111-8111-111111111111"],
+            stored["authorization_scope"],
+        )
+        self.assertEqual(["intervals_sync"], intent["authorization_scope"])
 
     def test_all_pending_plan_approval_freezes_and_displays_pending_entries(
         self,

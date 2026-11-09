@@ -16,7 +16,9 @@ from unittest.mock import patch
 import remote_planned_unit_fixture
 
 from backend import change_history
+from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import DatabaseManager, row_factory
+from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.repositories import PlanningStateRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
@@ -1161,6 +1163,37 @@ class PlannedUnitServiceTests(unittest.TestCase):
             )
         self.assertIsNone(deleted)
         self.assertEqual(self.state(), ([], [], 0))
+
+    def test_undoing_a_creation_keeps_the_garmin_link_of_a_pushed_workout(self):
+        entity_id = str(self.id)
+        entry = planned_units.normalize_planned_unit(self.workout(), local_id=entity_id)
+        repository = RemoteLinkRepository()
+        with self.manager.unit_of_work() as db:
+            self.service.insert(db, entry)
+            for provider in ("intervals", "garmin"):
+                repository.upsert(
+                    db,
+                    RemoteLink(
+                        RemoteEntityKind.PLANNED_UNIT,
+                        entity_id,
+                        provider,
+                        RemoteLinkState.SYNCED,
+                        remote_id=f"{provider}-1",
+                    ),
+                )
+            current = dict(
+                db.execute(
+                    "SELECT * FROM planned_units WHERE local_id=?", (entity_id,)
+                ).fetchone()
+            )
+            self.service.restore_in_transaction(db, entity_id, current, None, "create")
+            kept = [
+                link.provider
+                for link in repository.list_for_entity(
+                    db, RemoteEntityKind.PLANNED_UNIT, entity_id
+                )
+            ]
+        self.assertEqual(["garmin"], kept)
 
     def test_restore_in_transaction_rejects_conflict_and_corrupt_payload(self):
         entity_id = str(self.id)

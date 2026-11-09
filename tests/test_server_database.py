@@ -718,7 +718,7 @@ class ServerDatabaseTests(ServerTestCase):
                 names = set(archive.namelist())
                 manifest = json.loads(archive.read("manifest.json"))
                 self.assertEqual(manifest["format"], "intervals-coach-privacy-export")
-                self.assertEqual(manifest["format_version"], 15)
+                self.assertEqual(manifest["format_version"], 16)
                 self.assertEqual(manifest["status"], "complete")
                 self.assertIn("snapshots.jsonl", names)
                 self.assertIn("remote_links.jsonl", names)
@@ -971,8 +971,6 @@ class ServerDatabaseTests(ServerTestCase):
             transport = ExportStreamTransport(
                 Mock(side_effect=RuntimeError("unused database backup")),
                 lambda: service,
-                monotonic=time.monotonic,
-                time_limit_seconds=30,
             )
             with configured:
                 transport.stream_privacy_export(handler)

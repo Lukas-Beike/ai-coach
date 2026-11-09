@@ -38,7 +38,7 @@ from backend.db.schema import (
     configure_cipher,
     database_schema_is_current,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V23
+from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V24
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -89,6 +89,7 @@ def builders() -> dict[int, Callable[[Any], None]]:
         21: partial(populated_release_database, fixture=gate.V21_FIXTURE),
         22: partial(populated_release_database, fixture=gate.V22_FIXTURE),
         23: partial(populated_release_database, fixture=gate.V23_FIXTURE),
+        24: partial(populated_release_database, fixture=gate.V24_FIXTURE),
     }
 
     def populated(db: Any, build: Callable[[Any], Any]) -> None:
@@ -227,7 +228,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
 
     def test_a_failing_upgrade_leaves_every_released_schema_unchanged(self) -> None:
         def failing_last_step(connection: Any) -> None:
-            migrations._upgrade_v23_to_v24(connection)
+            migrations._upgrade_v24_to_v25(connection)
             raise RuntimeError("injected migration failure")
 
         for version in builders():
@@ -238,7 +239,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                     with (
                         mock.patch.dict(
                             migrations.UPGRADE_STEPS,
-                            {SHAPE_SCHEMA_V23: (SHAPE_CURRENT, failing_last_step)},
+                            {SHAPE_SCHEMA_V24: (SHAPE_CURRENT, failing_last_step)},
                         ),
                         self.assertRaisesRegex(RuntimeError, "injected"),
                     ):
@@ -326,6 +327,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                         configure_cipher=configure_cipher,
                         row_factory=row_factory,
                         schema_is_current=database_schema_is_current,
+                        startup_invariants=lambda _db: None,
                     )
                 )
                 staged = validation.stage(backup)

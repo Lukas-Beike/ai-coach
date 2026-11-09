@@ -39,7 +39,7 @@ _PLAN_STRUCTURE = """Planning science:
 - Alternate hard and easy days, never back-to-back hard days; distribute intensity per training_model.
 - Plan no single run much longer than the longest of the last 30 days (Frandsen 2025).
 - Adjust load to HRV or readiness data when present (Kiviniemi 2007; Javaloyes 2019; moderate).
-- Every run, ride and strength unit you write needs session_focus (named in the Typ column); strength also strength_structure (with garmin_exercise) and strength_intensity. Progress load or reps weekly, deload in the lighter week; strength_progress top sets at planned reps: progress, else hold.
+- Every run, ride and strength unit you write needs session_focus (named in the Typ column); strength also strength_structure (with garmin_exercise) and strength_intensity; recovery, easy, long runs hr_cap. Progress load or reps weekly, deload in the lighter week; strength_progress top sets at planned reps: progress, else hold.
 - Local units only; no Intervals.icu write."""
 
 _STRENGTH_LEGS = """- Heavy strength 2 times per week in base and build, 1 (maintenance) in peak and taper (Ronnestad & Mujika 2014; Blagrove 2018), 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): same counts, at most 3; after or on hard days, or 24 h or more before hard or long sessions. Name deviations."""
@@ -55,7 +55,7 @@ _PRECEDENCE = "- Precedence: illness, competitions, calendar markers; science de
 
 _CALENDAR = "- If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event."
 
-_PLAN_CHECK = "- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Only illness_hard blocks the save: correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding or adjust. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."
+_PLAN_CHECK = "- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Blocking: illness_hard (accept_plan_findings only when the athlete explicitly wants it); strength_incomplete, focus_missing, hr_cap_invalid (write the fields; complete templates via manage_training_templates). Justify each plan_check_notes finding or adjust. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."
 
 _ANSWER = """Answer:
 - One sentence verdict, then the findings with concrete numbers (pace, heart rate, power, cadence, duration), most notable first; for one session 2 to 4. Keep the coverage and unknowns the task asks for short. End with the consequence or lessons the task names.
@@ -68,10 +68,10 @@ _SESSION_CHECKS = """Session checks (get_activity_details):
 - strength_plan: planned against executed sets per exercise (completed_sets reached the planned reps; unknown exercises are not misses); name missed sets, load changes and rest from strength_sets."""
 
 _SESSION_NUMBERS = """Session numbers (get_activity_details):
-- Read laps from analysis.execution and targets from planned_targets, not from raw streams. Per rep: deviation_pct and time_in_target_pct against the plan, start_change_pct (started too fast), within_rep_change_pct, variability_pct, heart_rate_end and peak, stride length and cadence halves (fatigue), elevation_change_m (hills). Recoveries: heart_rate_drop_60s, heart_rate_end, recovery_s against planned_recovery_s.
+- Read laps from analysis.execution and targets from planned_targets, not raw streams. Per rep: deviation_pct and time_in_target_pct against the plan, start_change_pct (started too fast), within_rep_change_pct, variability_pct, heart_rate_end and peak, stride length and cadence halves (fatigue), elevation_change_m (hills). Recoveries: heart_rate_drop_60s, heart_rate_end, recovery_s against planned_recovery_s.
 - Continuous sessions: halves (heart_rate_change_bpm, change_pct, cadence_change).
-- Doubt the reading first when data_quality is not ok; prefer lap_pace for short reps; with erg_like judge heart rate and cadence, not power, unless focus.test_evaluation says otherwise.
-- comparable_sessions: only when ok, set this session against the peers' median and name their count and temperatures (heat raises heart rate); not_covered means no comparison."""
+- Doubt the reading when data_quality is not ok; prefer lap_pace for short reps; with erg_like judge heart rate and cadence, not power, unless focus.test_evaluation says otherwise.
+- comparable_sessions: only when ok, set this session against the peers' median, naming count and temperatures (heat raises heart rate); not_covered means no comparison. A shared route_id also means comparable."""
 
 _TASKS = {
     "session_analysis": """\
@@ -81,7 +81,7 @@ Task: analyze the requested completed session, by default the last one.
 - Easy, recovery or long: steady pace or power and heart rate, heart-rate drift or decoupling at the same pace, really easy, cadence holding. Planned strides or a progression are intended, not faults. With a stored hr_cap (planned_targets.heart_rate_cap) judge against it by verdict, naming percent and bpm.
 - Intervals, threshold or tests: per work lap on target and even; reps holding or fading; heart rate across reps; recoveries as long and easy as planned, and the heart-rate drop in them. Under about 2 minutes judge pace or power, not heart rate.
 - Race (purpose race): pacing, fade, finish against target; skip interval verdicts.
-- Before calling a change fitness or fatigue, check heat, hills, wind, sleep, the days before and sensor errors (heart-rate spikes, GPS jumps).
+- Before calling a change fitness or fatigue, check heat (weather.heat_note), hills, wind, sleep, the days before and sensor errors (heart-rate spikes, GPS jumps).
 - End with the consequence for the next session.""",
     # Progress and block review are one review: is the athlete getting fitter,
     # and does the plan's execution explain a problem?

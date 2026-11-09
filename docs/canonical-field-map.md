@@ -146,7 +146,7 @@ The upstream provider activity a record was copied from (an Intervals.icu copy o
 
 ## Metric kinds (`MetricKind`)
 
-Each kind has exactly one canonical unit (`MetricKind.unit`) and a plausibility range (`METRIC_BOUNDS` in `backend/canonical/validation.py`); an observation outside it is rejected. "Emitted by" lists the modules that construct observations of the kind (provider mappers and the three local derivations); "Status" comes from `UNPRODUCED_METRIC_KINDS` and `EXPORT_ONLY_METRIC_KINDS` in `backend/canonical/vocabulary.py`.
+Each kind has exactly one canonical unit (`MetricKind.unit`) and a plausibility range (`METRIC_BOUNDS` in `backend/canonical/validation.py`); an observation outside it is rejected. "Emitted by" lists the modules that construct observations of the kind (provider mappers and the local derivations); "Status" comes from `UNPRODUCED_METRIC_KINDS` and `EXPORT_ONLY_METRIC_KINDS` in `backend/canonical/vocabulary.py`.
 
 | Kind | Unit | Range | Meaning | Emitted by | Status |
 |---|---|---|---|---|---|
@@ -219,6 +219,11 @@ Each kind has exactly one canonical unit (`MetricKind.unit`) and a plausibility 
 | `aerobic_decoupling` | `%` | -100 to 100 | Local aerobic decoupling of one session (card M8). | `session_metrics.py` | unproduced by providers |
 | `body_battery_before_sleep` | `score` | 0 to 100 | Last Body Battery level up to four hours before sleep (derived locally). | `morning_battery_service.py` | unproduced by providers |
 | `morning_body_battery` | `score` | 0 to 100 | First Body Battery level after waking (derived locally). | `morning_battery_service.py` | unproduced by providers |
+| `activity_weather_temperature` | `C` | -90 to 60 | Air temperature during one outdoor ride or run (Open-Meteo model, derived locally). | `activity_weather.py` | unproduced by providers |
+| `activity_weather_apparent_temperature` | `C` | -120 to 80 | Apparent temperature during one outdoor ride or run; from 25 C the Coach names heat. | `activity_weather.py` | unproduced by providers |
+| `activity_weather_humidity` | `%` | 0 to 100 | Relative humidity during one outdoor ride or run. | `activity_weather.py` | unproduced by providers |
+| `activity_weather_wind_speed` | `m/s` | 0 to 120 | Wind speed at 10 m during one outdoor ride or run. | `activity_weather.py` | unproduced by providers |
+| `activity_weather_precipitation` | `mm` | 0 to 1,000 | Precipitation that fell during one outdoor ride or run. | `activity_weather.py` | unproduced by providers |
 
 ## Canonical vocabulary
 
@@ -527,6 +532,11 @@ Shared rule `activity_duration_s(sport, moving, timer, elapsed)`: `active = movi
 | `anaerobic_training_effect` | 0.0..5.0 | yes | - | |
 | `water_estimated_ml` | ml, 0..50,000 | yes | - | |
 | `energy_kcal` | kcal, 0..20,000 | yes | yes | Zero becomes `None` in G and W. |
+| `ground_contact_time_ms` | ms, 0..2,000 | yes | - | Running dynamics (#1870), only with a supporting sensor; zero is not measured and becomes `None`. |
+| `ground_contact_balance_pct` | percent of the contact time on the left foot, 0..100 | yes | - | Same. |
+| `vertical_oscillation_cm` | cm, 0..30 | yes | - | Same. |
+| `vertical_ratio_pct` | percent, 0..30 | yes | - | Same. |
+| `step_length_m` | m, 0..4 | yes | - | Garmin sends centimetres as `avgStrideLength`; divided by 100. Same zero rule. |
 | `power_zone_times_s` | tuple of (`Z<n>`, s), max 20 | yes | - | |
 | `hr_zone_times_s` | tuple of (`Z<n>`, s), max 20 | yes | - | |
 | `pace_zone_times_s` | tuple of (`Z<n>`, s), max 20 | - | - | |
@@ -549,7 +559,7 @@ Fields set by neither the Garmin nor the Wahoo mapper (only the removed Interval
 ### `garmin_activity_mapping.py`
 
 Status: Live. Called for every Garmin activity sync through `garmin_ingest_plan` (`canonical_plans.py`, via `_garmin_activity_mapper`), for replay of stored rows through `reprojection_plan`, and by `project_garmin_snapshot`.
-Mapper version: **20**
+Mapper version: **21**
 Inputs: Garmin activity list rows (`get_activities_by_date`, SDK and Personal API share the key names), merged by `merge_training_load_rows` with the dedicated per-activity rows `training_load_activities` and `activity_ratings` (single-activity `summaryDTO`). Entry point `map_garmin_activities(rows, zone, retrieved_at)`.
 Evidence: observed in `garmin_activity_list_entry_run_2026-11-03` (SDK) and `garmin_personal_activity_list_2026-11-03` (Personal API) for all keys not named under "documented" below; `directWorkoutRpe`, `directWorkoutFeel`, `minHR` observed under `summaryDTO` in `garmin_activity_detail_run_2026-11-03` and `garmin_personal_activity_detail_run_2026-11-03`. Documented only (code, no payload): `movingTime`, `averagePower`, `maxHeartRate`, `trainingEffect`, `averageBikingCadenceInRevPerMinute` (the sample is a run), `id` (alias of `activityId` in `merge_training_load_rows`), and zones above 5 (`hrTimeInZone_6`..`_20`, `powerTimeInZone_6`..`_20`). All sample values observed are from a run; ride and strength shapes are unverified against a payload.
 
@@ -593,6 +603,11 @@ General rules: first alias that carries a value wins (`_present`: not `None`, no
 | `min_temp_c`, `max_temp_c` | `minTemperature`, `maxTemperature` | deg C, -60..70 | Same pair rule. |
 | `water_estimated_ml` | `waterEstimated` | ml, Garmin's sweat-loss estimate | |
 | `lap_count` | `lapCount` | count | |
+| `ground_contact_time_ms` | `avgGroundContactTime` | ms (observed 264.5) | Running dynamics; `_running_dynamics`. Garmin writes 0 for a value it did not measure (observed: `avgVerticalOscillation` 0 beside a vertical ratio of 8.04), so 0 is no value and no issue. Absence is normal. |
+| `ground_contact_balance_pct` | `avgGroundContactBalance` -> `avgGroundContactBalanceLeft` | percent on the left foot, 0..100 (observed 49.63) | Top-level key observed; the `Left` spelling is the lap and `summaryDTO` name. |
+| `vertical_oscillation_cm` | `avgVerticalOscillation` | cm, 0..30 | |
+| `vertical_ratio_pct` | `avgVerticalRatio` | percent, 0..30 (observed 8.04) | |
+| `step_length_m` | `avgStrideLength` | centimetres divided by 100 -> m, 0..4 (observed 116.36 cm; the laps carry the same value as `avgStepLength` 1.1636 m) | Garmin calls the distance of one step "stride length". |
 | `energy_kcal` | `calories` | kcal, whole-session estimate including the resting share; `calories or None` | Zero means not estimated. |
 | `avg_cadence` | `averageBikingCadenceInRevPerMinute` else `averageRunningCadenceInStepsPerMinute` | bike: rpm as sent (used when truthy); run: steps/min divided by 2 (one leg) | `_cadence`. A bike value of 0 with no run key is no cadence (`None`), as for the other providers. Run key observed; bike key documented. |
 | `hr_zone_times_s`, `power_zone_times_s` | `hrTimeInZone_1`..`_20`, `powerTimeInZone_1`..`_20` | s per zone, id `Z<n>` (`n` = key number); Garmin's own zone boundaries | `_zone_times`. Absent zones are skipped; one invalid zone drops the whole distribution with one issue. `_1`..`_5` observed. |
@@ -655,7 +670,7 @@ Keys outside the table use `classify_sport_text` over the identity text; its ord
 
 Rows are matched on `activityId` (else `id`). Rows of one id combine in order, `activity_ratings` first then `training_load_activities` (`DEDICATED_ACTIVITY_SECTIONS`), a later value replacing an earlier one including an explicit null. For each alias group (`_TRAINING_LOAD_FIELDS`) in which the combined row carries a non-null value, the activity row's own aliases of that group are dropped and replaced by the carried ones; a group the combined row leaves null keeps the activity row's own value. In the ingest, stored dedicated rows come first and the payload's own rows win (`_garmin_activity_mapper`).
 
-Not mapped (present in the list payloads, ignored): `activityUUID`, the training-effect message texts (`aerobicTrainingEffectMessage`, `anaerobicTrainingEffectMessage`), `avgElevation`, `avgStrideLength`, `avgVerticalOscillation`, `avgVerticalRatio`, `avgGroundContactTime`, `avgGroundContactBalance`, `avgRespirationRate`, `minRespirationRate`, `maxRespirationRate`, `maxDoubleCadence`, `maxRunningCadenceInStepsPerMinute`, `maxVerticalSpeed`, `bmrCalories`, `autoCalcCalories`, `differenceBodyBattery`, `moderateIntensityMinutes`, `vigorousIntensityMinutes`, `beginTimestamp`, `endTimeGMT`, `timeZoneId`, `deviceId`, `sportTypeId`, `workoutId`, `splitSummaries`, `fastestSplit_*`, `minActivityLapDuration`, locations and coordinates, owner and privacy fields, flags (`favorite`, `pr`, `parent`, `hasSplits` ...). Reason: no canonical `ActivityRecord` field for them; detail-level data (splits, laps, streams) comes from the activity-detail mappers. `isManualActivity` duplicates `manualActivity`, which is the key read. Canonical fields this module never sets: `energy_kj`, `intensity`, `weighted_avg_speed_mps`, `pace_mps`, `ftp_w`, `eftp_w`, `avg_temp_c`, `pace_zone_times_s`, `planned_event_id`, `device_name`, `external_ref`.
+Not mapped (present in the list payloads, ignored): `activityUUID`, the training-effect message texts (`aerobicTrainingEffectMessage`, `anaerobicTrainingEffectMessage`), `avgElevation`, `avgRespirationRate`, `minRespirationRate`, `maxRespirationRate`, `maxDoubleCadence`, `maxRunningCadenceInStepsPerMinute`, `maxVerticalSpeed`, `bmrCalories`, `autoCalcCalories`, `differenceBodyBattery`, `moderateIntensityMinutes`, `vigorousIntensityMinutes`, `beginTimestamp`, `endTimeGMT`, `timeZoneId`, `deviceId`, `sportTypeId`, `workoutId`, `splitSummaries`, `fastestSplit_*`, `minActivityLapDuration`, locations and coordinates, owner and privacy fields, flags (`favorite`, `pr`, `parent`, `hasSplits` ...). Reason: no canonical `ActivityRecord` field for them; detail-level data (splits, laps, streams) comes from the activity-detail mappers. `isManualActivity` duplicates `manualActivity`, which is the key read. Canonical fields this module never sets: `energy_kj`, `intensity`, `weighted_avg_speed_mps`, `pace_mps`, `ftp_w`, `eftp_w`, `avg_temp_c`, `pace_zone_times_s`, `planned_event_id`, `device_name`, `external_ref`.
 
 ### `wahoo_activity_mapping.py`
 
@@ -842,6 +857,11 @@ Every key of the `ActivitySummary` TypedDict (`total=False`; only values some re
 | `max_temp_c` | `max_temp_c` | deg C |
 | `energy_kj` | `energy_kj` | kJ |
 | `energy_kcal` | `energy_kcal` | kcal |
+| `ground_contact_time_ms` | `ground_contact_time_ms` | ms |
+| `ground_contact_balance_pct` | `ground_contact_balance_pct` | percent on the left foot |
+| `vertical_oscillation_cm` | `vertical_oscillation_cm` | cm |
+| `vertical_ratio_pct` | `vertical_ratio_pct` | percent |
+| `step_length_m` | `step_length_m` | m |
 | `efficiency_factor` | stored derived observation `efficiency_factor` (`with_session_metrics`, method `local-session-metrics`) | ratio |
 | `efficiency_factor_unit` | `derivation.unit` of that observation | text |
 | `variability_index` | stored derived observation `variability_index` | ratio |
@@ -882,7 +902,7 @@ Keys the readers add that are not declared in the TypedDict: `zone_models` (zone
 
 ### `activity_detail.v1` metrics
 
-`activity_detail_contract` (`detail_contract.py`) uses the same orders and reports every candidate: each metric has `value`, `unit`, `source` and the other records' values as `alternatives`. Measured (`_MEASURED_METRICS`, measured order): `duration_s` s, `moving_duration_s` s, `elapsed_duration_s` s, `distance_m` m, `elevation_gain_m` m, `elevation_loss_m` m, `elevation_high_m` m, `elevation_low_m` m, `avg_hr` bpm, `max_hr` bpm, `min_hr` bpm, `avg_power` W, `max_power_w` W, `avg_cadence` rpm, `max_speed_mps` m/s, `min_temp_c` deg C, `max_temp_c` deg C, `steps` count, `lap_count` count, `energy_kj` kJ, `energy_kcal` kcal. Derived (`_DERIVED_METRICS`, derived order): `normalized_power` W, `load` (with `model`), `aerobic_training_effect`, `anaerobic_training_effect`, `water_estimated_ml` ml. Ratings `rpe`, `feel` (rating order, kind `athlete_entered`, with `scale`, `rating_label`, `normalized_0_1` from `ACTIVITY_RATING_SCALES`). `avg_hr` and `avg_power` fall back to the merged stream mean (kind `derived`) when no record has them (`_GAP_FILL`). Summary scalars fill metrics no record provides, and are kept as alternatives for `min_temp_c`, `max_temp_c`, `elevation_loss_m`.
+`activity_detail_contract` (`detail_contract.py`) uses the same orders and reports every candidate: each metric has `value`, `unit`, `source` and the other records' values as `alternatives`. Measured (`_MEASURED_METRICS`, measured order): `duration_s` s, `moving_duration_s` s, `elapsed_duration_s` s, `distance_m` m, `elevation_gain_m` m, `elevation_loss_m` m, `elevation_high_m` m, `elevation_low_m` m, `avg_hr` bpm, `max_hr` bpm, `min_hr` bpm, `avg_power` W, `max_power_w` W, `avg_cadence` rpm, `max_speed_mps` m/s, `min_temp_c` deg C, `max_temp_c` deg C, `steps` count, `lap_count` count, `energy_kj` kJ, `energy_kcal` kcal, `ground_contact_time_ms` ms, `ground_contact_balance_pct` %, `vertical_oscillation_cm` cm, `vertical_ratio_pct` %, `step_length_m` m. Derived (`_DERIVED_METRICS`, derived order): `normalized_power` W, `load` (with `model`), `aerobic_training_effect`, `anaerobic_training_effect`, `water_estimated_ml` ml. Ratings `rpe`, `feel` (rating order, kind `athlete_entered`, with `scale`, `rating_label`, `normalized_0_1` from `ACTIVITY_RATING_SCALES`). `avg_hr` and `avg_power` fall back to the merged stream mean (kind `derived`) when no record has them (`_GAP_FILL`). Summary scalars fill metrics no record provides, and are kept as alternatives for `min_temp_c`, `max_temp_c`, `elevation_loss_m`.
 
 ## Canonical records for activity detail
 
@@ -914,6 +934,7 @@ Equal-length channels on one strictly increasing `time_s` axis. At most 172,800 
 | `hr_source` | `HeartRateSource \| None` | FIT mapper (`fit_sensor_mapping.py`) | What measured the heart rate; `None` without a heart rate channel, for Garmin chart sets and for sets mapped before schema version 24. |
 | `power_source` | `PowerSource \| None` | FIT mapper (`fit_sensor_mapping.py`) | What measured the power; `None` without a power channel, for Garmin chart sets and for sets mapped before schema version 24. |
 | `sensors` | tuple of `ActivitySensor`, at most 16 | FIT mapper (`fit_sensor_mapping.py`) | The external heart rate, power meter and trainer sensors the recording named. |
+| `dfa_alpha1` | `ActivityDfaAlpha1 \| None` | FIT mapper (`fit_rr_mapping.py`, `backend/canonical/dfa_alpha1.py`) | The first threshold estimate of a chest-strap recording that carried RR intervals; `None` otherwise, for Garmin chart sets and for sets mapped before schema version 25. The RR intervals themselves are never part of the set. |
 
 Channel bounds (`CHANNEL_BOUNDS`) and producers:
 
@@ -931,6 +952,13 @@ Channel bounds (`CHANNEL_BOUNDS`) and producers:
 | `moving` | 1 moving, 0 paused | 0 to 1 | no | no |
 | `latitude_deg` | WGS84 degrees, private | -90 to 90 | yes | yes |
 | `longitude_deg` | WGS84 degrees, private | -180 to 180 | yes | yes |
+| `ground_contact_time_ms` | ms | 0 to 2,000 | no | yes |
+| `ground_contact_balance_pct` | percent of the contact time on the left foot | 0 to 100 | no | yes |
+| `vertical_oscillation_cm` | cm | 0 to 30 | no | yes |
+| `vertical_ratio_pct` | percent | 0 to 30 | no | yes |
+| `step_length_m` | m | 0 to 4 | no | yes |
+
+The five running dynamics channels (`RUNNING_DYNAMICS_CHANNELS`) exist only with a supporting sensor (chest strap, running pod or a watch that measures them); absence is normal. They are stored and merged per channel, but they never decide the primary stream (`_populated_channel_count`), and the `activity_detail.v1` document leaves out both their series and their coverage, so the Coach and the API receive the summary values and the form drift result, never the series. The form drift analysis (`performance/form_drift.py`) reads them.
 
 The two position channels are stored, backed up and exported like every channel, but `POSITION_CHANNELS` keeps them out of `merge_details`, the `activity_detail.v1` contract, its coverage and every Coach read: raw positions never leave storage, and the athlete can switch their storage off (`gps_tracks_enabled`, privacy section under **Mehr**).
 The property `kind` is always `streams` (`ActivityDetailKind.STREAMS`), not a stored field.
@@ -943,9 +971,21 @@ One external sensor a recording named. The serial number is only an input of the
 |---|---|---|---|
 | `role` | `SensorRole` | `fit_sensor_mapping.py` | From the ANT+ device type: 120 heart rate, 11 power meter, 17 trainer. |
 | `key` | text, SHA-256 hex | `fit_sensor_mapping.py` | Hash of manufacturer, product and serial number; the registry shows its first 16 characters. |
-| `connection` | text or `None` | `fit_sensor_mapping.py` | `antplus`, `ant`, `bluetooth` or `bluetooth_low_energy` from the file's `source_type`. |
+| `connection` | text or `None` | `fit_sensor_mapping.py` | `ant`, `antplus`, `bluetooth`, `bluetooth_low_energy` or `wifi` from the file's `source_type` (FIT SDK profile: 0 ant, 1 antplus, 2 bluetooth, 3 bluetooth_low_energy, 4 wifi, 5 local). |
 | `manufacturer` | int, 0 to 65,535, or `None` | `fit_sensor_mapping.py` | FIT manufacturer number. |
 | `product` | int, 0 to 65,535, or `None` | `fit_sensor_mapping.py` | FIT product number. |
+
+### `ActivityDfaAlpha1`
+
+The first threshold heart rate a chest-strap recording gives (DFA-a1, research-grade, never a lab value). Stored as one JSON object in `activity_detail_sets.dfa_alpha1`; the RR series is an input only.
+
+| Field | Type & unit | Emitted by | Notes |
+|---|---|---|---|
+| `estimate_bpm` | float, 60 to 220 bpm | `dfa_alpha1.first_threshold` | The heart rate at which the regression of alpha1 on the window heart rate reaches 0.75. |
+| `windows` | int, at least 1 | `dfa_alpha1.first_threshold` | Steady or ramping 2-minute windows the regression used. |
+| `artifact_share` | float, 0 to 1 | `dfa_alpha1.first_threshold` | Share of beats dropped by artifact correction (outside 300 to 2000 ms, or more than 20 % from the last accepted beat). |
+| `quality` | `DfaQuality` | `dfa_alpha1.first_threshold` | `good` with at least 20 windows, at most 3 % artifacts and R squared of at least 0.5; otherwise `low`. |
+| `method` | int | `dfa_alpha1.METHOD_VERSION` | Version of the calculation. |
 
 ### `ActivityLap`
 
@@ -1049,7 +1089,14 @@ The property `kind` is always `strength_sets`.
 
 ### `StreamChannel`
 
-Members `time_s`, `distance_m`, `altitude_m`, `grade_pct`, `speed_mps`, `power_w`, `heart_rate_bpm`, `cadence_rpm`, `temperature_c`, `moving`, `latitude_deg`, `longitude_deg`; units and producers in the `ActivityStreamSet` channel table.
+Members `time_s`, `distance_m`, `altitude_m`, `grade_pct`, `speed_mps`, `power_w`, `heart_rate_bpm`, `cadence_rpm`, `temperature_c`, `moving`, `latitude_deg`, `longitude_deg`, `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m`; units and producers in the `ActivityStreamSet` channel table.
+
+### `DfaQuality`
+
+| Value | Meaning | Produced by |
+|---|---|---|
+| `good` | At least 20 windows, at most 3 % artifacts and a clear fit | `dfa_alpha1.first_threshold` |
+| `low` | An estimate that misses one of those criteria | `dfa_alpha1.first_threshold` |
 
 ### `HeartRateSource`
 
@@ -1186,13 +1233,13 @@ Payload evidence for this scope: the sanitized payload files contain the Garmin 
 ### `garmin_activity_detail_mapping.py`
 
 Status: Live. Called by `_map_collected` in `backend/sync/garmin_activity_details.py` for every Garmin activity detail fetch and backfill; stored with `replace_detail_set(mapper_version=MAPPER_VERSION)`.
-Mapper version: **6**
+Mapper version: **9**
 Inputs: the dict from `collect_garmin_activity_detail` (`backend/providers/garmin.py`) with the parts `details`, `splits`, `hr_zones`, `power_zones`, `exercise_sets` (strength activities only) and `fit`. Transport: the Personal API serves `details` (with `maxChartSize` 2,000) and the original FIT file (`download_activity_fit`, unzipped by `fit_from_archive`); the unofficial login serves `splits`, the two zone parts and `exercise_sets`. A part that is absent gives no set and no issue; a present but malformed part gives one value-free issue and no set for it.
 Evidence: documented only (fixtures `tests/fixtures/providers/garmin/activity_detail/details.json`, `splits.json`, `hr_zones.json`, `power_zones.json`; strength and FIT cases are built inline in `tests/test_garmin_activity_detail_mapping.py`). The sanitized payload files `garmin_activity_detail_run_2026-11-03` and `garmin_personal_activity_detail_run_2026-11-03` hold the activity summary only.
 
 Provenance: `provider` `garmin`, `source_kind` `provider_reported`, `source_record_id` the activity id, `recorded_by` and `retrieved_at` from the caller, `label` `Garmin Connect`. `provider_activity_id` is `activity_id` (text, at most 200 chars; an integer id is rejected as `invalid_type`). All sets use `origin` `fetch`.
 
-Record keywords set per kind: stream set `provider_activity_id`, `provenance`, `origin`, `resolution`, `channels`, `hr_source`, `power_source`, `sensors`; lap set `provider_activity_id`, `provenance`, `origin`, `lap_source`, `laps`; zone distribution `provider_activity_id`, `provenance`, `origin`, `metric`, `boundary_source`, `buckets`; strength set list `provider_activity_id`, `provenance`, `origin`, `source`, `sets`.
+Record keywords set per kind: stream set `provider_activity_id`, `provenance`, `origin`, `resolution`, `channels`, `hr_source`, `power_source`, `sensors`, `dfa_alpha1`; lap set `provider_activity_id`, `provenance`, `origin`, `lap_source`, `laps`; zone distribution `provider_activity_id`, `provenance`, `origin`, `metric`, `boundary_source`, `buckets`; strength set list `provider_activity_id`, `provenance`, `origin`, `source`, `sets`.
 
 Which source wins per kind (`map_garmin_activity_detail`):
 
@@ -1219,6 +1266,7 @@ Streams from `details` (`_stream_set`, `_metric_columns`). Columns are read by `
 | `cadence_rpm` | `directBikeCadence` → `directRunCadence` (`_cadence_points`) | rpm; none | The bike column wins; the run column is used only when the bike column has no usable point. `directRunCadence` already counts one leg, kept as reported. |
 | `grade_pct` | none | | Not produced. |
 | `moving` | none | | Not produced; averages and zone counting then use every point. |
+| `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m` | none | | Not produced from the chart: its running dynamics metric keys are unverified. Only the FIT file (mapper below) carries them; its sets ride on this mapper's version 9. |
 | `resolution` | | `downsampled` | Fixed. |
 | `origin` | | `fetch` | Fixed. |
 
@@ -1278,8 +1326,8 @@ Not mapped: `directDoubleCadence`, every other metric descriptor key (for exampl
 
 ### `fit_activity_detail_mapping.py`
 
-Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 6.
-Mapper version: **5**
+Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 9.
+Mapper version: **8**
 Inputs: the raw bytes of one FIT activity file (`bytes`); decoding and scaling by `fit_file.py` (`fit_messages`, `fit_field`). Anything else gives one `fit` `invalid_type` issue. The caller passes `provider_activity_id` (Garmin activity id or Wahoo workout id) and the provenance (see the provenance table).
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes built in `tests/test_fit_activity_detail_mapping.py` and `tests/test_fit_file.py`; there is no FIT file or Wahoo payload in the payload files).
 
@@ -1303,10 +1351,16 @@ Streams, record message 20 (`_stream_set`, `_kept_records`, `_RECORD_CHANNEL_FIE
 | `latitude_deg` | record `position_lat` (0) | semicircles x 180 / 2^31, degrees | Private channel. Invalid sentinel `0x7FFFFFFF` and values outside -90..90 are gaps. |
 | `longitude_deg` | record `position_long` (1) | semicircles x 180 / 2^31, degrees | Private channel. Gaps as for latitude. |
 | `cadence_rpm` | record `cadence` (4) + `fractional_cadence` (53) | 4 whole, 53 is /128; sum (`_cadence`) | If 53 is absent only 4 is used; if 4 is missing the point is a gap. Rpm of one leg for running, as the device reports it. |
+| `ground_contact_time_ms` | record `stance_time` (41) | /10 ms; 0 is a gap | Running dynamics (#1870); FIT SDK profile, not checked against a recorded file. |
+| `ground_contact_balance_pct` | record `stance_time_balance` (84) | /100 percent; 0 is a gap | Read as the share on the left foot (unverified; some sensors may report the right foot). |
+| `vertical_oscillation_cm` | record `vertical_oscillation` (39) | /10 mm, then /10 to cm; 0 is a gap | |
+| `vertical_ratio_pct` | record `vertical_ratio` (83) | /100 percent; 0 is a gap | |
+| `step_length_m` | record `step_length` (85) | /10 mm, then /1000 to m; 0 is a gap | |
 | `grade_pct` | none | | Not produced. |
 | `moving` | none | | Not produced. |
 | `resolution` | | `full` | Fixed. |
 | `hr_source`, `power_source`, `sensors` | device information message 23 | see `fit_sensor_mapping.py` | Classified by `sensor_profile`; the serial number is only hashed. |
+| `dfa_alpha1` | hrv messages 78 | see `fit_rr_mapping.py` | Only for a `chest_strap` heart rate source; `_first_threshold` keeps the result, never the intervals. |
 
 Record fields not listed here are not read. A channel with no usable point is dropped; out-of-bounds points become gaps with an `out_of_range` issue named by the channel.
 
@@ -1352,20 +1406,36 @@ Not mapped: the session (18), activity and file messages, developer fields (skip
 
 ### `fit_sensor_mapping.py`
 
-Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (5) and by `garmin_activity_detail_mapping.py` version 6.
-Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 5 and `garmin_activity_detail_mapping.py` v 6.
+Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (8) and by `garmin_activity_detail_mapping.py` version 9.
+Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 8 and `garmin_activity_detail_mapping.py` v 9.
 Inputs: the decoded FIT messages and the provenance provider; device information is message 23 (`device_index` 0, `device_type` 1, `manufacturer` 2, `serial_number` 3, `product` 4, `source_type` 25).
-Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_sensor_mapping.py`). Whether Garmin and Wahoo files list a strap paired to a watch this way, and the Bluetooth LE device type numbers (2 heart rate, 3 power meter from the FIT profile), are unverified on real files.
+Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_sensor_mapping.py`). Whether Garmin and Wahoo files list a strap paired to a watch this way, and the Bluetooth LE device type numbers (the Garmin FIT SDK profile: 1 heart_rate, 2 bike_power, 7 bike_trainer), are unverified on real files; only the antplus (or unnamed) and Bluetooth LE sources name roles.
 
 Record keywords set: stream set `hr_source`, `power_source`, `sensors`; sensor `role`, `key`, `connection`, `manufacturer`, `product`.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
-| `hr_source` | external device with `device_type` 120 (ANT+) or 2 (Bluetooth LE `ble_device_type`) | `chest_strap`; else `optical` for a `garmin` provenance that lists devices, else `unknown` | `HeartRateSource.CHEST_STRAP` / `OPTICAL` / `UNKNOWN`; `None` without a heart rate channel. Heuristic, not a vendor guarantee. |
-| `power_source` | external device with `device_type` 11 or 17 (ANT+), 3 (Bluetooth LE) | 11 or BLE 3 `power_meter`, 17 `trainer`; else `estimated` for a Garmin file that lists devices, else `unknown` | `PowerSource.POWER_METER` / `TRAINER` / `ESTIMATED` / `UNKNOWN`; `None` without a power channel. |
+| `hr_source` | external device with `device_type` 120 (ANT+) or 1 (Bluetooth LE `ble_device_type` heart_rate) | `chest_strap`; else `optical` for a `garmin` provenance that lists devices, else `unknown` | `HeartRateSource.CHEST_STRAP` / `OPTICAL` / `UNKNOWN`; `None` without a heart rate channel. Heuristic, not a vendor guarantee. |
+| `power_source` | external device with `device_type` 11 or 17 (ANT+), 2 or 7 (Bluetooth LE `ble_device_type` bike_power, bike_trainer) | 11 or BLE 2 `power_meter`, 17 or BLE 7 `trainer`; else `estimated` for a Garmin file that lists devices, else `unknown` | `PowerSource.POWER_METER` / `TRAINER` / `ESTIMATED` / `UNKNOWN`; `None` without a power channel. |
 | `sensors` | external devices of type 120, 11 and 17 with a serial number | `heart_rate`, `power_meter`, `trainer`; `key` is the SHA-256 of manufacturer, product and serial | A device whose `source_type` is local (5) or with `device_index` 0 is the recording device, not a sensor. A sensor without a serial number cannot be identified and is left out. |
 
 Not mapped: every other device type (cadence, speed, light and radar sensors), the device's software and battery fields, and the serial number itself.
+
+### `fit_rr_mapping.py`
+
+Status: Live. Called by `_first_threshold` in `fit_activity_detail_mapping.py` for the stream set of every FIT file whose heart rate source is a chest strap (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (8) and by `garmin_activity_detail_mapping.py` version 9.
+Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 8 and `garmin_activity_detail_mapping.py` v 9.
+Inputs: the decoded FIT messages; the hrv message is global number 78, field 0 `time`, an array of up to five uint16 values in seconds (scale 1000, 0xFFFF invalid). Garmin writes it only while HRV logging is enabled for the heart rate sensor.
+Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_rr_mapping.py` and `tests/test_fit_file.py`). Whether real Garmin and Wahoo files carry hrv messages this way is unverified.
+
+Record keywords set: stream set `dfa_alpha1`.
+
+| Canonical field | Provider key(s) | Unit / conversion | Notes |
+|---|---|---|---|
+| (RR series, not stored) | hrv message 78 field 0 | seconds, /1000 to milliseconds; at most 150,000 beats | Returned as gap-free segments: an invalid slot between valid ones, or more than 10 s of the file clock that the intervals do not account for, starts a new segment (trailing invalid slots only pad a message). Input of `backend/canonical/dfa_alpha1.py`, which detrends each segment (smoothness priors, lambda 500) and never lets a window span two segments; never stored, logged or returned. |
+| `dfa_alpha1.estimate_bpm`, `windows`, `artifact_share`, `quality`, `method` | computed from the RR series | see `ActivityDfaAlpha1` | `None` unless artifact correction, smoothness-priors detrending (method version 2), enough steady windows and an alpha1 range that crosses 0.75 allow it. |
+
+Not mapped: the hrv timestamps (the message has none), RR values outside 300 to 2000 ms (dropped as artifacts), and every message other than 78.
 
 ### `wahoo_fit_download.py`
 
@@ -1418,6 +1488,11 @@ Fields the detail mapper reads (global message number, field number, scale regis
 | record (20) | 3 | heart_rate | 1 | bpm | `heart_rate_bpm` |
 | record (20) | 4 | cadence | 1 | rpm | `cadence_rpm` |
 | record (20) | 53 | fractional_cadence | /128 | rpm | added to `cadence_rpm` |
+| record (20) | 41 | stance_time | /10 | ms | `ground_contact_time_ms` |
+| record (20) | 84 | stance_time_balance | /100 | percent | `ground_contact_balance_pct` |
+| record (20) | 39 | vertical_oscillation | /10 | mm | `vertical_oscillation_cm` (/10) |
+| record (20) | 83 | vertical_ratio | /100 | percent | `vertical_ratio_pct` |
+| record (20) | 85 | step_length | /10 | mm | `step_length_m` (/1000) |
 | record (20) | 7 | power | 1 | W | `power_w` |
 | record (20) | 13 | temperature | 1 | degrees C | `temperature_c` |
 | record (20) | 0 | position_lat | x 180 / 2^31 | degrees | `latitude_deg` |
@@ -2302,6 +2377,29 @@ Inputs: sessions with sport `ride` or `run` only (`METRIC_SPORTS`, `wants_metric
 
 Not mapped: calories (device `energy_kcal`, a separate summary value), EF/VI of other sports, trend or comparability across sessions, provider EF/VI/decoupling/joules.
 
+### `activity_weather.py`
+
+Status: Live. `ActivityWeatherStage` (`backend/sync/activity_weather.py`) is a follow-up stage of the canonical backfill worker, after `session_analysis`; it is the only stage with a `prefetch` step, which the worker runs before the writer transaction, so no request is made while the writer is held. The request is `ActivityWeatherClient` (`backend/providers/activity_weather.py`, service `open-meteo-historical-forecast`); the reduction, the heat threshold and the stored block are in `backend/weather/activity_weather.py` and `backend/weather/activity_weather_store.py`.
+Method: `METHOD_ID` = `open-meteo-activity-weather`, `METHOD_VERSION` = **1**. Evidence: Open-Meteo Historical Forecast API (stored forecasts of past model runs, about 2 km in Germany, no delay, from 2022); no payload file applies.
+Inputs: sessions with sport `ride` or `run`, environment `outdoor`, started on or after 2022-01-01 UTC (`FIRST_DAY`) and ended at least 48 hours ago (`SETTLE`, so the stored forecast hours are complete); the summary `started_at`, `elapsed_duration_s` (else `moving_duration_s`, else one minute); the first valid `latitude_deg`/`longitude_deg` pair of the session's own full-resolution stream sets (Garmin and Wahoo; Intervals.icu sets are never read); without one the saved home location (the cached geocoding of the profile `weather_location`, `home_coordinates`).
+
+| Canonical field | Derivation / formula | Unit | Notes |
+|---|---|---|---|
+| `activity_weather_temperature` | hourly `temperature_2m` | `C` | Mean over the activity, weighted by overlap. |
+| `activity_weather_apparent_temperature` | hourly `apparent_temperature` | `C` | Same; `heat_note` names heat from `HEAT_APPARENT_C` = 25.0. |
+| `activity_weather_humidity` | hourly `relative_humidity_2m` | `%` | Same. |
+| `activity_weather_wind_speed` | hourly `wind_speed_10m`, requested with `wind_speed_unit=ms` | `m/s` | Same. |
+| `activity_weather_precipitation` | hourly `precipitation` | `mm` | Amount that fell during the activity: the value at hour `h` is the sum of the preceding hour. |
+
+- Request: only the coordinates rounded to 2 decimals (`COORDINATE_DECIMALS`) and the UTC days `start_date`/`end_date` leave the server, with `timezone=GMT`; the response's own grid coordinates are dropped. Request URLs are never logged (the transport logs query keys only).
+- Reduction: an instantaneous value at hour `h` stands for `h - 30 min` to `h + 30 min`, so a one-hour activity at 05:00 averages the 05:00 and 06:00 rows equally; hours without a value are skipped; no value at all gives no row.
+- `Observation` arguments: `kind`, `value`, `observed_on`, `observed_at`, `sport`, `method` = `open-meteo-activity-weather`, `method_version`, `input_fingerprint`, `provenance` with `provider` none, `source_kind` `derived`, `source_record_id` (session id), `recorded_by` (summary `recorded_by`; `unknown` when it is not a `RecordingOrigin`), `retrieved_at` none and `label` = `Open-Meteo Modell, Startposition` or `Open-Meteo Modell, Wohnort`. The stage skips stream sets of provider `intervals`. `details.derivation` = `{"location_kind": "activity_start" | "home"}`; never a coordinate.
+- Fingerprint: `fingerprint_inputs` of the session times, the sorted stream content hashes, the location kind and, for `home`, the rounded home coordinates, computed before any stream is decoded. A start position is part of the streams, so a stream change (a new set, deleted tracks) looks the session up again. This is the cache: a session with a current fingerprint is never fetched again; a response without a value is remembered in the stage state (`empty`, session id, kind and fingerprint only).
+- Bounds: at most `DEFAULT_BATCH_SIZE` 20 sessions per batch, newest first. The first failed request ends the pass, writes no observation and delays that session (30 minutes, doubling, at most 24 hours; kept in memory).
+- Reads: `stored_activity_weather`, `weather_block` (values, `location_kind`, `source`, `heat_note`) in the activity detail document of the Coach tool `get_activity_details` as `weather`. Rows of sessions that are gone are retired by `retire_derived_observations`.
+
+Not mapped: radiation, pressure, cloud cover, air quality, wind direction, any elevation or route data, weather of indoor sessions, activities before 2022.
+
 ### `morning_battery_service.py`
 
 Status: Live. `MorningBatteryStore.persist` runs inside the morning Body Battery refresh (`MorningBodyBatteryService`, composed in `server.py` `morning_body_battery_service` with a `CanonicalTableReader`; the first refresh each day after 05:00 local time, or an explicit check-in date). Without a canonical reader `persist` stores no observation; production always passes one.
@@ -2386,7 +2484,7 @@ Not mapped: `resting`, `model` and the `reserve`/`maximum` percent bases are not
 
 Code: `backend/db/canonical_store.py`; replay in `backend/sync/canonical_backfill.py`; ingest in `backend/sync/canonical_ingest.py`.
 
-- Table `observations`: one row per natural key `provider|metric|sport|series|(observed_at or observed_on)` (`observation_natural_key`); empty parts are empty strings. `series` is `athlete` (Intervals.icu athlete profile weight/eFTP/body fat/sport-less VO2max) or `session:<id>` (the six local per-session kinds `session_load`, `intensity_factor`, `efficiency_factor`, `variability_index`, `mechanical_work`, `aerobic_decoupling`: `SESSION_SERIES_KINDS`), else empty.
+- Table `observations`: one row per natural key `provider|metric|sport|series|(observed_at or observed_on)` (`observation_natural_key`); empty parts are empty strings. `series` is `athlete` (Intervals.icu athlete profile weight/eFTP/body fat/sport-less VO2max) or `session:<id>` (the eleven local per-session kinds `session_load`, `intensity_factor`, `efficiency_factor`, `variability_index`, `mechanical_work`, `aerobic_decoupling` and the five `activity_weather_*` kinds: `SESSION_SERIES_KINDS`), else empty.
 - Columns: `metric`, `value`, `unit`, `source_kind`, `recorded_by`, `provider` (NULL for derived), `source_record_id`, `sport`, `observed_on`, `observed_at`, `retrieved_at`, `label`, `mapper_version`, `method`, `aggregation`, `details` (JSON: `context`, `method_version`, `input_fingerprint`, `period`, `derivation`), `state`, `owner_record_id`.
 - Write (`upsert_observation`): insert, or update by natural key when any column differs (then `UPDATED`; identical = `UNCHANGED`). The row always becomes `active` again. `fill_only` (history fills) never replaces an active row of another source record at the same or a newer `mapper_version`.
 - State (`ProjectionState`): `active` / `retired`. Retiring never deletes: the row stays for history, backups and export, and a later write of the same key makes it `active` again.

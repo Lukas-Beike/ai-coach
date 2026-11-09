@@ -77,6 +77,7 @@ PREVIOUS_NOT_CONFIGURED_MESSAGES = {
 def _build(
     registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
 ) -> tuple[SyncCommandEndpoint, Mock, Mock, Mock, Mock]:
+    """Return the endpoint, queue, state, performance and provider_configured mocks."""
     queue = Mock()
     queue.enqueue.return_value = {"id": "job-1"}
     state = Mock()
@@ -84,18 +85,18 @@ def _build(
     state.set_sync_period.return_value = 7
     performance = Mock()
     performance.refresh.return_value = {"status": "refreshed"}
-    full_resync = Mock()
-    full_resync.provider_configured.return_value = True
+    provider_configured = Mock(return_value=True)
     endpoint = SyncCommandEndpoint(
         queue,
         state,
-        full_resync,
+        Mock(),
         lambda: "operation-1",
         {"intervals": 90, "garmin": 30},
         -1,
+        provider_configured=provider_configured,
         registry=registry,
     )
-    return endpoint, queue, state, performance, full_resync
+    return endpoint, queue, state, performance, provider_configured
 
 
 def _acme_registry(
@@ -253,15 +254,15 @@ class InjectedRegistryMockProviderTests(unittest.TestCase):
         registry = _acme_registry(
             uses_sync_period=True, payload=(("reason", "manual"),), message=message
         )
-        endpoint, queue, state, _, full_resync = _build(registry)
-        full_resync.provider_configured.return_value = False
+        endpoint, queue, state, _, provider_configured = _build(registry)
+        provider_configured.return_value = False
         with self.assertRaises(AppError) as raised:
             endpoint.execute(ACME_PATH, {"days": 7})
         self.assertEqual(
             public_error_contract(raised.exception), (409, "not_configured")
         )
         self.assertEqual(message, raised.exception.message)
-        full_resync.provider_configured.assert_called_once_with(ACME_ID)
+        provider_configured.assert_called_once_with(ACME_ID)
         state.set_sync_period.assert_not_called()
         queue.enqueue.assert_not_called()
         with self.assertRaises(AppError) as job_error:
@@ -283,12 +284,12 @@ class InjectedRegistryMockProviderTests(unittest.TestCase):
             not_configured_message=message,
         )
         registry = ProviderRegistry((*DEFAULT_PROVIDER_REGISTRY.all(), descriptor))
-        endpoint, queue, _, _, full_resync = _build(registry)
-        full_resync.provider_configured.return_value = False
+        endpoint, queue, _, _, provider_configured = _build(registry)
+        provider_configured.return_value = False
         with self.assertRaises(AppError) as raised:
             endpoint.execute(ACME_PATH)
         self.assertEqual(message, raised.exception.message)
-        full_resync.provider_configured.assert_called_once_with(ACME_ID)
+        provider_configured.assert_called_once_with(ACME_ID)
         queue.enqueue.assert_not_called()
 
     def test_route_without_not_configured_message_skips_configuration_check(
@@ -297,10 +298,10 @@ class InjectedRegistryMockProviderTests(unittest.TestCase):
         registry = _acme_registry(
             uses_sync_period=False, payload=(("reason", "manual"),), message=None
         )
-        endpoint, queue, _, _, full_resync = _build(registry)
-        full_resync.provider_configured.return_value = False
+        endpoint, queue, _, _, provider_configured = _build(registry)
+        provider_configured.return_value = False
         self.assertEqual((202, {"id": "job-1"}), endpoint.execute(ACME_PATH))
-        full_resync.provider_configured.assert_not_called()
+        provider_configured.assert_not_called()
         queue.enqueue.assert_called_once()
 
 

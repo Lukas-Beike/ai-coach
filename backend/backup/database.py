@@ -91,7 +91,10 @@ class DatabaseBackupService:
         """Copy the database; ``maximum_bytes`` None copies it at any size."""
         snapshot: Path | None = None
         try:
-            with self._manager.reader() as source:
+            # A pinned read transaction: SQLite restarts an unpinned backup on
+            # every concurrent commit, so a steady writer would starve it.
+            with self._manager.read_snapshot() as source:
+                source.execute("SELECT count(*) FROM sqlite_master").fetchone()
                 self._check_source_capacity(source, maximum_bytes)
                 descriptor, temporary_name = tempfile.mkstemp(
                     prefix=".database-backup-",
@@ -168,6 +171,8 @@ class DatabaseBackupService:
         )
         if not check or str(check).lower() != "ok":
             raise RuntimeError("database backup integrity check failed")
+        if target.execute("PRAGMA foreign_key_check").fetchall():
+            raise RuntimeError("database backup foreign key check failed")
 
     @staticmethod
     def _discard_snapshot(snapshot: Path | None) -> None:
@@ -175,7 +180,7 @@ class DatabaseBackupService:
             snapshot.unlink(missing_ok=True)
 
     def read_bytes(self) -> bytes:
-        with self.stream_file() as (path, _deadline):
+        with self.stream_file() as path:
             try:
                 return path.read_bytes()
             except OSError as exc:
@@ -184,11 +189,15 @@ class DatabaseBackupService:
                 ) from exc
 
     @contextmanager
-    def stream_file(self) -> Iterator[tuple[Path, float]]:
-        started = self._config.monotonic()
-        deadline = started + self._config.time_limit_seconds
+    def stream_file(self) -> Iterator[Path]:
+        """Yield a snapshot created within its own time limit.
+
+        Sending the file is bounded by the transport's idle timeout, not by
+        this limit.
+        """
+        deadline = self._config.monotonic() + self._config.time_limit_seconds
         snapshot = self._snapshot(deadline)
         try:
-            yield snapshot, deadline
+            yield snapshot
         finally:
             snapshot.unlink(missing_ok=True)

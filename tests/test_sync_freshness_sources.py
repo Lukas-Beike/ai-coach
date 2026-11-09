@@ -254,6 +254,48 @@ class AcmeMockProjectionTests(_DatabaseCase):
                 self.assertEqual(item["last_attempt_at"], last_sync.isoformat())
                 self.assertTrue(item["has_last_good"])
 
+    def test_output_only_area_never_ages_into_stale(self) -> None:
+        area = dataclasses.replace(
+            acme_descriptor().freshness_areas[0], read_only=False
+        )
+        descriptor = dataclasses.replace(acme_descriptor(), freshness_areas=(area,))
+        registry = ProviderRegistry((*DEFAULT_PROVIDER_DESCRIPTORS, descriptor))
+        runtime = ProviderRuntimeRegistry(registry, [fake_binding()])
+        last_push = NOW - timedelta(days=30)
+        self.set_values(**{ACME_AT_KEY: last_push.isoformat()})
+        with self.manager.unit_of_work() as db:
+            [item] = provider_freshness_state(
+                db,
+                config=make_config(),
+                get_value=lambda key: self.key_values.get(db, key),
+                profile={"acme_enabled": True},
+                garmin_has_core_error=False,
+                garmin_tokenstore_exists=False,
+                now=NOW,
+                freshness_sources=runtime.freshness_sources(),
+                registry=registry,
+            )
+        self.assertFalse(item["read_only"])
+        self.assertEqual(item["state"], "fresh")
+        self.assertIs(item["stale"], False)
+
+        # A stored push error without a history row must still need attention.
+        self.set_values(**{ACME_ERROR_KEY: "push failed"})
+        with self.manager.unit_of_work() as db:
+            [failed] = provider_freshness_state(
+                db,
+                config=make_config(),
+                get_value=lambda key: self.key_values.get(db, key),
+                profile={"acme_enabled": True},
+                garmin_has_core_error=False,
+                garmin_tokenstore_exists=False,
+                now=NOW,
+                freshness_sources=runtime.freshness_sources(),
+                registry=registry,
+            )
+        self.assertEqual(failed["state"], "stale")
+        self.assertEqual(failed["error_code"], "provider_error")
+
     def test_acme_unconfigured_and_error_states_use_its_own_settings(self) -> None:
         runtime = _acme_runtime()
         self.set_values(**{ACME_ERROR_KEY: "upstream failed"})

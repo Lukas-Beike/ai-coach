@@ -13,13 +13,18 @@ from typing import Any
 from unittest.mock import Mock
 
 from backend.canonical.vocabulary import RemoteEntityKind
+from backend.coach.proposal_creation import (
+    _approved_garmin_arguments,
+    _garmin_approval_details,
+)
 from backend.db import DatabaseManager, row_factory
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import session_focus, strength_structure
-from backend.planning.push_state import garmin_fingerprint
+from backend.planning.garmin_orphans import find_orphans, removal_entries
+from backend.planning.push_state import attach_push_state, garmin_fingerprint
 from backend.providers import garmin_strength_workout as mapping
 from backend.sync.executor import GarminJobAdapter
 from backend.sync.garmin_strength_push import GarminStrengthPushService
@@ -744,13 +749,245 @@ class PushTests(unittest.TestCase):
         self.assertEqual(["998"], list(self.garmin.schedules))
         self.assertIsNone(self.link(U1))
 
-    def test_remove_without_a_link_is_a_conflict(self) -> None:
+    # --- Orphans: workouts sent for units that no longer exist --------------
+
+    def sync_with_cleanup(self, *entries: tuple[str, str]) -> dict:
+        """Run the job the calendar button or the Coach card creates."""
+        selected = [
+            {"library_workout_id": i, "expected_payload_hash": h} for i, h in entries
+        ]
+        orphans = find_orphans_listed(self.database_manager)
+        return self.service.sync({"entries": [*selected, *removal_entries(orphans)]})
+
+    def orphan_ids(self) -> list[str]:
+        return [item.local_id for item in find_orphans_listed(self.database_manager)]
+
+    def retire(self, local_id: str, payload: dict) -> None:
+        self.update(local_id, {**payload, "local_deleted": True, "archived": True})
+
+    def test_a_replaced_unit_is_removed_and_its_successor_scheduled(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        self.retire(U1, UNIT)
+        replacement = self.insert(U2, {**UNIT, "name": "Kraft B"})
+        self.assertEqual([U1], self.orphan_ids())
+
+        result = self.sync_with_cleanup((U2, replacement))
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(
+            ["synced", "synced"], [item["status"] for item in result["results"]]
+        )
+        self.assertEqual(["503"], list(self.garmin.workouts))
+        self.assertEqual({"504": ("503", "2026-11-09")}, self.garmin.schedules)
+        self.assertEqual("503", self.link(U2).remote_id)
+        self.assertIsNone(self.link(U1))
+        self.assertEqual([], self.orphan_ids())
+
+    def test_a_moved_unit_keeps_one_schedule_and_is_no_orphan(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        moved = self.update(U1, {**UNIT, "date": "2026-11-12"})
+
+        self.assertEqual([], self.orphan_ids())
+        self.sync_with_cleanup((U1, moved))
+
+        self.assertEqual(
+            ["2026-11-12"], [day for _wid, day in self.garmin.schedules.values()]
+        )
+
+    def test_deleted_and_vanished_units_are_removed_on_the_next_sync(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)), (U2, self.insert(U2, UNIT)))
+        with self.database_manager.unit_of_work() as db:
+            db.execute("UPDATE planned_units SET tombstone=1 WHERE local_id=?", (U1,))
+            db.execute("DELETE FROM planned_units WHERE local_id=?", (U2,))
+        self.assertEqual({U1, U2}, set(self.orphan_ids()))
+
+        result = self.service.sync(
+            {"entries": removal_entries(find_orphans_listed(self.database_manager))}
+        )
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual({}, self.garmin.workouts)
+        self.assertEqual({}, self.garmin.schedules)
+        self.assertEqual([], self.orphan_ids())
+
+    def test_a_unit_that_is_no_strength_unit_any_more_is_an_orphan(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        self.update(U1, {**UNIT, "sport": "Ride"})
+
+        self.assertEqual([U1], self.orphan_ids())
+
+    def test_a_unit_with_an_unreadable_payload_is_no_orphan(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        with self.database_manager.unit_of_work() as db:
+            db.execute("UPDATE planned_units SET payload='[]' WHERE local_id=?", (U1,))
+
+        self.assertEqual([], self.orphan_ids())
+
+    def test_a_listed_leftover_removed_meanwhile_is_not_a_failure(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        self.retire(U1, UNIT)
+        stale = removal_entries(find_orphans_listed(self.database_manager))
+        self.service.sync({"entries": stale})
+
+        result = self.service.sync({"entries": stale})
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("already_synced", result["results"][0]["status"])
+
+    def test_the_card_shows_a_selected_archived_unit_as_a_push(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        self.retire(U1, UNIT)
+
+        arguments = _approved_garmin_arguments(
+            {"entries": [{"local_id": U1, "remove": False}]},
+            self.database_manager,
+            TODAY,
+        )
+        details = _garmin_approval_details(arguments, self.database_manager, TODAY)
+
+        self.assertEqual(
+            [("Kraft A", "Kraft an Garmin")],
+            [(item["name"], item["sport"]) for item in details],
+        )
+
+    def test_a_foreign_garmin_workout_is_never_touched(self) -> None:
+        self.garmin.workouts["999"] = {"workoutName": "Mein eigenes"}
+        self.garmin.schedules["998"] = ("999", "2026-11-09")
+        self.push((U1, self.insert(U1, UNIT)))
+        self.retire(U1, UNIT)
+        self.garmin.calls.clear()
+
+        result = self.sync_with_cleanup()
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual({"999": {"workoutName": "Mein eigenes"}}, self.garmin.workouts)
+        self.assertEqual({"998": ("999", "2026-11-09")}, self.garmin.schedules)
+        touched = {call[1] for call in self.garmin.calls}
+        self.assertTrue({"999", "998"}.isdisjoint(touched))
+
+    def test_a_failed_orphan_removal_keeps_its_link_for_the_next_sync(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        self.retire(U1, UNIT)
+        original = self.garmin.delete_workout
+        self.garmin.delete_workout = Mock(side_effect=_http_error(500))  # type: ignore[method-assign]
+
+        failed = self.sync_with_cleanup()
+        self.assertEqual("error", failed["status"])
+        self.assertIn(
+            "Altes Garmin-Workout nicht entfernt", failed["results"][0]["error"]
+        )
+        self.assertEqual([U1], self.orphan_ids())
+
+        self.garmin.delete_workout = original  # type: ignore[method-assign]
+        self.assertEqual("ok", self.sync_with_cleanup()["status"])
+        self.assertEqual([], self.orphan_ids())
+
+    def test_the_fallback_upload_removes_what_it_replaces(self) -> None:
+        digest = self.insert(U1, UNIT)
+        self.push((U1, digest))
+        # Garmin lost the workout but kept its schedule entry.
+        del self.garmin.workouts["501"]
+        self.garmin.calls.clear()
+
+        result = self.push((U1, digest))
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(
+            [
+                ("update", "501"),
+                ("unschedule", "502"),
+                ("delete", "501"),
+                ("upload", "503"),
+                ("get", "503"),
+                ("schedule", "503", "2026-11-09"),
+            ],
+            self.garmin.calls,
+        )
+        self.assertEqual({"504": ("503", "2026-11-09")}, self.garmin.schedules)
+        self.assertEqual(["503"], list(self.garmin.workouts))
+
+    def test_every_sent_workout_carries_the_marker(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+
+        description = self.garmin.workouts["501"]["description"]
+        self.assertTrue(description.startswith("Pacecraft\n"))
+        self.assertIn("Kniebeuge", description)
+
+    def test_the_card_lists_the_removals_it_adds(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        self.retire(U1, UNIT)
+        digest = self.insert(U2, {**UNIT, "name": "Kraft B"})
+
+        arguments = _approved_garmin_arguments(
+            {"entries": [{"local_id": U2, "remove": False}]},
+            self.database_manager,
+            TODAY,
+        )
+        details = _garmin_approval_details(arguments, self.database_manager, TODAY)
+
+        self.assertEqual(
+            [
+                {"library_workout_id": U2, "expected_payload_hash": digest},
+                {"library_workout_id": U1, "remove": True},
+            ],
+            arguments["entries"],
+        )
+        self.assertEqual(
+            [("Kraft B", "Kraft an Garmin"), ("Kraft A", "Wird bei Garmin entfernt")],
+            [(item["name"], item["sport"]) for item in details],
+        )
+
+    def test_the_calendar_lists_the_removals_on_a_unit_garmin_waits_for(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        self.retire(U1, UNIT)
+        self.insert(U2, {**UNIT, "name": "Kraft B"})
+        with self.database_manager.reader() as db:
+            rows = db.execute(
+                "SELECT local_id, payload, sync_state FROM planned_units "
+                "WHERE local_id=?",
+                (U2,),
+            ).fetchall()
+        pairs = [(row, json.loads(row["payload"])) for row in rows]
+
+        attach_push_state(
+            pairs,
+            {},
+            orphans=find_orphans_listed(self.database_manager),
+            today=TODAY,
+        )
+
+        self.assertEqual(
+            {"garmin": [{"id": U1, "name": "Kraft A", "date": "2026-11-09"}]},
+            pairs[0][1]["push_cleanup"],
+        )
+
+    def test_undoing_a_created_unit_keeps_its_garmin_link(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        with self.database_manager.unit_of_work() as db:
+            db.execute("DELETE FROM planned_units WHERE local_id=?", (U1,))
+            RemoteLinkRepository().delete_for_entity(
+                db, RemoteEntityKind.PLANNED_UNIT, U1, keep=("garmin",)
+            )
+
+        self.assertEqual([U1], self.orphan_ids())
+        self.assertEqual(
+            "Gelöschte Einheit", find_orphans_listed(self.database_manager)[0].name
+        )
+
+    def test_remove_without_a_link_has_nothing_left_to_do(self) -> None:
+        # e.g. a listed leftover another sync removed first
         result = self.service.sync(
             {"entries": [{"library_workout_id": U1, "remove": True}]}
         )
 
-        self.assertEqual("conflict", result["results"][0]["status"])
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("already_synced", result["results"][0]["status"])
         self.assertEqual(0, self.sessions)
+
+
+def find_orphans_listed(database_manager: DatabaseManager) -> list:
+    with database_manager.reader() as db:
+        return find_orphans(db, TODAY, limit=None)[0]
 
 
 if __name__ == "__main__":

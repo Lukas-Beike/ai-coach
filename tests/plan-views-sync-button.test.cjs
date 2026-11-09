@@ -53,3 +53,20 @@ test("a strength unit says why it was not sent to Garmin", () => {
   assert.equal(labels.blocked({ push_blocked: {} }), "");
   assert.equal(labels.blocked({}), "");
 });
+
+const pushStart = source.indexOf("async function runPlanPush");
+const pushEnd = source.indexOf("// What one successful push delivered", pushStart);
+const sent = [];
+const pushContext = vm.createContext({
+  api: async (url, options) => { sent.push(JSON.parse(options.body)); return { id: "job-1" }; },
+  waitForSyncJob: async (id) => ({ id, status: "completed" }),
+});
+vm.runInContext(source.slice(pushStart, pushEnd) + ";globalThis.run = runPlanPush; globalThis.leftover = leftoverEntry;", pushContext);
+
+test("a push job carries its entries; a leftover is removed by the entry its provider understands", async () => {
+  const hash = "a".repeat(64);
+  await pushContext.run("garmin", [{ library_workout_id: "u1", expected_payload_hash: hash }]);
+  assert.deepEqual(sent[0], { provider: "garmin", type: "plan_push", payload: { entries: [{ library_workout_id: "u1", expected_payload_hash: hash }] } });
+  assert.deepEqual({ ...pushContext.leftover("garmin", { id: "old-1", hash }, ids) }, { library_workout_id: "old-1", remove: true });
+  assert.deepEqual({ ...pushContext.leftover("intervals", { id: "old-3", hash }, ids) }, { library_workout_id: "old-3", expected_payload_hash: hash });
+});

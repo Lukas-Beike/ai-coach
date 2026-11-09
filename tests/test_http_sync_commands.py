@@ -27,6 +27,7 @@ class SyncCommandEndpointTests(unittest.TestCase):
             lambda: "operation-1",
             {"intervals": 90, "garmin": 30},
             -1,
+            provider_configured=lambda provider: True,
         )
 
     def test_body_policy_preserves_bodyless_routes_and_unknown_paths(self):
@@ -100,6 +101,7 @@ class SyncCommandEndpointTests(unittest.TestCase):
                     lambda: "operation-1",
                     {"intervals": 90, "garmin": 30},
                     -1,
+                    provider_configured=lambda provider: True,
                     registry=registry,
                 )
         self.assertEqual(build.call_count, 1)

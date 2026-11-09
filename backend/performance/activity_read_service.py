@@ -10,6 +10,7 @@ from backend.activities.activity_reference import ActivityReferenceResolver
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.detail_contract import measured_order
 from backend.activities.read_service import ActivityReadService, ActivitySummarySource
+from backend.activities.route_store import stored_route_block
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.profile import timezone_name
 from backend.canonical.local_time import local_date
@@ -40,6 +41,10 @@ from backend.performance.session_zones import (
     dated_thresholds,
     own_configurations,
     zone_settings_for,
+)
+from backend.weather.activity_weather_store import (
+    stored_activity_weather,
+    weather_block,
 )
 
 
@@ -211,7 +216,16 @@ class ActivityAnalysisReadService(ActivityReadService):
                     "Diese Aktivität ist lokal nicht vorhanden.",
                     reason="activity_details_not_found",
                 )
-            records = self._session_records(db, document["session"]["activity_id"])
+            session_id = document["session"]["activity_id"]
+            records = self._session_records(db, session_id)
+            weather = weather_block(
+                stored_activity_weather(db, [session_id]).get(session_id, {})
+            )
+            route = stored_route_block(db, session_id)
+        if weather is not None:
+            document["weather"] = weather
+        if route is not None:
+            document["route"] = route
         _add_purpose(document["session"], requested_summary())
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
 

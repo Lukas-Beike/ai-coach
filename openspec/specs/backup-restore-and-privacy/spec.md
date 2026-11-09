@@ -46,7 +46,7 @@ Evidence: `backend/backup/database.py::DatabaseBackupService._check_source_capac
 
 ### Requirement: Complete secret-filtered privacy exports
 
-The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions, approval proposals and the planning-state revision counter, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are exported in `provider_settings.json`. The format version is currently 15.
+The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions, approval proposals and the planning-state revision counter, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are exported in `provider_settings.json`. The format version is currently 16.
 
 #### Scenario: Privacy archive requested
 - **WHEN** the authenticated athlete requests the archive export
@@ -94,9 +94,17 @@ Stored GPS position channels SHALL be part of the database backup, the privacy e
 
 #### Scenario: Confirmed track deletion
 - **WHEN** the athlete confirms `GPS-SPUREN LÖSCHEN`
-- **THEN** every position channel is deleted, the other channels stay and any other phrase is rejected
+- **THEN** every position channel is deleted, the other channels stay, the route index and its names are deleted and any other phrase is rejected
 
-Evidence: `backend/canonical/vocabulary.py::POSITION_CHANNELS`; `backend/db/activity_detail_store.py::replace_detail_set`; `backend/privacy.py::PrivacyDeleteService`. Tests: `tests/test_gps_position_privacy.py`.
+#### Scenario: Storage turned off with routes
+- **WHEN** the athlete turns "GPS-Spuren speichern" off
+- **THEN** stored tracks, the route index and the route names stay until the confirmed deletion
+
+#### Scenario: Route read models
+- **WHEN** a route is read for the activity view, the Coach, diagnostics or logs
+- **THEN** only a label, a repeat count and an opaque route id appear
+
+Evidence: `backend/canonical/vocabulary.py::POSITION_CHANNELS`; `backend/db/activity_detail_store.py::replace_detail_set`; `backend/privacy.py::PrivacyDeleteService`, `backend/activities/route_store.py::clear_routes`. Tests: `tests/test_gps_position_privacy.py`, `tests/test_activity_routes.py::PrivacyDeleteTests`, `tests/test_activity_routes.py::PrivacySweepTests`.
 
 ### Requirement: Secrets stay out of exports, reports and logs
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.errors import NOT_FOUND_ERROR, AppError
+from backend.http_api.activity_route_post import ActivityRoutePostRoutes
 from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.auth_post import AuthPostRoutes
 from backend.http_api.chat_cancel_post import ChatCancelPostRoutes
@@ -15,6 +16,7 @@ from backend.http_api.coach_actions_post import CoachActionsPostRoutes
 from backend.http_api.diagnostics_delete_post import DiagnosticsDeletePostRoutes
 from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.feedback_post import FeedbackPostRoutes
+from backend.http_api.first_threshold_post import FirstThresholdPostRoutes
 from backend.http_api.garmin_post import GarminPostRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.metric_export_post import MetricExportPostRoutes
@@ -51,6 +53,8 @@ class HttpAuthenticatedPostRoutes:
     garmin: GarminPostRoutes | None = None
     provider_connections: ProviderConnectionPostRoutes | None = None
     planned_unit_focus: PlannedUnitFocusPostRoutes | None = None
+    first_threshold: FirstThresholdPostRoutes | None = None
+    activity_routes: ActivityRoutePostRoutes | None = None
 
 
 class HttpPostDispatcher:
@@ -84,6 +88,8 @@ class HttpPostDispatcher:
         self._garmin = authenticated_routes.garmin
         self._provider_connections = authenticated_routes.provider_connections
         self._planned_unit_focus = authenticated_routes.planned_unit_focus
+        self._first_threshold = authenticated_routes.first_threshold
+        self._activity_routes = authenticated_routes.activity_routes
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
         return self._auth_routes.handle(handler, path) or self._restore_route.handle(
@@ -137,6 +143,8 @@ class HttpPostDispatcher:
                 self._garmin,
                 self._provider_connections,
                 self._planned_unit_focus,
+                self._first_threshold,
+                self._activity_routes,
             )
             if route is not None
         )

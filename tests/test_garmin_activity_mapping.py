@@ -82,8 +82,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_twenty(self) -> None:
-        self.assertEqual(20, MAPPER_VERSION)
+    def test_mapper_version_is_twenty_one(self) -> None:
+        self.assertEqual(21, MAPPER_VERSION)
 
     def test_strength_duration_is_the_whole_session_not_the_active_timer(
         self,

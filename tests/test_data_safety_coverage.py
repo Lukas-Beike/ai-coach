@@ -181,7 +181,7 @@ EXPORT_COLUMNS_NOT_EXPORTED: dict[str, dict[str, str]] = {
 }
 # Schema version -> export format version that documents it. Bump both together.
 # Format 14 adds provider_settings.json without a schema change.
-EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 14, 24: 15}
+EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 14, 24: 15, 25: 16}
 
 # Key/value families (exact key or prefix ending in ":") and what the privacy
 # export does with them. "exported": application_state.json; "excluded": never
@@ -208,6 +208,9 @@ KV_EXPORT_DISPOSITION: dict[str, str] = {
     "intervals_purge_state": "exported",
     "local_load_state": "exported",
     "session_metrics_state": "exported",
+    "activity_weather_state": "exported",
+    "activity_routes": "exported",
+    "activity_routes_state": "exported",
     "session_analysis_state": "exported",
     "session_focus_backfill_state": "exported",
     "profile_weekly_plan_removal_state": "exported",
@@ -860,6 +863,7 @@ class BackupRestoreRoundTripTests(DataKindFixture):
                 configure_cipher=Mock(),
                 row_factory=sqlite3.Row,
                 schema_is_current=database_schema_is_current,
+                startup_invariants=lambda _db: None,
                 migrate_schema=migrate_schema,
             )
         ).validate(staged)

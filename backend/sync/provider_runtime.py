@@ -254,6 +254,10 @@ class ProviderRuntimeRegistry:
             "synchronous_refresh", lambda binding: binding.synchronous_refresh
         )
 
+    def provider_configured(self, provider_id: str) -> bool:
+        """Return whether a bound provider is configured now; unbound raises KeyError."""
+        return bool(self._by_id[provider_id].configured())
+
     def configured_for_job(self, job_type: str) -> tuple[str, ...]:
         """Return the bound providers that accept the job type and are configured now."""
         return tuple(

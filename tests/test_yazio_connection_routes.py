@@ -32,6 +32,7 @@ class YazioRouteTests(unittest.TestCase):
                     "garmin",
                     "provider_connections",
                     "planned_unit_focus",
+                    "activity_routes",
                 )
             }
         )
@@ -46,6 +47,7 @@ class YazioRouteTests(unittest.TestCase):
             "history_undo",
             "privacy_delete",
             "diagnostics_delete",
+            "first_threshold",
         ):
             setattr(routes, name, Mock(handle=Mock(return_value=False)))
         routes.nutrition = nutrition
