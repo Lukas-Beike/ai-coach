@@ -296,7 +296,7 @@ async function bootstrapAuth() {
       retryBootstrapAuth();
       return;
     }
-    $("#loginError").textContent = "Server nicht erreichbar.";
+    setLoginError("Server nicht erreichbar.");
     showLogin();
   } finally { clearTimeout(timeout); }
 }
@@ -321,16 +321,33 @@ function loginErrorMessage(exception) {
 }
 
 
+// The error text and the red field border (aria-invalid) always change together.
+function setLoginError(message) {
+  $("#loginError").textContent = message;
+  if (message) $("#loginPassword").setAttribute("aria-invalid", "true");
+  else $("#loginPassword").removeAttribute("aria-invalid");
+}
+
+
+function toggleLoginPassword() {
+  const input = $("#loginPassword");
+  const toggle = $("#loginPasswordToggle");
+  const show = input.type === "password";
+  input.type = show ? "text" : "password";
+  toggle.textContent = show ? "Verbergen" : "Anzeigen";
+  toggle.setAttribute("aria-pressed", String(show));
+}
+
+
 async function login(event) {
   event.preventDefault();
   const button = $("#loginButton");
   const buttonLabel = $("#loginButtonLabel");
-  const error = $("#loginError");
   button.disabled = true;
   button.classList.add("is-loading");
   button.setAttribute("aria-busy", "true");
   buttonLabel.textContent = "Anmelden …";
-  error.textContent = "";
+  setLoginError("");
   try {
     await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPassword").value }) });
     $("#loginPassword").value = "";
@@ -340,7 +357,7 @@ async function login(event) {
     notePwaActivity();
     await loadInitialState();
   } catch (exception) {
-    error.textContent = loginErrorMessage(exception);
+    setLoginError(loginErrorMessage(exception));
   } finally {
     button.disabled = false;
     button.classList.remove("is-loading");

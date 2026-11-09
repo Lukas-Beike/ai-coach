@@ -146,7 +146,12 @@ test("@responsive Garmin-only session shows per-provider notes and its own refre
   await expect(dialog.getByText("Garmin Connect: Die Zusammenfassung hat sich seit dem Laden geändert.", { exact: false })).toBeVisible();
   await expect(dialog.locator(".activity-analysis-error").filter({ hasText: "Garmin Connect: Garmin Connect lieferte keine Runden." })).toBeVisible();
   await expect(dialog.locator(".activity-analysis-error").filter({ hasText: "Wahoo: Wahoo-Datei unvollständig." })).toBeVisible();
-  await expect(dialog.getByText("Datenabdeckung Garmin Connect · power_w: 3/3 Messwerte")).toBeVisible();
+  // One muted source line; the per-provider facts sit in a folded section with readable channel names.
+  await expect(dialog.getByText("Quelle: Garmin Connect, Wahoo · Stand")).toBeVisible();
+  await expect(dialog.getByText("Datenabdeckung Garmin Connect")).toBeHidden();
+  await dialog.getByText("Herkunft im Detail").click();
+  await expect(dialog.getByText("Datenabdeckung Garmin Connect · Leistung: 3 von 3 Messwerten")).toBeVisible();
+  await expect(dialog).not.toContainText("power_w");
   await expect(dialog.getByRole("button", { name: /Wahoo/ })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Garmin Connect: Detaildaten aktualisieren" }).click();
   await expect.poll(() => page.evaluate(() => syntheticCalls.filter((call) => call.url === "/api/activities/act_garmin").length)).toBe(2);

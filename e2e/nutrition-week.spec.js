@@ -68,7 +68,7 @@ test("@responsive nutrition history switches between 14 days and 12 weeks", asyn
   await expect(root.locator("#nutritionWeekChartHeading")).toHaveText("Tagesverlauf");
   await expect(root.getByRole("button", { name: "Letzte 14 Tage", exact: true })).toHaveAttribute("aria-pressed", "true");
   await root.getByRole("button", { name: "12 Wochen", exact: true }).click();
-  await expect(root.locator("#nutritionWeekHeading")).toHaveText("Letzte 12 Wochen");
+  await expect(root.locator("#nutritionWeekPeriod")).toHaveText(/^\d{2}\.\d{2}\.\d{4} – \d{2}\.\d{2}\.\d{4}$/);
   await expect(root.locator("#nutritionWeekChartHeading")).toHaveText("Wochendurchschnitte");
   await expect(root.locator("#nutritionWeekStatus")).toContainText("84 Tagen");
   await root.getByText("Tageswerte anzeigen", { exact: true }).click();
@@ -78,7 +78,7 @@ test("@responsive nutrition history switches between 14 days and 12 weeks", asyn
   await root.getByRole("button", { name: "12 Wochen", exact: true }).click();
   await expect(root.locator("#nutritionWeekChartHeading")).toHaveText("Wochendurchschnitte");
   await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
-  await expect(root.locator("#nutritionWeekHeading")).toHaveText("Letzte 14 Tage");
+  await expect(root.locator("#nutritionWeekPeriod")).toHaveText(/^\d{2}\.\d{2}\.\d{4} – \d{2}\.\d{2}\.\d{4}$/);
   await expect(root.locator("#nutritionWeekChartHeading")).toHaveText("Tagesverlauf");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

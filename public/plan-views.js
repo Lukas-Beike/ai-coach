@@ -1469,7 +1469,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
         const summary = document.createElement("summary");
         const title = document.createElement("strong");
         title.textContent = sport;
-        summary.append(title);
+        summary.append(title, Object.assign(document.createElement("span"), { textContent: `${sportWorkouts.length} Einheit${sportWorkouts.length === 1 ? "" : "en"}` }));
         section.append(summary);
         const cards = document.createElement("div");
         cards.className = "library-sport-cards";

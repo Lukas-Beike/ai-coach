@@ -99,9 +99,10 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
   await expect(expenditure).not.toContainText("Abgerufen:");
   await expect(expenditure).not.toContainText("Garmin-Sync:");
   const totals = expenditure.locator("#nutritionExpenditureTotals");
-  await expect(totals).toContainText("Tagesverbrauch (vorläufig)");
   await expect(totals).toContainText("Aktivkalorien");
-  await expect(totals).toContainText("Grundumsatz (vorläufig)");
+  // "Vorläufig" is said once, in the status line, not again on the tiles.
+  await expect(totals).not.toContainText("vorläufig");
+  await expect(expenditure.getByText("Vorläufig")).toHaveCount(1);
   await expect(totals).toContainText("600 kcal");
   await expect(totals).toContainText("1.500 kcal");
   await expect(totals).toContainText("Prognose Tagesverbrauch");

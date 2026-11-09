@@ -822,7 +822,9 @@ class ServerFrontendTests(ServerTestCase):
         plan_markup = index[
             index.index('id="workoutsPanel"') : index.index('id="dataPanel"')
         ]
-        self.assertEqual(plan_markup.count("<button"), 1)
+        # Read-only: the retry and the refresh button (reload + shared calendar sync) are the only buttons.
+        self.assertEqual(plan_markup.count("<button"), 2)
+        self.assertIn('id="planRefreshButton"', plan_markup)
         self.assertIn('id="competitionRetry" type="button"', plan_markup)
         self.assertNotIn("planningEditDirty", state)
         self.assertNotIn("plannedWeekOpen", state)

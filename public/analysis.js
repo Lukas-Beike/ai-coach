@@ -147,7 +147,8 @@ function analysisChart(title, series, unit, start, end, note, {
     }
     legend.append(entry);
   });
-  if (showLegend) section.append(legend);
+  if (showLegend && analysisLegendRepeatsTitle(series, title)) analysisLegendInfoToHeading(heading, legend, title);
+  else if (showLegend) section.append(legend);
   else appendAnalysisLineKey(section, series);
 
   if (!series.some(analysisPlottable)) {
@@ -156,7 +157,7 @@ function analysisChart(title, series, unit, start, end, note, {
     return section;
   }
   const fewReadings = sparse && series.every((item) => item.points.filter(valid).length < 3);
-  if (fewReadings) legend.querySelectorAll(".analysis-info-tooltip").forEach((info) => info.append(reportNode("p", "Wenige Messungen · kein belastbarer Trend.", "analysis-sparse-note")));
+  if (fewReadings) section.querySelectorAll(".analysis-info-tooltip").forEach((info) => info.append(reportNode("p", "Wenige Messungen · kein belastbarer Trend.", "analysis-sparse-note")));
   const scales = analysisPlotScales(series, start, end, { unit, zeroCentered });
   const svg = analysisSvg("svg", { viewBox: `0 0 ${scales.chartWidth} 200`, role: "group", "aria-label": `${title}: datierter Verlauf. Tageswerte auswählen oder Werte ansehen öffnen.` });
   svg.append(analysisSvg("title", {}, `${title} · ${dateLabel(start)} bis ${dateLabel(end)}`));
@@ -170,6 +171,19 @@ function analysisChart(title, series, unit, start, end, note, {
   appendAnalysisReferenceNotes(section, series, unit);
   appendAnalysisTable(section, title, series, unit, caption);
   return section;
+}
+
+// A single series named like the chart only repeats the heading in its legend; its info button joins the heading instead.
+function analysisLegendRepeatsTitle(series, title) {
+  return series.length === 1 && (series[0].legendLabel || series[0].label) === title;
+}
+
+function analysisLegendInfoToHeading(heading, legend, title) {
+  const button = legend.querySelector(".analysis-legend-info");
+  button.textContent = "i";
+  button.className = "analysis-legend-info analysis-info-icon";
+  button.setAttribute("aria-label", `${title}: Informationen`);
+  heading.append(button, legend.querySelector(".analysis-info-tooltip"));
 }
 
 // A bar series is solid; a line is dashed when the series says so or by its position (see appendAnalysisSeries).
@@ -483,16 +497,25 @@ function analysisDayTickLabel(dateKey) {
   return dateKey.slice(5).split("-").reverse().join(".");
 }
 
+// Tick marks sit on every day (or every week start of a weekly chart); labels repeat at an even step counted back from the latest tick.
 function appendAnalysisDateTicks(svg, start, end, { chartWidth, x }, tickLabel = analysisDayTickLabel) {
-  const days = Math.round((Date.parse(end) - Date.parse(start)) / 86400000);
-  const intervals = Math.min(Math.max(1, days), chartWidth < 600 ? 3 : 7);
-  for (let index = 0; index <= intervals; index++) {
-    const date = addDateKey(start, Math.round(days * index / intervals));
-    let anchor = "middle";
-    if (index === 0) anchor = "start";
-    else if (index === intervals) anchor = "end";
-    svg.append(analysisSvg("text", { x: x(date), y: 188, "text-anchor": anchor, class: "analysis-date-tick" }, tickLabel(date)));
-  }
+  const weekly = tickLabel === analysisWeekTickLabel;
+  const dates = analysisTickDates(start, end, weekly);
+  const maxLabels = chartWidth < 600 ? 4 : 7;
+  const step = [1, 2, 3, 4, 7, 14, 28].find((candidate) => Math.floor((dates.length - 1) / candidate) + 1 <= maxLabels) || 28;
+  dates.forEach((date, index) => {
+    const labelled = (dates.length - 1 - index) % step === 0;
+    if (!labelled && dates.length > 31) return;
+    svg.append(analysisSvg("line", { x1: x(date), x2: x(date), y1: 160, y2: labelled ? 168 : 164, class: "analysis-tick-mark" }));
+    if (labelled) svg.append(analysisSvg("text", { x: x(date), y: 188, "text-anchor": "middle", class: "analysis-date-tick" }, tickLabel(date)));
+  });
+  if (weekly) svg.append(analysisSvg("text", { x: 4, y: 188, class: "analysis-week-caption" }, "Woche ab"));
+}
+
+function analysisTickDates(start, end, weekly) {
+  const dates = [];
+  for (let date = start; date <= end && dates.length < 400; date = addDateKey(date, weekly ? 7 : 1)) dates.push(date);
+  return dates.length ? dates : [start];
 }
 
 function analysisPointTooltip(section, marker, title, lines) {

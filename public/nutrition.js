@@ -173,7 +173,9 @@ function nutritionCard(item, template) {
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
   const basisLabel = nutritionBasisLabel(item.nutrition_basis, { template, syncLabel }, sourceLabel);
-  if (basisLabel) source.textContent = basisLabel + (template ? "" : syncLabel);
+  // The default (typed in by hand, stored locally) is not repeated under every meal; any other source or state is shown.
+  const isDefaultSource = !template && item.source === "manual" && item.sync_state !== "synced" && basisLabel === sourceLabel;
+  if (basisLabel && !isDefaultSource) source.textContent = basisLabel + (template ? "" : syncLabel);
   card.append(title, description, values);
   if (source.textContent) card.append(source);
   if (!template) {
@@ -260,7 +262,7 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
   };
   const totalValue = kcalValue(expenditure?.total_kcal);
   const totalCaption = document.createElement("span");
-  totalCaption.textContent = expenditure?.provisional ? "Tagesverbrauch (vorläufig)" : "Tagesverbrauch";
+  totalCaption.textContent = "Tagesverbrauch";
   totalTile.append(totalValue, totalCaption);
 
   const componentTile = (rawValue, caption) => {
@@ -283,7 +285,7 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
     totalTile,
     ...(projectionTile ? [projectionTile] : []),
     componentTile(expenditure?.active_kcal, "Aktivkalorien"),
-    componentTile(expenditure?.resting_kcal, expenditure?.provisional ? "Grundumsatz (vorläufig)" : "Grundumsatz"),
+    componentTile(expenditure?.resting_kcal, "Grundumsatz"),
   );
 
   const syncedAt = nutritionExpenditureTimestamp(expenditure?.synced_at);
@@ -419,7 +421,6 @@ function nutritionChartDayRow(day, scale) {
 
 function renderNutritionWeek(week) {
   const dayCount = week.days.length;
-  document.querySelector("#nutritionWeekHeading").textContent = dayCount === 84 ? "Letzte 12 Wochen" : `Letzte ${dayCount} Tage`;
   document.querySelector("#nutritionWeekPeriod").textContent = `${nutritionExpenditureDate(week.start_date)} – ${nutritionExpenditureDate(week.end_date)}`;
   const totals = document.querySelector("#nutritionWeekTotals");
   const balance = week.balance_kcal;
