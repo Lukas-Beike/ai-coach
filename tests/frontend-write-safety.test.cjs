@@ -383,5 +383,7 @@ test("first-threshold entry fields are not required in the profile confirmation"
   assert.equal(state.profileBaseline.first_threshold_hr, "");
   assert.equal(state.profileBaseline.first_threshold_pct, "82");
   assert.equal(context.profileSaveConfirmed({ first_threshold_hr: "150", name: "A" }, {}), false);
-  assert.equal(context.profileSaveConfirmed({ first_threshold_hr: "150", first_threshold_on: "2026-11-01" }, {}), true);
+  assert.equal(context.profileSaveConfirmed({ first_threshold_hr: "150", first_threshold_on: "2026-11-01" }, {}), false);
+  assert.equal(context.profileSaveConfirmed({ first_threshold_hr: "150", first_threshold_on: "2026-11-01" }, { first_threshold_pct: "82" }), true);
+  assert.equal(context.profileSaveConfirmed({ first_threshold_on: "2026-11-01" }, {}), true);
 });

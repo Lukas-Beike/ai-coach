@@ -12,6 +12,8 @@ function profileFormValues(form) {
 const PROFILE_ENTRY_FIELDS = ["first_threshold_hr", "first_threshold_on"];
 
 function profileSaveConfirmed(changed, saved) {
+  // An entered bpm value must come back as the stored percent.
+  if (profileFieldText(changed.first_threshold_hr) && typeof saved.first_threshold_pct !== "string") return false;
   return Object.keys(changed)
     .filter((key) => !PROFILE_ENTRY_FIELDS.includes(key))
     .every((key) => Object.hasOwn(saved, key) && typeof saved[key] === "string");
