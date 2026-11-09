@@ -225,7 +225,7 @@ class CalendarSyncTests(unittest.TestCase):
     def test_the_event_carries_the_range_resolved_for_the_unit_day(self) -> None:
         item = unit()
         for lthr in (LTHR, NEW_LTHR):
-            payload = self.service(lthr, None)._event_payload("u1", item)
+            payload = self.service(lthr, None)._event_payload("u1", item, lthr)
             low, high = resolved_range(item["hr_cap"], lthr) or (0, 0)
             self.assertIn(f"{low}-{high}bpm", payload["description"])
 
@@ -235,7 +235,7 @@ class CalendarSyncTests(unittest.TestCase):
         kv = ChangedFlagTests.kv()
         item = unit()
         service = self.service(LTHR, kv)
-        service._remember_sent_range("u1", item)
+        service._remember_sent_range("u1", item, LTHR)
         low, high = resolved_range(item["hr_cap"], LTHR) or (0, 0)
         self.assertEqual({sent_key("u1"): f"{low}-{high}"}, kv.store)
         flagged = resync_ids(
@@ -247,7 +247,7 @@ class CalendarSyncTests(unittest.TestCase):
         item = unit()
         export = MagicMock()
         service = self.service(LTHR, None, export)
-        payload = service._event_payload("u1", item)
+        payload = service._event_payload("u1", item, LTHR)
         export.upsert.return_value = [{"id": "e1"}]
         export.event_identity.return_value = "e1"
         service._remote_event("u1", item, payload, "{}")
@@ -257,7 +257,7 @@ class CalendarSyncTests(unittest.TestCase):
 
     def test_a_unit_without_a_cap_remembers_nothing(self) -> None:
         kv = ChangedFlagTests.kv()
-        self.service(LTHR, kv)._remember_sent_range("u1", unit(hr_cap=None))
+        self.service(LTHR, kv)._remember_sent_range("u1", unit(hr_cap=None), LTHR)
         self.assertEqual({}, kv.store)
 
 

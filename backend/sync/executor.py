@@ -468,9 +468,7 @@ class IntervalsJobAdapter:
             return self._nutrition_sync(payload)
         specific = self._jobs.execute_specific(job, payload, reason, job_type)
         if specific is None:
-            raise AppError(
-                400, UNKNOWN_PROVIDER_JOB, reason="invalid_job_request"
-            )
+            raise AppError(400, UNKNOWN_PROVIDER_JOB, reason="invalid_job_request")
         return specific
 
     def _nutrition_sync(self, payload: dict[str, Any]) -> dict[str, Any]:

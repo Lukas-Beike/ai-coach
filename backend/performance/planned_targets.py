@@ -155,7 +155,7 @@ def heart_rate_cap_execution(
         }
     base["cap_bpm"] = bpm
     timeline = _Timeline(streams)
-    spans = timeline._spans("heartrate", float("-inf"), float("inf"))
+    spans = timeline.spans("heartrate", float("-inf"), float("inf"))
     total = sum(span for _, span in spans)
     if total <= 0:
         return {**base, "status": "not_covered", "reason": "Kein Herzfrequenzverlauf."}
@@ -350,6 +350,10 @@ class _Timeline:
         total = sum(span for _, span in spans)
         inside = sum(span for value, span in spans if low <= value <= high)
         return round(inside / total * 100) if total > 0 else None
+
+    def spans(self, metric: str, start: float, end: float) -> list[tuple[float, float]]:
+        """Each displayed value with the time it covers inside the window."""
+        return self._spans(metric, start, end)
 
     def mean(self, metric: str, start: float, end: float) -> float | None:
         spans = self._spans(metric, start, end)

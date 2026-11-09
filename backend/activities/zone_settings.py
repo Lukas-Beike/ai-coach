@@ -137,7 +137,8 @@ class ZoneSettings:
             chosen, ZoneConfigurationMetric.PACE, sport, indoor=indoor, day=day
         )
         ftp = _threshold(power, base.ftp, "threshold")
-        lthr = _threshold(heart_rate, base.lthr, "threshold")
+        # The watch's own lactate threshold HR (dated Garmin set) leads for heart rate.
+        lthr = _threshold(heart_rate, base.lthr, "threshold", watch_first=True)
         threshold_pace = base.threshold_pace
         # Limits are percent of the threshold the settings carry, so the zone of
         # a measured value is the one the provider reported in absolute terms.
@@ -184,7 +185,11 @@ class ZoneSettings:
 
 
 def _threshold(
-    configuration: ZoneConfiguration | None, fallback: float | None, field: str
+    configuration: ZoneConfiguration | None,
+    fallback: float | None,
+    field: str,
+    *,
+    watch_first: bool = False,
 ) -> float | None:
     """A local configuration's value, Garmin's dated zone-set threshold, else the fallback.
 
@@ -201,7 +206,7 @@ def _threshold(
         return fallback
     value: float | None = getattr(configuration, field)
     provider = configuration.provenance.provider
-    if provider is None or (provider is ProviderId.GARMIN and field == "threshold"):
+    if provider is None or (provider is ProviderId.GARMIN and watch_first):
         first, second = (value, fallback)
     else:
         first, second = (fallback, value)

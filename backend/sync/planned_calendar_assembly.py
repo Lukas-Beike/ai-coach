@@ -85,6 +85,8 @@ class PlannedCalendarSyncAssembly:
             self._utc_now,
             self._today,
             self._future_days,
+            run_lthr_for=self._run_lthr_for,
+            key_values=self._key_values,
         )
 
     def _export_port(self) -> WorkoutExportPort:

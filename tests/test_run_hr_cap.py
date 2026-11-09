@@ -141,7 +141,9 @@ class CapTableTests(unittest.TestCase):
                 self.assertEqual({PERCENT_KEY, LOW_PERCENT_KEY, SOURCE_KEY}, set(cap))
                 self.assertEqual(percent, cap[PERCENT_KEY])
                 self.assertEqual(export_floor_percent(percent), cap[LOW_PERCENT_KEY])
-                self.assertEqual(cap, stored_cap({"hr_cap": cap}))
+                self.assertEqual(
+                    cap, stored_cap({"hr_cap": cap, "session_focus": focus})
+                )
 
     def test_the_lower_bound_is_the_table_percent_but_never_above_the_cap_gap(
         self,
@@ -176,6 +178,23 @@ class CapTableTests(unittest.TestCase):
         )
         measured = hr_cap(HR_CAP_PERCENT[FOCI[0]], SOURCE_MEASURED)
         self.assertTrue(cap_label(measured, LTHR).endswith("gemessen"))
+
+    def test_a_cap_left_over_from_another_focus_does_not_apply(self) -> None:
+        cap = hr_cap(HR_CAP_PERCENT[FOCI[0]])
+        for focus in ("threshold", "tempo", None):
+            item = {
+                "hr_cap": cap,
+                **({} if focus is None else {"session_focus": focus}),
+            }
+            self.assertIsNone(stored_cap(item))
+
+    def test_a_measured_threshold_that_no_cap_can_satisfy_falls_back_to_the_defaults(
+        self,
+    ) -> None:
+        percents, source = cap_percents(40.0)
+        self.assertEqual((dict(HR_CAP_PERCENT), SOURCE_DEFAULT), (percents, source))
+        for percent in effective_caps(40.0).values():
+            normalize_hr_cap(percent)  # every expected value is storable
 
     def test_malformed_caps_are_rejected(self) -> None:
         good = hr_cap(HR_CAP_PERCENT[FOCI[0]])

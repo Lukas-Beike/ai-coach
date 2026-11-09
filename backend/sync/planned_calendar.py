@@ -195,14 +195,17 @@ class PlannedCalendarSyncService:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
 
     def _event_payload(
-        self, normalized_id: str, workout: dict[str, Any]
+        self,
+        normalized_id: str,
+        workout: dict[str, Any],
+        run_lthr: float | None = None,
     ) -> dict[str, Any]:
         event_payload = self._export.serialize(
             normalized_id,
             build_planned_workout_export(
                 workout,
                 today=self._today(),
-                run_lthr=self._run_lthr_for(workout) if stored_cap(workout) else None,
+                run_lthr=run_lthr,
             ),
         )
         remote_external_id = str(workout.get("remote_event_external_id") or "").strip()
@@ -271,7 +274,8 @@ class PlannedCalendarSyncService:
         if workout.get("local_deleted") or workout.get("archived"):
             self._remove_event(normalized_id, row, workout)
             return None
-        event_payload = self._event_payload(normalized_id, workout)
+        run_lthr = self._run_lthr_for(workout) if stored_cap(workout) else None
+        event_payload = self._event_payload(normalized_id, workout, run_lthr)
         event = self._remote_event(
             normalized_id, workout, event_payload, row["payload"]
         )
@@ -285,17 +289,31 @@ class PlannedCalendarSyncService:
             },
             expected_payload=row["payload"],
         )
-        self._remember_sent_range(normalized_id, workout)
+        self._remember_sent_range(normalized_id, workout, run_lthr)
         return event
 
-    def _remember_sent_range(self, normalized_id: str, workout: dict[str, Any]) -> None:
+    def _remember_sent_range(
+        self, normalized_id: str, workout: dict[str, Any], run_lthr: float | None
+    ) -> None:
         """Remember the bpm range sent for a capped unit, to see later threshold moves."""
-        cap = stored_cap(workout)
-        if cap is None or self._key_values is None:
-            return
-        resolved = resolved_range(cap, self._run_lthr_for(workout))
-        with self._database_manager.unit_of_work() as db:
-            record_sent(self._key_values, db, normalized_id, resolved)
+        record_sent_range(
+            self._database_manager, self._key_values, normalized_id, workout, run_lthr
+        )
+
+
+def record_sent_range(
+    database_manager: DatabaseManager,
+    key_values: Any,
+    local_id: str,
+    workout: Mapping[str, Any],
+    run_lthr: float | None,
+) -> None:
+    """Remember the bpm range sent for a capped unit, to see later threshold moves."""
+    cap = stored_cap(workout)
+    if cap is None or key_values is None:
+        return
+    with database_manager.unit_of_work() as db:
+        record_sent(key_values, db, local_id, resolved_range(cap, run_lthr))
 
 
 @dataclass
@@ -400,6 +418,9 @@ class PlannedCalendarRepairService:
         now: Callable[[], str],
         today: Callable[[], date],
         future_days: int,
+        *,
+        run_lthr_for: Callable[[Mapping[str, Any]], float | None] = lambda _unit: None,
+        key_values: Any = None,
     ) -> None:
         self._database_manager = database_manager
         self._export = export
@@ -407,6 +428,8 @@ class PlannedCalendarRepairService:
         self._now = now
         self._today = today
         self._future_days = int(future_days)
+        self._run_lthr_for = run_lthr_for
+        self._key_values = key_values
 
     def create_batch(
         self, requested: list[dict[str, Any]]
@@ -652,9 +675,14 @@ class PlannedCalendarRepairService:
         context: _PlannedCalendarRepairContext,
         keeper: dict[str, Any] | None,
     ) -> None:
+        run_lthr = (
+            self._run_lthr_for(context.workout) if stored_cap(context.workout) else None
+        )
         payload = context.export.serialize(
             context.local_id,
-            build_planned_workout_export(context.workout, today=context.today),
+            build_planned_workout_export(
+                context.workout, today=context.today, run_lthr=run_lthr
+            ),
         )
         if keeper:
             payload["id"] = str(keeper["id"])
@@ -677,6 +705,13 @@ class PlannedCalendarRepairService:
                 reason="intervals_workout_verification_failed",
             )
         context.remote_id = context.export.event_identity(result)
+        record_sent_range(
+            self._database_manager,
+            self._key_values,
+            context.local_id,
+            context.workout,
+            run_lthr,
+        )
         saved_event = {
             **result,
             "external_id": payload["external_id"],

@@ -72,7 +72,11 @@ def cap_percents(first_threshold_pct: float | None) -> tuple[dict[str, float], s
         recovery = min(
             HR_CAP_PERCENT["recovery"], _floor_tenth(easy - RECOVERY_BELOW_EASY_PCT)
         )
-        if recovery >= _PERCENT_BOUNDS[0] and easy <= 100.0:
+        floor_ok = (
+            export_floor_percent(recovery) >= _PERCENT_BOUNDS[0]
+            and export_floor_percent(easy) >= _PERCENT_BOUNDS[0]
+        )
+        if floor_ok and recovery >= _PERCENT_BOUNDS[0] and easy <= 100.0:
             return {
                 focus: recovery if focus == "recovery" else easy
                 for focus in HR_CAP_PERCENT
@@ -145,7 +149,9 @@ def normalize_hr_cap(value: object) -> dict[str, Any]:
 def stored_cap(unit: Mapping[str, Any]) -> dict[str, Any] | None:
     """The valid cap stored on a unit payload, or None (a malformed one counts as none)."""
     value = unit.get(HR_CAP_KEY)
-    if value is None:
+    focus = str(unit.get("session_focus") or "").strip().casefold()
+    if value is None or focus not in HR_CAP_PERCENT:
+        # A cap left over from another focus does not apply.
         return None
     try:
         return normalize_hr_cap(value)

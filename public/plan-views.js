@@ -551,7 +551,8 @@ function hrCapChipSpec(entry) {
   const percent = Number(entry?.hr_cap?.percent_lthr);
   const source = HR_CAP_SOURCE_LABELS[entry?.hr_cap?.source];
   if (!Number.isFinite(percent) || !source) return null;
-  const bpm = Number(entry?.hr_cap_bpm?.high);
+  const high = entry?.hr_cap_bpm?.high;
+  const bpm = typeof high === "number" ? high : Number.NaN;
   const parts = [`≤ ${percent} % LSHF`, Number.isFinite(bpm) ? `${bpm} bpm` : null, source];
   return { kind: "focus", text: parts.filter(Boolean).join(" · "), derived: false };
 }
