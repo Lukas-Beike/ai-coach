@@ -106,7 +106,7 @@ def power_meter_changes(uses: Iterable[SensorUse]) -> list[dict[str, Any]]:
     for sport, sessions in by_sport.items():
         sessions.sort(key=lambda item: item[0])
         seen = set(sessions[0][1])
-        for started_at, after in (item for item in sessions[1:]):
+        for started_at, after in sessions[1:]:
             new = after.isdisjoint(seen)
             seen |= after
             if new:
