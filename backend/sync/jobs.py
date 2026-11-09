@@ -919,6 +919,11 @@ class SyncJobStore:
             stored_by_key = {
                 str(item.get("item_key") or ""): item for item in stored_items
             }
+            if len(stored_items) == 1 and len(item_results) > 1:
+                # One stored item stands for the whole job; a later success
+                # must not hide an earlier failure.
+                failed = [item for item in item_results if self._failed(item)]
+                item_results = failed[:1] or item_results[-1:]
             # Unkeyed results map by position only when none is keyed and counts agree.
             positional = len(item_results) == len(stored_items) and not any(
                 self._result_key(item) for item in item_results
@@ -968,6 +973,11 @@ class SyncJobStore:
             )
             updated, updated_items = read_job(db, job_id)
             return self._event_snapshot(updated, updated_items)
+
+    @staticmethod
+    def _failed(item: Mapping[str, Any]) -> bool:
+        outcome = str(item.get("status") or "error").strip().casefold()
+        return outcome not in {"synced", "already_synced", "skipped"}
 
     @staticmethod
     def _result_key(item: Mapping[str, Any]) -> str:

@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import date
 from typing import Any, Final
 
 from backend.canonical.planning_fields import STRENGTH_STRUCTURE
@@ -20,6 +21,8 @@ from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import strength_structure
+from backend.planning.garmin_orphans import GarminOrphan
+from backend.planning.intervals_orphans import IntervalsOrphan
 from backend.planning.library import library_payload_hash
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_strength_workout import (
@@ -124,18 +127,68 @@ def unmapped_exercises(
     ]
 
 
+def _cleanup_lists(
+    orphans: Sequence[GarminOrphan], intervals_orphans: Sequence[IntervalsOrphan]
+) -> dict[str, list[dict[str, str]]]:
+    """The leftovers each provider's sync removes, as the calendar receives them."""
+    return {
+        ProviderId.GARMIN.value: [
+            {"id": item.local_id, "name": item.name, "date": item.date}
+            for item in orphans
+        ],
+        ProviderId.INTERVALS.value: [
+            {
+                "id": item.local_id,
+                "name": item.name,
+                "date": item.date,
+                "hash": item.payload_hash,
+            }
+            for item in intervals_orphans
+        ],
+    }
+
+
+def _unit_cleanup(
+    lists: dict[str, list[dict[str, str]]],
+    pending: dict[str, bool],
+    payload: dict[str, Any],
+    today: date,
+) -> dict[str, list[dict[str, str]]]:
+    """The leftovers each provider removes with the sync of this upcoming unit.
+
+    Every unit a provider waits for carries them; the calendar shows them once,
+    on the first card that really offers that provider's sync button.
+    """
+    if str(payload.get("date") or "")[:10] < today.isoformat():
+        return {}
+    return {
+        provider: items
+        for provider, items in lists.items()
+        if items and pending.get(provider)
+    }
+
+
 def attach_push_state(
     pairs: Iterable[tuple[Any, dict[str, Any]]],
     baselines: dict[str, str | None],
     remembered: Mapping[str, GarminExercise] | None = None,
     resync: frozenset[str] | set[str] = frozenset(),
+    orphans: Sequence[GarminOrphan] = (),
+    intervals_orphans: Sequence[IntervalsOrphan] = (),
+    today: date = date.min,
 ) -> None:
     """Add ``payload_hash``, ``push_pending`` and ``push_blocked`` to each pair.
+
+    An upcoming unit a provider waits for also lists, per provider, the
+    leftovers its sync removes (``push_cleanup``): ``orphans`` are Garmin
+    workouts, ``intervals_orphans`` Intervals.icu events of deleted or replaced
+    units.
 
     ``resync`` holds the local ids of synced units whose exported heart-rate range
     moved only with the threshold HR. ``push_blocked`` names why a strength unit cannot reach Garmin, so the
     calendar says so instead of offering only Intervals.icu silently.
     """
+    lists = _cleanup_lists(orphans, intervals_orphans)
     for row, payload in pairs:
         digest = library_payload_hash(row["payload"])
         # A synced run unit whose heart-rate range moved with the threshold HR
@@ -155,6 +208,9 @@ def attach_push_state(
             )
         payload["payload_hash"] = digest
         payload["push_pending"] = pending
+        cleanup = _unit_cleanup(lists, pending, payload, today)
+        if cleanup:
+            payload["push_cleanup"] = cleanup
         payload["push_blocked"] = (
             {ProviderId.GARMIN.value: blocked} if blocked is not None else {}
         )

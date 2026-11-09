@@ -1527,6 +1527,7 @@ COACH_PROPOSALS = CoachProposalAssembly(
             now=lambda: time.time(),
             utc_now=runtime_clock.utc_now,
             uuid_factory=uuid.uuid4,
+            today=lambda: ATHLETE_CLOCK.now().date(),
         ),
     )
 )
