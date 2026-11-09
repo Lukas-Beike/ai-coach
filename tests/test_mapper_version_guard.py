@@ -37,6 +37,7 @@ REPLAYED_BY: Final[dict[str, tuple[str, ...]]] = {
     "garmin_gear_mapping": ("garmin_health_mapping",),
     "garmin_health_mapping": ("garmin_health_mapping",),
     "garmin_status_mapping": ("garmin_health_mapping",),
+    "garmin_zone_mapping": ("garmin_health_mapping",),
     "garmin_training_mapping": ("garmin_health_mapping",),
     "sleep_period_mapping": ("garmin_health_mapping",),
     # garmin_activity_mapping uses wahoo_device_type for relayed Wahoo rides.
@@ -62,23 +63,27 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "c1b26578d189a3b8afe775e9055fb5e2b78639e63c4eb061efcb376372e869ea",
     ),
     "garmin_gear_mapping": (
-        (19,),
+        (20,),
         "c1065949991a138dd91ec1b96da88939bf8c847e52ef550dc32a665cce0e1b7c",
     ),
     "garmin_health_mapping": (
-        (19,),
-        "52d3640fe4bd942bbc2654ac731aab4067226521fb0aa1aeedad432a808de3fa",
+        (20,),
+        "e655df5f9a2cf55a965d21b0d6e7d1c77185a9d230405513e99a729b05c930a3",
     ),
     "garmin_status_mapping": (
-        (19,),
+        (20,),
         "5da9d6874214b0b966721bd1cdd155ffdb64dcc247c79db92c11739b112a1f96",
     ),
     "garmin_training_mapping": (
-        (19,),
+        (20,),
         "34fd2a6d7884c0b54f9b87ccba040fb83f5cc7c481c69776edbd71c30e87be0e",
     ),
+    "garmin_zone_mapping": (
+        (20,),
+        "b06dffd17d1c09036a5ef7c1aab7695d56f0d5d8e2e4616238afc4a5f21dfeee",
+    ),
     "sleep_period_mapping": (
-        (19,),
+        (20,),
         "77efab15de0cda5414ed02c0d5005a9fe6fb1a650ec103bdb40e01cef065cf0f",
     ),
     "wahoo_activity_mapping": (

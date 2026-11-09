@@ -249,18 +249,28 @@ def _garmin_sport_category(value: Any) -> str:
 
 
 def garmin_profile_max_hr(snapshot: dict[str, Any]) -> dict[str, float | int]:
-    values: dict[str, list[float | int]] = {"cycling": [], "running": [], "generic": []}
-    for item in _garmin_mapping_nodes(snapshot.get("heart_rate_zones")):
-        max_hr = _as_number(
-            _first_present(item, garmin_perf_fields.MAX_HEART_RATE_ALIASES)
-        )
-        if max_hr is not None and 80 <= float(max_hr) <= 260:
-            values[
-                _garmin_sport_category(
-                    _first_present(item, ("sport", "sportType", "activityType"))
-                )
-            ].append(max_hr)
-    return {kind: max(items) for kind, items in values.items() if items}
+    """The profile maximum HR per sport category from the newest zone sets.
+
+    Stored zone sets accumulate (``fetchedOn`` dates each one), so a later set
+    replaces an earlier one; sets of one day, or without a date, count together.
+    """
+    sets = snapshot.get("heart_rate_zones")
+    elements = sets[:100] if isinstance(sets, list) else [sets]
+    values: dict[str, tuple[str, float | int]] = {}
+    for element in elements:
+        stamp = str(element.get("fetchedOn") or "") if isinstance(element, dict) else ""
+        for item in _garmin_mapping_nodes(element):
+            max_hr = _as_number(
+                _first_present(item, garmin_perf_fields.MAX_HEART_RATE_ALIASES)
+            )
+            if max_hr is None or not 80 <= float(max_hr) <= 260:
+                continue
+            kind = _garmin_sport_category(
+                _first_present(item, ("sport", "sportType", "activityType"))
+            )
+            if kind not in values or (stamp, max_hr) > values[kind]:
+                values[kind] = (stamp, max_hr)
+    return {kind: value for kind, (_, value) in values.items()}
 
 
 def _garmin_collect_vo2_values(

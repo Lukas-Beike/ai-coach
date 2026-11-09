@@ -67,6 +67,7 @@ from backend.providers.garmin_status_mapping import (
 )
 from backend.providers.garmin_status_mapping import map_garmin_status_codes
 from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
+from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
 from backend.providers.sleep_period_mapping import map_sleep_periods
 from backend.providers.wahoo_activity_mapping import (
     MAPPER_VERSION as WAHOO_ACTIVITY_VERSION,
@@ -115,6 +116,7 @@ GARMIN_MORNING_ATTEMPTED_AT_KEY: Final = "attempted_at"
 GARMIN_MORNING_ERROR_KEY: Final = "error"
 GARMIN_SLEEP_SECTION: Final = "sleep"
 GARMIN_GEAR_SECTION: Final = "gear"
+GARMIN_HEART_RATE_ZONES_SECTION: Final = "heart_rate_zones"
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +253,17 @@ def _garmin_batch(
         )
         return DomainBatch(
             source_id, GARMIN_HEALTH_VERSION, gear_items=items, gear_links=links
+        )
+    if section == GARMIN_HEART_RATE_ZONES_SECTION:
+        return DomainBatch(
+            source_id,
+            GARMIN_HEALTH_VERSION,
+            zones=map_garmin_heart_rate_zones(
+                element,
+                source_record_id=source_id,
+                retrieved_at=retrieved_at,
+                zone=zone,
+            ),
         )
     if section != GARMIN_SLEEP_SECTION:
         return None
