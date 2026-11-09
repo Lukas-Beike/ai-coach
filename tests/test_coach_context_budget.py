@@ -514,7 +514,7 @@ class CoachContextBudgetTests(unittest.TestCase):
                     for entry in captured.records
                     if getattr(entry, "event", None) == "coach_context_projection"
                 )
-                fields = record.context
+                fields = vars(record)["context"]
                 self.assertEqual(selection.name, fields["context_profile"])
                 self.assertEqual(selection.kind, fields["request_kind"])
                 sizes = fields["section_characters"]
