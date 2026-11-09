@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -16,6 +17,16 @@ from backend.planning.context import external_calendar_event_dates
 from backend.weather.adaptive import weather_adaptive_reason
 
 MAX_PREVIEW_PLANNED_UNITS = 500
+
+
+@dataclass(frozen=True)
+class AdaptivePreviewLimits:
+    """Window and limits of an adaptive preview."""
+
+    external_calendar_window_days: int
+    illness_text_limit: int
+    illness_pause_default_days: int
+    weather_adaptive_max_minutes: int
 
 
 def _as_number(value: Any) -> float | int | None:
@@ -409,10 +420,7 @@ class AdaptiveReplanPreviewService:
         today: Callable[[], date],
         now: Callable[[], str],
         id_factory: Callable[[], Any],
-        external_calendar_window_days: int,
-        illness_text_limit: int,
-        illness_pause_default_days: int,
-        weather_adaptive_max_minutes: int,
+        limits: AdaptivePreviewLimits,
         run_caps: Callable[[], dict[str, dict[str, Any]]] | None = None,
     ) -> None:
         """``run_caps`` gives the athlete's effective run heart-rate caps."""
@@ -425,10 +433,7 @@ class AdaptiveReplanPreviewService:
         self._today = today
         self._now = now
         self._id_factory = id_factory
-        self._external_calendar_window_days = external_calendar_window_days
-        self._illness_text_limit = illness_text_limit
-        self._illness_pause_default_days = illness_pause_default_days
-        self._weather_adaptive_max_minutes = weather_adaptive_max_minutes
+        self._limits = limits
         self._run_caps = run_caps
 
     def latest_preview(self, *, db: Any | None = None) -> dict[str, Any] | None:
@@ -500,8 +505,8 @@ class AdaptiveReplanPreviewService:
         illness_pause = adaptive.illness_pause_forecast(
             feedback,
             today_date,
-            illness_text_limit=self._illness_text_limit,
-            default_days=self._illness_pause_default_days,
+            illness_text_limit=self._limits.illness_text_limit,
+            default_days=self._limits.illness_pause_default_days,
         )
         illness_pause = _approve_existing_pause(
             illness_pause, self.latest_illness_pause(), today
@@ -510,7 +515,7 @@ class AdaptiveReplanPreviewService:
             self._external_calendar_reader.list_events(1000),
             today=today,
             today_date=today_date,
-            window_days=self._external_calendar_window_days,
+            window_days=self._limits.external_calendar_window_days,
         )
         signals.extend(calendar_signals)
         drafts = self._planned_unit_service.list(
@@ -536,7 +541,7 @@ class AdaptiveReplanPreviewService:
                     illness_pause=illness_pause,
                     events_by_date=events_by_date,
                     weather_days=weather_days,
-                    weather_adaptive_max_minutes=self._weather_adaptive_max_minutes,
+                    weather_adaptive_max_minutes=self._limits.weather_adaptive_max_minutes,
                     run_caps=run_caps,
                 )
             )

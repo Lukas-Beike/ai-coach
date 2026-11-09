@@ -86,6 +86,11 @@ def adaptive_recovery_description(sport: str, duration: int) -> str:
     )
 
 
+def _half_kg(kg: Any) -> float:
+    """Half the weight, to the nearest 0.5 kg."""
+    return round(float(kg)) / 2
+
+
 def lightened_structure(value: Any) -> list[dict[str, Any]] | None:
     """The same exercises made light: half the sets, half the weight, low effort."""
     try:
@@ -98,7 +103,9 @@ def lightened_structure(value: Any) -> list[dict[str, Any]] | None:
     for exercise in exercises:
         item = {**exercise, "sets": max(1, -(-int(exercise["sets"]) // 2))}
         if item.get("kg") is not None:
-            item["kg"] = round(float(item["kg"]) / 2 * 2) / 2
+            item["kg"] = _half_kg(item["kg"])
+        if isinstance(item.get("warmup"), dict) and item["warmup"].get("kg"):
+            item["warmup"] = {**item["warmup"], "kg": _half_kg(item["warmup"]["kg"])}
         if item.get("pct_1rm") is not None:
             item["pct_1rm"] = min(item["pct_1rm"], strength_structure.MODERATE_PCT - 15)
         if item.get("rpe") is not None:
@@ -311,6 +318,19 @@ def illness_calendar_events(
         )
         current += timedelta(days=1)
     return events
+
+
+def _overlaid(current: dict[str, Any], replacement: dict[str, Any]) -> dict[str, Any]:
+    """The current row with the replaced fields; a None replacement removes one."""
+    replaced = {
+        key: replacement[key] for key in ADAPTIVE_REPLACEMENT_KEYS if key in replacement
+    }
+    merged = {**current, **replaced}
+    return {
+        key: value
+        for key, value in merged.items()
+        if not (key in replaced and value is None)
+    }
 
 
 class AdaptiveReplanApplyService:
@@ -536,18 +556,10 @@ class AdaptiveReplanApplyService:
         # Overlay only the fields a preview replaces on the current row, so athlete
         # edits to start time, plan membership or remote identity survive.
         replacement = {
-            **current,
-            **{
-                key: replacement[key]
-                for key in ADAPTIVE_REPLACEMENT_KEYS
-                if key in replacement
-            },
+            **_overlaid(current, replacement),
             "id": draft_id,
             "sync_status": "local",
         }
-        for key in ADAPTIVE_REPLACEMENT_KEYS:
-            if key in replacement and replacement[key] is None:
-                replacement.pop(key)
         replacement["planned_duration_s"] = (
             int(replacement.get("duration_minutes") or 0) * 60
         )

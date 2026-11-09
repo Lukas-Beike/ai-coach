@@ -17,7 +17,10 @@ from backend.errors import AppError
 from backend.planning import adaptive, push_state
 from backend.planning import calendar as planning_calendar
 from backend.planning.adaptive import AdaptiveReplanApplyService
-from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
+from backend.planning.adaptive_preview_service import (
+    AdaptivePreviewLimits,
+    AdaptiveReplanPreviewService,
+)
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.revision import PlanningRevisionService
 
@@ -468,10 +471,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
             lambda: TODAY,
             lambda: NOW,
             lambda: str(uuid.uuid4()),
-            56,
-            1000,
-            3,
-            90,
+            AdaptivePreviewLimits(56, 1000, 3, 90),
         ).preview()
         service = self.make_service(
             calendar_conflict_service=CalendarConflictService(self.manager, Calendar())
@@ -541,7 +541,16 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
             session_focus="threshold",
             duration_minutes=50,
         )
-        heavy = [{"name": "Kniebeuge", "sets": 5, "reps": 5, "kg": 100, "pct_1rm": 85}]
+        heavy = [
+            {
+                "name": "Kniebeuge",
+                "sets": 5,
+                "reps": 5,
+                "kg": 100,
+                "pct_1rm": 85,
+                "warmup": {"sets": 2, "reps": 5, "kg": 60},
+            }
+        ]
         strength = self.workout(
             strength_id,
             "2026-09-23",
@@ -568,6 +577,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         exercise = saved_strength["strength_structure"][0]
         self.assertEqual((exercise["sets"], exercise["kg"]), (3, 50))
         self.assertLess(exercise["pct_1rm"], 65)
+        self.assertEqual(exercise["warmup"]["kg"], 30)
         self.assertNotEqual(push_state.garmin_fingerprint(saved_strength), before)
 
     def test_no_complaint_answers_propose_nothing(self):

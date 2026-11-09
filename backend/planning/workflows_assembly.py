@@ -6,7 +6,10 @@ from typing import Any
 
 from backend.performance.source_policy import SourcePreferences
 from backend.planning import changes as planning_changes
-from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
+from backend.planning.adaptive_preview_service import (
+    AdaptivePreviewLimits,
+    AdaptiveReplanPreviewService,
+)
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.daily_context_service import DailyPlanningContextService
 from backend.planning.library_plan_service import WorkoutLibraryPlanService
@@ -227,9 +230,11 @@ class PlanningWorkflowAssembly:
             self._local_date,
             self._utc_now,
             self._uuid_factory,
-            self._calendar_window_days,
-            self._checkin_text_limit,
-            self._default_illness_pause_days,
-            self._weather_adaptive_max_minutes,
+            AdaptivePreviewLimits(
+                self._calendar_window_days,
+                self._checkin_text_limit,
+                self._default_illness_pause_days,
+                self._weather_adaptive_max_minutes,
+            ),
             self._run_caps,
         )
