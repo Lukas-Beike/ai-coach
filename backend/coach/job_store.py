@@ -65,7 +65,8 @@ class CoachJobStore:
                     retry_after = float(receipt.get("retry_after") or 0)
                 except TypeError, ValueError:
                     retry_after = 0
-                if retry_after > time.time():
+                # A cancelled job is due at once, so it ends instead of waiting.
+                if retry_after > time.time() and not receipt.get("cancel_requested"):
                     continue
                 claimed = db.execute(
                     "UPDATE coach_commands SET status='running', updated_at=? "
@@ -109,6 +110,8 @@ class CoachJobStore:
                 attempts = max(0, int(receipt.get(counter) or 0)) + 1
             except TypeError, ValueError:
                 attempts = 1
+            if wait_seconds is not None and receipt.get("cancel_requested"):
+                return False
             if max_waits is not None and attempts > max_waits:
                 return False
             delay = (

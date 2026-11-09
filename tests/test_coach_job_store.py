@@ -157,6 +157,27 @@ class CoachJobStoreTests(unittest.TestCase):
             )
         )
 
+    def test_cancelled_job_is_not_requeued_for_data_and_is_claimed_at_once(self):
+        self._insert(
+            "cancelled",
+            {"mode": "background", "cancel_requested": True},
+            status="running",
+        )
+        self.assertFalse(
+            self.store.requeue(
+                "cancelled", "garmin_sleep_not_ready", wait_seconds=900, max_waits=8
+            )
+        )
+        self._insert(
+            "waiting",
+            {
+                "mode": "background",
+                "cancel_requested": True,
+                "retry_after": time.time() + 900,
+            },
+        )
+        self.assertEqual(self.store.claim()["client_turn_id"], "waiting")
+
     def test_message_requires_saved_user_content(self):
         with self.manager.unit_of_work() as db:
             db.execute(
