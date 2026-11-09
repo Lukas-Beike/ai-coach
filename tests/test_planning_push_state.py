@@ -70,6 +70,7 @@ class PushStateTests(unittest.TestCase):
                 ),
             )
 
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_each_unit_carries_its_push_hash_and_pending_targets(self) -> None:
         strength, ride = json.dumps(STRENGTH), json.dumps(RIDE)
         projected = self.project(
@@ -85,6 +86,7 @@ class PushStateTests(unittest.TestCase):
         # Endurance units never offer Garmin; a synced unit needs no Intervals push.
         self.assertEqual({"intervals": False}, projected[1]["push_pending"])
 
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_garmin_is_pending_until_its_content_was_pushed(self) -> None:
         raw = json.dumps(STRENGTH)
         self.link("s1", garmin_fingerprint(STRENGTH) or "")
@@ -153,6 +155,7 @@ class PushStateTests(unittest.TestCase):
         self.assertNotEqual(legacy, garmin_fingerprint(STRENGTH))
         self.assertTrue(projected[0]["push_pending"]["garmin"])
 
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_a_conflicted_unit_offers_no_provider(self) -> None:
         conflicted = self.project(
             [
