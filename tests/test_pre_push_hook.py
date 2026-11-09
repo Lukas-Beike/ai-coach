@@ -19,9 +19,10 @@ sys.exit(int(os.environ.get({name!r}, "0")))
 
 @unittest.skipUnless(shutil.which("sh") and shutil.which("git"), "needs sh and git")
 class PrePushHookTests(unittest.TestCase):
-    def run_hook(self, secrets="0", quality="0"):
+    def run_hook(self, secrets="0", quality="0", dirty_quality=None):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
             for path, name in (
                 ("scripts/check_push_secrets.py", "SECRETS_EXIT"),
@@ -29,6 +30,13 @@ class PrePushHookTests(unittest.TestCase):
             ):
                 (root / path).parent.mkdir(exist_ok=True)
                 (root / path).write_text(STUB.format(name=name), encoding="utf-8")
+            subprocess.run([*git, "add", "."], cwd=root, check=True)
+            subprocess.run([*git, "commit", "-qm", "stubs"], cwd=root, check=True)
+            if dirty_quality is not None:
+                # An uncommitted edit that would fail if the hook ran it.
+                (root / "tools/quality_baseline.py").write_text(
+                    f"raise SystemExit({dirty_quality})\n", encoding="utf-8"
+                )
             bin_dir = root / "bin"
             bin_dir.mkdir()
             shim = bin_dir / "python"
@@ -77,6 +85,11 @@ class PrePushHookTests(unittest.TestCase):
         result, _lines = self.run_hook(quality="1")
         self.assertEqual(result.returncode, 1)
         self.assertIn("quality ratchet", result.stderr)
+
+    def test_quality_runs_on_committed_head_not_the_working_tree(self):
+        result, lines = self.run_hook(dirty_quality=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(lines[-1], "quality_baseline.py")
 
 
 if __name__ == "__main__":

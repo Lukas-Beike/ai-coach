@@ -3,8 +3,12 @@
 # stops the push before anything else runs.
 root="$(git rev-parse --show-toplevel)"
 python "$root/scripts/check_push_secrets.py" || exit $?
-# CI's repository-wide quality ratchet (mypy, Ruff, complexity) on this tree.
-if ! python "$root/tools/quality_baseline.py"; then
-  echo "Push blocked: the quality ratchet found new findings (see above). Fix them, or install requirements-dev.txt if a tool is missing." >&2
+# CI's repository-wide quality ratchet (mypy, Ruff, complexity) on a clean
+# export of HEAD, so uncommitted edits neither hide nor add findings.
+tree="$(mktemp -d)" || exit 1
+trap 'rm -rf "$tree"' EXIT
+git -C "$root" archive --format=tar HEAD | tar -xf - -C "$tree" || exit 1
+if ! (cd "$tree" && python tools/quality_baseline.py); then
+  echo "Push blocked: the quality ratchet found new findings in HEAD (see above). Fix them, or install requirements-dev.txt if a tool is missing." >&2
   exit 1
 fi
