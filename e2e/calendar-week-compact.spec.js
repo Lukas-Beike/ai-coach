@@ -60,7 +60,8 @@ test("@responsive compact calendar week collapses past days, groups repeats and 
   for (const row of await page.locator(".planned-entry:not([open]) > summary").all()) {
     if (!(await row.isVisible())) continue;
     // A plain row stays compact, profile included; a conflict adds one component with its 44 px action.
-    const limit = (await row.locator(".planned-conflict").count()) ? 240 : 130;
+    // The 48 px workout profile is 32 px taller than the 16 px one the conflict limit was set with.
+    const limit = (await row.locator(".planned-conflict").count()) ? 200 + 32 : 130;
     expect((await row.boundingBox()).height).toBeLessThan(limit);
   }
   // Conflicts: one component with one action, no marker or conflict pills, calendar text not link-coloured.

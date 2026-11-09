@@ -955,7 +955,7 @@ h2 {
 .planned-session-header { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 0 10px; color: var(--ink); background: var(--surface-raised); }
 .planned-session-icon { display: grid; width: 30px; height: 30px; grid-row: 1 / 3; place-items: center; border-radius: 8px; color: var(--session-on-color); background: var(--session-color); font-size: .9rem; line-height: 1; }
 .planned-session-title { min-width: 0; color: var(--ink); font-size: .88rem; line-height: 1.35; font-weight: 650; overflow-wrap: break-word; hyphens: auto; }
-.planned-session-line { display: flex; flex-wrap: wrap; grid-column: 2; align-items: center; gap: 2px 6px; color: var(--muted); font-size: .72rem; line-height: 1.4; }
+.planned-session-line { grid-column: 2; color: var(--muted); font-size: .72rem; line-height: 1.4; }
 .planned-session-value { display: grid; grid-column: 3; grid-row: 1 / 3; justify-items: end; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
 .planned-session-value strong { color: var(--ink); font-size: .85rem; font-weight: 650; }
 .planned-session-metrics { color: var(--muted); font-size: .75rem; }
@@ -985,8 +985,8 @@ h2 {
 .planned-focus-field { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; }
 .planned-focus-field select { min-height: 36px; padding: 4px 8px; }
 .planned-focus-status { color: var(--muted); font-size: .72rem; }
-.planned-session-line .planned-sync-button { position: relative; min-height: 32px; padding: 2px 12px; border-radius: 10px; font-size: .72rem; line-height: 1.2; }
-.planned-session-line .planned-sync-button::before { content: ""; position: absolute; inset: -7px -4px; }
+.planned-session-line .planned-sync-button { position: relative; display: inline-flex; margin-left: 6px; min-height: 32px; padding: 2px 12px; border-radius: 10px; font-size: .72rem; line-height: 1.2; vertical-align: middle; }
+.planned-session-line .planned-sync-button::before { content: ""; position: absolute; inset: -7px 0; }
 .planned-description { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
 .planned-week-totals { margin: 0; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--subtle); font-size: .7rem; line-height: 1.5; }
 .planned-week-metrics[data-columns="1"] { grid-template-columns: auto minmax(0, 1fr); }
@@ -995,7 +995,7 @@ h2 {
 .planned-entry:is(.is-planned, .is-today, .is-missed, .is-skipped) { border: 1.5px dashed var(--accent-bright); background: var(--transparent); }
 .planned-entry:is(.is-planned, .is-today, .is-missed, .is-skipped) .planned-session-header { background: var(--transparent); }
 .planned-entry .calendar-workout-profile { height: 48px; margin: 2px 0 0; }
-.planned-session-line .planned-badges { display: inline-flex; vertical-align: middle; }
+.planned-session-line .planned-badges { display: inline-flex; margin-left: 6px; vertical-align: middle; }
 .planned-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border: 1px solid var(--warning-border); border-radius: 8px; color: var(--ink); background: var(--warning-surface-soft); font-size: .75rem; font-weight: 650; }
 .planned-conflict-button { min-height: 44px; margin-left: auto; }
 .planned-garmin-exercise { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }

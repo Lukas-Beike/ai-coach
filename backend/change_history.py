@@ -299,7 +299,6 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
             "training_preferences_mobility",
         ),
         ("training_model",),
-        ("weekly_plan",),
         (
             "preferred_source_thresholds",
             "preferred_source_body",
@@ -334,10 +333,8 @@ def accepted_audit_hashes(entity_type: str, value: dict[str, Any] | None) -> set
         if any(field in legacy for field in added):
             legacy = {key: item for key, item in legacy.items() if key not in added}
             generations.append(legacy)
-    retired = _FIELDS_RETIRED_FROM_AUDIT.get(entity_type, {})
-    for generation in [*generations]:
-        if retired:
-            generations.append({**generation, **retired})
+    if retired := _FIELDS_RETIRED_FROM_AUDIT.get(entity_type):
+        generations.extend({**generation, **retired} for generation in [*generations])
     for generation in generations:
         accepted.add(audit_hash(generation))
     return accepted

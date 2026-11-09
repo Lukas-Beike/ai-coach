@@ -2130,7 +2130,7 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     # The heart-rate branch's TRIMP constants follow the profile sex (M6 v3).
     athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
     # The one-time focus backfill of future units (#1849) runs after all stages.
-    extra_followups=(SESSION_FOCUS_BACKFILL, PROFILE_WEEKLY_PLAN_REMOVAL),
+    extra_followups=(PROFILE_WEEKLY_PLAN_REMOVAL, SESSION_FOCUS_BACKFILL),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(

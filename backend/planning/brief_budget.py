@@ -40,6 +40,7 @@ def _trim_dict(target: Any, key: str) -> bool:
 def _steps(brief: dict[str, Any]) -> list[tuple[str, Any]]:
     """(omitted label, trim callable) in trimming order."""
     return [
+        ("all_day_events", lambda: _trim_dict(brief, "all_day_events")),
         ("calendar_busy_minutes", lambda: _trim_dict(brief, "calendar_busy_minutes")),
         (
             "planned_sessions",

@@ -201,7 +201,7 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 
 #### Scenario: All-day events
 - **WHEN** a hard or long planned unit lies on a day with an all-day calendar event
-- **THEN** a soft `all_day_event` note is returned (calendar markers still apply); all-day events are never subtracted from any time.
+- **THEN** a soft `all_day_event` note is returned (calendar markers still apply); the `planning_brief` lists all-day events per date with name and training-impact flags (`all_day_events`), and they are never subtracted from any time.
 
 #### Scenario: Load notes
 - **WHEN** a planned run or ride has a computed load (workout steps against the thresholds in the Coach precedence: locally confirmed zone configurations first, then the source-policy provider winners, Garmin values at most 180 days and Wahoo values at most 90 days old; Intervals.icu is never a threshold source; local values do not age)
