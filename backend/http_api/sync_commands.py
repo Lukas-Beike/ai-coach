@@ -165,11 +165,13 @@ class SyncCommandEndpoint:
         period_defaults: Mapping[str, int],
         all_sync_days: int,
         *,
+        provider_configured: Callable[[str], bool],
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
     ) -> None:
         self._queue = queue
         self._state = state
         self._full_resync = full_resync
+        self._provider_configured = provider_configured
         self._operation_id_factory = operation_id_factory
         self._period_defaults = period_defaults
         self._all_sync_days = all_sync_days
@@ -241,7 +243,7 @@ class SyncCommandEndpoint:
         if message is None:
             return
         normalized = provider.strip().casefold()
-        if not self._full_resync.provider_configured(normalized):
+        if not self._provider_configured(normalized):
             raise AppError(409, message, reason="not_configured")
 
     def _manual_refresh(

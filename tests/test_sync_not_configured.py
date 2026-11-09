@@ -156,6 +156,9 @@ class NotConfiguredSyncRouteTests(unittest.TestCase):
             lambda: "operation-1",
             {"intervals": 90, "garmin": 30},
             -1,
+            provider_configured=lambda provider: (
+                provider == "intervals" and bool(self.config.intervals_api_key)
+            ),
         )
         self.route = SyncCommandPostRoute(lambda: self.endpoint)
 
