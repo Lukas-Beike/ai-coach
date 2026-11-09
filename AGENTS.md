@@ -118,7 +118,7 @@ Only non-discoverable facts and hard constraints belong in this file. Add a rule
 only for a failure that actually happened; prefer a hook, deny rule, or test
 for anything without exceptions. `.claude/settings.json` blocks agent access to
 `.env`, `data/`, and the Garmin token store, and `.githooks/pre-push` scans
-outgoing commits for secrets; never bypass either.
+outgoing commits for secrets and runs the quality ratchet; never bypass either.
 
 - Work in a dedicated task worktree; leave the primary checkout unchanged. Check
   the branch and existing diff before editing and preserve prior work; keep

@@ -84,7 +84,8 @@ confirmation. List every unfixed finding with its reason in the PR body.
 ## 3. Publish
 
 - Push with `git -c core.hooksPath=.githooks push`, using `--force-with-lease`
-  after a rewrite. The pre-push hook scans outgoing commits for secrets; never
+  after a rewrite. The pre-push hook scans outgoing commits for secrets and runs the
+  quality ratchet; never
   bypass it with `--no-verify`.
 - Create one non-draft PR against `develop` (or reuse the open one for this
   branch) with an English Conventional Commit title and a body covering the

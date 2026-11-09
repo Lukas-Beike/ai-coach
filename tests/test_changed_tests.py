@@ -115,10 +115,10 @@ class SelectModulesTests(unittest.TestCase):
 
     def test_full_suite_paths_and_unparsable_sources_select_everything(self):
         modules, reason = changed_tests.select_modules(
-            ["backend/db/schema.py"], self.root
+            ["backend/db/migrations.py"], self.root
         )
         self.assertIsNone(modules)
-        self.assertIn("backend/db/", reason)
+        self.assertIn("backend/db/migrations.py", reason)
         (self.root / "tests/test_broken.py").write_text("def (:\n", encoding="utf-8")
         self.assertIsNone(self.select("backend/other.py"))
 
@@ -129,6 +129,24 @@ class SelectModulesTests(unittest.TestCase):
                 self.assertTrue(
                     (root / prefix).exists() or list(root.glob(prefix + "*")), prefix
                 )
+
+    def test_a_selection_covering_most_modules_falls_back_with_a_reason(self):
+        with mock.patch.object(changed_tests, "FULL_SUITE_SHARE", 0.01):
+            modules, reason = changed_tests.select_modules(
+                ["backend/other.py"], self.root
+            )
+        self.assertIsNone(modules)
+        self.assertRegex(reason, r"^\d+ of \d+ test modules affected; full suite$")
+
+    def test_canonical_and_store_changes_select_focused_modules(self):
+        for path in (
+            "backend/db/activity_detail_store.py",
+            "backend/canonical/activity_detail.py",
+        ):
+            with self.subTest(path=path):
+                modules, _reason = changed_tests.select_modules([path])
+                self.assertIsNotNone(modules)
+                self.assertIn("test_activity_detail_store", modules)
 
     def test_repository_selection_is_narrower_than_the_suite(self):
         modules, _reason = changed_tests.select_modules(

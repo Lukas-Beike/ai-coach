@@ -1,2 +1,10 @@
 #!/bin/sh
-exec python "$(git rev-parse --show-toplevel)/scripts/check_push_secrets.py"
+# The secret scan runs first and reads the pushed refs from stdin; a failure
+# stops the push before anything else runs.
+root="$(git rev-parse --show-toplevel)"
+python "$root/scripts/check_push_secrets.py" || exit $?
+# CI's repository-wide quality ratchet (mypy, Ruff, complexity) on this tree.
+if ! python "$root/tools/quality_baseline.py"; then
+  echo "Push blocked: the quality ratchet found new findings (see above). Fix them, or install requirements-dev.txt if a tool is missing." >&2
+  exit 1
+fi
