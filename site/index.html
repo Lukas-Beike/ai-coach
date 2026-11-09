@@ -77,7 +77,7 @@
       <div class="wrap">
         <h2>The app</h2>
         <p class="section-lede">An installable, offline-capable web app, built for the phone first. Five areas: Coach, Calendar, Analysis, Nutrition, More.</p>
-        <ul class="shots" role="list" tabindex="0" aria-label="App screenshots, scroll sideways">
+        <ul class="shots">
           <li><figure class="shot"><img src="assets/screens/coach.png" width="780" height="1400" loading="lazy" alt="Coach chat with a question about the training week and the coach's answer."><figcaption><b>Coach</b>Ask, plan and change the week in one conversation.</figcaption></figure></li>
           <li><figure class="shot"><img src="assets/screens/calendar.png" width="780" height="1400" loading="lazy" alt="Calendar showing one week with completed and planned sessions and their workout profiles."><figcaption><b>Calendar</b>Planned and completed sessions, week by week.</figcaption></figure></li>
           <li><figure class="shot"><img src="assets/screens/load.png" width="780" height="1404" loading="lazy" alt="Analysis, load tab: training focus split into easy aerobic, high aerobic and anaerobic, and a weekly load chart."><figcaption><b>Load</b>Training focus and weekly load.</figcaption></figure></li>
@@ -128,7 +128,7 @@
             <a class="button button-quiet" href="https://github.com/Lukas-Beike/pacecraft/blob/develop/docs/setup.md">Setup guide</a>
           </div>
         </div>
-        <pre tabindex="0" role="region" aria-label="Docker run command"><code>mkdir -p data &amp;&amp; chown -R 100:101 data
+        <pre><code>mkdir -p data &amp;&amp; chown -R 100:101 data
 docker run -d --name pacecraft \
   --restart unless-stopped \
   --read-only --cap-drop=ALL \

@@ -70,10 +70,8 @@ h3{margin:0 0 8px;font-size:1.12rem;letter-spacing:-.01em}
 .feature .tag{display:block;margin-bottom:12px;font:600 .75rem/1 var(--mono);letter-spacing:.08em;color:var(--link)}
 
 .screens{background:var(--surface);border-block:1px solid var(--line)}
-.shots{display:flex;align-items:flex-start;gap:20px;overflow-x:auto;padding:6px 20px 22px;margin:0 -20px;scroll-snap-type:x proximity;list-style:none}
-.shots:focus-visible{outline-offset:-3px}
-.shots>li{flex:0 0 min(250px,70vw);scroll-snap-align:start}
-.shot{margin:0}
+.shots{display:grid;grid-template-columns:repeat(3,1fr);gap:36px 24px;align-items:start;padding:0;margin:0;list-style:none}
+.shot{margin:0 auto;max-width:270px}
 .shot img{width:100%;border-radius:24px;border:1px solid var(--line);box-shadow:var(--shadow)}
 .shot figcaption{margin-top:14px;font-size:.92rem;color:var(--muted)}
 .shot figcaption b{display:block;color:var(--ink);font-size:1rem}
@@ -97,7 +95,6 @@ td:last-child{color:var(--muted)}
 
 .host{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px;align-items:start}
 pre{margin:0;padding:20px;border-radius:14px;background:var(--code);color:#e8f3ec;overflow-x:auto;font:.88rem/1.65 var(--mono);border:1px solid var(--line)}
-pre:focus-visible{outline-offset:2px}
 .host ul{margin:0 0 24px;padding-left:1.2em;color:var(--muted)}
 .host li{margin-bottom:8px}
 .host li b{color:var(--ink)}
@@ -119,13 +116,14 @@ footer p{margin:0;max-width:52em}
   section{padding:64px 0}
 }
 @media (max-width:620px){
+  .shots{grid-template-columns:1fr 1fr;gap:22px 14px}
+  pre{white-space:pre-wrap;overflow-wrap:anywhere}
   .wrap{width:min(var(--max),100% - 32px)}
   nav li:not(:last-child){display:none}
   .brand small{display:none}
   .phone{width:48%}
   .phone:nth-child(2){margin-top:28px}
-  .shots{padding-inline:16px;margin-inline:-16px}
-  .facts ul{grid-template-columns:1fr}
+    .facts ul{grid-template-columns:1fr}
   .facts li{border-left:0;padding-left:0;border-top:1px solid var(--line)}
   .facts li:first-child{border-top:0}
   table,tbody,tr,th,td{display:block}
@@ -133,4 +131,4 @@ footer p{margin:0;max-width:52em}
   th,td{border:0;padding:0}
   th{margin-bottom:4px}
 }
-@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important;animation:none!important}}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
