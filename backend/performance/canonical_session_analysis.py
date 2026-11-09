@@ -29,8 +29,10 @@ from backend.canonical.vocabulary import (
     StreamChannel,
     StreamResolution,
 )
+from backend.performance import form_drift as form_drift_module
 from backend.performance import power_profile as power_profile_module
 from backend.performance.analysis_input import analysis_input
+from backend.performance.form_drift import form_drift
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import (
     HEART_RATE_HISTOGRAM_VERSION,
@@ -45,8 +47,9 @@ ANALYSIS_VERSION: Final = 3
 # Bump when the computation below changes, so the stage recomputes every row.
 # v3: grade-adjusted Pa:HR of outdoor runs (#1770).
 # v4: the heart rate and power source, and the optical heart rate warning (#1869).
+# v5: the running form drift of long runs (#1870).
 # The stored heart-rate histogram has its own version in the fingerprint.
-METHOD_VERSION: Final = 4
+METHOD_VERSION: Final = 5
 
 
 def analysis_records(records: Iterable[ActivityRecord]) -> tuple[ActivityRecord, ...]:
@@ -138,6 +141,16 @@ def session_analysis(
                 merged.streams, StreamChannel.POWER_W, StreamChannel.MOVING
             ),
         },
+        "form_drift": form_drift(
+            activity,
+            source_label=adapted.label_for(
+                "velocity_smooth",
+                "moving",
+                "ground_contact_time",
+                "vertical_oscillation",
+                "step_length",
+            ),
+        ),
         "running_profile": {
             **running_profile(
                 activity,
@@ -217,6 +230,7 @@ def analysis_fingerprint(
                 ANALYSIS_VERSION,
                 METHOD_VERSION,
                 power_profile_module.METHOD_VERSION,
+                form_drift_module.METHOD_VERSION,
                 stream_zones.ZONE_TIMES_VERSION,
                 HEART_RATE_HISTOGRAM_VERSION,
             ],

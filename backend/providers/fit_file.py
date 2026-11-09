@@ -80,6 +80,12 @@ _FIT_FIELD_SCALES: Final[Mapping[tuple[int, int], tuple[str, int, int]]] = {
     (20, 7): ("power_w", 1, 0),
     (20, 13): ("temperature_c", 1, 0),
     (20, 53): ("fractional_cadence_rpm", 128, 0),
+    # running dynamics (FIT SDK profile; not checked against a recorded file)
+    (20, 39): ("vertical_oscillation_mm", 10, 0),
+    (20, 41): ("stance_time_ms", 10, 0),
+    (20, 83): ("vertical_ratio_pct", 100, 0),
+    (20, 84): ("stance_time_balance_pct", 100, 0),
+    (20, 85): ("step_length_mm", 10, 0),
     (20, 73): ("enhanced_speed_m_s", 1000, 0),
     (20, 78): ("enhanced_altitude_m", 5, -500),
     # lap message

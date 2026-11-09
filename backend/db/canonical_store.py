@@ -116,6 +116,11 @@ ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "anaerobic_training_effect",
     "water_estimated_ml",
     "energy_kcal",
+    "ground_contact_time_ms",
+    "ground_contact_balance_pct",
+    "vertical_oscillation_cm",
+    "vertical_ratio_pct",
+    "step_length_m",
 )
 ACTIVITY_ZONE_DETAIL_FIELDS: Final = (
     "power_zone_times_s",

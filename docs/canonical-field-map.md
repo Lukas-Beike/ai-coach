@@ -532,6 +532,11 @@ Shared rule `activity_duration_s(sport, moving, timer, elapsed)`: `active = movi
 | `anaerobic_training_effect` | 0.0..5.0 | yes | - | |
 | `water_estimated_ml` | ml, 0..50,000 | yes | - | |
 | `energy_kcal` | kcal, 0..20,000 | yes | yes | Zero becomes `None` in G and W. |
+| `ground_contact_time_ms` | ms, 0..2,000 | yes | - | Running dynamics (#1870), only with a supporting sensor; zero is not measured and becomes `None`. |
+| `ground_contact_balance_pct` | percent of the contact time on the left foot, 0..100 | yes | - | Same. |
+| `vertical_oscillation_cm` | cm, 0..30 | yes | - | Same. |
+| `vertical_ratio_pct` | percent, 0..30 | yes | - | Same. |
+| `step_length_m` | m, 0..4 | yes | - | Garmin sends centimetres as `avgStrideLength`; divided by 100. Same zero rule. |
 | `power_zone_times_s` | tuple of (`Z<n>`, s), max 20 | yes | - | |
 | `hr_zone_times_s` | tuple of (`Z<n>`, s), max 20 | yes | - | |
 | `pace_zone_times_s` | tuple of (`Z<n>`, s), max 20 | - | - | |
@@ -554,7 +559,7 @@ Fields set by neither the Garmin nor the Wahoo mapper (only the removed Interval
 ### `garmin_activity_mapping.py`
 
 Status: Live. Called for every Garmin activity sync through `garmin_ingest_plan` (`canonical_plans.py`, via `_garmin_activity_mapper`), for replay of stored rows through `reprojection_plan`, and by `project_garmin_snapshot`.
-Mapper version: **20**
+Mapper version: **21**
 Inputs: Garmin activity list rows (`get_activities_by_date`, SDK and Personal API share the key names), merged by `merge_training_load_rows` with the dedicated per-activity rows `training_load_activities` and `activity_ratings` (single-activity `summaryDTO`). Entry point `map_garmin_activities(rows, zone, retrieved_at)`.
 Evidence: observed in `garmin_activity_list_entry_run_2026-11-03` (SDK) and `garmin_personal_activity_list_2026-11-03` (Personal API) for all keys not named under "documented" below; `directWorkoutRpe`, `directWorkoutFeel`, `minHR` observed under `summaryDTO` in `garmin_activity_detail_run_2026-11-03` and `garmin_personal_activity_detail_run_2026-11-03`. Documented only (code, no payload): `movingTime`, `averagePower`, `maxHeartRate`, `trainingEffect`, `averageBikingCadenceInRevPerMinute` (the sample is a run), `id` (alias of `activityId` in `merge_training_load_rows`), and zones above 5 (`hrTimeInZone_6`..`_20`, `powerTimeInZone_6`..`_20`). All sample values observed are from a run; ride and strength shapes are unverified against a payload.
 
@@ -598,6 +603,11 @@ General rules: first alias that carries a value wins (`_present`: not `None`, no
 | `min_temp_c`, `max_temp_c` | `minTemperature`, `maxTemperature` | deg C, -60..70 | Same pair rule. |
 | `water_estimated_ml` | `waterEstimated` | ml, Garmin's sweat-loss estimate | |
 | `lap_count` | `lapCount` | count | |
+| `ground_contact_time_ms` | `avgGroundContactTime` | ms (observed 264.5) | Running dynamics; `_running_dynamics`. Garmin writes 0 for a value it did not measure (observed: `avgVerticalOscillation` 0 beside a vertical ratio of 8.04), so 0 is no value and no issue. Absence is normal. |
+| `ground_contact_balance_pct` | `avgGroundContactBalance` -> `avgGroundContactBalanceLeft` | percent on the left foot, 0..100 (observed 49.63) | Top-level key observed; the `Left` spelling is the lap and `summaryDTO` name. |
+| `vertical_oscillation_cm` | `avgVerticalOscillation` | cm, 0..30 | |
+| `vertical_ratio_pct` | `avgVerticalRatio` | percent, 0..30 (observed 8.04) | |
+| `step_length_m` | `avgStrideLength` | centimetres divided by 100 -> m, 0..4 (observed 116.36 cm; the laps carry the same value as `avgStepLength` 1.1636 m) | Garmin calls the distance of one step "stride length". |
 | `energy_kcal` | `calories` | kcal, whole-session estimate including the resting share; `calories or None` | Zero means not estimated. |
 | `avg_cadence` | `averageBikingCadenceInRevPerMinute` else `averageRunningCadenceInStepsPerMinute` | bike: rpm as sent (used when truthy); run: steps/min divided by 2 (one leg) | `_cadence`. A bike value of 0 with no run key is no cadence (`None`), as for the other providers. Run key observed; bike key documented. |
 | `hr_zone_times_s`, `power_zone_times_s` | `hrTimeInZone_1`..`_20`, `powerTimeInZone_1`..`_20` | s per zone, id `Z<n>` (`n` = key number); Garmin's own zone boundaries | `_zone_times`. Absent zones are skipped; one invalid zone drops the whole distribution with one issue. `_1`..`_5` observed. |
@@ -660,7 +670,7 @@ Keys outside the table use `classify_sport_text` over the identity text; its ord
 
 Rows are matched on `activityId` (else `id`). Rows of one id combine in order, `activity_ratings` first then `training_load_activities` (`DEDICATED_ACTIVITY_SECTIONS`), a later value replacing an earlier one including an explicit null. For each alias group (`_TRAINING_LOAD_FIELDS`) in which the combined row carries a non-null value, the activity row's own aliases of that group are dropped and replaced by the carried ones; a group the combined row leaves null keeps the activity row's own value. In the ingest, stored dedicated rows come first and the payload's own rows win (`_garmin_activity_mapper`).
 
-Not mapped (present in the list payloads, ignored): `activityUUID`, the training-effect message texts (`aerobicTrainingEffectMessage`, `anaerobicTrainingEffectMessage`), `avgElevation`, `avgStrideLength`, `avgVerticalOscillation`, `avgVerticalRatio`, `avgGroundContactTime`, `avgGroundContactBalance`, `avgRespirationRate`, `minRespirationRate`, `maxRespirationRate`, `maxDoubleCadence`, `maxRunningCadenceInStepsPerMinute`, `maxVerticalSpeed`, `bmrCalories`, `autoCalcCalories`, `differenceBodyBattery`, `moderateIntensityMinutes`, `vigorousIntensityMinutes`, `beginTimestamp`, `endTimeGMT`, `timeZoneId`, `deviceId`, `sportTypeId`, `workoutId`, `splitSummaries`, `fastestSplit_*`, `minActivityLapDuration`, locations and coordinates, owner and privacy fields, flags (`favorite`, `pr`, `parent`, `hasSplits` ...). Reason: no canonical `ActivityRecord` field for them; detail-level data (splits, laps, streams) comes from the activity-detail mappers. `isManualActivity` duplicates `manualActivity`, which is the key read. Canonical fields this module never sets: `energy_kj`, `intensity`, `weighted_avg_speed_mps`, `pace_mps`, `ftp_w`, `eftp_w`, `avg_temp_c`, `pace_zone_times_s`, `planned_event_id`, `device_name`, `external_ref`.
+Not mapped (present in the list payloads, ignored): `activityUUID`, the training-effect message texts (`aerobicTrainingEffectMessage`, `anaerobicTrainingEffectMessage`), `avgElevation`, `avgRespirationRate`, `minRespirationRate`, `maxRespirationRate`, `maxDoubleCadence`, `maxRunningCadenceInStepsPerMinute`, `maxVerticalSpeed`, `bmrCalories`, `autoCalcCalories`, `differenceBodyBattery`, `moderateIntensityMinutes`, `vigorousIntensityMinutes`, `beginTimestamp`, `endTimeGMT`, `timeZoneId`, `deviceId`, `sportTypeId`, `workoutId`, `splitSummaries`, `fastestSplit_*`, `minActivityLapDuration`, locations and coordinates, owner and privacy fields, flags (`favorite`, `pr`, `parent`, `hasSplits` ...). Reason: no canonical `ActivityRecord` field for them; detail-level data (splits, laps, streams) comes from the activity-detail mappers. `isManualActivity` duplicates `manualActivity`, which is the key read. Canonical fields this module never sets: `energy_kj`, `intensity`, `weighted_avg_speed_mps`, `pace_mps`, `ftp_w`, `eftp_w`, `avg_temp_c`, `pace_zone_times_s`, `planned_event_id`, `device_name`, `external_ref`.
 
 ### `wahoo_activity_mapping.py`
 
@@ -847,6 +857,11 @@ Every key of the `ActivitySummary` TypedDict (`total=False`; only values some re
 | `max_temp_c` | `max_temp_c` | deg C |
 | `energy_kj` | `energy_kj` | kJ |
 | `energy_kcal` | `energy_kcal` | kcal |
+| `ground_contact_time_ms` | `ground_contact_time_ms` | ms |
+| `ground_contact_balance_pct` | `ground_contact_balance_pct` | percent on the left foot |
+| `vertical_oscillation_cm` | `vertical_oscillation_cm` | cm |
+| `vertical_ratio_pct` | `vertical_ratio_pct` | percent |
+| `step_length_m` | `step_length_m` | m |
 | `efficiency_factor` | stored derived observation `efficiency_factor` (`with_session_metrics`, method `local-session-metrics`) | ratio |
 | `efficiency_factor_unit` | `derivation.unit` of that observation | text |
 | `variability_index` | stored derived observation `variability_index` | ratio |
@@ -887,7 +902,7 @@ Keys the readers add that are not declared in the TypedDict: `zone_models` (zone
 
 ### `activity_detail.v1` metrics
 
-`activity_detail_contract` (`detail_contract.py`) uses the same orders and reports every candidate: each metric has `value`, `unit`, `source` and the other records' values as `alternatives`. Measured (`_MEASURED_METRICS`, measured order): `duration_s` s, `moving_duration_s` s, `elapsed_duration_s` s, `distance_m` m, `elevation_gain_m` m, `elevation_loss_m` m, `elevation_high_m` m, `elevation_low_m` m, `avg_hr` bpm, `max_hr` bpm, `min_hr` bpm, `avg_power` W, `max_power_w` W, `avg_cadence` rpm, `max_speed_mps` m/s, `min_temp_c` deg C, `max_temp_c` deg C, `steps` count, `lap_count` count, `energy_kj` kJ, `energy_kcal` kcal. Derived (`_DERIVED_METRICS`, derived order): `normalized_power` W, `load` (with `model`), `aerobic_training_effect`, `anaerobic_training_effect`, `water_estimated_ml` ml. Ratings `rpe`, `feel` (rating order, kind `athlete_entered`, with `scale`, `rating_label`, `normalized_0_1` from `ACTIVITY_RATING_SCALES`). `avg_hr` and `avg_power` fall back to the merged stream mean (kind `derived`) when no record has them (`_GAP_FILL`). Summary scalars fill metrics no record provides, and are kept as alternatives for `min_temp_c`, `max_temp_c`, `elevation_loss_m`.
+`activity_detail_contract` (`detail_contract.py`) uses the same orders and reports every candidate: each metric has `value`, `unit`, `source` and the other records' values as `alternatives`. Measured (`_MEASURED_METRICS`, measured order): `duration_s` s, `moving_duration_s` s, `elapsed_duration_s` s, `distance_m` m, `elevation_gain_m` m, `elevation_loss_m` m, `elevation_high_m` m, `elevation_low_m` m, `avg_hr` bpm, `max_hr` bpm, `min_hr` bpm, `avg_power` W, `max_power_w` W, `avg_cadence` rpm, `max_speed_mps` m/s, `min_temp_c` deg C, `max_temp_c` deg C, `steps` count, `lap_count` count, `energy_kj` kJ, `energy_kcal` kcal, `ground_contact_time_ms` ms, `ground_contact_balance_pct` %, `vertical_oscillation_cm` cm, `vertical_ratio_pct` %, `step_length_m` m. Derived (`_DERIVED_METRICS`, derived order): `normalized_power` W, `load` (with `model`), `aerobic_training_effect`, `anaerobic_training_effect`, `water_estimated_ml` ml. Ratings `rpe`, `feel` (rating order, kind `athlete_entered`, with `scale`, `rating_label`, `normalized_0_1` from `ACTIVITY_RATING_SCALES`). `avg_hr` and `avg_power` fall back to the merged stream mean (kind `derived`) when no record has them (`_GAP_FILL`). Summary scalars fill metrics no record provides, and are kept as alternatives for `min_temp_c`, `max_temp_c`, `elevation_loss_m`.
 
 ## Canonical records for activity detail
 
@@ -937,6 +952,13 @@ Channel bounds (`CHANNEL_BOUNDS`) and producers:
 | `moving` | 1 moving, 0 paused | 0 to 1 | no | no |
 | `latitude_deg` | WGS84 degrees, private | -90 to 90 | yes | yes |
 | `longitude_deg` | WGS84 degrees, private | -180 to 180 | yes | yes |
+| `ground_contact_time_ms` | ms | 0 to 2,000 | no | yes |
+| `ground_contact_balance_pct` | percent of the contact time on the left foot | 0 to 100 | no | yes |
+| `vertical_oscillation_cm` | cm | 0 to 30 | no | yes |
+| `vertical_ratio_pct` | percent | 0 to 30 | no | yes |
+| `step_length_m` | m | 0 to 4 | no | yes |
+
+The five running dynamics channels (`RUNNING_DYNAMICS_CHANNELS`) exist only with a supporting sensor (chest strap, running pod or a watch that measures them); absence is normal. They are stored and merged like every channel, but the `activity_detail.v1` document leaves their series out, so the Coach and the API receive the summary values and the form drift result, never the series (the coverage counts stay). The form drift analysis (`performance/form_drift.py`) reads them.
 
 The two position channels are stored, backed up and exported like every channel, but `POSITION_CHANNELS` keeps them out of `merge_details`, the `activity_detail.v1` contract, its coverage and every Coach read: raw positions never leave storage, and the athlete can switch their storage off (`gps_tracks_enabled`, privacy section under **Mehr**).
 The property `kind` is always `streams` (`ActivityDetailKind.STREAMS`), not a stored field.
@@ -1067,7 +1089,7 @@ The property `kind` is always `strength_sets`.
 
 ### `StreamChannel`
 
-Members `time_s`, `distance_m`, `altitude_m`, `grade_pct`, `speed_mps`, `power_w`, `heart_rate_bpm`, `cadence_rpm`, `temperature_c`, `moving`, `latitude_deg`, `longitude_deg`; units and producers in the `ActivityStreamSet` channel table.
+Members `time_s`, `distance_m`, `altitude_m`, `grade_pct`, `speed_mps`, `power_w`, `heart_rate_bpm`, `cadence_rpm`, `temperature_c`, `moving`, `latitude_deg`, `longitude_deg`, `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m`; units and producers in the `ActivityStreamSet` channel table.
 
 ### `DfaQuality`
 
@@ -1244,6 +1266,7 @@ Streams from `details` (`_stream_set`, `_metric_columns`). Columns are read by `
 | `cadence_rpm` | `directBikeCadence` → `directRunCadence` (`_cadence_points`) | rpm; none | The bike column wins; the run column is used only when the bike column has no usable point. `directRunCadence` already counts one leg, kept as reported. |
 | `grade_pct` | none | | Not produced. |
 | `moving` | none | | Not produced; averages and zone counting then use every point. |
+| `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m` | none | | Not produced from the chart: its running dynamics metric keys are unverified. Only the FIT file (mapper below) carries them; its sets ride on this mapper's version 8. |
 | `resolution` | | `downsampled` | Fixed. |
 | `origin` | | `fetch` | Fixed. |
 
@@ -1328,6 +1351,11 @@ Streams, record message 20 (`_stream_set`, `_kept_records`, `_RECORD_CHANNEL_FIE
 | `latitude_deg` | record `position_lat` (0) | semicircles x 180 / 2^31, degrees | Private channel. Invalid sentinel `0x7FFFFFFF` and values outside -90..90 are gaps. |
 | `longitude_deg` | record `position_long` (1) | semicircles x 180 / 2^31, degrees | Private channel. Gaps as for latitude. |
 | `cadence_rpm` | record `cadence` (4) + `fractional_cadence` (53) | 4 whole, 53 is /128; sum (`_cadence`) | If 53 is absent only 4 is used; if 4 is missing the point is a gap. Rpm of one leg for running, as the device reports it. |
+| `ground_contact_time_ms` | record `stance_time` (41) | /10 ms; 0 is a gap | Running dynamics (#1870); FIT SDK profile, not checked against a recorded file. |
+| `ground_contact_balance_pct` | record `stance_time_balance` (84) | /100 percent; 0 is a gap | Read as the share on the left foot (unverified; some sensors may report the right foot). |
+| `vertical_oscillation_cm` | record `vertical_oscillation` (39) | /10 mm, then /10 to cm; 0 is a gap | |
+| `vertical_ratio_pct` | record `vertical_ratio` (83) | /100 percent; 0 is a gap | |
+| `step_length_m` | record `step_length` (85) | /10 mm, then /1000 to m; 0 is a gap | |
 | `grade_pct` | none | | Not produced. |
 | `moving` | none | | Not produced. |
 | `resolution` | | `full` | Fixed. |
@@ -1460,6 +1488,11 @@ Fields the detail mapper reads (global message number, field number, scale regis
 | record (20) | 3 | heart_rate | 1 | bpm | `heart_rate_bpm` |
 | record (20) | 4 | cadence | 1 | rpm | `cadence_rpm` |
 | record (20) | 53 | fractional_cadence | /128 | rpm | added to `cadence_rpm` |
+| record (20) | 41 | stance_time | /10 | ms | `ground_contact_time_ms` |
+| record (20) | 84 | stance_time_balance | /100 | percent | `ground_contact_balance_pct` |
+| record (20) | 39 | vertical_oscillation | /10 | mm | `vertical_oscillation_cm` (/10) |
+| record (20) | 83 | vertical_ratio | /100 | percent | `vertical_ratio_pct` |
+| record (20) | 85 | step_length | /10 | mm | `step_length_m` (/1000) |
 | record (20) | 7 | power | 1 | W | `power_w` |
 | record (20) | 13 | temperature | 1 | degrees C | `temperature_c` |
 | record (20) | 0 | position_lat | x 180 / 2^31 | degrees | `latitude_deg` |

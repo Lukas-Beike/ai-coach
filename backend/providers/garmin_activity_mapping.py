@@ -56,6 +56,14 @@ the same moment.
   ``lapCount`` -> ``lap_count``.
 * ``calories`` (kcal, Garmin's whole-session estimate including the resting
   share) -> ``energy_kcal``; zero means not estimated and becomes None (card M8).
+* Running dynamics (#1870), when the device or a sensor measured them:
+  ``avgGroundContactTime`` (ms) -> ``ground_contact_time_ms``;
+  ``avgGroundContactBalance``, then ``avgGroundContactBalanceLeft`` (percent of
+  the contact time on the left foot) -> ``ground_contact_balance_pct``;
+  ``avgVerticalOscillation`` (cm) -> ``vertical_oscillation_cm``;
+  ``avgVerticalRatio`` (percent) -> ``vertical_ratio_pct``;
+  ``avgStrideLength`` (cm; the distance of one step) / 100 -> ``step_length_m``.
+  Garmin writes 0 for a value it did not measure, so 0 is no value and no issue.
 * ``averageBikingCadenceInRevPerMinute`` (rpm) -> ``avg_cadence``; else
   ``averageRunningCadenceInStepsPerMinute`` (steps/min) halved to one-leg rpm.
 * ``hrTimeInZone_<n>`` and ``powerTimeInZone_<n>`` (seconds, by Garmin's own
@@ -86,7 +94,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime, tzinfo
-from typing import Final
+from typing import Any, Final
 
 from backend.canonical.local_time import (
     parse_provider_datetime,
@@ -124,6 +132,11 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_POWER_W,
     MAX_ACTIVITY_SPEED_MPS,
     MAX_ACTIVITY_STEPS,
+    MAX_GROUND_CONTACT_TIME_MS,
+    MAX_PERCENT,
+    MAX_STEP_LENGTH_M,
+    MAX_VERTICAL_OSCILLATION_CM,
+    MAX_VERTICAL_RATIO_PCT,
     MIN_ACTIVITY_ALTITUDE_M,
     require_aware_datetime,
 )
@@ -168,7 +181,8 @@ from backend.providers.wahoo_activity_mapping import wahoo_device_type
 # recording relayed through Garmin Connect is not a Garmin recording, and a
 # relayed Wahoo ride that is not indoor or virtual carries the bike computer device type (#1686).
 # Version 20: a bike cadence of 0 without a run cadence is no cadence (#1826).
-MAPPER_VERSION: Final = 20
+# Version 21: maps the running dynamics averages (#1870).
+MAPPER_VERSION: Final = 21
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -215,6 +229,30 @@ _TRAINING_LOAD_FIELDS: Final = (
 _RPE_BOUNDS: Final = (10.0, 100.0)
 _FEEL_BOUNDS: Final = (0.0, 100.0)
 _TRAINING_EFFECT_BOUNDS: Final = (0.0, MAX_TRAINING_EFFECT)
+# Running dynamics: (record field, Garmin keys, upper bound in the provider's unit,
+# divisor to the canonical unit). Garmin reports the step length in centimetres.
+_DYNAMICS_FIELDS: Final[tuple[tuple[str, tuple[str, ...], float, float], ...]] = (
+    (
+        "ground_contact_time_ms",
+        ("avgGroundContactTime",),
+        MAX_GROUND_CONTACT_TIME_MS,
+        1,
+    ),
+    (
+        "ground_contact_balance_pct",
+        ("avgGroundContactBalance", "avgGroundContactBalanceLeft"),
+        MAX_PERCENT,
+        1,
+    ),
+    (
+        "vertical_oscillation_cm",
+        ("avgVerticalOscillation",),
+        MAX_VERTICAL_OSCILLATION_CM,
+        1,
+    ),
+    ("vertical_ratio_pct", ("avgVerticalRatio",), MAX_VERTICAL_RATIO_PCT, 1),
+    ("step_length_m", ("avgStrideLength",), MAX_STEP_LENGTH_M * 100, 100),
+)
 _ALTITUDE_BOUNDS: Final = (MIN_ACTIVITY_ALTITUDE_M, MAX_ACTIVITY_ALTITUDE_M)
 _BIKE_CADENCE_KEYS: Final = ("averageBikingCadenceInRevPerMinute",)
 _RUN_CADENCE_KEYS: Final = ("averageRunningCadenceInStepsPerMinute",)
@@ -456,6 +494,7 @@ def _map_row(
         max_temp_c=max_temp,
         water_estimated_ml=water,
         energy_kcal=calories or None,
+        **_running_dynamics(row, ref, issues),
         lap_count=lap_count,
         avg_cadence=cadence,
         hr_zone_times_s=hr_zones,
@@ -740,6 +779,17 @@ def _cadence(
         row, _RUN_CADENCE_KEYS, (0.0, 2 * MAX_ACTIVITY_CADENCE_RPM), ref, issues
     )
     return None if steps is None else steps / 2
+
+
+def _running_dynamics(
+    row: dict[str, object], ref: str | None, issues: list[MappingIssue]
+) -> dict[str, Any]:
+    """The running dynamics averages in canonical units; 0 means not measured."""
+    values: dict[str, Any] = {}
+    for field, keys, upper, divisor in _DYNAMICS_FIELDS:
+        number = _optional_number(row, keys, (0.0, upper), ref, issues)
+        values[field] = number / divisor if number else None
+    return values
 
 
 def _zone_times(

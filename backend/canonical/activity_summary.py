@@ -68,6 +68,12 @@ class ActivitySummary(TypedDict, total=False):
     max_temp_c: float
     energy_kj: float
     energy_kcal: float
+    # Running dynamics averages (#1870), only with a supporting sensor.
+    ground_contact_time_ms: float
+    ground_contact_balance_pct: float
+    vertical_oscillation_cm: float
+    vertical_ratio_pct: float
+    step_length_m: float
     # Local session metrics (card M8), stored as derived observations.
     efficiency_factor: float
     efficiency_factor_unit: str

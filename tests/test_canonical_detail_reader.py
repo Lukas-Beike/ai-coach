@@ -52,6 +52,7 @@ ANALYSIS_KEYS = {
     "execution",
     "aerobic",
     "power_profile",
+    "form_drift",
     "running_profile",
 }
 

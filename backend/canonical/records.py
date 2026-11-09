@@ -23,6 +23,11 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_POWER_W,
     MAX_ACTIVITY_SPEED_MPS,
     MAX_ACTIVITY_STEPS,
+    MAX_GROUND_CONTACT_TIME_MS,
+    MAX_PERCENT,
+    MAX_STEP_LENGTH_M,
+    MAX_VERTICAL_OSCILLATION_CM,
+    MAX_VERTICAL_RATIO_PCT,
     MIN_ACTIVITY_ALTITUDE_M,
     bounded_number,
     finite_number,
@@ -337,6 +342,11 @@ _SUMMARY_VALUE_BOUNDS: Final = (
     ("anaerobic_training_effect", 0.0, MAX_TRAINING_EFFECT),
     ("water_estimated_ml", 0.0, MAX_WATER_ESTIMATE_ML),
     ("energy_kcal", 0.0, MAX_ACTIVITY_ENERGY_KCAL),
+    ("ground_contact_time_ms", 0.0, MAX_GROUND_CONTACT_TIME_MS),
+    ("ground_contact_balance_pct", 0.0, MAX_PERCENT),
+    ("vertical_oscillation_cm", 0.0, MAX_VERTICAL_OSCILLATION_CM),
+    ("vertical_ratio_pct", 0.0, MAX_VERTICAL_RATIO_PCT),
+    ("step_length_m", 0.0, MAX_STEP_LENGTH_M),
 )
 _ZONE_FIELDS: Final = ("power_zone_times_s", "hr_zone_times_s", "pace_zone_times_s")
 
@@ -458,6 +468,14 @@ class ActivityRecord:
     water_estimated_ml: float | None = None
     # The device's energy-expenditure estimate of the session in kcal (card M8).
     energy_kcal: float | None = None
+    # Running dynamics averages (#1870), only with a supporting sensor: ground
+    # contact time in ms, the share of it on the left foot in percent, vertical
+    # oscillation in cm, vertical ratio in percent and step length in m.
+    ground_contact_time_ms: float | None = None
+    ground_contact_balance_pct: float | None = None
+    vertical_oscillation_cm: float | None = None
+    vertical_ratio_pct: float | None = None
+    step_length_m: float | None = None
     # Seconds per zone as (zone id, seconds) pairs, ids such as "Z1".
     power_zone_times_s: ZoneSeconds | None = None
     hr_zone_times_s: ZoneSeconds | None = None

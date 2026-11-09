@@ -581,6 +581,14 @@ class StreamChannel(StrEnum):
     # Private: see POSITION_CHANNELS.
     LATITUDE_DEG = "latitude_deg"
     LONGITUDE_DEG = "longitude_deg"
+    # Running dynamics (#1870): ground contact time, the share of it spent on the
+    # left foot, vertical oscillation, vertical ratio and step length. Present
+    # only with a supporting sensor; see RUNNING_DYNAMICS_CHANNELS.
+    GROUND_CONTACT_TIME_MS = "ground_contact_time_ms"
+    GROUND_CONTACT_BALANCE_PCT = "ground_contact_balance_pct"
+    VERTICAL_OSCILLATION_CM = "vertical_oscillation_cm"
+    VERTICAL_RATIO_PCT = "vertical_ratio_pct"
+    STEP_LENGTH_M = "step_length_m"
 
 
 # Raw GPS positions stay in storage, backup and export only. They are never
@@ -588,6 +596,20 @@ class StreamChannel(StrEnum):
 # them; weather and route features derive coarse values from the stored set.
 POSITION_CHANNELS: Final = frozenset(
     {StreamChannel.LATITUDE_DEG, StreamChannel.LONGITUDE_DEG}
+)
+
+
+# Running dynamics are read by the form drift analysis and stay out of the served
+# detail document, so the Coach receives the drift result and the summary values,
+# never the series.
+RUNNING_DYNAMICS_CHANNELS: Final = frozenset(
+    {
+        StreamChannel.GROUND_CONTACT_TIME_MS,
+        StreamChannel.GROUND_CONTACT_BALANCE_PCT,
+        StreamChannel.VERTICAL_OSCILLATION_CM,
+        StreamChannel.VERTICAL_RATIO_PCT,
+        StreamChannel.STEP_LENGTH_M,
+    }
 )
 
 

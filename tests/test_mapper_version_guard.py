@@ -60,7 +60,7 @@ NOT_REPLAYED: Final[dict[str, str]] = {
 PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     "fit_activity_detail_mapping": (
         (7, 8),
-        "478844833fb76464c26f4eb332c0b1759a02da34aaad4eae21c97120b5e5d1e1",
+        "eca8bad67f53708bc9beaf8e8894ee03f05a90a1137ee7a50c45dc2c48850078",
     ),
     "fit_rr_mapping": (
         (7, 8),
@@ -68,15 +68,15 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     ),
     "fit_sensor_mapping": (
         (7, 8),
-        "134b2316926293f83d911c1b3b6b88ba6d0a9d4ab900e97ec69b56c7788d19b1",
+        "2953aba79c668bb9ef9561fe5f80cea406b399d609301730fc8e79e95ef3626f",
     ),
     "garmin_activity_detail_mapping": (
         (8,),
         "345306bbc8cd8924db2404e236f830903933fdbf486e86d2f83a64b9bf71f1a3",
     ),
     "garmin_activity_mapping": (
-        (20,),
-        "c1b26578d189a3b8afe775e9055fb5e2b78639e63c4eb061efcb376372e869ea",
+        (21,),
+        "acb0b5d8f20a255978ada8ff9b3b22aa20ff94d4f7286273bfbf6a46837e7753",
     ),
     "garmin_gear_mapping": (
         (21,),
@@ -103,7 +103,7 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "77efab15de0cda5414ed02c0d5005a9fe6fb1a650ec103bdb40e01cef065cf0f",
     ),
     "wahoo_activity_mapping": (
-        (8, 20),
+        (8, 21),
         "9b74c3dca726d23d18e782b7dd8f351572a6a24c2230187db13a5cb5ba181312",
     ),
     "wahoo_threshold_mapping": (

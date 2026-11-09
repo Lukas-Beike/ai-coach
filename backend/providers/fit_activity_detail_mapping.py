@@ -14,6 +14,13 @@ rate (3), cadence (4, plus the fractional cadence 53 /128 when present), power (
 and temperature (13). The enhanced field is used per record when it holds a
 usable value; an invalid sentinel falls back to the base field.
 
+Running dynamics streams, present only with a supporting sensor and taken from the
+FIT SDK profile (not checked against a recorded file): stance_time (41, /10 ms) as
+ground contact time, stance_time_balance (84, /100 percent) as the share on the
+left foot, vertical_oscillation (39, /10 mm, shown in cm), vertical_ratio (83,
+/100 percent) and step_length (85, /10 mm, shown in m). A reading of 0 means not
+measured and is a gap.
+
 Device laps (``LapSource.DEVICE_LAPS``) use these lap fields: start_time (2),
 total_elapsed_time (7, /1000 s), total_timer_time (8, /1000 s, moving duration),
 total_distance (9, /100 m), average speed (enhanced 110, else base 13, /1000
@@ -92,7 +99,8 @@ from backend.providers.fit_sensor_mapping import sensor_profile
 # Version 6: the first threshold estimate (DFA-a1) of a chest-strap recording
 # that carries RR intervals (hrv messages); the intervals are not stored.
 # Version 7: Bluetooth LE sensor roles with the FIT SDK source type numbers.
-MAPPER_VERSION: Final = 7
+# Version 8: running dynamics channels from the record messages (#1870).
+MAPPER_VERSION: Final = 8
 
 # Same limit as the Garmin and Intervals mappers, so issues stay bounded.
 MAX_FIT_ACTIVITY_ID_LENGTH: Final = 200
@@ -164,6 +172,15 @@ _RECORD_CHANNEL_FIELDS: Final[tuple[tuple[StreamChannel, int], ...]] = (
     (StreamChannel.HEART_RATE_BPM, 3),
     (StreamChannel.POWER_W, 7),
     (StreamChannel.TEMPERATURE_C, 13),
+)
+# Running dynamics: channel, record field and the divisor from the scaled FIT unit
+# to the canonical one (oscillation mm -> cm, step length mm -> m).
+_DYNAMICS_FIELDS: Final[tuple[tuple[StreamChannel, int, float], ...]] = (
+    (StreamChannel.GROUND_CONTACT_TIME_MS, 41, 1.0),
+    (StreamChannel.GROUND_CONTACT_BALANCE_PCT, 84, 1.0),
+    (StreamChannel.VERTICAL_OSCILLATION_CM, 39, 10.0),
+    (StreamChannel.VERTICAL_RATIO_PCT, 83, 1.0),
+    (StreamChannel.STEP_LENGTH_M, 85, 1000.0),
 )
 # FIT positions are signed 32-bit semicircles: 2**31 semicircles are 180 degrees.
 _SEMICIRCLE_DEG: Final = 180.0 / 2**31
@@ -305,6 +322,11 @@ def _cadence(fields: Mapping[int, object]) -> float | None:
     return whole + (fraction or 0.0)
 
 
+def _measured(value: float | None, divisor: float) -> float | None:
+    """A running dynamics reading in canonical units; 0 means not measured."""
+    return value / divisor if value else None
+
+
 def _add_channel(
     channels: dict[StreamChannel, tuple[float | None, ...]],
     ref: str,
@@ -318,6 +340,29 @@ def _add_channel(
         _add_issue(issues, ref, channel.value, IssueReason.OUT_OF_RANGE)
     if any(point is not None for point in points):
         channels[channel] = points
+
+
+def _add_sensor_channels(
+    channels: dict[StreamChannel, tuple[float | None, ...]],
+    ref: str,
+    rows: list[Mapping[int, object]],
+    issues: list[MappingIssue],
+) -> None:
+    """Add the running dynamics and the GPS position channels of the records."""
+    for channel, field_number, divisor in _DYNAMICS_FIELDS:
+        measured = [
+            _measured(fit_field(fields, _RECORD_MESSAGE, field_number), divisor)
+            for fields in rows
+        ]
+        _add_channel(channels, ref, channel, measured, issues)
+    for channel, field_number in _POSITION_FIELDS:
+        degrees = [
+            None if raw is None else raw * _SEMICIRCLE_DEG
+            for raw in (
+                fit_field(fields, _RECORD_MESSAGE, field_number) for fields in rows
+            )
+        ]
+        _add_channel(channels, ref, channel, degrees, issues)
 
 
 def _stream_set(
@@ -347,14 +392,7 @@ def _stream_set(
         [_cadence(fields) for fields in rows],
         issues,
     )
-    for channel, field_number in _POSITION_FIELDS:
-        degrees = [
-            None if raw is None else raw * _SEMICIRCLE_DEG
-            for raw in (
-                fit_field(fields, _RECORD_MESSAGE, field_number) for fields in rows
-            )
-        ]
-        _add_channel(channels, ref, channel, degrees, issues)
+    _add_sensor_channels(channels, ref, rows, issues)
     if len(channels) < 2:
         return None
     hr_source, power_source, sensors = sensor_profile(

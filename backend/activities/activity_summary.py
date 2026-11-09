@@ -75,6 +75,11 @@ _MEASURED: Final = (
     ("device_name", "device_name"),
     ("energy_kj", "energy_kj"),
     ("energy_kcal", "energy_kcal"),
+    ("ground_contact_time_ms", "ground_contact_time_ms"),
+    ("ground_contact_balance_pct", "ground_contact_balance_pct"),
+    ("vertical_oscillation_cm", "vertical_oscillation_cm"),
+    ("vertical_ratio_pct", "vertical_ratio_pct"),
+    ("step_length_m", "step_length_m"),
 )
 # Summary key -> ActivityRecord field, in rating order.
 _RATINGS: Final = (("rpe", "rpe"), ("feel", "feel"))
