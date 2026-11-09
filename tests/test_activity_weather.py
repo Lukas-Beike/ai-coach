@@ -274,12 +274,12 @@ class StageCase(unittest.TestCase):
             moving_duration_s=3600.0,
         )
 
-    def run_once(self) -> BatchReport:
+    def _run_once(self) -> BatchReport:
         self.stage.prefetch(lambda: self.manager)
         with self.manager.unit_of_work() as db:
             return self.stage.run_batch(db)
 
-    def rows(self) -> list[dict[str, Any]]:
+    def _rows(self) -> list[dict[str, Any]]:
         with self.manager.reader() as db:
             return [
                 dict(row)
@@ -298,7 +298,7 @@ class StageCase(unittest.TestCase):
 class StageTests(StageCase):
     def test_start_position_is_fetched_rounded_and_stored(self) -> None:
         store_track(self.manager)
-        report = self.run_once()
+        report = self._run_once()
         self.assertTrue(report.done)
         self.assertEqual(
             [(52.51, 13.41, date(2026, 9, 10), date(2026, 9, 10))], self.fetch.calls
@@ -316,7 +316,7 @@ class StageTests(StageCase):
             {k: v for k, v in self.block().items() if k != "heat_note"},
         )
         self.assertIn("Hitze", self.block()["heat_note"])
-        rows = self.rows()
+        rows = self._rows()
         self.assertEqual(
             {
                 "activity_weather_temperature": "C",
@@ -334,16 +334,16 @@ class StageTests(StageCase):
 
     def test_a_stored_result_is_never_fetched_again(self) -> None:
         store_track(self.manager)
-        self.run_once()
-        second = self.run_once()
+        self._run_once()
+        second = self._run_once()
         self.assertEqual(1, len(self.fetch.calls))
         self.assertEqual(0, second.items)
         self.now += timedelta(days=3)
-        self.run_once()
+        self._run_once()
         self.assertEqual(1, len(self.fetch.calls))
 
     def test_without_a_position_the_home_location_is_used_and_labelled(self) -> None:
-        self.run_once()
+        self._run_once()
         self.assertEqual(
             [(51.12, 6.57, date(2026, 9, 10), date(2026, 9, 10))], self.fetch.calls
         )
@@ -352,21 +352,21 @@ class StageTests(StageCase):
         self.assertEqual("home", block["location_kind"])
         self.assertEqual("Open-Meteo Modell, Wohnort", block["source"])
         self.assertEqual(
-            {"Open-Meteo Modell, Wohnort"}, {r["label"] for r in self.rows()}
+            {"Open-Meteo Modell, Wohnort"}, {r["label"] for r in self._rows()}
         )
 
     def test_without_position_and_home_nothing_is_fetched_until_a_home_exists(
         self,
     ) -> None:
         self.home = None
-        self.run_once()
-        self.run_once()
+        self._run_once()
+        self._run_once()
         self.assertEqual([], self.fetch.calls)
-        self.assertEqual([], self.rows())
+        self.assertEqual([], self._rows())
         self.home = (51.1234, 6.5678)
-        self.run_once()
+        self._run_once()
         self.assertEqual(1, len(self.fetch.calls))
-        self.assertEqual(5, len(self.rows()))
+        self.assertEqual(5, len(self._rows()))
 
     def test_a_moved_home_looks_up_a_home_session_again_but_not_a_start(self) -> None:
         add_session_record(
@@ -383,74 +383,74 @@ class StageTests(StageCase):
             )
         store_track(self.manager, "g2")
         self.fetch.response = payload()
-        self.run_once()
+        self._run_once()
         self.assertEqual(2, len(self.fetch.calls))
         self.home = (48.1374, 11.5755)
-        self.run_once()
+        self._run_once()
         # Only the session without a position follows the home location.
         self.assertEqual(3, len(self.fetch.calls))
         self.assertEqual((48.14, 11.58), self.fetch.calls[-1][:2])
 
     def test_deleting_the_tracks_looks_the_session_up_at_home(self) -> None:
         store_track(self.manager)
-        self.run_once()
+        self._run_once()
         with self.manager.unit_of_work() as db:
             delete_stored_tracks(db)
-        self.run_once()
+        self._run_once()
         self.assertEqual(2, len(self.fetch.calls))
         self.assertEqual("home", self.block()["location_kind"])
-        self.assertEqual(5, len(self.rows()))
+        self.assertEqual(5, len(self._rows()))
 
     def test_a_failed_fetch_writes_nothing_and_backs_off(self) -> None:
         store_track(self.manager)
         self.fetch.fail = True
         with self.assertLogs("intervals_coach", level="WARNING"):
-            report = self.run_once()
+            report = self._run_once()
         self.assertTrue(report.done)
-        self.assertEqual([], self.rows())
+        self.assertEqual([], self._rows())
         with self.manager.reader() as db:
             self.assertEqual(
                 {},
                 json.loads(self.key_values.get(db, "activity_weather_state"))["empty"],
             )
-        self.run_once()
+        self._run_once()
         self.assertEqual(1, len(self.fetch.calls), "no retry before the backoff ends")
         self.now += timedelta(minutes=31)
         with self.assertLogs("intervals_coach", level="WARNING"):
-            self.run_once()
+            self._run_once()
         self.assertEqual(2, len(self.fetch.calls))
         # The second failure doubles the delay.
         self.now += timedelta(minutes=31)
-        self.run_once()
+        self._run_once()
         self.assertEqual(2, len(self.fetch.calls))
         self.fetch.fail = False
         self.now += timedelta(hours=2)
-        self.run_once()
-        self.assertEqual(5, len(self.rows()))
+        self._run_once()
+        self.assertEqual(5, len(self._rows()))
 
     def test_only_outdoor_rides_and_runs_since_2022_are_looked_up(self) -> None:
         with self.manager.unit_of_work() as db:
             db.execute("UPDATE activity_records SET environment = 'indoor'")
-        self.run_once()
+        self._run_once()
         with self.manager.unit_of_work() as db:
             db.execute(
                 "UPDATE activity_records SET environment = 'outdoor', sport = 'swim'"
             )
-        self.run_once()
+        self._run_once()
         with self.manager.unit_of_work() as db:
             db.execute(
                 "UPDATE activity_records SET sport = 'ride', started_at = ?",
                 ("2021-12-31T23:00:00+00:00",),
             )
-        self.run_once()
+        self._run_once()
         self.assertEqual([], self.fetch.calls)
 
     def test_a_session_that_just_ended_waits_for_its_forecast(self) -> None:
         self.now = START + timedelta(hours=2)
-        self.run_once()
+        self._run_once()
         self.assertEqual([], self.fetch.calls)
         self.now = START + timedelta(hours=50)
-        self.run_once()
+        self._run_once()
         self.assertEqual(1, len(self.fetch.calls))
 
     def test_a_response_without_values_is_remembered_not_refetched(self) -> None:
@@ -466,23 +466,23 @@ class StageTests(StageCase):
                 )
             }
         )
-        self.run_once()
-        self.run_once()
+        self._run_once()
+        self._run_once()
         self.assertEqual(1, len(self.fetch.calls))
-        self.assertEqual([], self.rows())
+        self.assertEqual([], self._rows())
 
     def test_gone_sessions_retire_their_rows(self) -> None:
-        self.run_once()
+        self._run_once()
         with self.manager.unit_of_work() as db:
             db.execute("UPDATE activity_sessions SET state = 'deleted'")
-        self.run_once()
-        self.assertEqual([], self.rows())
+        self._run_once()
+        self.assertEqual([], self._rows())
         with self.manager.reader() as db:
             self.assertEqual({}, stored_activity_weather(db))
 
     def test_the_summary_is_content_free(self) -> None:
         store_track(self.manager)
-        self.run_once()
+        self._run_once()
         with self.manager.reader() as db:
             summary = summarize_activity_weather(self.key_values, db)
         self.assertEqual("complete", summary["status"])
@@ -496,13 +496,13 @@ class BoundedBatchTests(StageCase):
         add_session_record(
             self.manager, ProviderId.GARMIN, "g2", "act_g2", moving_duration_s=3600.0
         )
-        first = self.run_once()
+        first = self._run_once()
         self.assertFalse(first.done)
         self.assertEqual(1, len(self.fetch.calls))
-        second = self.run_once()
+        second = self._run_once()
         self.assertTrue(second.done)
         self.assertEqual(2, len(self.fetch.calls))
-        self.assertEqual(10, len(self.rows()))
+        self.assertEqual(10, len(self._rows()))
 
 
 class WorkerTests(StageCase):
@@ -524,13 +524,13 @@ class WorkerTests(StageCase):
         worker.run_loop()
         self.assertEqual(1, len(self.fetch.calls))
         self.assertFalse(self.fetch.inside)
-        self.assertEqual(5, len(self.rows()))
+        self.assertEqual(5, len(self._rows()))
 
 
 class ReadTests(StageCase):
     def test_the_heat_note_follows_the_stored_apparent_temperature(self) -> None:
         self.fetch.response = payload(apparent_temperature=[20.0, 24.9, 24.9, 30.0])
-        self.run_once()
+        self._run_once()
         self.assertNotIn("heat_note", self.block())
 
     def test_home_coordinates_come_from_the_cached_geocoding(self) -> None:
@@ -619,7 +619,7 @@ class PrivacyTests(StageCase):
             home_location=lambda _db: self.home,
         )
         with self.assertLogs("intervals_coach", level="DEBUG") as stage_logs:
-            self.run_once()
+            self._run_once()
 
         # The request carries only the rounded position.
         (url,) = opened

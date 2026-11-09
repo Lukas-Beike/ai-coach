@@ -303,14 +303,14 @@ class ActivityWeatherStage:
             "retrying": retried,
             "retired": retired,
         }
+        if self._halted:
+            status = "retry"
+        else:
+            status = "complete" if done else "running"
         self._save(
             db,
             {
-                "status": "retry"
-                if self._halted
-                else "complete"
-                if done
-                else "running",
+                "status": status,
                 "method_version": METHOD_VERSION,
                 "completed_at": stamp if done else state.get("completed_at"),
                 "counts": counts,
@@ -373,12 +373,14 @@ class ActivityWeatherStage:
                 ):
                     plan.keep.update(row["natural_key"] for row in rows.values())
                     continue
-            elif (entry := empty.get(session_id)) and isinstance(entry, dict):
-                if entry.get("fingerprint") == _fingerprint(
-                    cheap, str(entry.get("kind")), home_key
-                ):
-                    plan.empty[session_id] = entry
-                    continue
+            elif (
+                (entry := empty.get(session_id))
+                and isinstance(entry, dict)
+                and entry.get("fingerprint")
+                == _fingerprint(cheap, str(entry.get("kind")), home_key)
+            ):
+                plan.empty[session_id] = entry
+                continue
             plan.changed.append((summary, cheap))
         return plan
 
