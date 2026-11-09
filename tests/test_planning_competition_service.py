@@ -101,6 +101,22 @@ class CompetitionServiceTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(len(self.service.list()), 25)
 
+    def test_full_upcoming_cap_allows_past_race_and_blocks_move_into_future(self):
+        past = self.service.save(self.competition(event_date="2026-02-01"))
+        self._save_many(20, date(2026, 9, 20))
+
+        archived = self.service.save(self.competition(event_date="2026-03-01"))
+        with self.assertRaises(AppError) as raised:
+            self.service.save(
+                {
+                    "competition_id": past["competition"]["id"],
+                    "event_date": "2026-12-01",
+                }
+            )
+
+        self.assertEqual(archived["status"], "created")
+        self.assertEqual(raised.exception.status, 400)
+
     def test_empty_values_clear_optional_fields_and_absent_ones_keep_them(self):
         created = self.service.save(self.competition(description="Flat"))
         competition_id = created["competition"]["id"]

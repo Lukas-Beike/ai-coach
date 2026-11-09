@@ -95,7 +95,7 @@ def _with_derived_event_date(
     if sent_day in (None, ""):
         value["event_date"] = start_day
         return {**arguments, "event_date": start_day}
-    if str(sent_day).strip()[:10] != start_day:
+    if not str(sent_day).strip().startswith(start_day):
         raise AppError(
             400,
             "Startzeit und Wettkampftag passen nicht zusammen: "
@@ -165,18 +165,24 @@ class CompetitionService:
             normalized = competitions.normalize_competition(value)
             if competition_id:
                 normalized["id"] = competition_id
+            today = self._local_today().isoformat()
+            was_upcoming = bool(existing) and (
+                str(existing.get("event_date") or "")[:10] >= today
+            )
+            if (
+                normalized["event_date"] >= today
+                and not was_upcoming
+                and self._repository.count_upcoming(db, today)
+                >= _MAX_UPCOMING_COMPETITIONS
+            ):
+                raise AppError(
+                    400,
+                    "Es können maximal 20 anstehende Wettkämpfe gespeichert werden.",
+                )
             if existing:
                 self._repository.update_local(db, normalized, now)
                 status = "updated"
             else:
-                upcoming = self._repository.count_upcoming(
-                    db, self._local_today().isoformat()
-                )
-                if upcoming >= _MAX_UPCOMING_COMPETITIONS:
-                    raise AppError(
-                        400,
-                        "Es können maximal 20 anstehende Wettkämpfe gespeichert werden.",
-                    )
                 self._repository.create_local(db, normalized, now)
                 status = "created"
             change_history.record_change(
