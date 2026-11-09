@@ -50,11 +50,15 @@ class BrowserAggregationTests(unittest.TestCase):
             for i in (1, 2)
         ]
 
-    def verify(self, manifests, expected=None):
+    def verify(self, manifests, expected=None, attempts=None):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             for index, manifest in enumerate(manifests):
-                directory = root / str(index)
+                name = str(index)
+                if attempts is not None:
+                    name = f"browser-run-summary-{index}-attempt-{attempts[index]}"
+                directory = root / name / "run"
+                directory.parent.mkdir()
                 directory.mkdir()
                 (directory / "manifest.json").write_text(
                     json.dumps(manifest), encoding="utf-8"
@@ -87,6 +91,27 @@ class BrowserAggregationTests(unittest.TestCase):
             failed[index]["status"] = "incomplete"
             with self.subTest(incomplete=index), self.assertRaises(ValueError):
                 self.verify(failed, expected)
+
+    def test_partial_rerun_uses_each_shards_latest_attempt(self):
+        first, second = self.manifests()
+        failed = copy.deepcopy(second)
+        failed["status"] = "failed"
+        # Shard 2 failed in attempt 1 and passed on rerun; shard 1 kept attempt 1.
+        self.assertEqual(
+            self.verify([first, failed, second], attempts=[1, 1, 2]), {"desktop": 2}
+        )
+
+    def test_failed_latest_attempt_or_missing_shard_still_fails(self):
+        first, second = self.manifests()
+        failed = copy.deepcopy(second)
+        failed["status"] = "failed"
+        for manifests, attempts in (
+            ([first, second, failed], [1, 1, 2]),
+            ([first, failed], [1, 2]),
+            ([first, first], [1, 1]),
+        ):
+            with self.subTest(attempts=attempts), self.assertRaises(ValueError):
+                self.verify(manifests, attempts=attempts)
 
     def test_missing_duplicate_and_extra_shards_fail(self):
         manifests = self.manifests()
