@@ -77,6 +77,7 @@ $("#garmin-disconnect").addEventListener("click", disconnectGarmin);
 $("#garmin-metric-export-toggle").addEventListener("click", (event) => toggleMetricExport(event.currentTarget));
 $("#garminFullResyncButton").addEventListener("click", () => fullResync(providerIds().garmin));
 $("#profileForm").addEventListener("submit", saveProfile);
+$("#firstThresholdAdopt").addEventListener("click", adoptFirstThreshold);
 $("#retryBodyGarmin").addEventListener("click", retryBodyGarmin);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 // A closed profile section cannot show its invalid field: open it first.

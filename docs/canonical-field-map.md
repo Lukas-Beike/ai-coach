@@ -919,6 +919,7 @@ Equal-length channels on one strictly increasing `time_s` axis. At most 172,800 
 | `hr_source` | `HeartRateSource \| None` | FIT mapper (`fit_sensor_mapping.py`) | What measured the heart rate; `None` without a heart rate channel, for Garmin chart sets and for sets mapped before schema version 24. |
 | `power_source` | `PowerSource \| None` | FIT mapper (`fit_sensor_mapping.py`) | What measured the power; `None` without a power channel, for Garmin chart sets and for sets mapped before schema version 24. |
 | `sensors` | tuple of `ActivitySensor`, at most 16 | FIT mapper (`fit_sensor_mapping.py`) | The external heart rate, power meter and trainer sensors the recording named. |
+| `dfa_alpha1` | `ActivityDfaAlpha1 \| None` | FIT mapper (`fit_rr_mapping.py`, `backend/canonical/dfa_alpha1.py`) | The first threshold estimate of a chest-strap recording that carried RR intervals; `None` otherwise, for Garmin chart sets and for sets mapped before schema version 25. The RR intervals themselves are never part of the set. |
 
 Channel bounds (`CHANNEL_BOUNDS`) and producers:
 
@@ -951,6 +952,18 @@ One external sensor a recording named. The serial number is only an input of the
 | `connection` | text or `None` | `fit_sensor_mapping.py` | `antplus`, `ant`, `bluetooth` or `bluetooth_low_energy` from the file's `source_type`. |
 | `manufacturer` | int, 0 to 65,535, or `None` | `fit_sensor_mapping.py` | FIT manufacturer number. |
 | `product` | int, 0 to 65,535, or `None` | `fit_sensor_mapping.py` | FIT product number. |
+
+### `ActivityDfaAlpha1`
+
+The first threshold heart rate a chest-strap recording gives (DFA-a1, research-grade, never a lab value). Stored as one JSON object in `activity_detail_sets.dfa_alpha1`; the RR series is an input only.
+
+| Field | Type & unit | Emitted by | Notes |
+|---|---|---|---|
+| `estimate_bpm` | float, 60 to 220 bpm | `dfa_alpha1.first_threshold` | The heart rate at which the regression of alpha1 on the window heart rate reaches 0.75. |
+| `windows` | int, at least 1 | `dfa_alpha1.first_threshold` | Steady or ramping 2-minute windows the regression used. |
+| `artifact_share` | float, 0 to 1 | `dfa_alpha1.first_threshold` | Share of beats dropped by artifact correction (outside 300 to 2000 ms, or more than 20 % from the last accepted beat). |
+| `quality` | `DfaQuality` | `dfa_alpha1.first_threshold` | `good` with at least 20 windows, at most 3 % artifacts and R squared of at least 0.5; otherwise `low`. |
+| `method` | int | `dfa_alpha1.METHOD_VERSION` | Version of the calculation. |
 
 ### `ActivityLap`
 
@@ -1055,6 +1068,13 @@ The property `kind` is always `strength_sets`.
 ### `StreamChannel`
 
 Members `time_s`, `distance_m`, `altitude_m`, `grade_pct`, `speed_mps`, `power_w`, `heart_rate_bpm`, `cadence_rpm`, `temperature_c`, `moving`, `latitude_deg`, `longitude_deg`; units and producers in the `ActivityStreamSet` channel table.
+
+### `DfaQuality`
+
+| Value | Meaning | Produced by |
+|---|---|---|
+| `good` | At least 20 windows, at most 3 % artifacts and a clear fit | `dfa_alpha1.first_threshold` |
+| `low` | An estimate that misses one of those criteria | `dfa_alpha1.first_threshold` |
 
 ### `HeartRateSource`
 
@@ -1191,13 +1211,13 @@ Payload evidence for this scope: the sanitized payload files contain the Garmin 
 ### `garmin_activity_detail_mapping.py`
 
 Status: Live. Called by `_map_collected` in `backend/sync/garmin_activity_details.py` for every Garmin activity detail fetch and backfill; stored with `replace_detail_set(mapper_version=MAPPER_VERSION)`.
-Mapper version: **6**
+Mapper version: **7**
 Inputs: the dict from `collect_garmin_activity_detail` (`backend/providers/garmin.py`) with the parts `details`, `splits`, `hr_zones`, `power_zones`, `exercise_sets` (strength activities only) and `fit`. Transport: the Personal API serves `details` (with `maxChartSize` 2,000) and the original FIT file (`download_activity_fit`, unzipped by `fit_from_archive`); the unofficial login serves `splits`, the two zone parts and `exercise_sets`. A part that is absent gives no set and no issue; a present but malformed part gives one value-free issue and no set for it.
 Evidence: documented only (fixtures `tests/fixtures/providers/garmin/activity_detail/details.json`, `splits.json`, `hr_zones.json`, `power_zones.json`; strength and FIT cases are built inline in `tests/test_garmin_activity_detail_mapping.py`). The sanitized payload files `garmin_activity_detail_run_2026-11-03` and `garmin_personal_activity_detail_run_2026-11-03` hold the activity summary only.
 
 Provenance: `provider` `garmin`, `source_kind` `provider_reported`, `source_record_id` the activity id, `recorded_by` and `retrieved_at` from the caller, `label` `Garmin Connect`. `provider_activity_id` is `activity_id` (text, at most 200 chars; an integer id is rejected as `invalid_type`). All sets use `origin` `fetch`.
 
-Record keywords set per kind: stream set `provider_activity_id`, `provenance`, `origin`, `resolution`, `channels`, `hr_source`, `power_source`, `sensors`; lap set `provider_activity_id`, `provenance`, `origin`, `lap_source`, `laps`; zone distribution `provider_activity_id`, `provenance`, `origin`, `metric`, `boundary_source`, `buckets`; strength set list `provider_activity_id`, `provenance`, `origin`, `source`, `sets`.
+Record keywords set per kind: stream set `provider_activity_id`, `provenance`, `origin`, `resolution`, `channels`, `hr_source`, `power_source`, `sensors`, `dfa_alpha1`; lap set `provider_activity_id`, `provenance`, `origin`, `lap_source`, `laps`; zone distribution `provider_activity_id`, `provenance`, `origin`, `metric`, `boundary_source`, `buckets`; strength set list `provider_activity_id`, `provenance`, `origin`, `source`, `sets`.
 
 Which source wins per kind (`map_garmin_activity_detail`):
 
@@ -1283,8 +1303,8 @@ Not mapped: `directDoubleCadence`, every other metric descriptor key (for exampl
 
 ### `fit_activity_detail_mapping.py`
 
-Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 6.
-Mapper version: **5**
+Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 7.
+Mapper version: **6**
 Inputs: the raw bytes of one FIT activity file (`bytes`); decoding and scaling by `fit_file.py` (`fit_messages`, `fit_field`). Anything else gives one `fit` `invalid_type` issue. The caller passes `provider_activity_id` (Garmin activity id or Wahoo workout id) and the provenance (see the provenance table).
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes built in `tests/test_fit_activity_detail_mapping.py` and `tests/test_fit_file.py`; there is no FIT file or Wahoo payload in the payload files).
 
@@ -1312,6 +1332,7 @@ Streams, record message 20 (`_stream_set`, `_kept_records`, `_RECORD_CHANNEL_FIE
 | `moving` | none | | Not produced. |
 | `resolution` | | `full` | Fixed. |
 | `hr_source`, `power_source`, `sensors` | device information message 23 | see `fit_sensor_mapping.py` | Classified by `sensor_profile`; the serial number is only hashed. |
+| `dfa_alpha1` | hrv messages 78 | see `fit_rr_mapping.py` | Only for a `chest_strap` heart rate source; `_first_threshold` keeps the result, never the intervals. |
 
 Record fields not listed here are not read. A channel with no usable point is dropped; out-of-bounds points become gaps with an `out_of_range` issue named by the channel.
 
@@ -1357,8 +1378,8 @@ Not mapped: the session (18), activity and file messages, developer fields (skip
 
 ### `fit_sensor_mapping.py`
 
-Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (5) and by `garmin_activity_detail_mapping.py` version 6.
-Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 5 and `garmin_activity_detail_mapping.py` v 6.
+Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (6) and by `garmin_activity_detail_mapping.py` version 7.
+Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 6 and `garmin_activity_detail_mapping.py` v 7.
 Inputs: the decoded FIT messages and the provenance provider; device information is message 23 (`device_index` 0, `device_type` 1, `manufacturer` 2, `serial_number` 3, `product` 4, `source_type` 25).
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_sensor_mapping.py`). Whether Garmin and Wahoo files list a strap paired to a watch this way, and the Bluetooth LE device type numbers (2 heart rate, 3 power meter from the FIT profile), are unverified on real files.
 
@@ -1371,6 +1392,22 @@ Record keywords set: stream set `hr_source`, `power_source`, `sensors`; sensor `
 | `sensors` | external devices of type 120, 11 and 17 with a serial number | `heart_rate`, `power_meter`, `trainer`; `key` is the SHA-256 of manufacturer, product and serial | A device whose `source_type` is local (5) or with `device_index` 0 is the recording device, not a sensor. A sensor without a serial number cannot be identified and is left out. |
 
 Not mapped: every other device type (cadence, speed, light and radar sensors), the device's software and battery fields, and the serial number itself.
+
+### `fit_rr_mapping.py`
+
+Status: Live. Called by `_first_threshold` in `fit_activity_detail_mapping.py` for the stream set of every FIT file whose heart rate source is a chest strap (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (6) and by `garmin_activity_detail_mapping.py` version 7.
+Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 6 and `garmin_activity_detail_mapping.py` v 7.
+Inputs: the decoded FIT messages; the hrv message is global number 78, field 0 `time`, an array of up to five uint16 values in seconds (scale 1000, 0xFFFF invalid). Garmin writes it only while HRV logging is enabled for the heart rate sensor.
+Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_rr_mapping.py` and `tests/test_fit_file.py`). Whether real Garmin and Wahoo files carry hrv messages this way is unverified.
+
+Record keywords set: stream set `dfa_alpha1`.
+
+| Canonical field | Provider key(s) | Unit / conversion | Notes |
+|---|---|---|---|
+| (RR series, not stored) | hrv message 78 field 0 | seconds, /1000 to milliseconds; at most 150,000 beats | Returned as gap-free segments: an invalid slot between valid ones, or more than 10 s of the file clock that the intervals do not account for, starts a new segment (trailing invalid slots only pad a message). Input of `backend/canonical/dfa_alpha1.py`, which detrends each segment (smoothness priors, lambda 500) and never lets a window span two segments; never stored, logged or returned. |
+| `dfa_alpha1.estimate_bpm`, `windows`, `artifact_share`, `quality`, `method` | computed from the RR series | see `ActivityDfaAlpha1` | `None` unless artifact correction, smoothness-priors detrending (method version 2), enough steady windows and an alpha1 range that crosses 0.75 allow it. |
+
+Not mapped: the hrv timestamps (the message has none), RR values outside 300 to 2000 ms (dropped as artifacts), and every message other than 78.
 
 ### `wahoo_fit_download.py`
 

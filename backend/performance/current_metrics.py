@@ -64,6 +64,7 @@ def _with_resolved_bpm(cap: dict[str, Any], lthr: float | None) -> dict[str, Any
 def coach_thresholds(
     metrics: Mapping[str, Mapping[str, Any]],
     first_threshold_pct: float | None = None,
+    first_threshold_estimated: bool = False,
 ) -> dict[str, Any]:
     """Return the thresholds plans use, with the FTP's source and alternatives.
 
@@ -86,7 +87,9 @@ def coach_thresholds(
     lthr = run_lthr if isinstance(run_lthr, int | float) and run_lthr > 0 else None
     result["run_hr_caps"] = {
         focus: _with_resolved_bpm(cap, lthr)
-        for focus, cap in effective_caps(first_threshold_pct).items()
+        for focus, cap in effective_caps(
+            first_threshold_pct, first_threshold_estimated
+        ).items()
     }
     if ftp.get("alternatives"):
         result["ftp_alternatives"] = [

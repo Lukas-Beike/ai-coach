@@ -25,6 +25,7 @@ from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.feedback_post import FeedbackPostRoutes
+from backend.http_api.first_threshold_post import FirstThresholdPostRoutes
 from backend.http_api.garmin_post import GarminPostRoutes
 from backend.http_api.handler import (
     HttpRequestHandlerDependencies,
@@ -209,6 +210,7 @@ class HttpAthleteServices:
     activity_feedback: Callable[[], Any] | None = None
     session_corrections: Callable[[], Any] | None = None
     zones: Callable[[], Any] | None = None
+    first_threshold: Callable[[], Any] | None = None
     body_export: Callable[[dict[str, str], str | None, float], str] | None = None
 
 
@@ -298,6 +300,11 @@ class HttpDomainRouteServices:
 
 def _present(route: Any) -> tuple[Any, ...]:
     return (route,) if route is not None else ()
+
+
+def _when(service: Any, route: Callable[..., Any], *args: Any) -> Any:
+    """The optional route built over ``service``, or None when it is not configured."""
+    return route(service, *args) if service else None
 
 
 def _provider_connection_routes(
@@ -455,6 +462,7 @@ class HttpApiAssembly:
                 local_today(),
                 activity_read_service().summaries_on_days,
             ),
+            first_threshold_service=athlete.first_threshold,
         )
         self.diagnostics_get_routes = DiagnosticsGetRoutes(
             session_auth_service,
@@ -614,9 +622,7 @@ class HttpApiAssembly:
         )
         self.settings_put_routes = SettingsPutRoutes(settings)
         provider_credentials = dependencies.domains.provider_credentials
-        self.credentials_put_routes = (
-            CredentialsPutRoutes(provider_credentials) if provider_credentials else None
-        )
+        self.credentials_put_routes = _when(provider_credentials, CredentialsPutRoutes)
         self.athlete_put_routes = AthletePutRoutes(
             athlete_context_service,
             profile_service,
@@ -634,9 +640,7 @@ class HttpApiAssembly:
             session_rpe_load,
             athlete.session_corrections,
         )
-        self.equipment_post_routes = (
-            EquipmentPostRoutes(athlete.equipment) if athlete.equipment else None
-        )
+        self.equipment_post_routes = _when(athlete.equipment, EquipmentPostRoutes)
         self.chat_cancel_post_routes = ChatCancelPostRoutes(
             coach_job_cancellation_service
         )
@@ -673,24 +677,14 @@ class HttpApiAssembly:
         self.provider_connection_get_routes, self.provider_connection_post_routes = (
             _provider_connection_routes(session_auth_service, connection_checks)
         )
-        self.wahoo_get_routes = (
-            WahooGetRoutes(wahoo_connection_service, maintenance_gate)
-            if wahoo_connection_service
-            else None
+        self.wahoo_get_routes = _when(
+            wahoo_connection_service, WahooGetRoutes, maintenance_gate
         )
-        self.wahoo_post_routes = (
-            WahooPostRoutes(wahoo_connection_service)
-            if wahoo_connection_service
-            else None
-        )
+        self.wahoo_post_routes = _when(wahoo_connection_service, WahooPostRoutes)
         garmin_login_service = dependencies.domains.garmin_login
-        self.garmin_post_routes = (
-            GarminPostRoutes(garmin_login_service) if garmin_login_service else None
-        )
-        self.metric_export_post_routes = (
-            MetricExportPostRoutes(metric_export_service)
-            if metric_export_service
-            else None
+        self.garmin_post_routes = _when(garmin_login_service, GarminPostRoutes)
+        self.metric_export_post_routes = _when(
+            metric_export_service, MetricExportPostRoutes
         )
         self.route_dispatcher = HttpRouteDispatcher(
             (
@@ -741,6 +735,12 @@ class HttpApiAssembly:
             self.garmin_post_routes,
             self.provider_connection_post_routes,
             PlannedUnitFocusPostRoutes(planned_unit_service, database_lock()),
+            _when(
+                athlete.first_threshold,
+                FirstThresholdPostRoutes,
+                profile_service,
+                database_lock(),
+            ),
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

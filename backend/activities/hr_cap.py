@@ -5,8 +5,9 @@ A run unit of a capped type (``HR_CAP_PERCENT``) stores ``hr_cap``:
 percentages are stored: the bpm is resolved wherever it is read, checked or
 exported, from the lactate threshold HR in effect on the unit's date, so the
 watch's own LTHR updates apply without editing a unit. The source says where the
-percent comes from: the default table, or the athlete's measured first threshold
-(profile value ``first_threshold_pct``, entered by the athlete only). This module
+percent comes from: the default table, the athlete's measured first threshold
+(profile value ``first_threshold_pct``, entered by the athlete) or an estimated
+one the athlete adopted (same value, profile origin ``estimated``). This module
 is the only place that holds the cap values and the rules that derive the
 measured and the exported ones; prompts, labels, checks and tests read it. Pure.
 """
@@ -38,8 +39,13 @@ EXPORT_FLOOR_PERCENT: Final = 65.0
 EXPORT_FLOOR_BELOW_CAP_PCT: Final = 15.0
 SOURCE_DEFAULT: Final = "default"
 SOURCE_MEASURED: Final = "measured"
-SOURCES: Final = (SOURCE_DEFAULT, SOURCE_MEASURED)
-_SOURCE_LABELS: Final = {SOURCE_DEFAULT: "Standard", SOURCE_MEASURED: "gemessen"}
+SOURCE_ESTIMATED: Final = "estimated"
+SOURCES: Final = (SOURCE_DEFAULT, SOURCE_MEASURED, SOURCE_ESTIMATED)
+_SOURCE_LABELS: Final = {
+    SOURCE_DEFAULT: "Standard",
+    SOURCE_MEASURED: "gemessen",
+    SOURCE_ESTIMATED: "geschätzt",
+}
 HR_CAP_KEY: Final = HR_CAP
 PERCENT_KEY: Final = "percent_lthr"
 LOW_PERCENT_KEY: Final = "low_percent_lthr"
@@ -60,12 +66,15 @@ def export_floor_percent(cap_percent: float) -> float:
     )
 
 
-def cap_percents(first_threshold_pct: float | None) -> tuple[dict[str, float], str]:
+def cap_percents(
+    first_threshold_pct: float | None, estimated: bool = False
+) -> tuple[dict[str, float], str]:
     """The cap percent per capped type and its source.
 
-    ``first_threshold_pct`` is the athlete's measured first threshold as percent
-    of the threshold HR on its measurement date. Without one, or when it gives an
-    implausible cap, the default table applies.
+    ``first_threshold_pct`` is the athlete's first threshold as percent of the
+    threshold HR on its measurement date; ``estimated`` says it is an adopted
+    estimate, not a measurement. Without one, or when it gives an implausible
+    cap, the default table applies.
     """
     if first_threshold_pct is not None:
         easy = _floor_tenth(first_threshold_pct - MEASURED_MARGIN_PCT)
@@ -80,7 +89,7 @@ def cap_percents(first_threshold_pct: float | None) -> tuple[dict[str, float], s
             return {
                 focus: recovery if focus == "recovery" else easy
                 for focus in HR_CAP_PERCENT
-            }, SOURCE_MEASURED
+            }, SOURCE_ESTIMATED if estimated else SOURCE_MEASURED
     return dict(HR_CAP_PERCENT), SOURCE_DEFAULT
 
 
@@ -93,9 +102,11 @@ def hr_cap(percent: float, source: str = SOURCE_DEFAULT) -> dict[str, Any]:
     }
 
 
-def effective_caps(first_threshold_pct: float | None) -> dict[str, dict[str, Any]]:
+def effective_caps(
+    first_threshold_pct: float | None, estimated: bool = False
+) -> dict[str, dict[str, Any]]:
     """The cap value to store for each capped type."""
-    percents, source = cap_percents(first_threshold_pct)
+    percents, source = cap_percents(first_threshold_pct, estimated)
     return {focus: hr_cap(percent, source) for focus, percent in percents.items()}
 
 

@@ -623,6 +623,13 @@ class SensorRole(StrEnum):
     TRAINER = "trainer"
 
 
+class DfaQuality(StrEnum):
+    """How far a DFA-a1 first threshold estimate can be trusted (schema version 25)."""
+
+    GOOD = "good"
+    LOW = "low"
+
+
 class LapKind(StrEnum):
     LAP = "lap"
     WORK = "work"

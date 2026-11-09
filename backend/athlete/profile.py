@@ -3,7 +3,7 @@
 import json
 import math
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -14,7 +14,10 @@ from backend.canonical.first_threshold import (
     FIRST_THRESHOLD_DATE_FIELD,
     FIRST_THRESHOLD_ENTRY_FIELD,
     FIRST_THRESHOLD_FIELD,
+    FIRST_THRESHOLD_ORIGIN_FIELD,
+    FIRST_THRESHOLD_ORIGINS,
     FIRST_THRESHOLD_PERCENT_BOUNDS,
+    ORIGIN_MEASURED,
     first_threshold_bpm,
     first_threshold_percent,
     percent_of_lthr,
@@ -38,10 +41,13 @@ PREFERRED_SOURCES = ("", ProviderId.GARMIN.value)
 # The athlete's sex for sex-specific methods (M6 TRIMP constants, #1774); empty
 # means not set.
 SEXES = ("", "male", "female")
-# The athlete's measured first threshold heart rate (bpm, for example from a lab
-# test); empty means not set. Only the athlete sets it, through the profile form
-# or the API: the Coach can read it but never write it.
-COACH_READ_ONLY_FIELDS = frozenset({FIRST_THRESHOLD_FIELD})
+# The athlete's first threshold heart rate (entered in bpm, for example from a lab
+# test, or adopted from the estimate) and where it comes from; empty means not
+# set. Only the athlete sets them, through the profile form or the API: the Coach
+# can read them but never write them.
+COACH_READ_ONLY_FIELDS = frozenset(
+    {FIRST_THRESHOLD_FIELD, FIRST_THRESHOLD_ORIGIN_FIELD}
+)
 
 DEFAULT_PROFILE = {
     "name": "",
@@ -70,6 +76,7 @@ DEFAULT_PROFILE = {
     "sleep_target_hours": "",
     "fueling_tolerance": "",
     FIRST_THRESHOLD_FIELD: "",
+    FIRST_THRESHOLD_ORIGIN_FIELD: "",
     **dict.fromkeys(PREFERRED_SOURCE_FIELDS, ""),
 }
 
@@ -117,12 +124,24 @@ def _normalize_first_threshold(result: dict[str, str], *, strict: bool) -> None:
     service when it saves and are no profile fields: a stored profile never has them.
     """
     text = result[FIRST_THRESHOLD_FIELD]
+    origin = result[FIRST_THRESHOLD_ORIGIN_FIELD]
+    if origin not in FIRST_THRESHOLD_ORIGINS:
+        if strict:
+            raise AppError(
+                400,
+                "Die Herkunft der ersten Schwelle muss gemessen oder geschätzt sein.",
+            )
+        origin = ""
     if not text:
+        result[FIRST_THRESHOLD_ORIGIN_FIELD] = ""
         return
     number = first_threshold_percent(text)
     if number is not None:
         result[FIRST_THRESHOLD_FIELD] = f"{number:g}"
+        # A value stored before the origin existed was entered by the athlete.
+        result[FIRST_THRESHOLD_ORIGIN_FIELD] = origin or ORIGIN_MEASURED
         return
+    result[FIRST_THRESHOLD_ORIGIN_FIELD] = ""
     if strict:
         low, high = FIRST_THRESHOLD_PERCENT_BOUNDS
         raise AppError(
@@ -161,6 +180,28 @@ def normalize_profile(
         if not math.isfinite(target) or not 4 <= target <= 12:
             raise AppError(400, "Das Schlafziel muss zwischen 4 und 12 Stunden liegen.")
     return result
+
+
+def _origin_after_edit(
+    profile: dict[str, Any], previous: Mapping[str, str]
+) -> dict[str, Any]:
+    """Tell where an edited first threshold comes from.
+
+    A value the athlete changes or clears without naming its origin is their own
+    entry (measured, or none when cleared), even if the previous value was an
+    adopted estimate. A write that keeps the value, or names another origin,
+    keeps what it says.
+    """
+    new = first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD))
+    if new == first_threshold_percent(previous.get(FIRST_THRESHOLD_FIELD)):
+        return profile
+    named = str(profile.get(FIRST_THRESHOLD_ORIGIN_FIELD) or "")
+    if named != previous.get(FIRST_THRESHOLD_ORIGIN_FIELD, ""):
+        return profile
+    return {
+        **profile,
+        FIRST_THRESHOLD_ORIGIN_FIELD: "" if new is None else ORIGIN_MEASURED,
+    }
 
 
 class ProfileService:
@@ -281,14 +322,29 @@ class ProfileService:
                 "Zu diesem Datum ist keine Laktatschwelle (LSHF) bekannt, mit der die "
                 "erste Schwelle in Prozent gespeichert werden kann.",
             )
-        return {**profile, FIRST_THRESHOLD_FIELD: f"{percent:g}"}
+        return {
+            **profile,
+            FIRST_THRESHOLD_FIELD: f"{percent:g}",
+            FIRST_THRESHOLD_ORIGIN_FIELD: ORIGIN_MEASURED,
+        }
 
     def save(self, profile: dict[str, Any]) -> dict[str, str]:
         """Replace the whole profile; callers must send every field they keep."""
-        normalized = normalize_profile(
-            self._with_first_threshold(profile), validate_timezone=True
-        )
+        submitted = self._with_first_threshold(profile)
+        normalize_profile(submitted, validate_timezone=True)
         with self.mutation_coordinator, self._manager.unit_of_work() as db:
+            previous = self.get_from_db(db)
+            if FIRST_THRESHOLD_ORIGIN_FIELD not in submitted:
+                # A replacement that does not mention the origin keeps the stored one.
+                submitted = {
+                    **submitted,
+                    FIRST_THRESHOLD_ORIGIN_FIELD: previous[
+                        FIRST_THRESHOLD_ORIGIN_FIELD
+                    ],
+                }
+            normalized = normalize_profile(
+                _origin_after_edit(submitted, previous), validate_timezone=True
+            )
             return self.save_in_transaction(normalized, db, already_normalized=True)
 
     def patch(self, changes: dict[str, Any]) -> dict[str, str]:
@@ -297,4 +353,18 @@ class ProfileService:
             raise AppError(400, "Die Profiländerung muss ein Objekt sein.")
         with self.mutation_coordinator, self._manager.unit_of_work() as db:
             current = self.get_from_db(db)
-            return self.save_in_transaction({**current, **changes}, db)
+            merged = _origin_after_edit({**current, **changes}, current)
+            return self.save_in_transaction(merged, db)
+
+    def set_first_threshold(self, percent: str, origin: str) -> dict[str, str]:
+        """Store a first threshold (percent of the LTHR) with its origin, as one profile change."""
+        with self.mutation_coordinator, self._manager.unit_of_work() as db:
+            current = self.get_from_db(db)
+            return self.save_in_transaction(
+                {
+                    **current,
+                    FIRST_THRESHOLD_FIELD: percent,
+                    FIRST_THRESHOLD_ORIGIN_FIELD: origin,
+                },
+                db,
+            )

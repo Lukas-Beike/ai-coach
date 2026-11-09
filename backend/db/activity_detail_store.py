@@ -19,13 +19,14 @@ import zlib
 from array import array
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Final, cast
 
 from backend.canonical.activity_detail import (
     LAP_METRIC_FIELDS,
     MAX_STREAM_POINTS,
     ActivityDetailSet,
+    ActivityDfaAlpha1,
     ActivityLap,
     ActivityLapSet,
     ActivitySensor,
@@ -44,6 +45,7 @@ from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
     ActivityRecordState,
     ActivitySessionState,
+    DfaQuality,
     ExerciseCategory,
     HeartRateSource,
     LapKind,
@@ -313,6 +315,7 @@ def replace_detail_set(
         header.get("hr_source"),
         header.get("power_source"),
         header.get("sensors"),
+        header.get("dfa_alpha1"),
     )
     if existing is None:
         db.execute(
@@ -320,8 +323,8 @@ def replace_detail_set(
             "detail_kind, mapper_version, origin, source_kind, recorded_by, "
             "source_record_id, resolution, lap_source, zone_boundary_source, "
             "set_source, summary_sha256, content_sha256, fetched_at, hr_source, "
-            "power_source, sensors, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "power_source, sensors, dfa_alpha1, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (*key, *values, now, now),
         )
     else:
@@ -331,7 +334,7 @@ def replace_detail_set(
             "source_kind = ?, recorded_by = ?, source_record_id = ?, resolution = ?, "
             "lap_source = ?, zone_boundary_source = ?, set_source = ?, summary_sha256 = ?, "
             "content_sha256 = ?, fetched_at = ?, hr_source = ?, power_source = ?, "
-            "sensors = ?, updated_at = ? "
+            "sensors = ?, dfa_alpha1 = ?, updated_at = ? "
             "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?",
             (*values, now, *key),
         )
@@ -730,6 +733,66 @@ def sensor_uses(db: Any) -> list[SensorUse]:
     return uses
 
 
+@dataclass(frozen=True, slots=True)
+class SessionFirstThreshold:
+    """The first threshold estimate stored for one session, on its local day."""
+
+    session_id: str
+    day: date
+    result: ActivityDfaAlpha1
+
+
+def first_threshold_results(
+    db: Any, *, since: date, until: date, sport: Sport
+) -> list[SessionFirstThreshold]:
+    """Return one stored DFA-a1 estimate per live session of ``sport`` in a day range.
+
+    Records of one session that carry an estimate compete: the better quality
+    wins, then the one with more windows. Rows with an unreadable day or estimate
+    are skipped. Oldest session first.
+    """
+    best: dict[str, SessionFirstThreshold] = {}
+    for row in db.execute(
+        "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE s.activity_id END "
+        "AS session_id, "
+        "COALESCE(s.local_date, substr(r.started_at, 1, 10)) AS day, d.dfa_alpha1 "
+        "FROM activity_detail_sets AS d "
+        "JOIN activity_records AS r ON r.provider = d.provider "
+        "AND r.provider_activity_id = d.provider_activity_id "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE d.detail_kind = ? AND d.dfa_alpha1 IS NOT NULL AND r.state = ? "
+        "AND s.state <> ? AND r.sport = ? "
+        "AND COALESCE(s.local_date, substr(r.started_at, 1, 10)) BETWEEN ? AND ? "
+        "ORDER BY day, r.provider_activity_id",
+        (
+            ActivitySessionState.DUPLICATE.value,
+            ActivityDetailKind.STREAMS.value,
+            ActivityRecordState.ACTIVE.value,
+            ActivitySessionState.DELETED.value,
+            sport.value,
+            since.isoformat(),
+            until.isoformat(),
+        ),
+    ).fetchall():
+        result = stored_dfa_alpha1(row["dfa_alpha1"])
+        try:
+            day = date.fromisoformat(str(row["day"]))
+        except ValueError:
+            continue
+        if result is None:
+            continue
+        found = best.get(row["session_id"])
+        if found is None or _dfa_rank(result) > _dfa_rank(found.result):
+            best[row["session_id"]] = SessionFirstThreshold(
+                row["session_id"], day, result
+            )
+    return sorted(best.values(), key=lambda item: (item.day, item.session_id))
+
+
+def _dfa_rank(result: ActivityDfaAlpha1) -> tuple[int, int]:
+    return (1 if result.quality is DfaQuality.GOOD else 0, result.windows)
+
+
 def stored_strength_source(
     db: Any, provider: str, provider_activity_id: str
 ) -> str | None:
@@ -923,7 +986,38 @@ def _header(detail: ActivityDetailSet, mapper_version: int) -> dict[str, Any]:
                 sort_keys=True,
                 separators=(",", ":"),
             )
+        if detail.dfa_alpha1 is not None:
+            header["dfa_alpha1"] = json.dumps(
+                _dfa_json(detail.dfa_alpha1), sort_keys=True, separators=(",", ":")
+            )
     return header
+
+
+def _dfa_json(result: ActivityDfaAlpha1) -> dict[str, Any]:
+    return {
+        "estimate_bpm": result.estimate_bpm,
+        "windows": result.windows,
+        "artifact_share": result.artifact_share,
+        "quality": result.quality.value,
+        "method": result.method,
+    }
+
+
+def stored_dfa_alpha1(text: object) -> ActivityDfaAlpha1 | None:
+    """Decode a stored first threshold estimate; an unreadable one yields None."""
+    if text is None:
+        return None
+    try:
+        item = json.loads(str(text))
+        return ActivityDfaAlpha1(
+            estimate_bpm=item["estimate_bpm"],
+            windows=item["windows"],
+            artifact_share=item["artifact_share"],
+            quality=DfaQuality(item["quality"]),
+            method=item["method"],
+        )
+    except TypeError, ValueError, KeyError, AttributeError:
+        return None
 
 
 def _sensor_json(sensor: ActivitySensor) -> dict[str, Any]:
@@ -1079,7 +1173,7 @@ def _read_sets(
         "SELECT d.provider, d.provider_activity_id, d.detail_kind, d.mapper_version, "
         "d.origin, d.source_kind, d.recorded_by, d.source_record_id, d.resolution, "
         "d.lap_source, d.zone_boundary_source, d.set_source, d.summary_sha256, "
-        "d.fetched_at, d.hr_source, d.power_source, d.sensors, "
+        "d.fetched_at, d.hr_source, d.power_source, d.sensors, d.dfa_alpha1, "
         "r.activity_id FROM activity_detail_sets AS d "
         "JOIN activity_records AS r ON r.provider = d.provider "
         "AND r.provider_activity_id = d.provider_activity_id "
@@ -1164,6 +1258,7 @@ def _rebuild(db: Any, row: Mapping[str, Any]) -> ActivityDetailSet:
             ),
             # Optional metadata must never make the stream set unreadable.
             sensors=stored_sensors(row["sensors"]),
+            dfa_alpha1=stored_dfa_alpha1(row["dfa_alpha1"]),
         )
     if kind is ActivityDetailKind.LAPS:
         laps = tuple(

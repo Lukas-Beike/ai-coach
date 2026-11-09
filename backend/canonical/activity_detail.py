@@ -37,6 +37,7 @@ from backend.canonical.vocabulary import (
     POSITION_CHANNELS,
     ActivityDetailKind,
     ActivityDetailOrigin,
+    DfaQuality,
     ExerciseCategory,
     HeartRateSource,
     LapKind,
@@ -66,6 +67,8 @@ MAX_STRENGTH_WEIGHT_KG: Final = 1_000.0
 MAX_WORKOUT_STEP_INDEX: Final = 999
 MAX_EXERCISE_NAME_LENGTH: Final = 64
 MAX_SENSORS: Final = 16
+DFA_ESTIMATE_BOUNDS_BPM: Final = (60.0, 220.0)
+MAX_DFA_WINDOWS: Final = 100_000
 SENSOR_KEY_PATTERN: Final = re.compile(r"[0-9a-f]{64}")
 SENSOR_ORIGIN_PATTERN: Final = re.compile(r"[a-z_]{1,24}")
 # Provider exercise codes such as ``BARBELL_BACK_SQUAT``: untrusted text, so only
@@ -167,12 +170,42 @@ class ActivitySensor:
 
 
 @dataclass(frozen=True, slots=True)
+class ActivityDfaAlpha1:
+    """The first threshold heart rate one activity's chest-strap RR intervals give.
+
+    Only this derived result is kept; the RR series itself never is. ``estimate_bpm``
+    is the heart rate at which the detrended fluctuation exponent alpha1 crosses
+    0.75, ``windows`` the number of 2-minute windows the regression used,
+    ``artifact_share`` the share of beats that artifact correction dropped (0 to
+    1) and ``method`` the version of the calculation. Research-grade, never a lab value.
+    """
+
+    estimate_bpm: float
+    windows: int
+    artifact_share: float
+    quality: DfaQuality
+    method: int
+
+    def __post_init__(self) -> None:
+        bounded_number(self.estimate_bpm, "estimate_bpm", *DFA_ESTIMATE_BOUNDS_BPM)
+        for name, upper in (("windows", MAX_DFA_WINDOWS), ("method", 999)):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an integer")
+            bounded_number(value, name, 1, upper)
+        bounded_number(self.artifact_share, "artifact_share", 0.0, 1.0)
+        require_instance(self.quality, DfaQuality, "quality")
+
+
+@dataclass(frozen=True, slots=True)
 class ActivityStreamSet:
     """Equal-length channels on one strictly increasing time axis (``time_s``).
 
     ``hr_source`` and ``power_source`` say what measured those channels when the
     recording names it; None means the provider did not say (or the mapper
     predates the field). ``sensors`` lists the sensors the recording named.
+    ``dfa_alpha1`` is the first threshold estimate of a chest-strap recording that
+    carried RR intervals (the intervals themselves are not part of the set).
     """
 
     provider_activity_id: str
@@ -183,14 +216,14 @@ class ActivityStreamSet:
     hr_source: HeartRateSource | None = None
     power_source: PowerSource | None = None
     sensors: tuple[ActivitySensor, ...] = ()
+    dfa_alpha1: ActivityDfaAlpha1 | None = None
 
     @property
     def kind(self) -> ActivityDetailKind:
         return ActivityDetailKind.STREAMS
 
-    def __post_init__(self) -> None:
-        _require_detail_header(self.provider_activity_id, self.provenance, self.origin)
-        require_instance(self.resolution, StreamResolution, "resolution")
+    def _check_sources(self) -> None:
+        """Validate the optional source, sensor and first threshold metadata."""
         if self.hr_source is not None:
             require_instance(self.hr_source, HeartRateSource, "hr_source")
         if self.power_source is not None:
@@ -201,6 +234,13 @@ class ActivityStreamSet:
         for sensor in sensors:
             require_instance(sensor, ActivitySensor, "sensor")
         object.__setattr__(self, "sensors", sensors)
+        if self.dfa_alpha1 is not None:
+            require_instance(self.dfa_alpha1, ActivityDfaAlpha1, "dfa_alpha1")
+
+    def __post_init__(self) -> None:
+        _require_detail_header(self.provider_activity_id, self.provenance, self.origin)
+        require_instance(self.resolution, StreamResolution, "resolution")
+        self._check_sources()
         # Mapping is abstract, so it is checked here rather than via require_instance.
         channels = self.channels
         if not isinstance(channels, Mapping):

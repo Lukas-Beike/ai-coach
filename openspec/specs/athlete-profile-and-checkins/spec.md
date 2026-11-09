@@ -154,6 +154,19 @@ The system SHALL save explicitly entered main equipment/components with validate
 
 Evidence: `backend/athlete/equipment.py:EquipmentService.save`, `backend/athlete/equipment.py:EquipmentService.sync_garmin_snapshot`; `backend/coach/tool_schemas.py:build_structured_tool_schemas` (equipment fields); `tests/test_coach_tool_coverage.py:test_training_records_and_equipment_tools_use_confirmed_local_state`; `tests/test_training_record_features.py:test_empty_initial_gear_snapshot_does_not_finalize_import`, `tests/test_training_record_features.py:test_legacy_empty_import_recovers_once_and_preserves_local_equipment`; `tests/test_coach_write_gate.py:test_archiving_equipment_is_a_delete`.
 
+### Requirement: Estimated first threshold from chest-strap RR intervals
+The system SHALL show an estimated first threshold heart rate, derived from stored chest-strap RR results, as an estimate and SHALL store it only when the athlete explicitly adopts it. The Coach SHALL have no tool that adopts it.
+
+#### Scenario: Athlete-level estimate
+- **WHEN** at least three good-quality run sessions of the last 60 days hold a DFA-a1 result
+- **THEN** the profile shows the median of their values, each as percent of the run threshold HR in effect on its day, with quality, session count and date range, and the Coach sees it in its performance context labelled a research-grade estimate.
+
+#### Scenario: Adopt the estimate
+- **WHEN** the athlete adopts the shown estimate
+- **THEN** the profile stores the percent with the origin `estimated` as one change with receipt and undo; an estimate that changed since it was shown, or a missing one, is refused, and a measured value is replaced only when the request says so.
+
+Evidence: `backend/performance/first_threshold_estimate.py:first_threshold_estimate`, `backend/performance/first_threshold_service.py:FirstThresholdService`; `tests/test_first_threshold_estimate.py`.
+
 ### Requirement: Recorded sensors linked to equipment
 The system SHALL list the distinct heart rate, power meter and trainer sensors named by recordings, each with its hashed short id, role, manufacturer, product, first and last day and session count, and SHALL let the athlete link a sensor to an active main equipment item or remove the link. A serial number SHALL never be stored or shown.
 

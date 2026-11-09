@@ -12,6 +12,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.first_threshold import (
     FIRST_THRESHOLD_FIELD,
+    first_threshold_estimated,
     first_threshold_percent,
 )
 from backend.canonical.stored_sports import resolve_competition_sport
@@ -468,11 +469,16 @@ class PlanGuardService:
             ),
             *plan_checks.strength_incomplete(units),
             *plan_checks.focus_missing(units),
-            *plan_checks.hr_cap_invalid(
-                units,
-                first_threshold_percent(self._profile().get(FIRST_THRESHOLD_FIELD)),
-            ),
+            *self._hr_cap_findings(units),
         ]
+
+    def _hr_cap_findings(self, units: Sequence[Mapping[str, Any]]) -> list[dict]:
+        profile = self._profile()
+        return plan_checks.hr_cap_invalid(
+            units,
+            first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD)),
+            first_threshold_estimated(profile),
+        )
 
     def _reported_illness(self) -> str:
         """One snapshot per service: check-ins a write creates itself do not count."""

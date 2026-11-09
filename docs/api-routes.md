@@ -50,7 +50,7 @@ activity IDs no longer resolve.
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
 | GET | `/api/plan`, `/api/library`, `/api/weather` | Planning, library and weather projections | Auth |
-| GET | `/api/performance`, `/api/profile`, `/api/feedback`, `/api/context-preview` | Athlete and performance projections | Auth |
+| GET | `/api/performance`, `/api/profile`, `/api/feedback`, `/api/context-preview` | Athlete and performance projections; `/api/profile` also carries `first_threshold_estimate` (percent of the run threshold HR, bpm, session count, quality, date range) or null | Auth |
 | GET | `/api/zones` | Local and provider zone configurations | Auth |
 | GET | `/api/activities`, `/api/activities/{id}` | Activity list and detail | Auth |
 | GET | `/api/sync/status`, `/api/sync/jobs/{id}` | Synchronization status and job result | Auth |
@@ -86,6 +86,7 @@ activity IDs no longer resolve.
 | POST | `/api/logs/delete`, `/api/diagnostics/delete` | Clear diagnostics data | CSRF |
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |
 | POST | `/api/equipment/sensor` | Link a recorded sensor to equipment, or unlink it | CSRF |
+| POST | `/api/profile/first-threshold/adopt` | Store the shown first threshold estimate (`percent_lthr`) as the profile's first threshold with origin `estimated`; `replace_measured: true` is needed when a measured value is stored | CSRF |
 | POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/entry/add-product`, `/api/nutrition/sync` | Write, delete or synchronize nutrition entries, or add a saved product to a logged meal | CSRF |
 | POST | `/api/nutrition/yazio/check` | Explicitly check Yazio authentication and record an in-memory result | CSRF |
 | POST | `/api/providers/{id}/check` | Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result | CSRF |

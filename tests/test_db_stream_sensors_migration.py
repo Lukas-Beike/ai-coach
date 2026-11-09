@@ -27,7 +27,7 @@ from backend.db.schema import (
     database_schema_signature,
     initialize_schema,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V23
+from backend.db.schema_history import SHAPE_SCHEMA_V23, SHAPE_SCHEMA_V24
 
 RELEASES = (21, 22, 23)
 NEW_COLUMNS = ("hr_source", "power_source", "sensors")
@@ -37,7 +37,11 @@ WHERE = "WHERE provider = ? AND provider_activity_id = ? AND detail_kind = ?"
 
 def detail_rows(db: sqlite3.Connection) -> list[dict[str, Any]]:
     return [
-        {k: v for k, v in dict(row).items() if k not in (*NEW_COLUMNS, "set_source")}
+        {
+            k: v
+            for k, v in dict(row).items()
+            if k not in (*NEW_COLUMNS, "set_source", "dfa_alpha1")
+        }
         for row in db.execute(
             "SELECT * FROM activity_detail_sets ORDER BY provider, "
             "provider_activity_id, detail_kind"
@@ -125,7 +129,7 @@ class StreamSensorsMigrationTests(unittest.TestCase):
                 with (
                     mock.patch.dict(
                         migrations.UPGRADE_STEPS,
-                        {SHAPE_SCHEMA_V23: (SHAPE_CURRENT, failing_last_step)},
+                        {SHAPE_SCHEMA_V23: (SHAPE_SCHEMA_V24, failing_last_step)},
                     ),
                     self.assertRaisesRegex(RuntimeError, "injected"),
                 ):

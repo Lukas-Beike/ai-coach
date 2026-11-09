@@ -719,6 +719,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
             threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
             run_lthr_on=lambda day: RUN_LTHR.on(day),
+            run_lthr_resolver=lambda: RUN_LTHR.day_resolver(),
         ),
     )
 )
@@ -1441,6 +1442,7 @@ COACH_CONTEXT = CoachContextAssembly(
             ),
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
             threshold_warnings=lambda: THRESHOLD_WARNINGS.read(),
+            first_threshold_estimate=lambda: ATHLETE_DATA.first_threshold().estimate(),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -2295,6 +2297,7 @@ HTTP_API = HttpApiAssembly(
                 activity_feedback=ATHLETE_DATA.activity_feedback,
                 session_corrections=ATHLETE_DATA.session_corrections,
                 zones=ATHLETE_DATA.zones,
+                first_threshold=ATHLETE_DATA.first_threshold,
                 body_export=lambda profile, revision, deadline: (
                     GARMIN_ASSEMBLY.body_export(ATHLETE_DATA.profile()).export(
                         profile, revision, deadline

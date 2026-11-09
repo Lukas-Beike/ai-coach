@@ -551,7 +551,7 @@ function focusChipSpec(entry) {
   return { kind: derived ? "focus-derived" : "focus", text: [derived ? "≈" : null, label, intensity].filter(Boolean).join(" "), derived };
 }
 
-const HR_CAP_SOURCE_LABELS = { default: "Standard", measured: "gemessen" };
+const HR_CAP_SOURCE_LABELS = { default: "Standard", measured: "gemessen", estimated: "geschätzt" };
 
 function hrCapChipSpec(entry) {
   const percent = Number(entry?.hr_cap?.percent_lthr);

@@ -32,6 +32,10 @@ REPLAYED_BY: Final[dict[str, tuple[str, ...]]] = {
         "fit_activity_detail_mapping",
         "garmin_activity_detail_mapping",
     ),
+    "fit_rr_mapping": (
+        "fit_activity_detail_mapping",
+        "garmin_activity_detail_mapping",
+    ),
     "fit_sensor_mapping": (
         "fit_activity_detail_mapping",
         "garmin_activity_detail_mapping",
@@ -55,16 +59,20 @@ NOT_REPLAYED: Final[dict[str, str]] = {
 # Module -> (replaying versions, code fingerprint).
 PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     "fit_activity_detail_mapping": (
-        (5, 6),
-        "8f61a5149cb2a3de3eb218315550fe95e602d6a2fd2c4ebb0232a6599c98f6dc",
+        (6, 7),
+        "6e968074b68571721e6d8291eaa14a32dbb223cfc3588013dc157f611e38adce",
+    ),
+    "fit_rr_mapping": (
+        (6, 7),
+        "4319aab924017281cffb92b24b53fa67ed8633d747b55e9f61f57b58821c6981",
     ),
     "fit_sensor_mapping": (
-        (5, 6),
+        (6, 7),
         "2953aba79c668bb9ef9561fe5f80cea406b399d609301730fc8e79e95ef3626f",
     ),
     "garmin_activity_detail_mapping": (
-        (6,),
-        "11c11e6384a73b1f38e970b639245c3b5bf110e710a48f14d5c3bb6b1c78d389",
+        (7,),
+        "ba1a73d275ee6a7dc6f3ca056d43738236fd95a1fe6a2f443df576d66fa725f7",
     ),
     "garmin_activity_mapping": (
         (20,),

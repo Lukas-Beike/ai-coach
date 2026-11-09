@@ -407,6 +407,7 @@ function renderProfileSummary(profile) {
 }
 
 function renderProfile(profile) {
+  renderFirstThresholdEstimate(state.data?.first_threshold_estimate, profile);
   setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
   if (state.profileDirty) return;
   const form = $("#profileForm");
@@ -414,6 +415,27 @@ function renderProfile(profile) {
   if (form.elements.coaching_style?.value === "Supportive, direct, and evidence-aware") form.elements.coaching_style.value = "Unterstützend, direkt und evidenzbasiert";
   state.profileBaseline = profileFormValues(form);
   renderProfileSummary(profile);
+}
+
+const FIRST_THRESHOLD_QUALITY_LABELS = { good: "gut", low: "niedrig" };
+
+function firstThresholdEstimateText(estimate) {
+  const percent = `${String(estimate.percent_lthr).replace(".", ",")} % LSHF`;
+  const sessions = `${estimate.sessions} ${estimate.sessions === 1 ? "Einheit" : "Einheiten"}`;
+  const quality = `Qualität ${FIRST_THRESHOLD_QUALITY_LABELS[estimate.quality] || estimate.quality}`;
+  return ["Schätzung", Number.isFinite(estimate.bpm) ? `${estimate.bpm} bpm` : null, percent, sessions, quality].filter(Boolean).join(" · ");
+}
+
+function renderFirstThresholdEstimate(estimate, profile = {}) {
+  const box = document.getElementById("firstThresholdEstimate");
+  if (!box) return;
+  box.hidden = !estimate;
+  if (estimate) {
+    document.getElementById("firstThresholdEstimateText").textContent = firstThresholdEstimateText(estimate);
+    box.dataset.percent = String(estimate.percent_lthr);
+  }
+  const stored = document.getElementById("firstThresholdStoredLabel");
+  if (stored) stored.textContent = profile?.first_threshold_pct && profile.first_threshold_origin === "estimated" ? "Gespeichert (% LSHF, geschätzt)" : "Gespeichert (% LSHF)";
 }
 
 function renderModelChoice(model, selectId, descriptionId) {

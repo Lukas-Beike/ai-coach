@@ -69,7 +69,9 @@ TimeoutErrorFactory = Callable[[], Exception]
 # Version 14 adds provider_settings.json, the stored non-secret provider fields.
 # Version 15 adds activity_detail_sets.hr_source, power_source and sensors
 # (schema v24).
-PRIVACY_EXPORT_FORMAT_VERSION = 15
+# Version 16 adds activity_detail_sets.dfa_alpha1, the stored first threshold
+# estimate of a chest-strap stream set (schema v25).
+PRIVACY_EXPORT_FORMAT_VERSION = 16
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",

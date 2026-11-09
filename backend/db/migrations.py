@@ -16,6 +16,7 @@ from typing import Any, Final
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     FEEDBACK_PURPOSE_DDL,
+    STREAM_DFA_DDL,
     STREAM_SENSORS_DDL,
     database_schema_is_current,
     database_schema_signature,
@@ -28,6 +29,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V21,
     SHAPE_SCHEMA_V22,
     SHAPE_SCHEMA_V23,
+    SHAPE_SCHEMA_V24,
     released_shape,
 )
 from backend.db.strength_sets_migration import add_strength_sets
@@ -119,8 +121,15 @@ def _upgrade_v23_to_v24(db: Any) -> None:
     execute_ddl(db, STREAM_SENSORS_DDL)
 
 
+def _upgrade_v24_to_v25(db: Any) -> None:
+    # Adds the first threshold estimate of stream sets; every detail row stays as
+    # it was and carries no estimate (NULL) until its activity is mapped again.
+    execute_ddl(db, STREAM_DFA_DDL)
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V21: (SHAPE_SCHEMA_V22, _upgrade_v21_to_v22),
     SHAPE_SCHEMA_V22: (SHAPE_SCHEMA_V23, _upgrade_v22_to_v23),
-    SHAPE_SCHEMA_V23: (SHAPE_CURRENT, _upgrade_v23_to_v24),
+    SHAPE_SCHEMA_V23: (SHAPE_SCHEMA_V24, _upgrade_v23_to_v24),
+    SHAPE_SCHEMA_V24: (SHAPE_CURRENT, _upgrade_v24_to_v25),
 }
