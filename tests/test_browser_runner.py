@@ -446,10 +446,38 @@ class BrowserRunnerTests(unittest.TestCase):
         code, value, _path = self.run_main(FakeProcesses(), current=False)
         self.assertEqual(code, 0)
         self.assertIs(False, value["images"]["application_matches_source"])
-        self.assertIn("docker build -t pacecraft:e2e .", self.stderr)
+        self.assertIn(
+            f"docker build -t {runner.worktree_image_tag(runner.ROOT)} .", self.stderr
+        )
         for current in (True, None):
             self.run_main(FakeProcesses(), current=current)
             self.assertNotIn("Warning", self.stderr)
+
+    def test_each_checkout_gets_its_own_application_image_tag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory) / "first", Path(directory) / "second"
+            first.mkdir()
+            second.mkdir()
+            tag = runner.worktree_image_tag(first)
+            self.assertRegex(tag, r"^pacecraft:e2e-[0-9a-f]{8}$")
+            self.assertEqual(tag, runner.worktree_image_tag(first))
+            self.assertEqual(tag, runner.worktree_image_tag(first / "." / "../first"))
+            self.assertNotEqual(tag, runner.worktree_image_tag(second))
+        self.assertEqual(
+            runner.worktree_image_tag(runner.ROOT),
+            runner.parser().parse_args(["--project", "all"]).image,
+        )
+
+    def test_print_image_needs_no_project_and_starts_nothing(self):
+        with (
+            mock.patch.object(runner, "Processes") as processes,
+            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            self.assertEqual(0, runner.main(["--print-image"]))
+        self.assertEqual(
+            runner.worktree_image_tag(runner.ROOT), stdout.getvalue().strip()
+        )
+        processes.assert_not_called()
 
     def test_image_source_comparison_hashes_content_and_ignores_bytecode(self):
         with tempfile.TemporaryDirectory() as directory:

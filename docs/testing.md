@@ -111,12 +111,13 @@ current application source before running locally:
 ```powershell
 npm ci --ignore-scripts
 node node_modules/@playwright/test/cli.js install chromium
-docker build -t pacecraft:e2e .
+docker build -t "$(python scripts/run_browser_tests.py --print-image)" .
 python scripts/run_browser_tests.py --project all --list
 python scripts/run_browser_tests.py --project mobile-small --spec e2e/css-cascade.spec.js
 python scripts/run_browser_tests.py --project all --jobs 1 --cache-state warm
 ```
 
+The image tag is per checkout, so parallel worktrees keep their own builds.
 `--list` starts no containers. A project/spec selection reports its focused scope;
 unknown projects, missing specs, invalid shards and empty selections fail. Desktop
 runs every functional contract, and the four smaller projects repeat only
