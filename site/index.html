@@ -3,120 +3,155 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#10120f">
-  <meta name="description" content="Meet Pacecraft: a private, self-hosted AI training coach for endurance athletes. Explore the features, product previews, and roadmap.">
-  <title>Pacecraft · AI Coach — Training, with context</title>
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0b1111">
+  <meta name="description" content="Pacecraft · AI Coach is a private, self-hosted training app for one athlete: Garmin and Wahoo data, an encrypted local database and an AI coach that plans and analyses.">
+  <title>Pacecraft · AI Coach</title>
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
+  <a class="skip" href="#main">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="#top" aria-label="Pacecraft home">
-      <img src="assets/mark.svg" width="34" height="34" alt="">
-      <span>Pace<b>craft</b></span>
-    </a>
-    <nav aria-label="Main navigation">
-      <a href="#features">Features</a>
-      <a href="#preview">Preview</a>
-      <a href="#roadmap">Roadmap</a>
-      <a class="nav-cta" href="https://github.com/Lukas-Beike/pacecraft">Explore on GitHub <span aria-hidden="true">↗</span></a>
-    </nav>
+    <div class="wrap">
+      <a class="brand" href="#top"><img src="assets/mark.svg" width="34" height="34" alt=""><span>Pacecraft <small>· AI Coach</small></span></a>
+      <nav aria-label="Main">
+        <ul>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#screens">Screens</a></li>
+          <li><a href="#data">Data</a></li>
+          <li><a class="nav-cta" href="#self-host">Self-host</a></li>
+        </ul>
+      </nav>
+    </div>
   </header>
 
-  <main id="top">
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="overline"><span class="pulse"></span> PERSONAL TRAINING, WITH CONTEXT</p>
-        <h1>Your training has a story.<br><span>Coach it forward.</span></h1>
-        <p class="hero-lede">A private AI coach that brings your training, recovery, schedule, and goals into one ongoing conversation.</p>
-        <div class="hero-actions">
-          <a class="button button-primary" href="https://github.com/Lukas-Beike/pacecraft">Explore the project <span aria-hidden="true">↗</span></a>
-          <a class="button button-quiet" href="#preview">See the app <span aria-hidden="true">↓</span></a>
-        </div>
-        <div class="hero-notes"><span><i>✓</i> Self-hosted</span><span><i>✓</i> Built for one athlete</span><span><i>✓</i> Open source</span></div>
-      </div>
-      <div class="hero-art" aria-label="Preview of the Pacecraft chat with a synthetic training week">
-        <div class="art-glow"></div>
-        <div class="app-shell app-chat">
-          <div class="app-top"><div class="app-brand"><span class="mini-mark">↗</span> Coach</div><span class="live-tag"><i></i> YOUR TRAINING SPACE</span></div>
-          <div class="chat-content">
-            <div class="day-stamp">TUESDAY · 7:18 AM</div>
-            <div class="chat-bubble athlete">How should I approach the rest of this week?</div>
-            <div class="coach-answer"><div class="coach-avatar">IC</div><div><b>A balanced week is taking shape.</b><p>You have a steady ride behind you and a quality run ahead. Keep today easy so you can get the most from Thursday’s intervals.</p></div></div>
-            <div class="workout-preview"><div class="workout-icon">↗</div><div><b>Easy aerobic run</b><small>40 min <span>·</span> comfortable pace</small></div><span class="status-chip">PLANNED</span></div>
-            <div class="composer-preview"><span>Ask your coach…</span><span class="send-dot">↑</span></div>
+  <main id="main">
+    <div class="hero" id="top">
+      <div class="wrap">
+        <div>
+          <p class="eyebrow">Self-hosted · one athlete</p>
+          <h1>Pace and power, planned and analysed by <em>your AI coach.</em></h1>
+          <p class="lede">A private training app for running, cycling and strength. It reads your Garmin and Wahoo data, keeps everything in an encrypted local database, and coaches you in a chat that knows your calendar, load and recovery.</p>
+          <div class="actions">
+            <a class="button button-primary" href="https://github.com/Lukas-Beike/pacecraft#quick-start">Self-host it</a>
+            <a class="button button-quiet" href="https://github.com/Lukas-Beike/pacecraft">View on GitHub</a>
           </div>
-          <div class="app-foot"><span>Coach</span><span>Calendar</span><span>Analysis</span><span>Nutrition</span></div>
         </div>
-        <div class="floating-note"><span class="note-icon">✳</span><span><b>Built around your week</b><small>Plan · activity · recovery</small></span></div>
-        <span class="art-index">01 / YOUR COACH</span>
+        <div class="phones">
+          <figure class="phone"><img src="assets/screens/coach.png" width="780" height="1400" alt=""></figure>
+          <figure class="phone"><img src="assets/screens/calendar.png" width="780" height="1400" alt=""></figure>
+        </div>
       </div>
-      <div class="hero-bottom"><span>MADE FOR ENDURANCE ATHLETES</span><span class="bottom-line"></span><span>PRIVATE BY DESIGN</span></div>
+    </div>
+
+    <div class="facts">
+      <div class="wrap">
+        <ul>
+          <li><b>Garmin and Wahoo in</b><span>Activities, sleep, HRV and thresholds</span></li>
+          <li><b>Intervals.icu out</b><span>Only when you ask, never read</span></li>
+          <li><b>Encrypted database</b><span>SQLCipher on your own server</span></li>
+          <li><b>Open source</b><span>AGPL-3.0, built for one athlete</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <section id="features">
+      <div class="wrap">
+        <h2>What it does</h2>
+        <p class="section-lede">One place for the plan, the sessions behind it and the conversation about both.</p>
+        <div class="features">
+          <article class="feature"><span class="tag">COACH</span><h3>Chat that knows your week</h3><p>Ask in plain language, by voice, or with photos and files. Every change the coach makes comes with a receipt and an undo.</p></article>
+          <article class="feature"><span class="tag">PLANNING</span><h3>Local calendar and library</h3><p>Plan running, cycling and strength. Replanning changes future sessions only after you approve a preview.</p></article>
+          <article class="feature"><span class="tag">ANALYSIS</span><h3>Load, performance, recovery</h3><p>Fitness, fatigue and form, current thresholds, sleep and HRV trends, and every session down to full-resolution charts.</p></article>
+          <article class="feature"><span class="tag">METHODS</span><h3>Computed on your server</h3><p>Eight local performance methods, each with an evidence card that lists its limits and sources.</p></article>
+          <article class="feature"><span class="tag">STRENGTH</span><h3>Named exercises, on your watch</h3><p>Structured strength workouts with named exercises, sent to your Garmin watch when you ask.</p></article>
+          <article class="feature"><span class="tag">NUTRITION</span><h3>Diary with context</h3><p>Local food databases, saved meals and products, and your Garmin energy use next to what you ate.</p></article>
+          <article class="feature"><span class="tag">CONTEXT</span><h3>Weather and calendar</h3><p>Weather, air quality, pollen and your private calendar shape what the coach plans.</p></article>
+          <article class="feature"><span class="tag">SOURCES</span><h3>Every value keeps its source</h3><p>A workout recorded by several devices becomes one session. Values are labelled Garmin, Wahoo, derived or AI estimate.</p></article>
+        </div>
+      </div>
     </section>
 
-    <section class="intro section-pad" id="features">
-      <div class="section-kicker">A COACH THAT SEES THE WHOLE PICTURE</div>
-      <div class="intro-row"><h2>More context.<br><span>Better conversations.</span></h2><p>Pacecraft connects the dots between the session you did, how you’re recovering, and the plan ahead. Ask naturally. Make changes deliberately.</p></div>
-      <div class="feature-grid">
-        <article class="feature-card feature-wide">
-          <div class="feature-icon icon-chat">✳</div><p class="card-label">01 / CONVERSATION</p><h3>Talk training<br>like a person.</h3><p>Ask follow-ups, add context, and explore a decision together. Your coach can keep track of the thread without turning every question into a form.</p>
-          <div class="mini-convo"><div><span class="tiny-dot"></span><b>You</b><p>Move the long ride to Sunday and keep Saturday free.</p></div><div><span class="tiny-dot green"></span><b>Coach</b><p>Done as a preview. Want to review the updated week?</p></div></div>
-        </article>
-        <article class="feature-card feature-calendar">
-          <div class="feature-icon icon-calendar">▦</div><p class="card-label">02 / PLANNING</p><h3>Plan with<br>your life in view.</h3><p>Review planned and completed sessions, check-ins, and schedule constraints in a clear training calendar.</p>
-          <div class="week-strip"><div><small>MON</small><b>REST</b></div><div><small>TUE</small><b>RUN</b><i></i></div><div><small>WED</small><b>RIDE</b><i></i></div><div><small>THU</small><b>RUN</b><i></i></div><div><small>FRI</small><b>REST</b></div><div><small>SAT</small><b>RIDE</b><i></i></div><div><small>SUN</small><b>—</b></div></div>
-        </article>
-        <article class="feature-card feature-analysis">
-          <div class="feature-icon icon-chart">⌁</div><p class="card-label">03 / PERFORMANCE</p><h3>See how<br>you’re trending.</h3><p>Explore load, performance, body, and recovery history. Measurements keep their source and missing days stay missing.</p>
-          <div class="chart-preview"><div class="chart-title"><b>Training load</b><span>LAST 14 DAYS</span></div><svg viewBox="0 0 520 116" role="img" aria-label="Illustrative training load line chart"><path class="chart-grid" d="M0 24H520M0 57H520M0 90H520"/><path class="chart-fill" d="M0 85 C30 82 35 70 66 76 S103 80 126 54 S170 50 193 59 S231 25 260 39 S299 58 326 42 S362 35 389 47 S421 51 450 20 S485 37 520 13 L520 116 L0 116Z"/><path class="chart-line" d="M0 85 C30 82 35 70 66 76 S103 80 126 54 S170 50 193 59 S231 25 260 39 S299 58 326 42 S362 35 389 47 S421 51 450 20 S485 37 520 13"/></svg><div class="chart-dates"><span>JUN 03</span><span>JUN 10</span><span>JUN 16</span></div></div>
-        </article>
-        <article class="feature-card feature-privacy">
-          <div class="feature-icon icon-lock">⌑</div><p class="card-label">04 / YOUR DATA</p><h3>Your training data<br>stays yours.</h3><p>Self-host the app on a trusted network. Athlete records are stored in an encrypted local database, and provider writes require your explicit action.</p>
-          <div class="privacy-visual"><span class="lock-shape">▣</span><div><b>Encrypted at rest</b><small>Stored with your instance</small></div><span class="privacy-check">✓</span></div>
-        </article>
-        <article class="feature-card feature-connect">
-          <div class="feature-icon icon-link">⤳</div><p class="card-label">05 / CONNECTED CONTEXT</p><h3>Bring your<br>training sources together.</h3><p>Use Intervals.icu and optional Garmin data alongside local check-ins, calendar constraints, and weather context.</p>
-          <div class="provider-row"><span class="provider-pill"><i class="provider-bars">▥</i> Intervals.icu</span><span class="provider-pill"><i class="provider-garmin">◈</i> Garmin</span><span class="provider-pill provider-more">+ calendar · weather</span></div>
-        </article>
-        <article class="feature-card feature-ai">
-          <div class="feature-icon icon-ai">✺</div><p class="card-label">06 / AI COACH</p><h3>Coaching that<br>fits your setup.</h3><p>Use the OpenAI Responses API with a server-side credential and local conversation continuity.</p>
-          <div class="provider-row"><span class="provider-pill"><i>✳</i> OpenAI Responses</span><span class="provider-pill provider-more">Configured by you</span></div>
-        </article>
+    <section class="screens" id="screens">
+      <div class="wrap">
+        <h2>The app</h2>
+        <p class="section-lede">An installable, offline-capable web app, built for the phone first. Five areas: Coach, Calendar, Analysis, Nutrition, More.</p>
+        <ul class="shots">
+          <li><figure class="shot"><img src="assets/screens/coach.png" width="780" height="1400" loading="lazy" alt="Coach chat with a question about the training week and the coach's answer."><figcaption><b>Coach</b>Ask, plan and change the week in one conversation.</figcaption></figure></li>
+          <li><figure class="shot"><img src="assets/screens/calendar.png" width="780" height="1400" loading="lazy" alt="Calendar showing one week with completed and planned sessions and their workout profiles."><figcaption><b>Calendar</b>Planned and completed sessions, week by week.</figcaption></figure></li>
+          <li><figure class="shot"><img src="assets/screens/load.png" width="780" height="1404" loading="lazy" alt="Analysis, load tab: training focus split into easy aerobic, high aerobic and anaerobic, and a weekly load chart."><figcaption><b>Load</b>Training focus and weekly load.</figcaption></figure></li>
+          <li><figure class="shot"><img src="assets/screens/performance.png" width="780" height="1404" loading="lazy" alt="Analysis, performance tab: current running and cycling thresholds, estimated values marked as estimates."><figcaption><b>Performance</b>Current thresholds, estimates marked as such.</figcaption></figure></li>
+          <li><figure class="shot"><img src="assets/screens/recovery.png" width="780" height="1404" loading="lazy" alt="Analysis, recovery tab: training readiness and sleep duration charts for the last 14 days."><figcaption><b>Recovery</b>Readiness and sleep over time.</figcaption></figure></li>
+          <li><figure class="shot"><img src="assets/screens/nutrition.png" width="780" height="1404" loading="lazy" alt="Nutrition diary: calories, carbohydrates, protein and fat for one day, with Garmin energy use below."><figcaption><b>Nutrition</b>Diary next to your energy use.</figcaption></figure></li>
+        </ul>
+        <p class="note">Screenshots show the standard synthetic demo data, not a real athlete. The app interface is currently German.</p>
       </div>
-      <p class="synthetic-note">Interface illustrations use synthetic example data and are for product preview only.</p>
     </section>
 
-    <section class="showcase section-pad" id="preview">
-      <div class="showcase-heading"><div><div class="section-kicker">A LOOK INSIDE</div><h2>One training space.<br><span>Several useful views.</span></h2></div><p>Move from a coaching question to your calendar or performance history without losing the thread.</p></div>
-      <div class="screens-grid">
-        <figure class="screen-figure screen-large"><div class="screen-top"><span class="screen-caption">01 — COACH</span><span class="screen-window"><i></i><i></i><i></i></span></div><div class="screen-canvas screen-coach"><div class="screen-sidebar"><b>IC</b><span class="side-active">✳</span><span>▦</span><span>⌁</span><span>◉</span></div><div class="screen-main"><div class="screen-heading"><small>YOUR TRAINING SPACE</small><b>Coach</b></div><div class="screen-day">WEDNESDAY · MORNING CHECK-IN</div><div class="screen-user">I slept well and my legs feel good. What should I focus on today?</div><div class="screen-reply"><b>That’s a good setup for your planned ride.</b><p>Your recent load is steady. Keep the first part controlled, then follow the intervals in your workout. Check in again if how you feel changes.</p><div class="reply-source"><span>●</span> TRAINING CONTEXT · UPDATED TODAY</div></div><div class="screen-plan"><span class="plan-glyph">↗</span><span><b>Tempo intervals</b><small>Bike · 60 min · planned</small></span><span class="plan-arrow">↗</span></div><div class="screen-prompt">Ask your coach… <b>↑</b></div></div></div></figure>
-        <figure class="screen-figure"><div class="screen-top"><span class="screen-caption">02 — TRAINING CALENDAR</span><span class="screen-window"><i></i><i></i><i></i></span></div><div class="screen-canvas screen-calendar"><div class="small-screen-title"><small>TRAINING PLAN</small><b>Calendar</b><span>‹ &nbsp; 10 – 16 June &nbsp; ›</span></div><div class="calendar-week"><div><small>MON 10</small><b>Rest day</b></div><div><small>TUE 11</small><b>Easy run</b><i>40 min · completed</i></div><div><small>WED 12</small><b>Tempo ride</b><i>60 min · planned</i></div><div><small>THU 13</small><b>Recovery</b></div><div><small>FRI 14</small><b>Run intervals</b><i>45 min · planned</i></div><div><small>SAT 15</small><b>Rest day</b></div><div><small>SUN 16</small><b>Long ride</b><i>2 h · planned</i></div></div><div class="week-summary"><span>WEEKLY PLAN</span><b>4 sessions</b><span class="summary-bar"><i></i></span></div></div></figure>
-        <figure class="screen-figure"><div class="screen-top"><span class="screen-caption">03 — PERFORMANCE</span><span class="screen-window"><i></i><i></i><i></i></span></div><div class="screen-canvas screen-performance"><div class="small-screen-title"><small>YOUR HISTORY</small><b>Analysis</b><span>Load &nbsp; Performance &nbsp; Recovery</span></div><div class="metric-cards"><div><small>FITNESS</small><b>42</b><i>CTL · Intervals.icu</i></div><div><small>FATIGUE</small><b>51</b><i>ATL · Intervals.icu</i></div><div><small>FORM</small><b class="metric-green">−9</b><i>TSB · Intervals.icu</i></div></div><div class="performance-chart"><div><b>Fitness &amp; fatigue</b><small>12 WEEKS</small></div><svg viewBox="0 0 540 154" aria-label="Illustrative 12 week fitness and fatigue chart" role="img"><path class="chart-grid" d="M0 28H540M0 68H540M0 108H540M0 148H540"/><path class="chart-line chart-green" d="M0 118 C40 105 65 116 95 91 S155 98 186 73 S240 83 272 60 S318 70 349 46 S400 61 426 35 S476 51 510 24 S530 30 540 14"/><path class="chart-line chart-blue" d="M0 98 C38 88 66 103 96 76 S154 89 184 60 S238 73 270 47 S320 62 350 33 S395 52 430 20 S475 36 510 14 S532 19 540 8"/></svg><div class="chart-legend"><span><i></i> Fitness</span><span><i></i> Fatigue</span><small>GAPS MEAN NO READING</small></div></div></div></figure>
+    <section id="data">
+      <div class="wrap">
+        <h2>Data in, plans out</h2>
+        <p class="section-lede">Training data comes from Garmin and Wahoo. Plans and history live in your database. Intervals.icu is written only when you ask and never read; only the coach conversation goes to your configured OpenAI endpoint.</p>
+        <div class="flow">
+          <div><h3>Garmin · Wahoo</h3><p>Activities, sleep, HRV, daily health and thresholds are read and bundled into one session per workout.</p></div>
+          <div class="arrow" aria-hidden="true">→</div>
+          <div class="core"><h3>Your Pacecraft server</h3><p>An encrypted local database holds sessions, plans, check-ins and conversations. The coach and all analysis work from it.</p></div>
+          <div class="arrow" aria-hidden="true">→</div>
+          <div><h3>Your devices</h3><p>Workouts go to Intervals.icu on request, which keeps them right on Garmin and Zwift. Strength workouts go straight to the Garmin watch, and Wahoo gets plan export on request.</p></div>
+        </div>
+        <table>
+          <caption>Providers and their role</caption>
+          <tbody>
+            <tr><th scope="row">Garmin</th><td><span class="role in">In</span>Activities, details, sleep, HRV, daily health, thresholds. Official Personal API key, optional login for the rest.</td></tr>
+            <tr><th scope="row">Wahoo</th><td><span class="role in">In</span>Activities and FIT files, cycling FTP, weight.</td></tr>
+            <tr><th scope="row">Intervals.icu</th><td><span class="role out">Out</span>Workouts, competitions, nutrition and thresholds, only on explicit synchronization. Never read.</td></tr>
+            <tr><th scope="row">OpenAI</th><td><span class="role">Coach</span>Responses API, or a compatible endpoint you configure. The key stays on the server.</td></tr>
+            <tr><th scope="row">Open-Meteo, DWD, ICS</th><td><span class="role in">In</span>Weather, air quality, pollen and calendar constraints.</td></tr>
+          </tbody>
+        </table>
       </div>
-      <p class="synthetic-note">These are interface previews composed with the standard synthetic demo dataset, not live athlete records.</p>
     </section>
 
-    <section class="roadmap section-pad" id="roadmap">
-      <div class="section-kicker">WHAT’S NEXT</div>
-      <div class="roadmap-head"><h2>Growing with<br><span>your training.</span></h2><p>The roadmap is a direction, not a delivery promise. Provider access and account models need careful design to preserve data control.</p></div>
-      <div class="roadmap-list">
-        <article class="roadmap-item"><span class="roadmap-number">01</span><div><div class="roadmap-state state-building"><i></i> IN PROGRESS</div><h3>Make the core experience clearer</h3><p>Keep improving coaching context, training analysis, and the mobile experience.</p></div><span class="roadmap-arrow">↗</span></article>
-        <article class="roadmap-item"><span class="roadmap-number">02</span><div><div class="roadmap-state state-exploring"><i></i> EXPLORING</div><h3>More fitness providers</h3><p>Evaluate additional activity, health, and training platforms based on useful data and stable APIs.</p></div><span class="roadmap-arrow">↗</span></article>
-        <article class="roadmap-item"><span class="roadmap-number">03</span><div><div class="roadmap-state state-exploring"><i></i> EXPLORING</div><h3>Multi-athlete and coach workspaces</h3><p>Explore whether a tenant-isolated account model can support coaches and teams without weakening privacy or separation.</p></div><span class="roadmap-arrow">↗</span></article>
+    <section class="screens" id="self-host">
+      <div class="wrap host">
+        <div>
+          <h2>Run it yourself</h2>
+          <p class="section-lede">One container, one data folder. You need Docker and a password of at least 12 characters; it is also the database key.</p>
+          <ul>
+            <li><b>Private network only.</b> Run it on a trusted LAN or private VPN, never directly on the internet.</li>
+            <li><b>Keep the data folder.</b> It holds the encrypted database. Never run <code>docker rm -v</code>.</li>
+            <li><b>HTTPS for install and voice.</b> Browsers require it for the app install and voice input.</li>
+          </ul>
+          <div class="actions">
+            <a class="button button-primary" href="https://github.com/Lukas-Beike/pacecraft#quick-start">Quick start</a>
+            <a class="button button-quiet" href="https://github.com/Lukas-Beike/pacecraft/blob/develop/docs/setup.md">Setup guide</a>
+          </div>
+        </div>
+        <pre><code>mkdir -p data &amp;&amp; chown -R 100:101 data
+docker run -d --name pacecraft \
+  --restart unless-stopped \
+  --read-only --cap-drop=ALL \
+  --security-opt no-new-privileges:true \
+  -p 8090:8090 -v "$PWD/data:/data" \
+  --env-file ./.env -e TZ=Europe/Berlin \
+  ghcr.io/lukas-beike/pacecraft:latest</code></pre>
       </div>
-      <div class="roadmap-foot"><span>Have a provider or workflow in mind?</span><a href="https://github.com/Lukas-Beike/pacecraft/issues">Share it on GitHub <b>↗</b></a></div>
-    </section>
-
-    <section class="closing section-pad">
-      <div class="closing-mark"><img src="assets/mark.svg" width="48" height="48" alt=""></div>
-      <p class="section-kicker">YOUR TRAINING. YOUR CALL.</p>
-      <h2>Make the next<br><span>move make sense.</span></h2>
-      <p>Explore the project, see how it works, and decide if it fits your training setup.</p>
-      <a class="button button-primary" href="https://github.com/Lukas-Beike/pacecraft">Explore Pacecraft <span aria-hidden="true">↗</span></a>
-      <small>Self-hosted · AGPL-3.0 · Built for your private network</small>
     </section>
   </main>
 
-  <footer class="site-footer"><a class="brand" href="#top"><img src="assets/mark.svg" width="28" height="28" alt=""><span>Pace<b>craft</b></span></a><span>Personal training software, built in the open.</span><div><a href="https://github.com/Lukas-Beike/pacecraft">GitHub</a><a href="https://github.com/Lukas-Beike/pacecraft/blob/main/LICENSE">AGPL-3.0</a></div></footer>
+  <footer>
+    <div class="wrap">
+      <ul>
+        <li><a href="https://github.com/Lukas-Beike/pacecraft">GitHub</a></li>
+        <li><a href="https://github.com/Lukas-Beike/pacecraft/blob/develop/docs/features.md">All features</a></li>
+        <li><a href="https://github.com/Lukas-Beike/pacecraft/blob/develop/docs/performance-methods/README.md">Performance methods</a></li>
+        <li><a href="https://github.com/Lukas-Beike/pacecraft/blob/develop/docs/canonical-model.md">Data model</a></li>
+        <li><a href="https://github.com/Lukas-Beike/pacecraft/issues">Issues</a></li>
+        <li><a href="https://github.com/Lukas-Beike/pacecraft/blob/develop/LICENSE">AGPL-3.0</a></li>
+      </ul>
+      <p>Pacecraft is a personal planning assistant, not a medical device. Stop at sharp pain, dizziness or signs of overtraining, and consult a physician before high-intensity training or when recovering from illness or injury.</p>
+    </div>
+  </footer>
 </body>
 </html>
