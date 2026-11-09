@@ -165,15 +165,8 @@ class HistoricalSyncJobOwner:
     def queue_next(
         self, job: dict[str, Any], result: Any, fallback_status: str
     ) -> None:
-        # A partial chunk stops the chain: providers advance their historical
-        # cursor only for complete windows, so continuing would skip the gap.
         job_type = str(job.get("type") or "")
-        if not (
-            job_type in BACKFILL_JOB_TYPES
-            and isinstance(result, dict)
-            and result.get("historical_next_end")
-            and fallback_status == "completed"
-        ):
+        if not backfill_continues(job, result, fallback_status):
             return
         next_end = result["historical_next_end"]
         # A chunk that ran again (a retry or a restart) may already have queued
@@ -659,8 +652,28 @@ def is_retired_intervals_ingest_job(job: Mapping[str, Any]) -> bool:
     )
 
 
+def backfill_continues(
+    job: Mapping[str, Any], result: Any, fallback_status: str
+) -> bool:
+    """Return whether a finished backfill chunk hands over to a next chunk.
+
+    A partial chunk stops the chain: providers advance their historical cursor
+    only for complete windows, so continuing would skip the gap.
+    """
+    return bool(
+        str(job.get("type") or "") in BACKFILL_JOB_TYPES
+        and isinstance(result, dict)
+        and result.get("historical_next_end")
+        and fallback_status == "completed"
+    )
+
+
 class SyncJobExecutor:
-    """Run one claimed job and persist its outcome and any backfill follow-up."""
+    """Run one claimed job and persist its outcome and any backfill follow-up.
+
+    A backfill chunk that hands over to a next chunk skips the completion hook;
+    the chunk that ends the chain runs it once for the whole walk.
+    """
 
     def __init__(
         self,
@@ -691,6 +704,7 @@ class SyncJobExecutor:
             result = self.execute(job)
             fallback_status = self._outcome_service.complete(job["id"], result)
             self._historical_sync.queue_next(job, result, fallback_status)
+            chain_continues = backfill_continues(job, result, fallback_status)
         except Exception as exc:  # noqa: BLE001 - runner persists every execution failure
             try:
                 self._outcome_service.record_failure(job, exc)
@@ -713,7 +727,8 @@ class SyncJobExecutor:
                         extra={"event": "sync_job_last_resort_failed"},
                     )
         else:
-            self._run_after_job(job)
+            if not chain_continues:
+                self._run_after_job(job)
 
     def _run_after_job(self, job: Mapping[str, Any]) -> None:
         """Run the completion hook; its failure never changes the job outcome."""

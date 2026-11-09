@@ -16,7 +16,7 @@ from typing import Any
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.runtime.memory import process_memory
-from backend.sync.refresh import ProviderRefreshTracker
+from backend.sync.refresh import SKIPPED_OPERATION_REASONS, ProviderRefreshTracker
 
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar(
     "operation_context", default=None
@@ -205,11 +205,19 @@ class SyncOperationObserver:
         if isinstance(error, AppError) and error.reason == "chat_cancelled":
             self._refresh_tracker.finish(refresh_id, "skipped", "cancelled")
             return
+        if isinstance(error, AppError) and error.reason in SKIPPED_OPERATION_REASONS:
+            # A deliberate hold (a full resync is running), not a provider error.
+            self._refresh_tracker.finish(refresh_id, "skipped", "held")
+            return
+        retry_after = getattr(error, "retry_after_seconds", None)
+        # A provider-named wait moves the next automatic attempt, never earlier.
+        extra = {"retry_after_seconds": retry_after} if retry_after else {}
         self._refresh_tracker.finish(
             refresh_id,
             "error",
             "failed",
             error_code=ProviderRefreshTracker.error_code(error),
+            **extra,
         )
 
     def _log(

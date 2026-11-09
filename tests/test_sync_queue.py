@@ -87,6 +87,14 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
         with self.manager.unit_of_work() as db:
             db.execute("UPDATE sync_jobs SET status=? WHERE id=?", (status, job_id))
 
+    def test_prune_runs_at_most_once_per_interval(self):
+        self.store.prune_finished = Mock(return_value=3)
+
+        self.assertEqual(self.service.prune_finished(), 3)
+        self.assertEqual(self.service.prune_finished(), 0)
+
+        self.store.prune_finished.assert_called_once_with()
+
     def test_enqueue_persists_wakes_and_publishes_safe_created_event(self):
         result = self.service.enqueue("garmin", payload={"reason": "manual"})
 
@@ -103,7 +111,6 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
                 "progress": {"completed": 0, "total": 1},
             },
         )
-
 
     def test_enqueue_maps_request_and_store_validation_errors(self):
         invalid_request = self._app_error(lambda: self.service.enqueue("unsupported"))
@@ -133,7 +140,6 @@ class SyncJobQueueServiceTests(SyncQueueFixtureMixin, unittest.TestCase):
         self.assertEqual(self.service.list(), [])
         self.assertFalse(self.wake_event.is_set())
         self.publisher.publish.assert_not_called()
-
 
     def test_resume_wakes_only_when_interrupted_jobs_were_resumed(self):
         self.assertEqual(self.service.resume_interrupted(), 0)

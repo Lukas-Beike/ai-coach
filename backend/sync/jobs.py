@@ -14,8 +14,8 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, date, datetime
+from collections.abc import Callable, Collection, Mapping, Sequence
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
@@ -86,6 +86,12 @@ RETRYABLE_ERROR_CLASSES = frozenset(
     }
 )
 SYNC_JOB_LIST_LIMIT = 50
+# Retention of finished jobs: a completed job is pruned once it is older than
+# the age bound, and the newest SYNC_JOB_KEEP_NEWEST jobs of any status stay
+# regardless. Queued, running, failed and partial jobs are never pruned: they
+# are work in flight or need the athlete's attention.
+SYNC_JOB_RETENTION_DAYS = 30
+SYNC_JOB_KEEP_NEWEST = 200
 SYNC_JOB_MAX_ATTEMPTS = 3
 MAX_JOB_REFRESH_DAYS = 3660
 MAX_EMPTY_BACKFILL_CHUNKS = 100
@@ -639,12 +645,15 @@ class SyncJobStore:
         *,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
         foreground_busy: Callable[[], bool] | None = None,
+        held_providers: Callable[[], Collection[str]] | None = None,
     ):
         self._database_manager = database_manager
         self._now = now
         self._uuid_factory = uuid_factory
         self._registry = registry
         self._foreground_busy = foreground_busy
+        # Providers whose queued jobs stay unclaimed (a running full resync).
+        self._held_providers = held_providers
 
     def state(self, job_id: str) -> dict[str, Any] | None:
         # Job reads are pure SELECTs: a WAL snapshot never waits behind a sync.
@@ -660,6 +669,38 @@ class SyncJobStore:
     def active(self, provider: str, job_type: str) -> bool:
         with self._database_manager.reader() as db:
             return has_active_job(db, provider, job_type)
+
+    def prune_finished(
+        self,
+        *,
+        retention_days: int = SYNC_JOB_RETENTION_DAYS,
+        keep_newest: int = SYNC_JOB_KEEP_NEWEST,
+    ) -> int:
+        """Delete old completed jobs and their items; return how many jobs went.
+
+        A job is pruned only when it completed more than ``retention_days`` ago
+        and is not among the ``keep_newest`` most recently created jobs.
+        """
+        now = datetime.fromisoformat(self._now())
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
+        cutoff = (now - timedelta(days=max(1, retention_days))).isoformat()
+        with self._database_manager.unit_of_work() as db:
+            stale = (
+                "SELECT id FROM sync_jobs WHERE status='completed' "
+                "AND COALESCE(finished_at, updated_at, created_at) < ? "
+                "AND id NOT IN (SELECT id FROM sync_jobs "
+                "ORDER BY created_at DESC, id DESC LIMIT ?)"
+            )
+            parameters = (cutoff, max(0, keep_newest))
+            db.execute(
+                f"DELETE FROM sync_job_items WHERE job_id IN ({stale})", parameters
+            )
+            return int(
+                db.execute(
+                    f"DELETE FROM sync_jobs WHERE id IN ({stale})", parameters
+                ).rowcount
+            )
 
     def has_backfill_continuation(
         self,
@@ -800,17 +841,26 @@ class SyncJobStore:
         """Claim the oldest due job; backfill jobs yield to all other work.
 
         While the Coach has queued or running work, backfill jobs stay queued so
-        the single database writer remains free for the athlete's request.
+        the single database writer remains free for the athlete's request. Jobs
+        of a provider whose full resync is running stay queued as well: they are
+        neither claimed nor charged an attempt, and run once the resync ends.
         """
         now = self._now()
         hold_backfill = self._foreground_busy is not None and self._foreground_busy()
+        held = tuple(self._held_providers()) if self._held_providers else ()
         with self._database_manager.unit_of_work() as db:
             candidate = db.execute(
                 "SELECT id FROM sync_jobs WHERE status='queued' "
                 "AND (available_at IS NULL OR available_at<=?) "
                 + (f"AND type NOT IN {_BACKFILL_TYPES_SQL} " if hold_backfill else "")
+                # Placeholders only; the provider names are bound parameters.
+                + (
+                    f"AND provider NOT IN ({', '.join('?' * len(held))}) "
+                    if held
+                    else ""
+                )
                 + f"ORDER BY type IN {_BACKFILL_TYPES_SQL}, created_at, id LIMIT 1",
-                (now,),
+                (now, *held),
             ).fetchone()
             if not candidate:
                 return None

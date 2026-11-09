@@ -294,7 +294,14 @@ from backend.privacy import (
     PrivacyPlanningSources,
     PrivacyStateDependencies,
 )
-from backend.provider_credentials import GARMIN_SOURCE_DB, ProviderCredentialService
+from backend.provider_credentials import (
+    GARMIN_SOURCE_DB,
+    GARMIN_TOKENS_KEY,
+    GARMIN_TOKENSTORE_STATE_KEY,
+    PROVIDER_CREDENTIALS_KEY,
+    WAHOO_TOKENS_KEY,
+    ProviderCredentialService,
+)
 from backend.providers import activity_weather as activity_weather_provider
 from backend.providers import air_quality as air_quality_provider
 from backend.providers import audio as audio_provider
@@ -307,6 +314,7 @@ from backend.providers.connection_check_probes import (
     build_probes as build_connection_probes,
 )
 from backend.providers.connection_checks import ProviderConnectionChecks
+from backend.providers.descriptors import GARMIN_ID, WAHOO_ID
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
     ModelBackgroundPolicy,
@@ -387,6 +395,7 @@ from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
     WAHOO_RESYNC_GATE,
+    resetting_providers,
 )
 from backend.sync.library import workout_library_sync_running
 from backend.sync.library_assembly import (
@@ -434,6 +443,7 @@ from backend.sync.queue_assembly import (
     SyncQueuePolicy,
     SyncQueueWorker,
 )
+from backend.sync.retry_hold import ProviderRetryHold
 from backend.sync.scheduler_assembly import (
     DailySyncLoopSettings,
     SyncScheduleControls,
@@ -1131,6 +1141,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
             retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
             registry=DEFAULT_PROVIDER_REGISTRY,
             foreground_busy=_coach_foreground_busy,
+            held_providers=resetting_providers,
         ),
     )
 )
@@ -1550,6 +1561,13 @@ COACH_PROPOSALS = CoachProposalAssembly(
     )
 )
 
+# Derived passes (local load, canonical backfill, Wahoo metric export) after any
+# provider read: a queued job, a Coach request that waits and a full resync.
+DERIVED_PASS_HOOK = chained_after_job(
+    refresh_after_job(lambda: start_canonical_backfill()),
+    lambda job: METRIC_EXPORT_RUNNER.after_job(job),
+)
+
 PROVIDER_RESYNC = ProviderResyncAssembly(
     dependencies=ProviderResyncAssembly.Inputs(
         competition=CompetitionSyncOwners(
@@ -1574,6 +1592,7 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
             uuid_factory=lambda: uuid.uuid4().hex,
             monotonic=time.perf_counter,
             operation_observer=PROVIDER_SYNC.operation_observer,
+            after_resync=DERIVED_PASS_HOOK,
         ),
     ),
     provider_runtime=provider_runtime,
@@ -1620,10 +1639,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     dependencies=SYNC_JOB_DEPENDENCIES,
     provider_runtime=provider_runtime,
-    after_job=chained_after_job(
-        refresh_after_job(lambda: start_canonical_backfill()),
-        lambda job: METRIC_EXPORT_RUNNER.after_job(job),
-    ),
+    after_job=DERIVED_PASS_HOOK,
 )
 
 
@@ -1636,6 +1652,21 @@ SYNC_JOB_WORKER_ASSEMBLY = SyncJobWorkerAssembly(
 )
 
 
+# The daily schedule follows the history's next_retry_at; an auth failure waits
+# for the athlete (manual refresh, restart or changed credentials).
+PROVIDER_RETRY_HOLD = ProviderRetryHold(
+    lambda: database_manager(),
+    lambda: datetime.now(UTC),
+    credential_keys={
+        GARMIN_ID: (
+            PROVIDER_CREDENTIALS_KEY,
+            GARMIN_TOKENS_KEY,
+            GARMIN_TOKENSTORE_STATE_KEY,
+        ),
+        WAHOO_ID: (PROVIDER_CREDENTIALS_KEY, WAHOO_TOKENS_KEY),
+    },
+)
+
 SYNC_SCHEDULERS = SyncSchedulerAssembly(
     dependencies=SyncSchedulerAssembly.Inputs(
         owners=SyncScheduleOwners(
@@ -1646,6 +1677,7 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
         ),
         persistence=SyncSchedulePersistence(
             sync_state_repository=sync_state_repository,
+            retry_held=PROVIDER_RETRY_HOLD.held,
         ),
         controls=SyncScheduleControls(
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
@@ -1676,6 +1708,7 @@ SYNC_COMMANDS = SyncCommandAssembly(
         planning_revision=PLANNING_REVISION_SERVICE,
         utc_now=runtime_clock.utc_now,
         training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
+        after_refresh=DERIVED_PASS_HOOK,
     ),
     illness_pause=IllnessPauseDependencies(
         config=lambda: CONFIG,

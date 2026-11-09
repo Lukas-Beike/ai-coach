@@ -48,9 +48,12 @@ class DailySyncScheduler:
         config: DailySyncSchedulerConfig,
         schedule_policies: Mapping[str, ProviderSchedulePolicy] | None = None,
         registry: ProviderRegistry | None = None,
+        retry_held: Callable[[str], bool] | None = None,
     ) -> None:
         self._queue = queue
         self._markers = markers
+        # True while a provider's failed refresh says its retry is not due yet.
+        self._retry_held = retry_held
         self._maintenance_gate = maintenance_gate
         self._config = config
         self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
@@ -85,6 +88,8 @@ class DailySyncScheduler:
             return
         if policy.blocked() or self._queue.active(provider_id):
             return
+        if self._retry_held is not None and self._retry_held(provider_id):
+            return
         self._queue.enqueue(
             provider_id,
             "refresh",
@@ -104,7 +109,9 @@ class DailySyncLoop:
         sleep: Callable[[float], None],
         logger: logging.Logger,
         stop_event: threading.Event | None = None,
+        housekeeping: Callable[[], object] | None = None,
     ) -> None:
+        self._housekeeping = housekeeping
         self._daily_scheduler = daily_scheduler
         self._morning_battery = morning_battery
         self._sleep = sleep
@@ -122,6 +129,7 @@ class DailySyncLoop:
                     return
             else:
                 self._sleep(300)
+            self._run_housekeeping()
             try:
                 self._daily_scheduler.schedule()
                 self._morning_battery.refresh()
@@ -140,6 +148,22 @@ class DailySyncLoop:
                         "reason": getattr(exc, "reason", None),
                     },
                 )
+
+    def _run_housekeeping(self) -> None:
+        """Run the periodic upkeep; its failure never skips the scheduling."""
+        if self._housekeeping is None:
+            return
+        try:
+            self._housekeeping()
+        except Exception as exc:  # noqa: BLE001 - keep the daily loop alive
+            self._logger.error(
+                "Sync housekeeping failed",
+                extra={
+                    "event": "sync_housekeeping_failed",
+                    "error_class": type(exc).__name__,
+                    "reason": getattr(exc, "reason", None),
+                },
+            )
 
 
 @dataclass(frozen=True)

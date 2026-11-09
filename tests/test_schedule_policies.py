@@ -16,6 +16,7 @@ from backend.providers.descriptors import (
     GARMIN_ID,
     WEATHER_ID,
 )
+from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.schedule_policies import (
     CalendarSchedulePolicy,
@@ -141,6 +142,16 @@ class CalendarSchedulePolicyTests(unittest.TestCase):
 
 
 class GarminSchedulePolicyTests(unittest.TestCase):
+    def test_blocked_follows_the_garmin_resync_gate_like_wahoo(self) -> None:
+        gate = ProviderResyncGate("Garmin")
+        policy = GarminSchedulePolicy(cast(Any, _Garmin()), 7, gate)
+
+        self.assertFalse(policy.blocked())
+        gate.begin_reset()
+        self.assertTrue(policy.blocked())
+        gate.end_reset()
+        self.assertFalse(policy.blocked())
+
     def test_configured_reads_live_service_and_is_never_blocked(self) -> None:
         garmin = _Garmin(configured=False)
         policy = GarminSchedulePolicy(cast(Any, garmin), 7)
@@ -164,10 +175,6 @@ class GarminSchedulePolicyTests(unittest.TestCase):
             policy.refresh_payload("startup", "startup"),
             {"days": 9, "reason": "startup", "end_date": "2025-05-29"},
         )
-
-
-
-
 
 
 class BuildSchedulePoliciesTests(unittest.TestCase):

@@ -208,9 +208,27 @@ class GarminRemoteReader:
         self._chunk_days = chunk_days
         self._all_sync_days = all_sync_days
         self._garmin_tokens = garmin_tokens
+        # One Personal API client per configured key, so its token (valid 24 h)
+        # is exchanged once and reused by every run until it expires.
+        self._personal_lock = threading.Lock()
+        self._personal_cache: tuple[str, GarminPersonalClient] | None = None
 
     def available(self) -> bool:
         return self._client_factory.available() or self._personal_configured()
+
+    def _personal(self) -> GarminPersonalClient | None:
+        """The cached Personal API client; a changed key builds a new one."""
+        key = str(getattr(self._config, "garmin_personal_api_key", "") or "").strip()
+        with self._personal_lock:
+            cached = self._personal_cache
+            if not key:
+                self._personal_cache = None
+                return None
+            if cached is not None and cached[0] == key:
+                return cached[1]
+            client = _personal_client(self._config, self._record_key_result)
+            self._personal_cache = None if client is None else (key, client)
+            return client
 
     def configured(self) -> bool:
         return self._personal_configured() or self._sdk_configured()
@@ -399,7 +417,9 @@ class GarminRemoteReader:
         if not self.configured():
             raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
-        client, login_argument = self._authenticated_client(call_external)
+        client, login_argument = self._authenticated_client(
+            call_external, personal_only=True
+        )
         try:
             return collect_wellness_history(
                 client,
@@ -426,14 +446,16 @@ class GarminRemoteReader:
     ) -> None:
         """Read the watch ratings of past activities for the one-off backfill (#1728).
 
-        One authenticated client serves the whole batch, so the Personal API token
-        is exchanged once. Only a failed token exchange flags the Personal API key
-        (the client does that); the classification is the sync owner's.
+        With a Personal API key the batch reads through it alone: no SDK login and
+        no ``sdk_skipped`` record. Only a failed token exchange flags the key (the
+        client does that); the classification is the sync owner's.
         """
         if not self.configured():
             raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
-        client, login_argument = self._authenticated_client(call_external)
+        client, login_argument = self._authenticated_client(
+            call_external, personal_only=True
+        )
         try:
             collect_activity_ratings(
                 client,
@@ -460,8 +482,8 @@ class GarminRemoteReader:
     ) -> None:
         """Download the FIT files of past activities for the stream backfill (#1763).
 
-        One authenticated client serves the whole batch, so the Personal API token
-        is exchanged once. Raises ``FitTransportMissing`` without a Personal API key.
+        The batch reads through the Personal API alone, with no SDK login. Raises
+        ``FitTransportMissing`` without a Personal API key.
         """
         if not self.configured():
             raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
@@ -469,7 +491,9 @@ class GarminRemoteReader:
             # The SDK has no file download: do not log in for nothing.
             raise FitTransportMissing
         call_external = self._external_call(None)
-        client, login_argument = self._authenticated_client(call_external)
+        client, login_argument = self._authenticated_client(
+            call_external, personal_only=True
+        )
         try:
             collect_activity_fit_files(
                 client,
@@ -523,7 +547,7 @@ class GarminRemoteReader:
         exact cause.
         """
         tokens = self._garmin_tokens
-        personal = _personal_client(self._config, self._record_key_result)
+        personal = self._personal()
         if personal is not None:
             self._check_personal_key(personal)
             if tokens is None or not tokens.connected():
@@ -591,17 +615,20 @@ class GarminRemoteReader:
         return call_external
 
     def _authenticated_client(
-        self, call_external: ExternalCall
+        self, call_external: ExternalCall, *, personal_only: bool = False
     ) -> tuple[GarminTransportClient, str]:
         """Route Garmin reads through the Personal API and, if connected, the SDK.
 
         Without a Personal API key the SDK login is required and MFA stops before
         any collection. With a key, a failed SDK login or pending MFA only drops
         the SDK-only families; the Personal API families still sync.
+        ``personal_only`` is for batches whose every family the Personal API
+        serves: with a key they never log the SDK in, so they cannot record a
+        skipped SDK either.
         """
-        personal = _personal_client(self._config, self._record_key_result)
+        personal = self._personal()
         login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
-        if personal is not None and not self._sdk_configured():
+        if personal is not None and (personal_only or not self._sdk_configured()):
             return GarminTransportClient(personal, None), login_argument
         try:
             sdk, mfa_status = garmin_adapter.authenticate_client(

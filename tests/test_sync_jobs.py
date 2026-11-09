@@ -418,7 +418,6 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
                     "Historischer Backfill ist nur",
                 )
 
-
     def test_competition_push_preserves_a_bounded_approval_manifest(self):
         entry = {"type": "competition", "id": "race-1", "sha256": "a" * 64}
         self.assertEqual(
@@ -662,7 +661,6 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertNotIn(job["id"], " ".join(captured.output))
         self.assertEqual(self.store.state(job["id"])["status"], "queued")
 
-
     def test_all_read_methods_reuse_an_outer_unit_of_work_connection(self):
         manager = DatabaseManager(
             self.manager.path,
@@ -746,7 +744,6 @@ class SyncJobStoreTests(unittest.TestCase):
                 {"type": "refresh", "payload": {"value": object()}},
                 [{"item_key": "one", "operation": "read"}],
             )
-
 
     def test_claim_is_conditional_and_increments_job_and_item_once(self):
         job, _ = self.enqueue(operations=[{"item_key": "one", "operation": "read"}])
@@ -839,6 +836,110 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.claim())
         self.current_now = "2026-09-20T12:00:15+00:00"
         self.assertEqual(self.store.claim()["id"], backfill["id"])
+
+    def test_claim_leaves_jobs_of_a_resetting_provider_queued_without_an_attempt(
+        self,
+    ):
+        resetting = ["garmin"]
+        store = SyncJobStore(
+            self.manager,
+            lambda: self.current_now,
+            lambda: next(self.identifiers),
+            held_providers=lambda: tuple(resetting),
+        )
+        garmin, _ = self.enqueue("garmin", "refresh")
+        weather, _ = self.enqueue("weather", "refresh", {"force": True})
+
+        self.assertEqual(store.claim()["id"], weather["id"])
+        self.assertIsNone(store.claim())
+        held = store.state(garmin["id"])
+        self.assertEqual(held["status"], "queued")
+        self.assertEqual(held["attempts"], 0)
+
+        resetting.clear()
+        claimed = store.claim()
+        self.assertEqual(claimed["id"], garmin["id"])
+        self.assertEqual(claimed["attempts"], 1)
+
+    def _insert_job(self, job_id, status, created_at, finished_at=None):
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO sync_jobs(id, provider, type, status, payload, "
+                "requested_by, attempts, progress_total, progress_completed, "
+                "finished_at, created_at, updated_at) "
+                "VALUES (?, 'garmin', 'refresh', ?, '{}', 'test', 1, 1, 1, ?, ?, ?)",
+                (job_id, status, finished_at, created_at, finished_at or created_at),
+            )
+            db.execute(
+                "INSERT INTO sync_job_items(id, job_id, item_key, operation, "
+                "payload_hash, status, attempts, created_at, updated_at) "
+                "VALUES (?, ?, 'job', 'refresh', 'hash', ?, 1, ?, ?)",
+                (f"item-{job_id}", job_id, status, created_at, created_at),
+            )
+
+    def _job_ids(self):
+        with self.manager.reader() as db:
+            return {row["id"] for row in db.execute("SELECT id FROM sync_jobs")}
+
+    def test_prune_removes_old_completed_jobs_and_their_items_only(self):
+        # now is 2026-09-20; the age bound is 30 days, the newest 2 always stay.
+        old = "2026-08-01T10:00:00+00:00"
+        recent = "2026-09-15T10:00:00+00:00"
+        self._insert_job("old-completed-1", "completed", old, old)
+        self._insert_job("old-completed-2", "completed", old, old)
+        self._insert_job("old-failed", "failed", old, old)
+        self._insert_job("old-partial", "partial", old, old)
+        self._insert_job("old-queued", "queued", old)
+        self._insert_job("old-running", "running", old)
+        self._insert_job("recent-completed", "completed", recent, recent)
+        self._insert_job(
+            "newest-old-completed", "completed", "2026-08-02T10:00:00+00:00", old
+        )
+
+        pruned = self.store.prune_finished(keep_newest=2)
+
+        # The newest two by creation are "recent-completed" and the one from
+        # 2026-08-02, so only the two oldest completed jobs go.
+        self.assertEqual(pruned, 2)
+        self.assertEqual(
+            self._job_ids(),
+            {
+                "old-failed",
+                "old-partial",
+                "old-queued",
+                "old-running",
+                "recent-completed",
+                "newest-old-completed",
+            },
+        )
+        with self.manager.reader() as db:
+            items = {
+                row["job_id"] for row in db.execute("SELECT job_id FROM sync_job_items")
+            }
+        self.assertEqual(items, self._job_ids())
+
+    def test_prune_keeps_every_recent_completed_job_and_list_still_works(self):
+        for index in range(5):
+            stamp = f"2026-09-1{index}T10:00:00+00:00"
+            self._insert_job(f"recent-{index}", "completed", stamp, stamp)
+
+        self.assertEqual(self.store.prune_finished(keep_newest=0), 0)
+        self.assertEqual(len(self._job_ids()), 5)
+        listed = self.store.list(3)
+        self.assertEqual(
+            [job["id"] for job in listed], ["recent-4", "recent-3", "recent-2"]
+        )
+
+    def test_prune_after_the_age_bound_leaves_the_newest_and_a_working_list(self):
+        for index in range(5):
+            stamp = f"2026-07-0{index + 1}T10:00:00+00:00"
+            self._insert_job(f"old-{index}", "completed", stamp, stamp)
+
+        self.assertEqual(self.store.prune_finished(keep_newest=2), 3)
+        self.assertEqual(self._job_ids(), {"old-3", "old-4"})
+        listed = self.store.list(10)
+        self.assertEqual([job["id"] for job in listed], ["old-4", "old-3"])
+        self.assertEqual(len(listed[0]["items"]), 1)
 
     def test_resume_interrupted_resets_running_records_and_claims_again(self):
         job, _ = self.enqueue(
@@ -966,7 +1067,6 @@ class SyncJobStoreTests(unittest.TestCase):
         states = [i["status"] for i in self.store.state(short_job["id"])["items"]]
         self.assertEqual(states, ["failed", "failed"])
         self.assertEqual(snapshot["status"], "failed")
-
 
     def test_one_stored_item_keeps_a_failure_among_several_results(self):
         # The generic job path stores one item for a whole Garmin push batch.

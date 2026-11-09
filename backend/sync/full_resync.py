@@ -202,7 +202,9 @@ class FullProviderResyncService:
         *,
         gates: Mapping[str, ProviderResyncGate] | None = None,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+        after_resync: Callable[[Mapping[str, Any]], None] = lambda _job: None,
     ) -> None:
+        self._after_resync = after_resync
         self._handlers = handlers
         self._state_store = state_store
         self._operation_journal = operation_journal
@@ -214,6 +216,13 @@ class FullProviderResyncService:
         return self._state_store.state(provider, self._gate(provider), db)
 
     def resync(self, provider: str, operation_id: str | None = None) -> dict[str, Any]:
+        result = self._resync(provider, operation_id)
+        if result.get("status") == "ok":
+            # After the gate is released: the passes read the resynced records.
+            self._after_resync({"provider": provider, "type": "refresh"})
+        return result
+
+    def _resync(self, provider: str, operation_id: str | None) -> dict[str, Any]:
         handler = self._handler(provider)
         if not handler.configured():
             raise handler.not_configured_error()

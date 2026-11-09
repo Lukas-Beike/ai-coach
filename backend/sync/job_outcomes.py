@@ -83,6 +83,10 @@ class SyncJobOutcomeService:
             base_seconds=self._retry_base_seconds,
             max_seconds=self._retry_max_seconds,
         )
+        retry_after = getattr(exc, "retry_after_seconds", None)
+        if type(retry_after) is int and retry_after > 0:
+            # The provider named a wait: not earlier, and never past the cap.
+            delay = max(delay, min(retry_after, self._retry_max_seconds))
         current_time = self._current_time()
         if current_time.tzinfo is None or current_time.utcoffset() is None:
             current_time = current_time.replace(tzinfo=UTC)

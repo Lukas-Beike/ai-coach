@@ -279,16 +279,19 @@ class ProviderRefreshCommandService:
     """Orchestrate refresh commands after the Coach has authorized them.
 
     ``synchronous_refreshes`` maps provider ids to the inline refresh used when a
-    request waits for completion.
+    request waits for completion. ``after_refresh`` is the completion hook a
+    queued job runs (the derived passes); a finished inline refresh runs it too.
     """
 
     def __init__(
         self,
         queue_service: SyncJobQueueService,
         synchronous_refreshes: Mapping[str, SynchronousRefresh],
+        after_refresh: Callable[[Mapping[str, Any]], None] = lambda _job: None,
     ) -> None:
         self._queue_service = queue_service
         self._synchronous_refreshes = synchronous_refreshes
+        self._after_refresh = after_refresh
 
     def start(
         self,
@@ -318,4 +321,6 @@ class ProviderRefreshCommandService:
                 "Für diesen Anbieter ist kein synchroner Vorababruf verfügbar.",
                 reason="invalid_refresh_request",
             )
-        return synchronous.refresh(provider, arguments, cancel_event)
+        result = synchronous.refresh(provider, arguments, cancel_event)
+        self._after_refresh({"provider": provider, "type": "refresh"})
+        return result

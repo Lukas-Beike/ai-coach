@@ -195,6 +195,42 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
             },
         )
 
+    def test_a_garmin_sdk_requirement_is_final_and_never_requeued(self):
+        job = self.enqueue()
+        claimed = self.claim(job)
+
+        self.service.record_failure(
+            claimed, AppError(409, "SDK needed", reason="garmin_sdk_required")
+        )
+
+        state = self.store.state(job["id"])
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["items"][0]["error_class"], "garmin_sdk_required")
+        self.assertFalse(self.wake_event.is_set())
+
+    def test_a_provider_named_wait_delays_the_retry_up_to_the_cap(self):
+        for retry_after, expected in (
+            (25, "12:00:25"),
+            (900, "12:00:30"),
+            (3, "12:00:10"),
+        ):
+            with self.subTest(retry_after=retry_after):
+                job = self.enqueue()
+                claimed = self.claim(job)
+
+                self.service.record_failure(
+                    claimed,
+                    AppError(
+                        429,
+                        "slow down",
+                        reason="provider_network_error",
+                        retry_after_seconds=retry_after,
+                    ),
+                )
+
+                available_at = self.store.state(job["id"])["available_at"]
+                self.assertEqual(available_at, f"2026-09-20T{expected}+00:00")
+
     def test_exhausted_retry_updates_and_publishes_final_failure(self):
         job = self.enqueue()
         claimed = self.claim(job)
