@@ -37,7 +37,7 @@ from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
-from backend.planning import strength_structure
+from backend.planning import planned_units, strength_structure
 from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.push_state import garmin_fingerprint
 from backend.planning.sport import planned_sport_environment
@@ -215,8 +215,9 @@ class GarminStrengthPushService:
             remembered = remembered_exercises(db)
         if not row or row["tombstone"]:
             return _error_result(local_id, "Einheit nicht gefunden", "conflict")
-        payload_hash = planning_library.library_payload_hash(row["payload"])
-        if payload_hash != item["expected_payload_hash"]:
+        if not planned_units.plan_push_hash_matches(
+            row["payload"], item["expected_payload_hash"]
+        ):
             return _error_result(local_id, "Seit der Vorschau geändert", "conflict")
         try:
             unit = json.loads(row["payload"] or "{}")
@@ -225,7 +226,7 @@ class GarminStrengthPushService:
             return _error_result(local_id, self._redact(str(exc))[:500])
         return _Prepared(
             local_id,
-            payload_hash,
+            planned_units.plan_push_payload_hash(row["payload"]),
             False,
             plan_date,
             document,

@@ -836,7 +836,19 @@ class SyncJobStore:
                 (now, job_id),
             )
             job = db.execute("SELECT * FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
-            return dict(job) if job else None
+            if not job:
+                return None
+            claimed = dict(job)
+            # A retried or resumed job re-runs only the items still open.
+            claimed["settled_item_keys"] = [
+                str(row["item_key"])
+                for row in db.execute(
+                    "SELECT item_key FROM sync_job_items WHERE job_id=? "
+                    "AND status IN ('completed', 'skipped')",
+                    (job_id,),
+                ).fetchall()
+            ]
+            return claimed
 
     def update(
         self,
@@ -912,7 +924,7 @@ class SyncJobStore:
             stored_items = [
                 dict(item)
                 for item in db.execute(
-                    f"SELECT id, item_key FROM sync_job_items WHERE job_id=? ORDER BY {ITEM_ORDER}",
+                    f"SELECT id, item_key, status FROM sync_job_items WHERE job_id=? ORDER BY {ITEM_ORDER}",
                     (job_id,),
                 ).fetchall()
             ]
@@ -1008,6 +1020,9 @@ class SyncJobStore:
             if outcome in {"synced", "already_synced", "skipped"}
             else "failed"
         )
+        if item_state == "failed" and target.get("status") in {"completed", "skipped"}:
+            # A settled item stays settled; a re-run never downgrades it.
+            return
         detail = str(redact(str(item.get("error") or "")) or "")[:500] or None
         db.execute(
             "UPDATE sync_job_items SET status=?, remote_id=COALESCE(?, remote_id), "

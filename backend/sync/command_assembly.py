@@ -89,6 +89,7 @@ class SyncCommandAssembly:
             self._core.workout_library_sync_state(),
             self._core.planning_revision,
             self._core.utc_now,
+            local_today=self._illness_pause.today,
         )
 
     def structured_plan_sync(self) -> StructuredPlanSyncService:

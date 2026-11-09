@@ -19,6 +19,15 @@ from backend.planning.workout_validation import validate_workout_description
 WORKOUT_TARGET_TYPES = frozenset({"AUTO", "POWER", "HR", "PACE"})
 
 
+def past_export_horizon(planned_date: Any, today: date) -> bool:
+    """Whether a unit's date lies before the oldest date an export accepts."""
+    try:
+        value = date.fromisoformat(str(planned_date or "")[:10])
+    except ValueError:
+        return False
+    return value < today - timedelta(days=1)
+
+
 def build_planned_workout_export(
     workout: dict[str, Any], *, today: date, run_lthr: float | None = None
 ) -> PlannedWorkoutExport:
@@ -34,7 +43,7 @@ def build_planned_workout_export(
         raise AppError(
             400, "Das Trainingsdatum muss das Format JJJJ-MM-TT haben."
         ) from exc
-    if workout_date < today - timedelta(days=1):
+    if past_export_horizon(workout_date.isoformat(), today):
         raise AppError(400, "Eine Einheit in der Vergangenheit wird nicht übertragen.")
     duration = int(workout.get("duration_minutes", 0))
     if duration < 5 or duration > 600:

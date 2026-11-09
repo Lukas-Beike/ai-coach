@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 from backend.canonical.vocabulary import RemoteEntityKind
@@ -13,6 +14,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning.planned_unit_service import UPDATE_SQL
 from backend.planning.revision import PlanningRevisionService
+from backend.planning.workout_export import past_export_horizon
 from backend.sync.library import WorkoutLibrarySyncStateService
 
 _REMOTE_LINKS = RemoteLinkRepository()
@@ -53,17 +55,24 @@ class PlanningAuthorityService:
         workout_library_sync_state_service: WorkoutLibrarySyncStateService,
         planning_revision_service: PlanningRevisionService,
         now: Callable[[], str],
+        local_today: Callable[[], date] | None = None,
     ) -> None:
+        self._local_today = local_today
         self._database_manager = database_manager
         self._workout_library_sync_state_service = workout_library_sync_state_service
         self._planning_revision_service = planning_revision_service
         self._now = now
 
     def pending_plan_push_entries(self) -> list[dict[str, str]]:
-        """Return the minimal expected-hash manifest for pending local workouts."""
+        """Return the minimal expected-hash manifest for pending local workouts.
+
+        Units dated before the export horizon can never be pushed; they stay
+        visible as expired in the calendar but are not pending.
+        """
         _summary, entries, _fingerprint = (
             self._workout_library_sync_state_service.preview()
         )
+        today = self._local_today() if self._local_today is not None else None
         return [
             {
                 "library_workout_id": str(entry["local_id"]),
@@ -75,7 +84,12 @@ class PlanningAuthorityService:
                 ),
             }
             for entry in entries
-            if entry.get("local_id") and entry.get("payload_hash")
+            if entry.get("local_id")
+            and entry.get("payload_hash")
+            and not (
+                today is not None
+                and past_export_horizon(entry.get("planned_date"), today)
+            )
         ]
 
     def mark_planning_authoritative(self, local_ids: list[str] | None = None) -> int:

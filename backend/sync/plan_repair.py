@@ -10,6 +10,7 @@ from typing import Any
 from backend.db import DatabaseManager
 from backend.errors import AppError
 from backend.planning import library as planning_library
+from backend.planning import planned_units
 from backend.planning import workouts as planning_workouts
 from backend.sync.authority import PlanningAuthorityService
 
@@ -79,7 +80,7 @@ class PlanRepairManifestService:
         return [
             {
                 "library_workout_id": row["local_id"],
-                "expected_payload_hash": planning_library.library_payload_hash(
+                "expected_payload_hash": planned_units.plan_push_payload_hash(
                     row["payload"]
                 ),
             }
@@ -156,9 +157,12 @@ class PlanRepairManifestService:
                     entry["library_workout_id"]: entry["expected_payload_hash"]
                     for entry in prepared.supplied_entries
                 }
+                payloads = {str(row["local_id"]): row["payload"] for row in rows}
                 if any(
-                    selected_hashes.get(entry["library_workout_id"])
-                    != entry["expected_payload_hash"]
+                    not planned_units.plan_push_hash_matches(
+                        payloads.get(entry["library_workout_id"]),
+                        selected_hashes.get(entry["library_workout_id"]),
+                    )
                     for entry in current_entries
                 ):
                     raise AppError(
@@ -187,7 +191,7 @@ class PlanRepairManifestService:
                 refreshed.append(
                     {
                         "library_workout_id": entry["library_workout_id"],
-                        "expected_payload_hash": planning_library.library_payload_hash(
+                        "expected_payload_hash": planned_units.plan_push_payload_hash(
                             row["payload"]
                         ),
                     }

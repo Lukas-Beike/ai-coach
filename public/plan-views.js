@@ -53,16 +53,14 @@ function plannedGarminBlockedText(entry) {
   return "";
 }
 
-// Providers this planned unit still needs an explicit push to, in push order:
-// Intervals.icu last, because its sync rewrites the unit and so its payload
-// hash, which every other job of the same click still carries. Past, done,
+// Providers this planned unit still needs an explicit push to. Past, done,
 // in-flight and unconfigured targets get none.
-function plannedPushTargets(entry, dateKey, todayKey, { configured = {}, completed = false, intervals } = {}) {
+function plannedPushTargets(entry, dateKey, todayKey, { configured = {}, completed = false } = {}) {
   const pending = entry?.push_pending;
   if (!entry?.local_id || !entry.payload_hash || entry.is_completed_activity || completed) return [];
   if (!pending || typeof pending !== "object" || !dateKey || dateKey < todayKey) return [];
   const targets = Object.keys(pending).filter((provider) => pending[provider] === true && configured[provider] === true);
-  return [...targets.filter((provider) => provider !== intervals).sort((a, b) => a.localeCompare(b)), ...targets.filter((provider) => provider === intervals)];
+  return targets.sort((a, b) => a.localeCompare(b));
 }
 
 const CALENDAR_MARKERS = [
@@ -1032,7 +1030,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   function plannedTargets(entry, dateKey, todayKey, actual) {
     const ids = providerIds();
     const configured = { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured) };
-    return plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual), intervals: ids.intervals });
+    return plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual) });
   }
 
   // Every pending unit carries the leftovers its provider's sync removes, but only the first card

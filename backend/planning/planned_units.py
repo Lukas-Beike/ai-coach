@@ -23,6 +23,8 @@ from backend.planning import workouts as planning_workouts
 from backend.planning.sport import apply_sport_update
 from backend.providers.intervals_workouts import (
     DERIVED_WORKOUT_KEYS,
+    PLANNING_DURATION_FIELD,
+    REMOTE_PLANNED_METRIC_KEYS,
     intervals_fields_from_planning,
     intervals_record_type,
 )
@@ -95,6 +97,53 @@ def planned_unit_payload_hash(payload: Any) -> str:
         default=str,
     )
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+# Fields a provider sync writes into the stored unit on success or failure:
+# remote identities and the derived metrics of the answered event. The planned
+# duration is the athlete's own value and stays part of the content.
+_PUSH_SYNC_KEYS = frozenset(
+    {
+        "remote_event_id",
+        "remote_event_external_id",
+        "external_id",
+        "sync_error",
+        *(key for key in REMOTE_PLANNED_METRIC_KEYS if key != PLANNING_DURATION_FIELD),
+    }
+)
+
+
+def plan_push_payload_hash(raw_payload: Any) -> str:
+    """Content-only hash a plan push preview records and its executors check.
+
+    A sync of one provider rewrites sync fields in the stored payload; they do
+    not change what the athlete approved, so they never move this hash.
+    """
+    if isinstance(raw_payload, dict):
+        payload = raw_payload
+    else:
+        try:
+            payload = json.loads(str(raw_payload or "") or "{}")
+        except TypeError, ValueError:
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return planned_unit_payload_hash(
+        {key: value for key, value in payload.items() if key not in _PUSH_SYNC_KEYS}
+    )
+
+
+def plan_push_hash_matches(raw_payload: Any, expected_hash: Any) -> bool:
+    """Whether a recorded plan push hash still matches the stored unit.
+
+    Cards and jobs recorded before the content-only hash carry the raw payload
+    hash; it is still accepted while the stored payload is unchanged.
+    """
+    expected = str(expected_hash or "").strip().lower()
+    return bool(expected) and expected in {
+        plan_push_payload_hash(raw_payload),
+        planning_library.library_payload_hash(raw_payload),
+    }
 
 
 def _planned_unit_metadata(workout: dict[str, Any]) -> dict[str, Any]:

@@ -23,6 +23,7 @@ from backend.errors import (
     AppError,
 )
 from backend.planning import library as planning_library
+from backend.planning import planned_units
 from backend.planning.hr_cap_sync import record_sent
 from backend.planning.workout_export import build_planned_workout_export
 from backend.sync.reconcile import PlannedUnitSyncStateWriter
@@ -497,9 +498,8 @@ class PlannedCalendarRepairService:
                 "FROM planned_units WHERE local_id<>?",
                 (local_id,),
             ).fetchall()
-        if (
-            not row
-            or planning_library.library_payload_hash(row["payload"]) != expected_hash
+        if not row or not planned_units.plan_push_hash_matches(
+            row["payload"], expected_hash
         ):
             raise AppError(
                 409,
@@ -565,10 +565,8 @@ class PlannedCalendarRepairService:
                 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
                 (context.local_id,),
             ).fetchone()
-        if (
-            not current
-            or planning_library.library_payload_hash(current["payload"])
-            != context.expected_hash
+        if not current or not planned_units.plan_push_hash_matches(
+            current["payload"], context.expected_hash
         ):
             raise AppError(409, message, reason="planning_revision_conflict")
 
@@ -724,10 +722,8 @@ class PlannedCalendarRepairService:
                 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
                 (context.local_id,),
             ).fetchone()
-            if (
-                not current
-                or planning_library.library_payload_hash(current["payload"])
-                != context.expected_hash
+            if not current or not planned_units.plan_push_hash_matches(
+                current["payload"], context.expected_hash
             ):
                 self._state_writer.persist(
                     db,
@@ -755,7 +751,7 @@ class PlannedCalendarRepairService:
                     _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
                     (context.local_id,),
                 ).fetchone()
-                context.expected_hash = planning_library.library_payload_hash(
+                context.expected_hash = planned_units.plan_push_payload_hash(
                     current["payload"]
                 )
         if conflict is not None:
@@ -832,10 +828,8 @@ class PlannedCalendarRepairService:
                     _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
                     (context.local_id,),
                 ).fetchone()
-                if (
-                    not current
-                    or planning_library.library_payload_hash(current["payload"])
-                    != context.expected_hash
+                if not current or not planned_units.plan_push_hash_matches(
+                    current["payload"], context.expected_hash
                 ):
                     raise AppError(
                         409,

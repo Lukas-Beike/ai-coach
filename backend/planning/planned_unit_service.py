@@ -25,7 +25,6 @@ from backend.planning.conflicts import calendar_item_window
 from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.garmin_orphans import find_orphans
 from backend.planning.intervals_orphans import find_intervals_orphans
-from backend.planning.library import library_payload_hash
 from backend.planning.push_state import attach_push_state, garmin_baselines
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
 from backend.planning.session_focus import carry_focus
@@ -680,7 +679,7 @@ class PlannedUnitService:
                 raise AppError(
                     409, "Erst den Sync-Konflikt lösen.", reason="sync_conflict"
                 )
-            if library_payload_hash(row["payload"]) != expected_hash:
+            if not planned_units.plan_push_hash_matches(row["payload"], expected_hash):
                 raise AppError(
                     409,
                     "Die Einheit wurde inzwischen geändert.",

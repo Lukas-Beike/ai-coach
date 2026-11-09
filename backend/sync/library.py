@@ -73,6 +73,24 @@ class WorkoutLibrarySyncStateService:
         self._key_value_repository = key_value_repository
         self._now = now
 
+    def reset_interrupted(self) -> int:
+        """Offer again the units a crash left "syncing"; run before any worker.
+
+        "syncing" is written before the remote call and is no open state, so a
+        unit stranded in it would never be offered for a push again.
+        """
+        now = self._now()
+        reset = 0
+        with self._database_manager.unit_of_work() as db:
+            for table in ("planned_units", "workout_library"):
+                reset += db.execute(
+                    f"UPDATE {table} SET sync_state='sync_error', "
+                    "sync_error='Die Übertragung wurde unterbrochen.', updated_at=? "
+                    "WHERE sync_state='syncing'",
+                    (now,),
+                ).rowcount
+        return reset
+
     def preview(self) -> tuple[dict[str, int], list[dict[str, Any]], str]:
         with self._database_manager.unit_of_work() as db:
             rows = db.execute(

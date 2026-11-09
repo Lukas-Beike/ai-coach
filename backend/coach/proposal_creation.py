@@ -29,8 +29,10 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import PlanAdjustmentRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
+from backend.planning import planned_units
 from backend.planning.garmin_orphans import find_orphans, removal_entries
 from backend.planning.intervals_orphans import find_intervals_orphans, sync_entries
+from backend.planning.workout_export import past_export_horizon
 from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
 
@@ -280,9 +282,7 @@ class CoachProposalCreationService:
             and self._nutrition_meal_library_service is not None
         ):
             preview_values.update(
-                self._nutrition_meal_library_service().prepare_values(
-                    preview_values
-                )
+                self._nutrition_meal_library_service().prepare_values(preview_values)
             )
 
     @staticmethod
@@ -484,13 +484,23 @@ def _approved_plan_sync_arguments(
     approved["entries"] = [
         {
             "library_workout_id": str(row["local_id"]),
-            "expected_payload_hash": hashlib.sha256(
-                str(row["payload"] or "").encode("utf-8")
-            ).hexdigest(),
+            "expected_payload_hash": planned_units.plan_push_payload_hash(
+                row["payload"]
+            ),
         }
         for row in rows
+        # A unit before the export horizon can never be pushed: not pending.
+        if not (all_pending and past_export_horizon(_payload_date(row), today))
     ]
     return approved
+
+
+def _payload_date(row: Any) -> str:
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except TypeError, ValueError:
+        return ""
+    return str(payload.get("date") or "") if isinstance(payload, dict) else ""
 
 
 def _with_intervals_leftovers(
@@ -581,7 +591,7 @@ def _approved_garmin_arguments(
         if remove
         else {
             "library_workout_id": local_id,
-            "expected_payload_hash": planning_library.library_payload_hash(
+            "expected_payload_hash": planned_units.plan_push_payload_hash(
                 payloads[local_id]
             ),
         }

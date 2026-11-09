@@ -63,7 +63,11 @@ class SyncCommandAssemblyTests(unittest.TestCase):
             self.assertIs(assembly.authority(), result)
 
         factory.assert_called_once_with(
-            self.manager, self.library_state, self.revision, self.clock
+            self.manager,
+            self.library_state,
+            self.revision,
+            self.clock,
+            local_today=self.today,
         )
         self.database_manager.assert_called_once_with()
         self.library_sync_state.assert_called_once_with()

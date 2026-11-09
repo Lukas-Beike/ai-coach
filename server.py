@@ -2430,6 +2430,7 @@ def main() -> None:
     if sys.platform != "win32":
         faulthandler.register(signal.SIGUSR1, all_threads=True)
     try:
+        WORKOUT_LIBRARY_SYNC.sync_state_service().reset_interrupted()
         SYNC_JOB_QUEUE.service().resume_interrupted()
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
             COACH_BACKGROUND_JOBS.turn_failure_service()

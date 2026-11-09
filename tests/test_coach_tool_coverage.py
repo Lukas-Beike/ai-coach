@@ -5,7 +5,6 @@ Each coverage claim must be observed as a successful tool receipt at runtime.
 """
 
 import functools
-import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -20,6 +19,7 @@ from backend.activities.hr_cap import effective_caps
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
 from backend.planning import library as planning_library
+from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.sync.adaptive import IllnessPauseSyncService
@@ -1696,9 +1696,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             [
                 {
                     "library_workout_id": local_id,
-                    "expected_payload_hash": hashlib.sha256(
-                        payload.encode("utf-8")
-                    ).hexdigest(),
+                    "expected_payload_hash": plan_push_payload_hash(payload),
                 }
             ],
             push_entries,

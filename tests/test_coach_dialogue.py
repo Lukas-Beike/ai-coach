@@ -889,7 +889,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 "SELECT payload FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)
             ).fetchone()
         queued = json.loads(job["payload"])["entries"][0]["expected_payload_hash"]
-        self.assertNotEqual(queued, before["expected_payload_hash"])
+        # Resolving rewrites only the sync status, so the content hash stays.
+        self.assertEqual(queued, before["expected_payload_hash"])
         self.assertEqual(
             queued, self.state()["planned_units"][0]["expected_payload_hash"]
         )

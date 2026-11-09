@@ -732,18 +732,40 @@ class SyncJobExecutor:
         """Normalize and dispatch a persisted provider-job envelope."""
         stored_payload = job.get("payload")
         try:
+            payload = (
+                dict(stored_payload)
+                if isinstance(stored_payload, dict)
+                else decode_job_payload(stored_payload)
+            )
+            if str(job.get("type") or "") == "plan_push":
+                payload = _unsettled_plan_entries(payload, job.get("settled_item_keys"))
             envelope = normalize_sync_job_request(
                 str(job.get("provider") or ""),
                 str(job.get("type") or ""),
-                dict(stored_payload)
-                if isinstance(stored_payload, dict)
-                else decode_job_payload(stored_payload),
+                payload,
                 all_sync_days=self._all_sync_days,
                 registry=self._registry,
             )
         except JobValidationError as exc:
             raise AppError(400, str(exc), reason="invalid_job_request") from exc
         return dispatch_provider_job(self._job_owners, job, envelope)
+
+
+def _unsettled_plan_entries(payload: dict[str, Any], settled: Any) -> dict[str, Any]:
+    """Drop plan entries a previous run of the same job already completed."""
+    entries = payload.get("entries")
+    keys = {str(key) for key in settled or ()}
+    if not keys or not isinstance(entries, list):
+        return payload
+    remaining = [
+        entry
+        for entry in entries
+        if not (
+            isinstance(entry, dict)
+            and str(entry.get("library_workout_id") or "") in keys
+        )
+    ]
+    return {**payload, "entries": remaining} if remaining else payload
 
 
 def chained_after_job(
