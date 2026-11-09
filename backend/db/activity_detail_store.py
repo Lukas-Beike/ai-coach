@@ -753,7 +753,8 @@ def first_threshold_results(
     """
     best: dict[str, SessionFirstThreshold] = {}
     for row in db.execute(
-        "SELECT r.activity_id AS session_id, "
+        "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE s.activity_id END "
+        "AS session_id, "
         "COALESCE(s.local_date, substr(r.started_at, 1, 10)) AS day, d.dfa_alpha1 "
         "FROM activity_detail_sets AS d "
         "JOIN activity_records AS r ON r.provider = d.provider "
@@ -764,6 +765,7 @@ def first_threshold_results(
         "AND COALESCE(s.local_date, substr(r.started_at, 1, 10)) BETWEEN ? AND ? "
         "ORDER BY day, r.provider_activity_id",
         (
+            ActivitySessionState.DUPLICATE.value,
             ActivityDetailKind.STREAMS.value,
             ActivityRecordState.ACTIVE.value,
             ActivitySessionState.DELETED.value,

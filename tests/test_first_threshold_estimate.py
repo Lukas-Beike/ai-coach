@@ -388,6 +388,24 @@ class StoredEstimateTests(Fixture):
             ],
         )
 
+    def test_a_merged_duplicate_session_counts_once(self) -> None:
+        primary = self.add_run(5, result(150.0, GOOD, 30))
+        duplicate = self.add_run(5, result(151.0, GOOD, 31), provider="wahoo")
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_sessions SET state = 'duplicate', merged_into = ? "
+                "WHERE activity_id = ?",
+                (primary, duplicate),
+            )
+        with self.manager.reader() as db:
+            rows = first_threshold_results(
+                db, since=TODAY - timedelta(days=59), until=TODAY, sport=Sport.RUN
+            )
+        self.assertEqual(
+            [(row.session_id, row.result.estimate_bpm) for row in rows],
+            [(primary, 151.0)],
+        )
+
 
 class ServiceFixture(Fixture):
     def setUp(self) -> None:
