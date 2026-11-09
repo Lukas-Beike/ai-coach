@@ -144,6 +144,10 @@ PRIVACY_REMOTE_SCOPE = (
         "Garmin-Token-Datei im Datenverzeichnis bleibt erhalten, wird aber nicht "
         "mehr verwendet."
     ),
+    (
+        "Wahoo-Konto und Wahoo-Daten bleiben unverändert; der Zugriff dieser "
+        "App wird bei Wahoo widerrufen."
+    ),
     "Externe Kalenderquelle und deren Anbieter bleiben unverändert.",
 )
 
@@ -163,6 +167,9 @@ class PrivacyDeleteDependencies:
     refresh_credentials: Callable[[], Any] | None = None
     # Discards a pending Garmin MFA login so it cannot store tokens afterwards.
     cancel_garmin_login: Callable[[], None] | None = None
+    # Best-effort Wahoo disconnect: bumps the connection generation and revokes
+    # the grant at Wahoo before the stored tokens are wiped.
+    disconnect_wahoo: Callable[[], dict[str, Any]] | None = None
     # Copies saved by a restore or by the Intervals.icu purge of an earlier
     # release; erased with the data.
     recovery_copies: RecoveryCopies | None = None
@@ -291,6 +298,23 @@ class PrivacyDeleteService:
                     )
             if dependencies.cancel_garmin_login is not None:
                 dependencies.cancel_garmin_login()
+            wahoo_revoke_attempted = False
+            wahoo_revoked = False
+            if dependencies.disconnect_wahoo is not None:
+                try:
+                    outcome = dependencies.disconnect_wahoo()
+                    wahoo_revoke_attempted = bool(
+                        outcome.get("remote_revoke_attempted")
+                    )
+                    wahoo_revoked = bool(outcome.get("remote_revoked"))
+                except Exception:
+                    # The purge completes; the kv wipe below drops the tokens anyway.
+                    wahoo_revoke_attempted = True
+                    dependencies.logger.warning(
+                        "Wahoo grant could not be revoked",
+                        extra={"event": "privacy_wahoo_revoke_failed"},
+                        exc_info=True,
+                    )
             # Flushes stay blocked from before the delete until the cache is dropped,
             # so deleted diagnostics are neither served nor written back.
             with (
@@ -337,6 +361,8 @@ class PrivacyDeleteService:
                 "recovery_copies_failed": recovery_copies_failed,
                 "remote_delete_attempted": remote_delete_attempted,
                 "remote_conversation_deleted": remote_deleted,
+                "wahoo_revoke_attempted": wahoo_revoke_attempted,
+                "wahoo_revoked": wahoo_revoked,
                 "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
             }
 
@@ -374,6 +400,7 @@ class PrivacyStateDependencies:
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
     refresh_credentials: Callable[[], Any] | None = None
     cancel_garmin_login: Callable[[], None] | None = None
+    disconnect_wahoo: Callable[[], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -419,6 +446,7 @@ class PrivacyAssembly:
         self._diagnostics_suspended = state.diagnostics_suspended
         self._refresh_credentials = state.refresh_credentials
         self._cancel_garmin_login = state.cancel_garmin_login
+        self._disconnect_wahoo = state.disconnect_wahoo
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -439,6 +467,7 @@ class PrivacyAssembly:
                 diagnostics_suspended=self._diagnostics_suspended,
                 refresh_credentials=self._refresh_credentials,
                 cancel_garmin_login=self._cancel_garmin_login,
+                disconnect_wahoo=self._disconnect_wahoo,
                 recovery_copies=RecoveryCopies(
                     self._data_dir(), self._database_path().name
                 ),

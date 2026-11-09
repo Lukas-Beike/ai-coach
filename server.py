@@ -902,6 +902,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             diagnostics_suspended=suspend_diagnostic_flushes,
             refresh_credentials=lambda: refresh_runtime_config(),
             cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
+            disconnect_wahoo=lambda: disconnect_wahoo_grant(),
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,
@@ -1211,6 +1212,13 @@ WAHOO_CONNECTION = WahooConnectionAssembly(
         secret_registry=WAHOO_SECRET_REGISTRY,
     )
 )
+
+
+def disconnect_wahoo_grant() -> dict[str, object]:
+    """Revoke the Wahoo grant best effort and drop its tokens (privacy purge)."""
+    return WAHOO_CONNECTION.service().disconnect()
+
+
 # The thresholds every outbound export sends (Intervals.icu metrics, Wahoo plan
 # headers): local zones, then Garmin, then Wahoo, current on the athlete's today.
 EXPORT_THRESHOLDS = export_thresholds_reader(
