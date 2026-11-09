@@ -177,6 +177,7 @@ class DefaultRegistryDispatchTests(unittest.TestCase):
         )
         state.set_sync_period.assert_not_called()
 
+
     def test_job_route_validates_payload_shape_and_accepts_non_string_provider(
         self,
     ) -> None:

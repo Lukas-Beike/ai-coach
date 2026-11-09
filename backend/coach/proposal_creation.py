@@ -264,7 +264,9 @@ class CoachProposalCreationService:
             and self._nutrition_meal_library_service is not None
         ):
             preview_values.update(
-                self._nutrition_meal_library_service().prepare_values(preview_values)
+                self._nutrition_meal_library_service().prepare_values(
+                    preview_values
+                )
             )
 
     @staticmethod
@@ -370,9 +372,9 @@ def _card_authorized_intent(
     """Authorize exactly the units an Intervals.icu plan-sync card lists.
 
     The athlete approves the card, which shows every listed unit. The model's
-    scope tokens are not what the athlete sees, so for a selected sync the
-    object tokens come from the card entries, each checked against local state.
-    The token is stored with the hashed card payload and grants nothing else.
+    unit tokens are not what the athlete sees, so for a selected sync they are
+    replaced by tokens for the card entries, each checked against local state.
+    The tokens are stored with the hashed card payload and grant nothing else.
     """
     entries = arguments.get("entries")
     if (
@@ -383,23 +385,13 @@ def _card_authorized_intent(
         or not entries
     ):
         return intent
+    # The executor's own entry rules, so the card never lists what it rejects.
     identifiers = sorted(
-        {
-            str(item.get("library_workout_id") or item.get("local_id") or "")
-            for item in entries
-            if isinstance(item, dict)
-        }
-        - {""}
-    )
-    if (
-        len(identifiers) != len(entries)
-        or len(identifiers) > _MAX_REMOTE_APPROVAL_DETAILS
-    ):
-        raise AppError(
-            400,
-            "Jede ausgewählte Einheit benötigt eine eigene local_id.",
-            reason="request_scope",
+        entry["library_workout_id"]
+        for entry in planning_library.library_bulk_request_entries(
+            entries, require_hash=True
         )
+    )
     placeholders = ",".join("?" for _ in identifiers)
     tokens: set[str] = set()
     with database_manager.reader() as db:
@@ -419,8 +411,11 @@ def _card_authorized_intent(
             "Das ausgewählte Objekt ist nicht mehr verfügbar. Lies den aktuellen Stand erneut.",
             reason="request_object_missing",
         )
+    # The card is the only authority over units: the model's own unit tokens go.
     scope = {
-        str(value) for value in intent.get("authorization_scope", []) if value
+        str(value)
+        for value in intent.get("authorization_scope", [])
+        if value and not str(value).startswith(("planned_unit:", "library_workout:"))
     } | tokens
     return {**intent, "authorization_scope": sorted(scope)}
 

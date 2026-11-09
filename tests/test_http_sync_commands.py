@@ -60,6 +60,8 @@ class SyncCommandEndpointTests(unittest.TestCase):
             "garmin", "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
         )
 
+
+
     def test_job_request_and_conflict_resolution_keep_requested_by_and_status(self):
         self.queue.enqueue.return_value = {"id": "job-2"}
         self.assertEqual(

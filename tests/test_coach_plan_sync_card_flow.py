@@ -264,6 +264,22 @@ class ApprovedCardAuthorizesItsUnitsTests(CoachPlanSyncCardFlowCase):
         self.assertEqual(sorted(ids), sorted(e["library_workout_id"] for e in queued))
         self.assertNotIn(OTHER_UNIT, {e["library_workout_id"] for e in queued})
 
+    def test_unit_tokens_from_the_model_never_widen_the_card(self) -> None:
+        call = self.coach_tool_call(
+            [WEEK[0][0]],
+            scope=["intervals_sync", f"planned_unit:{OTHER_UNIT}"],
+        )
+
+        card = self.card(call)
+        self.approve(card)
+
+        queued = json.loads(self.plan_push_jobs()[0]["payload"])["entries"]
+        self.assertEqual([WEEK[0][0]], [e["library_workout_id"] for e in queued])
+        with self.database.reader() as db:
+            row = db.execute("SELECT payload FROM coach_action_proposals").fetchone()
+        scope = json.loads(row["payload"])["intent"]["authorization_scope"]
+        self.assertNotIn(f"planned_unit:{OTHER_UNIT}", scope)
+
     def test_card_creation_rejects_a_unit_that_does_not_exist(self) -> None:
         call = self.coach_tool_call([WEEK[0][0]], scope=["intervals_sync"])
         call["arguments"]["entries"][0]["library_workout_id"] = (
