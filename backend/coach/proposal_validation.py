@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.labels import provider_name
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.proposal_models import (
     COACH_ACTION_TYPES,
@@ -28,8 +29,7 @@ def validated_coach_action_preview_input(
     target_system = str(values.get("target_system") or "").strip()
     if target_system not in {
         "local",
-        ProviderId.INTERVALS,
-        ProviderId.GARMIN,
+        *ProviderId,
         "local+intervals",
     }:
         raise AppError(400, "Die Aktionsvorschau benötigt ein gültiges Zielsystem.")
@@ -63,14 +63,22 @@ def validated_coach_action_preview_input(
 
 def _expected_target(action_type: str, payload: dict[str, Any]) -> str:
     if action_type == "remote_coach_write":
-        return remote_write_target(payload.get("tool"))
+        return remote_write_target(payload.get("tool"), payload.get("intent"))
     return "local"
 
 
-def remote_write_target(tool: Any) -> str:
-    """The provider one remote Coach write tool writes to."""
+def remote_write_target(tool: Any, intent: Any = None) -> str:
+    """The provider one remote Coach write tool writes to.
+
+    A job retry writes to the provider of the job it retries, which the
+    dialogue layer matched to the intent's target.
+    """
     if tool == "push_strength_to_garmin":
         return ProviderId.GARMIN.value
+    if tool == "resolve_training_sync_conflict" and isinstance(intent, dict):
+        retried = intent.get("target_system")
+        if retried in {provider.value for provider in ProviderId}:
+            return str(retried)
     return ProviderId.INTERVALS.value
 
 
@@ -80,8 +88,8 @@ def _validate_remote_coach_write(payload: dict[str, Any]) -> None:
     intent = payload.get("intent")
     request = intent.get("request") if isinstance(intent, dict) else None
     scope = intent.get("authorization_scope") if isinstance(intent, dict) else None
-    target = remote_write_target(tool)
-    sync_scope = "garmin_sync" if target == ProviderId.GARMIN else "intervals_sync"
+    target = remote_write_target(tool, intent)
+    sync_scope = f"{target}_sync"
     scope_ok = isinstance(scope, list) and sync_scope in scope
     source_ids = (
         request.get("source_message_ids") if isinstance(request, dict) else None
@@ -171,6 +179,11 @@ def remote_coach_write_diff(
 ) -> list[dict[str, str]]:
     """Project the remote effect into a compact, non-sensitive approval summary."""
     name = REMOTE_WRITE_LABELS[tool]
+    if tool == "resolve_training_sync_conflict":
+        name = (
+            f"Fehlgeschlagenen {provider_name(remote_write_target(tool, intent))}"
+            "-Sync wiederholen"
+        )
     if tool == "sync_nutrition":
         return _nutrition_approval_diff(name, approval_manifest)
     if tool == "start_intervals_plan_sync":

@@ -966,7 +966,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "resolve_training_sync_conflict",
-            "Resolve a local conflict using local_id and strategy (keep_local or adopt_remote), with local target. Or retry a failed/partial job using only job_id: read get_sync_job first, use its provider target, and include sync_job:<id> plus intervals_sync for pushes (remote_write=true) or <provider>_refresh for reads.",
+            "Resolve a local conflict using local_id and strategy (keep_local or adopt_remote), with local target. Or retry a failed/partial job using only job_id: read get_sync_job first, use its provider target, and include sync_job:<id> plus <provider>_sync (intervals_sync, garmin_sync or wahoo_sync) for pushes (remote_write=true) or <provider>_refresh for reads.",
             {
                 "local_id": {"type": "string"},
                 "job_id": {"type": "string"},

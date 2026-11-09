@@ -87,6 +87,7 @@ class CardFlow:
     execution: CoachProposalExecutionService
     preparation: CoachStructuredToolPreparationService
     inline_refreshes: dict[str, Any]
+    queue: SyncJobQueueService
 
 
 def wire_card_flow(case: unittest.TestCase) -> CardFlow:
@@ -211,6 +212,7 @@ def wire_card_flow(case: unittest.TestCase) -> CardFlow:
         execution=execution,
         preparation=preparation,
         inline_refreshes=inline_refreshes,
+        queue=queue,
     )
 
 
@@ -567,6 +569,152 @@ class EveryCardKindQueuesItsProviderJobTests(unittest.TestCase):
 
                 self.assertIn(caught.exception.status, {403, 409})
                 self.assertEqual([], queued_jobs(self.flow))
+
+
+# Provider -> (job type, label the athlete reads); each plan push is a remote
+# write, each refresh a read.
+RETRIED_JOBS = (
+    ("intervals", "plan_push", "Intervals.icu"),
+    ("garmin", "plan_push", "Garmin"),
+    ("garmin", "refresh", "Garmin"),
+    ("wahoo", "plan_push", "Wahoo"),
+    ("wahoo", "refresh", "Wahoo"),
+)
+
+
+def failed_job(flow: CardFlow, provider: str, job_type: str) -> dict[str, Any]:
+    """Queue one job of the provider and type and mark it failed."""
+    if job_type == "plan_push":
+        entries = unit_entries(flow, STRENGTH_IDS)
+        if provider != "intervals":
+            entries = [
+                {"local_id": entry["library_workout_id"], **entry} for entry in entries
+            ]
+        job = flow.queue.enqueue(
+            provider,
+            "plan_push",
+            {"entries": entries, "reason": "Synthetic retry"},
+            requested_by="coach",
+            item_operations=[
+                {
+                    "item_key": entry["library_workout_id"],
+                    "operation": "plan_push",
+                    "payload_hash": entry["expected_payload_hash"],
+                }
+                for entry in unit_entries(flow, STRENGTH_IDS)
+            ],
+        )
+    else:
+        job = flow.queue.enqueue(
+            provider, "refresh", {"reason": "Synthetic retry", "days": 7}
+        )
+    with flow.database.unit_of_work() as db:
+        db.execute("UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],))
+    return job
+
+
+def retry_call(
+    flow: CardFlow, job: dict[str, Any], *, target: str, scope: str, push: bool
+) -> dict[str, Any]:
+    return prepared_call(
+        flow,
+        "resolve_training_sync_conflict",
+        {"job_id": job["id"]},
+        request_for(
+            target, [f"sync_job:{job['id']}", scope], sync_scope=None, remote_write=push
+        ),
+    )
+
+
+def job_status(flow: CardFlow, job_id: str) -> str:
+    return next(j["status"] for j in queued_jobs(flow) if j["id"] == job_id)
+
+
+class RetryByJobProviderTests(unittest.TestCase):
+    """A retry takes its target and sync scope from the job it retries."""
+
+    def setUp(self) -> None:
+        self.flow = wire_card_flow(self)
+
+    def test_every_provider_and_job_type_retries_with_its_own_scope(self) -> None:
+        for provider, job_type, label in RETRIED_JOBS:
+            with self.subTest(provider=provider, job_type=job_type):
+                self.flow = wire_card_flow(self)
+                job = failed_job(self.flow, provider, job_type)
+                push = job_type == "plan_push"
+                call = retry_call(
+                    self.flow,
+                    job,
+                    target=provider,
+                    scope=f"{provider}_{'sync' if push else 'refresh'}",
+                    push=push,
+                )
+
+                if push:
+                    card = create_card(self.flow, call)
+                    self.assertEqual(provider, card["target_system"])
+                    self.assertIn(label, card["diff"][0]["name"])
+                    for other in {"Intervals.icu", "Garmin", "Wahoo"} - {label}:
+                        self.assertNotIn(other, card["diff"][0]["name"])
+                    self.assertEqual("failed", job_status(self.flow, job["id"]))
+                    result = approve_card(self.flow, card)
+                    self.assertEqual("queued", result["status"], result)
+                else:
+                    jobs: list[str] = []
+                    self.flow.sync_tools.execute(
+                        "resolve_training_sync_conflict",
+                        call["arguments"],
+                        intent=call["action"],
+                        sync_job_ids=jobs,
+                    )
+                    self.assertEqual([job["id"]], jobs)
+                self.assertEqual("queued", job_status(self.flow, job["id"]))
+
+    def test_a_push_retry_without_the_job_providers_sync_scope_is_denied(self) -> None:
+        for provider, job_type, label in RETRIED_JOBS:
+            if job_type != "plan_push":
+                continue
+            wrong = "garmin_sync" if provider != "garmin" else "intervals_sync"
+            with self.subTest(provider=provider):
+                job = failed_job(self.flow, provider, job_type)
+                with self.assertRaises(AppError) as caught:
+                    retry_call(self.flow, job, target=provider, scope=wrong, push=True)
+                self.assertEqual(
+                    (403, "remote_scope_denied"),
+                    (caught.exception.status, caught.exception.reason),
+                )
+                self.assertIn(label, str(caught.exception))
+                self.assertEqual("failed", job_status(self.flow, job["id"]))
+
+    def test_a_retry_aimed_at_another_provider_is_denied_by_name(self) -> None:
+        for provider, target in (("garmin", "intervals"), ("wahoo", "garmin")):
+            with self.subTest(provider=provider):
+                job = failed_job(self.flow, provider, "plan_push")
+                with self.assertRaises(AppError) as caught:
+                    retry_call(
+                        self.flow,
+                        job,
+                        target=target,
+                        scope=f"{target}_sync",
+                        push=True,
+                    )
+                self.assertEqual("request_target", caught.exception.reason)
+                self.assertIn(provider.capitalize(), str(caught.exception))
+
+    def test_a_push_retry_declared_as_a_read_is_denied(self) -> None:
+        for provider in ("garmin", "wahoo"):
+            with self.subTest(provider=provider):
+                job = failed_job(self.flow, provider, "plan_push")
+                with self.assertRaises(AppError) as caught:
+                    retry_call(
+                        self.flow,
+                        job,
+                        target=provider,
+                        scope=f"{provider}_refresh",
+                        push=False,
+                    )
+                self.assertEqual("remote_scope_denied", caught.exception.reason)
+                self.assertEqual("failed", job_status(self.flow, job["id"]))
 
 
 class ProviderRefreshByCoachTests(unittest.TestCase):

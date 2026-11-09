@@ -164,6 +164,69 @@ class TurnWriteGateTests(unittest.TestCase):
         named, _factory = make_gate("Synchronisier den Plan mit Intervals")
         self.assertIsNone(named.denial("start_intervals_plan_sync", {}))
 
+    def test_a_denial_names_only_the_provider_the_call_targeted(self) -> None:
+        garmin_push: dict[str, Any] = {"entries": [{"local_id": "unit-1"}]}
+        retry: dict[str, Any] = {"job_id": "job-1"}
+        cases: tuple[tuple[str, dict[str, Any], str, str, tuple[str, ...]], ...] = (
+            (
+                "push_strength_to_garmin",
+                garmin_push,
+                "remote_garmin_not_requested",
+                "Garmin",
+                ("Intervals", "Wahoo"),
+            ),
+            (
+                "start_intervals_plan_sync",
+                {},
+                "remote_not_requested",
+                "Intervals.icu",
+                ("Garmin", "Wahoo"),
+            ),
+            (
+                "resolve_training_sync_conflict",
+                {**retry, "_request": {"target": "garmin", "remote_write": True}},
+                "remote_garmin_not_requested",
+                "Garmin",
+                ("Intervals", "Wahoo"),
+            ),
+            (
+                "resolve_training_sync_conflict",
+                {**retry, "_request": {"target": "wahoo", "remote_write": True}},
+                "remote_wahoo_not_requested",
+                "Wahoo",
+                ("Intervals", "Garmin"),
+            ),
+            (
+                "resolve_training_sync_conflict",
+                {**retry, "_request": {"target": "intervals", "remote_write": True}},
+                "remote_not_requested",
+                "Intervals.icu",
+                ("Garmin", "Wahoo"),
+            ),
+        )
+        for tool, arguments, reason, named, others in cases:
+            with self.subTest(tool=tool, reason=reason):
+                gate, _factory = make_gate("Wie sieht meine Woche aus?")
+                denial = denied(gate, tool, arguments)
+                self.assertEqual(denial["gate_reason"], reason)
+                self.assertEqual(denial["reason"], "write_not_authorized")
+                self.assertIn(named, denial["message"])
+                for other in others:
+                    self.assertNotIn(other, denial["message"])
+
+    def test_a_read_retry_of_a_garmin_or_wahoo_job_is_not_denied(self) -> None:
+        for provider in ("garmin", "wahoo"):
+            with self.subTest(provider=provider):
+                gate, factory = make_gate(f"Wiederhole den {provider}-Abruf")
+                request = {"target": provider, "remote_write": False}
+                self.assertIsNone(
+                    gate.denial(
+                        "resolve_training_sync_conflict",
+                        {"job_id": "job-1", "_request": request},
+                    )
+                )
+                factory.assert_not_called()
+
     def test_negated_sync_wording_never_opens_a_remote_write(self) -> None:
         for message in (
             "Passe die Woche an ohne Intervals zu synchronisieren.",
