@@ -295,9 +295,8 @@ function dismissIntervalsHint() {
 
 function renderStatus(data) {
   const configured = data.configured;
-  const morning = data.morning_checkin || {};
   const openaiStatus = data.usage?.status || {};
-  const error = data.sync.last_error || data.library_sync?.last_error || morning.last_error
+  const error = data.sync.last_error || data.library_sync?.last_error
     || (openaiStatus.state === "error" ? openaiStatus.message : null);
   const activePanel = document.querySelector(".nav-item.active")?.dataset.panel || "chatPanel";
   const connections = { href: "#more/connections", label: "Anbindungen" };

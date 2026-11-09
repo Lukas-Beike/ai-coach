@@ -209,6 +209,14 @@ def morning_record(
     return record
 
 
+def counted_attempts(record: dict[str, Any]) -> int:
+    """Attempts that found the night or failed; a missing night is not counted."""
+    try:
+        return max(0, int(record.get("attempts", 1) or 0))
+    except TypeError, ValueError, OverflowError:
+        return 1
+
+
 def cached_result(
     record: dict[str, Any] | None,
     checkin_date: date,
@@ -216,6 +224,7 @@ def cached_result(
     now: datetime,
     max_attempts: int = 3,
     retry_seconds: int = 900,
+    sleep_wait_over: bool = False,
 ) -> dict[str, Any] | None:
     """Return the existing cache/retry decision without reading the system clock."""
     if not record or record.get("sleep_date") != checkin_date.isoformat():
@@ -223,11 +232,9 @@ def cached_result(
     sleep_date = checkin_date.isoformat()
     if record.get("status") == "ready":
         return {"status": "already_loaded", "sleep_date": sleep_date}
-    try:
-        attempts = int(record.get("attempts") or 1)
-    except TypeError, ValueError, OverflowError:
-        attempts = 1
-    if attempts >= max_attempts:
+    if counted_attempts(record) >= max_attempts:
+        return {"status": "attempts_exhausted", "sleep_date": sleep_date}
+    if sleep_wait_over and not record.get("sleep_end_at") and not record.get("error"):
         return {"status": "attempts_exhausted", "sleep_date": sleep_date}
     attempted = timestamp(record.get("attempted_at"))
     if now.tzinfo is None:

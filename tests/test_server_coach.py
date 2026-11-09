@@ -791,6 +791,35 @@ class ServerCoachTests(ServerTestCase):
             )
         chat.assert_not_called()
 
+    def test_sleep_not_ready_requeues_the_morning_job_with_a_quarter_hour_wait(self):
+        runner = server.COACH_BACKGROUND_JOBS.background_job_runner()
+        error = server.AppError(
+            503, "Garmin sleep is not ready", reason="garmin_sleep_not_ready"
+        )
+        with (
+            patch(
+                "backend.coach.job_store.CoachJobStore.requeue", return_value=True
+            ) as requeue,
+            patch(
+                "backend.coach.turn_failures.CoachTurnFailureService.persist"
+            ) as fail,
+        ):
+            runner._handle_app_error("client-turn", "operation", error)
+        requeue.assert_called_once_with(
+            "client-turn", "garmin_sleep_not_ready", wait_seconds=900, max_waits=8
+        )
+        fail.assert_not_called()
+
+        with (
+            patch("backend.coach.job_store.CoachJobStore.requeue", return_value=False),
+            patch(
+                "backend.coach.turn_failures.CoachTurnFailureService.persist",
+                return_value=None,
+            ) as fail,
+        ):
+            runner._handle_app_error("client-turn", "operation", error)
+        fail.assert_called_once()
+
     def test_completed_morning_background_job_returns_persisted_completion_receipt(
         self,
     ):

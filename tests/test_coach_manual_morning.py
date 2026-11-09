@@ -153,7 +153,6 @@ class MorningCheckinStateServiceTests(unittest.TestCase):
                 "status": "ready",
                 "date": TODAY.isoformat(),
                 "current_for_today": True,
-                "last_error": None,
             },
         )
 
@@ -168,7 +167,6 @@ class MorningCheckinStateServiceTests(unittest.TestCase):
                 "status": "waiting",
                 "date": yesterday.isoformat(),
                 "current_for_today": False,
-                "last_error": None,
             },
         )
 
@@ -179,7 +177,6 @@ class MorningCheckinStateServiceTests(unittest.TestCase):
                 "status": "waiting",
                 "date": None,
                 "current_for_today": False,
-                "last_error": None,
             },
         )
 
@@ -193,7 +190,6 @@ class MorningCheckinStateServiceTests(unittest.TestCase):
                 "status": "failed",
                 "date": TODAY.isoformat(),
                 "current_for_today": True,
-                "last_error": None,
             },
         )
 

@@ -98,6 +98,12 @@ class DiagnosticFollowupTests(unittest.TestCase):
             patch.object(
                 garmin_sync.GarminFixtureLoader, "load", return_value={}
             ) as fetch,
+            # The cooldown is under test, not the noon cutoff for a missing night.
+            patch(
+                "backend.performance.morning_battery_service."
+                "MORNING_SLEEP_WAIT_UNTIL_HOUR",
+                24,
+            ),
         ):
             service = server.morning_body_battery_service()
             first = service.sync(day)
@@ -138,7 +144,8 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 self.assertEqual(service.sync(day)["status"], "ready")
             self.assertEqual(
                 read_garmin()["morning_body_battery"]["attempts"],
-                2,
+                # The first refresh found no night yet and is not counted.
+                1,
             )
             self.assertEqual(service.sync(day)["status"], "already_loaded")
             self.assertEqual(fetch.call_count, 2)
@@ -275,8 +282,6 @@ class DiagnosticFollowupTests(unittest.TestCase):
         )
         self.assertEqual(json.dumps(snapshot, sort_keys=True), original)
         self.assertIn("weight", read_garmin())
-
-
 
     def test_failed_tool_is_diagnosable_without_session_credentials(self):
         private = "synthetic-private-content-never-export"

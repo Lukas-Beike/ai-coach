@@ -249,6 +249,18 @@ class CachedResultTests(unittest.TestCase):
             {"status": "attempts_exhausted", "sleep_date": CHECKIN_DATE.isoformat()},
         )
 
+    def test_missing_night_is_not_an_attempt_and_waits_until_cutoff(self):
+        record = {**self.record, "attempts": 0}
+        self.assertIsNone(cached_result(record, CHECKIN_DATE, now=self.now))
+        self.assertEqual(
+            cached_result(record, CHECKIN_DATE, now=self.now, sleep_wait_over=True),
+            {"status": "attempts_exhausted", "sleep_date": CHECKIN_DATE.isoformat()},
+        )
+        found = {**record, "sleep_end_at": "2026-09-04T05:45:00+00:00"}
+        self.assertIsNone(
+            cached_result(found, CHECKIN_DATE, now=self.now, sleep_wait_over=True)
+        )
+
     def test_retry_wait_is_strictly_less_than_nine_hundred_seconds(self):
         record = {
             **self.record,

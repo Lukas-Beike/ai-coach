@@ -124,6 +124,60 @@ class CoachJobStoreTests(unittest.TestCase):
         self.assertGreaterEqual(receipt["retry_after"], before + 32)
         self.assertTrue(self.wake.is_set())
 
+    def test_data_wait_requeues_with_fixed_delay_until_its_cap(self):
+        self._insert("morning", {"mode": "background"}, status="running")
+        before = time.time()
+
+        self.assertTrue(
+            self.store.requeue(
+                "morning", "garmin_sleep_not_ready", wait_seconds=900, max_waits=2
+            )
+        )
+
+        with self.manager.unit_of_work() as db:
+            row = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                ("morning",),
+            ).fetchone()
+            receipt = json.loads(row["receipt"])
+            self.assertEqual(receipt["data_wait_attempts"], 1)
+            self.assertNotIn("contention_attempts", receipt)
+            self.assertEqual(receipt["phase"], "waiting_for_data")
+            self.assertGreaterEqual(receipt["retry_after"], before + 900)
+            receipt["data_wait_attempts"] = 2
+            db.execute(
+                "UPDATE coach_commands SET status='running', receipt=? "
+                "WHERE client_turn_id='morning'",
+                (json.dumps(receipt),),
+            )
+
+        self.assertFalse(
+            self.store.requeue(
+                "morning", "garmin_sleep_not_ready", wait_seconds=900, max_waits=2
+            )
+        )
+
+    def test_cancelled_job_is_not_requeued_for_data_and_is_claimed_at_once(self):
+        self._insert(
+            "cancelled",
+            {"mode": "background", "cancel_requested": True},
+            status="running",
+        )
+        self.assertFalse(
+            self.store.requeue(
+                "cancelled", "garmin_sleep_not_ready", wait_seconds=900, max_waits=8
+            )
+        )
+        self._insert(
+            "waiting",
+            {
+                "mode": "background",
+                "cancel_requested": True,
+                "retry_after": time.time() + 900,
+            },
+        )
+        self.assertEqual(self.store.claim()["client_turn_id"], "waiting")
+
     def test_message_requires_saved_user_content(self):
         with self.manager.unit_of_work() as db:
             db.execute(
