@@ -125,32 +125,40 @@ def collect_wellness_history(
     }
     pagination: dict[str, dict[str, Any]] = {}
     for source, read in readers.items():
-        optional = source in OPTIONAL_WELLNESS_SOURCES
-        if not hooks.capability_allowed(source):
-            if not optional:
-                raise WellnessSourcePaused(source)
+        records = _read_source(source, read, hooks)
+        if records is None:
             payload["skipped_sources"].append(source)
             pagination[source] = {"records": 0}
             continue
-        try:
-            records = read()
-        except Exception as exc:
-            if not hooks.skippable(exc):
-                # Only real provider failures count toward the shared pause; a
-                # skipped history window must not pause the hourly sync.
-                hooks.capability_failure(source, exc)
-                if not optional:
-                    raise
-            payload["skipped_sources"].append(source)
-            pagination[source] = {"records": 0}
-            continue
-        hooks.capability_success(source)
         payload[source] = records
         pagination[source] = {"records": len(records)}
     if "daily_stats" in payload:
         payload["resting_hr"] = _resting_rows(payload["daily_stats"])
     payload["provider_sync"] = {"pagination": pagination}
     return payload
+
+
+def _read_source(
+    source: str, read: Callable[[], list[Any]], hooks: WellnessHistoryHooks
+) -> list[Any] | None:
+    """One source's records, or None when it is skipped for this chunk."""
+    optional = source in OPTIONAL_WELLNESS_SOURCES
+    if not hooks.capability_allowed(source):
+        if not optional:
+            raise WellnessSourcePaused(source)
+        return None
+    try:
+        records = read()
+    except Exception as exc:
+        if not hooks.skippable(exc):
+            # Only real provider failures count toward the shared pause; a
+            # skipped history window must not pause the hourly sync.
+            hooks.capability_failure(source, exc)
+            if not optional:
+                raise
+        return None
+    hooks.capability_success(source)
+    return records
 
 
 def _in_window(record: object, start: date, end: date) -> bool:
