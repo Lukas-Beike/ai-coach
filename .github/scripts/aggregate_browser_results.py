@@ -93,7 +93,7 @@ def collect_children(manifest, project, key, files, actual):
         actual.setdefault(project, []).extend(identity(item) for item in child_ids)
 
 
-ATTEMPT = re.compile(r"-attempt-([1-9][0-9]*)$")
+ATTEMPT = re.compile(r"-attempt-([1-9]d*)$")
 
 
 def attempt_of(path, directory):
