@@ -910,16 +910,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/coach/planning_commands.py",
-      "capabilities": [
-        "coach-conversation",
-        "coach-context-and-provenance",
-        "coach-tool-authority",
-        "model-selection-and-usage"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/coach/planning_tools_assembly.py",
       "capabilities": [
         "coach-conversation",
@@ -1778,13 +1768,6 @@
       "capabilities": [
         "runtime-and-configuration",
         "view-refresh-and-client-state"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/http_api/planning_commands_post.py",
-      "capabilities": [
-        "training-plans-and-adaptation"
       ],
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
@@ -5077,15 +5060,6 @@
       "owners": [
         "backend/http_api/planning_get.py:31",
         "backend/http_api/planning_get.py:36"
-      ],
-      "capabilities": [
-        "training-plans-and-adaptation"
-      ]
-    },
-    {
-      "path_literal": "/api/planning/commands",
-      "owners": [
-        "backend/http_api/planning_commands_post.py:28"
       ],
       "capabilities": [
         "training-plans-and-adaptation"

@@ -108,23 +108,6 @@ The system SHALL replace only selected active local units within the authorized 
 
 Evidence: `backend/planning/replacement.py:prepare_structured_plan_replacement`; `backend/planning/replacement_service.py:StructuredTrainingPlanReplacementService.replace`, `backend/planning/replacement_service.py:StructuredTrainingPlanReplacementService._archive_superseded_plans`, `backend/planning/replacement_service.py:StructuredTrainingPlanReplacementService._copy_constraints`; `backend/change_history.py:reserve_capacity`; `tests/test_coach_tool_coverage.py:test_replacement_changes_only_requested_period`; `tests/test_coach_dialogue.py:test_bounded_giro_rebuild_preserves_later_units_and_plan_constraints`; `tests/test_planning_replacement.py:test_rejects_past_and_out_of_period_workouts`, `tests/test_planning_replacement.py:test_rejects_overlapping_time_windows_in_replacement`.
 
-### Requirement: TP7 Authenticated idempotent planning commands
-The system SHALL support the allowed explicit planning API commands with a bounded client turn ID, session/conversation ownership and stable effect identity, storing their final receipt transactionally with the effect.
-
-#### Scenario: Explicit command success and replay
-- **WHEN** an authenticated planning command succeeds and is resubmitted unchanged by its owning session/conversation
-- **THEN** the stored receipt is returned without executing its effect twice.
-
-#### Scenario: Changed or active command identity
-- **WHEN** the ID already belongs to different arguments, a foreign session/conversation or a running command
-- **THEN** the command is rejected without repeating or replacing its effect.
-
-#### Scenario: Invalid command or domain failure
-- **WHEN** the operation/arguments/ID are invalid, the draft revision is stale or the domain write fails
-- **THEN** invalid input does not claim a new turn, and a claimed tool failure rolls back its local effect while persisting an honest failure receipt.
-
-Evidence: `backend/http_api/planning_commands_post.py:PlanningCommandsPostRoutes.handle`; `backend/coach/planning_commands.py:CoachPlanningCommandService.execute`, `backend/coach/planning_commands.py:CoachPlanningCommandService._claim`, `backend/coach/planning_commands.py:CoachPlanningCommandService._execute_claimed`; `tests/test_coach_planning_commands.py:test_success_replays_without_second_effect_and_binds_session_and_conversation`, `tests/test_coach_planning_commands.py:test_invalid_command_never_claims_turn`, `tests/test_coach_planning_commands.py:test_existing_running_claim_does_not_execute_again`, `tests/test_coach_planning_commands.py:test_tool_failure_rolls_back_effect_and_persists_failure_receipt`.
-
 ### Requirement: TP8 Persisted adaptive previews with trigger evidence
 The system SHALL create local adaptive proposals from current saved feedback, future local units, read-only calendar signals and cached forecast evidence, persist their source fingerprints and freshness, and leave units unchanged until apply.
 

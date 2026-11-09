@@ -2318,8 +2318,6 @@ HTTP_API = HttpApiAssembly(
                     proposal_confirmation_service=COACH_PROPOSALS.confirmation_service,
                     proposal_execution_service=COACH_PROPOSALS.execution_service,
                     reset_service=COACH_CONVERSATION.reset_service,
-                    provision_service=lambda: COACH_CONVERSATION.provision_service(),
-                    planning_command_service=COACH_TURNS.planning_command_service,
                 ),
                 stream=HttpCoachStreamSettings(
                     max_chat_request_bytes=coach_attachments.MAX_REQUEST_BYTES,
