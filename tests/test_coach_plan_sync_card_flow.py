@@ -59,7 +59,7 @@ def _payload(name: str, day: str, sport: str) -> str:
     return json.dumps({"name": name, "date": day, "type": sport}, sort_keys=True)
 
 
-class CoachPlanSyncCardFlowCase(unittest.TestCase):
+class ApprovedCardAuthorizesItsUnitsTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -233,8 +233,6 @@ class CoachPlanSyncCardFlowCase(unittest.TestCase):
                 )
             ]
 
-
-class ApprovedCardAuthorizesItsUnitsTests(CoachPlanSyncCardFlowCase):
     def test_mixed_week_card_is_approved_and_queues_one_plan_push_job(self) -> None:
         ids = [local_id for local_id, _, _ in WEEK]
         call = self.coach_tool_call(ids, scope=["intervals_sync"])

@@ -84,61 +84,72 @@ def _runtime_deps(
     )
 
 
-class JobAdmissionCase(unittest.TestCase):
-    intervals_key = "fake-key"
-    wahoo_connected = True
-    garmin_configured = True
+def build_endpoint(
+    case: unittest.TestCase,
+    *,
+    intervals_key: str,
+    wahoo_connected: bool,
+    garmin_configured: bool,
+) -> tuple[SyncCommandEndpoint, DatabaseManager]:
+    """Wire the real runtime bindings, queue and a temporary database for a case."""
+    temporary = tempfile.TemporaryDirectory()
+    case.addCleanup(temporary.cleanup)
+    database = DatabaseManager(
+        Path(temporary.name) / "admission.sqlite",
+        sqlite3,
+        row_factory=sqlite3.Row,
+    )
+    case.addCleanup(database.close)
+    with database.unit_of_work() as db:
+        initialize_schema(db)
+    identifiers = iter(f"job-{index}" for index in range(1, 100))
+    store = SyncJobStore(database, NOW.isoformat, lambda: next(identifiers))
+    queue = SyncJobQueueService(
+        store,
+        mock.Mock(spec=StateEventBuffer),
+        MaintenanceGate(),
+        threading.Event(),
+        all_sync_days=-1,
+        daily_sync_markers=DailySyncMarkerService(
+            database, KeyValueRepository(NOW.isoformat), lambda: NOW
+        ),
+    )
+    runtime = build_provider_runtime(
+        DEFAULT_PROVIDER_REGISTRY,
+        builtin_bindings(
+            _runtime_deps(
+                intervals_key=intervals_key,
+                wahoo_connected=wahoo_connected,
+                garmin_configured=garmin_configured,
+            )
+        ),
+    )
+    endpoint = SyncCommandEndpoint(
+        queue,
+        mock.Mock(),
+        mock.Mock(),
+        lambda: "operation-1",
+        {"intervals": 90},
+        -1,
+        provider_configured=runtime.provider_configured,
+    )
+    return endpoint, database
 
+
+def stored_jobs(database: DatabaseManager) -> int:
+    with database.unit_of_work() as db:
+        return int(db.execute("SELECT COUNT(*) FROM sync_jobs").fetchone()[0])
+
+
+class ConfiguredProviderTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        database = DatabaseManager(
-            Path(temporary.name) / "admission.sqlite",
-            sqlite3,
-            row_factory=sqlite3.Row,
+        self.endpoint, self.database = build_endpoint(
+            self,
+            intervals_key="fake-key",
+            wahoo_connected=True,
+            garmin_configured=True,
         )
-        self.addCleanup(database.close)
-        with database.unit_of_work() as db:
-            initialize_schema(db)
-        identifiers = iter(f"job-{index}" for index in range(1, 100))
-        store = SyncJobStore(database, NOW.isoformat, lambda: next(identifiers))
-        queue = SyncJobQueueService(
-            store,
-            mock.Mock(spec=StateEventBuffer),
-            MaintenanceGate(),
-            threading.Event(),
-            all_sync_days=-1,
-            daily_sync_markers=DailySyncMarkerService(
-                database, KeyValueRepository(NOW.isoformat), lambda: NOW
-            ),
-        )
-        runtime = build_provider_runtime(
-            DEFAULT_PROVIDER_REGISTRY,
-            builtin_bindings(
-                _runtime_deps(
-                    intervals_key=self.intervals_key,
-                    wahoo_connected=self.wahoo_connected,
-                    garmin_configured=self.garmin_configured,
-                )
-            ),
-        )
-        self.endpoint = SyncCommandEndpoint(
-            queue,
-            mock.Mock(),
-            mock.Mock(),
-            lambda: "operation-1",
-            {"intervals": 90},
-            -1,
-            provider_configured=runtime.provider_configured,
-        )
-        self.database = database
 
-    def stored_jobs(self) -> int:
-        with self.database.unit_of_work() as db:
-            return int(db.execute("SELECT COUNT(*) FROM sync_jobs").fetchone()[0])
-
-
-class ConfiguredProviderTests(JobAdmissionCase):
     def test_configured_intervals_and_wahoo_plan_push_are_enqueued(self) -> None:
         for provider in (INTERVALS_ID, WAHOO_ID):
             with self.subTest(provider=provider):
@@ -169,13 +180,14 @@ class ConfiguredProviderTests(JobAdmissionCase):
 
         self.assertEqual(400, caught.exception.status)
         self.assertEqual("invalid_job_request", caught.exception.reason)
-        self.assertEqual(0, self.stored_jobs())
+        self.assertEqual(0, stored_jobs(self.database))
 
 
-class UnconfiguredProviderTests(JobAdmissionCase):
-    intervals_key = ""
-    wahoo_connected = False
-    garmin_configured = False
+class UnconfiguredProviderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.endpoint, self.database = build_endpoint(
+            self, intervals_key="", wahoo_connected=False, garmin_configured=False
+        )
 
     def test_unconfigured_providers_get_409_before_any_job_is_stored(self) -> None:
         for provider in (INTERVALS_ID, GARMIN_ID, WAHOO_ID):
@@ -189,7 +201,7 @@ class UnconfiguredProviderTests(JobAdmissionCase):
                     DEFAULT_PROVIDER_REGISTRY.get(provider).not_configured_message,
                     caught.exception.message,
                 )
-        self.assertEqual(0, self.stored_jobs())
+        self.assertEqual(0, stored_jobs(self.database))
 
 
 if __name__ == "__main__":
