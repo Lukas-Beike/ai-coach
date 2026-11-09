@@ -132,6 +132,10 @@ class CompetitionServiceTests(unittest.TestCase):
         self.assertEqual(saved["distance"], "42200")
         self.assertEqual(saved["description"], "Flat")
         self.assertEqual(kept["competition"]["target"], "")
+        no_description = self.service.save(
+            {"competition_id": competition_id, "description": ""}
+        )
+        self.assertEqual(no_description["competition"]["description"], "")
         with self.manager.reader() as db:
             diff = db.execute(
                 "SELECT diff FROM change_history WHERE action='update' ORDER BY rowid"
