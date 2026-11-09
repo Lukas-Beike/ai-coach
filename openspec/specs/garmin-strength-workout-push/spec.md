@@ -31,7 +31,7 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 
 #### Scenario: Repeated push
 - **WHEN** a linked unit is pushed again after a change or move
-- **THEN** the same Garmin workout is updated, its own schedule is replaced by one on the current date, and a workout missing at Garmin is uploaded again.
+- **THEN** the same Garmin workout is updated, its own schedule is replaced by one on the current date, and a workout missing at Garmin is uploaded again after its old schedule and workout are unscheduled and deleted.
 
 #### Scenario: Weight unit
 - **WHEN** a set with 40 kg is exported
@@ -88,3 +88,24 @@ A saved workout whose exercise steps differ from the sent ones SHALL be deleted 
 - **THEN** that unit fails with a fixed message and the remaining units are not attempted.
 
 Evidence: `backend/sync/garmin_strength_push.py`; `tests/test_garmin_strength_push.py`.
+
+### Requirement: Garmin leftovers are removed by the explicit sync
+A link of provider `garmin` whose planned unit is missing, tombstoned, archived, deleted or no longer a strength unit SHALL count as an orphan. The explicit Garmin job SHALL carry up to 20 orphans as `remove` entries and the calendar and Coach cards SHALL list them ("Wird bei Garmin entfernt"); nothing SHALL be removed outside an explicit sync, and a Garmin workout without a link SHALL never be touched.
+
+#### Scenario: Kept link and marker
+- **WHEN** the creation of a unit is undone, or a workout is sent
+- **THEN** the unit's Garmin link stays so the workout remains removable, and the workout description starts with "Pacecraft".
+
+#### Scenario: Replaced unit
+- **WHEN** a unit was replaced by a new unit and the new unit is synced to Garmin
+- **THEN** the job also unschedules and deletes the old unit's linked workout, drops its link and schedules the new workout once.
+
+#### Scenario: Failed removal
+- **WHEN** Garmin refuses an orphan's removal
+- **THEN** the job reports the failure, the link stays and the next sync lists the orphan again.
+
+#### Scenario: Foreign workout
+- **WHEN** the Garmin calendar holds a workout this app did not send
+- **THEN** no orphan removal reads, changes or deletes it.
+
+Evidence: `backend/planning/garmin_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/db/remote_links.py:RemoteLinkRepository.delete_for_entity`, `public/plan-views.js:plannedGarminCleanup`; `tests/test_garmin_strength_push.py` (PushTests orphan tests), `tests/plan-views-sync-button.test.cjs`, `tests/test_sync_jobs.py:test_one_stored_item_keeps_a_failure_among_several_results`.

@@ -968,6 +968,21 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["status"], "failed")
 
 
+    def test_one_stored_item_keeps_a_failure_among_several_results(self):
+        # The generic job path stores one item for a whole Garmin push batch.
+        for results, expected in (
+            ([{"status": "error", "error": "bad"}, {"status": "synced"}], "failed"),
+            ([{"status": "synced"}, {"status": "error", "error": "bad"}], "failed"),
+            ([{"status": "synced"}, {"status": "synced"}], "completed"),
+        ):
+            with self.subTest(expected=expected, first=results[0]["status"]):
+                job, _ = self.enqueue("garmin", "plan_push", {"entries": []})
+                self.store.claim()
+                snapshot = self.store.update_from_result(
+                    job["id"], {"results": results}, "completed", str
+                )
+                self.assertEqual(snapshot["status"], expected)
+
     def test_resume_interrupted_resets_stale_competition_sync_markers(self):
         with self.manager.unit_of_work() as db:
             db.execute(

@@ -23,6 +23,7 @@ from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
 from backend.planning.conflicts import calendar_item_window
 from backend.planning.exercise_mappings import remembered_exercises
+from backend.planning.garmin_orphans import find_orphans
 from backend.planning.library import library_payload_hash
 from backend.planning.push_state import attach_push_state, garmin_baselines
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
@@ -152,8 +153,12 @@ class PlannedUnitService:
         """Restore one audited local state inside the caller-owned transaction."""
         if target is None:
             db.execute("DELETE FROM planned_units WHERE local_id=?", (entity_id,))
+            # A pushed Garmin workout stays removable by its link.
             _REMOTE_LINKS.delete_for_entity(
-                db, RemoteEntityKind.PLANNED_UNIT, entity_id
+                db,
+                RemoteEntityKind.PLANNED_UNIT,
+                entity_id,
+                keep=(ProviderId.GARMIN.value,),
             )
             return None
         if current is None:
@@ -361,6 +366,7 @@ class PlannedUnitService:
             )
             baselines = garmin_baselines(db) if push_state else {}
             remembered = remembered_exercises(db) if push_state else {}
+            orphans = find_orphans(db)[0] if push_state else []
             pairs = [
                 (row, payload)
                 for row in rows
@@ -372,7 +378,7 @@ class PlannedUnitService:
                 else set()
             )
         if push_state:
-            attach_push_state(pairs, baselines, remembered, resync)
+            attach_push_state(pairs, baselines, remembered, resync, orphans)
         return [payload for _row, payload in pairs]
 
     def list_for_coach(self, limit: int = 250) -> dict[str, Any]:

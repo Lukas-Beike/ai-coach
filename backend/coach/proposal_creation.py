@@ -28,6 +28,7 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import PlanAdjustmentRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
+from backend.planning.garmin_orphans import find_orphans, removal_entries
 from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
 
@@ -264,9 +265,7 @@ class CoachProposalCreationService:
             and self._nutrition_meal_library_service is not None
         ):
             preview_values.update(
-                self._nutrition_meal_library_service().prepare_values(
-                    preview_values
-                )
+                self._nutrition_meal_library_service().prepare_values(preview_values)
             )
 
     @staticmethod
@@ -529,6 +528,17 @@ def _approved_garmin_arguments(
         }
         for local_id, remove in selected
     ]
+    # The explicit Garmin sync also removes the workouts it sent for units that
+    # no longer exist; the card lists them.
+    with database_manager.reader() as db:
+        orphans, _total = find_orphans(db)
+    chosen = {entry["library_workout_id"] for entry in entries}
+    room = 28 - len(entries)
+    entries.extend(
+        removal_entries(
+            [item for item in orphans if item.local_id not in chosen][:room]
+        )
+    )
     return {"entries": entries, "reason": str(arguments.get("reason") or "")[:200]}
 
 
@@ -552,14 +562,31 @@ def _garmin_approval_details(
     removals = {
         entry["library_workout_id"] for entry in entries if entry.get("remove") is True
     }
+    with database_manager.reader() as db:
+        orphans = {item.local_id: item for item in find_orphans(db, limit=None)[0]}
     rows = _planned_rows(
-        [entry["library_workout_id"] for entry in entries], database_manager
+        [
+            entry["library_workout_id"]
+            for entry in entries
+            if entry["library_workout_id"] not in orphans
+        ],
+        database_manager,
     )
     details = _plan_workout_details(rows)
     for detail in details:
         detail["sport"] = (
             "Von Garmin entfernen" if detail["id"] in removals else "Kraft an Garmin"
         )
+    details.extend(
+        {
+            "name": item.name,
+            "date": _approval_date(item.date),
+            "sport": "Wird bei Garmin entfernt",
+            "id": item.local_id,
+        }
+        for local_id, item in orphans.items()
+        if local_id in removals
+    )
     return details
 
 

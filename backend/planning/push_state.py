@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Final
 
 from backend.canonical.planning_fields import STRENGTH_STRUCTURE
@@ -20,6 +20,7 @@ from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import strength_structure
+from backend.planning.garmin_orphans import GarminOrphan
 from backend.planning.library import library_payload_hash
 from backend.planning.sport import planned_sport_environment
 from backend.providers.garmin_strength_workout import (
@@ -129,8 +130,12 @@ def attach_push_state(
     baselines: dict[str, str | None],
     remembered: Mapping[str, GarminExercise] | None = None,
     resync: frozenset[str] | set[str] = frozenset(),
+    orphans: Sequence[GarminOrphan] = (),
 ) -> None:
     """Add ``payload_hash``, ``push_pending`` and ``push_blocked`` to each pair.
+
+    A unit that Garmin still waits for also lists the ``orphans``, the workouts
+    its sync removes (``push_cleanup``).
 
     ``resync`` holds the local ids of synced units whose exported heart-rate range
     moved only with the threshold HR. ``push_blocked`` names why a strength unit cannot reach Garmin, so the
@@ -155,6 +160,11 @@ def attach_push_state(
             )
         payload["payload_hash"] = digest
         payload["push_pending"] = pending
+        if pending.get(ProviderId.GARMIN.value) and orphans:
+            payload["push_cleanup"] = [
+                {"id": item.local_id, "name": item.name, "date": item.date}
+                for item in orphans
+            ]
         payload["push_blocked"] = (
             {ProviderId.GARMIN.value: blocked} if blocked is not None else {}
         )

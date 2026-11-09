@@ -8,7 +8,10 @@ workout scheduled on its planned date; the workout id and the schedule id live
 in ``remote_links`` (provider ``garmin``, entity ``planned_unit``), so a second
 push updates the same workout and moves its own schedule instead of creating a
 duplicate. An entry with ``remove`` deletes only that linked workout and its own
-schedule. Writes go through the unofficial SDK, because the Personal API is
+schedule; the calendar and the Coach card add such entries for the links of
+units that no longer exist (``planning.garmin_orphans``). A workout the update
+cannot find is replaced by a new upload after the old one is unscheduled and
+deleted. Writes go through the unofficial SDK, because the Personal API is
 read-only. One remote failure other than a client error stops the remaining
 units of the run, so a Garmin outage never turns into a burst of requests.
 """
@@ -58,6 +61,8 @@ SDK_REQUIRED_MESSAGE = (
     "Garmin-Workouts brauchen die Garmin-Anmeldung (SDK); "
     "die Personal API kann nicht schreiben."
 )
+# First line of every description, so a workout this app sent can be told apart.
+WORKOUT_MARKER = "Pacecraft"
 _STOPPED = "Nicht gesendet: Der Lauf wurde nach einem Garmin-Fehler beendet."
 
 
@@ -250,7 +255,7 @@ class GarminStrengthPushService:
             raise ValueError(NO_STRUCTURE_MESSAGE)
         document = strength_workout(
             name=str(unit.get("name") or ""),
-            description=strength_structure.render(exercises),
+            description=f"{WORKOUT_MARKER}\n{strength_structure.render(exercises)}",
             exercises=exercises,
             remembered=remembered,
         )
@@ -267,12 +272,14 @@ class GarminStrengthPushService:
         link = self._link(unit.local_id)
         workout_id = link.remote_id if link else None
         created = False
+        schedule_id = link.remote_external_id if link else None
         if workout_id:
             try:
                 _call(client.update_workout, workout_id, unit.document)
             except _Missing:
-                workout_id = None
-        schedule_id = link.remote_external_id if link else None
+                # The fresh upload replaces it; nothing of the old one may stay.
+                self._discard(client, workout_id, schedule_id)
+                workout_id = schedule_id = None
         if not workout_id:
             saved = _call(client.upload_workout, unit.document)
             workout_id = _workout_id(saved)
@@ -307,6 +314,19 @@ class GarminStrengthPushService:
             "remote_id": workout_id,
             "date": unit.plan_date,
         }
+
+    @staticmethod
+    def _discard(client: Any, workout_id: str | None, schedule_id: str | None) -> None:
+        """Unschedule and delete a linked workout; one already gone is fine."""
+        for method, remote_id in (
+            (client.unschedule_workout, schedule_id),
+            (client.delete_workout, workout_id),
+        ):
+            if remote_id:
+                try:
+                    _call(method, remote_id)
+                except _Missing:
+                    pass
 
     def _save_link(
         self,
@@ -380,16 +400,7 @@ class GarminStrengthPushService:
         link = self._link(unit.local_id)
         if link is None:
             return _error_result(unit.local_id, "Nicht an Garmin gesendet.", "conflict")
-        if link.remote_external_id:
-            try:
-                _call(client.unschedule_workout, link.remote_external_id)
-            except _Missing:
-                pass
-        if link.remote_id:
-            try:
-                _call(client.delete_workout, link.remote_id)
-            except _Missing:
-                pass
+        self._discard(client, link.remote_id, link.remote_external_id)
         with self._database_manager().unit_of_work() as db:
             _REMOTE_LINKS.delete(
                 db, RemoteEntityKind.PLANNED_UNIT, unit.local_id, GARMIN

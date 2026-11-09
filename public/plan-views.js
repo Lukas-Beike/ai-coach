@@ -12,8 +12,10 @@
 globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets, plannedPushTargetLabel, plannedGarminBlockedText });
 
 // One explicit plan_push job for one entry, carrying the hash it was shown with.
-async function runPlanPush(provider, entryId, payloadHash) {
-  const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entryId, expected_payload_hash: payloadHash }] } }) });
+// Removals are the listed Garmin leftovers of deleted units, sent in the same job.
+async function runPlanPush(provider, entryId, payloadHash, removals = []) {
+  const entries = [{ library_workout_id: entryId, expected_payload_hash: payloadHash }, ...removals.map((id) => ({ library_workout_id: id, remove: true }))];
+  const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries } }) });
   return globalThis.waitForSyncJob(job.id);
 }
 
@@ -1023,10 +1025,26 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   // One explicit sync per pending provider; each job carries the unit's current
   // payload hash, so a unit edited meanwhile is refused instead of pushed.
-  function plannedSyncButton(entry, dateKey, todayKey, actual) {
+  function plannedTargets(entry, dateKey, todayKey, actual) {
     const ids = providerIds();
     const configured = { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured) };
-    const targets = plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual), intervals: ids.intervals });
+    return plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual), intervals: ids.intervals });
+  }
+
+  // The Garmin workouts of deleted or replaced units that the Garmin sync of this unit removes too.
+  function plannedGarminCleanup(entry, dateKey, todayKey, actual) {
+    const items = entry.push_cleanup;
+    if (!Array.isArray(items) || !items.length || !plannedTargets(entry, dateKey, todayKey, actual).includes(providerIds().garmin)) return null;
+    const names = items.slice(0, 3).map((item) => `${item.name}${item.date ? ` ${dateLabel(item.date)}` : ""}`);
+    const note = document.createElement("span");
+    note.className = "planned-conflict planned-garmin-cleanup";
+    note.textContent = `Wird bei Garmin entfernt: ${names.join(", ")}${items.length > 3 ? ` + ${items.length - 3} weitere` : ""}`;
+    return note;
+  }
+
+  function plannedSyncButton(entry, dateKey, todayKey, actual) {
+    const ids = providerIds();
+    const targets = plannedTargets(entry, dateKey, todayKey, actual);
     if (!targets.length) return null;
     // A re-render during a running push must not offer a second click.
     state.plannedSyncInFlight ||= new Set();
@@ -1048,8 +1066,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const reached = [];
       for (const provider of targets) {
         try {
-          const done = await runPlanPush(provider, entry.local_id, entry.payload_hash);
-          if (done.status === "completed") reached.push(plannedPushTargetLabel(provider, entry, ids));
+          const removals = provider === ids.garmin ? (entry.push_cleanup || []).slice(0, 27).map((item) => item.id) : [];
+          const done = await runPlanPush(provider, entry.local_id, entry.payload_hash, removals);
+          if (done.status === "completed") reached.push(plannedPushTargetLabel(provider, entry, ids) + (removals.length ? ` · ${removals.length} alte bei Garmin entfernt` : ""));
           else failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
         } catch (error) {
           failures.push(error.message);
@@ -1175,6 +1194,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (conflict) cardSummary.append(conflict);
     const garminBlocked = plannedGarminBlocked(entry, dateKey, todayKey, actual);
     if (garminBlocked) cardSummary.append(garminBlocked);
+    const garminCleanup = plannedGarminCleanup(entry, dateKey, todayKey, actual);
+    if (garminCleanup) cardSummary.append(garminCleanup);
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const details = document.createElement("div");
     details.className = "planned-entry-details";

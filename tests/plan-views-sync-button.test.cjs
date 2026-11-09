@@ -53,3 +53,24 @@ test("a strength unit says why it was not sent to Garmin", () => {
   assert.equal(labels.blocked({ push_blocked: {} }), "");
   assert.equal(labels.blocked({}), "");
 });
+
+const pushStart = source.indexOf("async function runPlanPush");
+const pushEnd = source.indexOf("// What one successful push delivered", pushStart);
+const sent = [];
+const pushContext = vm.createContext({
+  api: async (url, options) => { sent.push(JSON.parse(options.body)); return { id: "job-1" }; },
+  waitForSyncJob: async (id) => ({ id, status: "completed" }),
+});
+vm.runInContext(source.slice(pushStart, pushEnd) + ";globalThis.run = runPlanPush;", pushContext);
+
+test("a Garmin push carries the listed leftovers as removals in the same job", async () => {
+  const hash = "a".repeat(64);
+  await pushContext.run("garmin", "u1", hash, ["old-1", "old-2"]);
+  await pushContext.run("intervals", "u1", hash);
+  assert.deepEqual(sent[0].payload.entries, [
+    { library_workout_id: "u1", expected_payload_hash: hash },
+    { library_workout_id: "old-1", remove: true },
+    { library_workout_id: "old-2", remove: true },
+  ]);
+  assert.deepEqual(sent[1].payload.entries, [{ library_workout_id: "u1", expected_payload_hash: hash }]);
+});

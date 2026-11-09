@@ -176,12 +176,23 @@ class RemoteLinkRepository:
         )
 
     def delete_for_entity(
-        self, db: Any, entity_kind: RemoteEntityKind, local_id: str
+        self,
+        db: Any,
+        entity_kind: RemoteEntityKind,
+        local_id: str,
+        *,
+        keep: Sequence[str] = (),
     ) -> None:
-        """Forget every provider's link of a local entity that no longer exists."""
+        """Forget the links of a local entity that no longer exists.
+
+        ``keep`` names providers whose link must survive, because it is the only
+        record of a remote object that still has to be removed explicitly.
+        """
+        marks = ", ".join("?" for _ in keep)
         db.execute(
-            "DELETE FROM remote_links WHERE entity_kind=? AND local_id=?",
-            (RemoteEntityKind(entity_kind).value, local_id),
+            "DELETE FROM remote_links WHERE entity_kind=? AND local_id=?"
+            + (f" AND provider NOT IN ({marks})" if keep else ""),
+            (RemoteEntityKind(entity_kind).value, local_id, *keep),
         )
 
     def refresh_from_slots(
