@@ -107,11 +107,9 @@ def fingerprint(
         if first is None:
             first = cell
         last = cell
-        if previous is not None and _step_m(previous, position) > MAX_GAP_M:
+        jumped = previous is not None and _step_m(previous, position) > MAX_GAP_M
+        if jumped or anchor is None:
             # Both sides of a signal gap count as cells, the jump as no distance.
-            cells.add(cell)
-            anchor = position
-        elif anchor is None:
             cells.add(cell)
             anchor = position
         elif (chord := _step_m(anchor, position)) >= SAMPLE_M:

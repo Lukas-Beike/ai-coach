@@ -82,7 +82,7 @@ activity IDs no longer resolve.
 | POST | `/api/change-history/undo/preview`, `/api/change-history/undo`, `/api/change-history/undo-turn` | Preview or apply an undo, or undo one Coach turn | CSRF |
 | POST | `/api/change-history/undo-focus-backfill` | Restore every unit the one-time session focus backfill changed, or none | CSRF |
 | POST | `/api/privacy/delete`, `/api/privacy/restore` | Delete or restore privacy data | CSRF |
-| POST | `/api/privacy/gps`, `/api/privacy/gps/delete` | Turn GPS-track storage on or off; delete every stored track after the typed confirmation; both also delete the routes derived from the tracks | CSRF |
+| POST | `/api/privacy/gps`, `/api/privacy/gps/delete` | Turn GPS-track storage on or off; delete every stored track and the routes derived from them after the typed confirmation | CSRF |
 | POST | `/api/routes/rename` | Rename a recognised route (`route_id`, `name`: 1 to 60 characters without control characters); answers `route_id` and `label` only | CSRF |
 | POST | `/api/logs/delete`, `/api/diagnostics/delete` | Clear diagnostics data | CSRF |
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |

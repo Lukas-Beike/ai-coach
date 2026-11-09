@@ -127,6 +127,21 @@ class ActivityRoutesStage:
         return STAGE
 
     def run_batch(self, db: Any) -> BatchReport:
+        """Place one batch; a failure is logged and never blocks later stages."""
+        try:
+            return self._run_batch(db)
+        except Exception as error:  # noqa: BLE001 - isolate this cosmetic stage
+            _LOGGER.warning(
+                "Route batch failed",
+                extra={
+                    "event": "activity_routes_failed",
+                    "context": {"error_type": type(error).__name__},
+                },
+            )
+            self.mark_failed(db)
+            return BatchReport(items=0, done=True)
+
+    def _run_batch(self, db: Any) -> BatchReport:
         """Place one batch of changed sessions in the caller's transaction."""
         index = route_store.load_index(db)
         before = json.dumps(index, sort_keys=True)

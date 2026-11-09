@@ -11,6 +11,7 @@ from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 from unittest.mock import Mock, patch
 
 from canonical_detail_support import add_session_record, open_manager
@@ -353,11 +354,11 @@ class StageCase(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             return self.stage.run_batch(db)
 
-    def index(self) -> dict[str, Any]:
+    def _index(self) -> dict[str, Any]:
         with self.manager.reader() as db:
             return route_store.load_index(db)
 
-    def block(self, session_id: str) -> dict[str, Any] | None:
+    def _block(self, session_id: str) -> dict[str, Any] | None:
         with self.manager.reader() as db:
             return route_store.stored_route_block(db, session_id)
 
@@ -376,20 +377,20 @@ class StageTests(StageCase):
         ordinals = {
             number: (block["repeat_index"], block["repeat_count"])
             for number in (1, 2, 3, 4, 5, 7)
-            if (block := self.block(f"act_g{number}")) is not None
+            if (block := self._block(f"act_g{number}")) is not None
         }
         # The reversed loop of the seventh day is the sixth visit of the route.
         self.assertEqual(
             {1: (1, 6), 2: (2, 6), 3: (3, 6), 4: (4, 6), 5: (5, 6), 7: (6, 6)},
             ordinals,
         )
-        last = self.block("act_g7")
+        last = self._block("act_g7")
         assert last is not None
         self.assertEqual(
             {"label": "Strecke 1", "repeat_index": 6, "repeat_count": 6},
             {k: v for k, v in last.items() if k != "route_id"},
         )
-        other = self.block("act_g6")
+        other = self._block("act_g6")
         assert other is not None
         self.assertEqual("Strecke 2", other["label"])
         self.assertEqual((1, 1), (other["repeat_index"], other["repeat_count"]))
@@ -398,8 +399,8 @@ class StageTests(StageCase):
         add_outdoor_session(self.manager, 1, loop(seed=1), day=20)
         add_outdoor_session(self.manager, 2, loop(seed=2), day=10)
         self.run_stage()
-        self.assertEqual(2, (self.block("act_g1") or {})["repeat_index"])
-        self.assertEqual(1, (self.block("act_g2") or {})["repeat_index"])
+        self.assertEqual(2, (self._block("act_g1") or {})["repeat_index"])
+        self.assertEqual(1, (self._block("act_g2") or {})["repeat_index"])
 
     def test_short_indoor_and_positionless_sessions_have_no_route(self) -> None:
         add_outdoor_session(self.manager, 1, loop(radius=300.0), distance=1885.0)
@@ -408,14 +409,14 @@ class StageTests(StageCase):
         add_outdoor_session(self.manager, 4, loop(seed=4), sport="swim")
         self.run_stage()
         for number in (1, 2, 3, 4):
-            self.assertIsNone(self.block(f"act_g{number}"))
-        self.assertEqual({}, self.index()["routes"])
+            self.assertIsNone(self._block(f"act_g{number}"))
+        self.assertEqual({}, self._index()["routes"])
 
     def test_a_second_run_decodes_and_writes_nothing(self) -> None:
         add_outdoor_session(self.manager, 1, loop(seed=1))
         add_outdoor_session(self.manager, 2, loop(seed=2))
         self.run_stage()
-        stored = self.index()
+        stored = self._index()
         with patch.object(
             activity_detail_store,
             "full_stream_sets_for_session",
@@ -425,7 +426,7 @@ class StageTests(StageCase):
         decode.assert_not_called()
         self.assertEqual(0, second.items)
         self.assertTrue(second.done)
-        self.assertEqual(stored, self.index())
+        self.assertEqual(stored, self._index())
         # A new session decodes only itself.
         add_outdoor_session(self.manager, 3, loop(seed=3))
         with patch.object(
@@ -436,7 +437,7 @@ class StageTests(StageCase):
             third = self.run_stage()
         self.assertEqual(1, third.items)
         self.assertEqual(1, decode.call_count)
-        self.assertEqual(3, (self.block("act_g3") or {})["repeat_count"])
+        self.assertEqual(3, (self._block("act_g3") or {})["repeat_count"])
 
     def test_batches_resume_until_every_session_is_placed(self) -> None:
         stage = ActivityRoutesStage(
@@ -449,7 +450,7 @@ class StageTests(StageCase):
             with self.manager.unit_of_work() as db:
                 done.append(stage.run_batch(db).done)
         self.assertEqual([False, False, True], done)
-        self.assertEqual(5, (self.block("act_g5") or {})["repeat_count"])
+        self.assertEqual(5, (self._block("act_g5") or {})["repeat_count"])
 
     def test_a_deleted_session_leaves_its_route_and_the_count(self) -> None:
         for number in range(1, 4):
@@ -461,9 +462,9 @@ class StageTests(StageCase):
                 ("act_g2",),
             )
         self.run_stage()
-        self.assertIsNone(self.block("act_g2"))
-        self.assertEqual(2, (self.block("act_g3") or {})["repeat_index"])
-        self.assertEqual(2, (self.block("act_g3") or {})["repeat_count"])
+        self.assertIsNone(self._block("act_g2"))
+        self.assertEqual(2, (self._block("act_g3") or {})["repeat_index"])
+        self.assertEqual(2, (self._block("act_g3") or {})["repeat_count"])
         for number in (1, 3):
             with self.manager.unit_of_work() as db:
                 db.execute(
@@ -471,12 +472,12 @@ class StageTests(StageCase):
                     (f"act_g{number}",),
                 )
         self.run_stage()
-        self.assertEqual({}, self.index()["routes"])
+        self.assertEqual({}, self._index()["routes"])
 
     def test_a_rename_survives_new_sessions_and_a_changed_stream(self) -> None:
         add_outdoor_session(self.manager, 1, loop(seed=1))
         self.run_stage()
-        route_id = (self.block("act_g1") or {})["route_id"]
+        route_id = (self._block("act_g1") or {})["route_id"]
         self.service.rename(route_id, "Hausrunde")
         add_outdoor_session(self.manager, 2, loop(seed=2))
         # The provider delivers the first track again, slightly different.
@@ -484,7 +485,7 @@ class StageTests(StageCase):
         report = self.run_stage()
         self.assertEqual(2, report.items)
         for number in (1, 2):
-            block = self.block(f"act_g{number}") or {}
+            block = self._block(f"act_g{number}") or {}
             self.assertEqual(
                 ("Hausrunde", route_id, number),
                 (block["label"], block["route_id"], block["repeat_index"]),
@@ -496,24 +497,24 @@ class StageTests(StageCase):
         self.run_stage()
         store_track(self.manager, "g2", loop(seed=3, centre_east=True))
         self.run_stage()
-        self.assertEqual(1, (self.block("act_g1") or {})["repeat_count"])
+        self.assertEqual(1, (self._block("act_g1") or {})["repeat_count"])
         self.assertNotEqual(
-            (self.block("act_g1") or {})["route_id"],
-            (self.block("act_g2") or {})["route_id"],
+            (self._block("act_g1") or {})["route_id"],
+            (self._block("act_g2") or {})["route_id"],
         )
 
     def test_deleted_tracks_remove_their_routes_and_names(self) -> None:
         add_outdoor_session(self.manager, 1, loop(seed=1))
         self.run_stage()
-        self.service.rename((self.block("act_g1") or {})["route_id"], "Hausrunde")
+        self.service.rename((self._block("act_g1") or {})["route_id"], "Hausrunde")
         with self.manager.unit_of_work() as db:
             activity_detail_store.delete_stored_tracks(db)
         self.run_stage()
-        self.assertIsNone(self.block("act_g1"))
-        self.assertEqual({}, self.index()["routes"])
+        self.assertIsNone(self._block("act_g1"))
+        self.assertEqual({}, self._index()["routes"])
         # Rebuilt neither now nor later without tracks.
         self.run_stage()
-        self.assertEqual({}, self.index()["routes"])
+        self.assertEqual({}, self._index()["routes"])
 
     def test_with_the_setting_off_stored_routes_stay(self) -> None:
         add_outdoor_session(self.manager, 1, loop(seed=1))
@@ -521,7 +522,7 @@ class StageTests(StageCase):
         with self.manager.unit_of_work() as db:
             self.key_values.set(db, activity_detail_store.GPS_TRACKS_KEY, "0")
         self.run_stage()
-        self.assertIsNotNone(self.block("act_g1"))
+        self.assertIsNotNone(self._block("act_g1"))
 
     def test_a_failing_batch_is_marked_failed(self) -> None:
         with self.manager.unit_of_work() as db:
@@ -544,7 +545,7 @@ class PrivacyDeleteTests(StageCase):
     def seed(self) -> str:
         add_outdoor_session(self.manager, 1, loop(seed=1))
         self.run_stage()
-        route_id = (self.block("act_g1") or {})["route_id"]
+        route_id = (self._block("act_g1") or {})["route_id"]
         self.service.rename(route_id, "Hausrunde")
         return str(route_id)
 
@@ -552,7 +553,7 @@ class PrivacyDeleteTests(StageCase):
         self.seed()
         result = self.privacy().delete_gps_tracks(GPS_TRACKS_DELETE_CONFIRMATION_TEXT)
         self.assertEqual(1, result["deleted_tracks"])
-        self.assertIsNone(self.block("act_g1"))
+        self.assertIsNone(self._block("act_g1"))
         with self.manager.reader() as db:
             self.assertIsNone(self.key_values.get(db, route_store.INDEX_KEY))
 
@@ -560,17 +561,26 @@ class PrivacyDeleteTests(StageCase):
         self.seed()
         with self.assertRaises(AppError):
             self.privacy().delete_gps_tracks("ja")
-        self.assertEqual("Hausrunde", (self.block("act_g1") or {})["label"])
+        self.assertEqual("Hausrunde", (self._block("act_g1") or {})["label"])
 
     def test_turning_the_setting_off_keeps_the_routes(self) -> None:
         self.seed()
         self.privacy().set_gps_tracks(True)
-        self.assertIsNotNone(self.block("act_g1"))
+        self.assertIsNotNone(self._block("act_g1"))
         self.privacy().set_gps_tracks(False)
-        self.assertIsNotNone(self.block("act_g1"))
+        self.assertIsNotNone(self._block("act_g1"))
 
 
 class HardeningTests(StageCase):
+    def test_a_failing_batch_is_isolated_and_marked_failed(self) -> None:
+        with mock.patch.object(self.stage, "_wanted", side_effect=RuntimeError("x")):
+            report = self.run_stage()
+        self.assertTrue(report.done)
+        with self.manager.reader() as db:
+            self.assertEqual(
+                "failed", summarize_activity_routes(self.key_values, db)["status"]
+            )
+
     def test_malformed_entries_and_a_nan_distance_do_not_fail_the_stage(self) -> None:
         add_outdoor_session(self.manager, 1, loop(seed=1))
         with self.manager.unit_of_work() as db:
@@ -581,7 +591,7 @@ class HardeningTests(StageCase):
             )
         report = self.run_stage()
         self.assertTrue(report.done)
-        self.assertIsNotNone(self.block("act_g1"))
+        self.assertIsNotNone(self._block("act_g1"))
 
 
 class RenameTests(StageCase):
@@ -589,14 +599,14 @@ class RenameTests(StageCase):
         super().setUp()
         add_outdoor_session(self.manager, 1, loop(seed=1))
         self.run_stage()
-        self.route_id = (self.block("act_g1") or {})["route_id"]
+        self.route_id = (self._block("act_g1") or {})["route_id"]
 
     def test_rename_stores_the_trimmed_name_and_answers_label_only(self) -> None:
         result = self.service.rename(self.route_id, "  Hausrunde ")
         self.assertEqual(
             {"status": "ok", "route_id": self.route_id, "label": "Hausrunde"}, result
         )
-        self.assertEqual("Hausrunde", (self.block("act_g1") or {})["label"])
+        self.assertEqual("Hausrunde", (self._block("act_g1") or {})["label"])
 
     def test_invalid_names_are_refused_and_change_nothing(self) -> None:
         for bad in ("", "  ", "a" * 61, "a\nb", "a\x07", None, 4, ["x"]):
@@ -604,7 +614,7 @@ class RenameTests(StageCase):
                 with self.assertRaises(AppError) as raised:
                     self.service.rename(self.route_id, bad)
                 self.assertEqual(400, raised.exception.status)
-        self.assertEqual("Strecke 1", (self.block("act_g1") or {})["label"])
+        self.assertEqual("Strecke 1", (self._block("act_g1") or {})["label"])
 
     def test_an_unknown_route_is_not_found(self) -> None:
         for unknown in ("r99", "", None, 7, ["r1"]):
@@ -645,13 +655,13 @@ class PrivacySweepTests(StageCase):
             )
         with self.assertLogs("intervals_coach", level="DEBUG") as logs:
             self.run_stage()
-        block = self.block("act_g2")
+        block = self._block("act_g2")
         assert block is not None
         self.assertEqual(
             {"label", "repeat_index", "repeat_count", "route_id"}, set(block)
         )
         renamed = self.service.rename(block["route_id"], "Hausrunde")
-        index = self.index()
+        index = self._index()
         reference = routes.decode(index["routes"][block["route_id"]]["ref"])
         assert reference is not None
         with self.manager.reader() as db:
