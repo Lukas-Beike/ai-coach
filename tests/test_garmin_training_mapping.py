@@ -203,6 +203,74 @@ class HistoryTests(unittest.TestCase):
             ],
         )
 
+    def test_endurance_group_map_accepts_a_mapping_or_a_list_of_dated_entries(
+        self,
+    ) -> None:
+        expected = [
+            ("endurance_score_group_average", 6800.0, "2026-09-28", "-"),
+            ("endurance_score_group_average", 6900.0, "2026-10-05", "-"),
+            ("endurance_score_group_max", 6900.0, "2026-09-28", "-"),
+        ]
+        keyed = {
+            "2026-09-28": {"groupAverage": 6800, "groupMax": 6900},
+            "2026-10-05": {"groupAverage": 6900},
+        }
+        listed = [
+            {"calendarDate": "2026-09-28", "groupAverage": 6800, "groupMax": 6900},
+            {"date": "2026-10-05", "groupAverage": 6900},
+            {"groupAverage": 7000},
+            "junk",
+        ]
+        for name, group_map in (("mapping", keyed), ("list", listed)):
+            with self.subTest(name):
+                self.assertEqual(
+                    rows({"endurance_score": {"groupMap": group_map}}), expected
+                )
+
+    def test_endurance_group_list_keeps_the_first_entry_of_a_day(self) -> None:
+        self.assertEqual(
+            rows(
+                {
+                    "endurance_score": {
+                        "groupMap": [
+                            {"date": DAY, "groupAverage": 6800},
+                            {"date": DAY, "groupAverage": 9000},
+                        ]
+                    }
+                }
+            ),
+            [("endurance_score_group_average", 6800.0, DAY, "-")],
+        )
+
+    def test_endurance_group_list_dates_use_their_first_ten_characters(self) -> None:
+        self.assertEqual(
+            rows(
+                {
+                    "endurance_score": {
+                        "groupMap": [
+                            {"calendarDate": f"{DAY}T00:00:00", "groupAverage": 6800},
+                            {"date": DAY, "groupAverage": 9000},
+                        ]
+                    }
+                }
+            ),
+            [("endurance_score_group_average", 6800.0, DAY, "-")],
+        )
+
+    def test_readiness_alias_order_is_the_same_in_history_and_section(self) -> None:
+        both = {"calendarDate": DAY, "score": 64, "trainingReadinessScore": 71}
+        only_long = {"calendarDate": DAY, "trainingReadinessScore": 71}
+        for section in ("training_readiness_history", "readiness"):
+            for name, record, expected in (
+                ("both: score wins", both, 64.0),
+                ("long spelling alone", only_long, 71.0),
+            ):
+                with self.subTest(section=section, case=name):
+                    self.assertEqual(
+                        rows({section: [record]}),
+                        [("readiness", expected, DAY, "-")],
+                    )
+
 
 class StatusCodeTests(unittest.TestCase):
     def codes(self, section: str, element: object) -> list[tuple[str, str, str]]:

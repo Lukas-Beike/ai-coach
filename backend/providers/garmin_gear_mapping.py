@@ -2,7 +2,7 @@
 
 One element of the ``gear`` section is one gear item as the collector normalized
 it: ``gearUUID``, ``gearName``, ``gearTypeName``, ``activityTypeName``,
-``gearStatusName``, ``maximumMeters``, the usage ``stats`` (``totalDistance`` in
+``gearStatusName``, ``maximumMeters`` (or ``maximumMeter``), the usage ``stats`` (``totalDistance`` in
 metres, ``totalActivities``) and, when the link list was read, ``activity_ids``.
 A missing ``activity_ids`` means the links are unknown, so none are emitted. A
 list marked ``activity_ids_truncated`` or ``activity_ids_stale`` (kept from an
@@ -26,6 +26,10 @@ from backend.canonical.mapping import coerce_number
 from backend.canonical.records import Provenance
 from backend.canonical.validation import MAX_TEXT_LENGTH
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, SourceKind
+from backend.providers.garmin_fields import (
+    GARMIN_GEAR_MAX_DISTANCE_ALIASES,
+    first_present,
+)
 
 GARMIN_LABEL: Final = "Garmin Connect"
 _MAX_LINKS: Final = 1000
@@ -90,7 +94,9 @@ def map_garmin_gear(
             type_label=_text(element.get("gearTypeName"), 100),
             activity_type_label=_text(element.get("activityTypeName"), 100),
             status_label=_text(element.get("gearStatusName"), 100),
-            maximum_distance_m=_distance(element.get("maximumMeters")),
+            maximum_distance_m=_distance(
+                first_present(element, GARMIN_GEAR_MAX_DISTANCE_ALIASES)
+            ),
             total_distance_m=_distance(stats.get("totalDistance")),
             total_activities=_count(stats.get("totalActivities")),
             provenance=provenance,

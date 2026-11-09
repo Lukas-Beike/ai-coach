@@ -12,6 +12,7 @@ from backend.providers.garmin_fields import (
     GARMIN_FTP_RANGE_VALUE,
     GARMIN_HRV_LAST_NIGHT_ALIASES,
     GARMIN_HRV_WEEKLY_ALIASES,
+    GARMIN_READINESS_ALIASES,
     GARMIN_SLEEP_DURATION_ALIASES,
 )
 
@@ -20,7 +21,6 @@ SUMMARY_DATE: Final = "summaryDate"
 ACTIVITY_START_LOCAL: Final = "startTimeLocal"
 WEEKLY_HRV_AVERAGE, WEEKLY_AVERAGE = GARMIN_HRV_WEEKLY_ALIASES
 RESTING_HEART_RATE: Final = "restingHeartRate"
-READINESS_SCORE: Final = "trainingReadinessScore"
 WEIGHT_KG: Final = "weightKg"
 SLEEP_SECONDS: Final = "sleepTimeSeconds"
 HRV_NIGHT_AVERAGE: Final = "lastNightAvg"
@@ -61,10 +61,4 @@ HRV_WITH_WEEKLY_ALIASES: Final = (
     *GARMIN_HRV_LAST_NIGHT_ALIASES,
     *GARMIN_HRV_WEEKLY_ALIASES,
 )
-PLANNING_READINESS_ALIASES: Final = (
-    READINESS_SCORE,
-    "overallReadinessScore",
-    "readinessScore",
-    "score",
-    "trainingReadiness",
-)
+PLANNING_READINESS_ALIASES: Final = GARMIN_READINESS_ALIASES

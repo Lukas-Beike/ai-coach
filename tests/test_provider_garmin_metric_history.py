@@ -473,6 +473,74 @@ class GarminHistoricMetricNormalizationTests(unittest.TestCase):
         )
         self.assertEqual(projected_readiness["points"][0]["value"], 72)
 
+    def test_readiness_chart_value_takes_score_before_the_long_spelling(self):
+        points = metric_points(
+            [
+                {
+                    "calendarDate": "2026-10-05",
+                    "score": 64,
+                    "trainingReadinessScore": 71,
+                },
+                {"calendarDate": "2026-10-04", "trainingReadinessScore": 71},
+            ],
+            start=START,
+            end=TODAY,
+        )
+        projected = projected_metric(
+            [
+                {
+                    "calendarDate": "2026-10-05",
+                    "score": 64,
+                    "trainingReadinessScore": 71,
+                },
+                {"calendarDate": "2026-10-04", "trainingReadinessScore": 71},
+            ],
+            start=START,
+            end=TODAY,
+            aggregation="daily",
+            metric="training_readiness_history",
+            synced_at="sync",
+        )
+        self.assertEqual(len(points), 2)
+        self.assertEqual(
+            [(row["date"], row["value"]) for row in projected["points"]],
+            [("2026-10-04", 71), ("2026-10-05", 64)],
+        )
+
+    def test_endurance_group_map_list_projects_like_the_keyed_mapping(self):
+        keyed = {
+            "2026-09-28": {"groupAverage": 6850},
+            "2026-10-05": {"groupAverage": 7000},
+        }
+        listed = [
+            {"date": "2026-09-28", "groupAverage": 6850},
+            {"calendarDate": "2026-10-05", "groupAverage": 7000},
+        ]
+        for group_map in (keyed, listed):
+            points = metric_points({"groupMap": group_map}, start=START, end=TODAY)
+            self.assertEqual(
+                [row["values"]["groupAverage"] for row in points], [6850, 7000]
+            )
+
+    def test_endurance_group_list_entry_with_two_date_keys_keeps_its_point(self):
+        points = metric_points(
+            {
+                "groupMap": [
+                    {
+                        "calendarDate": "2026-09-28T00:00:00",
+                        "summaryDate": "2026-09-29",
+                        "groupAverage": 6850,
+                    }
+                ]
+            },
+            start=START,
+            end=TODAY,
+        )
+        self.assertEqual(
+            [(row["date"], row["values"]["groupAverage"]) for row in points],
+            [("2026-09-28", 6850)],
+        )
+
     def test_wire_range_formats_preserve_ftp_and_endurance_weeks(self):
         points = ftp_points(
             [
