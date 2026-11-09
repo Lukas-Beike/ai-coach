@@ -83,6 +83,13 @@ def _step_m(a: Coordinates, b: Coordinates) -> float:
     return math.hypot(dx, dy)
 
 
+def _total_m(distance_m: float | None, track_m: float) -> float:
+    """The summary distance when it is usable, else the track length."""
+    if isinstance(distance_m, int | float) and 0 < distance_m < math.inf:
+        return float(distance_m)
+    return track_m
+
+
 def fingerprint(
     latitudes: Sequence[object],
     longitudes: Sequence[object],
@@ -121,11 +128,7 @@ def fingerprint(
     if first is None or last is None:
         return None
     cells.update((first, last))
-    total = (
-        float(distance_m)
-        if isinstance(distance_m, (int, float)) and 0 < distance_m < math.inf
-        else length
-    )
+    total = _total_m(distance_m, length)
     if total < MIN_DISTANCE_M or len(cells) < MIN_CELLS:
         return None
     return Fingerprint(first, last, total, frozenset(cells))
