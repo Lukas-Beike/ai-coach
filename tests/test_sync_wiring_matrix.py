@@ -466,7 +466,11 @@ class ConfiguredCheckTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(calls))
         owner = calls[0].func.value  # type: ignore[attr-defined]
-        self.assertEqual("provider_runtime", getattr(owner.func, "id", ""))
+        self.assertEqual(
+            "provider_runtime",
+            getattr(owner.func, "id", ""),
+            "HttpSyncServices must take provider_configured from provider_runtime()",
+        )
 
 
 if __name__ == "__main__":
