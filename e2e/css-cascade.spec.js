@@ -1,8 +1,6 @@
 const { test, expect } = require("@playwright/test");
-const { readFileSync } = require("node:fs");
-const path = require("node:path");
 
-const stylesheet = readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8").match(/href="(\/styles\.css\?v=\d+)"/)[1];
+const stylesheet = "/styles.css";
 
 test("visibility, chart variants and reduced motion override component styles", { tag: "@responsive" }, async ({ page }) => {
   await page.route("**/css-cascade-fixture", (route) => route.fulfill({

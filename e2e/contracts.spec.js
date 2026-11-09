@@ -1,10 +1,6 @@
 const { test, expect } = require("@playwright/test");
-const { readFileSync } = require("node:fs");
-const path = require("node:path");
 const { captureReadFixture, installReadFixture } = require("./read-fixture");
 const { contrastRatio } = require("./helpers/ui");
-
-const SERVICE_WORKER_CACHE = readFileSync(path.join(__dirname, "..", "public", "service-worker.js"), "utf8").match(/const CACHE = "([^"]+)";/)[1];
 
 let fixture;
 test.beforeAll(async ({ request }) => { fixture = await captureReadFixture(request); });
@@ -490,7 +486,17 @@ test("provider source retains visible stale and partial measurement context", as
 test("fresh service worker keeps the current shell available offline", async ({ page }) => {
   await ready(page);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  expect(await page.evaluate(() => caches.keys())).toEqual([SERVICE_WORKER_CACHE]);
+  // The cache name is stamped by the server, so the served worker names it.
+  const worker = await (await page.request.get("/service-worker.js")).text();
+  const cacheName = worker.match(/const CACHE = "(pacecraft-[0-9a-f]{10})";/)[1];
+  expect(await page.evaluate(() => caches.keys())).toEqual([cacheName]);
+  // Every stamped asset reference of the shell is in the fresh cache.
+  expect(await page.evaluate(async (name) => {
+    const cached = new Set((await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname + new URL(request.url).search));
+    const refs = [...document.querySelectorAll("script[src], link[rel~=stylesheet][href], link[rel~=icon][href], link[rel=apple-touch-icon][href]")]
+      .map((element) => new URL(element.src || element.href).pathname + new URL(element.src || element.href).search);
+    return { refs: refs.length, missing: refs.filter((ref) => !cached.has(ref)) };
+  }, cacheName)).toEqual({ refs: expect.any(Number), missing: [] });
   await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem("coach-state-snapshot")))).toBe(true);
   await page.context().setOffline(true);
   try {
@@ -505,7 +511,7 @@ test("fresh service worker keeps the current shell available offline", async ({ 
     await expect(page.locator("#loginPassword")).toBeEditable();
     expect(await page.evaluate(async () => {
       const names = await caches.keys();
-      const cacheName = names.find((name) => /^pacecraft-v/.test(name));
+      const cacheName = names.find((name) => /^pacecraft-[0-9a-f]{10}$/.test(name));
       const cache = await caches.open(cacheName);
       return (await cache.keys()).some((request) => new URL(request.url).pathname.startsWith("/api/"));
     })).toBe(false);

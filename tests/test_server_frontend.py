@@ -1,6 +1,8 @@
 """Server integration tests for frontend."""
 
 import re
+import shutil
+import tempfile
 import unittest
 from datetime import datetime as _local_datetime
 from datetime import timedelta
@@ -9,26 +11,35 @@ from unittest.mock import Mock
 
 from server_test_support import ServerTestCase, server
 
-VERSIONED_ASSET_REF = re.compile(r'(?<=[="])(/[^"?\s]+)\?v=(\d+)(?=")')
-CACHE_NAME_PATTERN = r'const CACHE = "pacecraft-v\d+";'
+VERSIONED_ASSET_REF = re.compile(r'(?<=[="])(/[^"?\s]+)\?v=([0-9a-f]{10})(?=")')
+CACHE_NAME_PATTERN = r'const CACHE = "pacecraft-[0-9a-f]{10}";'
 
 
 def versioned_asset_refs(markup):
-    """Return every local ``/path?v=N`` reference found in quoted markup or JS."""
+    """Return every local ``/path?v=<hash>`` reference found in quoted markup or JS."""
     return [
         f"{path}?v={version}" for path, version in VERSIONED_ASSET_REF.findall(markup)
     ]
 
 
-def asset_ref(path):
-    """Return the ``path?v=N`` reference that index.html currently serves."""
-    index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+def served_page(name):
+    """index.html or service-worker.js as the server stamps and serves it."""
+    return StaticAssetService(server.PUBLIC_DIR).stamped(name).decode("utf-8")
+
+
+def ref_in(markup, path):
+    """Return the one ``path?v=<hash>`` reference of ``path`` in stamped markup."""
     matches = [
-        ref for ref in versioned_asset_refs(index) if ref.split("?", 1)[0] == path
+        ref for ref in versioned_asset_refs(markup) if ref.split("?", 1)[0] == path
     ]
     if len(matches) != 1:
         raise AssertionError(f"Expected one versioned index reference for {path}")
     return matches[0]
+
+
+def asset_ref(path):
+    """Return the ``path?v=<hash>`` reference that index.html currently serves."""
+    return ref_in(served_page("index.html"), path)
 
 
 def frontend_source():
@@ -54,7 +65,12 @@ def frontend_source():
 
 
 from backend.http_api import state_events_get
-from backend.http_api.static_assets import STATIC_TARGETS, StaticAssetService
+from backend.http_api.static_assets import (
+    CACHE_NAME_TOKEN,
+    STATIC_TARGETS,
+    VERSIONED_STATIC_ASSETS,
+    StaticAssetService,
+)
 from backend.sync.adaptive import ILLNESS_CALENDAR_CATEGORY
 
 
@@ -457,12 +473,8 @@ class ServerFrontendTests(ServerTestCase):
         api_client = (
             Path(__file__).resolve().parents[1] / "public" / "api.js"
         ).read_text(encoding="utf-8")
-        index = (
-            Path(__file__).resolve().parents[1] / "public" / "index.html"
-        ).read_text(encoding="utf-8")
-        service_worker = (
-            Path(__file__).resolve().parents[1] / "public" / "service-worker.js"
-        ).read_text(encoding="utf-8")
+        index = served_page("index.html")
+        service_worker = served_page("service-worker.js")
         state = (Path(__file__).resolve().parents[1] / "public" / "state.js").read_text(
             encoding="utf-8"
         )
@@ -844,7 +856,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(
             'new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]])', plan_views
         )
-        self.assertIn("`⚠ Konflikt: ${labels.join(\" · \")}`", plan_views)
+        self.assertIn('`⚠ Konflikt: ${labels.join(" · ")}`', plan_views)
         self.assertIn('"Mit Coach lösen"', plan_views)
         self.assertIn("globalThis.askCoach?.(", plan_views)
         self.assertIn("`Entfallen (${restDayLabel})`", plan_views)
@@ -861,7 +873,9 @@ class ServerFrontendTests(ServerTestCase):
         # Conflicts use one component; day markers are neutral note text, not pills or link-blue text.
         self.assertNotIn(".planned-badge.is-conflict", styles)
         self.assertNotIn(".planned-badge.is-marker", styles)
-        self.assertNotIn("var(--link)", styles[styles.index(".planned-day-calendar") :][:200])
+        self.assertNotIn(
+            "var(--link)", styles[styles.index(".planned-day-calendar") :][:200]
+        )
         self.assertIn(".planned-conflict {", styles)
         self.assertIn(".planned-entry.is-skipped .planned-entry-status", styles)
         self.assertIn(".planned-badges { display: flex; flex-wrap: wrap;", styles)
@@ -926,10 +940,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("function renderWeatherNotice", app)
 
     def test_intervals_connection_status_has_detail_and_refreshes_assets(self):
-        markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        service_worker = (server.PUBLIC_DIR / "service-worker.js").read_text(
-            encoding="utf-8"
-        )
+        markup = served_page("index.html")
+        service_worker = served_page("service-worker.js")
         self.assertIn('id="intervalsConnectionDetail"', markup)
         asset_version = markup.split("app.js?v=", 1)[1].split('"', 1)[0]
         self.assertIn(f"app.js?v={asset_version}", markup)
@@ -1056,9 +1068,9 @@ class ServerFrontendTests(ServerTestCase):
             "public, max-age=31536000, immutable",
         )
         self.assertIn(b"function renderAnalysisHistory", response.body)
-        worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
+        worker = served_page("service-worker.js")
         self.assertIn(f'"{asset_ref("/analysis.js")}"', worker)
-        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        index = served_page("index.html")
         self.assertIn(f'{asset_ref("/analysis.js")}"', index)
         self.assertEqual(index.count("/analysis.js?v="), 1)
         self.assertRegex(worker, CACHE_NAME_PATTERN)
@@ -1202,33 +1214,165 @@ class ServerFrontendTests(ServerTestCase):
         handler.wfile.write.assert_not_called()
 
     def test_pwa_asset_versions_match_service_worker_precache(self):
-        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        service_worker = (server.PUBLIC_DIR / "service-worker.js").read_text(
-            encoding="utf-8"
-        )
+        index = served_page("index.html")
+        service_worker = served_page("service-worker.js")
         precache = re.search(r"const ASSETS = \[(.*?)\];", service_worker, re.DOTALL)
         self.assertIsNotNone(precache)
+        cached = re.findall(r'"([^"]+)"', precache.group(1))
         index_refs = versioned_asset_refs(index)
         self.assertTrue(index_refs)
-        for ref in index_refs:
-            self.assertIn(f'"{ref}"', precache.group(1))
+        self.assertEqual(len(index_refs), len(set(index_refs)))
+        # The shell and the unversioned manifest are cached; every other
+        # precache entry is exactly one stamped reference of index.html.
+        self.assertEqual({"/", "/manifest.webmanifest"}, set(cached) - set(index_refs))
+        self.assertEqual(set(index_refs), set(cached) - {"/", "/manifest.webmanifest"})
         self.assertRegex(service_worker, CACHE_NAME_PATTERN)
 
     def test_service_worker_precache_excludes_logo_and_links_apple_touch_icon(self):
-        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
-        service_worker = (server.PUBLIC_DIR / "service-worker.js").read_text(
-            encoding="utf-8"
-        )
+        index = served_page("index.html")
+        service_worker = served_page("service-worker.js")
         precache = re.search(r"const ASSETS = \[(.*?)\];", service_worker, re.DOTALL)
         self.assertIsNotNone(precache)
+        icon = asset_ref("/apple-touch-icon.png")
         self.assertNotIn('"/logo.png', service_worker)
         self.assertIn(
-            '<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">',
-            index,
+            f'<link rel="apple-touch-icon" href="{icon}" sizes="180x180">', index
         )
-        self.assertIn('"/apple-touch-icon.png?v=1"', precache.group(1))
+        self.assertIn(f'"{icon}"', precache.group(1))
         self.assertTrue((server.PUBLIC_DIR / "logo.png").is_file())
         self.assertTrue((server.PUBLIC_DIR / "apple-touch-icon.png").is_file())
+
+    def test_source_files_carry_no_version_numbers(self):
+        # Hand-written versions are what made parallel UI branches conflict.
+        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        worker = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
+        for source in (index, worker):
+            self.assertNotIn("?v=", source)
+            self.assertNotRegex(source, r"pacecraft-v?\d")
+        self.assertIn(f'"pacecraft-{CACHE_NAME_TOKEN}"', worker)
+
+    def test_stamped_output_never_keeps_placeholder_or_unversioned_references(self):
+        service = StaticAssetService(server.PUBLIC_DIR)
+        for path in ("/", "/index.html", "/service-worker.js", "/missing.js"):
+            with self.subTest(path=path):
+                body = service.render(path, path, None).body.decode("utf-8")
+                self.assertNotIn(CACHE_NAME_TOKEN, body)
+        index = service.stamped("index.html").decode("utf-8")
+        for ref in re.findall(r'(?:src|href)="(/[^"?]+)(\?[^"]*)?"', index):
+            if ref[0].lstrip("/") in VERSIONED_STATIC_ASSETS:
+                self.assertRegex(ref[1], r"^\?v=[0-9a-f]{10}$", ref[0])
+
+    def test_cache_name_follows_cached_assets_and_ignores_the_rest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            public = Path(directory)
+            shutil.copytree(server.PUBLIC_DIR, public, dirs_exist_ok=True)
+            service = StaticAssetService(public)
+
+            def stamps():
+                return {
+                    name: service.stamped(name).decode("utf-8")
+                    for name in ("index.html", "service-worker.js")
+                }
+
+            def cache_name(worker):
+                return re.search(CACHE_NAME_PATTERN, worker).group(0)
+
+            def ref(page, path):
+                return ref_in(page["index.html"], path)
+
+            before = stamps()
+            self.assertEqual(
+                cache_name(before["service-worker.js"]),
+                cache_name(stamps()["service-worker.js"]),
+            )
+            self.assertEqual(
+                cache_name(before["service-worker.js"]),
+                cache_name(
+                    StaticAssetService(public).stamped("service-worker.js").decode()
+                ),
+            )
+            # An uncached file does not change the cache name.
+            (public / "logo.png").write_bytes(b"changed logo")
+            self.assertEqual(before, stamps())
+            for name, path in (
+                ("app.js", "/app.js"),
+                ("styles.css", "/styles.css"),
+                ("icon.svg", "/icon.svg"),
+            ):
+                with self.subTest(asset=name):
+                    previous = stamps()
+                    with (public / name).open("ab") as handle:
+                        handle.write(b"\n/* changed */\n")
+                    current = stamps()
+                    self.assertNotEqual(
+                        cache_name(previous["service-worker.js"]),
+                        cache_name(current["service-worker.js"]),
+                    )
+                    self.assertNotEqual(ref(previous, path), ref(current, path))
+                    self.assertIn(
+                        f'"{ref(current, path)}"', current["service-worker.js"]
+                    )
+                    for other in ("/api.js", "/views.js"):
+                        self.assertEqual(ref(previous, other), ref(current, other))
+            # The shell, the manifest and the worker itself are cached too.
+            for name in ("index.html", "manifest.webmanifest", "service-worker.js"):
+                with self.subTest(asset=name):
+                    previous = stamps()
+                    with (public / name).open("ab") as handle:
+                        handle.write(b"\n")
+                    self.assertNotEqual(
+                        cache_name(previous["service-worker.js"]),
+                        cache_name(stamps()["service-worker.js"]),
+                    )
+
+    def test_branches_editing_different_assets_leave_version_fields_untouched(self):
+        sources = {
+            name: (server.PUBLIC_DIR / name).read_bytes()
+            for name in ("index.html", "service-worker.js")
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            roots = {}
+            for branch, asset in (("a", "app.js"), ("b", "styles.css")):
+                roots[branch] = Path(directory) / branch
+                shutil.copytree(server.PUBLIC_DIR, roots[branch])
+                with (roots[branch] / asset).open("ab") as handle:
+                    handle.write(f"\n/* {branch} */\n".encode())
+            for root in roots.values():
+                for name, source in sources.items():
+                    self.assertEqual(source, (root / name).read_bytes())
+            merged = Path(directory) / "merged"
+            shutil.copytree(roots["a"], merged)
+            shutil.copy(roots["b"] / "styles.css", merged / "styles.css")
+            stamped = {
+                key: StaticAssetService(root).stamped("index.html").decode()
+                for key, root in {**roots, "merged": merged}.items()
+            }
+            self.assertIn(
+                ref_in(stamped["a"], "/app.js"),
+                stamped["merged"],
+            )
+            self.assertIn(
+                ref_in(stamped["b"], "/styles.css"),
+                stamped["merged"],
+            )
+
+    def test_stamping_refuses_a_worker_without_its_cache_token_or_asset_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            public = Path(directory)
+            shutil.copytree(server.PUBLIC_DIR, public, dirs_exist_ok=True)
+            worker = public / "service-worker.js"
+            source = worker.read_text(encoding="utf-8")
+            worker.write_text(
+                source.replace(CACHE_NAME_TOKEN, "pacecraft-v1"), encoding="utf-8"
+            )
+            with self.assertRaises(ValueError):
+                StaticAssetService(public).stamped("service-worker.js")
+            worker.write_text(
+                source.replace('"/app.js",', '"/app.js",\n  "/ghost.js",'),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError):
+                StaticAssetService(public).stamped("service-worker.js")
 
     def test_every_public_asset_is_served(self):
         # An unlisted public file is answered with index.html, so the browser
@@ -1245,7 +1389,7 @@ class ServerFrontendTests(ServerTestCase):
         )
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
-        source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
+        source = served_page("service-worker.js")
         self.assertIn(f'"{asset_ref("/api.js")}"', source)
         self.assertIn(f'"{asset_ref("/navigation.js")}"', source)
         self.assertIn(f'"{asset_ref("/appearance.js")}"', source)
@@ -1289,7 +1433,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"Trainingsbereich wird geladen…"', app_source)
 
     def test_provider_refresh_ui_exposes_safe_retry_and_versioned_assets(self):
-        index = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+        index = served_page("index.html")
         app = frontend_source()
         self.assertIn('id="providerFreshnessTimeline"', index)
         self.assertIn("function renderProviderFreshness(data)", app)
@@ -1306,11 +1450,10 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('garmin: "Garmin"', app)
 
     def test_shared_format_module_is_loaded_and_served_before_consumers(self):
-        root = Path(__file__).resolve().parents[1]
-        index = (root / "public" / "index.html").read_text(encoding="utf-8")
-        worker = (root / "public" / "service-worker.js").read_text(encoding="utf-8")
+        index = served_page("index.html")
+        worker = served_page("service-worker.js")
         version = re.search(
-            r'<script src="/format\.js\?v=(\d+)" defer></script>', index
+            r'<script src="/format\.js\?v=([0-9a-f]{10})" defer></script>', index
         )
         self.assertIsNotNone(version)
         asset = f"/format.js?v={version.group(1)}"
