@@ -14,6 +14,7 @@ from backend.sync.gates import (
     INTERVALS_RESYNC_GATE,
     WAHOO_RESYNC_GATE,
     ProviderResyncGate,
+    resetting_providers,
     resync_gate,
 )
 
@@ -39,6 +40,21 @@ class ResyncGateMappingTests(unittest.TestCase):
         self.assertIs(resync_gate(ACME_ID, gates), acme_gate)
         with self.assertRaises(AppError):
             resync_gate(INTERVALS_ID, gates)
+
+
+class ResettingProvidersTests(unittest.TestCase):
+    def test_names_only_the_providers_whose_resync_is_running(self) -> None:
+        gates = {
+            GARMIN_ID: ProviderResyncGate("Garmin"),
+            WAHOO_ID: ProviderResyncGate("Wahoo"),
+        }
+        self.assertEqual((), resetting_providers(gates))
+
+        gates[GARMIN_ID].begin_reset()
+        self.assertEqual((GARMIN_ID,), resetting_providers(gates))
+
+        gates[GARMIN_ID].end_reset()
+        self.assertEqual((), resetting_providers(gates))
 
 
 class ProviderResyncGateTests(unittest.TestCase):

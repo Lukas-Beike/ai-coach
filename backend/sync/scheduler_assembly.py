@@ -35,6 +35,8 @@ class SyncScheduleOwners:
 @dataclass(frozen=True)
 class SyncSchedulePersistence:
     sync_state_repository: Callable[[], SyncStateRepository]
+    # Whether a provider's failed refresh holds its next automatic attempt.
+    retry_held: Callable[[str], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,7 @@ class SyncSchedulerAssembly:
         self._daily_sync_marker_service = owners.daily_sync_marker_service
         self._garmin_sync_service = owners.garmin_sync_service
         self._sync_state_repository = persistence.sync_state_repository
+        self._retry_held = persistence.retry_held
         self._maintenance_gate = controls.maintenance_gate
         self._sleep = controls.sleep
         self._config = policy.config
@@ -130,6 +133,7 @@ class SyncSchedulerAssembly:
                 else runtime.schedule_policies()["daily"]
             ),
             registry=None if runtime is None else runtime.static,
+            retry_held=self._retry_held,
         )
 
     def startup_scheduler(self) -> scheduler.StartupSyncScheduler:
@@ -190,4 +194,5 @@ class SyncSchedulerAssembly:
             sleep=self._sleep,
             logger=self._logger,
             stop_event=threading.Event(),
+            housekeeping=self._queue_service().prune_finished,
         )

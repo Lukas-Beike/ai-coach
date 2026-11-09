@@ -132,7 +132,9 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
     def schedule() -> GarminSchedulePolicy:
         return GarminSchedulePolicy(
-            garmin.sync_service(), deps.garmin_automatic_sync_days
+            garmin.sync_service(),
+            deps.garmin_automatic_sync_days,
+            deps.garmin_resync_gate,
         )
 
     def full_resync() -> GarminFullResync:

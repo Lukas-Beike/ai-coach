@@ -7,7 +7,7 @@ from contextlib import closing, contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from provider_runtime_fakes import ACME_ID, acme_descriptor, fake_binding
 
@@ -115,7 +115,14 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.competition_calls.append(kwargs)
         return self.competition_result
 
-    def _service(self, *, config=None, key_values=None, operation_id_factory=None):
+    def _service(
+        self,
+        *,
+        config=None,
+        key_values=None,
+        operation_id_factory=None,
+        after_resync=None,
+    ):
         operation_journal = FullResyncOperationJournal(
             self.observer,
             self.logger,
@@ -138,6 +145,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             ),
             operation_journal,
             gates=gates,
+            **({"after_resync": after_resync} if after_resync else {}),
         )
 
     def _get_value(self, provider, field):
@@ -225,6 +233,51 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(self._get_value("garmin", "status"), "")
         self.assertEqual(self._get_value("garmin", "last_at"), NOW)
         self.assertFalse(self.garmin_gate.is_resetting())
+
+    def test_a_finished_resync_requests_the_derived_passes_after_the_gate_ends(self):
+        requested = []
+        gate_state = []
+
+        def after_resync(job):
+            requested.append(dict(job))
+            gate_state.append(self.garmin_gate.is_resetting())
+
+        service = self._service(after_resync=after_resync)
+
+        service.resync("garmin", "garmin-operation")
+
+        self.assertEqual(requested, [{"provider": "garmin", "type": "refresh"}])
+        self.assertEqual(gate_state, [False])
+
+    def test_a_partial_resync_requests_the_derived_passes(self):
+        requested = []
+        service = self._service(after_resync=requested.append)
+        self.garmin_service.sync = Mock(return_value={"status": "partial"})
+
+        result = service.resync("garmin")
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(requested, [{"provider": "garmin", "type": "refresh"}])
+
+    def test_a_failed_resync_requests_no_derived_pass(self):
+        requested = []
+        service = self._service(after_resync=requested.append)
+        self.garmin_service.sync = Mock(side_effect=AppError(502, "Garmin down"))
+
+        with self.assertRaises(AppError):
+            service.resync("garmin")
+
+        self.assertEqual(requested, [])
+
+    def test_an_already_running_resync_requests_no_derived_pass(self):
+        requested = []
+        service = self._service(after_resync=requested.append)
+        self.garmin_gate.begin_reset()
+
+        result = service.resync("garmin")
+
+        self.assertEqual(result["status"], "already_running")
+        self.assertEqual(requested, [])
 
     def test_gate_and_context_are_restored_when_status_cleanup_fails(self):
         class FailingStatusCleanupRepository:

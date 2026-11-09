@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import threading
+import time
 from typing import Any
 
 from backend.errors import AppError
@@ -20,6 +21,8 @@ from backend.sync.jobs import (
     normalize_sync_job_request,
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
+
+PRUNE_INTERVAL_SECONDS = 3600.0
 
 
 class SyncJobQueueService:
@@ -43,6 +46,7 @@ class SyncJobQueueService:
         self._all_sync_days = all_sync_days
         self._daily_sync_markers = daily_sync_markers
         self._registry = registry
+        self._last_prune: float | None = None
 
     def state(self, job_id: str) -> dict[str, Any]:
         """Return one job or the existing localized not-found error."""
@@ -60,6 +64,16 @@ class SyncJobQueueService:
 
     def active(self, provider: str, job_type: str = "refresh") -> bool:
         return self._store.active(provider, job_type)
+
+    def prune_finished(self) -> int:
+        """Prune old completed jobs, at most once per ``PRUNE_INTERVAL_SECONDS``."""
+        now = time.monotonic()
+        last = self._last_prune
+        if last is not None and now - last < PRUNE_INTERVAL_SECONDS:
+            return 0
+        self._last_prune = now
+        with self._maintenance_gate.operation():
+            return self._store.prune_finished()
 
     def backfill_continued(
         self,

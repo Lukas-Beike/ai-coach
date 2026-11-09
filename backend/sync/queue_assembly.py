@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Event
@@ -41,6 +41,7 @@ class SyncQueuePolicy:
     retry_max_seconds: int
     registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY
     foreground_busy: Callable[[], bool] | None = None
+    held_providers: Callable[[], Collection[str]] | None = None
 
 
 class SyncJobQueueAssembly:
@@ -75,6 +76,7 @@ class SyncJobQueueAssembly:
         self._retry_max_seconds = policy.retry_max_seconds
         self._registry = policy.registry
         self._foreground_busy = policy.foreground_busy
+        self._held_providers = policy.held_providers
 
     def store(self) -> jobs.SyncJobStore:
         """Create a store bound to the active database manager."""
@@ -84,6 +86,7 @@ class SyncJobQueueAssembly:
             self._uuid_factory,
             registry=self._registry,
             foreground_busy=self._foreground_busy,
+            held_providers=self._held_providers,
         )
 
     def service(self) -> queue.SyncJobQueueService:

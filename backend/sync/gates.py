@@ -109,6 +109,14 @@ def resync_gate(
     return gate
 
 
+def resetting_providers(
+    gates: Mapping[str, ProviderResyncGate] | None = None,
+) -> tuple[str, ...]:
+    """Return the providers whose full resync is running, in gate order."""
+    mapping = DEFAULT_RESYNC_GATES if gates is None else gates
+    return tuple(provider for provider, gate in mapping.items() if gate.is_resetting())
+
+
 def provider_operation(provider: str) -> AbstractContextManager[None]:
     return resync_gate(provider).operation()
 

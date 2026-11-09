@@ -67,6 +67,55 @@ class SyncRefreshTests(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertEqual(sync_job_error_class(error), expected)
 
+    def test_an_unconnected_garmin_sdk_is_final_not_a_temporary_error(self):
+        error = AppError(409, "SDK needed", reason="garmin_sdk_required")
+
+        error_class = sync_job_error_class(error)
+
+        self.assertEqual(error_class, "garmin_sdk_required")
+        self.assertFalse(is_retryable_error(error_class))
+
+    def test_retry_at_never_retries_before_a_named_provider_wait(self):
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        arguments = {
+            "current_error_code": "rate_limited",
+            "now": now,
+            "base_seconds": 10,
+            "max_seconds": 25,
+        }
+        cases = (
+            (None, "2026-01-01T00:00:10+00:00"),
+            (4, "2026-01-01T00:00:10+00:00"),
+            (22, "2026-01-01T00:00:22+00:00"),
+            (900, "2026-01-01T00:00:25+00:00"),
+            (0, "2026-01-01T00:00:10+00:00"),
+        )
+        for retry_after, expected in cases:
+            with self.subTest(retry_after=retry_after):
+                self.assertEqual(
+                    retry_at([], retry_after_seconds=retry_after, **arguments),
+                    expected,
+                )
+
+    def test_tracker_finish_stores_the_provider_named_wait(self):
+        now = [datetime(2026, 1, 1, tzinfo=UTC)]
+        manager, _, tracker = self.make_tracker(now)
+        refresh_id = tracker.start("garmin", "data", "op-1", "background")
+
+        tracker.finish(
+            refresh_id,
+            "error",
+            "failed",
+            error_code="rate_limited",
+            retry_after_seconds=1800,
+        )
+
+        stored = manager.connection.execute(
+            "SELECT next_retry_at FROM provider_refresh_history WHERE id=?",
+            (refresh_id,),
+        ).fetchone()
+        self.assertEqual(stored[0], "2026-01-01T00:30:00+00:00")
+
     def test_a_busy_local_database_is_a_retryable_job_failure(self):
         self.assertTrue(
             is_retryable_error(sync_job_error_class(DatabaseBusyError("writer")))

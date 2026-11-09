@@ -143,6 +143,28 @@ class SyncOperationObserverTests(unittest.TestCase):
 
         tracker.finish.assert_called_once_with("refresh-1", "skipped", "cancelled")
 
+    def test_a_running_full_resync_is_skipped_not_an_error(self):
+        observer, tracker, _ = self.make_observer()
+
+        with self.assertRaises(AppError), observer.observe("garmin", "data"):
+            raise AppError(409, "resync running", reason="provider_resync_running")
+
+        tracker.finish.assert_called_once_with("refresh-1", "skipped", "held")
+
+    def test_a_provider_named_wait_reaches_the_refresh_history(self):
+        observer, tracker, _ = self.make_observer()
+
+        with self.assertRaises(AppError), observer.observe("garmin", "data"):
+            raise AppError(429, "slow", reason="rate_limited", retry_after_seconds=1200)
+
+        tracker.finish.assert_called_once_with(
+            "refresh-1",
+            "error",
+            "failed",
+            error_code="rate_limited",
+            retry_after_seconds=1200,
+        )
+
     def test_context_is_isolated_between_threads(self):
         observer, _, _ = self.make_observer()
         barrier = threading.Barrier(2)

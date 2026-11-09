@@ -27,6 +27,7 @@ class SyncCommandCore:
     utc_now: Callable[[], Any]
     training_change_limit: int
     synchronous_refreshes: Mapping[str, SynchronousRefresh] | None = None
+    after_refresh: Callable[[Mapping[str, Any]], None] = lambda _job: None
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,9 @@ class SyncCommandAssembly:
         if self._provider_runtime is not None:
             synchronous_refreshes = self._provider_runtime().synchronous_refreshes()
         return ProviderRefreshCommandService(
-            self._core.queue_service(), synchronous_refreshes
+            self._core.queue_service(),
+            synchronous_refreshes,
+            self._core.after_refresh,
         )
 
     def conflicts(self) -> SyncConflictCommandService:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -63,6 +63,7 @@ class ProviderResyncRuntime:
     uuid_factory: Callable[[], str]
     monotonic: Callable[[], float]
     operation_observer: Callable[[], SyncOperationObserver]
+    after_resync: Callable[[Mapping[str, Any]], None] = lambda _job: None
 
 
 class GarminFullResync:
@@ -184,6 +185,7 @@ class ProviderResyncAssembly:
         self._uuid_factory = runtime.uuid_factory
         self._monotonic = runtime.monotonic
         self._operation_observer = runtime.operation_observer
+        self._after_resync = runtime.after_resync
         self._provider_runtime = provider_runtime
 
     def competition_reconciler(self) -> CompetitionSyncReconciler:
@@ -237,6 +239,7 @@ class ProviderResyncAssembly:
                 self._uuid_factory,
             ),
             gates=gates,
+            after_resync=self._after_resync,
         )
 
     def _runtime_full_resync_service(
@@ -267,4 +270,5 @@ class ProviderResyncAssembly:
             ),
             gates=gates,
             registry=runtime.static,
+            after_resync=self._after_resync,
         )

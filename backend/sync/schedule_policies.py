@@ -77,17 +77,27 @@ class CalendarSchedulePolicy:
 
 
 class GarminSchedulePolicy:
-    """Scheduled when Garmin is configured, with its automatic sync window."""
+    """Scheduled when Garmin is configured, with its automatic sync window.
 
-    def __init__(self, garmin: GarminSyncService, automatic_sync_days: int) -> None:
+    ``blocked`` reports a Garmin resync reset when the gate is given.
+    """
+
+    def __init__(
+        self,
+        garmin: GarminSyncService,
+        automatic_sync_days: int,
+        resync_gate: ProviderResyncGate | None = None,
+    ) -> None:
         self._garmin = garmin
         self._automatic_sync_days = automatic_sync_days
+        self._resync_gate = resync_gate
 
     def configured(self) -> bool:
         return self._garmin.configured()
 
     def blocked(self) -> bool:
-        return False
+        """Report a Garmin full resync reset, as for Wahoo."""
+        return self._resync_gate is not None and self._resync_gate.is_resetting()
 
     def refresh_payload(self, _trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
         days, end_date = self._garmin.automatic_sync_window(self._automatic_sync_days)
@@ -138,10 +148,13 @@ def build_schedule_policies(
     garmin: GarminSyncService,
     calendar_enabled: bool,
     garmin_automatic_sync_days: int,
+    garmin_resync_gate: ProviderResyncGate | None = None,
 ) -> dict[str, ProviderSchedulePolicy]:
     """Return the built-in policies keyed by descriptor provider id."""
     return {
         WEATHER_ID: WeatherSchedulePolicy(profile),
         CALENDAR_ID: CalendarSchedulePolicy(enabled=calendar_enabled),
-        GARMIN_ID: GarminSchedulePolicy(garmin, garmin_automatic_sync_days),
+        GARMIN_ID: GarminSchedulePolicy(
+            garmin, garmin_automatic_sync_days, garmin_resync_gate
+        ),
     }
