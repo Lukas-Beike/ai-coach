@@ -80,6 +80,24 @@ Every table in the current schema SHALL have a recorded export decision and a pl
 
 Evidence: `backend/backup/export.py::PRIVACY_EXPORT_FORMAT_VERSION`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`. Tests: `tests/test_data_safety_coverage.py::CoverageGuardTests`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`.
 
+### Requirement: GPS positions stay in storage
+
+Stored GPS position channels SHALL be part of the database backup, the privacy export and the local data purge, and SHALL NOT enter any read model, Coach context, diagnostics report, log line or structured log field. The athlete SHALL be able to turn off the storage of new tracks (default on); turning it off SHALL NOT delete stored tracks, which only a confirmed request with the exact phrase `GPS-SPUREN LÖSCHEN` removes.
+
+#### Scenario: Positions in a stored stream set
+- **WHEN** a stream set with latitude and longitude channels is merged, served as activity detail or summarized as coverage
+- **THEN** no position channel and no coordinate value appears in the result
+
+#### Scenario: Storage turned off
+- **WHEN** the athlete turned "GPS-Spuren speichern" off and a file with positions is fetched
+- **THEN** the stream set is stored without position channels and its content hash equals that of the stripped set
+
+#### Scenario: Confirmed track deletion
+- **WHEN** the athlete confirms `GPS-SPUREN LÖSCHEN`
+- **THEN** every position channel is deleted, the other channels stay and any other phrase is rejected
+
+Evidence: `backend/canonical/vocabulary.py::POSITION_CHANNELS`; `backend/db/activity_detail_store.py::replace_detail_set`; `backend/privacy.py::PrivacyDeleteService`. Tests: `tests/test_gps_position_privacy.py`.
+
 ### Requirement: Secrets stay out of exports, reports and logs
 
 The privacy export, the diagnostics report and the log output SHALL NOT contain the Personal API key, provider API keys, Garmin or Wahoo tokens, session hashes or APP_PASSWORD, and the database backup SHALL keep stored credentials only inside the encrypted database.

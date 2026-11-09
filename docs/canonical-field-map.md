@@ -926,7 +926,10 @@ Channel bounds (`CHANNEL_BOUNDS`) and producers:
 | `cadence_rpm` | rpm, one leg for running | 0 to 300 | yes | yes |
 | `temperature_c` | degrees C | -60 to 70 | yes | yes |
 | `moving` | 1 moving, 0 paused | 0 to 1 | no | no |
+| `latitude_deg` | WGS84 degrees, private | -90 to 90 | yes | yes |
+| `longitude_deg` | WGS84 degrees, private | -180 to 180 | yes | yes |
 
+The two position channels are stored, backed up and exported like every channel, but `POSITION_CHANNELS` keeps them out of `merge_details`, the `activity_detail.v1` contract, its coverage and every Coach read: raw positions never leave storage, and the athlete can switch their storage off (`gps_tracks_enabled`, privacy section under **Mehr**).
 The property `kind` is always `streams` (`ActivityDetailKind.STREAMS`), not a stored field.
 
 ### `ActivityLap`
@@ -1031,7 +1034,7 @@ The property `kind` is always `strength_sets`.
 
 ### `StreamChannel`
 
-Members `time_s`, `distance_m`, `altitude_m`, `grade_pct`, `speed_mps`, `power_w`, `heart_rate_bpm`, `cadence_rpm`, `temperature_c`, `moving`; units and producers in the `ActivityStreamSet` channel table.
+Members `time_s`, `distance_m`, `altitude_m`, `grade_pct`, `speed_mps`, `power_w`, `heart_rate_bpm`, `cadence_rpm`, `temperature_c`, `moving`, `latitude_deg`, `longitude_deg`; units and producers in the `ActivityStreamSet` channel table.
 
 ### `StreamResolution`
 
@@ -1143,7 +1146,7 @@ Payload evidence for this scope: the sanitized payload files contain the Garmin 
 ### `garmin_activity_detail_mapping.py`
 
 Status: Live. Called by `_map_collected` in `backend/sync/garmin_activity_details.py` for every Garmin activity detail fetch and backfill; stored with `replace_detail_set(mapper_version=MAPPER_VERSION)`.
-Mapper version: **4**
+Mapper version: **5**
 Inputs: the dict from `collect_garmin_activity_detail` (`backend/providers/garmin.py`) with the parts `details`, `splits`, `hr_zones`, `power_zones`, `exercise_sets` (strength activities only) and `fit`. Transport: the Personal API serves `details` (with `maxChartSize` 2,000) and the original FIT file (`download_activity_fit`, unzipped by `fit_from_archive`); the unofficial login serves `splits`, the two zone parts and `exercise_sets`. A part that is absent gives no set and no issue; a present but malformed part gives one value-free issue and no set for it.
 Evidence: documented only (fixtures `tests/fixtures/providers/garmin/activity_detail/details.json`, `splits.json`, `hr_zones.json`, `power_zones.json`; strength and FIT cases are built inline in `tests/test_garmin_activity_detail_mapping.py`). The sanitized payload files `garmin_activity_detail_run_2026-11-03` and `garmin_personal_activity_detail_run_2026-11-03` hold the activity summary only.
 
@@ -1171,6 +1174,8 @@ Streams from `details` (`_stream_set`, `_metric_columns`). Columns are read by `
 | `power_w` | `directPower` | W; none | |
 | `heart_rate_bpm` | `directHeartRate` | bpm; none | |
 | `temperature_c` | `directAirTemperature` | degrees C; none | |
+| `latitude_deg` | `directLatitude` | degrees; none | Private channel. Key name unverified on a live payload; the FIT file wins whenever the Personal API delivers one. |
+| `longitude_deg` | `directLongitude` | degrees; none | Private channel, as above. |
 | `cadence_rpm` | `directBikeCadence` → `directRunCadence` (`_cadence_points`) | rpm; none | The bike column wins; the run column is used only when the bike column has no usable point. `directRunCadence` already counts one leg, kept as reported. |
 | `grade_pct` | none | | Not produced. |
 | `moving` | none | | Not produced; averages and zone counting then use every point. |
@@ -1229,12 +1234,12 @@ A value the `ActivityStrengthSet` bounds reject is set to `None` with an `out_of
 
 FIT part (`_fit_sets`). `fit` bytes are decoded by `map_fit_activity_detail` with this module's Garmin provenance; its streams and laps replace the JSON ones, its strength sets are used only when `exercise_sets` is missing.
 
-Not mapped: `directDoubleCadence`, every other metric descriptor key (for example latitude, longitude, vertical speed, power-wind or running-dynamics keys) are ignored; `splits` keys other than those above (`averageRunCadence`, `lapIndex` is used only for ordering); `splitSummaries` and `summaryDTO.*` (activity summary, mapped by `garmin_activity_mapping.py`); exercise `startTime`.
+Not mapped: `directDoubleCadence`, every other metric descriptor key (for example vertical speed, power-wind or running-dynamics keys) are ignored; `splits` keys other than those above (`averageRunCadence`, `lapIndex` is used only for ordering); `splitSummaries` and `summaryDTO.*` (activity summary, mapped by `garmin_activity_mapping.py`); exercise `startTime`.
 
 ### `fit_activity_detail_mapping.py`
 
-Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 4.
-Mapper version: **3**
+Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 5.
+Mapper version: **4**
 Inputs: the raw bytes of one FIT activity file (`bytes`); decoding and scaling by `fit_file.py` (`fit_messages`, `fit_field`). Anything else gives one `fit` `invalid_type` issue. The caller passes `provider_activity_id` (Garmin activity id or Wahoo workout id) and the provenance (see the provenance table).
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes built in `tests/test_fit_activity_detail_mapping.py` and `tests/test_fit_file.py`; there is no FIT file or Wahoo payload in the payload files).
 
@@ -1255,12 +1260,14 @@ Streams, record message 20 (`_stream_set`, `_kept_records`, `_RECORD_CHANNEL_FIE
 | `heart_rate_bpm` | record `heart_rate` (3) | bpm | |
 | `power_w` | record `power` (7) | W | |
 | `temperature_c` | record `temperature` (13) | degrees C | |
+| `latitude_deg` | record `position_lat` (0) | semicircles x 180 / 2^31, degrees | Private channel. Invalid sentinel `0x7FFFFFFF` and values outside -90..90 are gaps. |
+| `longitude_deg` | record `position_long` (1) | semicircles x 180 / 2^31, degrees | Private channel. Gaps as for latitude. |
 | `cadence_rpm` | record `cadence` (4) + `fractional_cadence` (53) | 4 whole, 53 is /128; sum (`_cadence`) | If 53 is absent only 4 is used; if 4 is missing the point is a gap. Rpm of one leg for running, as the device reports it. |
 | `grade_pct` | none | | Not produced. |
 | `moving` | none | | Not produced. |
 | `resolution` | | `full` | Fixed. |
 
-Position fields (0, 1) and all other record fields are not read. A channel with no usable point is dropped; out-of-bounds points become gaps with an `out_of_range` issue named by the channel.
+Record fields not listed here are not read. A channel with no usable point is dropped; out-of-bounds points become gaps with an `out_of_range` issue named by the channel.
 
 Laps, lap message 19 (`_lap_set`, `_lap`, `_LAP_METRIC_FIELDS`, `_LAP_KINDS`):
 
@@ -1300,12 +1307,12 @@ Strength sets, set message 225 (`_strength_set_set`, `_strength_set`), in file o
 | `index` | position among kept sets | | |
 | `source` | | `fit_set_messages` | Fixed. |
 
-Not mapped: positions (record 0, 1), the session (18), activity and file messages, developer fields (skipped by `fit_file`), device information, lap run cadence, set `category_subtype` (8), `weight_display_unit`, `message_index`, set `timestamp`.
+Not mapped: the session (18), activity and file messages, developer fields (skipped by `fit_file`), device information, lap run cadence, set `category_subtype` (8), `weight_display_unit`, `message_index`, set `timestamp`.
 
 ### `wahoo_fit_download.py`
 
 Status: Live. Transport only: `download_wahoo_fit` is injected into `WahooActivityDetailImport` by `wahoo_sync_assembly.py` and runs after a committed Wahoo sync. It maps nothing.
-Inputs: the Wahoo workout row's `workout_summary.file.url` (`wahoo_fit_url`), the signed download link of the workout's original FIT file. Decoding and mapping are done by `fit_activity_detail_mapping.py` (version 3) with Wahoo provenance (`device_measured`, `recorded_by` `wahoo`, label `Wahoo`); the sets are stored per Wahoo workout id with the summary hash of the active record. Result for Wahoo detail: `streams` (`full`), `laps` (`device_laps`) and `strength_sets` (`fit_set_messages`); no zone distribution (derived zones are added at read time).
+Inputs: the Wahoo workout row's `workout_summary.file.url` (`wahoo_fit_url`), the signed download link of the workout's original FIT file. Decoding and mapping are done by `fit_activity_detail_mapping.py` (version 4) with Wahoo provenance (`device_measured`, `recorded_by` `wahoo`, label `Wahoo`); the sets are stored per Wahoo workout id with the summary hash of the active record. Result for Wahoo detail: `streams` (`full`), `laps` (`device_laps`) and `strength_sets` (`fit_set_messages`); no zone distribution (derived zones are added at read time).
 Evidence: documented only (`tests/test_wahoo_fit_download.py`, `tests/test_wahoo_activity_details.py`); there is no Wahoo payload in the payload files.
 
 | Item | Rule |
@@ -1355,7 +1362,8 @@ Fields the detail mapper reads (global message number, field number, scale regis
 | record (20) | 53 | fractional_cadence | /128 | rpm | added to `cadence_rpm` |
 | record (20) | 7 | power | 1 | W | `power_w` |
 | record (20) | 13 | temperature | 1 | degrees C | `temperature_c` |
-| record (20) | 0, 1 | position_lat, position_long | raw | semicircles | not read by the detail mapper |
+| record (20) | 0 | position_lat | x 180 / 2^31 | degrees | `latitude_deg` |
+| record (20) | 1 | position_long | x 180 / 2^31 | degrees | `longitude_deg` |
 | lap (19) | 2 | start_time | 1 | s since FIT epoch | lap start offset |
 | lap (19) | 7 | total_elapsed_time | /1000 | s | lap end offset |
 | lap (19) | 8 | total_timer_time | /1000 | s | `moving_duration_s` |

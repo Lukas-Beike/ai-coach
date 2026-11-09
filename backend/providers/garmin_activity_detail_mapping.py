@@ -98,7 +98,8 @@ from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 # Version 2: maximum speed per lap.
 # Version 3: FIT record streams and device laps win over charts and splits.
 # Version 4: executed strength sets from exercise sets, else FIT set messages.
-MAPPER_VERSION: Final = 4
+# Version 5: GPS position channels (directLatitude, directLongitude).
+MAPPER_VERSION: Final = 5
 
 # Same limit as the Intervals mapper; kept local so providers do not import each other.
 MAX_GARMIN_ACTIVITY_ID_LENGTH: Final = 200
@@ -116,6 +117,10 @@ _STREAM_KEYS: Final[Mapping[str, StreamChannel]] = {
     "directPower": StreamChannel.POWER_W,
     "directHeartRate": StreamChannel.HEART_RATE_BPM,
     "directAirTemperature": StreamChannel.TEMPERATURE_C,
+    # Degrees, as the metric descriptors name them (unverified on a live payload;
+    # the FIT file wins whenever the Personal API delivers one).
+    "directLatitude": StreamChannel.LATITUDE_DEG,
+    "directLongitude": StreamChannel.LONGITUDE_DEG,
 }
 _KNOWN_KEYS: Final = frozenset(_STREAM_KEYS) | {
     _ELAPSED_TIME_KEY,

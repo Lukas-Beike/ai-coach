@@ -33,9 +33,11 @@ from backend.canonical.activity_detail import (
     ActivityStrengthSetSet,
     ZoneBucket,
     ZoneDistribution,
+    without_positions,
 )
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import (
+    POSITION_CHANNELS,
     ActivityDetailKind,
     ActivityDetailOrigin,
     ActivityRecordState,
@@ -157,6 +159,90 @@ def decode_series(
     return values
 
 
+GPS_TRACKS_KEY: Final = "gps_tracks_enabled"
+
+
+def gps_tracks_enabled(db: Any) -> bool:
+    """Whether new GPS tracks are stored; on unless the athlete turned it off."""
+    row = db.execute("SELECT value FROM kv WHERE key = ?", (GPS_TRACKS_KEY,)).fetchone()
+    return row is None or row["value"] != "0"
+
+
+def stored_track_count(db: Any) -> int:
+    """Count the stream sets that hold a stored GPS position."""
+    names = sorted(channel.value for channel in POSITION_CHANNELS)
+    row = db.execute(
+        "SELECT COUNT(DISTINCT provider || char(31) || provider_activity_id) AS total "
+        f"FROM activity_stream_channels WHERE channel IN ({', '.join('?' * len(names))})",
+        names,
+    ).fetchone()
+    return int(row["total"])
+
+
+def delete_stored_tracks(db: Any) -> int:
+    """Delete every stored GPS position channel; return the affected stream sets.
+
+    The sets keep their other channels and get the content hash of the
+    remaining channels, so later fetches compare against what is stored.
+    """
+    names = sorted(channel.value for channel in POSITION_CHANNELS)
+    marks = ", ".join("?" * len(names))
+    keys = [
+        (row["provider"], row["provider_activity_id"])
+        for row in db.execute(
+            "SELECT DISTINCT provider, provider_activity_id FROM activity_stream_channels "
+            f"WHERE channel IN ({marks})",
+            names,
+        )
+    ]
+    db.execute(
+        f"DELETE FROM activity_stream_channels WHERE channel IN ({marks})", names
+    )
+    for provider, activity_id in keys:
+        _rehash_stream_set(db, provider, activity_id)
+    return len(keys)
+
+
+def _rehash_stream_set(db: Any, provider: str, provider_activity_id: str) -> None:
+    key = (provider, provider_activity_id, ActivityDetailKind.STREAMS.value)
+    header = db.execute(
+        "SELECT mapper_version, origin, source_kind, recorded_by, source_record_id, "
+        "resolution FROM activity_detail_sets WHERE provider = ? "
+        "AND provider_activity_id = ? AND detail_kind = ?",
+        key,
+    ).fetchone()
+    if header is None:
+        return
+    children: list[tuple[object, ...]] = []
+    for row in db.execute(
+        "SELECT channel, point_count, valid_count, data FROM activity_stream_channels "
+        "WHERE provider = ? AND provider_activity_id = ? ORDER BY channel",
+        key[:2],
+    ):
+        values = decode_series(row["data"], row["point_count"], row["valid_count"])
+        points, valid = _pack_series(values)
+        children.append((row["channel"], row["point_count"], valid, points))
+    content = _content_hash(
+        {
+            "detail_kind": key[2],
+            "mapper_version": header["mapper_version"],
+            "origin": header["origin"],
+            "source_kind": header["source_kind"],
+            "recorded_by": header["recorded_by"],
+            "source_record_id": header["source_record_id"],
+            "resolution": header["resolution"],
+            "lap_source": None,
+            "zone_boundary_source": None,
+        },
+        children,
+    )
+    db.execute(
+        "UPDATE activity_detail_sets SET content_sha256 = ? WHERE provider = ? "
+        "AND provider_activity_id = ? AND detail_kind = ?",
+        (content, *key),
+    )
+
+
 def replace_detail_set(
     db: Any,
     detail: ActivityDetailSet,
@@ -176,6 +262,11 @@ def replace_detail_set(
         raise ValueError("mapper_version must be at least 1")
     if summary_sha256 is not None and not _SHA256_PATTERN.fullmatch(summary_sha256):
         raise ValueError("summary_sha256 must be a lowercase SHA-256 hex digest")
+    if isinstance(detail, ActivityStreamSet) and not gps_tracks_enabled(db):
+        stripped = without_positions(detail)
+        if stripped is None:
+            return WriteOutcome.UNCHANGED
+        detail = stripped
     provenance = detail.provenance
     if provenance.provider is None:
         raise ValueError("provenance.provider is required for activity details")

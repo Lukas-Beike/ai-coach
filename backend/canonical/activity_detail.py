@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from types import MappingProxyType
 from typing import Final
@@ -34,6 +34,7 @@ from backend.canonical.validation import (
     require_text,
 )
 from backend.canonical.vocabulary import (
+    POSITION_CHANNELS,
     ActivityDetailKind,
     ActivityDetailOrigin,
     ExerciseCategory,
@@ -76,6 +77,8 @@ CHANNEL_BOUNDS: Final[Mapping[StreamChannel, tuple[float, float]]] = {
     StreamChannel.CADENCE_RPM: (0.0, MAX_ACTIVITY_CADENCE_RPM),
     StreamChannel.TEMPERATURE_C: (-60.0, 70.0),
     StreamChannel.MOVING: (0.0, 1.0),
+    StreamChannel.LATITUDE_DEG: (-90.0, 90.0),
+    StreamChannel.LONGITUDE_DEG: (-180.0, 180.0),
 }
 
 ZONE_BOUNDARY_BOUNDS: Final[Mapping[ZoneMetric, tuple[float, float]]] = {
@@ -173,6 +176,20 @@ class ActivityStreamSet:
                 "channels must include at least one channel besides time_s"
             )
         object.__setattr__(self, "channels", MappingProxyType(frozen))
+
+
+def without_positions(stream_set: ActivityStreamSet) -> ActivityStreamSet | None:
+    """Return the set without GPS channels; None when nothing else is left."""
+    if not POSITION_CHANNELS.intersection(stream_set.channels):
+        return stream_set
+    kept = {
+        channel: values
+        for channel, values in stream_set.channels.items()
+        if channel not in POSITION_CHANNELS
+    }
+    if len(kept) < 2:
+        return None
+    return replace(stream_set, channels=kept)
 
 
 def _validated_series(

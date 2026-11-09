@@ -25,6 +25,7 @@ from backend.canonical.activity_detail import (
     ZoneDistribution,
 )
 from backend.canonical.vocabulary import (
+    POSITION_CHANNELS,
     PROVIDER_PRECEDENCE,
     DeviceType,
     LapSource,
@@ -176,7 +177,12 @@ def _merge_streams(candidates: list[DetailCandidate]) -> MergedStreams | None:
     primary_axis = _axis(primary)
     channels: dict[StreamChannel, ChannelChoice] = {}
     for channel in StreamChannel:
-        if channel is StreamChannel.TIME_S or not _has_values(candidates, channel):
+        # GPS positions are never part of a merged read model (privacy).
+        if (
+            channel is StreamChannel.TIME_S
+            or channel in POSITION_CHANNELS
+            or not _has_values(candidates, channel)
+        ):
             continue
         for candidate in _channel_order(channel, ranked, primary):
             values = _streams_of(candidate).channels[channel]
@@ -301,6 +307,7 @@ def _populated_channel_count(streams: ActivityStreamSet) -> int:
         1
         for channel, values in streams.channels.items()
         if channel is not StreamChannel.TIME_S
+        and channel not in POSITION_CHANNELS
         and any(value is not None for value in values)
     )
 

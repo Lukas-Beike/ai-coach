@@ -28,6 +28,7 @@ class PrivacyGetRoutes:
             "/api/privacy/export",
             "/api/privacy/delete/preview",
             "/api/privacy/backup",
+            "/api/privacy/gps",
         }:
             return False
 
@@ -36,6 +37,8 @@ class PrivacyGetRoutes:
             self._export_stream_transport().stream_privacy_export(handler)
         elif path == "/api/privacy/delete/preview":
             handler.send_json(200, self._privacy_delete_service().preview())
+        elif path == "/api/privacy/gps":
+            handler.send_json(200, self._privacy_delete_service().gps_state())
         else:
             self._export_stream_transport().stream_database_backup(handler)
         return True

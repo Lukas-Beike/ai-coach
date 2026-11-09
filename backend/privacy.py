@@ -18,6 +18,7 @@ from backend.backup.export import (
 )
 from backend.backup.recovery_copies import RecoveryCopies
 from backend.canonical.vocabulary import RemoteEntityKind
+from backend.db import activity_detail_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -32,6 +33,7 @@ from backend.providers.openai_requests import OpenAIResponsesClient
 from backend.runtime.maintenance import MaintenanceGate
 
 PRIVACY_DELETE_CONFIRMATION_TEXT = "LOKALE DATEN LÖSCHEN"
+GPS_TRACKS_DELETE_CONFIRMATION_TEXT = "GPS-SPUREN LÖSCHEN"
 
 PRIVACY_DELETE_SCOPE = (
     (
@@ -218,6 +220,42 @@ class PrivacyDeleteService:
             "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
             "openai_conversation": "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; ein Fehlschlag wird separat ausgewiesen.",
         }
+
+    def gps_state(self) -> dict[str, Any]:
+        """The "GPS-Spuren speichern" setting and how many activities hold a track."""
+        with self._dependencies.database_manager.read_snapshot() as db:
+            return {
+                "enabled": activity_detail_store.gps_tracks_enabled(db),
+                "stored_tracks": activity_detail_store.stored_track_count(db),
+                "confirmation_text": GPS_TRACKS_DELETE_CONFIRMATION_TEXT,
+            }
+
+    def set_gps_tracks(self, enabled: Any) -> dict[str, Any]:
+        """Turn the storage of new GPS tracks on or off; stored tracks stay."""
+        if not isinstance(enabled, bool):
+            raise AppError(400, "enabled muss true oder false sein.")
+        dependencies = self._dependencies
+        with (
+            dependencies.database_lock,
+            dependencies.database_manager.unit_of_work() as db,
+        ):
+            dependencies.key_value_repository.set(
+                db, activity_detail_store.GPS_TRACKS_KEY, "1" if enabled else "0"
+            )
+        return {"status": "ok", **self.gps_state()}
+
+    def delete_gps_tracks(self, confirm: Any) -> dict[str, Any]:
+        """Delete every stored GPS position after an explicit confirmation."""
+        if confirm != GPS_TRACKS_DELETE_CONFIRMATION_TEXT:
+            raise AppError(400, "Zum Löschen muss GPS-SPUREN LÖSCHEN bestätigt werden.")
+        dependencies = self._dependencies
+        with (
+            dependencies.maintenance_gate.restore(),
+            dependencies.database_lock,
+            dependencies.database_manager.unit_of_work() as db,
+        ):
+            deleted = activity_detail_store.delete_stored_tracks(db)
+        return {"status": "ok", "deleted_tracks": deleted, **self.gps_state()}
 
     def delete(self, confirm: Any) -> dict[str, Any]:
         if confirm != PRIVACY_DELETE_CONFIRMATION_TEXT:
