@@ -13,6 +13,15 @@ WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github/workflows/daily-release.yml"
 ).read_text(encoding="utf-8")
 CREATE_RELEASE = WORKFLOW.split("  create-release:\n", 1)[1]
+BUMP_STEP = WORKFLOW.split(
+    "      - name: Create version bump PR or promote release\n", 1
+)[1]
+BLOCKER_STEP = WORKFLOW.split(
+    "      - name: Hold scheduled release for release blockers\n", 1
+)[1].split("      - name:", 1)[0]
+POLICY = (Path(__file__).resolve().parents[1] / "docs/ci-and-releases.md").read_text(
+    encoding="utf-8"
+)
 
 
 class ReleaseEventTests(unittest.TestCase):
@@ -65,6 +74,81 @@ class ReleaseEventTests(unittest.TestCase):
                 self.assertIs(
                     eval(condition, {"__builtins__": {}}, {"github": github}), expected
                 )
+
+
+class ReleaseBlockerGateTests(unittest.TestCase):
+    def test_only_the_schedule_is_gated_and_every_release_step_honors_it(self):
+        self.assertIn("        if: github.event_name == 'schedule'\n", BLOCKER_STEP)
+        prepare = WORKFLOW.split("  prepare-version:\n", 1)[1].split(
+            "  create-release:\n", 1
+        )[0]
+        steps = prepare.split("      - name: ")[2:]
+        self.assertEqual(len(steps), 3)
+        for step in steps:
+            self.assertIn("if: steps.release-blocker.outputs.blocked != 'true'", step)
+
+    def test_policy_documents_the_label(self):
+        self.assertIn("`release-blocker`", POLICY)
+
+
+@unittest.skipIf(
+    os.name == "nt" or not shutil.which("bash"), "Requires the Linux CI Bash runtime"
+)
+class ReleaseBlockerShellTests(unittest.TestCase):
+    def run_gate(self, issues="", prs="", fail="none"):
+        with tempfile.TemporaryDirectory() as temp:
+            output, summary = Path(temp) / "output", Path(temp) / "summary"
+            mocks = textwrap.dedent(
+                r"""
+                gh() {
+                  case "$1" in
+                    "$FAIL") return 1 ;;
+                    issue) printf '%s' "$ISSUES" ;;
+                    pr) printf '%s' "$PRS" ;;
+                  esac
+                }
+                """
+            )
+            script = textwrap.dedent(BLOCKER_STEP.split("        run: |\n", 1)[1])
+            result = subprocess.run(
+                ["bash", "--noprofile", "--norc", "-c", mocks + script],
+                env={
+                    "PATH": os.environ["PATH"],
+                    "REPOSITORY": "example/release-test",
+                    "ISSUES": issues,
+                    "PRS": prs,
+                    "FAIL": fail,
+                    "GITHUB_OUTPUT": str(output),
+                    "GITHUB_STEP_SUMMARY": str(summary),
+                },
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            texts = [
+                p.read_text("utf-8") if p.exists() else "" for p in (output, summary)
+            ]
+            return result, *texts
+
+    def test_open_blockers_hold_the_release_with_a_summary(self):
+        result, output, summary = self.run_gate(issues="12\n", prs="34\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, "blocked=true\n")
+        self.assertIn("#12, #34", summary)
+
+    def test_no_blockers_release_as_before(self):
+        result, output, summary = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, "blocked=false\n")
+        self.assertEqual(summary, "")
+
+    def test_failed_query_fails_without_releasing(self):
+        for failing in ("issue", "pr"):
+            with self.subTest(failing=failing):
+                result, output, _ = self.run_gate(fail=failing)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("blocked=false", output)
 
 
 @unittest.skipIf(
@@ -227,7 +311,7 @@ class ReleaseShellGuardTests(unittest.TestCase):
 
     def test_unmerged_version_test_defers_without_waiting_or_mutating(self):
         script = textwrap.dedent(
-            WORKFLOW.split("        run: |\n", 1)[1].split(
+            BUMP_STEP.split("        run: |\n", 1)[1].split(
                 '          app_version="', 1
             )[0]
         )
@@ -239,7 +323,7 @@ class ReleaseShellGuardTests(unittest.TestCase):
 
     def test_already_merged_version_test_refreshes_develop_without_waiting(self):
         script = textwrap.dedent(
-            WORKFLOW.split("        run: |\n", 1)[1].split(
+            BUMP_STEP.split("        run: |\n", 1)[1].split(
                 '          app_version="', 1
             )[0]
         )
