@@ -124,34 +124,25 @@ class AssessTests(unittest.TestCase):
         active = {RIDE_FTP: DatedThreshold(300.0, None, None)}
         self.assertIsNone(assess_thresholds(active, {}, today=TODAY))
 
-    def test_indoor_rides_without_local_indoor_ftp(self) -> None:
+    def test_indoor_ftp_is_judged_only_when_the_athlete_set_one(self) -> None:
         active = {RIDE_FTP: DatedThreshold(260.0, GARMIN, _days_ago(3))}
         self.assertIsNone(assess_thresholds(active, {}, today=TODAY))
-        warning = assess_thresholds(active, {}, today=TODAY, indoor_rides=True)
+        fresh_indoor = DatedThreshold(250.0, None, _days_ago(5))
+        self.assertIsNone(
+            assess_thresholds(active, {}, today=TODAY, indoor_local=fresh_indoor)
+        )
+        stale_indoor = DatedThreshold(250.0, None, _days_ago(70))
+        warning = assess_thresholds(active, {}, today=TODAY, indoor_local=stale_indoor)
         assert warning is not None
         (item,) = warning["items"]
         self.assertEqual(
-            (item["metric"], item["reason"], item["value_text"]),
-            ("indoor_ftp", "indoor_missing", "260 W"),
+            (item["metric"], item["label"], item["reason"], item["value_text"]),
+            ("indoor_ftp", "Indoor-FTP", "stale", "250 W"),
         )
-        fresh_indoor = DatedThreshold(250.0, None, _days_ago(5))
-        self.assertIsNone(
-            assess_thresholds(
-                active, {}, today=TODAY, indoor_rides=True, indoor_local=fresh_indoor
-            )
-        )
+        self.assertEqual((item["source"], item["age_days"]), ("local", 70))
 
     def test_pace_reads_per_kilometre(self) -> None:
         self.assertEqual(value_text(MetricKind.THRESHOLD_PACE, 1000 / 270), "4:30 /km")
-
-
-class _Reader(StubReader):
-    def __init__(self, observations, summaries=()) -> None:
-        super().__init__(tuple(observations))
-        self._summaries = tuple(summaries)
-
-    def activity_summaries(self, _db, *, start=None, end=None, limit=None):
-        return self._summaries
 
 
 class _Database:
@@ -161,12 +152,10 @@ class _Database:
 
 
 class ServiceTests(unittest.TestCase):
-    def _read(
-        self, observations, configurations=(), *, saved=None, summaries=(), **kwargs
-    ):
+    def _read(self, observations, configurations=(), *, saved=None, **kwargs):
         service = ThresholdStalenessService(
             _Database,
-            lambda: _Reader(observations, summaries),
+            lambda: StubReader(tuple(observations)),
             lambda: TODAY,
             zone_configurations=lambda _db: tuple(configurations),
             preferences=lambda _db: NO_PREFERENCES,
@@ -219,24 +208,22 @@ class ServiceTests(unittest.TestCase):
         assert warning is not None
         self.assertEqual(warning["items"][0]["age_days"], 60)
 
-    def test_indoor_rides_in_the_window(self) -> None:
-        def ride(environment, day="2026-11-01T07:00:00"):
-            return {
-                "sport": "ride",
-                "environment": environment,
-                "started_at_local": day,
-            }
-
+    def test_indoor_rides_use_the_ride_ftp_without_a_warning(self) -> None:
         fresh = (_garmin(MetricKind.FTP, 260.0, Sport.RIDE, 3),)
-        self.assertIsNone(self._read(fresh, summaries=(ride("outdoor"),)))
-        self.assertIsNone(
-            self._read(fresh, summaries=(ride("virtual", "2026-09-01T07:00:00"),))
-        )
-        warning = self._read(fresh, summaries=(ride("virtual"),))
+        self.assertIsNone(self._read(fresh))
+
+    def test_only_an_explicit_stale_indoor_ftp_warns(self) -> None:
+        fresh = (_garmin(MetricKind.FTP, 260.0, Sport.RIDE, 3),)
+        recent = _local_ftp(250.0, indoor=True, valid_from=_days_ago(5))
+        self.assertIsNone(self._read(fresh, [recent]))
+        old = _local_ftp(250.0, indoor=True, valid_from=_days_ago(70))
+        warning = self._read(fresh, [old])
         assert warning is not None
-        self.assertEqual(warning["items"][0]["reason"], "indoor_missing")
-        indoor = _local_ftp(250.0, indoor=True, valid_from=_days_ago(5))
-        self.assertIsNone(self._read(fresh, [indoor], summaries=(ride("indoor"),)))
+        (item,) = warning["items"]
+        self.assertEqual(
+            (item["metric"], item["reason"], item["source"], item["age_days"]),
+            ("indoor_ftp", "stale", "local", 70),
+        )
 
     def test_stale_wahoo_ftp_is_named(self) -> None:
         wahoo = replace(
