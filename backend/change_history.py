@@ -75,7 +75,6 @@ PROFILE_FIELDS = {
     "training_preferences_strength",
     "training_preferences_mobility",
     "training_model",
-    "weekly_plan",
     "coaching_style",
     "timezone",
     "weather_location",
@@ -300,7 +299,6 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
             "training_preferences_mobility",
         ),
         ("training_model",),
-        ("weekly_plan",),
         (
             "preferred_source_thresholds",
             "preferred_source_body",
@@ -316,6 +314,14 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
 }
 
 
+# Fields that left the projection after rows were recorded with them, with the
+# empty value those rows carried when the athlete never set one. The weekly plan
+# (profile) was removed with #1850.
+_FIELDS_RETIRED_FROM_AUDIT: dict[str, dict[str, Any]] = {
+    "profile": {"weekly_plan": ""},
+}
+
+
 def accepted_audit_hashes(entity_type: str, value: dict[str, Any] | None) -> set[str]:
     """Return the hashes a current projection may match for a recorded row."""
     accepted = {audit_hash(value)}
@@ -327,6 +333,8 @@ def accepted_audit_hashes(entity_type: str, value: dict[str, Any] | None) -> set
         if any(field in legacy for field in added):
             legacy = {key: item for key, item in legacy.items() if key not in added}
             generations.append(legacy)
+    if retired := _FIELDS_RETIRED_FROM_AUDIT.get(entity_type):
+        generations.extend({**generation, **retired} for generation in [*generations])
     for generation in generations:
         accepted.add(audit_hash(generation))
     return accepted

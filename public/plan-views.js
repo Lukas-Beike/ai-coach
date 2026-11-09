@@ -966,7 +966,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const left = 54 - Math.max(0, item.value) / top * 50;
     const right = 54 - Math.max(0, item.end_value) / top * 50;
     const zone = Number.isInteger(item.zone) && item.zone >= 1 && item.zone <= 7 ? item.zone : "unknown";
-    return analysisSvg("polygon", { points: `${x},54 ${x},${left} ${x + width},${right} ${x + width},54`, "data-zone": zone });
+    // A hairline gap keeps neighbouring intervals apart without hiding a short one.
+    const gap = Math.min(0.6, width / 4);
+    const start = x + gap / 2, end = x + width - gap / 2;
+    return analysisSvg("polygon", { points: `${start},54 ${start},${left} ${end},${right} ${end},54`, "data-zone": zone });
   }
 
   function plannedFocusForm(entry) {
@@ -1158,9 +1161,12 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
     const title = actual?.name || entry.name || "Trainingseinheit";
+    // The sport line carries the chips and, only for a unit still to send, a compact sync button.
     cardSummary.append(plannedSessionHeader(entry, actual, title, (line) => {
       appendPlannedEntryStatus(line, entry, status, restDayLabel, dateKey, todayKey, weekHasPlan);
       appendFocusChip(line, entry);
+      const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
+      if (syncButton) line.append(syncButton);
     }), meta);
     appendPlannedExecution(cardSummary, entry, status);
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
@@ -1170,8 +1176,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const garminBlocked = plannedGarminBlocked(entry, dateKey, todayKey, actual);
     if (garminBlocked) cardSummary.append(garminBlocked);
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
-    const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
-    if (syncButton) cardSummary.append(syncButton);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
     const metrics = plannedSessionMetrics(entry, actual);

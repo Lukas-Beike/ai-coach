@@ -51,7 +51,7 @@ _TESTS = """Tests (session_focus test):
 - Every 2 to 4 weeks an easy run may be a control run at a fixed heart rate on one route (Buchheit 2014): session_focus easy, named in the description."""
 
 _THRESHOLDS = "- Watt, pace and heart-rate targets use current_performance.thresholds, the values plans use. If ftp_conflict, name the ftp_alternatives value once."
-_PRECEDENCE = "- Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations."
+_PRECEDENCE = "- Precedence: illness, competitions, calendar markers; science defaults; the athlete's availability (8b). Justify deviations."
 
 _CALENDAR = "- If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event."
 

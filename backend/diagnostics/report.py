@@ -49,6 +49,9 @@ from backend.sync.garmin import GarminFixtureLoader, GarminSyncStateService
 from backend.sync.garmin_projection_service import GarminProjectionService
 from backend.sync.library import WorkoutLibrarySyncStateService
 from backend.sync.local_load import summarize_local_load
+from backend.sync.profile_weekly_plan_removal import (
+    summarize_profile_weekly_plan_removal,
+)
 from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
@@ -229,6 +232,9 @@ class DiagnosticReportService:
                 "session_metrics": summarize_session_metrics(deps.key_values, db),
                 "session_analysis": summarize_session_analysis(deps.key_values, db),
                 "session_focus_backfill": summarize_session_focus_backfill(
+                    deps.key_values, db
+                ),
+                "profile_weekly_plan_removal": summarize_profile_weekly_plan_removal(
                     deps.key_values, db
                 ),
                 "logs": deps.recent_logs.list(),

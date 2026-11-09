@@ -48,6 +48,18 @@ def all_day_events(
     return result
 
 
+def all_day_brief(
+    events: Sequence[Mapping[str, Any]], first: date, days: int
+) -> dict[str, list[dict[str, Any]]]:
+    """All-day events per local date of the horizon; dates without one are left out."""
+    result = {}
+    for offset in range(days):
+        day = first + timedelta(days=offset)
+        if listed := all_day_events(events, day):
+            result[day.isoformat()] = listed
+    return result
+
+
 def busy_minutes(
     events: Sequence[Mapping[str, Any]], first: date, days: int
 ) -> dict[str, int]:

@@ -21,7 +21,7 @@ from backend.coach.tool_execution_service import CoachStructuredToolExecutionSer
 from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_schemas import ACCEPT_PLAN_FINDINGS
 from backend.db.manager import DatabaseManager
-from backend.planning import plan_checks
+from backend.planning import calendar_load, plan_checks
 from backend.planning.load_checks import LoadThresholds
 from backend.planning.plan_guard_service import (
     IllnessNotConfirmedError,
@@ -531,6 +531,38 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.run_tool("save_checkin")
         self.guard.findings.assert_not_called()
         self.assertEqual(1, self.stored())
+
+
+class AllDayEventsBriefTests(unittest.TestCase):
+    def test_all_day_events_are_listed_per_date_and_trimmed_last_day_first(self):
+        events = [
+            {
+                "name": "Reise",
+                "all_day": True,
+                "start_local": "2026-11-04T00:00:00",
+                "end_local": "2026-11-05T00:00:00",
+                "no_training": True,
+            },
+            {
+                "name": "Timed",
+                "start_local": "2026-11-04T09:00:00",
+                "end_local": "2026-11-04T10:00:00",
+            },
+        ]
+        listed = calendar_load.all_day_brief(events, TODAY, 7)
+        self.assertEqual(["2026-11-04"], list(listed))
+        self.assertEqual("Reise", listed["2026-11-04"][0]["name"])
+        self.assertTrue(listed["2026-11-04"][0]["no_training"])
+        brief = build_planning_brief(
+            progress={},
+            completed=[],
+            competitions=[],
+            training_model="pyramidal",
+            today=TODAY,
+            all_day_events=listed,
+        )
+        self.assertEqual(listed, brief["all_day_events"])
+        self.assertIn("never subtracted", brief["all_day_events_source"])
 
 
 class LastTestsTests(unittest.TestCase):
