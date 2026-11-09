@@ -39,9 +39,35 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       startsWith(github.event.workflow_run.head_branch, 'chore/release-version-'))
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     steps:
+      - name: Hold scheduled release for release blockers
+        id: release-blocker
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A failed query fails this step, so the scheduled run never releases blind.
+          blockers="$(gh issue list --repo "$REPOSITORY" --label release-blocker --state open --json number --jq '.[].number')"
+          blockers+=" $(gh pr list --repo "$REPOSITORY" --label release-blocker --state open --json number --jq '.[].number')"
+          blockers="$(echo $blockers)"
+          if [[ -n "$blockers" ]]; then
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+            message="Scheduled release held: open release-blocker items #${blockers// /, #}."
+            echo "$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Create release GitHub App token
         id: release-app-token
+        if: steps.release-blocker.outputs.blocked != 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.0.0
         with:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
@@ -51,6 +77,7 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
       - name: Check out develop
+        if: steps.release-blocker.outputs.blocked != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
@@ -59,6 +86,7 @@ jobs:
           token: ${{ steps.release-app-token.outputs.token }}
 
       - name: Create version bump PR or promote release
+        if: steps.release-blocker.outputs.blocked != 'true'
         env:
           GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
           REPOSITORY: ${{ github.repository }}
