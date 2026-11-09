@@ -52,8 +52,9 @@ from backend.canonical.vocabulary import (
 from backend.db.activity_detail_store import StoredDetailSet
 
 METHOD_VERSION: Final = 1
-# Bump when ``zone_times`` counts differently, so stored report zones recompute.
-ZONE_TIMES_VERSION: Final = 1
+# Bump when ``zone_times`` counts or names its zones differently, so stored report
+# zones recompute (2: the zone source of each sensor, the Garmin watch zones).
+ZONE_TIMES_VERSION: Final = 2
 LABEL: Final = "Zoneneinstellungen"
 MIN_GAP_S: Final = 30.0
 GAP_FACTOR: Final = 3.0
@@ -100,6 +101,15 @@ def with_stream_zones(
         laps=merged.laps,
         zones=MappingProxyType({**merged.zones, **added}),
     )
+
+
+def zone_sources(settings: ZoneSettings) -> dict[str, str]:
+    """The source of the zone limits of each report sensor."""
+    return {
+        "heart_rate": settings.hr_source,
+        "power": settings.power_source,
+        "pace": settings.pace_source,
+    }
 
 
 def zone_times(
@@ -168,15 +178,23 @@ def _channel_seconds(
 
 def _limits(
     metric: ZoneMetric, settings: ZoneSettings
-) -> tuple[float, tuple[float, ...]] | None:
-    """The threshold and the percent limits of one metric, if its threshold is known."""
+) -> tuple[float, tuple[float, ...], str] | None:
+    """The threshold, percent limits and source of one metric, if its threshold is known."""
     if metric is ZoneMetric.HEART_RATE:
-        threshold, limits = settings.lthr, settings.hr_limits
+        threshold, limits, source = (
+            settings.lthr,
+            settings.hr_limits,
+            settings.hr_source,
+        )
     else:
-        threshold, limits = settings.ftp, settings.power_limits
+        threshold, limits, source = (
+            settings.ftp,
+            settings.power_limits,
+            settings.power_source,
+        )
     if not threshold or threshold <= 0 or len(limits) + 1 > MAX_ZONES:
         return None
-    return threshold, limits
+    return threshold, limits, source
 
 
 def _derived(
@@ -191,7 +209,7 @@ def _derived(
         or len(choice.values) != len(streams.time_s)
     ):
         return None
-    threshold, limits = zone_limits
+    threshold, limits, source_name = zone_limits
     moving = streams.channels.get(StreamChannel.MOVING)
     if moving is not None and len(moving.values) != len(streams.time_s):
         return None
@@ -227,7 +245,7 @@ def _derived(
         source_record_id=stream_provenance.source_record_id,
         recorded_by=stream_provenance.recorded_by,
         retrieved_at=stream_provenance.retrieved_at,
-        label=LABEL,
+        label=f"{LABEL}: {source_name}",
     )
     distribution = ZoneDistribution(
         provider_activity_id=source.stored.provider_activity_id,

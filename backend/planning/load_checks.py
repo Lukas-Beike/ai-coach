@@ -101,12 +101,14 @@ def _has_configuration(
 ) -> bool:
     """Whether a configuration with a usable threshold applies to a load sport.
 
-    A stored Intervals.icu configuration gives limits only, so it never counts.
+    A stored Intervals.icu configuration gives limits only, so it never counts,
+    and neither does a provider configuration without a threshold.
     """
     usable = [
         item
         for item in configurations
         if item.provenance.provider is not ProviderId.INTERVALS
+        and (item.provenance.provider is None or item.threshold)
     ]
     return any(
         effective_zone_configuration(usable, metric, sport, indoor=indoor, day=today)

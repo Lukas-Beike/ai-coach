@@ -109,4 +109,5 @@ def zone_settings_part(settings: ZoneSettings | None) -> dict[str, Any] | None:
         "power_limits": list(settings.power_limits),
         "hr_limits": list(settings.hr_limits),
         "pace_limits": list(settings.pace_limits),
+        "sources": [settings.power_source, settings.hr_source, settings.pace_source],
     }

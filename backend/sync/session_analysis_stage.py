@@ -37,7 +37,7 @@ from typing import Any, Final
 from backend.activities.activity_summary import activity_summaries
 from backend.activities.detail_merge import MergedDetail, merge_details
 from backend.activities.stream_zones import LABEL as ZONE_LABEL
-from backend.activities.stream_zones import zone_times
+from backend.activities.stream_zones import zone_sources, zone_times
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_summary import (
     stored_activity_key,
@@ -424,7 +424,14 @@ def _zone_times(session: _Session, merged: MergedDetail) -> dict[str, Any] | Non
         session.zones,
         pace=session.summary.get("sport") == Sport.RUN.value,
     )
-    return {"label": ZONE_LABEL, **times} if times else None
+    if not times:
+        return None
+    sources = zone_sources(session.zones)
+    return {
+        "label": ZONE_LABEL,
+        "sources": {sensor: sources[sensor] for sensor in times},
+        **times,
+    }
 
 
 def _version(row: Mapping[str, Any] | None) -> int | None:

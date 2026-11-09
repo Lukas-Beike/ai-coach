@@ -46,6 +46,14 @@ def _zones(value: Any) -> list[dict[str, Any]] | None:
     return zones if len(zones) == len(value) else None
 
 
+def _source_label(times: Mapping[str, Any], sensor: str) -> str:
+    """The label of stored zone times, with the zone source of the sensor."""
+    label = str(times.get("label") or LABEL)
+    sources = times.get("sources")
+    named = sources.get(sensor) if isinstance(sources, dict) else None
+    return f"{label}: {named}" if named else label
+
+
 def with_zone_times(
     summaries: Iterable[Mapping[str, Any]],
     stored: Mapping[str, Mapping[str, Any]],
@@ -61,7 +69,7 @@ def with_zone_times(
             local = _zones(times.get(sensor))
             if local is not None:
                 item[key] = local
-                sources[key] = str(times.get("label") or LABEL)
+                sources[key] = _source_label(times, sensor)
                 models[key] = LOCAL_MODEL
             elif item.get(key):
                 models[key] = PROVIDER_MODEL

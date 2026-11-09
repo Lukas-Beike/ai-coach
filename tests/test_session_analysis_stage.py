@@ -27,7 +27,7 @@ from backend.canonical.vocabulary import (
     StreamChannel,
     StreamResolution,
 )
-from backend.db import activity_detail_store, canonical_store
+from backend.db import activity_detail_store, canonical_domain_store, canonical_store
 from backend.db.activity_detail_store import replace_detail_set, save_analysis
 from backend.db.repositories import KeyValueRepository
 from backend.performance import canonical_session_analysis
@@ -39,6 +39,7 @@ from backend.performance.session_analysis_reads import (
 )
 from backend.performance.zone_time_reads import read_zone_times, with_zone_times
 from backend.providers.garmin_health_mapping import MAPPER_VERSION
+from backend.providers.garmin_zone_mapping import map_garmin_heart_rate_zones
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import session_analysis_stage
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
@@ -48,6 +49,7 @@ from backend.sync.session_analysis_stage import (
     summarize_session_analysis,
 )
 from tests.canonical_detail_support import NOW, ZONE, add_session_record, open_manager
+from tests.canonical_domain_support import local_zone_configuration
 
 GARMIN = ProviderId.GARMIN
 INTERVALS = ProviderId.INTERVALS
@@ -112,6 +114,58 @@ def _laps(db: Any, provider: ProviderId, provider_activity_id: str) -> None:
         ),
         mapper_version=1,
         summary_sha256=None,
+        now=NOW,
+    )
+
+
+def _threshold_hr(db: Any, provider: ProviderId, value: float) -> None:
+    canonical_store.upsert_observation(
+        db,
+        Observation(
+            kind=MetricKind.THRESHOLD_HR,
+            value=MetricValue(value, "bpm"),
+            observed_on=date(2026, 9, 1),
+            observed_at=None,
+            provenance=Provenance(
+                provider=provider,
+                source_kind=SourceKind.PROVIDER_REPORTED,
+                source_record_id=f"{provider.value}-lthr",
+                recorded_by=RecordingOrigin.GARMIN,
+                retrieved_at=datetime(2026, 9, 1, tzinfo=UTC),
+                label=None,
+            ),
+            sport=Sport.RUN,
+        ),
+        mapper_version=MAPPER_VERSION,
+        now=NOW,
+    )
+
+
+def _watch_zones(db: Any, **overrides: Any) -> None:
+    """The Garmin watch zones fetched on 2026-09-01: zone 2 spans 122-140 bpm."""
+    node = {
+        "sport": "DEFAULT",
+        "trainingMethod": "LACTATE_THRESHOLD",
+        "lactateThresholdHeartRateUsed": 166,
+        "maxHeartRateUsed": 189,
+        "zone1Floor": 100,
+        "zone2Floor": 122,
+        "zone3Floor": 141,
+        "zone4Floor": 152,
+        "zone5Floor": 163,
+        **overrides,
+    }
+    canonical_domain_store.replace_zone_configurations(
+        db,
+        provider=GARMIN,
+        source_record_id="heart_rate_zones/~watch",
+        configurations=map_garmin_heart_rate_zones(
+            node,
+            source_record_id="heart_rate_zones/~watch",
+            retrieved_at=datetime(2026, 9, 1, 8, 0, tzinfo=UTC),
+            zone=ZONE,
+        ),
+        mapper_version=MAPPER_VERSION,
         now=NOW,
     )
 
@@ -291,6 +345,7 @@ class SessionAnalysisStageTests(unittest.TestCase):
         assert row is not None
         zones = row["payload"]["zone_times"]
         self.assertEqual("Zoneneinstellungen", zones["label"])
+        self.assertEqual({"power": "Standardzonen"}, zones["sources"])
         power = {zone["id"]: zone["secs"] for zone in zones["power"]}
         # 200 W at the Garmin FTP of 200 W is Z4; the Intervals FTP is never read.
         self.assertEqual(float(SECONDS), power["Z4"])
@@ -301,7 +356,68 @@ class SessionAnalysisStageTests(unittest.TestCase):
         summary = with_zone_times([{"id": "act_g1", "sport": "ride"}], read)[0]
         self.assertEqual(zones["power"], summary["power_zone_times"])
         self.assertEqual({"power_zone_times": "local"}, summary["zone_models"])
-        self.assertEqual("Zoneneinstellungen", summary["sources"]["power_zone_times"])
+        self.assertEqual(
+            "Zoneneinstellungen: Standardzonen", summary["sources"]["power_zone_times"]
+        )
+
+    def test_heart_rate_zone_times_follow_the_garmin_watch_zones(self) -> None:
+        add_session_record(self.manager, GARMIN, "g2", "act_g2", sport="run")
+        self._write(
+            lambda db: _streams(db, GARMIN, "g2"),
+            lambda db: _threshold_hr(db, GARMIN, 166.0),
+        )
+
+        def seconds() -> tuple[dict[str, float], str]:
+            row = self._row("act_g2")
+            assert row is not None
+            times = row["payload"]["zone_times"]
+            return (
+                {zone["id"]: zone["secs"] for zone in times["heart_rate"]},
+                times["sources"]["heart_rate"],
+            )
+
+        self._run()
+        # 140 of 166 bpm is 84.3 % of the threshold: zone 3 in Coggan's five zones.
+        coggan, source = seconds()
+        self.assertEqual((float(SECONDS), "Standardzonen"), (coggan["Z3"], source))
+
+        self._write(_watch_zones)
+        changed = self._run()
+        # The watch's zone 2 ends at 140 bpm: the same run is zone 2 now.
+        self.assertEqual(1, changed["counts"]["computed"])
+        watch, source = seconds()
+        self.assertEqual((float(SECONDS), "Garmin-Zonen"), (watch["Z2"], source))
+        self.assertEqual(0.0, watch.get("Z3", 0.0))
+        with self.manager.reader() as db:
+            read = read_zone_times(db, ["act_g2"])
+        summary = with_zone_times([{"id": "act_g2", "sport": "run"}], read)[0]
+        self.assertEqual(
+            "Zoneneinstellungen: Garmin-Zonen",
+            summary["sources"]["heart_rate_zone_times"],
+        )
+
+        # Counting again changes nothing.
+        self.assertEqual(0, self._run()["counts"]["computed"])
+
+        # A changed watch threshold recomputes, and a confirmed local zone set wins.
+        self._write(lambda db: _watch_zones(db, zone3Floor=139, zone2Floor=121))
+        self.assertEqual(1, self._run()["counts"]["computed"])
+        self.assertEqual(float(SECONDS), seconds()[0]["Z3"])
+        self._write(
+            lambda db: canonical_domain_store.upsert_local_zone_configuration(
+                db,
+                local_zone_configuration(
+                    sport=Sport.RUN,
+                    valid_from=date(2026, 9, 1),
+                    threshold=166.0,
+                    limits=(120.0, 145.0, 160.0, 170.0, 190.0),
+                ),
+                now=NOW,
+            )
+        )
+        self._run()
+        local, source = seconds()
+        self.assertEqual((float(SECONDS), "lokale Zonen"), (local["Z2"], source))
 
     def test_the_row_stores_the_heart_rate_histogram(self) -> None:
         self._write(lambda db: _streams(db, GARMIN, "g1"))

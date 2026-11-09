@@ -225,7 +225,9 @@ from backend.providers.garmin_weight_walk import (
 # Version 18: night SpO2, lowest SpO2, respiration rate and sleeping heart rate.
 # Version 19: the Personal API's HRV ``status`` is a status code, and a Body
 # Battery day keyed ``date`` (the SDK's own name) keeps its totals.
-MAPPER_VERSION: Final = 19
+# Version 20: the watch heart-rate zones also project zone configurations
+# (``garmin_zone_mapping``), dated by the day they were fetched.
+MAPPER_VERSION: Final = 20
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"

@@ -37,13 +37,15 @@ MERGE_SECTIONS: Final = (
     "activity_ratings",
     "cycling_ftp_history",
     "activity_matches",
+    # Each changed zone set is kept with its first-fetch day (``fetchedOn``), so
+    # the zones valid on an earlier day keep applying to the sessions of that day.
+    "heart_rate_zones",
 )
 # The provider's current answer replaces the stored one.
 REPLACE_SECTIONS: Final = (
     "training_load_balance",
     "daily_training_status",
     "gear",
-    "heart_rate_zones",
     "readiness",
     "race_predictions",
     "max_metrics",
