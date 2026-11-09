@@ -10,3 +10,7 @@ test-results/
 playwright/.auth/
 .graphify-local/
 .openspec-local/
+
+# Local coverage data (pyproject sets parallel = true)
+.coverage
+.coverage.*
