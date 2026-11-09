@@ -41,6 +41,10 @@ from backend.performance.session_zones import (
     own_configurations,
     zone_settings_for,
 )
+from backend.weather.activity_weather_store import (
+    stored_activity_weather,
+    weather_block,
+)
 
 
 class ActivityAnalysisReadService(ActivityReadService):
@@ -211,7 +215,13 @@ class ActivityAnalysisReadService(ActivityReadService):
                     "Diese Aktivität ist lokal nicht vorhanden.",
                     reason="activity_details_not_found",
                 )
-            records = self._session_records(db, document["session"]["activity_id"])
+            session_id = document["session"]["activity_id"]
+            records = self._session_records(db, session_id)
+            weather = weather_block(
+                stored_activity_weather(db, [session_id]).get(session_id, {})
+            )
+        if weather is not None:
+            document["weather"] = weather
         _add_purpose(document["session"], requested_summary())
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
 

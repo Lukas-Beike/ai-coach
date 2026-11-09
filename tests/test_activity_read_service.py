@@ -11,15 +11,17 @@ from activity_row_support import (
     canonical_source,
     summaries_of_rows,
 )
-from canonical_detail_support import add_session_record, open_manager
+from canonical_detail_support import NOW, ZONE, add_session_record, open_manager
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.canonical.activity_summary import stored_activity_key
 from backend.canonical.vocabulary import ProviderId
+from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
+from backend.sync.activity_weather import ActivityWeatherStage
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 INTERVALS = ProviderId.INTERVALS
@@ -332,6 +334,39 @@ class ActivityReadServiceTests(unittest.TestCase):
 
         self.assertEqual("act_new", result["session"]["activity_id"])
         self.assertNotIn("avg_speed_mps", result["metrics"])
+
+    def test_detail_carries_the_stored_weather_block_with_its_heat_note(self):
+        snapshot = {"synced_at": "2026-09-20T08:00:00+00:00", "athlete": {}}
+        stage = ActivityWeatherStage(
+            key_values=KeyValueRepository(lambda: NOW),
+            zone_provider=lambda: ZONE,
+            clock=lambda: NOW,
+            fetch=lambda *_args: {
+                "hourly": {
+                    "time": ["2026-09-10T05:00", "2026-09-10T06:00"],
+                    "temperature_2m": [24.0, 24.0],
+                    "apparent_temperature": [25.0, 25.0],
+                }
+            },
+            home_location=lambda _db: (52.52, 13.41),
+        )
+        stage.prefetch(lambda: self.manager)
+        with self.manager.unit_of_work() as db:
+            stage.run_batch(db)
+        service = self.detail_service(snapshot)
+
+        result = service.detail(
+            "new",
+            garmin_status=NO_GARMIN_SYNC_STATUS,
+            profile={},
+            today=date(2026, 9, 20),
+        )
+
+        weather = result["weather"]
+        self.assertEqual(25.0, weather["apparent_temperature_c"])
+        self.assertEqual("home", weather["location_kind"])
+        self.assertIn("Hitze", weather["heat_note"])
+        self.assertNotIn("52.5", json.dumps(weather))
 
     def test_detail_service_requires_a_canonical_source(self):
         with self.assertRaises(TypeError):

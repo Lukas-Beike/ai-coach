@@ -219,6 +219,13 @@ class MetricKind(StrEnum):
     # last level up to four hours before sleep and the first after waking.
     BODY_BATTERY_BEFORE_SLEEP = "body_battery_before_sleep"
     MORNING_BODY_BATTERY = "morning_body_battery"
+    # Weather during one outdoor ride or run, from Open-Meteo at the activity's
+    # start position or, without one, at the home location (#1868).
+    ACTIVITY_WEATHER_TEMPERATURE = "activity_weather_temperature"
+    ACTIVITY_WEATHER_APPARENT_TEMPERATURE = "activity_weather_apparent_temperature"
+    ACTIVITY_WEATHER_HUMIDITY = "activity_weather_humidity"
+    ACTIVITY_WEATHER_WIND_SPEED = "activity_weather_wind_speed"
+    ACTIVITY_WEATHER_PRECIPITATION = "activity_weather_precipitation"
 
     @property
     def unit(self) -> str:
@@ -296,6 +303,11 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.AEROBIC_DECOUPLING: "%",
     MetricKind.BODY_BATTERY_BEFORE_SLEEP: "score",
     MetricKind.MORNING_BODY_BATTERY: "score",
+    MetricKind.ACTIVITY_WEATHER_TEMPERATURE: "C",
+    MetricKind.ACTIVITY_WEATHER_APPARENT_TEMPERATURE: "C",
+    MetricKind.ACTIVITY_WEATHER_HUMIDITY: "%",
+    MetricKind.ACTIVITY_WEATHER_WIND_SPEED: "m/s",
+    MetricKind.ACTIVITY_WEATHER_PRECIPITATION: "mm",
 }
 
 
@@ -366,6 +378,19 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
         for kind in (
             MetricKind.BODY_BATTERY_BEFORE_SLEEP,
             MetricKind.MORNING_BODY_BATTERY,
+        )
+    },
+    **{
+        kind: (
+            "derived locally per session by backend.sync.activity_weather from "
+            "the Open-Meteo historical forecast, never by a provider mapper"
+        )
+        for kind in (
+            MetricKind.ACTIVITY_WEATHER_TEMPERATURE,
+            MetricKind.ACTIVITY_WEATHER_APPARENT_TEMPERATURE,
+            MetricKind.ACTIVITY_WEATHER_HUMIDITY,
+            MetricKind.ACTIVITY_WEATHER_WIND_SPEED,
+            MetricKind.ACTIVITY_WEATHER_PRECIPITATION,
         )
     },
 }

@@ -81,7 +81,7 @@ Task: analyze the requested completed session, by default the last one.
 - Easy, recovery or long: steady pace or power and heart rate, heart-rate drift or decoupling at the same pace, really easy, cadence holding. Planned strides or a progression are intended, not faults. With a stored hr_cap (planned_targets.heart_rate_cap) judge against it by verdict, naming percent and bpm.
 - Intervals, threshold or tests: per work lap on target and even; reps holding or fading; heart rate across reps; recoveries as long and easy as planned, and the heart-rate drop in them. Under about 2 minutes judge pace or power, not heart rate.
 - Race (purpose race): pacing, fade, finish against target; skip interval verdicts.
-- Before calling a change fitness or fatigue, check heat, hills, wind, sleep, the days before and sensor errors (heart-rate spikes, GPS jumps).
+- Before calling a change fitness or fatigue, check heat (weather.heat_note), hills, wind, sleep, the days before and sensor errors (heart-rate spikes, GPS jumps).
 - End with the consequence for the next session.""",
     # Progress and block review are one review: is the athlete getting fitter,
     # and does the plan's execution explain a problem?

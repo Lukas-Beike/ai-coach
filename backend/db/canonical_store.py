@@ -47,7 +47,8 @@ from backend.canonical.vocabulary import (
 
 ACTIVITY_ID_PREFIX: Final = "act_"
 ATHLETE_SERIES: Final = "athlete"
-# Local per-session derived kinds, keyed by their owning session (cards M6, M8).
+# Local per-session derived kinds, keyed by their owning session (cards M6, M8,
+# activity weather).
 SESSION_SERIES_KINDS: Final = frozenset(
     {
         MetricKind.SESSION_LOAD,
@@ -56,6 +57,11 @@ SESSION_SERIES_KINDS: Final = frozenset(
         MetricKind.VARIABILITY_INDEX,
         MetricKind.MECHANICAL_WORK,
         MetricKind.AEROBIC_DECOUPLING,
+        MetricKind.ACTIVITY_WEATHER_TEMPERATURE,
+        MetricKind.ACTIVITY_WEATHER_APPARENT_TEMPERATURE,
+        MetricKind.ACTIVITY_WEATHER_HUMIDITY,
+        MetricKind.ACTIVITY_WEATHER_WIND_SPEED,
+        MetricKind.ACTIVITY_WEATHER_PRECIPITATION,
     }
 )
 _ATHLETE_SERIES_KINDS: Final = frozenset(

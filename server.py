@@ -290,6 +290,7 @@ from backend.privacy import (
     PrivacyStateDependencies,
 )
 from backend.provider_credentials import GARMIN_SOURCE_DB, ProviderCredentialService
+from backend.providers import activity_weather as activity_weather_provider
 from backend.providers import air_quality as air_quality_provider
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
@@ -452,6 +453,7 @@ from backend.sync.wahoo_sync_assembly import WahooSyncAssembly, WahooSyncInputs
 from backend.sync.weather import WeatherSyncService
 from backend.sync.worker import shared_sync_job_wake_event
 from backend.sync.worker_assembly import SyncJobWorkerAssembly
+from backend.weather.activity_weather_store import home_coordinates
 from backend.weather.assembly import (
     WeatherAssembly,
     WeatherProviderRuntime,
@@ -2131,6 +2133,17 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
     # The one-time focus backfill of future units (#1849) runs after all stages.
     extra_followups=(PROFILE_WEEKLY_PLAN_REMOVAL, SESSION_FOCUS_BACKFILL),
+    # Weather during outdoor sessions (#1868); only 2-decimal coordinates leave.
+    activity_weather_fetch=lambda *position: (
+        activity_weather_provider.ActivityWeatherClient(
+            PROVIDER_TRANSPORT.json_http_client().request
+        ).fetch(*position)
+    ),
+    home_location=lambda db: home_coordinates(
+        KEY_VALUE_REPOSITORY,
+        db,
+        ATHLETE_DATA.profile().get_from_db(db).get("weather_location", ""),
+    ),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe location-specific weather fetches, forecast/air/pollen source composition, cache and retry state, saved forecasts, and advisory training projections. Saved historical values are archived forecasts, not observed historical weather.
+Describe location-specific weather fetches, forecast/air/pollen source composition, cache and retry state, saved forecasts, and advisory training projections. Saved historical values are archived forecasts, not observed historical weather, as are the weather values stored for past sessions.
 
 ## Requirements
 
@@ -98,6 +98,19 @@ The system SHALL archive daily forecast projections with saved-at/location metad
 - **THEN** exact identity wins and the original planned input remains unchanged.
 
 Evidence: `backend/weather/history.py:remember_forecasts`, `backend/weather/history.py:calendar_state`, `backend/weather/history.py:add_to_planned`, `backend/weather/projection.py:daily_summary`; `tests/test_weather_history.py:test_calendar_state_keeps_past_history_and_current_weather_wins`, `tests/test_weather_history.py:test_add_to_planned_matches_id_before_date_and_name_without_mutation`, `tests/test_weather_projection.py:test_daily_summary_filters_dates_caps_rows_and_projects_fields`.
+
+### Requirement: Weather during outdoor sessions
+The system SHALL store Open-Meteo historical-forecast weather per outdoor ride or run since 2022 as derived observations, at the first stored GPS position or else the saved weather location, labelled home. Only two-decimal coordinates SHALL be sent; none SHALL reach observations, logs, diagnostics or the Coach. Requests SHALL run outside the writer transaction; a current result SHALL not be refetched. The Coach read SHALL note heat from 25 C apparent temperature.
+
+#### Scenario: Position and fallback
+- **WHEN** a session has a stored position, or has none and a weather location is saved
+- **THEN** the request uses the rounded position or home coordinates and the label names "Startposition" or "Wohnort".
+
+#### Scenario: Cache and failure
+- **WHEN** a session already has a current result, or a request fails
+- **THEN** no second request is made for the result, and a failure writes no observation and waits before a retry.
+
+Evidence: `backend/sync/activity_weather.py:ActivityWeatherStage`, `backend/providers/activity_weather.py:activity_weather_params`, `backend/weather/activity_weather.py:reduce_hourly`, `backend/weather/activity_weather.py:heat_note`; `tests/test_activity_weather.py:test_start_position_is_fetched_rounded_and_stored`, `tests/test_activity_weather.py:test_a_stored_result_is_never_fetched_again`, `tests/test_activity_weather.py:test_no_raw_coordinate_leaves_the_stored_streams`.
 
 ### Requirement: Advisory weather training windows and adaptive reasons
 The system SHALL propose supported near-term outdoor cycling/running windows from contiguous hourly forecast data, required precipitation/temperature inputs, event duration, weekday availability, and optional wind/rain/air-quality penalties. Indoor/virtual activities and inadequate hourly coverage SHALL yield no recommendation.

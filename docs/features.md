@@ -73,6 +73,7 @@
 - **Weather Window Recommendations**: Automated calculation of optimal outdoor training windows over the next 5 days based on temperature, precipitation, wind speeds, and air quality.
 - **Workday Schedule Awareness**: Outdoor suggestions tailored around athlete working hours (06:00-15:30 Monday-Thursday, until 14:00 Friday, with a 12:00-13:00 lunch window).
 - **Adaptive Weather Alerts**: Proactive notifications and planned calendar warnings when impending heavy rain, extreme heat, or high winds impact scheduled outdoor sessions.
+- **Weather During Sessions**: Each outdoor ride or run since 2022 gets the Open-Meteo historical-forecast weather (temperature, apparent temperature, humidity, wind, precipitation) at its start position, or at the saved weather location, labelled as home, when no GPS position is stored. Only coordinates rounded to two decimals leave the server. A stored result is never fetched again; failed requests are retried later with a growing delay. The Coach sees the weather and a heat note from an apparent temperature of 25 °C, so heat is not read as a fitness change, never a coordinate.
 - **Efficient Server Caching**: 3-hour server-side forecast caching with automatic on-demand cache overrides accessible from the More tab.
 
 ## External Calendars & Schedule Constraints
