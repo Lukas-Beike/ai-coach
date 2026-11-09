@@ -87,6 +87,12 @@ class PlanPushHashTests(unittest.TestCase):
         self.assertFalse(past_export_horizon(None, today))
 
 
+def _state(store: SyncJobStore, job_id: str) -> dict:
+    state = store.state(job_id)
+    assert state is not None
+    return state
+
+
 class SettledItemsTests(unittest.TestCase):
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory()
@@ -122,7 +128,7 @@ class SettledItemsTests(unittest.TestCase):
     def _states(self, job_id: str) -> dict[str, str]:
         return {
             item["item_key"]: item["status"]
-            for item in self.store.state(job_id)["items"]
+            for item in _state(self.store, job_id)["items"]
         }
 
     def test_retry_reruns_only_open_items_and_never_downgrades_completed(
@@ -145,7 +151,9 @@ class SettledItemsTests(unittest.TestCase):
             ],
             None,
         )
-        self.assertEqual(self.store.claim()["settled_item_keys"], [])
+        first = self.store.claim()
+        assert first is not None
+        self.assertEqual(first["settled_item_keys"], [])
         self.store.update_from_result(
             job["id"],
             {
@@ -159,6 +167,7 @@ class SettledItemsTests(unittest.TestCase):
         )
         self.store.resolve(job["id"])
         claimed = self.store.claim()
+        assert claimed is not None
         self.assertEqual(claimed["settled_item_keys"], ["done"])
         self.assertEqual(
             _unsettled_plan_entries({"entries": entries}, claimed["settled_item_keys"])[
@@ -181,7 +190,7 @@ class SettledItemsTests(unittest.TestCase):
         self.assertEqual(
             self._states(job["id"]), {"done": "completed", "retry": "completed"}
         )
-        self.assertEqual(self.store.state(job["id"])["status"], "completed")
+        self.assertEqual(_state(self.store, job["id"])["status"], "completed")
 
     def test_all_settled_keeps_the_payload(self) -> None:
         payload = {"entries": [{"library_workout_id": "a"}]}
