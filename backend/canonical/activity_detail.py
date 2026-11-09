@@ -27,6 +27,11 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_ELEVATION_M,
     MAX_ACTIVITY_LOAD,
     MAX_ACTIVITY_POWER_W,
+    MAX_GROUND_CONTACT_TIME_MS,
+    MAX_PERCENT,
+    MAX_STEP_LENGTH_M,
+    MAX_VERTICAL_OSCILLATION_CM,
+    MAX_VERTICAL_RATIO_PCT,
     bounded_number,
     optional_bounded_number,
     optional_text,
@@ -88,6 +93,11 @@ CHANNEL_BOUNDS: Final[Mapping[StreamChannel, tuple[float, float]]] = {
     StreamChannel.MOVING: (0.0, 1.0),
     StreamChannel.LATITUDE_DEG: (-90.0, 90.0),
     StreamChannel.LONGITUDE_DEG: (-180.0, 180.0),
+    StreamChannel.GROUND_CONTACT_TIME_MS: (0.0, MAX_GROUND_CONTACT_TIME_MS),
+    StreamChannel.GROUND_CONTACT_BALANCE_PCT: (0.0, MAX_PERCENT),
+    StreamChannel.VERTICAL_OSCILLATION_CM: (0.0, MAX_VERTICAL_OSCILLATION_CM),
+    StreamChannel.VERTICAL_RATIO_PCT: (0.0, MAX_VERTICAL_RATIO_PCT),
+    StreamChannel.STEP_LENGTH_M: (0.0, MAX_STEP_LENGTH_M),
 }
 
 ZONE_BOUNDARY_BOUNDS: Final[Mapping[ZoneMetric, tuple[float, float]]] = {

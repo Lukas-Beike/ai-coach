@@ -36,6 +36,7 @@ from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     POSITION_CHANNELS,
     PROVIDER_PRECEDENCE,
+    RUNNING_DYNAMICS_CHANNELS,
     ProviderId,
     RecordingOrigin,
     SourceKind,
@@ -76,6 +77,11 @@ _MEASURED_METRICS: Final[tuple[tuple[str, str], ...]] = (
     ("lap_count", "count"),
     ("energy_kj", "kJ"),
     ("energy_kcal", "kcal"),
+    ("ground_contact_time_ms", "ms"),
+    ("ground_contact_balance_pct", "%"),
+    ("vertical_oscillation_cm", "cm"),
+    ("vertical_ratio_pct", "%"),
+    ("step_length_m", "m"),
 )
 _DERIVED_METRICS: Final[tuple[tuple[str, str | None], ...]] = (
     ("normalized_power", "W"),
@@ -385,6 +391,7 @@ def _streams(streams: MergedStreams | None) -> dict[str, Any] | None:
                 "aligned": choice.aligned,
             }
             for channel, choice in streams.channels.items()
+            if channel not in RUNNING_DYNAMICS_CHANNELS
         },
     }
 
@@ -494,7 +501,11 @@ def _coverage(sets: Sequence[StoredDetailSet]) -> dict[str, dict[str, int]]:
         if not isinstance(detail, ActivityStreamSet):
             continue
         for channel, values in detail.channels.items():
-            if channel is StreamChannel.TIME_S or channel in POSITION_CHANNELS:
+            if (
+                channel is StreamChannel.TIME_S
+                or channel in POSITION_CHANNELS
+                or channel in RUNNING_DYNAMICS_CHANNELS
+            ):
                 continue
             entry = {
                 "points": len(values),

@@ -82,6 +82,7 @@
     renderStrengthSets(payload.strength_sets, content);
     renderIntervalQuality(payload, content);
     renderAerobic(payload, content);
+    renderRunningForm(payload, content);
     renderPower(payload, content);
     for (const item of payload.equipment || []) content.append(node("p", `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
     renderBundle(payload.session_bundle, api, content, reload, notice);
@@ -393,6 +394,47 @@
     return { label: "Kadenz", unit: "rpm", factor: 1 };
   }
 
+  // Running dynamics averages (#1870): label, unit and decimals per served metric key.
+  const RUNNING_DYNAMICS = [
+    ["ground_contact_time_ms", "Bodenkontaktzeit", "ms", 0],
+    ["ground_contact_balance_pct", "Bodenkontakt links", "%", 1],
+    ["vertical_oscillation_cm", "Vertikale Oszillation", "cm", 1],
+    ["vertical_ratio_pct", "Vertikales Verhältnis", "%", 1],
+    ["step_length_m", "Schrittlänge", "m", 2],
+  ];
+  const DRIFT_METRICS = { contact_time: ["Bodenkontaktzeit", 0], vertical_oscillation: ["Vertikale Oszillation", 1], step_length: ["Schrittlänge", 2] };
+  const decimal = (value, digits) => value.toLocaleString("de-DE", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
+
+  // Label and text of each running dynamics average a sensor measured; none when the device had no sensor.
+  function runningDynamics(metrics) {
+    return RUNNING_DYNAMICS
+      .filter(([key]) => isNumber(metrics?.[key]))
+      .map(([key, label, unit, digits]) => [label, `${decimal(metrics[key], digits)} ${unit}`]);
+  }
+
+  // Lines of the form drift check, led by its label when the run is flagged; none unless the check ran.
+  function formDriftLines(drift) {
+    if (drift?.status !== "ok") return [];
+    const lines = Object.entries(drift.metrics || {})
+      .filter(([name, metric]) => DRIFT_METRICS[name] && isNumber(metric?.first) && isNumber(metric?.last) && isNumber(metric?.change_percent))
+      .map(([name, metric]) => {
+        const [label, digits] = DRIFT_METRICS[name];
+        const sign = metric.change_percent > 0 ? "+" : "";
+        return `${label} ${decimal(metric.first, digits)} → ${decimal(metric.last, digits)} ${metric.unit} (${sign}${decimal(metric.change_percent, 1)} %)`;
+      });
+    return drift.flagged && typeof drift.label === "string" ? [drift.label, ...lines] : lines;
+  }
+
+  function renderRunningForm(payload, content) {
+    const dynamics = runningDynamics(metricValues(payload));
+    const drift = formDriftLines(payload.analysis?.form_drift);
+    if (!dynamics.length && !drift.length) return;
+    content.append(node("h3", "Laufdynamik"));
+    if (dynamics.length) content.append(node("p", dynamics.map(([label, text]) => `${label} ${text}`).join(" · ")));
+    for (const line of drift) content.append(node("p", line));
+  }
+
   function renderSeries(session, streams, content) {
     let charts = 0;
     const cadence = cadenceDisplay(session);
@@ -613,5 +655,5 @@
 
   globalThis.addEventListener("popstate", () => { if (dialog) close(false); });
 
-  globalThis.ActivityDetails = { open, close, requestDetails, cadenceDisplay, metricValues, providerNotes, refreshActions };
+  globalThis.ActivityDetails = { open, close, requestDetails, cadenceDisplay, metricValues, runningDynamics, formDriftLines, providerNotes, refreshActions };
 })();
