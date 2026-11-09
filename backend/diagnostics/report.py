@@ -43,6 +43,7 @@ from backend.runtime.ports import (
     ProviderCoverageReader,
 )
 from backend.settings import SettingsService
+from backend.sync.activity_routes import summarize_activity_routes
 from backend.sync.activity_weather import summarize_activity_weather
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.freshness import ProviderFreshnessService
@@ -232,6 +233,7 @@ class DiagnosticReportService:
                 ),
                 "session_metrics": summarize_session_metrics(deps.key_values, db),
                 "activity_weather": summarize_activity_weather(deps.key_values, db),
+                "activity_routes": summarize_activity_routes(deps.key_values, db),
                 "session_analysis": summarize_session_analysis(deps.key_values, db),
                 "session_focus_backfill": summarize_session_focus_backfill(
                     deps.key_values, db

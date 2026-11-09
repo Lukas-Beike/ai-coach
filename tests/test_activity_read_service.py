@@ -12,6 +12,7 @@ from activity_row_support import (
     summaries_of_rows,
 )
 from canonical_detail_support import NOW, ZONE, add_session_record, open_manager
+from test_activity_routes import loop, store_track
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.canonical.activity_summary import stored_activity_key
@@ -21,6 +22,7 @@ from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
+from backend.sync.activity_routes import ActivityRoutesStage
 from backend.sync.activity_weather import ActivityWeatherStage
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
@@ -367,6 +369,44 @@ class ActivityReadServiceTests(unittest.TestCase):
         self.assertEqual("home", weather["location_kind"])
         self.assertIn("Hitze", weather["heat_note"])
         self.assertNotIn("52.5", json.dumps(weather))
+
+    def test_detail_carries_only_the_route_label_and_repeat_count(self):
+        snapshot = {"synced_at": "2026-09-20T08:00:00+00:00", "athlete": {}}
+        add_session_record(
+            self.manager,
+            ProviderId.GARMIN,
+            "gn",
+            "act_new",
+            sport="run",
+            distance_m=5026.5,
+        )
+        start = (51.98765, 7.65432)
+        store_track(self.manager, "gn", loop(start, seed=1))
+        stage = ActivityRoutesStage(
+            key_values=KeyValueRepository(lambda: NOW), zone_provider=lambda: ZONE
+        )
+        with self.manager.unit_of_work() as db:
+            stage.run_batch(db)
+
+        result = self.detail_service(snapshot).detail(
+            "new",
+            garmin_status=NO_GARMIN_SYNC_STATUS,
+            profile={},
+            today=date(2026, 9, 20),
+        )
+
+        self.assertEqual(
+            {
+                "label": "Strecke 1",
+                "repeat_index": 1,
+                "repeat_count": 1,
+                "route_id": "r1",
+            },
+            result["route"],
+        )
+        text = json.dumps(result)
+        for needle in ("51.98", "7.65", "latitude", "longitude", "fingerprint"):
+            self.assertNotIn(needle, text)
 
     def test_detail_service_requires_a_canonical_source(self):
         with self.assertRaises(TypeError):

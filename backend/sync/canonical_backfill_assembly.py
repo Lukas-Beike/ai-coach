@@ -11,6 +11,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.performance.session_rpe_load import FeedbackLookup
 from backend.performance.source_policy import NO_PREFERENCES
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.activity_routes import ActivityRoutesStage
 from backend.sync.activity_weather import ActivityWeatherStage, Fetch, HomeLocation
 from backend.sync.canonical_backfill import DEFAULT_BATCH_SIZE, CanonicalBackfill
 from backend.sync.canonical_backfill_worker import (
@@ -30,6 +31,7 @@ class CanonicalBackfillAssembly:
     session_metrics: SessionMetricsStage
     session_analysis: SessionAnalysisStage
     activity_weather: ActivityWeatherStage | None = None
+    activity_routes: ActivityRoutesStage | None = None
 
 
 def build_canonical_backfill(
@@ -88,6 +90,10 @@ def build_canonical_backfill(
             home_location=home_location,
         )
     )
+    # Repeated outdoor routes from the stored GPS tracks (#1868).
+    activity_routes = ActivityRoutesStage(
+        key_values=key_values, zone_provider=zone_provider
+    )
     worker = CanonicalBackfillWorker(
         backfill=backfill,
         database=database,
@@ -95,6 +101,7 @@ def build_canonical_backfill(
         followups=(
             local_load,
             session_metrics,
+            activity_routes,
             session_analysis,
             *(() if activity_weather is None else (activity_weather,)),
             # Last, so a failing extra stage never blocks the canonical ones.
@@ -108,4 +115,5 @@ def build_canonical_backfill(
         session_metrics=session_metrics,
         session_analysis=session_analysis,
         activity_weather=activity_weather,
+        activity_routes=activity_routes,
     )

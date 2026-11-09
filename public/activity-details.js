@@ -75,6 +75,7 @@
     content.replaceChildren();
     const session = payload.session || {};
     renderMetadata(session, metricValues(payload), content);
+    renderRoute(payload.route, api, content);
     content.append(...providerNotes(payload));
     renderSeries(session, payload.streams, content);
     renderLaps(payload.laps, content);
@@ -281,6 +282,34 @@
       metrics.load != null ? `Belastung ${metrics.load}` : null,
     ].filter(Boolean);
     content.append(node("p", values.join(" · ")));
+  }
+
+  // The recognised route of the session as "label, n. Mal"; the athlete can rename it.
+  function renderRoute(route, api, content) {
+    if (!route) return;
+    const line = node("p");
+    let label = route.label;
+    const show = () => {
+      const rename = node("button", "Umbenennen", "secondary-button"); rename.type = "button";
+      rename.addEventListener("click", edit);
+      line.replaceChildren(`${label}, ${route.repeat_index}. Mal `, rename);
+    };
+    const edit = () => {
+      const form = document.createElement("form");
+      const input = document.createElement("input"); input.maxLength = 60; input.required = true; input.value = label; input.setAttribute("aria-label", "Streckenname");
+      const save = node("button", "Speichern"); save.type = "submit";
+      const cancel = node("button", "Abbrechen", "secondary-button"); cancel.type = "button"; cancel.addEventListener("click", show);
+      const status = node("span", null, "muted"); status.setAttribute("role", "status");
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
+        try {
+          const result = await api("/api/routes/rename", { method: "POST", body: JSON.stringify({ route_id: route.route_id, name: input.value }) });
+          label = result.label; show();
+        } catch (error) { status.textContent = error.message; save.disabled = false; }
+      });
+      form.append(input, " ", save, " ", cancel, " ", status); line.replaceChildren(form); input.focus();
+    };
+    show(); content.append(line);
   }
 
   const COVERAGE_LABELS = { power_w: "Leistung", heart_rate_bpm: "Herzfrequenz", speed_mps: "Geschwindigkeit", altitude_m: "Höhe", distance_m: "Distanz", grade_pct: "Steigung", cadence_rpm: "Kadenz", temperature_c: "Temperatur" };

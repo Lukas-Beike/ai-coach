@@ -1,0 +1,226 @@
+"""Recognise repeated outdoor routes from the stored GPS tracks (#1868).
+
+``ActivityRoutesStage`` is a follow-up stage of the canonical backfill worker.
+Per outdoor ride or run it fingerprints the stream content hashes, the start
+and the distance before any stream is decoded; only sessions whose stored input
+hash differs are decoded, fingerprinted (``backend.activities.routes``) and
+placed, oldest first, so a pass without changes decodes nothing. Sessions that
+are gone and routes without a session leave the index, athlete names stay on
+the routes that remain. Nothing is requested remotely.
+
+With "GPS-Spuren speichern" off the stage keeps no route: the index is deleted
+and not rebuilt. Positions live only in local variables of the decoding; the
+state and the log carry counts.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import Callable, Mapping
+from datetime import UTC, tzinfo
+from typing import Any, Final
+
+from backend.activities import route_store, routes
+from backend.activities.activity_summary import activity_summaries
+from backend.canonical.activity_detail import ActivityStreamSet
+from backend.canonical.records import fingerprint_inputs
+from backend.canonical.vocabulary import (
+    PROVIDER_PRECEDENCE,
+    Environment,
+    ProviderId,
+    StreamChannel,
+)
+from backend.db import activity_detail_store
+from backend.db.repositories import KeyValueRepository
+from backend.performance.session_metrics import METRIC_SPORTS
+from backend.sync.canonical_backfill import BatchReport
+from backend.sync.canonical_table_reader import CanonicalTableReader
+
+# The application logger: only it has handlers (see observability.configure_logging).
+_LOGGER = logging.getLogger("intervals_coach")
+STAGE: Final = "activity_routes"
+STATE_KEY: Final = route_store.STATE_KEY
+METHOD_VERSION: Final = 1
+DEFAULT_BATCH_SIZE: Final = 50
+_INTERVALS: Final = ProviderId.INTERVALS.value
+_RANK: Final = {
+    provider.value: index for index, provider in enumerate(PROVIDER_PRECEDENCE)
+}
+
+
+def _wants(summary: Mapping[str, Any]) -> bool:
+    return (
+        summary.get("sport") in METRIC_SPORTS
+        and summary.get("environment") == Environment.OUTDOOR.value
+    )
+
+
+def _input_hash(summary: Mapping[str, Any], stream_hashes: list[str]) -> str:
+    """Every input of a session's fingerprint, known without decoding a stream."""
+    return fingerprint_inputs(
+        {
+            "method_version": METHOD_VERSION,
+            "started_at": summary.get("started_at"),
+            "distance_m": summary.get("distance_m"),
+            "streams": sorted(stream_hashes),
+        }
+    )
+
+
+def _track(
+    db: Any, session_id: str, distance_m: float | None
+) -> routes.Fingerprint | None:
+    """The fingerprint of the session's own track; the best provider with one wins."""
+    sets = sorted(
+        (
+            item
+            for item in activity_detail_store.full_stream_sets_for_session(
+                db, session_id
+            )
+            if item.provider != _INTERVALS
+        ),
+        key=lambda item: _RANK.get(item.provider, len(_RANK)),
+    )
+    for item in sets:
+        detail = item.detail
+        if not isinstance(detail, ActivityStreamSet):
+            continue
+        found = routes.fingerprint(
+            detail.channels.get(StreamChannel.LATITUDE_DEG, ()),
+            detail.channels.get(StreamChannel.LONGITUDE_DEG, ()),
+            distance_m,
+        )
+        if found is not None:
+            return found
+    return None
+
+
+class ActivityRoutesStage:
+    """Backfill follow-up that keeps the route index current."""
+
+    def __init__(
+        self,
+        *,
+        key_values: KeyValueRepository,
+        zone_provider: Callable[[], tzinfo | None],
+        reader: CanonicalTableReader | None = None,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+    ) -> None:
+        if batch_size < 1:
+            raise ValueError("batch_size must be at least 1")
+        self._key_values = key_values
+        self._zone_provider = zone_provider
+        self._reader = reader or CanonicalTableReader()
+        self._batch_size = batch_size
+
+    @property
+    def stage(self) -> str:
+        return STAGE
+
+    def run_batch(self, db: Any) -> BatchReport:
+        """Place one batch of changed sessions in the caller's transaction."""
+        index = route_store.load_index(db)
+        before = json.dumps(index, sort_keys=True)
+        wanted = self._wanted(db)
+        keys = activity_detail_store.full_stream_keys(db, list(wanted))
+        sessions = index["sessions"]
+        hashes = {
+            session_id: _input_hash(
+                summary,
+                [
+                    key.content_sha256
+                    for key in keys.get(session_id, ())
+                    if key.provider != _INTERVALS
+                ],
+            )
+            for session_id, summary in wanted.items()
+        }
+        changed = [
+            session_id
+            for session_id, digest in hashes.items()
+            if sessions.get(session_id, {}).get("h") != digest
+        ]
+        batch = changed[: self._batch_size]
+        for session_id in batch:
+            summary = wanted[session_id]
+            sessions.setdefault(session_id, {"route": None})
+            sessions[session_id].update(h=hashes[session_id], at=summary["started_at"])
+            routes.place(
+                index, session_id, _track(db, session_id, summary.get("distance_m"))
+            )
+        routes.prune(index, wanted)
+        if json.dumps(index, sort_keys=True) != before:
+            route_store.save_index(self._key_values, db, index)
+        remaining = len(changed) - len(batch)
+        counts = {
+            "sessions": len(wanted),
+            "placed": len(batch),
+            "routes": len(index["routes"]),
+            "with_route": sum(1 for item in sessions.values() if item.get("route")),
+            "remaining": remaining,
+        }
+        self._save(
+            db,
+            {
+                "status": "running" if remaining else "complete",
+                "method_version": METHOD_VERSION,
+                "counts": counts,
+            },
+        )
+        # Counts only: never a position, a cell, a name or a session id.
+        _LOGGER.info(
+            "Activity routes reconciled",
+            extra={"event": "activity_routes_reconciled", "context": counts},
+        )
+        return BatchReport(items=len(batch), done=remaining == 0)
+
+    def mark_failed(self, db: Any) -> None:
+        state = _load_state(self._key_values, db)
+        state["status"] = "failed"
+        self._save(db, state)
+
+    def summary(self, db: Any) -> dict[str, Any]:
+        """Return the content-free status and counts of the last batch."""
+        return summarize_activity_routes(self._key_values, db)
+
+    def _wanted(self, db: Any) -> dict[str, Mapping[str, Any]]:
+        """Outdoor rides and runs by session id, oldest first."""
+        sessions = [
+            (session_id, records)
+            for session_id, records in self._reader.activity_sessions(db)
+            if records
+        ]
+        summaries = [
+            summary
+            for summary in activity_summaries(sessions, self._zone_provider() or UTC)
+            if _wants(summary)
+        ]
+        summaries.sort(key=lambda item: (str(item.get("started_at")), str(item["id"])))
+        return {str(summary["id"]): summary for summary in summaries}
+
+    def _save(self, db: Any, state: Mapping[str, Any]) -> None:
+        self._key_values.set(
+            db, STATE_KEY, json.dumps(state, sort_keys=True, separators=(",", ":"))
+        )
+
+
+def _load_state(key_values: KeyValueRepository, db: Any) -> dict[str, Any]:
+    raw = key_values.get(db, STATE_KEY)
+    try:
+        state = json.loads(raw) if raw else {}
+    except ValueError:
+        state = {}
+    return state if isinstance(state, dict) else {}
+
+
+def summarize_activity_routes(
+    key_values: KeyValueRepository, db: Any
+) -> dict[str, Any]:
+    """Content-free status and counts of the last batch, for diagnostics."""
+    state = _load_state(key_values, db)
+    return {
+        "status": state.get("status", "pending"),
+        "method_version": state.get("method_version"),
+        "counts": state.get("counts", {}),
+    }
