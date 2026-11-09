@@ -168,6 +168,72 @@ def _mean_heart_rate(rr_ms: Sequence[float]) -> float:
     return 60_000.0 * len(rr_ms) / math.fsum(rr_ms)
 
 
+def _penalty_bands(
+    count: int, weight: float
+) -> tuple[list[float], list[float], list[float]]:
+    """Main, first and second sub-diagonal of ``I + weight * D'D`` for ``count`` values."""
+    diag = [1.0] * count
+    sub1 = [0.0] * (count - 1)
+    sub2 = [0.0] * (count - 2)
+    for row in range(count - 2):
+        diag[row] += weight
+        diag[row + 1] += 4.0 * weight
+        diag[row + 2] += weight
+        sub1[row] -= 2.0 * weight
+        sub1[row + 1] -= 2.0 * weight
+        sub2[row] += weight
+    return diag, sub1, sub2
+
+
+def _ldl_factor(
+    diag: list[float], sub1: list[float], sub2: list[float]
+) -> tuple[list[float], list[float], list[float]]:
+    """LDL' of a symmetric pentadiagonal matrix: pivots, L[i][i-1] and L[i][i-2]."""
+    count = len(diag)
+    pivot = [0.0] * count
+    low1 = [0.0] * count
+    low2 = [0.0] * count
+    for i in range(count):
+        pivot[i] = diag[i]
+        if i >= 1:
+            pivot[i] -= low1[i] * low1[i] * pivot[i - 1]
+        if i >= 2:
+            pivot[i] -= low2[i] * low2[i] * pivot[i - 2]
+        if i + 1 < count:
+            cross = low2[i + 1] * low1[i] * pivot[i - 1] if i >= 1 else 0.0
+            low1[i + 1] = (sub1[i] - cross) / pivot[i]
+        if i + 2 < count:
+            low2[i + 2] = sub2[i] / pivot[i]
+    return pivot, low1, low2
+
+
+def _ldl_solve(
+    rhs: Sequence[float],
+    pivot: list[float],
+    low1: list[float],
+    low2: list[float],
+) -> list[float]:
+    """Solve ``L D L' x = rhs`` by forward and back substitution."""
+    count = len(rhs)
+    forward = [0.0] * count
+    for i in range(count):
+        value = rhs[i]
+        if i >= 1:
+            value -= low1[i] * forward[i - 1]
+        if i >= 2:
+            value -= low2[i] * forward[i - 2]
+        forward[i] = value
+    solution = [0.0] * count
+    for i in range(count - 1, -1, -1):
+        value = forward[i] / pivot[i]
+        if i + 1 < count:
+            value -= low1[i + 1] * solution[i + 1]
+        if i + 2 < count:
+            value -= low2[i + 2] * solution[i + 2]
+        solution[i] = value
+    return solution
+
+
 def detrend(series: Sequence[float], smoothing: float = DETREND_LAMBDA) -> list[float]:
     """Remove the slow trend of ``series`` with smoothness priors.
 
@@ -180,50 +246,8 @@ def detrend(series: Sequence[float], smoothing: float = DETREND_LAMBDA) -> list[
     count = len(series)
     if count < 3:
         return list(series)
-    weight = smoothing * smoothing
-    # Bands of A = I + weight * D'D: main, first and second sub-diagonal.
-    diag = [1.0] * count
-    sub1 = [0.0] * (count - 1)
-    sub2 = [0.0] * (count - 2)
-    for row in range(count - 2):
-        diag[row] += weight
-        diag[row + 1] += 4.0 * weight
-        diag[row + 2] += weight
-        sub1[row] -= 2.0 * weight
-        sub1[row + 1] -= 2.0 * weight
-        sub2[row] += weight
-    pivot = [0.0] * count
-    low1 = [0.0] * count  # L[i][i-1]
-    low2 = [0.0] * count  # L[i][i-2]
-    for i in range(count):
-        pivot[i] = diag[i]
-        if i >= 1:
-            pivot[i] -= low1[i] * low1[i] * pivot[i - 1]
-        if i >= 2:
-            pivot[i] -= low2[i] * low2[i] * pivot[i - 2]
-        if i + 1 < count:
-            numerator = sub1[i] - (
-                low2[i + 1] * low1[i] * pivot[i - 1] if i >= 1 else 0.0
-            )
-            low1[i + 1] = numerator / pivot[i]
-        if i + 2 < count:
-            low2[i + 2] = sub2[i] / pivot[i]
-    forward = [0.0] * count
-    for i in range(count):
-        value = series[i]
-        if i >= 1:
-            value -= low1[i] * forward[i - 1]
-        if i >= 2:
-            value -= low2[i] * forward[i - 2]
-        forward[i] = value
-    trend = [0.0] * count
-    for i in range(count - 1, -1, -1):
-        value = forward[i] / pivot[i]
-        if i + 1 < count:
-            value -= low1[i + 1] * trend[i + 1]
-        if i + 2 < count:
-            value -= low2[i + 2] * trend[i + 2]
-        trend[i] = value
+    pivot, low1, low2 = _ldl_factor(*_penalty_bands(count, smoothing * smoothing))
+    trend = _ldl_solve(series, pivot, low1, low2)
     return [series[i] - trend[i] for i in range(count)]
 
 

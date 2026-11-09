@@ -14,6 +14,7 @@ dropout. The module is pure and never raises for malformed content.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Final
 
 from backend.providers.fit_file import FitMessage, fit_scaled_array
@@ -27,37 +28,63 @@ MAX_RR_INTERVALS: Final = 150_000
 MAX_UNACCOUNTED_S: Final = 10.0
 
 
-def rr_intervals_ms(messages: list[FitMessage]) -> list[list[float]]:
-    """Return the file's RR intervals in milliseconds as gap-free segments, oldest first."""
-    segments: list[list[float]] = [[]]
-    total = 0
+@dataclass
+class _Segmenter:
+    """Collects the intervals into gap-free segments while it follows the file clock."""
+
+    segments: list[list[float]] = field(default_factory=lambda: [[]])
+    total: int = 0
     clock: int | None = None
     segment_start: int | None = None
-    elapsed_s = 0.0
-    for number, fields in messages:
+    elapsed_s: float = 0.0
+
+    def observe_clock(self, fields: dict[int, object]) -> None:
         stamp = fields.get(_TIMESTAMP_FIELD)
         if isinstance(stamp, int) and not isinstance(stamp, bool):
-            clock = stamp
-        if number != HRV_MESSAGE:
-            continue
-        if clock is not None:
-            if segment_start is None:
-                segment_start = clock
-            elif clock - segment_start - elapsed_s > MAX_UNACCOUNTED_S:
-                segments.append([])
-                segment_start, elapsed_s = clock, 0.0
+            self.clock = stamp
+
+    def _break(self) -> None:
+        self.segments.append([])
+        self.segment_start, self.elapsed_s = self.clock, 0.0
+
+    def check_clock_gap(self) -> None:
+        """Break when the file clock ran ahead of the intervals by more than a dropout."""
+        if self.clock is None:
+            return
+        if self.segment_start is None:
+            self.segment_start = self.clock
+        elif self.clock - self.segment_start - self.elapsed_s > MAX_UNACCOUNTED_S:
+            self._break()
+
+    def add_message(self, fields: dict[int, object]) -> bool:
+        """Add one hrv message; False once the interval limit is reached."""
         slots = fit_scaled_array(fields, HRV_MESSAGE, _TIME_FIELD)
         while slots and slots[-1] is None:
             slots.pop()
         for slot in slots:
             if slot is None:
-                if segments[-1]:
-                    segments.append([])
-                    segment_start, elapsed_s = clock, 0.0
+                if self.segments[-1]:
+                    self._break()
                 continue
-            segments[-1].append(slot * 1000.0)
-            elapsed_s += slot
-            total += 1
-            if total >= MAX_RR_INTERVALS:
-                return [segment for segment in segments if segment]
-    return [segment for segment in segments if segment]
+            self.segments[-1].append(slot * 1000.0)
+            self.elapsed_s += slot
+            self.total += 1
+            if self.total >= MAX_RR_INTERVALS:
+                return False
+        return True
+
+    def result(self) -> list[list[float]]:
+        return [segment for segment in self.segments if segment]
+
+
+def rr_intervals_ms(messages: list[FitMessage]) -> list[list[float]]:
+    """Return the file's RR intervals in milliseconds as gap-free segments, oldest first."""
+    segmenter = _Segmenter()
+    for number, fields in messages:
+        segmenter.observe_clock(fields)
+        if number != HRV_MESSAGE:
+            continue
+        segmenter.check_clock_gap()
+        if not segmenter.add_message(fields):
+            break
+    return segmenter.result()

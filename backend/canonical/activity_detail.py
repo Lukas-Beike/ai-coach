@@ -222,9 +222,8 @@ class ActivityStreamSet:
     def kind(self) -> ActivityDetailKind:
         return ActivityDetailKind.STREAMS
 
-    def __post_init__(self) -> None:
-        _require_detail_header(self.provider_activity_id, self.provenance, self.origin)
-        require_instance(self.resolution, StreamResolution, "resolution")
+    def _check_sources(self) -> None:
+        """Validate the optional source, sensor and first threshold metadata."""
         if self.hr_source is not None:
             require_instance(self.hr_source, HeartRateSource, "hr_source")
         if self.power_source is not None:
@@ -237,6 +236,11 @@ class ActivityStreamSet:
         object.__setattr__(self, "sensors", sensors)
         if self.dfa_alpha1 is not None:
             require_instance(self.dfa_alpha1, ActivityDfaAlpha1, "dfa_alpha1")
+
+    def __post_init__(self) -> None:
+        _require_detail_header(self.provider_activity_id, self.provenance, self.origin)
+        require_instance(self.resolution, StreamResolution, "resolution")
+        self._check_sources()
         # Mapping is abstract, so it is checked here rather than via require_instance.
         channels = self.channels
         if not isinstance(channels, Mapping):

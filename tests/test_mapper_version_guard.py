@@ -64,7 +64,7 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     ),
     "fit_rr_mapping": (
         (6, 7),
-        "e16a1f77eb6db72ef2d4046493be04df57b109c782af12c0d74894566ae13ecb",
+        "4319aab924017281cffb92b24b53fa67ed8633d747b55e9f61f57b58821c6981",
     ),
     "fit_sensor_mapping": (
         (6, 7),

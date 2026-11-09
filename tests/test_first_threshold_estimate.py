@@ -263,80 +263,89 @@ def result(bpm, quality=GOOD, windows=40):
     )
 
 
-class Fixture(unittest.TestCase):
+def open_database(case: Any) -> None:
+    """Give ``case`` a temporary encrypted-schema database in ``case.manager``."""
+    temporary = tempfile.TemporaryDirectory()
+    case.addCleanup(temporary.cleanup)
+    case.manager = DatabaseManager(
+        Path(temporary.name) / "first.db", sqlite3, row_factory=row_factory
+    )
+    case.addCleanup(case.manager.close)
+    with case.manager.unit_of_work() as db:
+        initialize_schema(db)
+    case.counter = 0
+
+
+def add_session(db, activity_id, provider, record_id, day):
+    db.execute(
+        "INSERT INTO activity_sessions(activity_id, primary_provider, "
+        "primary_provider_activity_id, started_at, local_date, created_at, "
+        "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            activity_id,
+            provider,
+            record_id,
+            f"{day}T07:00:00+00:00",
+            day,
+            STAMP,
+            STAMP,
+        ),
+    )
+
+
+def add_record(db, activity_id, provider, record_id, day, sport):
+    db.execute(
+        "INSERT INTO activity_records(provider, provider_activity_id, activity_id, "
+        "state, mapper_version, source_kind, recorded_by, sport, environment, "
+        "started_at, local_date, load_model, fetched_at, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'active', 1, 'provider_reported', ?, ?, 'outdoor', ?, ?, "
+        "'unknown', ?, ?, ?)",
+        (
+            provider,
+            record_id,
+            activity_id,
+            provider,
+            sport,
+            f"{day}T07:00:00+00:00",
+            day,
+            STAMP,
+            STAMP,
+            STAMP,
+        ),
+    )
+
+
+def add_run(
+    case: Any, days_ago, estimate, *, sport="run", provider="garmin", session=None
+):
+    """A live session with one record and a stream set holding ``estimate``."""
+    case.counter += 1
+    day = (TODAY - timedelta(days=days_ago)).isoformat()
+    activity_id = session or f"act_{case.counter}"
+    record_id = f"r{case.counter}"
+    with case.manager.unit_of_work() as db:
+        if session is None:
+            add_session(db, activity_id, provider, record_id, day)
+        add_record(db, activity_id, provider, record_id, day, sport)
+        replace_detail_set(
+            db,
+            stream_set(record_id, estimate, provider=ProviderId(provider)),
+            mapper_version=6,
+            summary_sha256=None,
+            now=STAMP,
+        )
+    return activity_id
+
+
+class StoredEstimateTests(unittest.TestCase):
+    manager: DatabaseManager
+    counter: int
+
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.manager = DatabaseManager(
-            Path(temporary.name) / "first.db", sqlite3, row_factory=row_factory
-        )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
-        self.counter = 0
+        open_database(self)
 
-    def add_session(self, db, activity_id, provider, record_id, day):
-        db.execute(
-            "INSERT INTO activity_sessions(activity_id, primary_provider, "
-            "primary_provider_activity_id, started_at, local_date, created_at, "
-            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                activity_id,
-                provider,
-                record_id,
-                f"{day}T07:00:00+00:00",
-                day,
-                STAMP,
-                STAMP,
-            ),
-        )
-
-    def add_record(self, db, activity_id, provider, record_id, day, sport):
-        db.execute(
-            "INSERT INTO activity_records(provider, provider_activity_id, activity_id, "
-            "state, mapper_version, source_kind, recorded_by, sport, environment, "
-            "started_at, local_date, load_model, fetched_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'active', 1, 'provider_reported', ?, ?, 'outdoor', ?, ?, "
-            "'unknown', ?, ?, ?)",
-            (
-                provider,
-                record_id,
-                activity_id,
-                provider,
-                sport,
-                f"{day}T07:00:00+00:00",
-                day,
-                STAMP,
-                STAMP,
-                STAMP,
-            ),
-        )
-
-    def add_run(
-        self, days_ago, estimate, *, sport="run", provider="garmin", session=None
-    ):
-        """A live session with one record and a stream set holding ``estimate``."""
-        self.counter += 1
-        day = (TODAY - timedelta(days=days_ago)).isoformat()
-        activity_id = session or f"act_{self.counter}"
-        record_id = f"r{self.counter}"
-        with self.manager.unit_of_work() as db:
-            if session is None:
-                self.add_session(db, activity_id, provider, record_id, day)
-            self.add_record(db, activity_id, provider, record_id, day, sport)
-            replace_detail_set(
-                db,
-                stream_set(record_id, estimate, provider=ProviderId(provider)),
-                mapper_version=6,
-                summary_sha256=None,
-                now=STAMP,
-            )
-        return activity_id
-
-
-class StoredEstimateTests(Fixture):
     def test_the_estimate_round_trips_with_its_stream_set(self) -> None:
-        self.add_run(3, result(152.5))
+        add_run(self, 3, result(152.5))
         with self.manager.reader() as db:
             stored = detail_sets_for(db, "garmin", "r1")
             text = db.execute("SELECT dfa_alpha1 FROM activity_detail_sets").fetchone()[
@@ -359,7 +368,7 @@ class StoredEstimateTests(Fixture):
     def test_a_set_without_an_estimate_stores_null_and_bad_text_reads_as_none(
         self,
     ) -> None:
-        self.add_run(3, None)
+        add_run(self, 3, None)
         with self.manager.reader() as db:
             row = db.execute("SELECT dfa_alpha1 FROM activity_detail_sets").fetchone()
         self.assertIsNone(row["dfa_alpha1"])
@@ -369,13 +378,13 @@ class StoredEstimateTests(Fixture):
     def test_reader_returns_one_estimate_per_live_run_session_in_the_range(
         self,
     ) -> None:
-        self.add_run(3, result(150.0))
-        shared = self.add_run(8, result(151.0, LOW, 12))
+        add_run(self, 3, result(150.0))
+        shared = add_run(self, 8, result(151.0, LOW, 12))
         # The better record of the same session wins.
-        self.add_run(8, result(152.0, GOOD, 30), provider="wahoo", session=shared)
-        self.add_run(12, result(160.0), sport="ride")
-        self.add_run(70, result(140.0))
-        self.add_run(20, None)
+        add_run(self, 8, result(152.0, GOOD, 30), provider="wahoo", session=shared)
+        add_run(self, 12, result(160.0), sport="ride")
+        add_run(self, 70, result(140.0))
+        add_run(self, 20, None)
         with self.manager.reader() as db:
             rows = first_threshold_results(
                 db, since=TODAY - timedelta(days=59), until=TODAY, sport=Sport.RUN
@@ -389,8 +398,8 @@ class StoredEstimateTests(Fixture):
         )
 
     def test_a_merged_duplicate_session_counts_once(self) -> None:
-        primary = self.add_run(5, result(150.0, GOOD, 30))
-        duplicate = self.add_run(5, result(151.0, GOOD, 31), provider="wahoo")
+        primary = add_run(self, 5, result(150.0, GOOD, 30))
+        duplicate = add_run(self, 5, result(151.0, GOOD, 31), provider="wahoo")
         with self.manager.unit_of_work() as db:
             db.execute(
                 "UPDATE activity_sessions SET state = 'duplicate', merged_into = ? "
@@ -407,41 +416,53 @@ class StoredEstimateTests(Fixture):
         )
 
 
-class ServiceFixture(Fixture):
+def open_service(case: Any) -> None:
+    """Give ``case`` a profile service and a first threshold service over its database."""
+    case.kv = KeyValueRepository(lambda: STAMP)
+    case.lthr = 170.0
+    case.profile = ProfileService(
+        case.manager,
+        ProfileRepository(case.kv),
+        case.kv,
+        on_location_changed=lambda *args, **kwargs: None,
+        mutation_coordinator=threading.RLock(),
+        run_lthr_on=lambda _day: case.lthr,
+    )
+    case.service = FirstThresholdService(
+        case.manager, case.profile, lambda: lambda _day: case.lthr, lambda: TODAY
+    )
+
+
+def seed(case: Any, bpms=(150.0, 153.0, 156.0, 153.0)):
+    for index, bpm in enumerate(bpms):
+        add_run(case, 5 * (index + 1), result(bpm))
+
+
+def history(case: Any):
+    with case.manager.reader() as db:
+        return [
+            json.loads(row["diff"])
+            for row in db.execute(
+                "SELECT diff FROM change_history WHERE entity_type = 'profile' "
+                "ORDER BY rowid"
+            )
+        ]
+
+
+class AdoptFlowTests(unittest.TestCase):
+    manager: DatabaseManager
+    counter: int
+    kv: KeyValueRepository
+    lthr: float
+    profile: ProfileService
+    service: FirstThresholdService
+
     def setUp(self) -> None:
-        super().setUp()
-        self.kv = KeyValueRepository(lambda: STAMP)
-        self.lthr = 170.0
-        self.profile = ProfileService(
-            self.manager,
-            ProfileRepository(self.kv),
-            self.kv,
-            on_location_changed=lambda *args, **kwargs: None,
-            mutation_coordinator=threading.RLock(),
-            run_lthr_on=lambda _day: self.lthr,
-        )
-        self.service = FirstThresholdService(
-            self.manager, self.profile, lambda: lambda _day: self.lthr, lambda: TODAY
-        )
+        open_database(self)
+        open_service(self)
 
-    def seed(self, bpms=(150.0, 153.0, 156.0, 153.0)):
-        for index, bpm in enumerate(bpms):
-            self.add_run(5 * (index + 1), result(bpm))
-
-    def history(self):
-        with self.manager.reader() as db:
-            return [
-                json.loads(row["diff"])
-                for row in db.execute(
-                    "SELECT diff FROM change_history WHERE entity_type = 'profile' "
-                    "ORDER BY rowid"
-                )
-            ]
-
-
-class AdoptFlowTests(ServiceFixture):
     def test_the_profile_read_shows_the_estimate_and_changes_nothing(self) -> None:
-        self.seed()
+        seed(self)
         view = self.service.estimate()
         assert view is not None
         self.assertEqual(
@@ -449,10 +470,10 @@ class AdoptFlowTests(ServiceFixture):
             (90.0, 153, 4, "low"),
         )
         self.assertEqual(self.profile.get()[FIRST_THRESHOLD_FIELD], "")
-        self.assertEqual(self.history(), [])
+        self.assertEqual(history(self), [])
 
     def test_without_enough_sessions_there_is_nothing_to_show_or_adopt(self) -> None:
-        self.seed((150.0, 153.0))
+        seed(self, (150.0, 153.0))
         self.assertIsNone(self.service.estimate())
         with self.assertRaises(AppError) as raised:
             self.service.adopt({"percent_lthr": 90.0})
@@ -460,13 +481,13 @@ class AdoptFlowTests(ServiceFixture):
         self.assertEqual(self.profile.get()[FIRST_THRESHOLD_FIELD], "")
 
     def test_adopting_stores_percent_and_origin_with_a_change_receipt(self) -> None:
-        self.seed()
+        seed(self)
         outcome = self.service.adopt({"percent_lthr": 90.0})
         stored = self.profile.get()
         self.assertEqual(stored[FIRST_THRESHOLD_FIELD], "90")
         self.assertEqual(stored[FIRST_THRESHOLD_ORIGIN_FIELD], ORIGIN_ESTIMATED)
         self.assertEqual(outcome["profile"][FIRST_THRESHOLD_ORIGIN_FIELD], "estimated")
-        (entry,) = self.history()
+        (entry,) = history(self)
         self.assertEqual(
             set(entry["fields"]),
             {FIRST_THRESHOLD_FIELD, FIRST_THRESHOLD_ORIGIN_FIELD},
@@ -478,29 +499,29 @@ class AdoptFlowTests(ServiceFixture):
         self.assertTrue(first_threshold_estimated(stored))
 
     def test_adopting_the_value_already_stored_writes_nothing(self) -> None:
-        self.seed()
+        seed(self)
         first = self.service.adopt({"percent_lthr": 90.0})
         self.assertTrue(first["adopted"])
-        entries = len(self.history())
+        entries = len(history(self))
         again = self.service.adopt({"percent_lthr": 90.0})
         self.assertFalse(again["adopted"])
         self.assertEqual(again["profile"][FIRST_THRESHOLD_FIELD], "90")
         self.assertEqual(again["profile"][FIRST_THRESHOLD_ORIGIN_FIELD], "estimated")
         self.assertEqual(again["first_threshold_estimate"]["percent_lthr"], 90.0)
-        self.assertEqual(len(self.history()), entries)
+        self.assertEqual(len(history(self)), entries)
 
     def test_a_stale_or_missing_shown_value_is_refused(self) -> None:
-        self.seed()
+        seed(self)
         for payload in ({"percent_lthr": 89.0}, {}, {"percent_lthr": "x"}):
             with self.subTest(payload=payload), self.assertRaises(AppError) as raised:
                 self.service.adopt(payload)
             self.assertEqual(raised.exception.status, 409)
         with self.assertRaises(AppError):
             self.service.adopt([])
-        self.assertEqual(self.history(), [])
+        self.assertEqual(history(self), [])
 
     def test_a_measured_value_is_replaced_only_when_the_request_says_so(self) -> None:
-        self.seed()
+        seed(self)
         self.profile.patch({FIRST_THRESHOLD_FIELD: "85"})
         self.assertEqual(
             self.profile.get()[FIRST_THRESHOLD_ORIGIN_FIELD], ORIGIN_MEASURED
@@ -512,7 +533,7 @@ class AdoptFlowTests(ServiceFixture):
         self.service.adopt({"percent_lthr": 90.0, "replace_measured": True})
         self.assertEqual(self.profile.get()[FIRST_THRESHOLD_FIELD], "90")
         # An adopted estimate needs no confirmation to be adopted again.
-        self.add_run(1, result(160.0))
+        add_run(self, 1, result(160.0))
         view = self.service.estimate()
         assert view is not None
         self.service.adopt({"percent_lthr": view["percent_lthr"]})
@@ -521,7 +542,7 @@ class AdoptFlowTests(ServiceFixture):
         self.assertEqual(stored[FIRST_THRESHOLD_FIELD], f"{view['percent_lthr']:g}")
 
     def test_a_manual_entry_or_edit_resets_the_origin_to_measured(self) -> None:
-        self.seed()
+        seed(self)
         self.service.adopt({"percent_lthr": 90.0})
         self.profile.patch({"first_threshold_hr": "144"})  # 144 / 170 = 84.7 percent
         stored = self.profile.get()
@@ -541,7 +562,7 @@ class AdoptFlowTests(ServiceFixture):
         self.assertEqual(self.profile.get()[FIRST_THRESHOLD_ORIGIN_FIELD], "")
 
     def test_a_full_replacement_without_the_origin_keeps_it(self) -> None:
-        self.seed()
+        seed(self)
         self.service.adopt({"percent_lthr": 90.0})
         replacement = {
             key: value
@@ -720,7 +741,13 @@ class CoachVisibilityTests(unittest.TestCase):
             self.assertNotIn(forbidden, sources, forbidden)
 
 
-class RrNeverLeavesTheMapperTests(Fixture):
+class RrNeverLeavesTheMapperTests(unittest.TestCase):
+    manager: DatabaseManager
+    counter: int
+
+    def setUp(self) -> None:
+        open_database(self)
+
     def test_the_rr_series_is_in_no_stored_set_export_or_coach_view(self) -> None:
         marker = 1234.0  # an interval no ramp beat has; found only if it leaked
         series = ramp(0)
@@ -729,8 +756,8 @@ class RrNeverLeavesTheMapperTests(Fixture):
         found = detail.dfa_alpha1
         assert found is not None
         with self.manager.unit_of_work() as db:
-            self.add_session(db, "act_1", "garmin", "a1", "2026-11-01")
-            self.add_record(db, "act_1", "garmin", "a1", "2026-11-01", "run")
+            add_session(db, "act_1", "garmin", "a1", "2026-11-01")
+            add_record(db, "act_1", "garmin", "a1", "2026-11-01", "run")
             replace_detail_set(
                 db, detail, mapper_version=6, summary_sha256=None, now=STAMP
             )
