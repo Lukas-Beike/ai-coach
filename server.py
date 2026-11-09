@@ -134,7 +134,10 @@ from backend.config import (
 )
 from backend.db import manager as database_manager_runtime
 from backend.db import row_factory as database_row_factory
-from backend.db.bootstrap import initialize_application_database
+from backend.db.bootstrap import (
+    apply_startup_invariants,
+    initialize_application_database,
+)
 from backend.db.key_value import KeyValueService
 from backend.db.manager import (
     DATABASE_LOCK as DB_LOCK,
@@ -916,6 +919,13 @@ BACKUP_ASSEMBLY = BackupAssembly(
             configure_cipher=configure_cipher,
             row_factory=database_row_factory,
             schema_is_current=database_schema_is_current,
+            startup_invariants=lambda db: apply_startup_invariants(
+                db,
+                key_values=KEY_VALUE_REPOSITORY,
+                now=runtime_clock.utc_now(),
+                default_profile_json=json.dumps(DEFAULT_PROFILE),
+                provider_resync_keys=PROVIDER_RESYNC_KEYS.values(),
+            ),
         ),
         lifecycle=RestoreLifecycleDependencies(
             maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
@@ -2331,8 +2341,6 @@ HTTP_API = HttpApiAssembly(
             privacy=HttpPrivacyServices(
                 backup=BACKUP_ASSEMBLY.backup_service,
                 export=PRIVACY_ASSEMBLY.archive_export_service,
-                monotonic=time.monotonic,
-                export_time_limit_seconds=EXPORT_TIME_LIMIT_SECONDS,
                 delete=PRIVACY_ASSEMBLY.delete_service,
                 restore=BACKUP_ASSEMBLY.restore_service,
                 max_backup_bytes=MAX_BACKUP_BYTES,

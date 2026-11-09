@@ -17,6 +17,9 @@ from backend.http_api.responses import (
 
 LOGGER = logging.getLogger("intervals_coach")
 STREAM_CHUNK_BYTES = 64 * 1024
+# A stream ends when the client accepts no data for this long; a slow client
+# that keeps making progress is never cut off by a total time limit.
+STREAM_IDLE_TIMEOUT_SECONDS = 30.0
 
 
 class HttpResponseTransport:
@@ -89,9 +92,10 @@ class HttpResponseTransport:
         content_type: str,
         filename: str,
         *,
-        deadline: float | None = None,
         cleanup: bool = False,
     ) -> None:
+        connection = getattr(handler, "connection", None)
+        previous_timeout = None if connection is None else connection.gettimeout()
         try:
             size = path.stat().st_size
             handler.send_response(200)
@@ -104,19 +108,18 @@ class HttpResponseTransport:
             handler.send_header("X-Content-Type-Options", "nosniff")
             handler.send_header("X-Frame-Options", "DENY")
             handler.end_headers()
+            if connection is not None:
+                # Bounds each socket write, so only a stalled client ends the stream.
+                connection.settimeout(STREAM_IDLE_TIMEOUT_SECONDS)
             with path.open("rb") as source:
                 while True:
-                    if deadline is not None and time.monotonic() > deadline:
-                        LOGGER.warning(
-                            "File stream exceeded time limit",
-                            extra={"event": "file_stream_timeout"},
-                        )
-                        break
                     chunk = source.read(STREAM_CHUNK_BYTES)
                     if not chunk:
                         break
                     handler.wfile.write(chunk)
         except handler.client_disconnect_errors:
+            # A stalled client raises TimeoutError here; the body is truncated.
+            handler.close_connection = True
             handler.log_client_disconnect()
         except OSError:
             LOGGER.warning(
@@ -125,6 +128,11 @@ class HttpResponseTransport:
                 exc_info=True,
             )
         finally:
+            if connection is not None:
+                try:
+                    connection.settimeout(previous_timeout)
+                except OSError:
+                    pass
             if cleanup:
                 try:
                     path.unlink(missing_ok=True)

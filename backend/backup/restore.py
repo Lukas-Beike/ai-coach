@@ -155,11 +155,29 @@ class DatabaseRestoreService:
             reason="restore_storage_failed",
         )
 
+    def _logged_storage_error(self, exc: OSError) -> AppError:
+        error = self._storage_error(exc)
+        # Class and errno only: OS messages can carry data-directory paths.
+        self._dependencies.logger.warning(
+            "Database restore storage failure",
+            extra={
+                "event": "database_restore_storage_failed",
+                "context": {
+                    "error_class": type(exc).__name__,
+                    "errno": exc.errno,
+                    "status": error.status,
+                },
+            },
+        )
+        return error
+
     def _stage(self, payload: bytes | Iterable[bytes]) -> Path:
         try:
             return self._dependencies.validation.stage(payload)
         except AppError:
             raise
+        except OSError as exc:
+            raise self._logged_storage_error(exc) from exc
         except Exception as exc:
             raise self._invalid_backup(exc) from exc
 
@@ -174,20 +192,7 @@ class DatabaseRestoreService:
         try:
             return self._replace(temporary_path)
         except OSError as exc:
-            error = self._storage_error(exc)
-            # Class and errno only: OS messages can carry data-directory paths.
-            self._dependencies.logger.warning(
-                "Database restore storage failure",
-                extra={
-                    "event": "database_restore_storage_failed",
-                    "context": {
-                        "error_class": type(exc).__name__,
-                        "errno": exc.errno,
-                        "status": error.status,
-                    },
-                },
-            )
-            raise error from exc
+            raise self._logged_storage_error(exc) from exc
 
     def restore(self, payload: bytes | Iterable[bytes]) -> dict[str, Any]:
         """Restore from a whole backup or its ordered chunks.

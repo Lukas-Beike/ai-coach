@@ -293,6 +293,21 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.sync_jobs.resume_interrupted.assert_not_called()
         self.assertFalse(self.gate.state()["active"])
 
+    def test_full_disk_during_staging_reports_507_not_an_invalid_backup(self) -> None:
+        self.validation.stage.side_effect = OSError(
+            errno.ENOSPC, "No space left on device", "/synthetic/data/staging.db"
+        )
+
+        with self.assertRaises(AppError) as raised:
+            self.service.restore(b"replacement database")
+
+        self.assertEqual(raised.exception.status, 507)
+        self.assertEqual(raised.exception.reason, "restore_storage_full")
+        self.assertNotIn("synthetic", raised.exception.message)
+        self.assertNotIn("Errno", raised.exception.message)
+        self.validation.validate.assert_not_called()
+        self.assertEqual(self.database_path.read_bytes(), b"previous database")
+
     def recovery_copies(self) -> list[Path]:
         return sorted(self.data_dir.glob("coach.db.pre-restore-*"))
 
