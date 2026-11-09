@@ -114,6 +114,8 @@ def _provider_freshness_status(
         if status == "partial":
             return "partial", _provider_fallback_error_code(fallback_error)
     if last_good:
+        if stale_after_s is None and fallback_error:
+            return "stale", "provider_error"
         return _provider_freshness_last_good_state(
             stale_after_s, last_good, now=now
         ), _provider_fallback_error_code(fallback_error)

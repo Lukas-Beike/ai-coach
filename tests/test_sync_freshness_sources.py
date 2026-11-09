@@ -279,6 +279,23 @@ class AcmeMockProjectionTests(_DatabaseCase):
         self.assertEqual(item["state"], "fresh")
         self.assertIs(item["stale"], False)
 
+        # A stored push error without a history row must still need attention.
+        self.set_values(**{ACME_ERROR_KEY: "push failed"})
+        with self.manager.unit_of_work() as db:
+            [failed] = provider_freshness_state(
+                db,
+                config=make_config(),
+                get_value=lambda key: self.key_values.get(db, key),
+                profile={"acme_enabled": True},
+                garmin_has_core_error=False,
+                garmin_tokenstore_exists=False,
+                now=NOW,
+                freshness_sources=runtime.freshness_sources(),
+                registry=registry,
+            )
+        self.assertEqual(failed["state"], "stale")
+        self.assertEqual(failed["error_code"], "provider_error")
+
     def test_acme_unconfigured_and_error_states_use_its_own_settings(self) -> None:
         runtime = _acme_runtime()
         self.set_values(**{ACME_ERROR_KEY: "upstream failed"})
