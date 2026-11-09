@@ -191,7 +191,7 @@ def _wants(summary: Mapping[str, Any], now: datetime) -> bool:
     ):
         return False
     start, end = _window(summary)
-    return start.date() >= FIRST_DAY and end + SETTLE <= now
+    return (start - timedelta(minutes=30)).date() >= FIRST_DAY and end + SETTLE <= now
 
 
 class ActivityWeatherStage:
@@ -420,7 +420,7 @@ class ActivityWeatherStage:
     def _failed(self, session_id: str, now: datetime, error: Exception) -> None:
         """End the pass and delay the session; the error type is all that is kept."""
         failures = self._retry.get(session_id, (0, now))[0] + 1
-        delay = min(RETRY_BASE * 2 ** (failures - 1), RETRY_MAX)
+        delay = min(RETRY_BASE * 2 ** min(failures - 1, 6), RETRY_MAX)
         self._retry[session_id] = (failures, now + delay)
         self._halted = True
         _LOGGER.warning(

@@ -449,7 +449,7 @@ class StageTests(StageCase):
         self.now = START + timedelta(hours=2)
         self.run_once()
         self.assertEqual([], self.fetch.calls)
-        self.now = START + timedelta(hours=5)
+        self.now = START + timedelta(hours=50)
         self.run_once()
         self.assertEqual(1, len(self.fetch.calls))
 

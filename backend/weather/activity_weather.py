@@ -20,7 +20,7 @@ from backend.providers.activity_weather import HOURLY_FIELDS
 # The Historical Forecast API starts in 2022; earlier activities get no weather.
 FIRST_DAY: Final = date(2022, 1, 1)
 # Hours this close to now may still lack their stored forecast.
-SETTLE: Final = timedelta(hours=3)
+SETTLE: Final = timedelta(hours=48)
 # Apparent temperature at which the Coach names heat (#1868).
 HEAT_APPARENT_C: Final = 25.0
 MIN_DURATION: Final = timedelta(minutes=1)
