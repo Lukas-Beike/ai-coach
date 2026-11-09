@@ -220,7 +220,7 @@ class WorkflowSourceTests(unittest.TestCase):
         )
         self.assertEqual(len(re.findall(r"docker build\s", workflow)), 1)
         image = workflow.split("  image:\n", 1)[1].split("  test_shards:\n", 1)[0]
-        self.assertIn("docker build --tag pacecraft:ci .", image)
+        self.assertIn("docker build --tag pacecraft:ci\n", image)
         self.assertIn("needs: source\n", image)
         upload = image.split("actions/upload-artifact@", 1)[1]
         self.assertIn("name: pacecraft-ci-image", upload)
@@ -267,7 +267,9 @@ class WorkflowSourceTests(unittest.TestCase):
         e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]
         # Browser checks no longer wait for the unit tests; publishing still needs both.
         self.assertNotIn("needs.test", e2e)
-        self.assertIn("needs: [source, test, e2e, browser, quality]", workflow)
+        self.assertIn(
+            "needs: [source, test, e2e, browser, quality, image_sbom]", workflow
+        )
         entries = re.findall(
             r"- \{ project: ([a-z-]+), shard: (\d+), shards: (\d+) \}", e2e
         )
@@ -372,7 +374,53 @@ class WorkflowSourceTests(unittest.TestCase):
         )
         self.assertIn("python .github/scripts/aggregate_browser_results.py", browser)
         self.assertIn("E2E_RESULT: ${{ needs.e2e.result }}", browser)
-        self.assertIn("needs: [source, test, e2e, browser, quality]", workflow)
+        self.assertIn(
+            "needs: [source, test, e2e, browser, quality, image_sbom]", workflow
+        )
+
+    def test_release_pushes_the_tested_image_instead_of_rebuilding(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/publish-container.yml"
+        ).read_text(encoding="utf-8")
+        publish = workflow.split("  build-and-push:\n", 1)[1]
+        self.assertNotIn("docker/build-push-action", workflow)
+        self.assertIn(
+            "needs: [source, test, e2e, browser, quality, image_sbom]", publish
+        )
+        self.assertIn("name: pacecraft-ci-image", publish)
+        self.assertIn("docker tag pacecraft:ci", publish)
+        self.assertIn("cosign attest --type spdxjson", publish)
+        self.assertIn("org.opencontainers.image.source=", workflow)
+
+    def test_pull_request_runs_cancel_only_their_own_older_run(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/publish-container.yml"
+        ).read_text(encoding="utf-8")
+        head = workflow.split("\njobs:\n", 1)[0]
+        self.assertIn(
+            "group: publish-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}",
+            head,
+        )
+        self.assertIn(
+            "cancel-in-progress: ${{ github.event_name == 'pull_request' }}", head
+        )
+
+    def test_pages_deploy_only_from_main(self):
+        workflow = (
+            Path(__file__).resolve().parents[1] / ".github/workflows/pages.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("    branches: [main]\n", workflow)
+        self.assertIn("  workflow_dispatch:\n", workflow)
+
+    def test_dependabot_updates_wait_three_days(self):
+        config = (
+            Path(__file__).resolve().parents[1] / ".github/dependabot.yml"
+        ).read_text(encoding="utf-8")
+        ecosystems = config.count("package-ecosystem:")
+        self.assertGreater(ecosystems, 0)
+        self.assertEqual(config.count("cooldown:\n      default-days: 3\n"), ecosystems)
 
     def test_published_tags_are_verified_against_the_signed_digest(self):
         workflow = (
