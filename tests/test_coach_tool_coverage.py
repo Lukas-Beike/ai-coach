@@ -16,6 +16,7 @@ from canonical_detail_support import seed_intervals_activity
 from support import mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
 
+from backend.activities.hr_cap import effective_caps
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
 from backend.planning import library as planning_library
@@ -411,6 +412,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                         "description": "- 30m 60% Synthetic easy instructions",
                         "duration_minutes": 30,
                         "session_focus": "easy",
+                        "hr_cap": effective_caps(None)["easy"],
                     }
                 ]
             },
@@ -1936,6 +1938,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "description": "- 50m Z1 HR Synthetic very easy run",
             "duration_minutes": 50,
             "session_focus": "easy",
+            "hr_cap": effective_caps(None)["easy"],
             "expected_payload_hash": next(
                 u["expected_payload_hash"]
                 for u in initial["planned_units"]
@@ -2203,7 +2206,14 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                             "action": "update",
                             field: sport,
                             # A changed sport drops the focus; Run needs a new one.
-                            **({"session_focus": "easy"} if sport == "Run" else {}),
+                            **(
+                                {
+                                    "session_focus": "easy",
+                                    "hr_cap": effective_caps(None)["easy"],
+                                }
+                                if sport == "Run"
+                                else {}
+                            ),
                             "expected_payload_hash": state["planned_units"][0][
                                 "expected_payload_hash"
                             ],

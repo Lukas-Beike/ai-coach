@@ -10,6 +10,7 @@ from unittest.mock import patch
 from support import parsed_workout_fixture
 from test_coach_dialogue import DialogueHarness, server
 
+from backend.activities.hr_cap import effective_caps
 from backend.calendar import external as calendar_external
 from backend.coach.authorization import require_coach_scope
 from backend.http_api import pagination as api_pagination
@@ -220,6 +221,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                             "action": "update",
                             "sport": "Run",
                             "session_focus": "easy",
+                            "hr_cap": effective_caps(None)["easy"],
                             "description": "- 75m Z1 HR",
                             "expected_payload_hash": self.selection(local_id)[
                                 "expected_payload_hash"

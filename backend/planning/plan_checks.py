@@ -128,7 +128,7 @@ _RULE_TEXT = {
     "illness_hard": "hard or 90+ minute session within 3 days of a reported illness.",
     "strength_incomplete": "a strength unit the Coach created, moved or changed without strength_structure, session_focus and strength_intensity.",
     "focus_missing": "a run or ride unit the Coach created, moved or changed without session_focus.",
-    "hr_cap_invalid": "a recovery, easy or long run unit the Coach created or changed without a heart-rate cap (percent of the threshold HR, its lower bound and source) within the effective cap, or with a source or lower bound that does not match the athlete's measured first threshold.",
+    "hr_cap_invalid": "a recovery, easy or long run unit the Coach created or changed without a heart-rate cap (percentages and source) within the effective cap.",
     "intensity_distribution": "planned low/moderate/high time of a week clearly outside the training model's reference range (unknown time is uncovered, strength excluded).",
     leg_strength.BEFORE_KEY: "moderate or heavy leg strength less than about 24 h before a hard run or ride or the week's long one.",
     leg_strength.FREQUENCY: "more than 3 leg strength sessions or more than 2 heavy ones in a week, or none in a plan of 2+ weeks when strength is expected.",
