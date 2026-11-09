@@ -14,7 +14,7 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import PlanAdjustmentRepository, PlanningStateRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.planning import adaptive
+from backend.planning import adaptive, push_state
 from backend.planning import calendar as planning_calendar
 from backend.planning.adaptive import AdaptiveReplanApplyService
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
@@ -530,6 +530,56 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self.assertEqual(saved["target"], "AUTO")
         self.assertIsNone(planning_calendar.calendar_constraint_decision(saved, event))
 
+    def test_pain_replan_resets_focus_cap_and_lightens_strength(self):
+        run_id, strength_id = str(uuid.uuid4()), str(uuid.uuid4())
+        run = self.workout(
+            run_id,
+            "2026-09-22",
+            type="Run",
+            name="Schwelle 3x10",
+            description="- 50m Z4 HR",
+            session_focus="threshold",
+            duration_minutes=50,
+        )
+        heavy = [{"name": "Kniebeuge", "sets": 5, "reps": 5, "kg": 100, "pct_1rm": 85}]
+        strength = self.workout(
+            strength_id,
+            "2026-09-23",
+            type="WeightTraining",
+            name="Kraft schwer",
+            description="Kniebeuge 5x5",
+            session_focus="legs",
+            strength_intensity="heavy",
+            strength_structure=heavy,
+        )
+        before = push_state.garmin_fingerprint(strength)
+
+        _preview, result = self.preview_and_apply(
+            [run, strength], [], feedback={"pain": "Knie"}
+        )
+
+        self.assertEqual(result["updated"], 2)
+        saved_run = self.saved(run_id)
+        self.assertEqual(saved_run["session_focus"], "easy")
+        self.assertNotIn("hr_cap", saved_run)  # no caps wired in this fixture
+        self.assertFalse(adaptive.workout_is_hard(saved_run))
+        saved_strength = self.saved(strength_id)
+        self.assertEqual(saved_strength["strength_intensity"], "light")
+        exercise = saved_strength["strength_structure"][0]
+        self.assertEqual((exercise["sets"], exercise["kg"]), (3, 50))
+        self.assertLess(exercise["pct_1rm"], 65)
+        self.assertNotEqual(push_state.garmin_fingerprint(saved_strength), before)
+
+    def test_no_complaint_answers_propose_nothing(self):
+        for answer in ("keine", "Nein.", "gesund", " - "):
+            with self.subTest(answer=answer):
+                draft = self.workout(str(uuid.uuid4()), "2026-09-22")
+                preview, _result = self.preview_and_apply(
+                    [draft], [], feedback={"pain": answer, "illness": answer}
+                )
+                self.assertEqual(preview["changes"], [])
+                self.assertFalse(preview.get("illness_pause"))
+
     def test_no_intensity_description_only_hard_keyword_keeps_title_and_applies(self):
         event = self.calendar_event(no_intensity=True)
         workout_id = str(uuid.uuid4())
@@ -778,6 +828,31 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self.assertNotIn("apply_adaptive_changes", defined_names)
         self.assertFalse(hasattr(adaptive, "AdaptiveDependencies"))
         self.assertFalse(hasattr(adaptive, "apply_adaptive_changes"))
+
+
+class AdaptiveHardAndReplacementTests(unittest.TestCase):
+    def test_set_focus_decides_hardness_before_keywords(self):
+        self.assertTrue(
+            adaptive.workout_is_hard(
+                {"type": "Run", "name": "Schwelle 3x10", "session_focus": "threshold"}
+            )
+        )
+        self.assertFalse(
+            adaptive.workout_is_hard(
+                {"type": "Run", "name": "kein Tempo", "session_focus": "easy"}
+            )
+        )
+        self.assertTrue(adaptive.workout_is_hard({"type": "Run", "name": "Tempo run"}))
+
+    def test_run_replacement_takes_the_easy_cap(self):
+        caps = {"easy": {"percent_lthr": 87.0}}
+        replacement = adaptive.adaptive_recovery_replacement(
+            {"type": "Run", "name": "VO2", "session_focus": "vo2max"},
+            "pain",
+            run_caps=caps,
+        )
+        self.assertEqual(replacement["session_focus"], "easy")
+        self.assertEqual(replacement["hr_cap"], caps["easy"])
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.athlete.checkins import reports_complaint
 from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
 from backend.planning import adaptive, calendar
@@ -39,9 +40,9 @@ def _forecast_freshness(weather: dict[str, Any]) -> dict[str, Any]:
 
 def _feedback_signals(feedback: dict[str, Any]) -> list[str]:
     signals = []
-    if feedback.get("illness"):
+    if reports_complaint(feedback.get("illness")):
         signals.append("illness reported")
-    if feedback.get("pain"):
+    if reports_complaint(feedback.get("pain")):
         signals.append("pain/injury reported")
     if feedback.get("soreness") is not None and feedback["soreness"] >= 8:
         signals.append("high soreness")
@@ -168,7 +169,7 @@ def _reasons(
         blocking_triggers.append("illness")
     if severe:
         reasons.append("pain or high soreness reported")
-        if feedback.get("pain"):
+        if reports_complaint(feedback.get("pain")):
             blocking_triggers.append("injury")
     if high_load and adaptive.workout_is_hard(draft):
         reasons.append("recovery signal suggests reducing intensity")
@@ -221,7 +222,8 @@ def _change_state(
             and not illness_pause.get("approved")
             and illness_pause["start_date"] <= draft_date <= illness_pause["end_date"]
         ),
-        "severe": bool(feedback.get("pain") or (feedback.get("soreness") or 0) >= 8),
+        "severe": reports_complaint(feedback.get("pain"))
+        or (feedback.get("soreness") or 0) >= 8,
         "high_load": bool(
             (feedback.get("stress") or 0) >= 8
             or (motivation is not None and motivation <= 2)
@@ -244,7 +246,11 @@ def _change_state(
 
 
 def _replacement(
-    draft: dict[str, Any], reason: str, state: dict[str, Any], max_minutes: int
+    draft: dict[str, Any],
+    reason: str,
+    state: dict[str, Any],
+    max_minutes: int,
+    run_caps: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     limits = [
         limit
@@ -270,6 +276,7 @@ def _replacement(
             reason,
             state["available_minutes"] if state["limited"] else None,
             min(limits) if limits else None,
+            run_caps,
         )
         if state["no_intensity_limited"] and not calendar.workout_is_explicitly_easy(
             replacement
@@ -341,6 +348,7 @@ def _change(
     events_by_date: dict[str, list[dict[str, Any]]],
     weather_days: dict[str, dict[str, Any]],
     weather_adaptive_max_minutes: int,
+    run_caps: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     state = _change_state(
         draft,
@@ -369,7 +377,9 @@ def _change(
         state["weather_reason"],
     )
     reason = "; ".join(reasons)
-    replacement = _replacement(draft, reason, state, weather_adaptive_max_minutes)
+    replacement = _replacement(
+        draft, reason, state, weather_adaptive_max_minutes, run_caps
+    )
     change = _change_result(draft, state, replacement, blocking_triggers)
     # Apply re-checks archives against the current calendar; a kept replacement
     # that would still break a marker of its day is never proposed.
@@ -403,7 +413,9 @@ class AdaptiveReplanPreviewService:
         illness_text_limit: int,
         illness_pause_default_days: int,
         weather_adaptive_max_minutes: int,
+        run_caps: Callable[[], dict[str, dict[str, Any]]] | None = None,
     ) -> None:
+        """``run_caps`` gives the athlete's effective run heart-rate caps."""
         self._database_manager = database_manager
         self._adjustment_repository = adjustment_repository
         self._checkin_service = checkin_service
@@ -417,6 +429,7 @@ class AdaptiveReplanPreviewService:
         self._illness_text_limit = illness_text_limit
         self._illness_pause_default_days = illness_pause_default_days
         self._weather_adaptive_max_minutes = weather_adaptive_max_minutes
+        self._run_caps = run_caps
 
     def latest_preview(self, *, db: Any | None = None) -> dict[str, Any] | None:
         if db is None:
@@ -510,6 +523,7 @@ class AdaptiveReplanPreviewService:
                 "Einheiten; die adaptive Vorschau kann nicht vollständig erstellt werden. "
                 "Bitte zuerst nicht mehr benötigte Einheiten archivieren.",
             )
+        run_caps = self._run_caps() if self._run_caps else None
         changes = [
             change
             for draft in drafts
@@ -523,6 +537,7 @@ class AdaptiveReplanPreviewService:
                     events_by_date=events_by_date,
                     weather_days=weather_days,
                     weather_adaptive_max_minutes=self._weather_adaptive_max_minutes,
+                    run_caps=run_caps,
                 )
             )
             is not None

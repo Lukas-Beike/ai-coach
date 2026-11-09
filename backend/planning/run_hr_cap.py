@@ -21,10 +21,16 @@ from backend.activities.hr_cap import (
     PERCENT_KEY,
     SOURCE_KEY,
     cap_percents,
+    effective_caps,
     export_floor_percent,
     hr_cap,
     normalize_hr_cap,
     percent_text,
+)
+from backend.canonical.first_threshold import (
+    FIRST_THRESHOLD_FIELD,
+    first_threshold_estimated,
+    first_threshold_percent,
 )
 from backend.canonical.planning_fields import SESSION_FOCUS
 from backend.canonical.vocabulary import Sport
@@ -117,4 +123,12 @@ def message(problem: Mapping[str, Any]) -> str:
         f"Run unit '{problem['focus']}' {reason}: write hr_cap {value} "
         f"(cap source {problem['cap_source']}). Percentages only; the bpm follows "
         "the athlete's current lactate threshold HR."
+    )
+
+
+def profile_run_caps(profile: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """The cap value to store per capped type for the athlete's profile."""
+    return effective_caps(
+        first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD)),
+        first_threshold_estimated(profile),
     )

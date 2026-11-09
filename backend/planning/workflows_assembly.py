@@ -53,6 +53,8 @@ class DailyPlanningSources:
     source_preferences: Callable[[Any], SourcePreferences] | None = None
     # The athlete's IANA time zone; it dates the last sync for open days (M7).
     timezone: Callable[[], str] | None = None
+    # The athlete's effective run heart-rate caps for adaptive replacements.
+    run_caps: Callable[[], dict[str, dict[str, Any]]] | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +108,7 @@ class PlanningWorkflowAssembly:
         self._morning_body_battery_service = daily.morning_body_battery_service
         self._local_date = daily.local_date
         self._timezone = daily.timezone
+        self._run_caps = daily.run_caps
         self._calendar_window_days = daily.calendar_window_days
         self._checkin_text_limit = daily.checkin_text_limit
         self._observation_reader = daily.observation_reader
@@ -228,4 +231,5 @@ class PlanningWorkflowAssembly:
             self._checkin_text_limit,
             self._default_illness_pause_days,
             self._weather_adaptive_max_minutes,
+            self._run_caps,
         )

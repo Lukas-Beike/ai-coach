@@ -10,13 +10,22 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend import change_history
-from backend.athlete.checkins import CHECKIN_TEXT_LIMITS
+from backend.athlete.checkins import CHECKIN_TEXT_LIMITS, reports_complaint
 from backend.athlete.local_date import LocalDate, iso_date_prefix
+from backend.canonical.planning_fields import (
+    HR_CAP,
+    SESSION_FOCUS,
+    STRENGTH_INTENSITY,
+    STRENGTH_STRUCTURE,
+)
+from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.planning import calendar as planning_calendar
+from backend.planning import strength_structure
 from backend.planning import workouts as planning_workouts
 from backend.planning.planned_unit_service import UPDATE_SQL as PLANNED_UNIT_UPDATE_SQL
-from backend.planning.sport import planned_activity_type
+from backend.planning.session_focus import session_focus
+from backend.planning.sport import planned_activity_type, planned_sport_environment
 
 DEFAULT_ILLNESS_PAUSE_DAYS = 3
 WEATHER_ADAPTIVE_MAX_MINUTES = 90
@@ -29,12 +38,23 @@ ADAPTIVE_REPLACEMENT_KEYS = (
     "rationale",
     "archived",
     "private_calendar_adjustment",
+    # Re-derived for the easier content; None removes a field that no longer fits.
+    SESSION_FOCUS,
+    STRENGTH_INTENSITY,
+    STRENGTH_STRUCTURE,
+    HR_CAP,
 )
+# Focus of an endurance unit the replan makes easy.
+ADAPTIVE_EASY_FOCUS = "easy"
 # Neutral title for a hard draft replaced on a [NO_INTENSITY] day.
 ADAPTIVE_EASY_NAME = "Lockere Einheit"
 
 
 def workout_is_hard(workout: dict[str, Any]) -> bool:
+    """A set session_focus decides (as in plan checks); else the text keywords."""
+    focus = session_focus(workout)
+    if focus.origin == "set":
+        return bool(focus.is_hard)
     text = f"{workout.get('name', '')} {workout.get('description', '')}".casefold()
     return any(
         term in text
@@ -66,11 +86,60 @@ def adaptive_recovery_description(sport: str, duration: int) -> str:
     )
 
 
+def lightened_structure(value: Any) -> list[dict[str, Any]] | None:
+    """The same exercises made light: half the sets, half the weight, low effort."""
+    try:
+        exercises = strength_structure.normalize_structure(value)
+    except AppError:
+        return None
+    if not exercises:
+        return None
+    light = []
+    for exercise in exercises:
+        item = {**exercise, "sets": max(1, -(-int(exercise["sets"]) // 2))}
+        if item.get("kg") is not None:
+            item["kg"] = round(float(item["kg"]) / 2 * 2) / 2
+        if item.get("pct_1rm") is not None:
+            item["pct_1rm"] = min(item["pct_1rm"], strength_structure.MODERATE_PCT - 15)
+        if item.get("rpe") is not None:
+            item["rpe"] = min(item["rpe"], strength_structure.MODERATE_RPE - 1)
+        if item.get("rir") is not None:
+            item["rir"] = max(item["rir"], strength_structure.MODERATE_RIR + 1)
+        light.append(item)
+    return light
+
+
+def easier_fields(
+    workout: dict[str, Any], run_caps: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Focus, strength and cap fields that match an easy replacement.
+
+    A run or ride becomes ``easy`` (a run with the easy cap from ``run_caps``,
+    the athlete's effective caps); a strength unit keeps its exercises made
+    light. Other sports keep their fields.
+    """
+    sport = planned_sport_environment(workout)[0]
+    if sport is Sport.RUN:
+        return {
+            SESSION_FOCUS: ADAPTIVE_EASY_FOCUS,
+            HR_CAP: (run_caps or {}).get(ADAPTIVE_EASY_FOCUS),
+        }
+    if sport is Sport.RIDE:
+        return {SESSION_FOCUS: ADAPTIVE_EASY_FOCUS, HR_CAP: None}
+    if sport is Sport.STRENGTH:
+        return {
+            STRENGTH_STRUCTURE: lightened_structure(workout.get(STRENGTH_STRUCTURE)),
+            STRENGTH_INTENSITY: "light",
+        }
+    return {}
+
+
 def adaptive_recovery_replacement(
     workout: dict[str, Any],
     reason: str,
     available_minutes: int | None = None,
     max_minutes: int | None = None,
+    run_caps: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     sport = planned_activity_type(workout)
     duration_limit = int(available_minutes or workout.get("duration_minutes") or 30)
@@ -85,6 +154,7 @@ def adaptive_recovery_replacement(
     )
     return {
         **workout,
+        **easier_fields(workout, run_caps),
         "duration_minutes": duration,
         "description": adaptive_recovery_description(sport, duration),
         "target": "AUTO",
@@ -196,7 +266,7 @@ def illness_pause_forecast(
     default_days: int,
 ) -> dict[str, Any] | None:
     illness = str(feedback.get("illness") or "").strip()[:illness_text_limit]
-    if not illness:
+    if not reports_complaint(illness):
         return None
     end_date = today + timedelta(days=default_days - 1)
     return {
@@ -475,6 +545,9 @@ class AdaptiveReplanApplyService:
             "id": draft_id,
             "sync_status": "local",
         }
+        for key in ADAPTIVE_REPLACEMENT_KEYS:
+            if key in replacement and replacement[key] is None:
+                replacement.pop(key)
         replacement["planned_duration_s"] = (
             int(replacement.get("duration_minutes") or 0) * 60
         )
