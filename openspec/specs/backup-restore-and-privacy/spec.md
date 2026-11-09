@@ -94,9 +94,17 @@ Stored GPS position channels SHALL be part of the database backup, the privacy e
 
 #### Scenario: Confirmed track deletion
 - **WHEN** the athlete confirms `GPS-SPUREN LÖSCHEN`
-- **THEN** every position channel is deleted, the other channels stay and any other phrase is rejected
+- **THEN** every position channel is deleted, the other channels stay, the route index and its names are deleted and any other phrase is rejected
 
-Evidence: `backend/canonical/vocabulary.py::POSITION_CHANNELS`; `backend/db/activity_detail_store.py::replace_detail_set`; `backend/privacy.py::PrivacyDeleteService`. Tests: `tests/test_gps_position_privacy.py`.
+#### Scenario: Storage turned off with routes
+- **WHEN** the athlete turns "GPS-Spuren speichern" off
+- **THEN** stored tracks, the route index and the route names stay until the confirmed deletion
+
+#### Scenario: Route read models
+- **WHEN** a route is read for the activity view, the Coach, diagnostics or logs
+- **THEN** only a label, a repeat count and an opaque route id appear
+
+Evidence: `backend/canonical/vocabulary.py::POSITION_CHANNELS`; `backend/db/activity_detail_store.py::replace_detail_set`; `backend/privacy.py::PrivacyDeleteService`, `backend/activities/route_store.py::clear_routes`. Tests: `tests/test_gps_position_privacy.py`, `tests/test_activity_routes.py::PrivacyDeleteTests`, `tests/test_activity_routes.py::PrivacySweepTests`.
 
 ### Requirement: Secrets stay out of exports, reports and logs
 

@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.diagnostics.readiness_probe import ReadinessProbeService
+from backend.http_api.activity_route_post import ActivityRoutePostRoutes
 from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
@@ -207,6 +208,7 @@ class HttpAthleteServices:
     local_today: Callable[[], Any]
     state_event_buffer: Any
     equipment: Callable[[], Any] | None = None
+    activity_routes: Callable[[], Any] | None = None
     activity_feedback: Callable[[], Any] | None = None
     session_corrections: Callable[[], Any] | None = None
     zones: Callable[[], Any] | None = None
@@ -740,6 +742,11 @@ class HttpApiAssembly:
                 FirstThresholdPostRoutes,
                 profile_service,
                 database_lock(),
+            ),
+            (
+                ActivityRoutePostRoutes(athlete.activity_routes)
+                if athlete.activity_routes
+                else None
             ),
         )
         self.post_dispatcher = HttpPostDispatcher(

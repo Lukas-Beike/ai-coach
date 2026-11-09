@@ -196,6 +196,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "stream_backfill",
                 "session_metrics",
                 "activity_weather",
+                "activity_routes",
                 "session_analysis",
                 "session_focus_backfill",
                 "profile_weekly_plan_removal",
@@ -309,7 +310,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # One more reads the local load state (card M6), one the rating backfill state.
         # The stream backfill reads its state once (the read stops at the fake db).
         # The session focus backfill state and the weekly plan removal state are one more read each.
-        self.assertEqual(self.key_values.get.call_count, 14)
+        self.assertEqual(self.key_values.get.call_count, 15)
 
     def test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:

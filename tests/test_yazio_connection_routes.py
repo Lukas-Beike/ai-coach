@@ -32,6 +32,7 @@ class YazioRouteTests(unittest.TestCase):
                     "garmin",
                     "provider_connections",
                     "planned_unit_focus",
+                    "activity_routes",
                 )
             }
         )

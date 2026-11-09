@@ -20,6 +20,7 @@ from pathlib import Path
 
 from backend import config as app_config
 from backend import observability
+from backend.activities.route_store import ActivityRouteService
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -728,6 +729,9 @@ ATHLETE_PROFILE_SERVICE = ATHLETE_DATA.profile_for(
 )
 # Declared ahead of its first lambda reference; assigned by build_canonical_read below.
 CANONICAL_READ: CanonicalReadSelector
+
+# Renames a recognised route of outdoor sessions (#1868); only the label is exposed.
+ACTIVITY_ROUTES = ActivityRouteService(database_manager, DB_LOCK, KEY_VALUE_REPOSITORY)
 
 ACTIVITY_READS = ActivityReadAssembly(
     database_manager,
@@ -2294,6 +2298,7 @@ HTTP_API = HttpApiAssembly(
                 competition=PLANNING_DATA.competition,
                 activity_read=ACTIVITY_READS.activity_read,
                 equipment=ATHLETE_DATA.equipment,
+                activity_routes=lambda: ACTIVITY_ROUTES,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
                 session_corrections=ATHLETE_DATA.session_corrections,
                 zones=ATHLETE_DATA.zones,

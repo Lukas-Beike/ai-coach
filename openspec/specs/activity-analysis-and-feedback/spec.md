@@ -161,6 +161,23 @@ The system SHALL set a run's or ride's execution against comparable earlier sess
 
 Evidence: `backend/performance/comparable_sessions.py:comparable_sessions`, `backend/performance/session_execution.py:comparison_metrics`, `backend/performance/mean_max_curve.py:SessionCurveReader.curves`, `backend/db/activity_detail_store.py:lap_set_keys`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService._session_checks`; `tests/test_comparable_sessions.py`, `tests/test_coach_session_checks.py:ComparableSessionsCheckTests`, `tests/test_mean_max_curve.py:SessionExecutionCurveTests`.
 
+### Requirement: Recognised routes of outdoor sessions
+The system SHALL group repeated outdoor rides and runs with a stored GPS track into routes and give the activity view and the Coach only a route label, visit number, visit count and opaque id. The athlete SHALL be able to rename a route.
+
+#### Scenario: Repeats of one loop
+- **WHEN** several outdoor sessions follow the same loop, also with GPS jitter or in the reverse direction: distances within 10 %, start in or beside the other's start (or end) cell and a Jaccard overlap of the coarse grid cells of at least 0.6
+- **THEN** they share one route and `get_activity_details` returns `route` with the label ("Strecke n" until renamed), `repeat_index` by start time and `repeat_count`
+
+#### Scenario: Different or short tracks
+- **WHEN** another loop from the same start, a distance more than 10 % apart, an indoor session, a short track or a session without positions is compared
+- **THEN** it joins no route of the first loop and the last three get no route
+
+#### Scenario: Rename
+- **WHEN** the athlete posts a name of 1 to 60 characters without control characters for a known route to `/api/routes/rename`
+- **THEN** the route shows that label from then on, also after recomputation; an unknown route answers 404 and an invalid name 400
+
+Evidence: `backend/activities/routes.py:same_route`, `backend/sync/activity_routes.py:ActivityRoutesStage`, `backend/activities/route_store.py:ActivityRouteService`, `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`; `tests/test_activity_routes.py`, `tests/test_activity_read_service.py:test_detail_carries_only_the_route_label_and_repeat_count`, `tests/activity-route.test.cjs`.
+
 ### Requirement: Conservative planned-workout matching and interval quality
 The system SHALL match planned units to compatible completed activities using the implemented identity/time/sport rules and freeze targets only for an unambiguous local plan match. Interval-quality calculations SHALL use frozen target basis and original measured samples/laps, report missing steps as partial, and leave ambiguous or unsupported targets unscored. Completed duration alone SHALL not establish target achievement.
 

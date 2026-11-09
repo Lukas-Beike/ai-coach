@@ -10,6 +10,7 @@ from backend.activities.activity_reference import ActivityReferenceResolver
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.detail_contract import measured_order
 from backend.activities.read_service import ActivityReadService, ActivitySummarySource
+from backend.activities.route_store import stored_route_block
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.profile import timezone_name
 from backend.canonical.local_time import local_date
@@ -220,8 +221,11 @@ class ActivityAnalysisReadService(ActivityReadService):
             weather = weather_block(
                 stored_activity_weather(db, [session_id]).get(session_id, {})
             )
+            route = stored_route_block(db, session_id)
         if weather is not None:
             document["weather"] = weather
+        if route is not None:
+            document["route"] = route
         _add_purpose(document["session"], requested_summary())
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
 

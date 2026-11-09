@@ -209,6 +209,8 @@ KV_EXPORT_DISPOSITION: dict[str, str] = {
     "local_load_state": "exported",
     "session_metrics_state": "exported",
     "activity_weather_state": "exported",
+    "activity_routes": "exported",
+    "activity_routes_state": "exported",
     "session_analysis_state": "exported",
     "session_focus_backfill_state": "exported",
     "profile_weekly_plan_removal_state": "exported",

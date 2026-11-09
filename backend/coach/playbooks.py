@@ -68,10 +68,10 @@ _SESSION_CHECKS = """Session checks (get_activity_details):
 - strength_plan: planned against executed sets per exercise (completed_sets reached the planned reps; unknown exercises are not misses); name missed sets, load changes and rest from strength_sets."""
 
 _SESSION_NUMBERS = """Session numbers (get_activity_details):
-- Read laps from analysis.execution and targets from planned_targets, not from raw streams. Per rep: deviation_pct and time_in_target_pct against the plan, start_change_pct (started too fast), within_rep_change_pct, variability_pct, heart_rate_end and peak, stride length and cadence halves (fatigue), elevation_change_m (hills). Recoveries: heart_rate_drop_60s, heart_rate_end, recovery_s against planned_recovery_s.
+- Read laps from analysis.execution and targets from planned_targets, not raw streams. Per rep: deviation_pct and time_in_target_pct against the plan, start_change_pct (started too fast), within_rep_change_pct, variability_pct, heart_rate_end and peak, stride length and cadence halves (fatigue), elevation_change_m (hills). Recoveries: heart_rate_drop_60s, heart_rate_end, recovery_s against planned_recovery_s.
 - Continuous sessions: halves (heart_rate_change_bpm, change_pct, cadence_change).
-- Doubt the reading first when data_quality is not ok; prefer lap_pace for short reps; with erg_like judge heart rate and cadence, not power, unless focus.test_evaluation says otherwise.
-- comparable_sessions: only when ok, set this session against the peers' median and name their count and temperatures (heat raises heart rate); not_covered means no comparison."""
+- Doubt the reading when data_quality is not ok; prefer lap_pace for short reps; with erg_like judge heart rate and cadence, not power, unless focus.test_evaluation says otherwise.
+- comparable_sessions: only when ok, set this session against the peers' median, naming count and temperatures (heat raises heart rate); not_covered means no comparison. A shared route_id also means comparable."""
 
 _TASKS = {
     "session_analysis": """\

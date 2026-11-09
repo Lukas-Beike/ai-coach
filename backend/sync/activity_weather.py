@@ -22,13 +22,13 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any, Final
 
 from backend.activities.activity_summary import activity_summaries
+from backend.activities.routes import valid_position
 from backend.canonical.activity_detail import ActivityStreamSet
 from backend.canonical.activity_summary import summary_duration_s, summary_local_date
 from backend.canonical.records import (
@@ -114,21 +114,6 @@ def _fingerprint(cheap: str, kind: str, home_key: str) -> str:
     )
 
 
-def _valid_position(latitude: object, longitude: object) -> Coordinates | None:
-    if not isinstance(latitude, (int, float)) or not isinstance(
-        longitude, (int, float)
-    ):
-        return None
-    if not (math.isfinite(latitude) and math.isfinite(longitude)):
-        return None
-    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
-        return None
-    if latitude == 0 and longitude == 0:
-        # A device without a fix reports the origin.
-        return None
-    return float(latitude), float(longitude)
-
-
 def _start_position(db: Any, session_id: str) -> Coordinates | None:
     """The first valid stored position of the session's own streams."""
     sets = sorted(
@@ -148,7 +133,7 @@ def _start_position(db: Any, session_id: str) -> Coordinates | None:
         latitudes = detail.channels.get(StreamChannel.LATITUDE_DEG, ())
         longitudes = detail.channels.get(StreamChannel.LONGITUDE_DEG, ())
         for latitude, longitude in zip(latitudes, longitudes, strict=False):
-            if (position := _valid_position(latitude, longitude)) is not None:
+            if (position := valid_position(latitude, longitude)) is not None:
                 return position
     return None
 
