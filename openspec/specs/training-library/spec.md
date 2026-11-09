@@ -403,6 +403,10 @@ A run unit whose focus has a cap in `HR_CAP_PERCENT` (`backend/activities/hr_cap
 - **WHEN** the athlete enters a measured first-threshold heart rate in bpm (profile form or API, never by the Coach)
 - **THEN** it is stored as percent of the run threshold HR in effect on the measurement date (`first_threshold_pct`), the easy and long cap becomes that percent minus a fixed margin and the recovery cap the lower of its default and the easy cap minus a fixed gap (constants in `backend/activities/hr_cap.py`), the cap source is `measured`, and a cap with another source than the current one is rejected like a wrong value.
 
+#### Scenario: Adopted first threshold estimate
+- **WHEN** the athlete adopts the first threshold estimate from chest-strap RR intervals (`POST /api/profile/first-threshold/adopt`, never by the Coach)
+- **THEN** it is stored as `first_threshold_pct` with the origin `estimated` (`first_threshold_origin`) through the profile save path with change receipt and undo, the caps follow it like a measured value, the cap source is `estimated` (label `geschätzt`), a stored measured value is replaced only when the request says so, and a later manual entry sets the origin back to `measured`.
+
 #### Scenario: Export to Wahoo
 - **WHEN** a run unit with a cap becomes a Wahoo plan
 - **THEN** every step with a heart-rate target, warm-up and cool-down included, is one wide range from the lower bound to the cap in percent of the threshold HR (`% LTHR`), resolved by the plan header's `threshold_hr`, which Pacecraft supplies from the current thresholds; a moved threshold changes the exported plan, so the existing push state shows the unit as changed.

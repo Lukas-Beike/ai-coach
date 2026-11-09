@@ -46,10 +46,15 @@ class RunLthr:
 
         return lthr_for
 
+    def day_resolver(self) -> Callable[[date | None], float | None]:
+        """One snapshot of the resolved thresholds as a lookup for a plain date."""
+        lthr_for = self.resolver()
+        today = self._today()
+        return lambda day: lthr_for({"date": (day or today).isoformat()})
+
     def on(self, day: date | None) -> float | None:
         """The run threshold HR on ``day`` (today when None)."""
-        when = day or self._today()
-        return self.resolver()({"date": when.isoformat()})
+        return self.day_resolver()(day)
 
     def resync(self, db: Any, payloads: list[dict[str, Any]]) -> set[str]:
         """Synced capped run units whose bpm range moved only with the threshold HR."""

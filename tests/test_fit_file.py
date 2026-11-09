@@ -19,6 +19,7 @@ from backend.providers.fit_file import (
     fit_messages,
     fit_metric,
     fit_scaled,
+    fit_scaled_array,
     fit_timestamp_iso,
 )
 
@@ -291,6 +292,22 @@ class FitFileValueTests(unittest.TestCase):
         self.assertEqual(fit_metric(messages, 20, 5), [100, 250])
         self.assertEqual(fit_metric(messages, 20, 3), [99])
         self.assertEqual(fit_scaled(messages, 19, 9), [2.0])
+
+    def test_hrv_message_78_decodes_its_interval_array_to_seconds(self):
+        data = (
+            FitBuilder()
+            .raw(
+                struct.pack("<BBBHB", 0x40, 0, 0, 78, 1)
+                + struct.pack("<BBB", 0, 6, UINT16)
+            )
+            .raw(bytes([0]) + struct.pack("<3H", 800, 0xFFFF, 1234))
+            .build()
+        )
+        ((number, fields),) = fit_messages(data)
+        self.assertEqual((number, fields), (78, {0: [800, None, 1234]}))
+        self.assertEqual(fit_scaled_array(fields, 78, 0), [0.8, None, 1.234])
+        self.assertEqual(fit_scaled_array({0: 640}, 78, 0), [0.64])
+        self.assertEqual(fit_scaled_array({0: None}, 78, 0), [None])
 
     def test_fit_timestamp_iso_uses_the_fit_epoch(self):
         self.assertEqual(fit_timestamp_iso(0), "1989-12-31T00:00:00Z")

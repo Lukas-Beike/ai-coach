@@ -8,6 +8,7 @@ from typing import Any, Final
 from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.first_threshold import (
     FIRST_THRESHOLD_FIELD,
+    first_threshold_estimated,
     first_threshold_percent,
 )
 from backend.performance import activity_validation, garmin_projection
@@ -246,7 +247,9 @@ def current_performance_context(
         "metrics": metrics,
         "thresholds": {
             **performance_current_metrics.coach_thresholds(
-                metrics, first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD))
+                metrics,
+                first_threshold_percent(profile.get(FIRST_THRESHOLD_FIELD)),
+                first_threshold_estimated(profile),
             ),
             "weight": metrics["weight_kg"]["value"],
         },

@@ -13,6 +13,7 @@ from backend.activities.session_corrections import SessionCorrectionService
 from backend.athlete.checkins import CheckinService
 from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
+from backend.athlete.first_threshold import FirstThresholdService
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
 from backend.canonical.activity_summary import ActivitySummary
@@ -52,6 +53,10 @@ class AthleteRuntime:
     # The run threshold HR in effect on a date (None = today), for the measured
     # first threshold the athlete enters in bpm; None when no threshold is known.
     run_lthr_on: Callable[[date | None], float | None] = lambda _day: None
+    # One snapshot of the same lookup for many dates, for the first threshold estimate.
+    run_lthr_resolver: Callable[[], Callable[[date | None], float | None]] = lambda: (
+        lambda _day: None
+    )
 
 
 class AthleteDataAssembly:
@@ -91,6 +96,7 @@ class AthleteDataAssembly:
         self._thresholds_changed = runtime.thresholds_changed
         self._threshold_warnings = runtime.threshold_warnings
         self._run_lthr_on = runtime.run_lthr_on
+        self._run_lthr_resolver = runtime.run_lthr_resolver
 
     def activity_summaries(self) -> tuple[ActivitySummary, ...]:
         with self._database_manager().unit_of_work() as db:
@@ -137,6 +143,14 @@ class AthleteDataAssembly:
     def checkin(self) -> CheckinService:
         return CheckinService(
             self._database_manager(), self._checkin_repository, self._local_date
+        )
+
+    def first_threshold(self) -> FirstThresholdService:
+        return FirstThresholdService(
+            self._database_manager(),
+            self.profile(),
+            self._run_lthr_resolver,
+            self._local_date,
         )
 
     def profile(self) -> ProfileService:

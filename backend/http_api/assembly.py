@@ -25,6 +25,7 @@ from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 from backend.http_api.equipment_post import EquipmentPostRoutes
 from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.feedback_post import FeedbackPostRoutes
+from backend.http_api.first_threshold_post import FirstThresholdPostRoutes
 from backend.http_api.garmin_post import GarminPostRoutes
 from backend.http_api.handler import (
     HttpRequestHandlerDependencies,
@@ -209,6 +210,7 @@ class HttpAthleteServices:
     activity_feedback: Callable[[], Any] | None = None
     session_corrections: Callable[[], Any] | None = None
     zones: Callable[[], Any] | None = None
+    first_threshold: Callable[[], Any] | None = None
     body_export: Callable[[dict[str, str], str | None, float], str] | None = None
 
 
@@ -455,6 +457,7 @@ class HttpApiAssembly:
                 local_today(),
                 activity_read_service().summaries_on_days,
             ),
+            first_threshold_service=athlete.first_threshold,
         )
         self.diagnostics_get_routes = DiagnosticsGetRoutes(
             session_auth_service,
@@ -741,6 +744,11 @@ class HttpApiAssembly:
             self.garmin_post_routes,
             self.provider_connection_post_routes,
             PlannedUnitFocusPostRoutes(planned_unit_service, database_lock()),
+            FirstThresholdPostRoutes(
+                athlete.first_threshold, profile_service, database_lock()
+            )
+            if athlete.first_threshold
+            else None,
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

@@ -33,8 +33,10 @@ exercise subtype (8) is not mapped, so FIT sets carry no exercise name.
 
 Device information (23) yields the heart rate and power source of the stream set
 and its external heart rate and power sensors, with the serial only as a hash
-(``fit_sensor_mapping``). Not mapped: session and activity messages,
-developer fields, and lap run cadence.
+(``fit_sensor_mapping``). The hrv messages (78) of a chest-strap recording give
+the first threshold estimate of the stream set (``dfa_alpha1``); only that result
+is kept, never the RR intervals (``fit_rr_mapping``). Not mapped: session and
+activity messages, developer fields, and lap run cadence.
 
 The mapper is pure: it performs no I/O, logs nothing and never raises for
 malformed bytes. Issues name the activity, the FIT field and a reason only.
@@ -53,6 +55,7 @@ from backend.canonical.activity_detail import (
     MAX_STREAM_SPAN_S,
     MAX_STRENGTH_SETS,
     ActivityDetailSet,
+    ActivityDfaAlpha1,
     ActivityLap,
     ActivityLapSet,
     ActivityStreamSet,
@@ -67,6 +70,7 @@ from backend.canonical.validation import require_instance, require_text
 from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
     ExerciseCategory,
+    HeartRateSource,
     LapKind,
     LapSource,
     StreamChannel,
@@ -74,7 +78,9 @@ from backend.canonical.vocabulary import (
     StrengthSetSource,
     StrengthSetType,
 )
+from backend.performance.dfa_alpha1 import first_threshold
 from backend.providers.fit_file import FitMessage, fit_field, fit_messages
+from backend.providers.fit_rr_mapping import rr_intervals_ms
 from backend.providers.fit_sensor_mapping import sensor_profile
 
 # Version 1: first mapping of FIT activity detail sets (streams and device laps).
@@ -83,7 +89,9 @@ from backend.providers.fit_sensor_mapping import sensor_profile
 # Version 4: GPS position channels from the record semicircles.
 # Version 5: heart rate and power sources and the external sensors of a stream
 # set, from the device information messages.
-MAPPER_VERSION: Final = 5
+# Version 6: the first threshold estimate (DFA-a1) of a chest-strap recording
+# that carries RR intervals (hrv messages); the intervals are not stored.
+MAPPER_VERSION: Final = 6
 
 # Same limit as the Garmin and Intervals mappers, so issues stay bounded.
 MAX_FIT_ACTIVITY_ID_LENGTH: Final = 200
@@ -364,10 +372,20 @@ def _stream_set(
             hr_source=hr_source,
             power_source=power_source,
             sensors=sensors,
+            dfa_alpha1=_first_threshold(messages, hr_source),
         )
     except TypeError, ValueError:
         _add_issue(issues, ref, "record", IssueReason.OUT_OF_RANGE)
         return None
+
+
+def _first_threshold(
+    messages: list[FitMessage], hr_source: HeartRateSource | None
+) -> ActivityDfaAlpha1 | None:
+    """The DFA-a1 estimate of a chest-strap recording; only this result is kept."""
+    if hr_source is not HeartRateSource.CHEST_STRAP:
+        return None
+    return first_threshold(rr_intervals_ms(messages))
 
 
 def _lap_set(

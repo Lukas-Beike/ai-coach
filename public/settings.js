@@ -51,6 +51,39 @@ async function retryBodyGarmin(event) {
   } finally { button.disabled = false; profileSaveInFlight = false; }
 }
 
+// The adopted value reaches the open form even while it holds unsaved edits: only the
+// stored-percent input and the estimate block change, every other edit stays.
+function applyAdoptedFirstThreshold(result) {
+  const form = $("#profileForm");
+  const stored = profileFieldText(result.profile?.first_threshold_pct);
+  if (form?.elements.first_threshold_pct) form.elements.first_threshold_pct.value = stored;
+  if (state.profileBaseline) state.profileBaseline = { ...state.profileBaseline, first_threshold_pct: stored };
+  if (state.data) state.data = { ...state.data, profile: { ...state.data.profile, ...result.profile }, first_threshold_estimate: result.first_threshold_estimate };
+  renderFirstThresholdEstimate(result.first_threshold_estimate, result.profile);
+  if (state.profileDirty && form && state.profileBaseline) {
+    state.profileDirty = Object.keys(determineChangedProfileFields(profileFormValues(form), state.profileBaseline)).length > 0;
+    setDirtyIndicator("profileDirtyIndicator", state.profileDirty);
+  }
+}
+
+async function adoptFirstThreshold(event) {
+  const button = event.currentTarget;
+  const percent = Number($("#firstThresholdEstimate").dataset.percent);
+  if (!Number.isFinite(percent) || button.disabled) return;
+  const profile = state.data?.profile || {};
+  const replacesMeasured = Boolean(profile.first_threshold_pct) && profile.first_threshold_origin === "measured";
+  if (replacesMeasured && !(await requestConfirmation("Der gemessene Wert wird durch die Schätzung ersetzt.", { title: "Gemessenen Wert ersetzen?", confirmLabel: "Ersetzen" }))) return;
+  button.disabled = true;
+  try {
+    const result = await api("/api/profile/first-threshold/adopt", { method: "POST", body: JSON.stringify({ percent_lthr: percent, ...(replacesMeasured ? { replace_measured: true } : {}) }) });
+    applyAdoptedFirstThreshold(result);
+    invalidateContextPreview();
+    toast(result.adopted === false ? "Schätzung ist bereits übernommen" : "Erste Schwelle übernommen");
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+}
+
 function determineChangedProfileFields(formValues, baseline) {
   if (!baseline) {
     throw new Error("Das Profil wird noch geladen. Bitte kurz warten und erneut speichern.");

@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v24 and supports upgrades from v21 (releases 1.13.41 to 1.13.44), v22 (the 2.0.0 candidate) and v23; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v25 and supports upgrades from v21 (releases 1.13.41 to 1.13.44), v22 (the 2.0.0 candidate), v23 and v24; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from released schemas v21, v22 and v23 and the current schema v24, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from released schemas v21, v22, v23 and v24 and the current schema v25, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Released baseline upgrade
 - **WHEN** a populated released v21 database is opened by this build
@@ -160,3 +160,13 @@ The v23 to v24 step SHALL add `activity_detail_sets.hr_source`, `power_source` a
 - **THEN** every detail row and every other table survive with no source, a source can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
 
 Evidence: `backend/db/migrations.py:_upgrade_v23_to_v24`; `tests/test_db_stream_sensors_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+
+### Requirement: Stream first threshold estimate upgrade
+
+The v24 to v25 step SHALL add `activity_detail_sets.dfa_alpha1` (NULL for every existing row, checked to a JSON object) and keep every other row unchanged. A v21, v22 or v23 database SHALL reach v25 through the later shapes in the same transaction.
+
+#### Scenario: Populated release upgrade
+- **WHEN** a populated v21, v22, v23 or v24 database is opened by this build
+- **THEN** every detail row and every other table survive with no estimate, an estimate can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
+
+Evidence: `backend/db/migrations.py:_upgrade_v24_to_v25`; `tests/test_db_first_threshold_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.

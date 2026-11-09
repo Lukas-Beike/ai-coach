@@ -123,8 +123,8 @@ HR_CAP_SCHEMA: dict[str, Any] = {
         "with a lower bound or source that does not belong to it; the error names the value). "
         "Percentages only, never bpm: write the percent_lthr, low_percent_lthr and source of "
         "current_performance.thresholds.run_hr_caps for the unit's focus. The bpm follows the "
-        "athlete's current lactate threshold HR by itself. The athlete's measured first "
-        "threshold changes those caps; you never set or derive it. Null for other units."
+        "athlete's current lactate threshold HR by itself. The athlete's first threshold "
+        "(measured, or an estimate the athlete adopted) changes those caps; you never set or derive it. Null for other units."
     ),
     "properties": {
         PERCENT_KEY: {"type": "number", "minimum": 20, "maximum": 120},

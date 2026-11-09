@@ -46,6 +46,7 @@ NOT_PRODUCERS: Final[dict[str, str]] = {
     "backend/sync/canonical_table_reader.py": "decodes stored rows",
     "backend/performance/current_thresholds.py": "transient observation of a zone",
     "backend/sync/wahoo_activity_details.py": "stores sets the FIT mapper produced",
+    "backend/performance/dfa_alpha1.py": "computes the result fit_rr_mapping.py documents",
 }
 PATH_TOKEN = re.compile(r"^(?:backend|tests|scripts|public|docs)/[\w./-]+\.\w+$")
 MODULE_TOKEN = re.compile(r"^[a-z][a-z0-9_]*\.py$")
