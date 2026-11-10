@@ -382,7 +382,7 @@ class OpenAIResponsesClient:
         result = self._get_response(response_id)
         return self._validated(self.responses_path, result, "responses_background")
 
-    def _get_response(self, response_id: str, *, timeout: float | None = None) -> Any:
+    def _get_response(self, response_id: str, *, timeout: int | None = None) -> Any:
         self._require_api_key()
         normalized_id = _validate_response_id(response_id)
         return self.http_client.request(
