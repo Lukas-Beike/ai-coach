@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -17,6 +17,7 @@ from functools import partial
 from typing import Any
 
 from backend.canonical.garmin_payload import ACTIVITY_RATINGS_SECTION
+from backend.canonical.section_items import record_day
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import (
     GARMIN_DATE_ALIASES,
@@ -959,6 +960,34 @@ def _collect_daily_summaries_window(
     return covered
 
 
+def _resting_value(row: Mapping[str, Any]) -> float | None:
+    heart_rate = row.get("heartRate")
+    for value in (
+        row.get("restingHeartRate"),
+        heart_rate.get("restingValue") if isinstance(heart_rate, Mapping) else None,
+    ):
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > 0
+        ):
+            return float(value)
+    return None
+
+
+def resting_rows(summaries: list[Any]) -> list[dict[str, Any]]:
+    """Return one resting-heart-rate row per daily summary that carries one."""
+    rows: list[dict[str, Any]] = []
+    for row in summaries:
+        if not isinstance(row, Mapping):
+            continue
+        day = record_day(row)
+        value = _resting_value(row)
+        if day is not None and value is not None:
+            rows.append({"calendarDate": day, "restingHeartRate": value})
+    return rows
+
+
 def _collect_resting_hr(
     client: Any,
     windows: list[tuple[date, date]],
@@ -974,9 +1003,21 @@ def _collect_resting_hr(
     stats = pagination.setdefault(
         "resting_hr", {"windows": len(windows), "records": 0, "complete": True}
     )
+    # Days whose daily summary already carries the resting value need no
+    # intraday heart-rate download.
+    covered: dict[str, dict[str, Any]] = {
+        row["calendarDate"]: row
+        for row in resting_rows(payload.get("daily_stats") or [])
+    }
     for window_start, window_end in windows:
         current = window_start
         while current <= window_end:
+            known = covered.get(current.isoformat())
+            if known is not None:
+                payload.setdefault("resting_hr", []).append(dict(known))
+                stats["records"] = int(stats["records"]) + 1
+                current += timedelta(days=1)
+                continue
             try:
                 value = external_call(
                     "garmin",
@@ -1680,9 +1721,12 @@ def collect_garmin_data(
         _collect_resting_hr(
             client, windows, payload, pagination, external_call, redact, warn
         )
+        # Training status is a current-state read: one day, not one call per
+        # window day.
+        latest = max(window_end for _, window_end in windows)
         _collect_daily_stats(
             client,
-            windows,
+            [(latest, latest)],
             payload,
             pagination,
             external_call,
