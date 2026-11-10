@@ -426,7 +426,7 @@ class GarminLoginService:
                 "Garmin connected hook failed",
                 extra={
                     "event": "garmin_connected_hook_failed",
-                    "error_class": type(exc).__name__,
+                    "context": {"error_class": type(exc).__name__},
                 },
             )
 

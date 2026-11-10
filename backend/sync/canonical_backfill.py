@@ -99,7 +99,7 @@ MIN_BATCH_SIZE: Final = 100
 MAX_BATCH_SIZE: Final = 250
 COUNTER_NAMES: Final = ("skipped_invalid", "duplicates", "reprojected", "retired")
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 _REPROJECT: Final = "reproject"
 _GARMIN: Final = ProviderId.GARMIN.value
 
@@ -629,7 +629,7 @@ def _reprojection_work(
             "canonical re-projection skipped a record the mapper rejected",
             extra={
                 "event": "canonical_reprojection_record_skipped",
-                "error_class": type(exc).__name__,
+                "context": {"error_class": type(exc).__name__},
             },
         )
         return _Work(skipped_invalid=1, unmappable=True)

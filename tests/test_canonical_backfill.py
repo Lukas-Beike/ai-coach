@@ -1662,9 +1662,7 @@ class ReprojectionTests(BackfillFixture):
             (INTERVALS,),
         )
 
-        with self.assertLogs(
-            "backend.sync.canonical_backfill", level="WARNING"
-        ) as logs:
+        with self.assertLogs("intervals_coach", level="WARNING") as logs:
             self.bump_and_reproject_with_raising_record(backfill, "1")
 
         summary = self.summary(backfill)
@@ -1700,7 +1698,7 @@ class ReprojectionTests(BackfillFixture):
             {record.__dict__.get("event") for record in logs.records},
         )
         self.assertEqual(
-            ["ValueError"], [r.__dict__.get("error_class") for r in logs.records]
+            ["ValueError"], [log_extra(r, "error_class") for r in logs.records]
         )
         self.assertNotIn("synthetic payload text", logs.output[0])
 
@@ -1728,7 +1726,7 @@ class ReprojectionTests(BackfillFixture):
         with (
             patch.dict(canonical_plans._MAPPER_VERSIONS, {key: version + 1}),
             patch.object(backfill_module, "reprojection_plan", raising),
-            self.assertLogs("backend.sync.canonical_backfill", level="WARNING"),
+            self.assertLogs("intervals_coach", level="WARNING"),
         ):
             self.run_to_completion(backfill)
             with self.manager.reader() as db:
@@ -1798,7 +1796,7 @@ class ReprojectionTests(BackfillFixture):
                 canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
             ),
             patch.object(backfill_module, "reprojection_plan", plan),
-            self.assertLogs("backend.sync.canonical_backfill", level="WARNING"),
+            self.assertLogs("intervals_coach", level="WARNING"),
         ):
             worker.run_loop()
 
