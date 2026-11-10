@@ -440,6 +440,15 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.assertEqual(report["app"]["version"], "1.2.3")
         self.assertEqual(report["wahoo"]["connected"], False)
 
+    def test_a_failing_garmin_section_keeps_the_configuration(self):
+        self.garmin_projection.public_state.side_effect = RuntimeError("x")
+
+        report = self.service.report()
+
+        self.assertEqual(report["garmin"], {"status": "unavailable"})
+        self.assertIsNone(report["configuration"]["garmin_configured"])
+        self.assertIn("openai_base_url_custom", report["configuration"])
+
     def test_log_files_are_read_before_the_read_snapshot(self):
         self.service._deps = replace(
             self.service._deps,

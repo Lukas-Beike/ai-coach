@@ -175,7 +175,7 @@ class DiagnosticReportService:
                     != DEFAULT_OPENAI_BASE_URL,
                     "intervals_configured": bool(deps.config.intervals_api_key),
                     "garmin_library_available": deps.garmin_client_factory.available(),
-                    "garmin_configured": garmin_status["configured"],
+                    "garmin_configured": garmin_status.get("configured"),
                     "garmin_fixture_configured": deps.garmin_fixture_loader.path()
                     is not None,
                     "model": deps.settings.selected_model(),
