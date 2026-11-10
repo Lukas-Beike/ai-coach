@@ -418,13 +418,28 @@ function consumeChatStreamBlock(block, context) {
   if (parsed) applyChatStreamEvent(parsed.event, parsed.payload, context);
 }
 
+// The server sends a heartbeat every 15 s; three missed ones mean the route is dead.
+const CHAT_STREAM_SILENCE_MS = 45_000;
+
+// A half-open connection never errors, so a silent read is aborted into the recovery polls.
+function readChatStreamChunk(reader, controller, silenceMs = CHAT_STREAM_SILENCE_MS) {
+  let timer;
+  const silent = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller?.abort();
+      reject(new Error("Die Verbindung zum Coach ist abgerissen."));
+    }, silenceMs);
+  });
+  return Promise.race([reader.read(), silent]).finally(() => clearTimeout(timer));
+}
+
 async function readChatStream(response, context) {
   if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   while (true) {
-    const chunk = await reader.read();
+    const chunk = await readChatStreamChunk(reader, context.stream?.controller);
     if (chunk.done) break;
     buffer += decoder.decode(chunk.value, { stream: true });
     const blocks = buffer.split(/\r?\n\r?\n/);

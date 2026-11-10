@@ -121,11 +121,14 @@ class CoachConversationResetService:
         self.remote_delete_thread.start()
         return True
 
-    def _active_operation_ids(self) -> list[str]:
+    def _active_operation_ids(self, *, running_only: bool = False) -> list[str]:
+        query = (
+            "SELECT receipt FROM coach_commands WHERE status = 'running'"
+            if running_only
+            else "SELECT receipt FROM coach_commands WHERE status IN ('queued', 'running')"
+        )
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            rows = db.execute(
-                "SELECT receipt FROM coach_commands WHERE status IN ('queued', 'running')"
-            ).fetchall()
+            rows = db.execute(query).fetchall()
         operation_ids = (
             str(command_receipt(row["receipt"]).get("operation_id") or "")
             for row in rows
@@ -183,6 +186,10 @@ class CoachConversationResetService:
             )
             self._key_values.set(db, "coach_pending_request", "null")
         return operation_ids, conversation_id, generation
+
+    def cancel_running_turns(self) -> None:
+        """Stop running turns before maintenance; queued turns stay queued."""
+        self._cancel_turns(self._active_operation_ids(running_only=True))
 
     def reset(self) -> dict[str, Any]:
         # A running turn holds the conversation lock until it ends, so ask it to

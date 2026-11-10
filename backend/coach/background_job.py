@@ -11,6 +11,7 @@ from backend.coach.chat_turn import CoachChatTurnService
 from backend.coach.job_store import MAX_FAILED_ATTEMPTS, CoachJobStore
 from backend.coach.morning import ManualMorningCheckinService
 from backend.coach.morning_completion import MorningCoachJobCompletionService
+from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.streams import ChatStreamRegistry
 from backend.coach.turn_failures import CoachTurnFailureService
 from backend.errors import INTERNAL_SERVER_ERROR, AppError
@@ -173,8 +174,14 @@ class CoachBackgroundJobRunner:
         if not receipt.get("openai_response_id"):
             worker_phase["phase"] = "preparing"
         self._jobs.merge_receipt(client_turn_id, worker_phase)
-        if receipt.get("request_kind") == "morning_checkin":
+        # A resumed turn already holds its provider response; a cancel stops the
+        # blocking Garmin sync before and after it instead of running it first.
+        if receipt.get("request_kind") == "morning_checkin" and not receipt.get(
+            "openai_response_id"
+        ):
+            raise_if_chat_cancelled(cancel_event)
             self._morning().prepare()
+            raise_if_chat_cancelled(cancel_event)
         result = self._chat_turn().run(
             message,
             on_text_delta=self._delta_callback(operation_id, receipt, stream_attached),

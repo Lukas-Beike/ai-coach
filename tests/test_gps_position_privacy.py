@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import unittest
+from unittest.mock import Mock
 
 from backend.activities.detail_contract import _coverage, _streams
 from backend.activities.detail_merge import merge_details
@@ -272,7 +273,11 @@ class _Null:
 
 
 class _Gate:
-    def restore(self):
+    def __init__(self):
+        self.before_wait = []
+
+    def restore(self, before_wait=None):
+        self.before_wait.append(before_wait)
         return _Null()
 
 
@@ -294,6 +299,7 @@ class _Dependencies:
         self.database_lock = _Null()
         self.maintenance_gate = _Gate()
         self.key_value_repository = _Keys()
+        self.cancel_coach_turns = Mock()
 
 
 class GpsSettingServiceTests(unittest.TestCase):
@@ -318,6 +324,17 @@ class GpsSettingServiceTests(unittest.TestCase):
             self.service.delete_gps_tracks("ja")
         result = self.service.delete_gps_tracks(GPS_TRACKS_DELETE_CONFIRMATION_TEXT)
         self.assertEqual(result["deleted_tracks"], 0)
+
+    def test_delete_cancels_running_coach_turns_before_the_maintenance_drain(self):
+        dependencies = _Dependencies(self.db)
+        service = PrivacyDeleteService(dependencies)
+
+        service.delete_gps_tracks(GPS_TRACKS_DELETE_CONFIRMATION_TEXT)
+
+        self.assertEqual(
+            dependencies.maintenance_gate.before_wait,
+            [dependencies.cancel_coach_turns],
+        )
 
 
 if __name__ == "__main__":

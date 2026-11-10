@@ -57,6 +57,95 @@ class MaintenanceGateTests(unittest.TestCase):
         thread.join(1)
         self.assertFalse(thread.is_alive())
 
+    def test_restore_cancels_running_work_before_it_waits(self):
+        gate = maintenance.MaintenanceGate()
+        cancel = threading.Event()
+        entered = threading.Event()
+        seen = []
+
+        def running_turn():
+            with gate.operation():
+                entered.set()
+                cancel.wait(5)
+
+        def cancel_turn():
+            seen.append(gate.state()["active"])
+            cancel.set()
+
+        thread = threading.Thread(target=running_turn)
+        thread.start()
+        self.assertTrue(entered.wait(1))
+
+        with gate.restore(cancel_turn, timeout=2):
+            self.assertEqual(gate.state()["running_operations"], 0)
+
+        thread.join(1)
+        self.assertEqual(seen, [True])
+        self.assertEqual(gate.state(), {"active": False, "running_operations": 0})
+
+    def test_restore_times_out_with_retryable_409_and_leaves_gate_open(self):
+        gate = maintenance.MaintenanceGate()
+        release = threading.Event()
+        entered = threading.Event()
+        generation = gate.current_generation()
+
+        def stuck_operation():
+            with gate.operation():
+                entered.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=stuck_operation)
+        thread.start()
+        self.assertTrue(entered.wait(1))
+        try:
+            with (
+                self.assertRaises(AppError) as caught,
+                gate.restore(timeout=0.05),
+            ):
+                self.fail("restore must not start while work is running")
+            self.assertEqual(caught.exception.status, 409)
+            self.assertEqual(caught.exception.reason, "maintenance_drain_timeout")
+            self.assertFalse(gate.state()["active"])
+            self.assertEqual(gate.current_generation(), generation)
+            with gate.operation():
+                pass
+        finally:
+            release.set()
+            thread.join(1)
+
+    def test_restore_timeout_keeps_a_nested_caller_operation(self):
+        gate = maintenance.MaintenanceGate()
+        release = threading.Event()
+        entered = threading.Event()
+
+        def stuck_operation():
+            with gate.operation():
+                entered.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=stuck_operation)
+        thread.start()
+        self.assertTrue(entered.wait(1))
+        try:
+            with gate.operation():
+                with self.assertRaises(AppError), gate.restore(timeout=0.05):
+                    pass
+                self.assertEqual(gate.state()["running_operations"], 2)
+        finally:
+            release.set()
+            thread.join(1)
+        self.assertEqual(gate.state(), {"active": False, "running_operations": 0})
+
+    def test_failing_cancel_hook_clears_restoring(self):
+        gate = maintenance.MaintenanceGate()
+
+        def broken():
+            raise RuntimeError("synthetic")
+
+        with self.assertRaises(RuntimeError), gate.restore(broken):
+            pass
+        self.assertFalse(gate.state()["active"])
+
     def test_restore_drains_other_operations_when_called_from_operation(self):
         gate = maintenance.MaintenanceGate()
         other_entered = threading.Event()

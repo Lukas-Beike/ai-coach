@@ -89,6 +89,29 @@ class CoachChatStreamTransportTests(unittest.TestCase):
         self.registry.unregister.assert_called_once()
         self.assertTrue(self.handler.close_connection)
 
+    def test_disconnect_stops_relaying_so_the_request_releases_its_operation(
+        self,
+    ) -> None:
+        def drop_after_first_delta(event: str, _data: object) -> None:
+            if event == "delta":
+                raise ClientDisconnected()
+
+        self.handler.send_sse_event.side_effect = drop_after_first_delta
+        self.events = Mock()
+        self.events.get.side_effect = [
+            ("delta", {"text": "hello"}),
+            AssertionError("relay kept waiting after the client left"),
+        ]
+        self.registry.events.return_value = self.events
+
+        self.transport.handle(self.handler, self.session)
+
+        self.assertEqual(self.events.get.call_count, 1)
+        self.registry.unregister.assert_called_once_with(
+            "synthetic-session", "new-operation"
+        )
+        self.assertFalse(self.cancel_event.is_set())
+
     def test_header_disconnect_still_submits_without_further_events(self) -> None:
         self.handler.send_sse_headers.side_effect = ClientDisconnected()
         self.events.put(("completed", {"status": "done"}))

@@ -875,6 +875,10 @@ def start_canonical_backfill() -> None:
     return CANONICAL_BACKFILL.worker.start()
 
 
+def cancel_running_coach_turns() -> None:
+    return COACH_CONVERSATION.reset_service().cancel_running_turns()
+
+
 PRIVACY_ASSEMBLY = PrivacyAssembly(
     dependencies=PrivacyAssembly.Inputs(
         athlete=PrivacyAthleteSources(
@@ -904,6 +908,7 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             refresh_credentials=lambda: refresh_runtime_config(),
             cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
             disconnect_wahoo=lambda: disconnect_wahoo_grant(),
+            cancel_coach_turns=cancel_running_coach_turns,
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,
@@ -953,6 +958,7 @@ BACKUP_ASSEMBLY = BackupAssembly(
             diagnostics_suspended=suspend_diagnostic_flushes,
             canonical_backfill_start=start_canonical_backfill,
             refresh_credentials=lambda: refresh_runtime_config(),
+            cancel_coach_turns=cancel_running_coach_turns,
         ),
     )
 )

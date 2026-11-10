@@ -254,7 +254,7 @@ class _Lock:
 
 class _Gate:
     @contextmanager
-    def restore(self):
+    def restore(self, before_wait=None):
         yield
 
 

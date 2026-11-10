@@ -219,6 +219,44 @@ class CoachBackgroundJobRunnerTests(unittest.TestCase):
         )
         self.completion.complete.assert_not_called()
 
+    def test_cancel_before_morning_prepare_skips_the_garmin_sync(self) -> None:
+        self.failures.persist.return_value = {"status": "cancelled"}
+        self.jobs.cancel_requested.return_value = True
+
+        self.runner.run(self.job("op-before", request_kind="morning_checkin"))
+
+        self.morning.prepare.assert_not_called()
+        self.chat.run.assert_not_called()
+        persisted = self.failures.persist.call_args.args[2]
+        self.assertEqual(persisted.reason, "chat_cancelled")
+
+    def test_cancel_during_morning_prepare_stops_before_the_turn(self) -> None:
+        operation_id = "op-during"
+        self.failures.persist.return_value = {"status": "cancelled"}
+        self.morning.prepare.side_effect = lambda: self.streams.cancel_background_event(
+            operation_id
+        )
+
+        self.runner.run(self.job(operation_id, request_kind="morning_checkin"))
+
+        self.morning.prepare.assert_called_once_with()
+        self.chat.run.assert_not_called()
+        persisted = self.failures.persist.call_args.args[2]
+        self.assertEqual(persisted.reason, "chat_cancelled")
+
+    def test_resumed_morning_turn_does_not_repeat_the_sync(self) -> None:
+        self.completion.complete.return_value = {"status": "completed"}
+        self.runner.run(
+            self.job(
+                "op-resume",
+                request_kind="morning_checkin",
+                openai_response_id="synthetic-response",
+            )
+        )
+
+        self.morning.prepare.assert_not_called()
+        self.chat.run.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

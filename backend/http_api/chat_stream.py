@@ -74,6 +74,7 @@ class CoachChatStreamTransport:
                 cancel_event,
                 send_event,
                 disconnect,
+                lambda: client_connected,
             )
         except AppError as exc:
             send_event("error", self._app_error(exc))
@@ -104,6 +105,7 @@ class CoachChatStreamTransport:
         cancel_event: Any,
         send_event: Callable[[str, Any], None],
         disconnect: Callable[[], None],
+        connected: Callable[[], bool],
     ) -> None:
         handler.connection.settimeout(self._response_timeout_seconds + 30)
         try:
@@ -130,7 +132,7 @@ class CoachChatStreamTransport:
             send_event("background", job)
             return
         self._relay_events(
-            events, client_turn_id, session_hash, operation_id, send_event
+            events, client_turn_id, session_hash, operation_id, send_event, connected
         )
 
     def _relay_events(
@@ -140,8 +142,11 @@ class CoachChatStreamTransport:
         session_hash: str,
         operation_id: str,
         send_event: Callable[[str, Any], None],
+        connected: Callable[[], bool],
     ) -> None:
-        while True:
+        # A detached client leaves the durable job running; the relay stops so this
+        # request no longer holds a maintenance operation for the whole turn.
+        while connected():
             try:
                 event, data = events.get(timeout=15)
             except queue.Empty:

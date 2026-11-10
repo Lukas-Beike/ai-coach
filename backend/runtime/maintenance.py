@@ -1,11 +1,17 @@
 """Coordinate ordinary operations with destructive maintenance work."""
 
 import threading
+import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any
 
 from backend.errors import AppError
+
+# Bound for draining running work before a restore or destructive delete; the
+# browser gives up after about 25 s, so the athlete sees the real result.
+RESTORE_DRAIN_TIMEOUT_SECONDS = 20.0
 
 
 class MaintenanceGate:
@@ -50,7 +56,18 @@ class MaintenanceGate:
                 self.condition.notify_all()
 
     @contextmanager
-    def restore(self):
+    def restore(
+        self,
+        before_wait: Callable[[], None] | None = None,
+        *,
+        timeout: float | None = None,
+    ):
+        """Block new operations, ask running work to stop, then drain it.
+
+        ``before_wait`` runs outside the gate lock once ordinary operations are
+        refused, so it can cancel running Coach turns. The drain is bounded: on
+        timeout nothing has changed and the caller gets a retryable 409.
+        """
         with self.condition:
             if self.restoring:
                 raise AppError(409, "Eine Datenbankwiederherstellung läuft bereits.")
@@ -58,17 +75,38 @@ class MaintenanceGate:
             nested = bool(getattr(self.local, "depth", 0))
             if nested:
                 self.active -= 1
-            while self.active:
-                self.condition.wait()
-            self.generation += 1
+        try:
+            if before_wait is not None:
+                before_wait()
+            with self.condition:
+                deadline = time.monotonic() + (
+                    RESTORE_DRAIN_TIMEOUT_SECONDS if timeout is None else timeout
+                )
+                while self.active:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise AppError(
+                            409,
+                            "Laufende Aufgaben, etwa eine Coach-Antwort, werden noch "
+                            "beendet. Es wurde nichts geändert. Bitte gleich erneut versuchen.",
+                            reason="maintenance_drain_timeout",
+                        )
+                    self.condition.wait(remaining)
+                self.generation += 1
+        except BaseException:
+            self._finish_restore(nested)
+            raise
         try:
             yield
         finally:
-            with self.condition:
-                self.restoring = False
-                if nested:
-                    self.active += 1
-                self.condition.notify_all()
+            self._finish_restore(nested)
+
+    def _finish_restore(self, nested: bool) -> None:
+        with self.condition:
+            self.restoring = False
+            if nested:
+                self.active += 1
+            self.condition.notify_all()
 
     def current_generation(self) -> int:
         with self.condition:
