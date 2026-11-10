@@ -104,6 +104,34 @@ class PushStateTests(unittest.TestCase):
             pairs[1][1]["push_cleanup"],
         )
 
+    def test_a_deleted_unit_nearest_today_never_carries_the_leftovers(self) -> None:
+        rows = [
+            {
+                "local_id": "gone",
+                "payload": json.dumps(
+                    {**RIDE, "date": "2026-11-10", "local_deleted": True}
+                ),
+                "sync_state": "synced",
+            },
+            {
+                "local_id": "shown",
+                "payload": json.dumps({**RIDE, "date": "2026-11-14"}),
+                "sync_state": "synced",
+            },
+        ]
+        pairs = [(row, json.loads(row["payload"])) for row in rows]
+
+        attach_push_state(
+            pairs,
+            {},
+            orphans=[GarminOrphan("o1", "Alte Kraft", "2026-11-05")],
+            wahoo_orphans=[],
+            today=date(2026, 11, 10),
+        )
+
+        self.assertNotIn("push_cleanup", pairs[0][1])
+        self.assertIn("garmin", pairs[1][1]["push_cleanup"])
+
     def test_a_pending_unit_keeps_the_leftovers_instead_of_a_second_carrier(
         self,
     ) -> None:

@@ -243,13 +243,20 @@ def _carry_unclaimed_cleanup(
     payloads: list[dict[str, Any]],
     today: date,
 ) -> None:
-    """Put each provider's leftovers on one unit when no pending unit carries them."""
+    """Put each provider's leftovers on one unit when no pending unit carries them.
+
+    Only units the calendar renders qualify: a deleted or archived carrier would
+    hide the leftover item.
+    """
+    visible = [
+        p for p in payloads if not p.get("local_deleted") and not p.get("archived")
+    ]
     carrier = next(
-        iter(nearest_first(payloads, today, lambda p: str(p.get("date") or "")[:10])),
+        iter(nearest_first(visible, today, lambda p: str(p.get("date") or "")[:10])),
         None,
     )
     if carrier is None:
         return
     for provider, items in lists.items():
-        if items and not any(provider in p.get("push_cleanup", {}) for p in payloads):
+        if items and not any(provider in p.get("push_cleanup", {}) for p in visible):
             carrier.setdefault("push_cleanup", {})[provider] = items
