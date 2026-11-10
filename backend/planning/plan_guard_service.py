@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.checkins import reports_complaint
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.first_threshold import (
     FIRST_THRESHOLD_FIELD,
@@ -142,11 +143,52 @@ def read_progress(reports: Any) -> Mapping[str, Any]:
     return reports.report.progress({"days": 42}, reports.timezone(), with_curves=False)
 
 
-def recent_illness(checkins: Sequence[Mapping[str, Any]], today: date) -> str:
-    """Illness text of the newest check-in of today or the last two days."""
+def _active_pause_illness(
+    checkins: Sequence[Mapping[str, Any]], today: date, pause: Mapping[str, Any]
+) -> str | None:
+    """Illness text while an approved pause runs, None outside its window.
+
+    A check-in inside the window (on or after its start, up to today) speaks
+    for the athlete: the newest one decides, so a cleared answer ends it.
+    """
+    start = str(pause.get("start_date") or "")
+    end = str(pause.get("end_date") or "")
+    if not pause.get("approved") or not start <= today.isoformat() <= end:
+        return None
+    inside = [
+        row
+        for row in checkins
+        if start <= str(row.get("checkin_date") or "") <= today.isoformat()
+    ]
+    if not inside:
+        return str(pause.get("illness") or "")
+    newest = max(inside, key=lambda row: str(row["checkin_date"]))
+    text = str(newest.get("illness") or "")
+    return text if reports_complaint(text) else ""
+
+
+def recent_illness(
+    checkins: Sequence[Mapping[str, Any]],
+    today: date,
+    pause: Mapping[str, Any] | None = None,
+) -> str:
+    """Illness text of the approved pause window, else of the recent check-ins.
+
+    Without a running pause it is the newest check-in of the last two days up
+    to today; future-dated rows never count.
+    """
+    if pause:
+        active = _active_pause_illness(checkins, today, pause)
+        if active is not None:
+            return active
     first = (today - timedelta(days=2)).isoformat()
+    last = today.isoformat()
     latest = max(
-        (row for row in checkins if str(row.get("checkin_date") or "") >= first),
+        (
+            row
+            for row in checkins
+            if first <= str(row.get("checkin_date") or "") <= last
+        ),
         key=lambda row: str(row["checkin_date"]),
         default=None,
     )

@@ -122,7 +122,7 @@ _RULE_TEXT = {
     "back_to_back_hard": "hard run or ride on consecutive days.",
     "strength_hard_same_day": "heavy strength and a hard run or ride less than 6 h apart.",
     "missing_taper": "final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
-    "illness_hard": "hard or 90+ minute session within 3 days of a reported illness.",
+    "illness_hard": "hard or 90+ minute session within 5 days of a reported illness (today included).",
     "strength_incomplete": "a strength unit the Coach created, moved or changed without strength_structure, session_focus and strength_intensity.",
     "focus_missing": "a run or ride unit the Coach created, moved or changed without session_focus.",
     "hr_cap_invalid": "a recovery, easy or long run unit the Coach created or changed without a heart-rate cap (percentages and source) within the effective cap.",
@@ -140,7 +140,9 @@ HARD_INTENSITY = 0.85
 MIN_STRENGTH_GAP_H = 6
 TAPER_DAYS = 14
 TAPER_MIN_REDUCTION = 0.20
-ILLNESS_DAYS = 3
+# Days of caution after a reported illness, today included; the approved pause
+# forecast shares it (today .. today + ILLNESS_DAYS - 1).
+ILLNESS_DAYS = 5
 LONG_SESSION_S = 5400
 RUN_WINDOW_DAYS = 30
 # Key check_plan sets on a unit copy whose steps give a computed intensity.
@@ -390,14 +392,14 @@ def _illness_hard(
 ) -> list[dict]:
     if not reports_complaint(illness):
         return []
-    last = (today + timedelta(days=ILLNESS_DAYS)).isoformat()
+    last = (today + timedelta(days=ILLNESS_DAYS - 1)).isoformat()
     # One finding per session, so making a flagged session harder or longer
     # is a new finding and blocks again.
     return [
         _finding(
             "illness_hard",
             [unit],
-            "Illness is reported; no hard or long session in the next 3 days.",
+            "Illness is reported; no hard or long session in the next 5 days.",
             {
                 "through": last,
                 "planned_minutes": round(_duration_s(unit) / 60),

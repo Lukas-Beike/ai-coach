@@ -713,6 +713,48 @@ class PlanBriefTests(unittest.TestCase):
         self.assertEqual("Erkältung", recent_illness(rows, TODAY))
         self.assertEqual("", recent_illness(rows[1:], TODAY))
 
+    def test_recent_illness_ignores_future_rows_and_a_cleared_day(self) -> None:
+        rows = [
+            {"checkin_date": "2026-11-04", "illness": "Erkältung"},
+            {"checkin_date": "2026-11-03", "illness": "Erkältung"},
+            {"checkin_date": "2026-11-02", "illness": ""},
+        ]
+        self.assertEqual("", recent_illness(rows, TODAY))
+        self.assertEqual("Erkältung", recent_illness(rows[:1], date(2026, 11, 4)))
+
+    def test_approved_pause_window_keeps_illness_on_days_three_to_five(self) -> None:
+        pause = {
+            "start_date": "2026-11-02",
+            "end_date": "2026-11-06",
+            "illness": "Erkältung",
+            "approved": True,
+        }
+        rows = [{"checkin_date": "2026-11-02", "illness": "Erkältung"}]
+        for day in (4, 5, 6):
+            self.assertEqual(
+                "Erkältung", recent_illness(rows, date(2026, 11, day), pause)
+            )
+        # The window is over, and a pause that was never approved does not count.
+        self.assertEqual("", recent_illness(rows, date(2026, 11, 7), pause))
+        self.assertEqual(
+            "", recent_illness(rows, date(2026, 11, 5), {**pause, "approved": False})
+        )
+
+    def test_check_in_without_complaint_clears_the_approved_pause(self) -> None:
+        pause = {
+            "start_date": "2026-11-02",
+            "end_date": "2026-11-06",
+            "illness": "Erkältung",
+            "approved": True,
+        }
+        same_evening = [{"checkin_date": "2026-11-02", "illness": ""}]
+        self.assertEqual("", recent_illness(same_evening, TODAY, pause))
+        later = [
+            {"checkin_date": "2026-11-04", "illness": "keine"},
+            {"checkin_date": "2026-11-02", "illness": "Erkältung"},
+        ]
+        self.assertEqual("", recent_illness(later, date(2026, 11, 5), pause))
+
     def test_schema_enum_matches_rule_codes(self) -> None:
         self.assertEqual(
             list(plan_checks.BLOCKING_CODES), ACCEPT_PLAN_FINDINGS["items"]["enum"]

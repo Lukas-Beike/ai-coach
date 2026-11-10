@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, timedelta
 
-from backend.planning import plan_checks
+from backend.planning import adaptive, plan_checks
 
 TODAY = date(2026, 11, 2)
 
@@ -143,6 +143,23 @@ class PlanCheckRuleTests(unittest.TestCase):
         self.assertEqual([], check([easy], illness="Fieber"))
         far = unit("d", "2026-11-09", "run", planned_intensity=0.9)
         self.assertEqual([], check([far], illness="Fieber"))
+
+    def test_illness_window_is_the_shared_pause_window(self) -> None:
+        # TODAY + ILLNESS_DAYS - 1 is the last day of the pause and of the check.
+        last = (TODAY + timedelta(days=plan_checks.ILLNESS_DAYS - 1)).isoformat()
+        after = (TODAY + timedelta(days=plan_checks.ILLNESS_DAYS)).isoformat()
+        end = unit("a", last, "run", planned_intensity=0.9)
+        beyond = unit("b", after, "run", planned_intensity=0.9)
+        self.assertEqual(["illness_hard"], codes(check([end], illness="Fieber")))
+        self.assertEqual([], check([beyond], illness="Fieber"))
+        forecast = adaptive.illness_pause_forecast(
+            {"illness": "Fieber"},
+            TODAY,
+            illness_text_limit=1000,
+            default_days=adaptive.DEFAULT_ILLNESS_PAUSE_DAYS,
+        )
+        assert forecast is not None
+        self.assertEqual(last, forecast["end_date"])
 
     def test_taper_finding_keeps_its_identity_when_units_change(self) -> None:
         race = {"event_date": "2026-12-06", "priority": "A"}

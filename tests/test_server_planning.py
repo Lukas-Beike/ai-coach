@@ -485,11 +485,10 @@ class ServerPlanningTests(ServerTestCase):
         checkins = {
             row["checkin_date"]: row for row in server.ATHLETE_DATA.checkin().list(30)
         }
-        for offset in range(planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS):
-            pause_date = (
-                server.ATHLETE_CLOCK.now().date() + timedelta(days=offset)
-            ).isoformat()
-            self.assertEqual(checkins[pause_date]["illness"], "Fever")
+        today = server.ATHLETE_CLOCK.now().date()
+        self.assertEqual(checkins[today.isoformat()]["illness"], "Fever")
+        for offset in range(1, planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS):
+            self.assertNotIn((today + timedelta(days=offset)).isoformat(), checkins)
         repeated_preview = (
             server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         )
