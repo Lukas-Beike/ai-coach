@@ -473,20 +473,8 @@ class Redactor:
         return redact
 
     def sanitize_log_value(self, value: Any) -> Any:
-        redact = self._text_redactor()
-
-        def clean(item: Any) -> Any:
-            if isinstance(item, str):
-                return redact(item)
-            if isinstance(item, dict):
-                return {str(key): clean(child) for key, child in item.items()}
-            if isinstance(item, (list, tuple)):
-                return [clean(child) for child in item]
-            if item is None or isinstance(item, (bool, int, float)):
-                return item
-            return redact(str(item))
-
-        return clean(value)
+        """Apply the diagnostic key, label and authorization rules to a log value."""
+        return self.sanitize_diagnostic_value(value)
 
     def sanitize_diagnostic_value(self, value: Any) -> Any:
         """Retain diagnostic content while removing credentials before storage."""
@@ -654,6 +642,11 @@ class JsonLogFormatter(logging.Formatter):
         )
 
 
+LOG_MAX_BYTES = 5_000_000
+# The active file plus this many rotations: ten files of 5 MB in all.
+LOG_BACKUP_COUNT = 9
+
+
 def configure_logging(
     logger: logging.Logger,
     data_dir: Path,
@@ -672,7 +665,10 @@ def configure_logging(
     formatter = JsonLogFormatter(redactor)
 
     file_handler = RotatingFileHandler(
-        log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+        log_path,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
@@ -684,19 +680,29 @@ def configure_logging(
     logger.addHandler(stream_handler)
 
 
-_ROUTINE_POLL_GET_PATHS = frozenset({"/api/chat/status", "/api/state/events"})
+_ROUTINE_POLL_GET_PATHS = frozenset(
+    {
+        "/api/chat/status",
+        "/api/state/events",
+        "/api/sync/status",
+        "/api/health",
+        "/api/auth/status",
+    }
+)
+_SYNC_JOB_POLL_RE = re.compile(r"/api/sync/jobs/[0-9a-f-]+")
 
 
 def http_access_log_level(method: str | None, path: str, status: object) -> int:
     """Return the access-log level for a request.
 
-    Successful GET requests to the chat status poll and the state event stream
-    are routine client traffic and are logged at DEBUG. Every other request,
+    Successful GET requests to the chat status, sync status, sync job, health
+    and auth status polls and the state event stream are routine client
+    traffic and are logged at DEBUG. Every other request,
     and every non-2xx or unknown status, keeps the INFO access-log level.
     """
     if (
         method == "GET"
-        and path in _ROUTINE_POLL_GET_PATHS
+        and (path in _ROUTINE_POLL_GET_PATHS or _SYNC_JOB_POLL_RE.fullmatch(path))
         and str(status).startswith("2")
     ):
         return logging.DEBUG
@@ -799,6 +805,9 @@ def safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     reason = str(getattr(exc, "reason", "") or "").strip()
     if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
         result["reason"] = reason
+    category = str(getattr(exc, "category", "") or "").strip()
+    if category and re.fullmatch(r"[a-z_]{1,80}", category):
+        result["category"] = category
     validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
     if validation_reason and re.fullmatch(r"[a-z_]{1,80}", validation_reason):
         result["validation_reason"] = validation_reason

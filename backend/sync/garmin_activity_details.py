@@ -56,7 +56,7 @@ from backend.providers.garmin_activity_detail_mapping import (
 from backend.sync.garmin import GARMIN_CAPABILITY_PAUSE_SECONDS
 from backend.sync.refresh import sync_job_error_class
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 ACTIVITY_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9_-]{1,200}")
 COOLDOWN: Final = timedelta(minutes=10)
 BACKFILL_BATCH_SIZE: Final = 10
@@ -309,7 +309,7 @@ class GarminActivityDetailService:
                     "garmin activity detail backfill stopped after an error",
                     extra={
                         "event": "garmin_activity_detail_backfill_failed",
-                        "error_type": type(error).__name__,
+                        "context": {"error_type": type(error).__name__},
                     },
                 )
         finally:
@@ -483,7 +483,7 @@ def _map_collected(
             "garmin activity detail mapping produced issues",
             extra={
                 "event": "garmin_activity_detail_mapping_issues",
-                "issues": len(mapped.issues),
+                "context": {"issues": len(mapped.issues)},
             },
         )
     return mapped

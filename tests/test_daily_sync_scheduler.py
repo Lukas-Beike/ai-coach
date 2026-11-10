@@ -267,7 +267,8 @@ class DailySyncSchedulerTests(unittest.TestCase):
         self.assertEqual(scheduler.calls, 2)
         morning.refresh.assert_called_once_with()
         self.assertEqual(
-            logger.error.call_args.kwargs["extra"]["error_class"], "RuntimeError"
+            logger.error.call_args.kwargs["extra"]["context"]["error_class"],
+            "RuntimeError",
         )
         self.assertNotIn("private detail", repr(logger.error.call_args))
 

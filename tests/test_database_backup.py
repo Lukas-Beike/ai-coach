@@ -154,7 +154,10 @@ class DatabaseBackupServiceTests(unittest.TestCase):
         self.logger.warning.assert_called_once()
         self.assertEqual(
             self.logger.warning.call_args.kwargs["extra"],
-            {"event": "database_backup_snapshot_failed", "error_class": "RuntimeError"},
+            {
+                "event": "database_backup_snapshot_failed",
+                "context": {"error_class": "RuntimeError"},
+            },
         )
         self.assertFalse(list(self.root.glob(".database-backup-*.tmp")))
 
@@ -185,7 +188,7 @@ class DatabaseBackupServiceTests(unittest.TestCase):
             self.logger.warning.call_args.kwargs["extra"],
             {
                 "event": "database_restore_checkpoint_failed",
-                "error_class": "DatabaseError",
+                "context": {"error_class": "DatabaseError"},
             },
         )
 

@@ -30,7 +30,7 @@ DATABASE_LOCK = threading.RLock()
 # stream of short foreground writes can delay but never starve background work.
 BACKGROUND_WRITER_BYPASS_LIMIT = 8
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 _BACKGROUND_WRITER: ContextVar[bool] = ContextVar(
     "database_background_writer", default=False
 )

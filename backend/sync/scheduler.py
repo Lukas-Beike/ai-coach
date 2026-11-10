@@ -144,8 +144,10 @@ class DailySyncLoop:
                     "Automatic synchronization scheduling failed",
                     extra={
                         "event": "daily_sync_failed",
-                        "error_class": type(exc).__name__,
-                        "reason": getattr(exc, "reason", None),
+                        "context": {
+                            "error_class": type(exc).__name__,
+                            "reason": getattr(exc, "reason", None),
+                        },
                     },
                 )
 
@@ -160,8 +162,10 @@ class DailySyncLoop:
                 "Sync housekeeping failed",
                 extra={
                     "event": "sync_housekeeping_failed",
-                    "error_class": type(exc).__name__,
-                    "reason": getattr(exc, "reason", None),
+                    "context": {
+                        "error_class": type(exc).__name__,
+                        "reason": getattr(exc, "reason", None),
+                    },
                 },
             )
 

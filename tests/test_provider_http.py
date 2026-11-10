@@ -33,6 +33,9 @@ class _CallLogger:
     def __init__(self):
         self.records = []
 
+    def debug(self, message, **kwargs):
+        self.records.append(("debug", message, kwargs))
+
     def info(self, message, **kwargs):
         self.records.append(("info", message, kwargs))
 
@@ -973,7 +976,7 @@ class ProviderHTTPTests(unittest.TestCase):
         self.assertEqual(calls, [True])
         self.assertEqual(
             [record[2]["extra"]["event"] for record in logger.records],
-            ["external_call_started"],
+            ["external_call_started", "external_call_failed"],
         )
         self.assertEqual(
             [event for event, _details in capture.entries],
@@ -1035,6 +1038,92 @@ class ProviderHTTPTests(unittest.TestCase):
             logger.records[1][2]["extra"]["context"]["error_code"], "timeout"
         )
         self.assertEqual(capture.entries[1][1]["error"], {"type": "TimeoutError"})
+
+
+class ExternalCallFailureLoggingTests(unittest.TestCase):
+    def test_app_error_logs_a_warning_with_reason_and_diagnostic_id(self) -> None:
+        logger = _CallLogger()
+        capture = _DiagnosticCapture()
+
+        def call():
+            raise AppError(409, "synthetic message", reason="already_exists")
+
+        with self.assertRaises(AppError):
+            external_call(
+                "synthetic", "create", call, logger=logger, diagnostic_capture=capture
+            )
+
+        level, _message, kwargs = logger.records[1]
+        self.assertEqual(level, "warning")
+        context = kwargs["extra"]["context"]
+        self.assertEqual(kwargs["extra"]["event"], "external_call_failed")
+        self.assertEqual(context["reason"], "already_exists")
+        self.assertEqual(context["error_code"], "already_exists")
+        self.assertEqual(context["status"], 409)
+        self.assertEqual(
+            context["diagnostic_id"], capture.entries[1][1]["diagnostic_id"]
+        )
+        self.assertNotIn("synthetic message", repr(logger.records))
+
+    def test_personal_api_rate_limit_logs_a_warning_with_category(self) -> None:
+        logger = _CallLogger()
+        capture = _DiagnosticCapture()
+        limited = http_module.classify_provider_status(429, "garmin")
+
+        with self.assertRaises(AppError):
+            external_call(
+                "garmin",
+                "activity_fit",
+                lambda: (_ for _ in ()).throw(limited),
+                {"activity_id": "1"},
+                logger=logger,
+                diagnostic_capture=capture,
+            )
+
+        level, _message, kwargs = logger.records[1]
+        self.assertEqual(level, "warning")
+        context = kwargs["extra"]["context"]
+        self.assertEqual(context["error_code"], "rate_limited")
+        self.assertEqual(context["category"], "rate_limited")
+        self.assertEqual(context["status"], 429)
+        self.assertNotEqual(context["error_code"], "internal_error")
+        self.assertEqual(
+            capture.entries[1][1]["error"],
+            {"type": "ProviderHTTPError", "status": 429, "category": "rate_limited"},
+        )
+
+    def test_http_status_without_a_category_maps_to_its_status(self) -> None:
+        error = http_module.classify_provider_status(502, "garmin")
+
+        self.assertEqual(http_module._external_call_error_code(error), "http_502")
+
+    def test_per_activity_success_logs_at_debug_and_failures_stay_visible(
+        self,
+    ) -> None:
+        logger = _CallLogger()
+        capture = _DiagnosticCapture()
+
+        external_call(
+            "garmin",
+            "activity_fit",
+            lambda: {"ok": True},
+            {"activity_id": "1"},
+            logger=logger,
+            diagnostic_capture=capture,
+        )
+        external_call(
+            "garmin",
+            "sleep",
+            lambda: {"ok": True},
+            {"date": "2026-11-10"},
+            logger=logger,
+            diagnostic_capture=capture,
+        )
+
+        self.assertEqual(
+            [record[0] for record in logger.records],
+            ["debug", "debug", "info", "info"],
+        )
 
 
 if __name__ == "__main__":

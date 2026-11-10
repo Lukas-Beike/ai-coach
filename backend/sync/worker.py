@@ -13,7 +13,7 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.jobs import SyncJobStore
 
 _SYNC_JOB_WAKE_EVENT = threading.Event()
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 
 def shared_sync_job_wake_event() -> threading.Event:
@@ -87,8 +87,10 @@ class SyncJobWorker:
             "Synchronization worker iteration failed",
             extra={
                 "event": "sync_worker_iteration_failed",
-                "error_class": type(exc).__name__,
-                "reason": getattr(exc, "reason", None),
+                "context": {
+                    "error_class": type(exc).__name__,
+                    "reason": getattr(exc, "reason", None),
+                },
             },
         )
 

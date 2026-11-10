@@ -151,7 +151,7 @@ class NutritionHttpApiTests(unittest.TestCase):
             self.local_now,
             unavailable,
         )
-        with self.assertLogs("backend.http_api.nutrition", level="WARNING"):
+        with self.assertLogs("intervals_coach", level="WARNING"):
             routes.handle(self.handler, "/api/nutrition/day")
         payload = self.handler.send_json.call_args.args[1]
         self.assertEqual(payload["macro_ranges"], {"fat_g": (60, 90)})

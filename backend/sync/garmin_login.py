@@ -37,7 +37,7 @@ from backend.provider_credentials import (
 )
 from backend.sync.garmin_personal_status import SDK_SKIPPED_KEY
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 MFA_TTL_SECONDS = 600
 MAX_FIELD_LENGTH = 512

@@ -1207,12 +1207,14 @@ class SyncJobStore:
 
     @staticmethod
     def _log_transition_rejection(expected_status: str, target_status: str) -> None:
-        logging.getLogger(__name__).warning(
+        logging.getLogger("intervals_coach").warning(
             "Sync job status transition rejected",
             extra={
                 "event": "sync_job_transition_rejected",
-                "expected_status": expected_status,
-                "target_status": target_status,
+                "context": {
+                    "expected_status": expected_status,
+                    "target_status": target_status,
+                },
             },
         )
 

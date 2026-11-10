@@ -12,7 +12,7 @@ from backend.coach.job_store import CoachJobStore
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 
 class CoachJobWorker:
@@ -112,8 +112,10 @@ class CoachJobWorker:
             "Coach worker iteration failed",
             extra={
                 "event": event,
-                "error_class": type(error).__name__,
-                "reason": getattr(error, "reason", None),
+                "context": {
+                    "error_class": type(error).__name__,
+                    "reason": getattr(error, "reason", None),
+                },
             },
         )
 

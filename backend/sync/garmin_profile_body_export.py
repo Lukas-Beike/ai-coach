@@ -69,7 +69,9 @@ class GarminProfileBodyExport:
             try:
                 _persist_garmin_tokens(self._tokens, client, login_argument)
             except Exception:  # noqa: BLE001 - preserve the determined remote outcome
-                logging.getLogger(__name__).warning("Garmin token persistence failed")
+                logging.getLogger("intervals_coach").warning(
+                    "Garmin token persistence failed"
+                )
 
     def export(
         self, saved: dict[str, str], revision: str | None, deadline: float | None = None

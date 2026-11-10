@@ -53,7 +53,7 @@ class DatabaseBackupService:
                 "Database checkpoint failed before validated restore",
                 extra={
                     "event": "database_restore_checkpoint_failed",
-                    "error_class": type(exc).__name__,
+                    "context": {"error_class": type(exc).__name__},
                 },
             )
 
@@ -79,7 +79,7 @@ class DatabaseBackupService:
                 "Database backup snapshot could not be created",
                 extra={
                     "event": "database_backup_snapshot_failed",
-                    "error_class": type(exc).__name__,
+                    "context": {"error_class": type(exc).__name__},
                 },
             )
             raise AppError(

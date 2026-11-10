@@ -158,7 +158,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     summary=lambda: {"local": 2}
                 ),
                 canonical_coverage=self.coverage,
-                recent_logs=SimpleNamespace(list=lambda: [{"event": "safe"}]),
+                recent_logs=SimpleNamespace(report_entries=lambda: [{"event": "safe"}]),
                 diagnostic_capture=self.capture,
                 activity_rows=self.canonical_rows,
                 observations=self.canonical_rows,

@@ -1289,7 +1289,7 @@ class GarminSyncLifecycleState:
 
 
 def _log_backfill_failure(error: Exception) -> None:
-    logging.getLogger(__name__).warning(
+    logging.getLogger("intervals_coach").warning(
         "Automatic Garmin activity detail backfill failed (%s)",
         type(error).__name__,
     )
@@ -1505,7 +1505,7 @@ class GarminSyncService:
                     self._lifecycle_state.record_metric_export_status(export_message)
                     message += f" {export_message}"
             except Exception as error:  # noqa: BLE001 - import remains successful; never expose provider errors
-                logging.getLogger(__name__).warning(
+                logging.getLogger("intervals_coach").warning(
                     "Automatic metric export failed (%s)", type(error).__name__
                 )
                 result["metric_export"] = {"exported": 0, "conflicts": 0, "failed": 1}

@@ -67,7 +67,7 @@ class DatabaseManagerTests(unittest.TestCase):
                 raise ValueError("boom")
 
             with (
-                self.assertLogs("backend.db.manager", "ERROR"),
+                self.assertLogs("intervals_coach", "ERROR"),
                 manager.unit_of_work(),
             ):
                 manager.after_commit(fail)

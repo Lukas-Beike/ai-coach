@@ -642,7 +642,7 @@ class SyncJobStoreTests(unittest.TestCase):
 
     def test_job_status_transition_rejects_undeclared_and_raced_edges(self):
         job, _ = self.enqueue()
-        with self.assertLogs("backend.sync.jobs", level="WARNING") as captured:
+        with self.assertLogs("intervals_coach", level="WARNING") as captured:
             with (
                 self.manager.unit_of_work() as db,
                 self.assertRaises(SyncJobTransitionError),

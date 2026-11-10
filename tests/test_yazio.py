@@ -654,5 +654,15 @@ class YazioClientTests(unittest.TestCase):
         self.assertFalse(client.configured)
 
 
+class YazioSecretValuesTests(unittest.TestCase):
+    def test_session_tokens_are_exposed_for_log_redaction_only_while_held(self):
+        client = YazioClient(config, opener=Script(tokens=[token()]))
+        self.assertEqual(client.secret_values(), ())
+
+        client.check_connection()
+
+        self.assertEqual(client.secret_values(), ("access-1", "refresh-1"))
+
+
 if __name__ == "__main__":
     unittest.main()

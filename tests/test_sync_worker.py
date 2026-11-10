@@ -189,7 +189,10 @@ class SyncJobWorkerTests(unittest.TestCase):
             worker.run_loop()
 
         self.assertGreaterEqual(store.claims, 3)
-        reasons = [call.kwargs["extra"]["reason"] for call in log_error.call_args_list]
+        reasons = [
+            call.kwargs["extra"]["context"]["reason"]
+            for call in log_error.call_args_list
+        ]
         self.assertEqual(reasons, ["store_failure", "runner_failure"])
         self.assertNotIn("secret", repr(log_error.call_args_list))
 
@@ -217,7 +220,8 @@ class SyncJobWorkerTests(unittest.TestCase):
         self.assertEqual(store.claims, 2)
         self.assertEqual([job["id"] for job in runner.jobs], ["job-1"])
         self.assertEqual(
-            log_error.call_args.kwargs["extra"]["error_class"], "OperationalError"
+            log_error.call_args.kwargs["extra"]["context"]["error_class"],
+            "OperationalError",
         )
         self.assertNotIn("private detail", repr(log_error.call_args))
 
@@ -248,7 +252,8 @@ class SyncJobWorkerTests(unittest.TestCase):
 
         self.assertEqual(runner.calls, ["uncertain", "next"])
         self.assertEqual(
-            log_error.call_args.kwargs["extra"]["error_class"], "RuntimeError"
+            log_error.call_args.kwargs["extra"]["context"]["error_class"],
+            "RuntimeError",
         )
 
     def test_stop_wakes_worker_and_start_restarts_after_exit(self) -> None:

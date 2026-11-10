@@ -713,12 +713,14 @@ class BackfillBatchTests(_Base):
         _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
         reader = _Details({"1001": RuntimeError("PRIVATE-PROVIDER-TEXT")})
 
-        with self.assertLogs("backend.sync.garmin_activity_details", "WARNING") as logs:
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
             result = self.service(reader).backfill()
 
         self.assertEqual(result["status"], "failed")
         self.assertTrue(reader.closed)
-        self.assertEqual(getattr(logs.records[0], "error_type", None), "RuntimeError")
+        self.assertEqual(
+            vars(logs.records[0])["context"], {"error_type": "RuntimeError"}
+        )
         joined = str(logs.output) + str(result)
         self.assertNotIn("PRIVATE-PROVIDER-TEXT", joined)
 

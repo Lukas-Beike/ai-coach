@@ -535,7 +535,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.outcomes.failure_error = RuntimeError("store failure")
         job = self.job("garmin")
 
-        with self.assertLogs("backend.sync.executor", level="ERROR") as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             self.executor.run(job)
 
         self.assertEqual(self.outcomes.update_calls, [("job-123", "failed")])
@@ -555,7 +555,7 @@ class SyncJobExecutorTests(unittest.TestCase):
             raise RuntimeError("hook failure")
 
         executor = self.make_executor(after_job=broken)
-        with self.assertLogs("backend.sync.executor", level="ERROR") as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             executor.run(self.job("garmin"))
         self.assertEqual(len(self.outcomes.complete_calls), 1)
         self.assertEqual(self.outcomes.failure_calls, [])

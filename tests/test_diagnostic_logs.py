@@ -138,6 +138,71 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
             self.assertEqual(entries, [{"message": "998"}, {"message": "999"}])
             sanitize.assert_called_once_with(entries)
 
+    def test_report_keeps_overnight_warnings_beyond_routine_info(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "app.log"
+            log_path.with_name("app.log.9").write_text(
+                json.dumps({"level": "ERROR", "event": "overnight_failure"}) + "\n",
+                encoding="utf-8",
+            )
+            log_path.with_name("app.log.2").write_text(
+                json.dumps({"level": "WARNING", "event": "warned"}) + "\n",
+                encoding="utf-8",
+            )
+            log_path.write_text(
+                "".join(
+                    json.dumps({"level": "INFO", "event": f"poll_{i}"}) + "\n"
+                    for i in range(500)
+                ),
+                encoding="utf-8",
+            )
+            service = RecentLogEntriesService(
+                log_path, _redactor(), lambda: "fixed-time"
+            )
+
+            entries = service.report_entries()
+
+        events = [entry["event"] for entry in entries]
+        self.assertEqual(events[:2], ["overnight_failure", "warned"])
+        self.assertEqual(events[2:], [f"poll_{i}" for i in range(400, 500)])
+
+    def test_report_limits_non_info_entries_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "app.log"
+            lines = [{"level": "WARNING", "event": f"warn_{i}"} for i in range(250)]
+            lines.append({"level": "INFO", "event": "info"})
+            log_path.write_text(
+                "".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8"
+            )
+            service = RecentLogEntriesService(
+                log_path, _redactor(), lambda: "fixed-time"
+            )
+
+            entries = service.report_entries()
+
+        self.assertEqual(len(entries), 201)
+        self.assertEqual(entries[0]["event"], "warn_50")
+        self.assertEqual(entries[-1]["event"], "info")
+
+    def test_download_reads_all_ten_rotation_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "app.log"
+            log_path.write_text('{"message":"current"}\n', encoding="utf-8")
+            for index in range(1, 10):
+                log_path.with_name(f"app.log.{index}").write_text(
+                    json.dumps({"message": f"rot{index}"}) + "\n", encoding="utf-8"
+                )
+            service = RecentLogEntriesService(
+                log_path, _redactor(), lambda: "fixed-time"
+            )
+
+            lines = service.download().decode("utf-8").splitlines()
+
+        self.assertEqual(
+            [json.loads(line)["message"] for line in lines],
+            [f"rot{index}" for index in range(9, 0, -1)] + ["current"],
+        )
+
     def test_clear_removes_rotated_logs_and_truncates_active_log(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             log_path = Path(directory) / "app.log"

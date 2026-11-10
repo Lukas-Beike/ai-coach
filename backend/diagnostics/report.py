@@ -241,7 +241,7 @@ class DiagnosticReportService:
                 "profile_weekly_plan_removal": summarize_profile_weekly_plan_removal(
                     deps.key_values, db
                 ),
-                "logs": deps.recent_logs.list(),
+                "logs": deps.recent_logs.report_entries(),
                 "debug_capture": {
                     **diagnostic_capture_status,
                     "entries": diagnostic_capture_entries,
