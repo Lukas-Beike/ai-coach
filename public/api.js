@@ -120,6 +120,8 @@
       }, onUnauthorized);
       const payload = await readResponse(response, onUnauthorized);
       if (method && method !== "GET" && !Object.keys(payload).length) throw responseError(response, "Die Serverbestätigung fehlt. Bitte den gespeicherten Stand prüfen.", "empty_confirmation");
+      // Unsaved-form tracking (notifications.js) ends once a change was confirmed.
+      if (method && method !== "GET") globalThis.dispatchEvent?.(new Event("pacecraft:saved"));
       return payload;
     } catch (error) {
       if (error?.name === "AbortError" && !callerSignal?.aborted) {

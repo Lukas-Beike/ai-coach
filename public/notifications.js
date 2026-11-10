@@ -99,7 +99,17 @@ function trackUnsavedForms() {
     const scope = event.isTrusted && event.target.closest?.("form:not(#chatForm), #garminSyncDays");
     if (scope) scope.dataset.dirty = "1";
   });
-  for (const type of ["submit", "reset"]) document.addEventListener(type, (event) => delete event.target.dataset?.dirty);
+  // A submitted form stays unsaved until the server confirms a change, so a rejected save keeps its input.
+  document.addEventListener("submit", (event) => { if (event.target.dataset) event.target.dataset.saving = "1"; });
+  document.addEventListener("reset", (event) => { delete event.target.dataset?.dirty; });
+  globalThis.addEventListener("pacecraft:saved", () => {
+    for (const form of document.querySelectorAll("form[data-saving]")) { delete form.dataset.dirty; delete form.dataset.saving; }
+  });
+}
+
+// An edited form counts unless it sits in a closed dialog (cancelled or dismissed).
+function editedFormPending() {
+  return [...document.querySelectorAll("form[data-dirty], #garminSyncDays[data-dirty]")].some((field) => !field.closest?.("dialog:not([open])"));
 }
 
 // Settings fields that start empty, so any value in them is still being entered.
@@ -111,7 +121,7 @@ function pageInputPending() {
     || [...document.querySelectorAll(UPDATE_RELOAD_INPUT_FIELDS)].some((field) => field.value.trim())
     || (typeof providerCredentialBusy !== "undefined" && providerCredentialBusy.size > 0)
     || Boolean($("#calendarDisplaySaveButton")?.disabled)
-    || Boolean(document.querySelector("form[data-dirty], #garminSyncDays[data-dirty]"))
+    || editedFormPending()
     || Boolean($("#nutritionExtraction") && !$("#nutritionExtraction").hidden && $("#nutritionExtraction").childElementCount);
 }
 

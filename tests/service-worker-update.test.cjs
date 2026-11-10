@@ -61,6 +61,8 @@ function page({ controlled = true } = {}) {
   const documentListeners = {};
   const nodes = { "#messageInput": { value: "" }, "#backupRestoreButton": { disabled: false }, "#calendarDisplaySaveButton": { disabled: false }, "dialog[open]": null };
   const credentialFields = [{ value: "" }, { value: "" }];
+  const dirtyForms = [];
+  const globalListeners = {};
   const providerCredentialBusy = new Set();
   const pendingTurn = new Map();
   const state = {
@@ -82,7 +84,7 @@ function page({ controlled = true } = {}) {
     visibilityState: "visible",
     activeElement: null,
     querySelector: (selector) => nodes[selector] ?? null,
-    querySelectorAll: (selector) => (selector.includes("#cred-form-openai input") ? credentialFields : []),
+    querySelectorAll: (selector) => (selector.includes("#cred-form-openai input") ? credentialFields : selector.startsWith("form[data-dirty]") ? dirtyForms.filter((form) => form.dataset.dirty) : selector === "form[data-saving]" ? dirtyForms.filter((form) => form.dataset.saving) : []),
     addEventListener: (type, handler) => { documentListeners[type] = handler; },
   };
   const reloads = [];
@@ -90,6 +92,7 @@ function page({ controlled = true } = {}) {
     state,
     document,
     providerCredentialBusy,
+    addEventListener: (type, handler) => { globalListeners[type] = handler; },
     setTimeout: (handler) => handler(),
     requestAnimationFrame: (handler) => handler(),
     sessionStorage: { getItem: (key) => pendingTurn.get(key) ?? null },
@@ -119,6 +122,8 @@ function page({ controlled = true } = {}) {
     credentialFields,
     providerCredentialBusy,
     documentListeners,
+    globalListeners,
+    dirtyForms,
     leaveField: () => { document.activeElement = null; documentListeners.focusout(); },
     pendingTurn,
     reloads,
@@ -178,7 +183,7 @@ const blockers = {
   "a typed credential": ({ credentialFields }) => { credentialFields[1].value = "123456"; return () => { credentialFields[1].value = ""; }; },
   "a credential save": ({ providerCredentialBusy }) => { providerCredentialBusy.add("garmin-login"); return () => { providerCredentialBusy.clear(); }; },
   "a calendar settings save": ({ nodes }) => { nodes["#calendarDisplaySaveButton"].disabled = true; return () => { nodes["#calendarDisplaySaveButton"].disabled = false; }; },
-  "an edited form": ({ nodes }) => { nodes["form[data-dirty], #garminSyncDays[data-dirty]"] = {}; return () => { nodes["form[data-dirty], #garminSyncDays[data-dirty]"] = null; }; },
+  "an edited form": ({ dirtyForms }) => { dirtyForms.push({ dataset: { dirty: "1" }, closest: () => null }); return () => { dirtyForms.length = 0; }; },
   "an open nutrition extraction": ({ nodes }) => { nodes["#nutritionExtraction"] = { hidden: false, childElementCount: 2 }; return () => { nodes["#nutritionExtraction"] = { hidden: true, childElementCount: 2 }; }; },
   "a focused settings field": ({ document }) => {
     document.activeElement = { matches: () => true, closest: () => null };
@@ -241,19 +246,44 @@ test("every chat control update checks a held update reload", () => {
   assert.match(updateChatControls, /\n {2}reloadForUpdateWhenSafe\(\);$/);
 });
 
-test("typing into a form marks it unsaved until it is submitted or reset", () => {
-  const { documentListeners } = page();
+test("typing into a form marks it unsaved until a save is confirmed or the form is reset", () => {
+  const { documentListeners, globalListeners, dirtyForms } = page();
   const form = { dataset: {} };
   const field = { closest: (selector) => (selector.startsWith("form") ? form : null) };
+  dirtyForms.push(form);
   documentListeners.input({ isTrusted: true, target: field });
   assert.equal(form.dataset.dirty, "1");
   documentListeners.submit({ target: form });
+  // A rejected save sends no confirmation: the input stays protected.
+  assert.equal(form.dataset.dirty, "1");
+  globalListeners["pacecraft:saved"]();
   assert.equal(form.dataset.dirty, undefined);
   documentListeners.input({ isTrusted: true, target: field });
   documentListeners.reset({ target: form });
   assert.equal(form.dataset.dirty, undefined);
   documentListeners.input({ isTrusted: false, target: field });
   assert.equal(form.dataset.dirty, undefined);
+});
+
+test("a failed save keeps the update reload held until a later save succeeds", () => {
+  const view = page();
+  const form = { dataset: { dirty: "1" }, closest: () => null };
+  view.dirtyForms.push(form);
+  view.replaceWorker();
+  view.documentListeners.submit({ target: form });
+  view.context.reloadForUpdateWhenSafe();
+  assert.equal(view.reloads.length, 0);
+  view.documentListeners.submit({ target: form });
+  view.globalListeners["pacecraft:saved"]();
+  view.context.reloadForUpdateWhenSafe();
+  assert.equal(view.reloads.length, 1);
+});
+
+test("an edited form in a closed dialog does not hold the update reload", () => {
+  const view = page();
+  view.dirtyForms.push({ dataset: { dirty: "1" }, closest: (selector) => (selector === "dialog:not([open])" ? {} : null) });
+  view.replaceWorker();
+  assert.equal(view.reloads.length, 1);
 });
 
 test("leaving a field during a pointer press waits for the click", () => {
