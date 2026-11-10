@@ -7,7 +7,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
-    "@fission-ai/openspec": "1.16.0",
+    "@fission-ai/openspec": "1.16.1",
     "@playwright/test": "1.65.0"
   }
 }
