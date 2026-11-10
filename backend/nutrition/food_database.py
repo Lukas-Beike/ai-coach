@@ -21,6 +21,7 @@ from typing import Any
 
 from backend.errors import AppError
 from backend.nutrition.food_mirror import FoodDatabaseMirror
+from backend.nutrition.models import nutrition_number
 from backend.providers.open_food_facts import OpenFoodFactsClient
 from backend.providers.yazio import YazioClient
 
@@ -634,7 +635,7 @@ class FoodDatabaseService:
         if not isinstance(item, dict) or set(item) != {"food_id", "amount", "unit"}:
             raise AppError(400, "Zutat muss food_id, amount und unit enthalten.")
         try:
-            amount = float(item["amount"])
+            amount = nutrition_number(item["amount"])
         except TypeError, ValueError:
             raise AppError(400, "Ungültige Zutatenmenge.") from None
         if (

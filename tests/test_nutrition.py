@@ -297,6 +297,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         logged = self.service.log_template(template["id"], 0.5)
         self.assertEqual(logged["kcal"], 87)
         self.assertEqual(logged["nutrition_basis"]["ingredients"][0]["amount"], 25)
+        self.assertEqual(self.service.log_template(template["id"], "0,5")["kcal"], 87)
         renamed = self.library.save_template(
             {
                 "id": template["id"],
@@ -688,7 +689,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(corrected["id"], saved["id"])
         self.assertEqual(corrected["kcal"], 600)
         self.assertEqual(corrected["meal_date"], "2026-09-25")
-        self.assertEqual(corrected["logged_at"], "2026-09-24T12:15:00")
+        self.assertEqual(corrected["logged_at"], "2026-09-25T12:15:00")
         self.assertEqual(corrected["description"], "Bowl")
         self.assertEqual(
             (corrected["carbs_g"], corrected["protein_g"], corrected["fat_g"]),

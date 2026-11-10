@@ -12,6 +12,7 @@ from backend.db.repositories import NutritionProductRepository
 from backend.errors import AppError
 from backend.nutrition.components import MealComponentCalculator
 from backend.nutrition.food_database import FoodDatabaseService, matches_all_terms
+from backend.nutrition.models import nutrition_number
 from backend.nutrition.photo import validate_packaging_extraction
 
 PRODUCT_NOT_FOUND = "Produkt nicht gefunden."
@@ -101,6 +102,9 @@ class ProductCatalogService:
     ) -> dict[str, Any]:
         current = self.get_product(product_id)
         merged = {**current, **(payload if isinstance(payload, dict) else {})}
+        if merged.get("confidence") is None:
+            # The stored value is the product's own; an edit without one keeps it.
+            merged["confidence"] = current.get("extraction_confidence")
         merged["id"] = str(product_id)
         return self.save_product(merged)
 
@@ -190,7 +194,7 @@ class ProductCatalogService:
                 reason="nutrition_product_archived",
             )
         try:
-            quantity = float(amount)
+            quantity = nutrition_number(amount)
         except (TypeError, ValueError) as exc:
             raise AppError(400, "Ung\u00fcltige Produktmenge.") from exc
         if not math.isfinite(quantity) or not 0 < quantity <= 10000:

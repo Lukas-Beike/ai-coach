@@ -84,7 +84,41 @@ function renderNutritionSegments(route) {
 function nutritionNumber(value) {
   if (value == null || value === "") return "–";
   const number = Number(value);
-  return Number.isFinite(number) ? String(Math.round(number * 10) / 10) : String(value);
+  return Number.isFinite(number) ? AppFormat.number(number, { digits: 1 }) : String(value);
+}
+
+// A diary write reports its text with "Rückgängig" while the change can still be undone.
+function showNutritionReceipt(status, message, change, afterUndo) {
+  const text = document.createElement("span");
+  text.textContent = `${message} `;
+  status.replaceChildren(text);
+  if (!change?.id) return;
+  const undo = document.createElement("button");
+  undo.type = "button";
+  undo.className = "message-undo";
+  undo.textContent = "Rückgängig";
+  undo.addEventListener("click", async () => {
+    undo.disabled = true;
+    try {
+      await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
+      status.textContent = "Zurückgenommen.";
+      await afterUndo?.();
+    } catch (error) {
+      undo.disabled = false;
+      text.textContent = `${error.message} `;
+    }
+  });
+  status.append(undo);
+}
+
+async function deleteNutritionEntry(item) {
+  if (!await requestConfirmation(`Mahlzeit „${item.description}“ wirklich löschen?`, { title: "Mahlzeit löschen?", confirmLabel: "Löschen" })) return;
+  const status = document.querySelector("#nutritionStatus");
+  try {
+    const result = await api("/api/nutrition/entry/delete", { method: "POST", body: JSON.stringify({ id: item.id }) });
+    await loadNutrition({ preserve: true });
+    showNutritionReceipt(status, "Mahlzeit gelöscht.", result.change, () => loadNutrition({ preserve: true }));
+  } catch (error) { status.textContent = `Mahlzeit konnte nicht gelöscht werden: ${error.message}`; }
 }
 
 function nutritionComponentSource(basis) {
@@ -181,6 +215,11 @@ function nutritionCard(item, template) {
   if (!template) {
     const details = nutritionComponentDetails(item);
     if (details) card.append(details);
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.className = "secondary-button"; remove.textContent = "Löschen";
+    remove.setAttribute("aria-label", `Mahlzeit löschen: ${item.description}`);
+    remove.addEventListener("click", () => void deleteNutritionEntry(item));
+    card.append(remove);
   }
   return card;
 }
@@ -945,11 +984,13 @@ async function addNutritionProductToMeal() {
   const addButton = document.querySelector("#nutritionProductUseAdd");
   addButton.disabled = true;
   try {
-    if (mealId) await api("/api/nutrition/entry/add-product", { method: "POST", body: JSON.stringify({ id: mealId, product_id: use.product.id, amount: Number(use.amount), unit: use.unit }) });
-    else await api("/api/nutrition/entry", { method: "POST", body: JSON.stringify({ product_id: use.product.id, amount: Number(use.amount), unit: use.unit, meal_type: "snack", meal_date: document.querySelector("#nutritionDate").value || todayIso(), source: "manual" }) });
+    const body = mealId
+      ? { id: mealId, product_id: use.product.id, amount: Number(use.amount), unit: use.unit }
+      : { product_id: use.product.id, amount: Number(use.amount), unit: use.unit, meal_type: "snack", meal_date: document.querySelector("#nutritionDate").value || todayIso(), source: "manual" };
+    const result = await api(mealId ? "/api/nutrition/entry/add-product" : "/api/nutrition/entry", { method: "POST", body: JSON.stringify(body) });
     if (generation !== state.sessionGeneration) return;
     closeNutritionProductUse();
-    document.querySelector("#nutritionProductStatus").textContent = `„${use.product.name}“ ${mealId ? "zur Mahlzeit ergänzt" : "als Snack erfasst"}.`;
+    showNutritionReceipt(document.querySelector("#nutritionProductStatus"), `„${use.product.name}“ ${mealId ? "zur Mahlzeit ergänzt" : "als Snack erfasst"}.`, result.change);
   } catch (error) {
     if (generation !== state.sessionGeneration) return;
     document.querySelector("#nutritionProductUseStatus").textContent = `Produkt konnte nicht erfasst werden: ${error.message}`;

@@ -51,7 +51,7 @@ def _basis_amount(value: Any) -> float | None:
     if isinstance(value, bool):
         raise AppError(400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction")
     try:
-        amount = float(value)
+        amount = nutrition_number(value)
     except (TypeError, ValueError) as exc:
         raise AppError(
             400, INVALID_BASIS_AMOUNT, reason="invalid_food_extraction"
