@@ -904,6 +904,23 @@ class ReplayTests(unittest.TestCase):
         service.rearm()
         self.assertEqual("2026-05-01", cursor_of(env, WAHOO))
 
+    def test_rearm_leaves_a_walking_chain_until_it_reaches_the_floor(self) -> None:
+        env = self.env
+        self.stored_old_session(1, 120)
+        service, _lister, _downloads = self.replay_service({}, [])
+        write_cursor(env.db, WAHOO, STREAM_HISTORY_CURSOR, "2026-05-01", "", NOW)
+
+        service.rearm()
+
+        # A queued job may still carry the old end_date: keep the walk, record
+        # nothing, so the first refresh after the floor restarts from the newest day.
+        self.assertEqual("2026-05-01", cursor_of(env, WAHOO))
+        self.assertEqual(0, state_of(env, WAHOO)["replay_mapper_version"])
+        write_cursor(env.db, WAHOO, STREAM_HISTORY_CURSOR, FLOOR.isoformat(), "", NOW)
+        service.rearm()
+        self.assertIsNone(cursor_of(env, WAHOO))
+        self.assertEqual(MAPPER_VERSION, state_of(env, WAHOO)["replay_mapper_version"])
+
     def test_without_a_replay_window_rearm_changes_nothing(self) -> None:
         env = self.env
         self.stored_old_session(1, 120)

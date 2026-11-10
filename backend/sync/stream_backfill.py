@@ -293,6 +293,11 @@ class StreamBackfillService:
             state = _read_state(self._key_values, db, self._provider)
             if state["replay_mapper_version"] >= version:
                 return
+            cursor = read_cursor(db, self._provider, STREAM_HISTORY_CURSOR)
+            if not _at_floor(cursor.get("cursor"), self._earliest_date):
+                # A walking chain may carry an older end_date in its queued job;
+                # it is rearmed by the first refresh after it reaches the floor.
+                return
             state.update(
                 replay_mapper_version=version,
                 skipped_ids=[],
