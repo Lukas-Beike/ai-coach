@@ -32,9 +32,13 @@ const ASSETS = [
   "/settings.js",
   "/app.js",
   "/icon.svg",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/icon-maskable-512.png",
   "/apple-touch-icon.png",
   "/manifest.webmanifest"
 ];
+const CACHED_PATHS = new Set(ASSETS.map((asset) => asset.split("?")[0]));
 const VERSIONED_ASSETS = new Set([
   "/format.js",
   "/activity-details.js",
@@ -88,25 +92,35 @@ globalThis.addEventListener("fetch", (event) => {
     })));
     return;
   }
+  const isNavigation = event.request.mode === "navigate";
+  // Every navigation is the one app shell and is kept under "/" only, so unknown
+  // paths and OAuth return URLs add no copies. Other files are kept only when precached.
+  const cacheKey = isNavigation ? "/" : event.request;
+  const storable = isNavigation || CACHED_PATHS.has(url.pathname);
   const fetched = fetch(event.request).then((response) => {
-    const copy = response.ok ? response.clone() : null;
-    return { response, stored: copy && caches.open(CACHE).then((cache) => cache.put(event.request, copy)) };
+    const copy = storable && response.ok ? response.clone() : null;
+    return { response, stored: copy && caches.open(CACHE).then((cache) => cache.put(cacheKey, copy)) };
   });
   // The cache update outlives a response that was already served from the cache.
   event.waitUntil(fetched.then(({ stored }) => stored).catch(() => {}));
   const network = fetched.then(({ response }) => response);
-  const cached = () => caches.open(CACHE).then((cache) => cache.match(event.request));
-  if (event.request.mode !== "navigate") {
+  const cached = () => caches.open(CACHE).then((cache) => cache.match(cacheKey));
+  if (!isNavigation) {
     event.respondWith(network.catch(cached));
     return;
   }
   // A slow network must not hold the app start: after a short wait the cached
   // page starts the app while the network response still refreshes the cache.
+  // A server error (a proxy's 502 page during a restart) counts as no network.
   event.respondWith(new Promise((resolve, reject) => {
     let settled = false;
     const settle = (response) => { if (response && !settled) { settled = true; resolve(response); } };
     const timer = setTimeout(() => cached().then(settle).catch(() => {}), NAVIGATION_TIMEOUT_MS);
-    network.then((response) => { clearTimeout(timer); settle(response); }).catch(async () => {
+    network.then(async (response) => {
+      clearTimeout(timer);
+      if (response.status < 500) return settle(response);
+      settle(await cached().catch(() => null) || response);
+    }).catch(async () => {
       clearTimeout(timer);
       const response = await cached().catch(() => null);
       if (response) settle(response);

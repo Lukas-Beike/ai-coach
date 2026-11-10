@@ -6,6 +6,7 @@ async function syncGarmin() {
   button.disabled = true;
   button.textContent = "Garmin wird synchronisiert…";
   try {
+    $("#garminSyncDays")?.removeAttribute?.("data-dirty");
     const configuredDays = $("#garminSyncDays")?.value || state.data?.sync_settings?.garmin_days || 84;
     const result = await api("/api/garmin/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
     const completed = await waitForSyncJob(result.id);

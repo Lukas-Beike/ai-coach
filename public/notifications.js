@@ -76,8 +76,13 @@ function registerServiceWorker() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") reloadForUpdateWhenSafe();
   });
-  // Leaving a field may end the last edit; focus moves on after focusout.
-  document.addEventListener("focusout", () => setTimeout(reloadForUpdateWhenSafe, 0));
+  trackUnsavedForms();
+  // Leaving a field may end the last edit; focus moves on after focusout. A pointer
+  // press on a save button must reach its click first, so the check waits a frame
+  // after the press ends.
+  document.addEventListener("focusout", () => { if (!pointerHeld) requestAnimationFrame(reloadForUpdateWhenSafe); });
+  document.addEventListener("pointerdown", () => { pointerHeld = true; }, true);
+  for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, () => { pointerHeld = false; setTimeout(() => requestAnimationFrame(reloadForUpdateWhenSafe), 0); }, true);
   navigator.serviceWorker.register("/service-worker.js").catch(() => {});
 }
 
@@ -86,6 +91,16 @@ function registerServiceWorker() {
 // next check: when a chat or load state ends, or when the page is hidden.
 let serviceWorkerReplaced = false;
 let serviceWorkerReloaded = false;
+let pointerHeld = false;
+
+// Any form the athlete typed into counts as unsaved until it is submitted or reset.
+function trackUnsavedForms() {
+  document.addEventListener("input", (event) => {
+    const scope = event.isTrusted && event.target.closest?.("form:not(#chatForm), #garminSyncDays");
+    if (scope) scope.dataset.dirty = "1";
+  });
+  for (const type of ["submit", "reset"]) document.addEventListener(type, (event) => delete event.target.dataset?.dirty);
+}
 
 // Settings fields that start empty, so any value in them is still being entered.
 const UPDATE_RELOAD_INPUT_FIELDS = "#cred-form-openai input, #cred-form-intervals input, #cred-form-wahoo input, #cred-form-garmin_personal input, #garmin-login-form input, #garmin-mfa-form input, #nutritionProductQuery";
@@ -95,7 +110,9 @@ function pageInputPending() {
   return Boolean(active?.matches?.("input, textarea, select") && !active.closest?.("#chatForm"))
     || [...document.querySelectorAll(UPDATE_RELOAD_INPUT_FIELDS)].some((field) => field.value.trim())
     || (typeof providerCredentialBusy !== "undefined" && providerCredentialBusy.size > 0)
-    || Boolean($("#calendarDisplaySaveButton")?.disabled);
+    || Boolean($("#calendarDisplaySaveButton")?.disabled)
+    || Boolean(document.querySelector("form[data-dirty], #garminSyncDays[data-dirty]"))
+    || Boolean($("#nutritionExtraction") && !$("#nutritionExtraction").hidden && $("#nutritionExtraction").childElementCount);
 }
 
 function updateReloadIsSafe() {
