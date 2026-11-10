@@ -11,7 +11,11 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
-from support import isolated_server, reset_application_state
+from support import (
+    canonical_backfill_stopped,
+    isolated_server,
+    reset_application_state,
+)
 
 from backend.activities.hr_cap import effective_caps
 from backend.coach import service as coach_service
@@ -34,6 +38,9 @@ class DialogueHarness:
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         self.enterContext(isolated_server(server, root))
+        # A provider refresh starts the derived passes in a background thread;
+        # join it before the temporary data directory is removed.
+        self.enterContext(canonical_backfill_stopped(server))
         reset_application_state(server)
         fixed = patch.object(
             server.ATHLETE_CLOCK,
