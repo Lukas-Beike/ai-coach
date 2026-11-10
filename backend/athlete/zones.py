@@ -9,6 +9,7 @@ records a change-history row whose undo restores the previous local state.
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Callable, Mapping
 from datetime import date
@@ -227,22 +228,23 @@ def _effective(
 ) -> list[dict[str, Any]]:
     """Per sport, metric and environment the configuration in effect today."""
     result = []
-    for sport in EDITABLE_SPORTS:
-        for metric in ZoneConfigurationMetric:
-            for indoor in (False, True):
-                chosen = effective_zone_configuration(
-                    configurations, metric, sport, indoor=indoor, day=today
-                )
-                if chosen is None or (indoor and chosen.environment is None):
-                    continue
-                result.append(
-                    {
-                        "sport": sport.value,
-                        "metric": metric.value,
-                        "environment": "indoor" if indoor else None,
-                        "key": canonical_domain_store.zone_configuration_key(chosen),
-                    }
-                )
+    for sport, metric, indoor in itertools.product(
+        EDITABLE_SPORTS, ZoneConfigurationMetric, (False, True)
+    ):
+        chosen = effective_zone_configuration(
+            configurations, metric, sport, indoor=indoor, day=today
+        )
+        # The indoor view lists only a configuration of its own.
+        if chosen is None or (indoor and chosen.environment is None):
+            continue
+        result.append(
+            {
+                "sport": sport.value,
+                "metric": metric.value,
+                "environment": "indoor" if indoor else None,
+                "key": canonical_domain_store.zone_configuration_key(chosen),
+            }
+        )
     return result
 
 
@@ -312,6 +314,8 @@ class ZoneConfigurationService:
         elif payload.get("valid_from") in (None, ""):
             dated["valid_from"] = self._today().isoformat()
         configuration = local_configuration(dated)
+        if configuration.valid_from and configuration.valid_from > self._today():
+            raise AppError(400, "Das Datum „Gilt ab“ darf nicht in der Zukunft liegen.")
         key = canonical_domain_store.zone_configuration_key(configuration)
         with self._database_manager.unit_of_work() as db:
             current, _ = self.current(db, key)

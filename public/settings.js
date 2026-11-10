@@ -527,6 +527,7 @@ function renderZoneEditor() {
   $("#zoneFromBeginningField").hidden = selected.length > 0;
   $("#zoneFromBeginning").checked = false;
   $("#zoneValidFrom").disabled = false;
+  $("#zoneValidFrom").max = zoneToday;
   $("#zoneValidFrom").value = zoneToday;
   $("#zoneRemoveButton").dataset.key = local?.key || "";
   const sources = $("#zoneSources");

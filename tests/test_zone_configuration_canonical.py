@@ -517,6 +517,12 @@ class LocalZoneEditTests(unittest.TestCase):
         self.assertEqual(self._effective_lthr(date(2026, 10, 10)), 165)
         self.assertEqual(self._effective_lthr(date(2026, 10, 11)), 172)
 
+    def test_a_future_start_is_rejected(self) -> None:
+        with self.assertRaises(AppError) as raised:
+            self.service.save({**RUN_HR, "valid_from": "2026-10-12"})
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(self.local(), [])
+
     def test_an_earlier_date_can_be_chosen(self) -> None:
         receipt = self.service.save({**RUN_HR, "valid_from": "2026-09-01"})
         self.assertEqual(receipt["configuration"]["valid_from"], "2026-09-01")
