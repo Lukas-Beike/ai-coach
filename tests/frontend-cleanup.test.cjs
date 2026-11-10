@@ -19,9 +19,12 @@ function workerAssets() {
 test("every service-worker asset exists in public/ and is referenced from index.html", () => {
   const assets = workerAssets().filter((asset) => asset !== "/");
   assert.ok(assets.length > 0);
+  // Icons only the manifest names are cached for the offline install.
+  const manifestIcons = new Set(JSON.parse(read("manifest.webmanifest")).icons.map((icon) => icon.src).filter((src) => !index.includes(`"${src}`)));
   for (const asset of assets) {
     const file = asset.split("?")[0].slice(1);
     assert.ok(fs.existsSync(path.join(publicDir, file)), `${asset} is cached but missing from public/`);
+    if (manifestIcons.has(asset)) continue;
     if (file === "manifest.webmanifest") assert.ok(index.includes(`href="/${file}"`), `${file} is not linked from index.html`);
     else assert.ok(index.includes(`"${asset}"`), `${asset} is not referenced from index.html with the same version`);
   }

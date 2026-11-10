@@ -89,18 +89,17 @@ class FitBuilder:
     def data(self, local, values, *, time_offset=None):
         """Add one data record. Absent fields are written as FIT invalid values.
 
-        With ``time_offset`` the record uses a compressed timestamp header and
-        field 253 is omitted from the record, as the FIT protocol requires.
+        With ``time_offset`` the record uses a compressed timestamp header; like
+        the FIT SDK reads it, it carries every field of its definition, so a
+        definition without field 253 gives the spec-standard compressed layout.
         """
         fields = self._definitions[local]
         if time_offset is None:
             header = local
-            items = fields
         else:
             header = 0x80 | (local << 5) | (time_offset & 0x1F)
-            items = [field for field in fields if field[0] != 253]
         self._body.append(header)
-        for number, base_type in items:
+        for number, base_type in fields:
             value = values.get(number, _INVALID.get(base_type & 0x1F))
             self._body += struct.pack("<" + _FORMATS[base_type & 0x1F], value)
         return self
@@ -233,16 +232,39 @@ class FitFileFramingTests(unittest.TestCase):
 
 class FitFileValueTests(unittest.TestCase):
     def test_compressed_timestamps_restore_the_last_full_timestamp(self):
+        # Local 1 has no field 253 (the spec layout): the timestamp comes from the
+        # header offset alone and still advances the last full timestamp.
         builder = FitBuilder().define(0, 20, [(253, UINT32), (3, UINT8)])
+        builder.define(1, 20, [(3, UINT8)])
         builder.data(0, {253: 1030, 3: 100})  # 1030 & 31 == 6
-        builder.data(0, {3: 101}, time_offset=3)  # wraps to 1059
-        builder.data(0, {3: 102}, time_offset=5)  # 1059 & 31 == 3, so +2 to 1061
+        builder.data(1, {3: 101}, time_offset=3)  # wraps to 1059
+        builder.data(1, {3: 102}, time_offset=5)  # 1059 & 31 == 3, so +2 to 1061
+        builder.data(1, {3: 103}, time_offset=5)  # same offset: no step
         self.assertEqual(
             fit_messages(builder.build()),
             [
                 (20, {253: 1030, 3: 100}),
                 (20, {253: 1059, 3: 101}),
                 (20, {253: 1061, 3: 102}),
+                (20, {253: 1061, 3: 103}),
+            ],
+        )
+
+    def test_a_compressed_record_whose_definition_has_253_reads_every_field(self):
+        # The FIT SDK reads all defined fields and then sets the timestamp from the
+        # offset, so the stored 253 value is replaced and the next record advances.
+        builder = FitBuilder().define(0, 20, [(253, UINT32), (3, UINT8)])
+        builder.data(0, {253: 1030, 3: 100})
+        builder.data(
+            0, {253: 7, 3: 101}, time_offset=9
+        )  # 1030 & 31 == 6, so +3 to 1033
+        builder.data(0, {253: 7, 3: 102}, time_offset=12)  # +3 to 1036
+        self.assertEqual(
+            [message for _, message in fit_messages(builder.build())],
+            [
+                {253: 1030, 3: 100},
+                {253: 1033, 3: 101},
+                {253: 1036, 3: 102},
             ],
         )
 

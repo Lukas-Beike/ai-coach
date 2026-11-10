@@ -15,7 +15,9 @@ from intervals_compaction import compact_snapshot
 from backend.coach import streams as coach_streams
 from backend.config import Config
 from backend.db.manager import DATABASE_MANAGER_CACHE
+from backend.errors import AppError
 from backend.runtime import clock as runtime_clock
+from backend.sync.metric_export_runner import MetricExportRunner
 
 PROVIDER_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
 PROVIDER_SYNCED_TEXT = "2026-10-10T06:00:00+00:00"
@@ -100,6 +102,7 @@ class RecordedIntervalsClient:
         }
         self.competitions = list(competitions or [])
         self.library = list(library or [])
+        self.saved_events: dict[str, dict[str, Any]] = {}
 
     def fetch_snapshot(self, activity_days):
         self.recorder.record(
@@ -118,9 +121,17 @@ class RecordedIntervalsClient:
     def upsert_competition_events(self, events):
         if events:
             self.recorder.record("POST", "/athlete/0/events", events)
-        return [
+        saved = [
             {**event, "id": event.get("id") or "remote-event-1"} for event in events
         ]
+        self.saved_events.update({str(event["id"]): event for event in saved})
+        return saved
+
+    def get_event(self, event_id):
+        self.recorder.record("GET", f"/athlete/0/events/{event_id}")
+        if event_id not in self.saved_events:
+            raise AppError(404, "Event nicht gefunden.")
+        return self.saved_events[event_id]
 
     def bulk_delete_events(self, identifiers):
         if identifiers:
@@ -188,6 +199,27 @@ def canonical_backfill_stopped(server, timeout: float = 10.0):
     finally:
         server.CANONICAL_BACKFILL.worker.stop()
         server.CANONICAL_BACKFILL.worker.join(timeout)
+
+
+@contextmanager
+def metric_export_stopped(server, timeout: float = 10.0):
+    """Give the test its own metric-export runner and join it before cleanup.
+
+    A provider refresh requests a delayed automatic export on a background
+    thread. Left on the shared runner it would run after the test, in whatever
+    data directory is current, and race the temporary directory's removal.
+    """
+    runner = MetricExportRunner(
+        lambda: server.METRIC_EXPORT,
+        enabled=server._intervals_export_configured,
+        maintenance_gate=lambda: server.runtime_maintenance.MAINTENANCE_GATE,
+    )
+    try:
+        with patch.object(server, "METRIC_EXPORT_RUNNER", runner):
+            yield runner
+    finally:
+        runner.stop()
+        runner.join(timeout)
 
 
 def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -> None:

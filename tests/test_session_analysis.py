@@ -37,9 +37,9 @@ def run(environment="outdoor", grade=True):
 
 class SessionAnalysisTests(unittest.TestCase):
     def test_heart_rate_histogram_counts_moving_seconds_per_bpm(self):
-        # 100 s at 120 bpm, a 20 s gap (nothing counted), 50 s at 150 bpm of
+        # 100 s at 120 bpm, a 40 s pause (nothing counted), 50 s at 150 bpm of
         # which the first 10 s are stopped; 25 and 250 bpm are no readings.
-        times = list(range(101)) + [120 + second for second in range(51)]
+        times = list(range(101)) + [140 + second for second in range(51)]
         heart = [120.4] * 101 + [150] * 51
         moving = [True] * 101 + [False] * 10 + [True] * 41
         heart[10] = 25
@@ -49,6 +49,32 @@ class SessionAnalysisTests(unittest.TestCase):
         )
         self.assertEqual({"120": 98.0, "150": 40.0}, result["seconds"])
         self.assertEqual(138.0, result["covered_s"])
+
+    def test_histogram_counts_downsampled_and_smart_recording_steps(self):
+        times = [index * 5.4 for index in range(2000)]
+        result = heart_rate_histogram(
+            {"streams": {"time": times, "heartrate": [140] * 2000}}
+        )
+        self.assertAlmostEqual(1999 * 5.4, result["covered_s"], places=1)
+        steps = [1, 2, 3, 4, 6, 7, 8]
+        smart = [0.0]
+        for index in range(600):
+            smart.append(smart[-1] + steps[index % len(steps)])
+        result = heart_rate_histogram(
+            {"streams": {"time": smart, "heartrate": [140] * len(smart)}}
+        )
+        self.assertAlmostEqual(smart[-1], result["covered_s"], places=2)
+
+    def test_decoupling_works_on_a_downsampled_ride(self):
+        result = aerobic_analysis(ride([index * 5.4 for index in range(2000)]))
+        self.assertEqual("ok", result["status"])
+
+    def test_a_real_pause_above_the_adaptive_gap_is_still_skipped(self):
+        times = [float(i) for i in range(100)] + [200.0 + i for i in range(100)]
+        result = heart_rate_histogram(
+            {"streams": {"time": times, "heartrate": [140] * len(times)}}
+        )
+        self.assertEqual(198.0, result["covered_s"])
 
     def test_heart_rate_histogram_needs_a_matching_stream(self):
         self.assertIsNone(heart_rate_histogram({"streams": {"time": [0, 1, 2]}}))
@@ -117,7 +143,7 @@ class SessionAnalysisTests(unittest.TestCase):
                     100 if i % 2 else 300 for i in range(3601)
                 ]
             else:
-                activity = ride([0, 600, 2100, 3600])
+                activity = ride(list(range(601)) + list(range(2100, 3601)))
             with self.subTest(variant=variant):
                 self.assertEqual(
                     "insufficient_data", aerobic_analysis(activity)["status"]

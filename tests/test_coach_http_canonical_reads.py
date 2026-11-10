@@ -22,7 +22,6 @@ from intervals_plan_stub import intervals_snapshot_coverage
 
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.context import CoachPerformanceContextReader
-from backend.diagnostics.canonical_counts import activity_count, wellness_day_count
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.http_api.state_prelude import CalendarWindowRange, PublicStateLocalPrelude
 from backend.planning.compact_activities import (
@@ -385,29 +384,3 @@ class HttpStateReadTests(CanonicalContextReadCase):
 
         self.assertTrue(stripped)
         self.assertEqual(_by_id(stripped), _by_id(full))
-
-
-class DiagnosticCountTests(CanonicalContextReadCase):
-    @staticmethod
-    def _counts(selector: Any, db: Any) -> tuple[int, int]:
-        return activity_count(selector, db), wellness_day_count(selector, db, TODAY)
-
-    def _read_counts(self, selector: Any, _snapshot: dict[str, Any]) -> tuple[int, int]:
-        with self.manager.reader() as db:
-            return self._counts(selector, db)
-
-    def test_counts_are_zero_until_the_tables_serve(self) -> None:
-        pending, tables = self._pending_and_tables(self._read_counts)
-
-        self.assertEqual(pending, (0, 0))
-        self.assertEqual(tables, (6, 3))
-
-    def test_counts_do_not_need_the_snapshot_sections(self) -> None:
-        full, stripped = self._with_and_without_sections(self._read_counts)
-
-        self.assertEqual(stripped, full)
-
-    def test_unwired_readers_count_zero(self) -> None:
-        with self.manager.reader() as db:
-            self.assertEqual(activity_count(None, db), 0)
-            self.assertEqual(wellness_day_count(None, db, TODAY), 0)

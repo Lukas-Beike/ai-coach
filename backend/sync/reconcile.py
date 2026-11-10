@@ -70,12 +70,16 @@ class PlannedUnitSyncStateWriter:
         *,
         now: str,
         expected_payload: str | None = None,
+        clear_remote_event: bool = False,
     ) -> bool:
+        """Persist one state; ``clear_remote_event`` drops a removed event's ids."""
         row = db.execute(
             "SELECT payload, sync_conflict FROM planned_units WHERE local_id = ?",
             (local_id,),
         ).fetchone()
-        state_values = self._state_values(row, state, remote_event, expected_payload)
+        state_values = self._state_values(
+            row, state, remote_event, expected_payload, clear_remote_event
+        )
         if state_values is None:
             return False
         if row is None:
@@ -92,6 +96,7 @@ class PlannedUnitSyncStateWriter:
         state: str,
         remote_event: dict[str, Any] | None,
         expected_payload: str | None,
+        clear_remote_event: bool = False,
     ) -> tuple[dict[str, Any], str, str, bool, str | None] | None:
         changed = expected_payload is not None and (
             row is None or row["payload"] != expected_payload
@@ -112,6 +117,8 @@ class PlannedUnitSyncStateWriter:
         )
         if changed and state == "synced":
             _apply_remote_event(baseline_payload, state, remote_event)
+        if clear_remote_event:
+            _drop_remote_event_ids(payload, baseline_payload)
         persisted_state = "local" if changed and state == "synced" else state
         if changed:
             payload["sync_status"] = persisted_state
@@ -187,3 +194,10 @@ class PlannedUnitSyncStateWriter:
                 local_id,
             ),
         )
+
+
+def _drop_remote_event_ids(*targets: dict[str, Any]) -> None:
+    """The event is gone, so a restored unit must not send its old id."""
+    for target in targets:
+        target.pop("remote_event_id", None)
+        target.pop("remote_event_external_id", None)

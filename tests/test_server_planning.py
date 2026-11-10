@@ -485,11 +485,10 @@ class ServerPlanningTests(ServerTestCase):
         checkins = {
             row["checkin_date"]: row for row in server.ATHLETE_DATA.checkin().list(30)
         }
-        for offset in range(planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS):
-            pause_date = (
-                server.ATHLETE_CLOCK.now().date() + timedelta(days=offset)
-            ).isoformat()
-            self.assertEqual(checkins[pause_date]["illness"], "Fever")
+        today = server.ATHLETE_CLOCK.now().date()
+        self.assertEqual(checkins[today.isoformat()]["illness"], "Fever")
+        for offset in range(1, planning_adaptive.DEFAULT_ILLNESS_PAUSE_DAYS):
+            self.assertNotIn((today + timedelta(days=offset)).isoformat(), checkins)
         repeated_preview = (
             server.PLANNING_WORKFLOWS.adaptive_replan_preview_service().preview()
         )
@@ -3076,13 +3075,19 @@ class ServerPlanningTests(ServerTestCase):
         )
         local_id = saved["competition"]["id"]
         deleted = []
+        stored = {}
 
         class FakeIntervalsClient:
             def fetch_competition_events(self):
                 return []
 
             def upsert_competition_events(self, events):
-                return [{**events[0], "id": 888}] if events else []
+                saved = [{**events[0], "id": 888}] if events else []
+                stored.update({str(event["id"]): event for event in saved})
+                return saved
+
+            def get_event(self, event_id):
+                return stored[event_id]
 
             def bulk_delete_events(self, identifiers):
                 deleted.extend(identifiers)

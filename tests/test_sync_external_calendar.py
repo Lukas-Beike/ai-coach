@@ -251,6 +251,34 @@ class ExternalCalendarSyncTests(unittest.TestCase):
         )
         self.assertEqual(self.observer.scopes[0].result, result)
 
+    def test_unsupported_component_is_skipped_stored_and_reported(self):
+        feed = (
+            b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+            b"BEGIN:VEVENT\r\nUID:ok\r\nDTSTART:20260925T100000Z\r\n"
+            b"SUMMARY:Urlaub\r\nDESCRIPTION:[NO_TRAINING]\r\nEND:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\nUID:odd\r\nDTSTART:20260101T100000Z\r\n"
+            b"SUMMARY:Geheim\r\nRRULE:FREQ=WEEKLY;BYWEEKNO=20\r\nEND:VEVENT\r\n"
+            b"END:VCALENDAR\r\n"
+        )
+        with (
+            patch(
+                "backend.providers.calendar.external_calendar_url",
+                return_value="https://calendar.example/feed.ics",
+            ),
+            patch("backend.providers.calendar.fetch_calendar_feed", return_value=feed),
+        ):
+            result = self.service.sync("manual", "operation-1")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["events"], 1)
+        self.assertEqual(result["skipped"], {"count": 1, "reasons": {"recurrence": 1}})
+        self.assertEqual([row["uid"] for row in self.rows()], ["ok"])
+        self.assertEqual(self.rows()[0]["no_training"], 1)
+        self.assertEqual(self.kv("last_external_calendar_sync_error"), "")
+        stored = self.kv("last_external_calendar_sync_skipped")
+        self.assertEqual(stored, '{"recurrence": 1}')
+        self.assertNotIn("Geheim", stored)
+
     def test_lock_competition_is_observed_without_provider_or_database_calls(self):
         self.lock.acquire()
         try:

@@ -114,7 +114,7 @@ class CoachReviewTests(unittest.TestCase):
                 server.COACH_CONVERSATION,
                 "provision_service",
                 return_value=Mock(
-                    ensure=Mock(return_value="summary-recovery-conversation")
+                    binding=Mock(return_value="summary-recovery-conversation")
                 ),
             ),
             patch(
@@ -492,14 +492,12 @@ class CoachReviewTests(unittest.TestCase):
         )
 
     def test_adaptive_apply_after_day_change_preserves_now_past_unit(self):
-        tomorrow = (
-            _local_datetime.now().astimezone().date() + timedelta(days=1)
-        ).isoformat()
+        today = _local_datetime.now().astimezone().date().isoformat()
         planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
                     **self.workout(),
-                    "date": tomorrow,
+                    "date": today,
                     "description": "- 60m 60%",
                     "duration_minutes": 60,
                 }

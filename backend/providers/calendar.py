@@ -35,11 +35,21 @@ ICAL_MAX_RECURRENCE_COUNT = 1000
 ICAL_MAX_RECURRENCE_PERIODS = 10000
 ICAL_MAX_EXPANSION_STEPS = 1_000_000
 ICAL_MAX_RAW_EVENTS = 10000
+ICAL_SKIP_RECURRENCE = "recurrence"
+ICAL_SKIP_COMPONENT = "component"
+ICAL_SKIP_REASONS = frozenset({ICAL_SKIP_RECURRENCE, ICAL_SKIP_COMPONENT})
 ICAL_DAY_NUMBERS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 
 
 class _CalendarResolveTimeout(TimeoutError):
     """Address resolution did not finish within the caller's deadline."""
+
+
+class _IcalSkip(AppError):
+    """An unsupported or invalid component that is skipped, not fatal."""
+
+    def __init__(self, message: str, reason: str = ICAL_SKIP_RECURRENCE) -> None:
+        super().__init__(400, message, reason=reason)
 
 
 class _IcalExpansionBudget:
@@ -399,13 +409,18 @@ def unfold_ical(
 
 
 def ical_duration(raw: str) -> timedelta | None:
-    match = re.fullmatch(
-        r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?", raw.strip().upper()
+    """Parse an RFC 5545 duration, also the week form and weeks combined with days."""
+    match = re.fullmatch(r"\+?P(?:(\d+)W)?(?:(\d+)D)?(?:T(\w*))?", raw.strip().upper())
+    time = re.fullmatch(
+        r"(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", (match.group(3) or "") if match else ""
     )
-    if not match:
+    if not match or not time:
         return None
-    days, hours, minutes, seconds = (int(value or 0) for value in match.groups())
-    duration = timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
+    weeks, days = (int(value or 0) for value in match.groups()[:2])
+    hours, minutes, seconds = (int(value or 0) for value in time.groups())
+    duration = timedelta(
+        weeks=weeks, days=days, hours=hours, minutes=minutes, seconds=seconds
+    )
     return duration if duration.total_seconds() > 0 else None
 
 
@@ -449,8 +464,8 @@ def _ical_rule_values(raw: str) -> dict[str, str]:
         key, separator, value = part.partition("=")
         key = key.strip().upper()
         if not separator or not key or key in values:
-            raise AppError(
-                400, "Die Kalender-Wiederholung ist ungültig oder doppelt angegeben."
+            raise _IcalSkip(
+                "Die Kalender-Wiederholung ist ungültig oder doppelt angegeben."
             )
         values[key] = value.strip().upper()
     supported = {
@@ -465,7 +480,7 @@ def _ical_rule_values(raw: str) -> dict[str, str]:
         "WKST",
     }
     if set(values) - supported:
-        raise AppError(400, "Diese Kalender-Wiederholungsregel wird nicht unterstützt.")
+        raise _IcalSkip("Diese Kalender-Wiederholungsregel wird nicht unterstützt.")
     return values
 
 
@@ -484,8 +499,7 @@ def _ical_rule_integer(
         try:
             number = int(raw_value)
         except ValueError as exc:
-            raise AppError(
-                400,
+            raise _IcalSkip(
                 f"{name} der Kalender-Wiederholung muss aus ganzen Zahlen bestehen.",
             ) from exc
         if (
@@ -494,11 +508,9 @@ def _ical_rule_integer(
             or number > maximum
             or (number < 0 and not allow_negative)
         ):
-            raise AppError(400, f"{name} der Kalender-Wiederholung ist ungültig.")
+            raise _IcalSkip(f"{name} der Kalender-Wiederholung ist ungültig.")
         if number in result:
-            raise AppError(
-                400, f"{name} der Kalender-Wiederholung ist doppelt angegeben."
-            )
+            raise _IcalSkip(f"{name} der Kalender-Wiederholung ist doppelt angegeben.")
         result.append(number)
     return result
 
@@ -506,13 +518,13 @@ def _ical_rule_integer(
 def _ical_rule_byday_token(token: str, frequency: str) -> tuple[int, int | None]:
     match = re.fullmatch(r"([+-]?\d{1,2})?([A-Z]{2})", token)
     if not match or match.group(2) not in ICAL_DAY_NUMBERS:
-        raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
+        raise _IcalSkip(UNSUPPORTED_BYDAY_ERROR)
     ordinal = int(match.group(1)) if match.group(1) else None
     if ordinal == 0 or (ordinal is not None and abs(ordinal) > 53):
-        raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
+        raise _IcalSkip(UNSUPPORTED_BYDAY_ERROR)
     if frequency in {"DAILY", "WEEKLY"} and ordinal is not None:
-        raise AppError(
-            400, "Eine BYDAY-Position wird nur für MONTHLY oder YEARLY unterstützt."
+        raise _IcalSkip(
+            "Eine BYDAY-Position wird nur für MONTHLY oder YEARLY unterstützt."
         )
     return ICAL_DAY_NUMBERS[match.group(2)], ordinal
 
@@ -527,7 +539,7 @@ def _ical_rule_bydays(
     for token in raw.split(","):
         item = _ical_rule_byday_token(token, frequency)
         if item in result:
-            raise AppError(400, UNSUPPORTED_BYDAY_ERROR)
+            raise _IcalSkip(UNSUPPORTED_BYDAY_ERROR)
         result.append(item)
     return result
 
@@ -536,42 +548,39 @@ def _ical_rrule(raw: str, local_zone: tzinfo) -> dict[str, Any]:
     values = _ical_rule_values(raw)
     frequency = values.get("FREQ")
     if frequency not in {"DAILY", "WEEKLY", "MONTHLY", "YEARLY"}:
-        raise AppError(
-            400, "Diese Kalender-Wiederholungsfrequenz wird nicht unterstützt."
-        )
+        raise _IcalSkip("Diese Kalender-Wiederholungsfrequenz wird nicht unterstützt.")
     try:
         count = int(values["COUNT"]) if values.get("COUNT") else None
     except ValueError as exc:
-        raise AppError(
-            400, "COUNT der Kalender-Wiederholung muss eine ganze Zahl sein."
+        raise _IcalSkip(
+            "COUNT der Kalender-Wiederholung muss eine ganze Zahl sein."
         ) from exc
     if count is not None and not 1 <= count <= ICAL_MAX_RECURRENCE_COUNT:
-        raise AppError(
-            400,
+        raise _IcalSkip(
             f"COUNT der Kalender-Wiederholung muss zwischen 1 und {ICAL_MAX_RECURRENCE_COUNT} liegen.",
         )
     try:
         interval = int(values.get("INTERVAL", "1"))
     except ValueError as exc:
-        raise AppError(
-            400, "INTERVAL der Kalender-Wiederholung muss eine ganze Zahl sein."
+        raise _IcalSkip(
+            "INTERVAL der Kalender-Wiederholung muss eine ganze Zahl sein."
         ) from exc
     if not 1 <= interval <= ICAL_MAX_RECURRENCE_COUNT:
-        raise AppError(400, "INTERVAL der Kalender-Wiederholung ist zu groß.")
+        raise _IcalSkip("INTERVAL der Kalender-Wiederholung ist zu groß.")
     bydays = _ical_rule_bydays(values, frequency)
     bymonthday = _ical_rule_integer(values, "BYMONTHDAY", -31, 31, allow_negative=True)
     bymonth = _ical_rule_integer(values, "BYMONTH", 1, 12)
     bysetpos = _ical_rule_integer(values, "BYSETPOS", -366, 366, allow_negative=True)
     if bysetpos and frequency in {"DAILY", "WEEKLY"}:
-        raise AppError(400, "BYSETPOS wird nur für MONTHLY oder YEARLY unterstützt.")
+        raise _IcalSkip("BYSETPOS wird nur für MONTHLY oder YEARLY unterstützt.")
     wkst = ICAL_DAY_NUMBERS.get(values.get("WKST", "MO"))
     if wkst is None:
-        raise AppError(400, "WKST der Kalender-Wiederholung ist ungültig.")
+        raise _IcalSkip("WKST der Kalender-Wiederholung ist ungültig.")
     until: date | None = None
     if values.get("UNTIL"):
         temporal = _ical_temporal_value(values["UNTIL"], {}, local_zone)
         if temporal is None:
-            raise AppError(400, "UNTIL der Kalender-Wiederholung ist ungültig.")
+            raise _IcalSkip("UNTIL der Kalender-Wiederholung ist ungültig.")
         until = temporal[0].date() if temporal[1] else temporal[0]
     return {
         "frequency": frequency,
@@ -900,6 +909,17 @@ def _ical_source_window(first: date, last: date, days_before: int) -> tuple[date
     )
 
 
+def _ical_rule_ended_before(raw: str, first: date, local_zone: tzinfo) -> bool:
+    """Whether the rule's UNTIL lies safely before the window, so it never yields."""
+    for part in raw.split(";"):
+        key, _, value = part.partition("=")
+        if key.strip().upper() != "UNTIL":
+            continue
+        temporal = _ical_temporal_value(value.strip().upper(), {}, local_zone)
+        return temporal is not None and temporal[0].date() < first - timedelta(days=1)
+    return False
+
+
 def _ical_base_starts(
     event: dict[str, Any],
     duration: timedelta,
@@ -911,13 +931,20 @@ def _ical_base_starts(
 ) -> list[datetime]:
     if not event.get("rrules"):
         return [event["start"]]
-    if event.get("unsupported_recurrence"):
-        raise AppError(400, "Diese Kalender-Wiederholung wird nicht unterstützt.")
-    starts = []
     recurrence_first, recurrence_last = _ical_source_window(
         first, last, duration.days + 2
     )
-    for raw in event["rrules"]:
+    rules = [
+        raw
+        for raw in event["rrules"]
+        if not _ical_rule_ended_before(raw, recurrence_first, local_zone)
+    ]
+    if not rules:
+        return []
+    if event.get("unsupported_recurrence"):
+        raise _IcalSkip("Diese Kalender-Wiederholung wird nicht unterstützt.")
+    starts = []
+    for raw in rules:
         starts.extend(
             _ical_recurrence_starts(
                 event,
@@ -971,8 +998,23 @@ def _ical_instances(
         }
 
 
+def _ical_split_unquoted(text: str, separator: str, limit: int = -1) -> list[str]:
+    """Split at a separator outside double quotes, at most `limit` times."""
+    parts: list[str] = []
+    start = 0
+    quoted = False
+    for index, character in enumerate(text):
+        if character == '"':
+            quoted = not quoted
+        elif character == separator and not quoted and limit != len(parts):
+            parts.append(text[start:index])
+            start = index + 1
+    parts.append(text[start:])
+    return parts
+
+
 def _ical_property_parameters(key_part: str) -> tuple[str, dict[str, str]]:
-    parts = key_part.split(";")
+    parts = _ical_split_unquoted(key_part, ";")
     parameters = {
         name.upper(): value
         for parameter in parts[1:]
@@ -1010,7 +1052,7 @@ def _ical_store_recurrence_dates(
     if key not in {"EXDATE", "RDATE"}:
         return False
     if key == "RDATE" and "/" in raw:
-        raise AppError(400, "RDATE mit Zeiträumen wird nicht unterstützt.")
+        raise _IcalSkip("RDATE mit Zeiträumen wird nicht unterstützt.")
     field = "exdates" if key == "EXDATE" else "rdates"
     message = (
         "EXDATE der Kalender-Wiederholung ist ungültig."
@@ -1020,7 +1062,7 @@ def _ical_store_recurrence_dates(
     for value in raw.split(","):
         parsed = _ical_temporal_value(value, parameters, local_zone)
         if parsed is None:
-            raise AppError(400, message)
+            raise _IcalSkip(message)
         event.setdefault(field, []).append(parsed[0])
     return True
 
@@ -1050,7 +1092,7 @@ def _ical_store_scalar_property(
     elif key == "RECURRENCE-ID":
         parsed = _ical_temporal_value(raw, parameters, local_zone)
         if parsed is None:
-            raise AppError(400, "RECURRENCE-ID der Kalender-Wiederholung ist ungültig.")
+            raise _IcalSkip("RECURRENCE-ID der Kalender-Wiederholung ist ungültig.")
         event["recurrence_id"] = parsed[0]
     elif key == "EXRULE":
         event["unsupported_recurrence"] = True
@@ -1078,7 +1120,9 @@ def _ical_append_parsed_event(
         and current.get("status", "").upper() != "CANCELLED"
         and not (current.get("uid") and current.get("start"))
     ):
-        raise AppError(400, "Ein Kalendertermin benötigt UID und DTSTART.")
+        raise _IcalSkip(
+            "Ein Kalendertermin benötigt UID und DTSTART.", ICAL_SKIP_COMPONENT
+        )
     if (
         current
         and current.get("uid")
@@ -1108,31 +1152,61 @@ def _ical_nested_line(
 
 
 def _ical_store_line(current: dict[str, Any], line: str, local_zone: tzinfo) -> None:
-    if ":" not in line:
+    parts = _ical_split_unquoted(line, ":", 1)
+    if len(parts) < 2:
         return
-    key_part, raw = line.split(":", 1)
+    key_part, raw = parts
     key, parameters = _ical_property_parameters(key_part)
     _ical_store_property(current, key, raw, parameters, local_zone)
 
 
-def _ical_parsed_events(payload: bytes, local_zone: tzinfo) -> list[dict[str, Any]]:
+def _ical_note_skip(skips: dict[str, int] | None, error: AppError) -> None:
+    if skips is not None:
+        reason = str(error.reason)
+        skips[reason] = skips.get(reason, 0) + 1
+
+
+def _ical_close_event(
+    current: dict[str, Any] | None,
+    invalid: _IcalSkip | None,
+    events: list[dict[str, Any]],
+    skips: dict[str, int] | None,
+) -> None:
+    """Keep a complete event, or count the component it had to skip."""
+    try:
+        if invalid is None:
+            _ical_append_parsed_event(current, events)
+    except _IcalSkip as error:
+        invalid = error
+    if invalid is not None:
+        _ical_note_skip(skips, invalid)
+
+
+def _ical_parsed_events(
+    payload: bytes, local_zone: tzinfo, skips: dict[str, int] | None = None
+) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
+    invalid: _IcalSkip | None = None
     nested = 0
     for line in unfold_ical(payload):
         upper = line.upper()
         if upper == "BEGIN:VEVENT":
             current = {}
+            invalid = None
             continue
         handled, nested = _ical_nested_line(current, nested, upper)
         if handled:
             continue
         if upper == "END:VEVENT":
-            _ical_append_parsed_event(current, events)
+            _ical_close_event(current, invalid, events, skips)
             current = None
             continue
-        if current is not None:
-            _ical_store_line(current, line, local_zone)
+        if current is not None and invalid is None:
+            try:
+                _ical_store_line(current, line, local_zone)
+            except _IcalSkip as error:
+                invalid = error
     return events
 
 
@@ -1169,17 +1243,21 @@ def _ical_add_result_instances(
     excluded: set[datetime] | None = None,
     *,
     budget: _IcalExpansionBudget | None = None,
+    skips: dict[str, int] | None = None,
 ) -> None:
-    for item in _ical_instances(
-        event, first, last, local_zone, excluded, budget=budget
-    ):
-        key = (item["uid"], item["start_local"])
-        if key not in result and len(result) >= ICAL_MAX_RECURRENCE_COUNT:
-            raise AppError(
-                400,
-                f"Der Kalender-Feed enthält mehr als {ICAL_MAX_RECURRENCE_COUNT} Termine im Syncfenster.",
-            )
-        result.setdefault(key, item)
+    try:
+        for item in _ical_instances(
+            event, first, last, local_zone, excluded, budget=budget
+        ):
+            key = (item["uid"], item["start_local"])
+            if key not in result and len(result) >= ICAL_MAX_RECURRENCE_COUNT:
+                raise AppError(
+                    400,
+                    f"Der Kalender-Feed enthält mehr als {ICAL_MAX_RECURRENCE_COUNT} Termine im Syncfenster.",
+                )
+            result.setdefault(key, item)
+    except _IcalSkip as error:
+        _ical_note_skip(skips, error)
 
 
 def _ical_add_master_results(
@@ -1190,6 +1268,7 @@ def _ical_add_master_results(
     local_zone: tzinfo,
     *,
     budget: _IcalExpansionBudget | None = None,
+    skips: dict[str, int] | None = None,
 ) -> None:
     exceptions_by_uid: dict[str, set[datetime]] = {}
     for item in events:
@@ -1198,7 +1277,14 @@ def _ical_add_master_results(
     for event in filter(_ical_is_master_event, events):
         exceptions = exceptions_by_uid.get(event["uid"], set())
         _ical_add_result_instances(
-            result, event, first, last, local_zone, exceptions, budget=budget
+            result,
+            event,
+            first,
+            last,
+            local_zone,
+            exceptions,
+            budget=budget,
+            skips=skips,
         )
 
 
@@ -1210,10 +1296,11 @@ def _ical_add_exception_results(
     local_zone: tzinfo,
     *,
     budget: _IcalExpansionBudget | None = None,
+    skips: dict[str, int] | None = None,
 ) -> None:
     for event in filter(_ical_is_exception_event, events):
         _ical_add_result_instances(
-            result, event, first, last, local_zone, budget=budget
+            result, event, first, last, local_zone, budget=budget, skips=skips
         )
 
 
@@ -1224,10 +1311,15 @@ def _ical_expanded_results(
     local_zone: tzinfo,
     *,
     budget: _IcalExpansionBudget | None = None,
+    skips: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     result: dict[tuple[str, str], dict[str, Any]] = {}
-    _ical_add_master_results(result, events, first, last, local_zone, budget=budget)
-    _ical_add_exception_results(result, events, first, last, local_zone, budget=budget)
+    _ical_add_master_results(
+        result, events, first, last, local_zone, budget=budget, skips=skips
+    )
+    _ical_add_exception_results(
+        result, events, first, last, local_zone, budget=budget, skips=skips
+    )
     return sorted(
         result.values(),
         key=lambda item: (item["start_local"], item["name"], item["uid"]),
@@ -1241,9 +1333,14 @@ def parse_ical_calendar(
     today: date,
     window_start: date | None = None,
     window_end: date | None = None,
+    skips: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
+    """Parse the feed; unsupported components are skipped and counted in `skips`.
+
+    `skips` maps a reason class to a count and never carries event text.
+    """
     first, last = _ical_window(window_start, window_end, today)
-    events = _ical_parsed_events(payload, local_zone)
+    events = _ical_parsed_events(payload, local_zone, skips)
     return _ical_expanded_results(
-        events, first, last, local_zone, budget=_IcalExpansionBudget()
+        events, first, last, local_zone, budget=_IcalExpansionBudget(), skips=skips
     )

@@ -177,7 +177,7 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
         moved = planned_workout_update_candidate(
             current, "update", {"date": "2026-09-23"}
         )
-        self.assertTrue(prepare_planned_workout_date(moved, current))
+        self.assertTrue(prepare_planned_workout_date(moved, current, today=TODAY))
         retimed = planned_workout_update_candidate(
             current,
             "update",
@@ -186,7 +186,7 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
                 "starts_at_local": "2026-09-23T08:15:00+02:00",
             },
         )
-        self.assertTrue(prepare_planned_workout_date(retimed, current))
+        self.assertTrue(prepare_planned_workout_date(retimed, current, today=TODAY))
 
         self.assertEqual(moved["starts_at_local"], "2026-09-23T07:30:00+02:00")
         self.assertEqual(retimed["starts_at_local"], "2026-09-23T08:15:00+02:00")
@@ -297,7 +297,7 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
             "planned_duration_s": 2100,
         }
         candidate = planned_workout_update_candidate(
-            strength, "update", {"duration_minutes": "35,5"}
+            strength, "update", {"duration_minutes": "40"}
         )
         result = normalized_planned_workout_update(
             candidate,
@@ -305,9 +305,14 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
             {},
             LOCAL_ID,
             "update",
-            {"duration_minutes": "35,5"},
+            {"duration_minutes": "40"},
         )
-        self.assertEqual(result["planned_duration_s"], 2130)
+        self.assertEqual(result["planned_duration_s"], 2400)
+        with self.assertRaises(AppError) as raised:
+            planned_workout_update_candidate(
+                strength, "update", {"duration_minutes": "35,5"}
+            )
+        self.assertEqual(raised.exception.status, 400)
 
     def test_restore_candidate_clears_local_deleted_but_current_metadata_is_preserved(
         self,
@@ -325,10 +330,6 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
         )
         self.assertTrue(result["archived"] is False)
         self.assertTrue(result["local_deleted"])
-
-
-
-
 
 
 if __name__ == "__main__":

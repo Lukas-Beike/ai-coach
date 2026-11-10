@@ -181,7 +181,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
                 "status": "applied",
                 "id": preview_id,
                 "updated": 2,
-                "updated_checkins": 2,
+                "updated_checkins": 1,
                 "stale": [],
                 "illness_pause": {
                     "start_date": "2026-09-20",
@@ -216,7 +216,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
             checkins["notes"],
             "preexisting · Krankheitspause prognostiziert ab 2026-09-20",
         )
-        self.assertIsNotNone(
+        self.assertIsNone(
             self.row("SELECT 1 FROM athlete_checkins WHERE checkin_date='2026-09-21'")
         )
         audit = self.row(
@@ -233,10 +233,44 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
             ]
         )
         self.assertTrue(applied["illness_pause"]["approved"])
+        self.assertEqual(applied["illness_pause"]["status"], "approved")
+        self.assertEqual(
+            (
+                applied["illness_pause"]["start_date"],
+                applied["illness_pause"]["end_date"],
+            ),
+            ("2026-09-20", "2026-09-21"),
+        )
         self.assertEqual(
             self.service.apply(preview_id),
             {"status": "already_applied", "id": preview_id},
         )
+
+    def test_approval_writes_no_future_checkins_and_cleared_illness_stays_clear(self):
+        preview_id = self.add_preview(
+            {
+                "changes": [],
+                "illness_pause": {
+                    "start_date": "2026-09-20",
+                    "end_date": "2026-09-24",
+                    "illness": "cold",
+                },
+            }
+        )
+
+        result = self.service.apply(preview_id)
+
+        self.assertEqual(result["updated_checkins"], 1)
+        with self.manager.reader() as db:
+            days = [
+                row["checkin_date"]
+                for row in db.execute("SELECT checkin_date FROM athlete_checkins")
+            ]
+            history = db.execute(
+                "SELECT COUNT(*) AS n FROM change_history WHERE entity_type='checkin'"
+            ).fetchone()["n"]
+        self.assertEqual(days, ["2026-09-20"])
+        self.assertEqual(history, 1)
 
     def test_stale_partial_and_past_reasons_are_idempotent(self):
         good_id, changed_id, past_id = (str(uuid.uuid4()) for _ in range(3))
@@ -534,7 +568,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         run_id, strength_id = str(uuid.uuid4()), str(uuid.uuid4())
         run = self.workout(
             run_id,
-            "2026-09-22",
+            TODAY.isoformat(),
             type="Run",
             name="Schwelle 3x10",
             description="- 50m Z4 HR",
@@ -553,7 +587,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         ]
         strength = self.workout(
             strength_id,
-            "2026-09-23",
+            TODAY.isoformat(),
             type="WeightTraining",
             name="Kraft schwer",
             description="Kniebeuge 5x5",
@@ -583,7 +617,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
     def test_no_complaint_answers_propose_nothing(self):
         for answer in ("keine", "Nein.", "gesund", " - "):
             with self.subTest(answer=answer):
-                draft = self.workout(str(uuid.uuid4()), "2026-09-22")
+                draft = self.workout(str(uuid.uuid4()), TODAY.isoformat())
                 preview, _result = self.preview_and_apply(
                     [draft], [], feedback={"pain": answer, "illness": answer}
                 )

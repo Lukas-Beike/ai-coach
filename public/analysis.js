@@ -570,6 +570,19 @@ function appendAnalysisPointInspectors(section, svg, series, unit, { x, chartRig
     svg.append(marker);
   });
   if (!candidates.length) return;
+  // Roving tabindex: one tab stop per chart (the latest day); arrows move between days.
+  const markers = candidates.map((candidate) => candidate.marker);
+  const rove = (target) => markers.forEach((node) => node.setAttribute("tabindex", node === target ? "0" : "-1"));
+  rove(markers.at(-1));
+  markers.forEach((marker, index) => {
+    marker.addEventListener("focus", () => rove(marker));
+    marker.addEventListener("keydown", (event) => {
+      const target = { ArrowLeft: Math.max(0, index - 1), ArrowRight: Math.min(markers.length - 1, index + 1), Home: 0, End: markers.length - 1 }[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      markers[target].focus();
+    });
+  });
   const overlay = analysisSvg("rect", { x: 60, y: 26, width: chartRight - 60, height: 137, fill: "transparent", class: "analysis-plot-hit", "aria-hidden": "true" });
   const nearest = (event) => {
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
@@ -1578,16 +1591,39 @@ function maintenanceButton(item) {
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await api("/api/equipment/maintenance", { method: "POST", body: JSON.stringify({ equipment_id: item.id, date: timezoneDateKey(state.data?.profile?.timezone, new Date()) }) });
+      const result = await api("/api/equipment/maintenance", { method: "POST", body: JSON.stringify({ equipment_id: item.id, date: timezoneDateKey(state.data?.profile?.timezone, new Date()) }) });
       // Maintenance does not advance state_versions, so drop the cached response even if the athlete has left the route.
       invalidateAnalysisReport("/api/analysis/training-records");
       await renderTrainingRecords();
+      showMaintenanceReceipt(result?.change);
     } catch (error) {
       button.disabled = false;
       if (!isSessionEndedError(error)) button.textContent = error.message || "Wartung fehlgeschlagen";
     }
   });
   return button;
+}
+
+function showMaintenanceReceipt(change, message = "Wartung erfasst. ") {
+  const status = reportNode("p", message);
+  status.setAttribute("role", "status");
+  document.getElementById("equipmentItems")?.querySelector("h3")?.after(status);
+  if (!change?.id) return;
+  const undo = reportNode("button", "Rückgängig", "message-undo");
+  undo.type = "button";
+  undo.addEventListener("click", async () => {
+    undo.disabled = true;
+    try {
+      await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
+      invalidateAnalysisReport("/api/analysis/training-records");
+      await renderTrainingRecords();
+      showMaintenanceReceipt(null, "Zurückgenommen.");
+    } catch (error) {
+      undo.disabled = false;
+      status.firstChild.textContent = `${error.message} `;
+    }
+  });
+  status.append(undo);
 }
 
 function garminEquipmentCard(item) {

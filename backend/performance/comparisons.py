@@ -86,6 +86,35 @@ def _performance_trend(
     )
 
 
+def _training_load_comparison(
+    last_7: Mapping[str, Any], previous_7: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """Compare the two weekly load sums without colouring a coverage gap.
+
+    A week with sessions lacking a load (card M6) sums them as nothing, so the
+    difference may be missing data. Then the numbers and the counts remain, but
+    delta, direction and colour stay unset.
+    """
+    comparison = wellness.comparison_value(
+        last_7["training_load"],
+        previous_7["training_load"],
+        "",
+        7,
+        higher_is_better=None,
+        label="vorherigen 7 Tagen",
+    )
+    if comparison is None:
+        return None
+    missing = {
+        "last_7": int(last_7.get("load_missing_sessions") or 0),
+        "previous_7": int(previous_7.get("load_missing_sessions") or 0),
+    }
+    comparison["load_missing_sessions"] = missing
+    if any(missing.values()):
+        comparison.update(delta=None, direction=None, color=None)
+    return comparison
+
+
 def performance_comparisons(
     metrics: dict[str, dict[str, Any]],
     recovery: dict[str, Any],
@@ -152,15 +181,9 @@ def performance_comparisons(
             load["averages_7d"]["atl"],
             "",
             7,
-            higher_is_better=False,
+            higher_is_better=None,
         ),
-        "training_load_7d": wellness.comparison_value(
-            last_7["training_load"],
-            previous_7["training_load"],
-            "",
-            7,
-            label="vorherigen 7 Tagen",
-        ),
+        "training_load_7d": _training_load_comparison(last_7, previous_7),
         "training_volume_7d": wellness.comparison_value(
             last_7["duration_hours"],
             base_30["duration_hours"] * 7 / 30,

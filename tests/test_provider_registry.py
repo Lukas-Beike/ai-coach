@@ -206,7 +206,6 @@ class DefaultDescriptorParityTests(unittest.TestCase):
         self.assertEqual(("intervals",), registry.ids_with(Capability.COMPETITIONS))
         self.assertEqual(("weather",), registry.ids_with(Capability.WEATHER_FORECAST))
         self.assertEqual(("calendar",), registry.ids_with(Capability.PUBLIC_CALENDAR))
-        self.assertEqual((), registry.ids_with(Capability.PLANNED_EVENTS))
         self.assertEqual(("intervals",), registry.ids_with(Capability.METRIC_EXPORT))
         self.assertEqual(
             {

@@ -27,7 +27,12 @@ ENTITY_TYPES = {
     "activity_feedback",
     "activity_session",
     "nutrition_entry",
+    "nutrition_template",
+    "nutrition_product",
     "checkin",
+    "equipment",
+    "equipment_assignment",
+    "equipment_maintenance",
     "metric_export",
 }
 # A metric export to a provider; its entity id is "<provider>:<remote record>".
@@ -183,6 +188,45 @@ NUTRITION_ENTRY_FIELDS = (
     "nutrition_basis",
     "logged_time_known",
 )
+# A saved meal; the update time is not tracked, so a save without a change
+# records nothing and a restore stamps the time again.
+NUTRITION_TEMPLATE_FIELDS = (
+    "id",
+    "name",
+    "description",
+    "meal_type",
+    "meal_type_explicit",
+    "kcal",
+    "carbs_g",
+    "protein_g",
+    "fat_g",
+    "source",
+    "nutrition_basis",
+)
+# A saved food product; the update time is not tracked, so a save without a change
+# records nothing. The favorite flag is a display preference and stays out, so
+# toggling it neither enters the history nor blocks undo of an earlier change.
+NUTRITION_PRODUCT_FIELDS = (
+    "id",
+    "barcode",
+    "name",
+    "brand",
+    "basis_amount",
+    "basis_unit",
+    "kcal",
+    "carbs_g",
+    "protein_g",
+    "fat_g",
+    "sugar_g",
+    "fiber_g",
+    "salt_g",
+    "source",
+    "source_url",
+    "external_id",
+    "provenance",
+    "extraction_confidence",
+    "status",
+)
 # One daily check-in; its entity id is the check-in date. The day status and the
 # tag answers live beside the row and are present only once the athlete set them.
 CHECKIN_FIELDS = (
@@ -200,13 +244,40 @@ CHECKIN_FIELDS = (
     "day_status",
     "tag_answers",
 )
+# One equipment item, with the fields the athlete or Coach edits; the revision, the
+# update time and the Garmin-owned mileage are left out so a provider sync keeps undo.
+EQUIPMENT_FIELDS = (
+    "id",
+    "name",
+    "sport",
+    "environment",
+    "sport_pending",
+    "kind",
+    "status",
+    "parent_id",
+    "parent_pending",
+    "start_date",
+    "initial_distance_km",
+    "initial_hours",
+    "maintenance_km",
+    "maintenance_hours",
+    "lifetime_target_km",
+    "lifetime_target_source",
+)
+# The explicit gear of one activity; its entity id is the assignment key, and
+# an unassignment keeps the row with ``equipment_id`` None.
+EQUIPMENT_ASSIGNMENT_FIELDS = ("activity_id", "equipment_id")
+# One maintenance entry; the observation time is left out.
+EQUIPMENT_MAINTENANCE_FIELDS = ("id", "equipment_id", "date", "notes", "distance_km")
 # A composite meal keeps its ingredient snapshots in nutrition_basis.
 _FIELD_LIMITS = {
     "activity_feedback": 400_000,
     "activity_session": 20_000,
     "nutrition_entry": 100_000,
+    "nutrition_template": 100_000,
     # Free-text notes reach 4000 characters, more once JSON-escaped.
     "checkin": 20_000,
+    "equipment_maintenance": 20_000,
 }
 _DEFAULT_FIELD_LIMIT = 4000
 # A local zone configuration; its entity id is the configuration key.
@@ -245,7 +316,12 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "activity_feedback": set(ACTIVITY_FEEDBACK_FIELDS),
         "activity_session": set(ACTIVITY_SESSION_FIELDS),
         "nutrition_entry": set(NUTRITION_ENTRY_FIELDS),
+        "nutrition_template": set(NUTRITION_TEMPLATE_FIELDS),
+        "nutrition_product": set(NUTRITION_PRODUCT_FIELDS),
         "checkin": set(CHECKIN_FIELDS),
+        "equipment": set(EQUIPMENT_FIELDS),
+        "equipment_assignment": set(EQUIPMENT_ASSIGNMENT_FIELDS),
+        "equipment_maintenance": set(EQUIPMENT_MAINTENANCE_FIELDS),
         METRIC_EXPORT_ENTITY: set(METRIC_EXPORT_FIELDS),
     }
     try:

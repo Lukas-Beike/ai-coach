@@ -86,6 +86,33 @@ def garmin_source_observed_at(value: Any) -> str | None:
     return max(dates, default=None)
 
 
+def garmin_sleep_observed_at(value: Any) -> str | None:
+    """Return the newest primary ``calendarDate`` of the sleep records.
+
+    Nested timestamps such as the wake time can fall on the next day, which
+    would make the night look observed in the future, so only the record's own
+    ``calendarDate`` counts. Records without one fall back to the nested search.
+    """
+    records = value if isinstance(value, list) else [value]
+    dates = [
+        observed_at
+        for record in records
+        if (observed_at := _sleep_calendar_date(record))
+    ]
+    return max(dates, default=None) or garmin_source_observed_at(value)
+
+
+def _sleep_calendar_date(record: Any) -> str | None:
+    if not isinstance(record, dict):
+        return None
+    nested = record.get("dailySleepDTO")
+    nested = nested if isinstance(nested, dict) else {}
+    return _garmin_record_date(
+        record.get(garmin_perf_fields.CALENDAR_DATE)
+        or nested.get(garmin_perf_fields.CALENDAR_DATE)
+    )
+
+
 def _garmin_key(value: Any) -> str:
     return "".join(
         character for character in str(value).casefold() if character.isalnum()

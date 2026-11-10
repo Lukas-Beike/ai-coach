@@ -326,26 +326,27 @@ def _fit_data_record(
     if definition is None:
         raise ValueError("FIT data has no definition")
     architecture, global_number, fields, developer_fields = definition
-    record_fields = [field for field in fields if not (compressed and field[0] == 253)]
     developer_size = sum(field[1] for field in developer_fields)
-    total_size = sum(field[1] for field in record_fields)
+    total_size = sum(field[1] for field in fields)
     if offset + total_size + developer_size > data_end:
         raise ValueError("Truncated FIT data record")
     values: dict[int, object] = {}
-    for number, size, base_type in record_fields:
+    for number, size, base_type in fields:
         values[number] = _fit_value(
             data[offset : offset + size], base_type, architecture
         )
         offset += size
     offset += developer_size
-    has_timestamp = any(number == 253 for number, _, _ in fields)
-    if compressed and has_timestamp and isinstance(last_timestamp, int):
+    if compressed and isinstance(last_timestamp, int):
+        # The FIT SDK reads every field of the definition, then replaces the
+        # timestamp with the last full one advanced by the 5-bit header offset.
         timestamp_offset = record_header & 0x1F
         last_timestamp += (timestamp_offset - (last_timestamp & 0x1F)) & 0x1F
-        values.setdefault(253, last_timestamp)
-    timestamp = values.get(253)
-    if has_timestamp and isinstance(timestamp, int):
-        last_timestamp = timestamp
+        values[253] = last_timestamp
+    else:
+        timestamp = values.get(253)
+        if isinstance(timestamp, int):
+            last_timestamp = timestamp
     return offset, last_timestamp, (global_number, values)
 
 

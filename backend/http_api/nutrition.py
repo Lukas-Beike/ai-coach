@@ -9,7 +9,6 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from backend import change_history
-from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.http_api.auth import SessionAuthService
 from backend.nutrition.diary import NutritionDiaryService
@@ -20,6 +19,7 @@ from backend.nutrition.photo import PHOTO_REQUEST_MAX_BYTES
 
 NUTRITION_ENTRY_PATH = "/api/nutrition/entry"
 NUTRITION_PRODUCTS_PATH = "/api/nutrition/products"
+PRODUCT_ENTITY = "nutrition_product"
 INVALID_BODY = "Ungültiger Anfrageinhalt."
 
 
@@ -133,13 +133,11 @@ class NutritionPostRoutes:
         self,
         diary_service: Callable[[], NutritionDiaryService],
         meal_library_service: Callable[[], NutritionMealLibraryService],
-        sync_job_queue: Callable[[], Any],
         nutrition_refresh_service: Callable[[], Any] | None = None,
         local_now: Callable[[], datetime] | None = None,
     ) -> None:
         self._diary_service = diary_service
         self._meal_library_service = meal_library_service
-        self._sync_job_queue = sync_job_queue
         self._nutrition_refresh_service = nutrition_refresh_service
         self._local_now = local_now or datetime.now
 
@@ -149,7 +147,6 @@ class NutritionPostRoutes:
             NUTRITION_ENTRY_PATH: self._create,
             f"{NUTRITION_ENTRY_PATH}/delete": self._delete,
             f"{NUTRITION_ENTRY_PATH}/add-product": self._add_product,
-            "/api/nutrition/sync": self._sync,
             "/api/nutrition/refresh": self._refresh,
             NUTRITION_PRODUCTS_PATH: self._save_product,
             f"{NUTRITION_PRODUCTS_PATH}/lookup": self._lookup_product,
@@ -194,25 +191,6 @@ class NutritionPostRoutes:
         with change_history.collect_changes() as changes:
             result = self._diary_service().delete_meal(str(entry_id))
         handler.send_json(200, {"ok": True, **result, **_change(changes)})
-
-    def _sync(self, handler: Any) -> None:
-        payload = _read_object(handler) if handler.headers.get("Content-Length") else {}
-        meal_date = payload.get("date") or payload.get("meal_date")
-        job_payload = (
-            {"date": meal_date}
-            if meal_date
-            else {"pending_limit": payload.get("limit") or 14}
-        )
-        job = self._sync_job_queue().enqueue(
-            ProviderId.INTERVALS.value,
-            "nutrition_sync",
-            job_payload,
-            requested_by="http_api",
-        )
-        handler.send_json(
-            202,
-            {"ok": True, "status": "queued", "sync_job_id": job["id"]},
-        )
 
     def _refresh(self, handler: Any) -> None:
         payload = _read_object(handler)
@@ -294,9 +272,10 @@ class NutritionPostRoutes:
                 "Das Produkt muss ausdrücklich bestätigt werden.",
                 reason="confirmation_required",
             )
+        with change_history.collect_changes() as changes:
+            saved = self._meal_library_service().save_product(product)
         handler.send_json(
-            200,
-            {"ok": True, "product": self._meal_library_service().save_product(product)},
+            200, {"ok": True, "product": saved, **_change(changes, PRODUCT_ENTITY)}
         )
 
     def _lookup_product(self, handler: Any) -> None:
@@ -339,14 +318,12 @@ class NutritionPostRoutes:
                 "Das Archivieren muss ausdrücklich bestätigt werden.",
                 reason="confirmation_required",
             )
+        with change_history.collect_changes() as changes:
+            archived = self._meal_library_service().archive_product(
+                str(payload.get("id") or "")
+            )
         handler.send_json(
-            200,
-            {
-                "ok": True,
-                "product": self._meal_library_service().archive_product(
-                    str(payload.get("id") or "")
-                ),
-            },
+            200, {"ok": True, "product": archived, **_change(changes, PRODUCT_ENTITY)}
         )
 
 
@@ -373,14 +350,13 @@ class NutritionPutRoutes:
             product_id = str(payload.get("id") or "").strip()
             if not product_id:
                 raise AppError(400, "id ist erforderlich zum Aktualisieren.")
+            with change_history.collect_changes() as changes:
+                updated = self._meal_library_service().update_product(
+                    product_id, payload
+                )
             handler.send_json(
                 200,
-                {
-                    "ok": True,
-                    "product": self._meal_library_service().update_product(
-                        product_id, payload
-                    ),
-                },
+                {"ok": True, "product": updated, **_change(changes, PRODUCT_ENTITY)},
             )
             return True
         if path != NUTRITION_ENTRY_PATH:
@@ -396,12 +372,12 @@ class NutritionPutRoutes:
         return True
 
 
-def _change(changes: list[dict[str, str]]) -> dict[str, Any]:
-    """The undo reference of the diary entry change, as ``{"change": ...}``."""
-    entry_changes = [
-        item for item in changes if item["entity_type"] == "nutrition_entry"
-    ]
-    return {"change": entry_changes[-1]} if entry_changes else {}
+def _change(
+    changes: list[dict[str, str]], entity_type: str = "nutrition_entry"
+) -> dict[str, Any]:
+    """The undo reference of the last change of one entity type, as ``{"change": ...}``."""
+    matching = [item for item in changes if item["entity_type"] == entity_type]
+    return {"change": matching[-1]} if matching else {}
 
 
 def _read_object(handler: Any, max_bytes: int | None = None) -> dict[str, Any]:

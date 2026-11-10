@@ -150,10 +150,10 @@ def legacy_activity_keys(summary: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def summary_duration_s(summary: Mapping[str, Any]) -> float | None:
-    """Return the moving duration, else the elapsed duration, of a summary."""
+    """Return the positive moving duration, else the positive elapsed duration."""
     for key in ("moving_duration_s", "elapsed_duration_s"):
         value = summary.get(key)
-        if value is not None:
+        if value is not None and float(value) > 0:
             return float(value)
     return None
 

@@ -35,7 +35,10 @@ from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
 from backend.providers.garmin_gear_fields import garmin_gear_id
 from backend.sync.canonical_ingest import DeletionWindow, fetch_deletion_window
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync.garmin_payload_metrics import garmin_source_observed_at
+from backend.sync.garmin_payload_metrics import (
+    garmin_sleep_observed_at,
+    garmin_source_observed_at,
+)
 from backend.sync.garmin_performance_history import append_garmin_performance_history
 from backend.sync.garmin_personal_status import SDK_SKIPPED_KEY, sdk_skipped_view
 from backend.sync.garmin_snapshot_writer import (
@@ -645,7 +648,11 @@ def _merge_source_freshness(
         freshness[source] = {
             "freshness": "current" if complete else "partial",
             "fetched_at": payload["synced_at"],
-            "observed_at": garmin_source_observed_at(incoming),
+            "observed_at": (
+                garmin_sleep_observed_at(incoming)
+                if source == "sleep"
+                else garmin_source_observed_at(incoming)
+            ),
         }
     elif source in stored:
         freshness[source] = {**previous_freshness, "freshness": "stale"}

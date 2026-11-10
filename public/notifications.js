@@ -76,8 +76,13 @@ function registerServiceWorker() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") reloadForUpdateWhenSafe();
   });
-  // Leaving a field may end the last edit; focus moves on after focusout.
-  document.addEventListener("focusout", () => setTimeout(reloadForUpdateWhenSafe, 0));
+  trackUnsavedForms();
+  // Leaving a field may end the last edit; focus moves on after focusout. A pointer
+  // press on a save button must reach its click first, so the check waits a frame
+  // after the press ends.
+  document.addEventListener("focusout", () => { if (!pointerHeld) requestAnimationFrame(reloadForUpdateWhenSafe); });
+  document.addEventListener("pointerdown", () => { pointerHeld = true; }, true);
+  for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, () => { pointerHeld = false; setTimeout(() => requestAnimationFrame(reloadForUpdateWhenSafe), 0); }, true);
   navigator.serviceWorker.register("/service-worker.js").catch(() => {});
 }
 
@@ -86,6 +91,26 @@ function registerServiceWorker() {
 // next check: when a chat or load state ends, or when the page is hidden.
 let serviceWorkerReplaced = false;
 let serviceWorkerReloaded = false;
+let pointerHeld = false;
+
+// Any form the athlete typed into counts as unsaved until it is submitted or reset.
+function trackUnsavedForms() {
+  document.addEventListener("input", (event) => {
+    const scope = event.isTrusted && event.target.closest?.("form:not(#chatForm), #garminSyncDays");
+    if (scope) scope.dataset.dirty = "1";
+  });
+  // A submitted form stays unsaved until the server confirms a change, so a rejected save keeps its input.
+  document.addEventListener("submit", (event) => { if (event.target.dataset) event.target.dataset.saving = "1"; });
+  document.addEventListener("reset", (event) => { delete event.target.dataset?.dirty; });
+  globalThis.addEventListener("pacecraft:saved", () => {
+    for (const form of document.querySelectorAll("form[data-saving]")) { delete form.dataset.dirty; delete form.dataset.saving; }
+  });
+}
+
+// An edited form counts unless it sits in a closed dialog (cancelled or dismissed).
+function editedFormPending() {
+  return [...document.querySelectorAll("form[data-dirty], #garminSyncDays[data-dirty]")].some((field) => !field.closest?.("dialog:not([open])"));
+}
 
 // Settings fields that start empty, so any value in them is still being entered.
 const UPDATE_RELOAD_INPUT_FIELDS = "#cred-form-openai input, #cred-form-intervals input, #cred-form-wahoo input, #cred-form-garmin_personal input, #garmin-login-form input, #garmin-mfa-form input, #nutritionProductQuery";
@@ -95,7 +120,9 @@ function pageInputPending() {
   return Boolean(active?.matches?.("input, textarea, select") && !active.closest?.("#chatForm"))
     || [...document.querySelectorAll(UPDATE_RELOAD_INPUT_FIELDS)].some((field) => field.value.trim())
     || (typeof providerCredentialBusy !== "undefined" && providerCredentialBusy.size > 0)
-    || Boolean($("#calendarDisplaySaveButton")?.disabled);
+    || Boolean($("#calendarDisplaySaveButton")?.disabled)
+    || editedFormPending()
+    || Boolean($("#nutritionExtraction") && !$("#nutritionExtraction").hidden && $("#nutritionExtraction").childElementCount);
 }
 
 function updateReloadIsSafe() {

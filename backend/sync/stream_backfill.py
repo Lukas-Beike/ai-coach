@@ -24,6 +24,14 @@ download fails three runs in a row or answers with a client error is kept out th
 same way. A job without ``end_date`` starts the chain again and lets those
 failed records retry. Nothing is written to a provider, and nothing before the
 history floor is read.
+
+A provider can also replay a mapper upgrade (#1936): a record whose full stream set
+was stored by an older mapper version and that lies inside the replay window is
+downloaded again once. Wahoo keeps no FIT bytes, so this is the only way an
+upgrade reaches sessions older than the regular detail import's window. The old
+streams stay until the replacement is stored, so a failed or empty download changes
+nothing. ``rearm`` moves a finished chain's cursor back when the mapper is newer
+than the one the chain last ran for.
 """
 
 from __future__ import annotations
@@ -59,7 +67,7 @@ from backend.providers.garmin_rating_history import (
     RATE_LIMITED,
     RatingReadStopped,
 )
-from backend.sync.cursors import read_cursor, write_cursor
+from backend.sync.cursors import clear_cursor, read_cursor, write_cursor
 from backend.sync.jobs import STREAM_HISTORY_CURSOR
 
 FAILURE_LIMIT: Final = 3
@@ -105,6 +113,17 @@ class StreamCandidate:
 
 
 @dataclass(frozen=True)
+class StreamReplay:
+    """Records whose streams an older mapper version stored are read again.
+
+    Only sessions from ``since`` on qualify; older ones keep their streams.
+    """
+
+    mapper_version: int
+    since: date
+
+
+@dataclass(frozen=True)
 class StreamSelection:
     """Candidates newest first, plus the counts of the records not read."""
 
@@ -130,25 +149,35 @@ def select_stream_candidates(
     *,
     excluded: frozenset[str] = frozenset(),
     earliest: date | None = None,
+    replay: StreamReplay | None = None,
 ) -> StreamSelection:
     """Classify the provider's records of live sessions that could carry streams.
 
     ``excluded`` holds provider activity ids that are not read again; records
     before ``earliest`` are no candidates. Manual and strength records are never
-    eligible.
+    eligible. With ``replay``, a record whose full streams all come from an older
+    mapper version is a candidate too, when its day is not before ``replay.since``.
     """
     rows = db.execute(
         "SELECT r.provider_activity_id, r.started_at, r.local_date, r.recorded_by, "
         "EXISTS (SELECT 1 FROM activity_detail_sets AS d "
         "WHERE d.provider = r.provider "
         "AND d.provider_activity_id = r.provider_activity_id "
-        "AND d.detail_kind = ? AND d.resolution = ?) AS has_streams "
+        "AND d.detail_kind = ? AND d.resolution = ?) AS has_streams, "
+        "EXISTS (SELECT 1 FROM activity_detail_sets AS d "
+        "WHERE d.provider = r.provider "
+        "AND d.provider_activity_id = r.provider_activity_id "
+        "AND d.detail_kind = ? AND d.resolution = ? "
+        "AND d.mapper_version >= ?) AS has_current_streams "
         "FROM activity_records AS r "
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id AND s.state <> ? "
         "WHERE r.provider = ? AND r.state = ? AND r.recorded_by <> ? AND r.sport <> ?",
         (
             ActivityDetailKind.STREAMS.value,
             StreamResolution.FULL.value,
+            ActivityDetailKind.STREAMS.value,
+            StreamResolution.FULL.value,
+            0 if replay is None else replay.mapper_version,
             ActivitySessionState.DELETED.value,
             provider,
             ActivityRecordState.ACTIVE.value,
@@ -167,7 +196,14 @@ def select_stream_candidates(
             continue
         if row["has_streams"]:
             with_streams += 1
-        elif identifier not in excluded:
+            wanted = (
+                replay is not None
+                and not row["has_current_streams"]
+                and day >= replay.since.isoformat()
+            )
+        else:
+            wanted = True
+        if wanted and identifier not in excluded:
             found[identifier] = StreamCandidate(
                 identifier, day, started, str(row["recorded_by"])
             )
@@ -207,6 +243,7 @@ class StreamBackfillService:
         earliest_date: date,
         batch_limit: int,
         operation: Callable[[], AbstractContextManager[Any]] = nullcontext,
+        replay_days: int | None = None,
     ) -> None:
         self._provider = provider
         self._source = source
@@ -219,6 +256,7 @@ class StreamBackfillService:
         self._earliest_date = earliest_date
         self._batch_limit = batch_limit
         self._operation = operation
+        self._replay_days = replay_days
 
     def available(self) -> bool:
         """Return whether a real provider read is configured (never in fixture mode)."""
@@ -240,6 +278,45 @@ class StreamBackfillService:
         with self._operation():
             return self._backfill(end)
 
+    def rearm(self) -> None:
+        """Start a finished chain again once per mapper version (#1936).
+
+        A mapper upgrade only reaches stored streams through the replay, and a chain
+        at its floor queues no job. The cursor is forgotten and the failed records
+        may retry, once for each mapper version the replay has not covered yet;
+        without a replay window nothing changes.
+        """
+        if self._replay_days is None or not self._configured():
+            return
+        version = self._mapping.mapper_version
+        with self._guard(), self._database_manager().unit_of_work() as db:
+            state = _read_state(self._key_values, db, self._provider)
+            if state["replay_mapper_version"] >= version:
+                return
+            cursor = read_cursor(db, self._provider, STREAM_HISTORY_CURSOR)
+            if not _at_floor(cursor.get("cursor"), self._earliest_date):
+                # A walking chain may carry an older end_date in its queued job;
+                # it is rearmed by the first refresh after it reaches the floor.
+                return
+            state.update(
+                replay_mapper_version=version,
+                skipped_ids=[],
+                failures={},
+                updated_at=self._utc_now(),
+            )
+            self._key_values.set(
+                db, state_key(self._provider), json.dumps(state, sort_keys=True)
+            )
+            clear_cursor(db, self._provider, STREAM_HISTORY_CURSOR)
+
+    def _replay(self) -> StreamReplay | None:
+        if self._replay_days is None:
+            return None
+        today = date.fromisoformat(iso_date_prefix(self._utc_now()))
+        return StreamReplay(
+            self._mapping.mapper_version, today - timedelta(days=self._replay_days)
+        )
+
     def _backfill(self, end: date | None) -> dict[str, Any]:
         with self._database_manager().reader() as db:
             state = _read_state(self._key_values, db, self._provider)
@@ -254,6 +331,7 @@ class StreamBackfillService:
                 self._provider,
                 excluded=_excluded(state),
                 earliest=self._earliest_date,
+                replay=self._replay(),
             )
         batch, more = selection.batch(end, self._batch_limit)
         outcome, failure, blocked = self._fetch_batch(batch)
@@ -511,6 +589,7 @@ def _read_state(
         else {},
         "blocked": stored.get("blocked") or None,
         "updated_at": stored.get("updated_at"),
+        "replay_mapper_version": int(stored.get("replay_mapper_version") or 0),
     }
 
 

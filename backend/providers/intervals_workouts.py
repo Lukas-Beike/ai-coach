@@ -27,7 +27,6 @@ from backend.canonical.stored_sports import (
     workout_sport_from_record,
 )
 from backend.canonical.vocabulary import Environment, Sport
-from backend.providers.intervals_activity_fields import REMOTE_EVENT_METRIC_KEYS
 from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 
 INTERVALS_EVENT_CATEGORY = "WORKOUT"
@@ -58,9 +57,11 @@ _PLANNING_WIRE_FIELDS = (
     (INTENSITY, PLANNED_INTENSITY),
 )
 _PLANNING_FIELD_BY_WIRE = dict(_PLANNING_WIRE_FIELDS)
-# Planned-unit metrics a synced remote event carries back, by planning name.
+# Planned-unit metrics a synced remote event carries back onto the local unit,
+# by planning name.
 REMOTE_PLANNED_METRIC_KEYS = tuple(
-    _PLANNING_FIELD_BY_WIRE.get(key, key) for key in REMOTE_EVENT_METRIC_KEYS
+    _PLANNING_FIELD_BY_WIRE.get(key, key)
+    for key in ("moving_time", "workout_doc", TRAINING_LOAD, INTENSITY)
 )
 
 

@@ -15,6 +15,7 @@ from support import (
     canonical_backfill_stopped,
     isolated_server,
     latest_tool_outputs,
+    metric_export_stopped,
     reset_application_state,
 )
 
@@ -40,9 +41,11 @@ class DialogueHarness:
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         self.enterContext(isolated_server(server, root))
-        # A provider refresh starts the derived passes in a background thread;
-        # join it before the temporary data directory is removed.
+        # A provider refresh starts the derived passes and the delayed automatic
+        # metric export in background threads; join both before the temporary
+        # data directory is removed.
         self.enterContext(canonical_backfill_stopped(server))
+        self.enterContext(metric_export_stopped(server))
         reset_application_state(server)
         fixed = patch.object(
             server.ATHLETE_CLOCK,
@@ -173,7 +176,8 @@ class DialogueHarness:
                 server.COACH_CONVERSATION,
                 "provision_service",
                 return_value=Mock(
-                    ensure=Mock(return_value="synthetic-conversation"),
+                    binding=Mock(return_value="synthetic-conversation"),
+                    bind_remote=Mock(return_value="synthetic-conversation"),
                     rotate=Mock(return_value="synthetic-conversation"),
                 ),
             ),

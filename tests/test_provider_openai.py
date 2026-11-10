@@ -1913,6 +1913,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         http = _ClientHTTP(
             {"id": "resp_bg", "status": "queued"},
             {},
+            {"id": "resp_bg", "status": "cancelled", "usage": {"total_tokens": 7}},
         )
         times = iter((0.0, 11.0, 11.0, 11.0))
         waits = []
@@ -1933,9 +1934,82 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(waits, [0.25])
         self.assertEqual(
             http.calls[-1][0][:2],
+            ("GET", "https://api.example.test/v1/responses/resp_bg"),
+        )
+        self.assertEqual(
+            http.calls[-2][0][:2],
             ("POST", "https://api.example.test/v1/responses/resp_bg/cancel"),
         )
+        # The budget stop bills the cancelled response once, after the cancel POST.
+        self.assertEqual(
+            [(entry[1]["usage"], entry[2]) for entry in state.usage],
+            [({"total_tokens": 7}, "responses_background")],
+        )
+
+    def test_responses_client_background_cancel_records_final_usage_best_effort(self):
+        class Event:
+            def is_set(self):
+                return True
+
+            def wait(self, _seconds):
+                return True
+
+        state = _ClientState()
+        http = _ClientHTTP(
+            {"id": "resp_bg", "status": "queued"},
+            {},
+            RuntimeError("retrieve failed"),
+        )
+        client = self._client(http, state)
+
+        with self.assertRaises(AppError) as raised:
+            client.background({"input": "hello"}, cancel_event=Event())
+
+        self.assertEqual(raised.exception.reason, "chat_cancelled")
+        self.assertEqual(http.calls[-1][0][0], "GET")
+        # The lookup is bounded well below the chat reset's lock wait.
+        self.assertEqual(http.calls[-1][1]["timeout"], 5)
         self.assertEqual(state.usage, [])
+
+        http = _ClientHTTP(
+            {"id": "resp_bg", "status": "queued"},
+            {},
+            {"id": "resp_bg", "status": "cancelled", "usage": {"total_tokens": 3}},
+        )
+        client = self._client(http, state)
+        with self.assertRaises(AppError):
+            client.background({"input": "hello"}, cancel_event=Event())
+        self.assertEqual(
+            [(entry[1]["usage"], entry[2]) for entry in state.usage],
+            [({"total_tokens": 3}, "responses_background")],
+        )
+
+    def test_responses_client_failed_response_body_records_usage_before_raising(self):
+        class RejectingState(_ClientState):
+            def validate_openai_response(self, path, result):
+                if result.get("status") == "failed":
+                    raise AppError(502, "synthetic", reason="response_failed")
+                return result
+
+        state = RejectingState()
+        http = _ClientHTTP(
+            {"id": "resp_f", "status": "failed", "usage": {"total_tokens": 5}},
+            {"id": "resp_f2", "status": "failed", "usage": {"total_tokens": 6}},
+        )
+        client = self._client(http, state)
+
+        with self.assertRaises(AppError):
+            client.responses({"input": "hello"})
+        with self.assertRaises(AppError):
+            client.retrieve("resp_f2")
+
+        self.assertEqual(
+            [(entry[1]["usage"], entry[2]) for entry in state.usage],
+            [
+                ({"total_tokens": 5}, "responses"),
+                ({"total_tokens": 6}, "responses_background"),
+            ],
+        )
 
     def _stream_client(
         self, opener, *, state=None, capture=None, logger=None, wait=None, **overrides
@@ -2130,7 +2204,32 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(
             (raised.exception.status, raised.exception.reason), (499, "chat_cancelled")
         )
-        self.assertEqual(state.usage, [])
+        # The completed body is not accepted after the cancel, but its real usage
+        # is still billed.
+        self.assertEqual(
+            [(entry[1].get("usage"), entry[2]) for entry in state.usage],
+            [({"total_tokens": 1}, "responses_stream_cancelled")],
+        )
+
+    def test_stream_client_failed_response_records_its_usage_before_raising(self):
+        class RejectingState(_StreamStateService):
+            def validate_openai_response(self, _path, _result):
+                raise AppError(502, "synthetic", reason="response_failed")
+
+        state = RejectingState()
+        client = self._stream_client(
+            lambda *_args, **_kwargs: _StreamResponse(self._stream_lines()),
+            state=state,
+        )
+
+        with self.assertRaises(AppError) as raised:
+            client.stream({"input": "hello"}, lambda _delta: None)
+
+        self.assertEqual(raised.exception.reason, "response_failed")
+        self.assertEqual(
+            [(entry[1].get("usage"), entry[2]) for entry in state.usage],
+            [({"total_tokens": 1}, "responses_stream_failed")],
+        )
 
     def test_stream_client_redacts_callback_app_error_from_logs_and_diagnostics(self):
         state = _StreamStateService()

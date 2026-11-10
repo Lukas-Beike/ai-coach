@@ -1,7 +1,9 @@
 """Server integration tests for frontend."""
 
+import json
 import re
 import shutil
+import struct
 import tempfile
 import unittest
 from datetime import datetime as _local_datetime
@@ -818,7 +820,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"Trainingsload"', plan_views)
         self.assertIn("Plan/Ist:", plan_views)
         self.assertIn("daily_planning_context", plan_views)
-        self.assertIn("card.open = false", plan_views)
+        self.assertIn("card.open = openPlannedEntries.has(entryKey)", plan_views)
         self.assertIn("section.open = false", plan_views)
         self.assertIn("planned-day-${kind}", plan_views)
         self.assertIn('kind: "calendar"', plan_views)
@@ -1220,10 +1222,17 @@ class ServerFrontendTests(ServerTestCase):
         index_refs = versioned_asset_refs(index)
         self.assertTrue(index_refs)
         self.assertEqual(len(index_refs), len(set(index_refs)))
-        # The shell and the unversioned manifest are cached; every other
-        # precache entry is exactly one stamped reference of index.html.
-        self.assertEqual({"/", "/manifest.webmanifest"}, set(cached) - set(index_refs))
-        self.assertEqual(set(index_refs), set(cached) - {"/", "/manifest.webmanifest"})
+        # The shell, the unversioned manifest and its icons are cached; every
+        # other precache entry is exactly one stamped reference of index.html.
+        unstamped = {
+            "/",
+            "/manifest.webmanifest",
+            "/icon-192.png",
+            "/icon-512.png",
+            "/icon-maskable-512.png",
+        }
+        self.assertEqual(unstamped, set(cached) - set(index_refs))
+        self.assertEqual(set(index_refs), set(cached) - unstamped)
         self.assertRegex(service_worker, CACHE_NAME_PATTERN)
 
     def test_service_worker_precache_excludes_logo_and_links_apple_touch_icon(self):
@@ -1239,6 +1248,34 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn(f'"{icon}"', precache.group(1))
         self.assertTrue((server.PUBLIC_DIR / "logo.png").is_file())
         self.assertTrue((server.PUBLIC_DIR / "apple-touch-icon.png").is_file())
+
+    def test_manifest_declares_any_and_maskable_icons_that_are_precached(self):
+        manifest = json.loads(
+            (server.PUBLIC_DIR / "manifest.webmanifest").read_text(encoding="utf-8")
+        )
+        service_worker = served_page("service-worker.js")
+        by_src = {icon["src"]: icon for icon in manifest["icons"]}
+        self.assertEqual(by_src["/icon.svg"]["purpose"], "any")
+        self.assertEqual(by_src["/icon-192.png"]["sizes"], "192x192")
+        self.assertEqual(by_src["/icon-512.png"]["sizes"], "512x512")
+        self.assertEqual(by_src["/icon-maskable-512.png"]["purpose"], "maskable")
+        for src in by_src:
+            self.assertTrue((server.PUBLIC_DIR / src.lstrip("/")).is_file(), src)
+            self.assertIn(f'"{src}"', service_worker)
+        for name, size in (
+            ("icon-192.png", 192),
+            ("icon-512.png", 512),
+            ("icon-maskable-512.png", 512),
+        ):
+            header = (server.PUBLIC_DIR / name).read_bytes()[:24]
+            self.assertEqual(header[1:4], b"PNG")
+            self.assertEqual(struct.unpack(">II", header[16:24]), (size, size))
+
+    def test_csp_allows_blob_images_for_the_decode_fallback(self):
+        response = StaticAssetService(server.PUBLIC_DIR).render("/", "/", None)
+        policy = dict(response.headers)["Content-Security-Policy"]
+        self.assertIn("img-src 'self' data: blob:;", policy)
+        self.assertIn("script-src 'self';", policy)
 
     def test_source_files_carry_no_version_numbers(self):
         # Hand-written versions are what made parallel UI branches conflict.
@@ -1421,7 +1458,10 @@ class ServerFrontendTests(ServerTestCase):
             source.count(
                 "caches.open(CACHE).then((cache) => cache.match(event.request))"
             ),
-            2,
+            1,
+        )
+        self.assertIn(
+            "caches.open(CACHE).then((cache) => cache.match(cacheKey))", source
         )
         self.assertNotIn("caches.match(", source)
 

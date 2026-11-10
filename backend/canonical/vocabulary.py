@@ -7,6 +7,12 @@ from enum import StrEnum
 from typing import Final
 
 
+# Intervals.icu has been an output target only since release 2.0.0 (#1728,
+# #1848): nothing ingests its records any more. The branches that still read
+# ``INTERVALS`` rows are intentional guards for inert data stored before 2.0 and
+# must stay: backend/activities (canonical_sessions, detail_contract,
+# strength_sets, zone_settings, activity_summary), backend/db/canonical_store
+# and backend/coach/context_selection.
 class ProviderId(StrEnum):
     INTERVALS = "intervals"
     GARMIN = "garmin"

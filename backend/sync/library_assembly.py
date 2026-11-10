@@ -51,6 +51,10 @@ class WorkoutLibraryState:
     redactor: Redactor
     utc_now: Callable[[], str]
     local_today: Callable[[], date] | None = None
+    # Synced capped units whose bpm range moved with the threshold HR.
+    hr_cap_resync: Callable[[Any, list[dict[str, Any]]], set[str]] = (
+        lambda _db, _payloads: set()
+    )
 
 
 class WorkoutLibrarySyncAssembly:
@@ -80,6 +84,7 @@ class WorkoutLibrarySyncAssembly:
         self._redactor = state.redactor
         self._utc_now = state.utc_now
         self._local_today = state.local_today
+        self._hr_cap_resync = state.hr_cap_resync
         self._uuid_factory = dependencies.uuid_factory
 
     def export_port(
@@ -108,6 +113,7 @@ class WorkoutLibrarySyncAssembly:
             self._redactor,
             self._key_values,
             self._utc_now,
+            self._hr_cap_resync,
         )
 
     def sync_service(self) -> WorkoutLibrarySyncService:

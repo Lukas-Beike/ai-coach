@@ -658,7 +658,6 @@ class HttpApiAssembly:
         self.nutrition_post_routes = NutritionPostRoutes(
             diary_service,
             meal_library_service,
-            sync_job_queue_service,
             nutrition_refresh_service,
             athlete_clock.now,
         )

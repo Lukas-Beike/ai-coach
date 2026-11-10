@@ -23,6 +23,7 @@ V21_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v21.sql.txt"
 V22_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v22.sql.txt"
 V23_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v23.sql.txt"
 V24_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v24.sql.txt"
+V25_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v25.sql.txt"
 
 
 def service(data_dir: Path, **overrides: object) -> DatabaseRestoreValidationService:
@@ -142,7 +143,13 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 )
 
     def test_validate_upgrades_a_populated_released_backup(self) -> None:
-        for fixture in (V21_FIXTURE, V22_FIXTURE, V23_FIXTURE, V24_FIXTURE):
+        for fixture in (
+            V21_FIXTURE,
+            V22_FIXTURE,
+            V23_FIXTURE,
+            V24_FIXTURE,
+            V25_FIXTURE,
+        ):
             with (
                 self.subTest(fixture=fixture.name),
                 tempfile.TemporaryDirectory() as directory,

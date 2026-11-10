@@ -6,6 +6,8 @@ remembered per unit; when the athlete's threshold HR later moves, the unit's
 range differs from it and the unit counts as changed, so the calendar sync button
 offers it again. Nothing is sent without that explicit sync. Only percentages are
 stored on the unit; the remembered range is bookkeeping about what was sent.
+A capped unit sent while no threshold HR was known is remembered as ``none``, so
+the first known range counts as a change too.
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ from typing import Any, Final
 from backend.activities.hr_cap import resolved_range, stored_cap
 
 SENT_PREFIX: Final = "hr_cap_sent:"
+# Remembered when a capped unit was sent as zone text because no range resolved.
+NO_RANGE: Final = "none"
 # Resolves the run threshold HR in effect on a unit's date, or None.
 type LthrFor = Callable[[Mapping[str, Any]], float | None]
 
@@ -31,11 +35,10 @@ def range_text(resolved: tuple[int, int] | None) -> str:
 def record_sent(
     key_values: Any, db: Any, local_id: str, resolved: tuple[int, int] | None
 ) -> None:
-    """Remember the bpm range sent for a unit; forget it when none was sent."""
-    if resolved is None:
-        key_values.delete(db, sent_key(local_id))
-    else:
-        key_values.set(db, sent_key(local_id), range_text(resolved))
+    """Remember the bpm range sent for a capped unit, or ``none`` when no range resolved."""
+    key_values.set(
+        db, sent_key(local_id), NO_RANGE if resolved is None else range_text(resolved)
+    )
 
 
 def resync_ids(

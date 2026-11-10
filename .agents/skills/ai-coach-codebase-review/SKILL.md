@@ -54,6 +54,7 @@ No finite review can mathematically guarantee discovery of every possible defect
 ## Evidence and finding rules
 
 - Report a finding only when a concrete execution path, violated invariant, observable UI failure, or demonstrable omission supports it. Give an exact file and line anchor when code is involved.
+- Give a finding with a user-visible effect the `UI evidence` field of the report template; the frontend walkthrough of step 7 is what supplies `browser` evidence.
 - Explain trigger, observable impact, affected data or boundary, and a proportionate remediation plus regression-test idea.
 - Distinguish confirmed defects from design concerns, missing tests, documentation drift, and unverified risks. Do not inflate a test gap into a production defect without showing the underlying unsafe behavior.
 - Check callers, guards, transactions, compensating behavior, existing tests, and runtime behavior before claiming a bug. Deduplicate symptoms that share one root cause.

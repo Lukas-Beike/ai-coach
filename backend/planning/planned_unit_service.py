@@ -9,6 +9,7 @@ from datetime import date
 from typing import Any
 
 from backend import change_history
+from backend.activities.hr_cap import stored_cap
 from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
 from backend.canonical.planning_fields import (
@@ -33,6 +34,7 @@ from backend.planning.repository import (
     planned_unit_rows_between,
 )
 from backend.planning.session_focus import carry_focus
+from backend.planning.wahoo_orphans import find_wahoo_orphans
 
 _REMOTE_LINKS = RemoteLinkRepository()
 UPDATE_SQL = (
@@ -63,7 +65,12 @@ def _without_unset_focus(
 
 
 def _differs_only_in_focus(restored: dict[str, Any], current: dict[str, Any]) -> bool:
-    """Whether an undo changes nothing but the local focus (sync state stays)."""
+    """Whether an undo changes nothing but the local focus (sync state stays).
+
+    A focus that changes the effective heart-rate cap changes the exported text.
+    """
+    if stored_cap(restored) != stored_cap(current):
+        return False
     ignored = {*(key for key in FOCUS_KEYS if key != HR_CAP), "sync_status"}
 
     def comparable(payload: dict[str, Any]) -> dict[str, Any]:
@@ -375,6 +382,7 @@ class PlannedUnitService:
             intervals_orphans = (
                 find_intervals_orphans(db, self._today())[0] if push_state else []
             )
+            wahoo_orphans = find_wahoo_orphans(db)[0] if push_state else []
             pairs = [
                 (row, payload)
                 for row in rows
@@ -394,6 +402,7 @@ class PlannedUnitService:
                 orphans,
                 intervals_orphans,
                 self._today(),
+                wahoo_orphans,
             )
         return [payload for _row, payload in pairs]
 
@@ -620,7 +629,9 @@ class PlannedUnitService:
         candidate = planned_units.planned_workout_update_candidate(
             current, action, values
         )
-        date_changed = planned_units.prepare_planned_workout_date(candidate, current)
+        date_changed = planned_units.prepare_planned_workout_date(
+            candidate, current, today=self._today()
+        )
         window_changed = calendar_item_window(candidate) != calendar_item_window(
             current
         )
@@ -661,7 +672,10 @@ class PlannedUnitService:
             before,
             bump_planning_revision=bump_planning_revision,
             focus_only=action == "update"
-            and (remote_neutral or _is_focus_only(values)),
+            and (remote_neutral or _is_focus_only(values))
+            # A focus that turns the exported heart-rate cap on or off, or
+            # changes it, is a content change the provider must be offered.
+            and stored_cap(updated) == stored_cap(current),
         )
         return {
             "status": "local",

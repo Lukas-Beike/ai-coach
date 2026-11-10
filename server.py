@@ -493,7 +493,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.0.4"
+APP_VERSION = "2.0.5"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -859,6 +859,9 @@ HISTORY = HistoryAssembly(
             # Defined further down; resolved only when a history service is built.
             nutrition_diary=lambda: NUTRITION_ASSEMBLY.diary_service(),
             checkin_service=ATHLETE_DATA.checkin,
+            meal_library=lambda: NUTRITION_ASSEMBLY.meal_library_service(),
+            product_catalog=lambda: NUTRITION_ASSEMBLY.product_catalog_service(),
+            equipment_history=ATHLETE_DATA.equipment_history,
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,
@@ -1424,6 +1427,7 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
             redactor=REDACTOR,
             utc_now=runtime_clock.utc_now,
             local_today=lambda: ATHLETE_CLOCK.now().date(),
+            hr_cap_resync=lambda db, payloads: RUN_LTHR.resync(db, payloads),
         ),
         uuid_factory=uuid.uuid4,
     )
@@ -1824,7 +1828,12 @@ def _plan_guard_service() -> PlanGuardService:
         ),
         competitions=lambda: PLANNING_DATA.competition().list(),
         illness=lambda: recent_illness(
-            ATHLETE_DATA.checkin().list(3), ATHLETE_CLOCK.now().date()
+            ATHLETE_DATA.checkin().list(10),
+            ATHLETE_CLOCK.now().date(),
+            (
+                PLANNING_WORKFLOWS.adaptive_replan_preview_service().latest_illness_pause()
+                or (None, None)
+            )[1],
         ),
         progress=lambda: read_progress(HTTP_API.training_reports()),
         training_model=lambda: str(
@@ -1861,6 +1870,10 @@ def _plan_guard_service() -> PlanGuardService:
                 days=LAST_TEST_DAYS,
             ),
         ),
+    ).with_return_stage(
+        lambda: (
+            PLANNING_WORKFLOWS.adaptive_replan_preview_service().enforced_return_stage()
+        )
     )
 
 
@@ -2258,7 +2271,6 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             app_version=APP_VERSION,
         ),
         provider_health=DiagnosticProviderHealth(
-            sync_state=sync_state_repository,
             provider_state=provider_state_service,
             provider_freshness=PROVIDER_SYNC.freshness_service,
             redactor=REDACTOR,
@@ -2278,7 +2290,6 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
             canonical_coverage=lambda: CANONICAL_READ,
             canonical_backfill=lambda: CANONICAL_BACKFILL.status_reader,
             canonical_read=lambda: CANONICAL_READ,
-            canonical_rows=lambda: CANONICAL_READ,
         ),
         report=DiagnosticReportSettings(
             utc_now=runtime_clock.utc_now,
@@ -2554,6 +2565,7 @@ def main() -> None:
             sync_worker.join(timeout=5)
         COACH_JOB_WORKER.join(timeout=5)
         CANONICAL_BACKFILL.worker.join(timeout=5)
+        METRIC_EXPORT_RUNNER.join(timeout=5)
         DIAGNOSTIC_CAPTURE.flush()
 
 

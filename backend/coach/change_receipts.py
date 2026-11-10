@@ -30,7 +30,13 @@ _FULLY_TRACKED_TOOLS = frozenset(
         "update_nutrition_entry",
         "delete_nutrition_entry",
         "log_nutrition_template",
+        "save_nutrition_template",
+        "delete_nutrition_template",
+        "save_nutrition_product",
         "save_checkin",
+        "save_equipment",
+        "assign_activity_equipment",
+        "log_equipment_maintenance",
     }
 )
 

@@ -255,6 +255,9 @@ class _IdleStreamBackfill:
     def backfill(self, end: Any) -> dict[str, Any]:
         raise AssertionError("an unavailable backfill must not run")
 
+    def rearm(self) -> None:
+        """A refresh restarts nothing in a fixture run."""
+
 
 class WahooAcceptanceTests(WahooOrchestrationCase):
     def test_connected_account_flows_from_the_scheduler_to_the_status(self) -> None:

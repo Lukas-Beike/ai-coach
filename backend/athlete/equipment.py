@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any, Protocol
 
+from backend import change_history
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical import sensor_registry
@@ -27,6 +28,8 @@ from backend.db import activity_detail_store, canonical_store, garmin_store
 from backend.errors import AppError
 
 EQUIPMENT_PREFIX = "equipment:"
+ASSIGNMENT_PREFIX = "equipment_assignment:"
+MAINTENANCE_PREFIX = "equipment_maintenance:"
 SENSOR_EQUIPMENT_PREFIX = "sensor_equipment:"
 SELECT_VALUE = "SELECT value FROM kv WHERE key=?"
 GARMIN_GEAR_SOURCE = "garmin_gear"
@@ -37,7 +40,7 @@ GARMIN_INITIAL_SOURCE = "garmin-initial-sync"
 SPORT_DERIVATION_SHARE = 0.75
 SPORT_DERIVATION_MIN_ROWS = 3
 
-_UPSERT_KV = (
+UPSERT_KV = (
     "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE "
     "SET value=excluded.value,updated_at=excluded.updated_at"
 )
@@ -306,14 +309,27 @@ class EquipmentService:
             }
             _preserve_equipment_metadata(saved, previous, payload)
             db.execute(
-                _UPSERT_KV,
+                UPSERT_KV,
                 (
                     EQUIPMENT_PREFIX + item_id,
                     json.dumps(saved, allow_nan=False),
                     saved["updated_at"],
                 ),
             )
-        return {"ok": True, "stored_locally": True, "equipment": saved}
+            change = _record_change(
+                db,
+                "equipment",
+                item_id,
+                "update" if previous else "create",
+                previous,
+                saved,
+            )
+        return {
+            "ok": True,
+            "stored_locally": True,
+            "equipment": saved,
+            "change": change,
+        }
 
     def assign(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict) or set(payload) != {
@@ -345,13 +361,8 @@ class EquipmentService:
                 (EQUIPMENT_PREFIX + str(payload["equipment_id"]),),
             ).fetchone()
             equipment = json.loads(item["value"]) if item else None
-            if payload["equipment_id"] is not None and (
-                not equipment
-                or equipment["status"] != "active"
-                or equipment.get("parent_id")
-                or equipment.get("parent_pending")
-                or equipment.get("sport_pending")
-                or _item_pair(equipment) != _stored_pair(_row_sport(row))
+            if payload["equipment_id"] is not None and not assignable_equipment(
+                equipment, row
             ):
                 raise AppError(400, "Aktive passende Hauptausrüstung erforderlich.")
             # The assignment belongs to the session it was made for, so it stays
@@ -367,23 +378,35 @@ class EquipmentService:
             if key not in family:
                 key = str(row["id"])
             for other in family - {key}:
-                db.execute(
-                    "DELETE FROM kv WHERE key = ?", ("equipment_assignment:" + other,)
+                replaced = stored_value(db, ASSIGNMENT_PREFIX + other)
+                db.execute("DELETE FROM kv WHERE key = ?", (ASSIGNMENT_PREFIX + other,))
+                _record_change(
+                    db, "equipment_assignment", other, "delete", replaced, None
                 )
+            previous = stored_value(db, ASSIGNMENT_PREFIX + key)
             saved = {
                 "activity_id": key,
                 "equipment_id": equipment["id"] if equipment else None,
                 "observed_at": self._utc_now(),
             }
             db.execute(
-                _UPSERT_KV,
-                (
-                    "equipment_assignment:" + key,
-                    json.dumps(saved),
-                    saved["observed_at"],
-                ),
+                UPSERT_KV,
+                (ASSIGNMENT_PREFIX + key, json.dumps(saved), saved["observed_at"]),
             )
-        return {"ok": True, "stored_locally": True, "assignment": saved}
+            change = _record_change(
+                db,
+                "equipment_assignment",
+                key,
+                "update" if previous else "create",
+                previous,
+                saved,
+            )
+        return {
+            "ok": True,
+            "stored_locally": True,
+            "assignment": saved,
+            "change": change,
+        }
 
     def assign_sensor(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Link a recorded sensor to the athlete's equipment, or unlink it (None)."""
@@ -421,7 +444,7 @@ class EquipmentService:
                 raise AppError(400, "Aktive Hauptausrüstung erforderlich.")
             now = self._utc_now()
             db.execute(
-                _UPSERT_KV,
+                UPSERT_KV,
                 (
                     SENSOR_EQUIPMENT_PREFIX + key,
                     json.dumps({"equipment_id": equipment["id"], "observed_at": now}),
@@ -475,12 +498,116 @@ class EquipmentService:
             db.execute(
                 "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?)",
                 (
-                    "equipment_maintenance:" + saved["id"],
+                    MAINTENANCE_PREFIX + saved["id"],
                     json.dumps(saved),
                     saved["observed_at"],
                 ),
             )
-        return {"ok": True, "stored_locally": True, "maintenance": saved}
+            change = _record_change(
+                db, "equipment_maintenance", saved["id"], "create", None, saved
+            )
+        return {
+            "ok": True,
+            "stored_locally": True,
+            "maintenance": saved,
+            "change": change,
+        }
+
+
+def stored_value(db: Any, key: str) -> dict[str, Any] | None:
+    """The JSON record stored under one key, or None."""
+    row = db.execute(SELECT_VALUE, (key,)).fetchone()
+    if row is None:
+        return None
+    try:
+        value = json.loads(row["value"])
+    except TypeError, ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _record_change(
+    db: Any,
+    entity_type: str,
+    entity_id: str,
+    action: str,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+) -> dict[str, str] | None:
+    """Record one equipment change; returns its undo reference, if it changed."""
+    record = change_history.record_change(
+        db, entity_type, entity_id, action, before, after
+    )
+    if record is None:
+        return None
+    return {field: record[field] for field in change_history.UNDO_REFERENCE_FIELDS}
+
+
+def assignable_equipment(
+    equipment: dict[str, Any] | None, row: dict[str, Any] | None
+) -> bool:
+    """Whether an item may be assigned: an active, resolved main item of the sport.
+
+    Without the activity row (``row`` None) the sport pair is not compared.
+    """
+    return bool(
+        equipment
+        and equipment["status"] == "active"
+        and not equipment.get("parent_id")
+        and not equipment.get("parent_pending")
+        and not equipment.get("sport_pending")
+        and (row is None or _item_pair(equipment) == _stored_pair(_row_sport(row)))
+    )
+
+
+def activity_row(
+    summaries: Sequence[ActivitySummary], key: str
+) -> dict[str, Any] | None:
+    """The session row an assignment key names, or None when it is unknown."""
+    return next(
+        (
+            row
+            for row in _session_rows(summaries)
+            if key in {str(row["id"]), *row["references"]}
+        ),
+        None,
+    )
+
+
+def equipment_in_use(db: Any, item_id: str) -> bool:
+    """Whether a component, assignment, maintenance entry or sensor link names it."""
+    return bool(_equipment_children(db, item_id)) or (
+        db.execute(
+            "SELECT 1 FROM kv WHERE (key LIKE ? OR key LIKE ? OR key LIKE ?) "
+            "AND json_extract(value, '$.equipment_id')=? LIMIT 1",
+            (
+                ASSIGNMENT_PREFIX + "%",
+                MAINTENANCE_PREFIX + "%",
+                SENSOR_EQUIPMENT_PREFIX + "%",
+                item_id,
+            ),
+        ).fetchone()
+        is not None
+    )
+
+
+def validate_restored_equipment(db: Any, item: dict[str, Any]) -> None:
+    """Refuse (409) a restored item whose parent, components or sport no longer fit."""
+    payload = {
+        key: item.get(key) for key in ("kind", "sport", "environment", "parent_id")
+    }
+    try:
+        if payload["kind"] not in {"shoes", "bike", "component", "other"}:
+            raise AppError(400, "Ausrüstung ungültig.")
+        _equipment_sport_fields(_payload_sport(payload))
+        _equipment_parent(db, payload, str(item["id"]))
+        _validate_equipment_children(
+            db, str(item["id"]), item.get("parent_id"), payload
+        )
+    except AppError as exc:
+        raise AppError(
+            409, "Die Ausrüstung passt nicht mehr zu ihrer Umgebung."
+        ) from exc
 
 
 def _payload_sport(payload: dict[str, Any]) -> StoredSport | None:

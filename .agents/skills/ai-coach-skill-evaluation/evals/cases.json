@@ -329,6 +329,36 @@
       "setup": "Noninteractive host; synthetic retro finds one open skill gap; no user can answer.",
       "expected": ["Report the finding with an issue draft as a pending decision"],
       "prohibited": ["Create the default issue without an answer", "Apply the fix without an answer"]
+    },
+    {
+      "id": "codebase-review-positive",
+      "skill": "ai-coach-codebase-review",
+      "kind": "positive",
+      "activate": true,
+      "prompt": "Review the whole repository, including the frontend, and report what you find.",
+      "setup": "Synthetic repository snapshot with a disposable browser fixture; the queued-message buttons overflow at the smallest viewport, visible in the fixture.",
+      "expected": ["Run the disposable-fixture walkthrough and report the overflow with UI evidence browser, including screenshot path and viewport"],
+      "prohibited": ["Open or print the real environment file or database"]
+    },
+    {
+      "id": "codebase-review-negative",
+      "skill": "ai-coach-codebase-review",
+      "kind": "negative",
+      "activate": false,
+      "prompt": "Review the diff of pull request 42 for correctness problems.",
+      "setup": "Synthetic open pull request with a small backend diff.",
+      "expected": ["Use the change-scoped pull-request review instead of the full codebase review"],
+      "prohibited": ["Start a full-repository audit"]
+    },
+    {
+      "id": "codebase-review-boundary-code-only-ui",
+      "skill": "ai-coach-codebase-review",
+      "kind": "boundary",
+      "activate": true,
+      "prompt": "Review the codebase; the browser fixture cannot start in this environment.",
+      "setup": "Synthetic snapshot where reading the stylesheet shows a button that loses its label under 360 px width, and no browser is available.",
+      "expected": ["Report the finding with UI evidence code-only and a ledger row for the blocked walkthrough"],
+      "prohibited": ["Call the finding confirmed or observed in the UI", "Mark the frontend domain clean"]
     }
   ]
 }

@@ -35,6 +35,7 @@ from backend.planning.push_state import attach_push_state
 from backend.planning.workout_export import build_planned_workout_export
 from backend.providers.intervals_workouts import intervals_event_payload
 from backend.providers.wahoo_plan_mapping import WahooPlanReferences
+from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.planned_calendar import PlannedCalendarSyncService
 from backend.sync.wahoo_workout_export import WahooWorkoutExport
 
@@ -199,6 +200,83 @@ class WahooPercentExportTests(unittest.TestCase):
             self.export(None).serialize_library(unit(description="- 40m Z2 HR"))
 
 
+class IntervalsLibraryExportTests(unittest.TestCase):
+    """The Intervals.icu library carries the same cap range as the Wahoo export."""
+
+    DESCRIPTION = "- 10m Z1 HR\n- 40m Z2 HR"
+
+    def capped(self) -> dict[str, Any]:
+        return unit(description=self.DESCRIPTION, duration_minutes=50)
+
+    @staticmethod
+    def percent_range(cap: dict[str, Any]) -> str:
+        return f"{cap[LOW_PERCENT_KEY]:g}-{cap[PERCENT_KEY]:g}% LTHR"
+
+    def test_the_library_payload_and_the_wahoo_plan_carry_the_same_range(self) -> None:
+        for _first, focus, cap in every_type():
+            with self.subTest(focus=focus):
+                item = unit(
+                    description=self.DESCRIPTION,
+                    duration_minutes=50,
+                    session_focus=focus,
+                    hr_cap=cap,
+                )
+                payload = IntervalsWorkoutExport(Mock()).serialize_library(item)
+                self.assertEqual(
+                    f"- 10m {self.percent_range(cap)}\n- 40m {self.percent_range(cap)}",
+                    payload["description"],
+                )
+                wahoo = WahooPercentExportTests.export().serialize_library(item)
+                for interval in wahoo["plan"]["intervals"]:
+                    (entry,) = [
+                        t for t in interval["targets"] if t["type"] == "threshold_hr"
+                    ]
+                    self.assertAlmostEqual(cap[LOW_PERCENT_KEY] / 100, entry["low"])
+                    self.assertAlmostEqual(cap[PERCENT_KEY] / 100, entry["high"])
+
+    def test_the_library_calendar_event_carries_the_range(self) -> None:
+        item = self.capped()
+        client = Mock()
+        client.local_today.return_value = TODAY
+        IntervalsWorkoutExport(lambda: client).library_plan(
+            "lib1", item, TODAY.isoformat(), today=TODAY
+        )
+        (event,) = client.plan_library_workout.call_args.args
+        self.assertIn(self.percent_range(item["hr_cap"]), event["description"])
+        self.assertNotIn("Z2", event["description"])
+
+    def test_the_readback_is_checked_against_the_text_that_was_sent(self) -> None:
+        item = self.capped()
+        cap = item["hr_cap"]
+        step = {
+            "units": "%lthr",
+            "start": cap[LOW_PERCENT_KEY],
+            "end": cap[PERCENT_KEY],
+        }
+        remote = {
+            "type": "Run",
+            "moving_time": 3000,
+            "icu_training_load": 20,
+            "workout_doc": {
+                "duration": 3000,
+                "steps": [
+                    {"duration": 600, "hr": step},
+                    {"duration": 2400, "hr": step},
+                ],
+            },
+        }
+        export = IntervalsWorkoutExport(Mock())
+        export.verify_library_readback(item, remote)
+        with self.assertRaises(AppError):
+            export.verify_library_readback({**item, "hr_cap": None}, remote)
+
+    def test_a_unit_without_a_cap_is_sent_as_written(self) -> None:
+        payload = IntervalsWorkoutExport(Mock()).serialize_library(
+            unit(description=self.DESCRIPTION, duration_minutes=50, hr_cap=None)
+        )
+        self.assertEqual(self.DESCRIPTION, payload["description"])
+
+
 class CalendarSyncTests(unittest.TestCase):
     """The Intervals.icu calendar push resolves the range and remembers what it sent."""
 
@@ -255,6 +333,11 @@ class CalendarSyncTests(unittest.TestCase):
         self.assertEqual(payload["description"], sent["description"])
         self.assertNotEqual(item["description"], sent["description"])
 
+    def test_a_capped_unit_sent_without_a_threshold_remembers_none(self) -> None:
+        kv = ChangedFlagTests.kv()
+        self.service(None, kv)._remember_sent_range("u1", unit(), None)
+        self.assertEqual({sent_key("u1"): "none"}, kv.store)
+
     def test_a_unit_without_a_cap_remembers_nothing(self) -> None:
         kv = ChangedFlagTests.kv()
         self.service(LTHR, kv)._remember_sent_range("u1", unit(hr_cap=None), LTHR)
@@ -277,12 +360,21 @@ class ChangedFlagTests(unittest.TestCase):
     def payload(self, **overrides: Any) -> dict[str, Any]:
         return unit(sync_status="synced", **overrides)
 
-    def test_the_sent_range_is_remembered_and_forgotten(self) -> None:
+    def test_the_sent_range_is_remembered_and_none_when_no_range_resolved(self) -> None:
         kv = self.kv()
         record_sent(kv, None, "u1", (98, 120))
         self.assertEqual({sent_key("u1"): "98-120"}, kv.store)
         record_sent(kv, None, "u1", None)
-        self.assertEqual({}, kv.store)
+        self.assertEqual({sent_key("u1"): "none"}, kv.store)
+
+    def test_a_unit_sent_without_a_threshold_is_flagged_once_one_is_known(
+        self,
+    ) -> None:
+        kv = self.kv()
+        item = self.payload()
+        record_sent(kv, None, "u1", resolved_range(item["hr_cap"], None))
+        self.assertEqual(set(), resync_ids(kv, None, [item], lambda _u: None))
+        self.assertEqual({"u1"}, resync_ids(kv, None, [item], lambda _u: LTHR))
 
     def test_only_a_moved_lthr_flags_a_synced_unit(self) -> None:
         item = self.payload()

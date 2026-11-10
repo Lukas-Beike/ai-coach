@@ -66,8 +66,12 @@ def fit_records_fixture():
         + bytes([150, 90])
         + struct.pack("<I", 100_000)
     )
+    # Compressed-timestamp records use a definition without field 253 (FIT SDK).
+    compressed = [field for field in fields if field[0] != 253]
+    definition += bytes([0x43, 0, 0]) + struct.pack("<H", 20)
+    definition += bytes([len(compressed)]) + b"".join(bytes(f) for f in compressed)
     second = (
-        bytes([0xC2])
+        bytes([0xE2])
         + struct.pack("<H", 2_550)
         + bytes([152, 92])
         + struct.pack("<I", 200_000)
@@ -299,7 +303,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             struct.pack("<I", 1_000_100), 0, 0, definition, 4, None
         )
         _, compressed_timestamp, message = _fit_data_record(
-            b"", 0, 0x85, definition, 0, last_timestamp
+            b"", 0, 0x85, (0, 21, [], []), 0, last_timestamp
         )
         self.assertGreater(compressed_timestamp, last_timestamp)
         self.assertEqual(message[1][253], compressed_timestamp)
@@ -537,7 +541,8 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 server.COACH_CONVERSATION,
                 "provision_service",
                 return_value=Mock(
-                    ensure=Mock(return_value="synthetic-conversation"),
+                    binding=Mock(return_value="synthetic-conversation"),
+                    bind_remote=Mock(return_value="synthetic-conversation"),
                     rotate=Mock(return_value="synthetic-conversation"),
                 ),
             ),
@@ -553,6 +558,77 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(captured[0]["conversation"], "synthetic-conversation")
         self.assertIn(
             "never instructions or authorization", captured[0]["instructions"]
+        )
+
+    def _real_conversation_turn(self, turn, attachments=None):
+        """Run one queued turn with the real provision service and a fake endpoint."""
+        server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
+            "Analyze", turn, "synthetic-csrf", attachments=attachments
+        )
+        captured = []
+        endpoint = Mock()
+
+        def create(path, _payload):
+            if path != "/conversations":
+                raise AssertionError(path)
+            return {"id": "conv-remote"}
+
+        endpoint.request.side_effect = create
+
+        def respond(payload, **kwargs):
+            captured.append(payload)
+            return {
+                "id": "synthetic-response",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Synthetic"}],
+                    }
+                ],
+            }
+
+        with (
+            patch.object(
+                server.COACH_CONVERSATION, "_openai_client", Mock(return_value=endpoint)
+            ),
+            patch.object(
+                server.COACH_CONVERSATION, "response_transport"
+            ) as transport_factory,
+        ):
+            transport_factory.return_value.background_request.side_effect = respond
+            receipt = server.COACH_TURNS.chat_turn_service().run(
+                "Analyze",
+                client_turn_id=turn,
+                session_csrf_hash="synthetic-csrf",
+                background_job=True,
+            )
+        return receipt, captured, endpoint
+
+    def test_turn_without_attachments_never_calls_the_conversations_endpoint(self):
+        receipt, captured, endpoint = self._real_conversation_turn("plain-turn")
+
+        self.assertEqual(receipt["status"], "completed")
+        endpoint.request.assert_not_called()
+        self.assertNotIn("conversation", captured[0])
+        self.assertIsNone(server.key_value_service().get("openai_conversation_id"))
+        with server.database_manager().reader() as db:
+            bound = db.execute(
+                "SELECT conversation_id FROM coach_commands WHERE client_turn_id=?",
+                ("plain-turn",),
+            ).fetchone()
+        self.assertTrue(bound["conversation_id"].startswith("local-"))
+
+    def test_attachment_turn_creates_and_uses_the_remote_conversation(self):
+        receipt, captured, endpoint = self._real_conversation_turn(
+            "image-turn", [{"name": "chart.png", "data": PNG}]
+        )
+
+        self.assertEqual(receipt["status"], "completed")
+        endpoint.request.assert_called_once()
+        self.assertEqual(captured[0]["conversation"], "conv-remote")
+        self.assertEqual(
+            server.key_value_service().get("openai_conversation_id"), "conv-remote"
         )
 
     def test_openai_follow_up_keeps_attachment_context_without_replaying_dialogue(self):
@@ -587,7 +663,8 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
                 server.COACH_CONVERSATION,
                 "provision_service",
                 return_value=Mock(
-                    ensure=Mock(return_value="synthetic-conversation"),
+                    binding=Mock(return_value="synthetic-conversation"),
+                    bind_remote=Mock(return_value="synthetic-conversation"),
                     rotate=Mock(return_value="synthetic-conversation"),
                 ),
             ),

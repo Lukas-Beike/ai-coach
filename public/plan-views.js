@@ -18,9 +18,9 @@ async function runPlanPush(provider, entries) {
 }
 
 // The job entry that removes one listed leftover of a deleted or replaced unit:
-// a Garmin workout by a remove entry, an Intervals.icu event by the hidden unit's own entry.
+// a Garmin workout or Wahoo plan by a remove entry, an Intervals.icu event by the hidden unit's own entry.
 function leftoverEntry(provider, item, ids) {
-  return provider === ids.garmin ? { library_workout_id: item.id, remove: true } : { library_workout_id: item.id, expected_payload_hash: item.hash };
+  return provider !== ids.intervals ? { library_workout_id: item.id, remove: true } : { library_workout_id: item.id, expected_payload_hash: item.hash };
 }
 
 // What one successful push delivered: Garmin gets the structured workout,
@@ -32,6 +32,32 @@ function plannedPushTargetLabel(provider, entry, ids = {}) {
 }
 
 // Controls sit in the card summary; a click must not toggle the card.
+// Before a rebuild: remember which cards are open and which control has focus.
+function rememberPlannedEntryState(root) {
+  openPlannedEntries = new Set([...root.querySelectorAll(".planned-entry[data-entry-key]")].filter((card) => card.open).map((card) => card.dataset.entryKey));
+  for (const key of plannedFocusStatuses.keys()) if (!openPlannedEntries.has(key)) plannedFocusStatuses.delete(key);
+  const active = document.activeElement;
+  const card = active?.closest?.(".planned-entry[data-entry-key]");
+  if (!card || !root.contains(card)) return null;
+  return { key: card.dataset.entryKey, name: active.matches("select") ? active.name : "" };
+}
+
+function restorePlannedEntryFocus(root, focused) {
+  if (!focused) return;
+  const card = [...root.querySelectorAll(".planned-entry[data-entry-key]")].find((node) => node.dataset.entryKey === focused.key);
+  const target = focused.name ? card?.querySelector(`select[name="${focused.name}"]`) : null;
+  (target || card?.querySelector("summary"))?.focus({ preventScroll: true });
+}
+
+// The unit's description, or a placeholder when the card body would stay empty.
+function appendPlannedDescription(details, text) {
+  if (!text && details.childElementCount) return;
+  const description = document.createElement("p");
+  description.className = "planned-description";
+  description.textContent = text || "Keine weiteren Details hinterlegt.";
+  details.append(description);
+}
+
 function stopSummaryToggle(event) {
   event.preventDefault();
   event.stopPropagation();
@@ -82,6 +108,12 @@ const PLANNED_UV_FLAG_MIN = 6;
 const PLANNED_AQI_FLAG_MIN = 60; // European AQI "schlecht" and worse
 const PLANNED_CAMS_POLLEN_FLAG_MIN = 10; // grains/m³; DWD levels count from 1
 const PLANNED_DAY_STATUS_LABELS = new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]]);
+
+function externalCalendarDetail(calendar) {
+  if (calendar.last_error) return "Fehler bei letzter Aktualisierung";
+  const skipped = Number(calendar.skipped_events) || 0;
+  return skipped ? `${skipped} Termine übersprungen` : "";
+}
 
 function stripCalendarMarkers(text) {
   return String(text || "").replace(CALENDAR_MARKER_PATTERN, "").replace(/\s{2,}/g, " ").trim();
@@ -501,8 +533,9 @@ function adaptiveIllnessPending(data, preview) {
   return needsForecast || pendingPause;
 }
 
-function adaptiveCaption(illnessPending, count) {
+function adaptiveCaption(illnessPending, count, returnPending = false) {
   if (illnessPending) return "Krankheit gemeldet: Sportpause prognostizieren und bestätigen.";
+  if (returnPending && !count) return "Rückkehr nach Krankheit: nächste Stufe bestätigen.";
   if (count === 1) return "Ein zukünftiger Entwurf braucht eine Anpassung.";
   return `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
 }
@@ -560,6 +593,26 @@ function appendFocusChip(root, entry) {
   row.dataset.focusChip = chip?.derived ? "derived" : "set";
   if (chip?.derived) row.firstElementChild.setAttribute("aria-label", `${chip.text} (abgeleitet)`);
   root.append(row);
+}
+
+// A unit is identified by its local id, else by provider id and day; the open
+// cards and the "Gespeichert" status survive the re-render of a calendar reload.
+function plannedEntryKey(entry, dateKey) {
+  if (entry?.local_id) return `local:${entry.local_id}`;
+  const id = entry?.id ?? entry?.activity_id;
+  return id ? `id:${id}@${dateKey}` : "";
+}
+
+let openPlannedEntries = new Set();
+const plannedFocusStatuses = new Map();
+
+// The summary chip follows the saved focus without waiting for the next reload.
+function refreshFocusChip(card, entry) {
+  const holder = document.createElement("span");
+  appendFocusChip(holder, entry);
+  const row = card.querySelector("summary [data-focus-chip]");
+  if (row) row.replaceWith(...holder.childNodes);
+  else card.querySelector("summary .planned-session-line")?.append(...holder.childNodes);
 }
 
 function focusSelect(label, name, options, selected) {
@@ -691,7 +744,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const changes = Array.isArray(preview?.changes) ? preview.changes : [];
     const illnessPending = adaptiveIllnessPending(data, preview);
     const required = Boolean(planning.needs_replan || illnessPending);
-    const caption = adaptiveCaption(illnessPending, Number(planning.replan_changes || changes.length));
+    const caption = adaptiveCaption(illnessPending, Number(planning.replan_changes || changes.length), Boolean(planning.illness_return_pending));
     const weatherChanged = changes.some((change) => Array.isArray(change?.blocking_triggers) && change.blocking_triggers.includes("weather"));
     const forecastNote = weatherChanged ? adaptiveForecastNote(preview?.weather_forecast, formatTime) : "";
     const coachNotice = $("#coachAdaptivePlanningNotice");
@@ -707,7 +760,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const syncButton = $("#externalCalendarSyncButton");
     setConnectionChip("#externalCalendarConnectionStatus", connectionKind({ configured: calendar.configured, error: Boolean(calendar.last_error) }));
     const detail = $("#externalCalendarConnectionDetail");
-    if (detail) detail.textContent = calendar.last_error ? "Fehler bei letzter Aktualisierung" : "";
+    if (detail) detail.textContent = externalCalendarDetail(calendar);
     if (syncButton) {
       syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
       syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";
@@ -919,7 +972,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return analysisSvg("polygon", { points: `${start},54 ${start},${left} ${end},${right} ${end},54`, "data-zone": zone });
   }
 
-  function plannedFocusForm(entry) {
+  function plannedFocusForm(entry, dateKey) {
     const sport = focusSport(entry);
     if (!sport || !entry.local_id || entry.is_completed_activity) return null;
     const isSet = entry.focus_origin === "set";
@@ -931,14 +984,24 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const status = document.createElement("span");
     status.className = "planned-focus-status";
     status.setAttribute("role", "status");
+    const statusKey = plannedEntryKey(entry, dateKey);
+    status.textContent = plannedFocusStatuses.get(statusKey) || "";
     const previous = parts.map((part) => part.select.value);
     const save = async () => {
       status.textContent = "";
+      plannedFocusStatuses.delete(statusKey);
       try {
         const body = { session_focus: focus.select.value || null, strength_intensity: parts[1]?.select.value || null };
         await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/focus`, { method: "POST", body: JSON.stringify(body) });
         previous.splice(0, previous.length, ...parts.map((part) => part.select.value));
         status.textContent = "Gespeichert";
+        if (statusKey) plannedFocusStatuses.set(statusKey, "Gespeichert");
+        const card = form.closest(".planned-entry");
+        if (card) {
+          const saved = { ...entry, session_focus: focus.select.value || entry.session_focus, focus_origin: focus.select.value ? "set" : entry.focus_origin };
+          if (parts[1]?.select.value) Object.assign(saved, { strength_intensity: parts[1].select.value, intensity_origin: "set" });
+          refreshFocusChip(card, saved);
+        }
         return true;
       } catch (error) {
         parts.forEach((part, index) => { part.select.value = previous[index]; });
@@ -1003,6 +1066,57 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     });
   }
 
+  // Leftovers no pending sync removes with it (Wahoo plans of deleted library entries, or a
+  // provider with no unit waiting): one item with its own explicit removal, on the card that carries them.
+  function plannedLeftovers(entry, dateKey, todayKey, actual) {
+    const lists = entry.push_cleanup;
+    if (!lists || typeof lists !== "object") return [];
+    const ids = providerIds();
+    const configured = { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured), [ids.wahoo]: Boolean(state.data?.wahoo?.connected) };
+    const targets = plannedTargets(entry, dateKey, todayKey, actual);
+    return [ids.garmin, ids.intervals, ids.wahoo]
+      .filter((provider) => !targets.includes(provider) && configured[provider] === true && Array.isArray(lists[provider]) && lists[provider].length && claimCleanup(provider, entry.local_id))
+      .map((provider) => plannedLeftoverItem(provider, lists[provider], ids));
+  }
+
+  function plannedLeftoverItem(provider, items, ids) {
+    const shown = items.slice(0, 28);
+    const names = items.slice(0, 3).map((item) => [item.name, item.date ? dateLabel(item.date) : ""].filter(Boolean).join(" "));
+    const more = items.length > 3 ? " + " + (items.length - 3) + " weitere" : "";
+    const providerName = coachProviderLabel(provider);
+    const note = document.createElement("span");
+    note.className = "planned-conflict planned-cleanup planned-leftovers";
+    const text = document.createElement("span");
+    text.textContent = names.join(", ") + more;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button planned-conflict-button planned-leftovers-button";
+    button.textContent = `${items.length} ${items.length === 1 ? "alter Eintrag" : "alte Einträge"} bei ${providerName} entfernen`;
+    state.plannedSyncInFlight ||= new Set();
+    const key = "leftovers:" + provider;
+    button.disabled = state.plannedSyncInFlight.has(key);
+    button.addEventListener("click", async (event) => {
+      // The item sits in the card summary; a click must not toggle the card.
+      stopSummaryToggle(event);
+      if (state.plannedSyncInFlight.has(key)) return;
+      state.plannedSyncInFlight.add(key);
+      button.disabled = true;
+      let failure = "";
+      try {
+        const done = await runPlanPush(provider, shown.map((item) => leftoverEntry(provider, item, ids)));
+        if (done.status !== "completed") failure = globalThis.providerJobErrorDetail?.(done) || "Entfernen fehlgeschlagen";
+      } catch (error) {
+        failure = error.message;
+      }
+      state.plannedSyncInFlight.delete(key);
+      globalThis.toast?.(failure || `${shown.length} bei ${providerName} entfernt`, Boolean(failure));
+      button.disabled = false;
+      await globalThis.load?.();
+    });
+    note.append(text, button);
+    return note;
+  }
+
   // One provider's sync of a unit, then the listed leftovers in a job of their own, so one that
   // cannot be removed never fails the unit.
   async function pushToProvider(provider, entry, ids) {
@@ -1031,10 +1145,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     button.textContent = "Synchronisieren";
     button.setAttribute("aria-label", `${entry.name || "Einheit"} synchronisieren`);
     button.disabled = state.plannedSyncInFlight.has(entry.local_id);
-    button.addEventListener("click", async (event) => {
-      // The button sits in the card summary; a click must not toggle the card.
-      event.preventDefault();
-      event.stopPropagation();
+    button.addEventListener("click", async () => {
       if (state.plannedSyncInFlight.has(entry.local_id)) return;
       state.plannedSyncInFlight.add(entry.local_id);
       button.disabled = true;
@@ -1138,6 +1249,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return row;
   }
 
+  function plannedActivityButton(actual) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button";
+    button.textContent = "Aktivität analysieren";
+    button.addEventListener("click", () => globalThis.ActivityDetails.open(actual, { api, showDialog: showAccessibleDialog }));
+    return button;
+  }
+
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
     const actual = calendarActualActivity(entry);
     const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -1145,7 +1265,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const status = restDayLabel ? "skipped" : baseStatus;
     const card = document.createElement("details");
     card.className = `planned-entry is-${status}`;
-    card.open = false;
+    const entryKey = plannedEntryKey(entry, dateKey);
+    if (entryKey) card.dataset.entryKey = entryKey;
+    card.open = openPlannedEntries.has(entryKey);
     const cardSummary = document.createElement("summary");
     const meta = document.createElement("span");
     meta.className = "planned-meta";
@@ -1161,8 +1283,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     cardSummary.append(plannedSessionHeader(entry, actual, title, (line) => {
       appendPlannedEntryStatus(line, entry, status, restDayLabel, dateKey, todayKey, weekHasPlan);
       appendFocusChip(line, entry);
-      const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
-      if (syncButton) line.append(syncButton);
     }), meta);
     appendPlannedExecution(cardSummary, entry, status);
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
@@ -1171,39 +1291,21 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (conflict) cardSummary.append(conflict);
     const garminBlocked = plannedGarminBlocked(entry, dateKey, todayKey, actual);
     if (garminBlocked) cardSummary.append(garminBlocked);
-    cardSummary.append(...plannedCleanup(entry, dateKey, todayKey, actual));
+    cardSummary.append(...plannedCleanup(entry, dateKey, todayKey, actual), ...plannedLeftovers(entry, dateKey, todayKey, actual));
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
     const metrics = plannedSessionMetrics(entry, actual);
     if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
-    if (actual && (actual.id || actual.activity_id)) {
-      const activityButton = document.createElement("button");
-      activityButton.type = "button";
-      activityButton.className = "secondary-button";
-      activityButton.textContent = "Aktivität analysieren";
-      activityButton.addEventListener("click", () => globalThis.ActivityDetails.open(actual, {
-        api,
-        showDialog: showAccessibleDialog,
-      }));
-      details.append(activityButton);
-    }
+    if (actual && (actual.id || actual.activity_id)) details.append(plannedActivityButton(actual));
     appendPlannedCalendarComparison(details, entry, actual);
-    const focusForm = plannedFocusForm(entry);
+    const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);
-    if (entry.description) {
-      const description = document.createElement("p");
-      description.className = "planned-description";
-      description.textContent = entry.description;
-      details.append(description);
-    }
-    if (!details.childElementCount) {
-      const description = document.createElement("p");
-      description.className = "planned-description";
-      description.textContent = "Keine weiteren Details hinterlegt.";
-      details.append(description);
-    }
+    appendPlannedDescription(details, entry.description);
+    // The sync button lives in the card body; a button inside <summary> is nested-interactive.
+    const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
+    if (syncButton) details.append(syncButton);
     card.append(cardSummary, details);
     return card;
   }
@@ -1369,6 +1471,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const previousDayOpenState = new Map(
       [...root.querySelectorAll(".planned-day[data-date] > .planned-day-toggle")].map((toggle) => [toggle.parentElement.dataset.date, toggle.open]),
     );
+    const focusedEntry = rememberPlannedEntryState(root);
     root.replaceChildren();
     const weeklyCompliance = new Map(
       (Array.isArray(state.data?.planning_compliance) ? state.data.planning_compliance : [])
@@ -1408,6 +1511,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       weeklyCompliance,
     };
     for (let weekIndex = 0; weekIndex < pastWeeks + futureWeeks + 1; weekIndex += 1) root.append(renderPlannedWeek(view, weekIndex));
+    restorePlannedEntryFocus(root, focusedEntry);
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
   }
 

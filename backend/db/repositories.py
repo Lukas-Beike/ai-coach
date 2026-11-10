@@ -185,6 +185,14 @@ class NutritionProductRepository:
             > 0
         )
 
+    def delete(self, db: Any, product_id: str) -> bool:
+        return (
+            db.execute(
+                "DELETE FROM nutrition_products WHERE id=?", (product_id,)
+            ).rowcount
+            > 0
+        )
+
     def archive(self, db: Any, product_id: str, updated_at: str) -> bool:
         return (
             db.execute(
@@ -449,6 +457,9 @@ class ProfileRepository:
         self._key_value.set(db, self._KEY, payload)
 
 
+_TOMBSTONE_LABEL_PREFIX = "competition_tombstone:"
+
+
 class CompetitionRepository:
     """Read local competitions without owning a database connection."""
 
@@ -553,7 +564,23 @@ class CompetitionRepository:
         intervals_event_id: Any,
         external_id: Any,
         now: str,
+        *,
+        name: Any = None,
+        event_date: Any = None,
     ) -> None:
+        # The table has no name or date column: the label that lets the approval
+        # card name the deletion lives in the key/value store under the row id.
+        KeyValueRepository(lambda: now).set(
+            db,
+            _TOMBSTONE_LABEL_PREFIX + tombstone_id,
+            json.dumps(
+                {
+                    "name": str(name or "")[:200],
+                    "event_date": str(event_date or "")[:10],
+                },
+                ensure_ascii=False,
+            ),
+        )
         db.execute(
             "INSERT INTO competition_sync_tombstones"
             "(id, intervals_event_id, external_id, created_at, provider) "
@@ -567,6 +594,25 @@ class CompetitionRepository:
                 ProviderId.INTERVALS.value,
             ),
         )
+
+    @staticmethod
+    def tombstone_label(db: Any, tombstone_id: str) -> dict[str, str] | None:
+        """Return the stored name and date of a deleted competition, if kept."""
+        raw = KeyValueRepository(str).get(db, _TOMBSTONE_LABEL_PREFIX + tombstone_id)
+        try:
+            label = json.loads(raw or "")
+        except ValueError:
+            return None
+        if not isinstance(label, dict) or not str(label.get("name") or "").strip():
+            return None
+        return {
+            "name": str(label["name"]),
+            "event_date": str(label.get("event_date") or ""),
+        }
+
+    @staticmethod
+    def clear_tombstone_label(db: Any, tombstone_id: str) -> None:
+        KeyValueRepository(str).delete(db, _TOMBSTONE_LABEL_PREFIX + tombstone_id)
 
     def delete(self, db: Any, competition_id: str) -> None:
         db.execute("DELETE FROM competitions WHERE id=?", (competition_id,))
@@ -723,6 +769,15 @@ class PlanAdjustmentRepository:
         rows = db.execute(
             "SELECT payload, status FROM plan_adjustments ORDER BY created_at DESC, rowid DESC LIMIT ?",
             (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_applied(self, db: Any) -> list[dict[str, Any]]:
+        """Every applied or partial adjustment, newest first, without a row limit."""
+        rows = db.execute(
+            "SELECT payload, status FROM plan_adjustments "
+            "WHERE status IN ('applied', 'partial') "
+            "ORDER BY created_at DESC, rowid DESC"
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -1109,7 +1164,8 @@ def nutrition_macro_totals(entries: list[dict[str, Any]]) -> dict[str, Any]:
     """Return complete daily macro totals and display-only sums of known values.
 
     A total_* field stays None unless every entry reports that macro, so sync,
-    approval and Coach context never treat a partial sum as a daily total.
+    approval and Coach context never treat a partial sum as a daily total. A day
+    without entries has no totals either: they are unknown, not zero.
     """
     totals: dict[str, Any] = {}
     known_totals: dict[str, float | None] = {}
@@ -1119,7 +1175,7 @@ def nutrition_macro_totals(entries: list[dict[str, Any]]) -> dict[str, Any]:
         ]
         known_totals[field] = round(sum(known), 1) if known else None
         totals[f"total_{field}"] = (
-            round(sum(known), 1) if len(known) == len(entries) else None
+            round(sum(known), 1) if entries and len(known) == len(entries) else None
         )
     totals["known_macro_totals"] = known_totals
     totals["entries_without_macros"] = sum(

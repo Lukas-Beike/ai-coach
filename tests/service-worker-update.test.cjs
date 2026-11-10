@@ -61,6 +61,8 @@ function page({ controlled = true } = {}) {
   const documentListeners = {};
   const nodes = { "#messageInput": { value: "" }, "#backupRestoreButton": { disabled: false }, "#calendarDisplaySaveButton": { disabled: false }, "dialog[open]": null };
   const credentialFields = [{ value: "" }, { value: "" }];
+  const dirtyForms = [];
+  const globalListeners = {};
   const providerCredentialBusy = new Set();
   const pendingTurn = new Map();
   const state = {
@@ -82,7 +84,7 @@ function page({ controlled = true } = {}) {
     visibilityState: "visible",
     activeElement: null,
     querySelector: (selector) => nodes[selector] ?? null,
-    querySelectorAll: (selector) => (selector.includes("#cred-form-openai input") ? credentialFields : []),
+    querySelectorAll: (selector) => (selector.includes("#cred-form-openai input") ? credentialFields : selector.startsWith("form[data-dirty]") ? dirtyForms.filter((form) => form.dataset.dirty) : selector === "form[data-saving]" ? dirtyForms.filter((form) => form.dataset.saving) : []),
     addEventListener: (type, handler) => { documentListeners[type] = handler; },
   };
   const reloads = [];
@@ -90,7 +92,9 @@ function page({ controlled = true } = {}) {
     state,
     document,
     providerCredentialBusy,
+    addEventListener: (type, handler) => { globalListeners[type] = handler; },
     setTimeout: (handler) => handler(),
+    requestAnimationFrame: (handler) => handler(),
     sessionStorage: { getItem: (key) => pendingTurn.get(key) ?? null },
     location: { reload: () => reloads.push(1) },
     navigator: {
@@ -117,6 +121,9 @@ function page({ controlled = true } = {}) {
     document,
     credentialFields,
     providerCredentialBusy,
+    documentListeners,
+    globalListeners,
+    dirtyForms,
     leaveField: () => { document.activeElement = null; documentListeners.focusout(); },
     pendingTurn,
     reloads,
@@ -176,6 +183,8 @@ const blockers = {
   "a typed credential": ({ credentialFields }) => { credentialFields[1].value = "123456"; return () => { credentialFields[1].value = ""; }; },
   "a credential save": ({ providerCredentialBusy }) => { providerCredentialBusy.add("garmin-login"); return () => { providerCredentialBusy.clear(); }; },
   "a calendar settings save": ({ nodes }) => { nodes["#calendarDisplaySaveButton"].disabled = true; return () => { nodes["#calendarDisplaySaveButton"].disabled = false; }; },
+  "an edited form": ({ dirtyForms }) => { dirtyForms.push({ dataset: { dirty: "1" }, closest: () => null }); return () => { dirtyForms.length = 0; }; },
+  "an open nutrition extraction": ({ nodes }) => { nodes["#nutritionExtraction"] = { hidden: false, childElementCount: 2 }; return () => { nodes["#nutritionExtraction"] = { hidden: true, childElementCount: 2 }; }; },
   "a focused settings field": ({ document }) => {
     document.activeElement = { matches: () => true, closest: () => null };
     return () => { document.activeElement = null; };
@@ -235,4 +244,112 @@ test("a hidden page keeps a draft instead of reloading", () => {
 test("every chat control update checks a held update reload", () => {
   const updateChatControls = slice(coachSource, "function updateChatControls", "\n}\n");
   assert.match(updateChatControls, /\n {2}reloadForUpdateWhenSafe\(\);$/);
+});
+
+test("typing into a form marks it unsaved until a save is confirmed or the form is reset", () => {
+  const { documentListeners, globalListeners, dirtyForms } = page();
+  const form = { dataset: {} };
+  const field = { closest: (selector) => (selector.startsWith("form") ? form : null) };
+  dirtyForms.push(form);
+  documentListeners.input({ isTrusted: true, target: field });
+  assert.equal(form.dataset.dirty, "1");
+  documentListeners.submit({ target: form });
+  // A rejected save sends no confirmation: the input stays protected.
+  assert.equal(form.dataset.dirty, "1");
+  globalListeners["pacecraft:saved"]();
+  assert.equal(form.dataset.dirty, undefined);
+  documentListeners.input({ isTrusted: true, target: field });
+  documentListeners.reset({ target: form });
+  assert.equal(form.dataset.dirty, undefined);
+  documentListeners.input({ isTrusted: false, target: field });
+  assert.equal(form.dataset.dirty, undefined);
+});
+
+test("a failed save keeps the update reload held until a later save succeeds", () => {
+  const view = page();
+  const form = { dataset: { dirty: "1" }, closest: () => null };
+  view.dirtyForms.push(form);
+  view.replaceWorker();
+  view.documentListeners.submit({ target: form });
+  view.context.reloadForUpdateWhenSafe();
+  assert.equal(view.reloads.length, 0);
+  view.documentListeners.submit({ target: form });
+  view.globalListeners["pacecraft:saved"]();
+  view.context.reloadForUpdateWhenSafe();
+  assert.equal(view.reloads.length, 1);
+});
+
+test("an edited form in a closed dialog does not hold the update reload", () => {
+  const view = page();
+  view.dirtyForms.push({ dataset: { dirty: "1" }, closest: (selector) => (selector === "dialog:not([open])" ? {} : null) });
+  view.replaceWorker();
+  assert.equal(view.reloads.length, 1);
+});
+
+test("leaving a field during a pointer press waits for the click", () => {
+  const view = page();
+  view.state.chatDraftDirty = true;
+  view.replaceWorker();
+  view.documentListeners.pointerdown();
+  view.state.chatDraftDirty = false;
+  view.documentListeners.focusout();
+  assert.equal(view.reloads.length, 0);
+  view.documentListeners.pointerup();
+  assert.equal(view.reloads.length, 1);
+});
+
+// Drives the worker's fetch handler with a recorded cache and a scripted network.
+function fetching(networkStatus, { shell = true } = {}) {
+  const handlers = {};
+  const stored = new Map(shell ? [["/", { shell: true, status: 200 }]] : []);
+  const puts = [];
+  const context = vm.createContext({
+    URL,
+    setTimeout,
+    clearTimeout,
+    TypeError,
+    addEventListener: (type, handler) => { handlers[type] = handler; },
+    fetch: async () => {
+      if (networkStatus === "offline") throw new TypeError("offline");
+      const response = { status: networkStatus, ok: networkStatus < 400, clone: () => ({ copy: true }) };
+      return response;
+    },
+    caches: {
+      open: async () => ({
+        match: async (key) => stored.get(typeof key === "string" ? key : key.url) ?? null,
+        put: async (key) => { puts.push(typeof key === "string" ? key : key.url); },
+      }),
+    },
+  });
+  vm.runInContext(workerSource, context);
+  return async (url, mode = "navigate") => {
+    let answer;
+    const waits = [];
+    handlers.fetch({ request: { url: `http://localhost${url}`, method: "GET", mode }, respondWith: (promise) => { answer = promise; }, waitUntil: (promise) => waits.push(promise) });
+    const response = await answer.catch((error) => error);
+    await Promise.all(waits);
+    return { response, puts };
+  };
+}
+
+test("a server error on a navigation shows the cached app shell", async () => {
+  const { response } = await fetching(502)("/");
+  assert.equal(response.shell, true);
+});
+
+test("a server error without a cached shell is still shown", async () => {
+  const { response } = await fetching(502, { shell: false })("/");
+  assert.equal(response.status, 502);
+});
+
+test("navigations are cached under the app shell key only", async () => {
+  for (const path of ["/", "/does-not-exist", "/?wahoo=connected"]) {
+    const { puts } = await fetching(200)(path);
+    assert.deepEqual(puts, ["/"], path);
+  }
+});
+
+test("only precached files are stored for other requests", async () => {
+  assert.deepEqual((await fetching(200)("/app.js", "no-cors")).puts, ["http://localhost/app.js"]);
+  assert.deepEqual((await fetching(200)("/unknown.json", "no-cors")).puts, []);
 });

@@ -549,15 +549,25 @@ class WahooPlanPushOwner(Protocol):
     def sync(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
 
+class WahooStreamBackfill(StreamBackfill, Protocol):
+    """The stream backfill plus the restart of its chain for a mapper replay."""
+
+    def rearm(self) -> None: ...
+
+
 class WahooJobAdapter:
-    """Run the explicit Wahoo plan export, the stream backfill or the read-only sync."""
+    """Run the explicit Wahoo plan export, the stream backfill or the read-only sync.
+
+    A finished refresh restarts the stream chain once per FIT mapper version, so the
+    paced backfill downloads the files of sessions an older mapper stored (#1936).
+    """
 
     def __init__(
         self,
         *,
         sync: WahooSyncJobOwner,
         plan_push: WahooPlanPushOwner | None = None,
-        stream_backfill: StreamBackfill | None = None,
+        stream_backfill: WahooStreamBackfill | None = None,
     ) -> None:
         self._sync = sync
         self._plan_push = plan_push
@@ -579,7 +589,10 @@ class WahooJobAdapter:
         if job_type == STREAM_BACKFILL:
             return run_stream_backfill(self._stream_backfill, payload)
         _reject_plan_push(job_type)
-        return self._sync.sync(payload.get("days"), reason, operation_id=job["id"])
+        result = self._sync.sync(payload.get("days"), reason, operation_id=job["id"])
+        if self._stream_backfill is not None:
+            self._stream_backfill.rearm()
+        return result
 
 
 class CalendarWeatherJobAdapter:

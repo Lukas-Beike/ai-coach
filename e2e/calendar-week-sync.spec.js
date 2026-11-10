@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const AxeBuilder = require("@axe-core/playwright").default;
 
 async function openCalendar(page, request) {
   expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
@@ -43,13 +44,14 @@ test("@responsive the calendar week offers the sync button only for units still 
   await card("Bereits gesendet").scrollIntoViewIfNeeded();
   await expect(card("Bereits gesendet").locator(".planned-sync-button")).toHaveCount(0);
   await expect(card("Bereits gesendet").locator("summary")).not.toContainText(/synchron/i);
-  // Never sent and changed units each get one compact button on the sport line.
+  // Never sent and changed units each get one compact button in the card body.
   for (const name of ["Nie gesendet", "Seit dem Senden geändert"]) {
     const entry = card(name);
+    await entry.evaluate((element) => { element.open = true; });
     const button = entry.locator(".planned-sync-button");
     await expect(button).toHaveCount(1);
     await expect(button).toHaveText("Synchronisieren");
-    await expect(entry.locator(".planned-session-line .planned-sync-button")).toHaveCount(1);
+    await expect(entry.locator(".planned-entry-details > .planned-sync-button")).toHaveCount(1);
     const [buttonBox, entryBox] = await Promise.all([button.boundingBox(), entry.boundingBox()]);
     expect(buttonBox.height).toBeGreaterThanOrEqual(28);
     expect(buttonBox.height).toBeLessThan(44);
@@ -62,6 +64,15 @@ test("@responsive the calendar week offers the sync button only for units still 
     expect(hit).toBeGreaterThanOrEqual(44);
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+});
+
+test("@responsive the sync button is not nested inside the card summary", async ({ page, request }) => {
+  await openCalendar(page, request);
+  await renderUnits(page);
+  await expect(page.locator(".planned-entry .planned-sync-button")).toHaveCount(2);
+  await expect(page.locator(".planned-entry summary .planned-sync-button")).toHaveCount(0);
+  const results = await new AxeBuilder({ page }).include("#plannedCalendar").withRules(["nested-interactive"]).analyze();
+  expect(results.violations.filter((violation) => violation.nodes.some((node) => node.target.join(" ").includes("planned-entry")))).toEqual([]);
 });
 
 test("@responsive an endurance unit shows a tall zone-coloured workout profile", async ({ page, request }, testInfo) => {

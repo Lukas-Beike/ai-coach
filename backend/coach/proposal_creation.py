@@ -26,7 +26,7 @@ from backend.coach.proposal_validation import (
     validated_coach_action_preview_input,
 )
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import PlanAdjustmentRepository
+from backend.db.repositories import CompetitionRepository, PlanAdjustmentRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning import planned_units
@@ -769,6 +769,14 @@ def _competition_detail(db: Any, item: dict[str, Any]) -> dict[str, str]:
     if not row:
         raise AppError(409, "Competition manifest changed before approval.")
     _validate_manifest_row(row, item, "Competition manifest changed before approval.")
+    label = CompetitionRepository.tombstone_label(db, str(row["id"]))
+    if label:
+        return {
+            "name": label["name"][:120],
+            "date": _approval_date(label["event_date"]),
+            "sport": "Wird bei Intervals.icu entfernt",
+            "id": str(row["intervals_event_id"] or row["id"]),
+        }
     return {
         "name": "Remote-Wettkampfeintrag l\u00f6schen",
         "date": "Freigegebene L\u00f6schmarkierung",

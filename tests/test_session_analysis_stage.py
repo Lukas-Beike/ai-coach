@@ -507,7 +507,9 @@ class SessionAnalysisStageTests(unittest.TestCase):
         self.assertEqual(0, self._run()["counts"]["computed"])
 
         with patch.object(
-            canonical_session_analysis, "HEART_RATE_HISTOGRAM_VERSION", 2
+            canonical_session_analysis,
+            "HEART_RATE_HISTOGRAM_VERSION",
+            canonical_session_analysis.HEART_RATE_HISTOGRAM_VERSION + 1,
         ):
             self.assertEqual(1, self._run()["counts"]["computed"])
 

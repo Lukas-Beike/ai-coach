@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.checkins import reports_complaint
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.first_threshold import (
     FIRST_THRESHOLD_FIELD,
@@ -142,11 +143,52 @@ def read_progress(reports: Any) -> Mapping[str, Any]:
     return reports.report.progress({"days": 42}, reports.timezone(), with_curves=False)
 
 
-def recent_illness(checkins: Sequence[Mapping[str, Any]], today: date) -> str:
-    """Illness text of the newest check-in of today or the last two days."""
+def _active_pause_illness(
+    checkins: Sequence[Mapping[str, Any]], today: date, pause: Mapping[str, Any]
+) -> str | None:
+    """Illness text while an approved pause runs, None outside its window.
+
+    A check-in inside the window (on or after its start, up to today) speaks
+    for the athlete: the newest one decides, so a cleared answer ends it.
+    """
+    start = str(pause.get("start_date") or "")
+    end = str(pause.get("end_date") or "")
+    if not pause.get("approved") or not start <= today.isoformat() <= end:
+        return None
+    inside = [
+        row
+        for row in checkins
+        if start <= str(row.get("checkin_date") or "") <= today.isoformat()
+    ]
+    if not inside:
+        return str(pause.get("illness") or "")
+    newest = max(inside, key=lambda row: str(row["checkin_date"]))
+    text = str(newest.get("illness") or "")
+    return text if reports_complaint(text) else ""
+
+
+def recent_illness(
+    checkins: Sequence[Mapping[str, Any]],
+    today: date,
+    pause: Mapping[str, Any] | None = None,
+) -> str:
+    """Illness text of the approved pause window, else of the recent check-ins.
+
+    Without a running pause it is the newest check-in of the last two days up
+    to today; future-dated rows never count.
+    """
+    if pause:
+        active = _active_pause_illness(checkins, today, pause)
+        if active is not None:
+            return active
     first = (today - timedelta(days=2)).isoformat()
+    last = today.isoformat()
     latest = max(
-        (row for row in checkins if str(row.get("checkin_date") or "") >= first),
+        (
+            row
+            for row in checkins
+            if first <= str(row.get("checkin_date") or "") <= last
+        ),
         key=lambda row: str(row["checkin_date"]),
         default=None,
     )
@@ -415,6 +457,7 @@ class PlanGuardService:
         history: BriefHistory | None = None,
     ) -> None:
         self._history = history or BriefHistory()
+        self._return_stage: Callable[[], int | None] = lambda: None
         self._profile = profile
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -430,6 +473,7 @@ class PlanGuardService:
         self._calendar_cache: tuple[Sequence[Mapping[str, Any]], ...] | None = None
         self._threshold_cache: tuple[LoadThresholds | None] | None = None
         self._illness_cache: tuple[str] | None = None
+        self._return_stage_cache: tuple[int | None] | None = None
 
     def _planned_weeks(
         self,
@@ -460,6 +504,7 @@ class PlanGuardService:
                 completed=completed,
                 competitions=self._competitions(),
                 illness=self._reported_illness(),
+                return_stage=self._current_return_stage(),
                 thresholds=self._load_thresholds(),
                 expects_strength=self._expects_strength(),
                 calendar_events=self._events(),
@@ -485,6 +530,19 @@ class PlanGuardService:
         if self._illness_cache is None:
             self._illness_cache = (self._illness(),)
         return self._illness_cache[0]
+
+    def with_return_stage(
+        self, return_stage: Callable[[], int | None]
+    ) -> PlanGuardService:
+        """Enforce the stage of the return after an illness pause (#2042)."""
+        self._return_stage = return_stage
+        return self
+
+    def _current_return_stage(self) -> int | None:
+        """One snapshot per service, like the reported illness."""
+        if self._return_stage_cache is None:
+            self._return_stage_cache = (self._return_stage(),)
+        return self._return_stage_cache[0]
 
     def _load_thresholds(self) -> LoadThresholds | None:
         """One snapshot per service, so before and after a write compare alike."""

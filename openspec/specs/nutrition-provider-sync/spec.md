@@ -7,21 +7,21 @@ Describe explicit local-diary export to Intervals.icu and scoped Garmin nutritio
 ## Requirements
 
 ### Requirement: Nutrition export is an explicit queued operation
-The system SHALL start an HTTP nutrition export only from the authenticated, CSRF-protected sync action and return a queued-job receipt. Ordinary diary reads, edits, product lookup, and view refresh SHALL not implicitly export nutrition.
+The system SHALL start a nutrition export only from a sync the athlete names, approved through a Coach action card, and SHALL NOT expose a direct HTTP route that queues it. Ordinary diary reads, edits, product lookup, and view refresh SHALL not implicitly export nutrition.
 
-#### Scenario: Export one selected date
-- **WHEN** the athlete explicitly submits a nutrition sync with a date
-- **THEN** the server enqueues the Intervals nutrition-sync operation for that date and returns HTTP 202 with its `sync_job_id`.
+#### Scenario: No direct export route
+- **WHEN** a client posts to `/api/nutrition/sync`
+- **THEN** the nutrition routes do not handle it and no nutrition-export job is enqueued.
 
 #### Scenario: Export pending dates
-- **WHEN** the explicit action selects pending dates rather than one date
-- **THEN** the queued payload carries the requested pending limit, defaulting to fourteen; service execution accepts only a limit from one through thirty-one.
+- **WHEN** the approved Coach action covers pending dates
+- **THEN** service execution accepts only a limit from one through thirty-one.
 
 #### Scenario: Refresh the diary
 - **WHEN** the athlete refreshes a nutrition view
 - **THEN** the narrow read-refresh path is used and no nutrition-export job is enqueued.
 
-Evidence: `backend/http_api/nutrition.py::NutritionPostRoutes._sync`, `backend/nutrition/sync.py::IntervalsNutritionSyncService.sync_pending`, `backend/http_api/handler.py::RequestHandler.do_POST`; `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_post_sync_route`, `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_post_sync_pending_route_queues_bounded_provider_job`, `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_nutrition_refresh_diary_reads_local_meals_and_only_daily_energy`.
+Evidence: `backend/http_api/nutrition.py::NutritionPostRoutes.handle`, `backend/nutrition/sync.py::IntervalsNutritionSyncService.sync_pending`; `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_the_removed_sync_route_is_not_handled`, `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_nutrition_refresh_diary_reads_local_meals_and_only_daily_energy`.
 
 ### Requirement: Approved exports bind exact local snapshots
 The system SHALL represent an approved nutrition export as selected dates with local revision, calories, macros, entry count, and a content digest. Approved execution SHALL validate the complete manifest and recheck each date before writing it.
@@ -53,13 +53,13 @@ The system SHALL export a day's aggregated calories and macros to that day's Int
 
 #### Scenario: Empty day after deletion
 - **WHEN** the final previously exported entry is deleted and the athlete explicitly exports the pending date
-- **THEN** the zero-calorie day and appropriate macro clearing can replace the old daily nutrition totals without requiring a fabricated meal.
+- **THEN** calories and all macros are sent as the provider's unset number, `-1`, instead of zeros, so the old daily nutrition totals are cleared without requiring a fabricated meal; the day's macro totals read as unknown.
 
 #### Scenario: Repeat the selected day's export
 - **WHEN** an unchanged day is explicitly exported again
 - **THEN** its totals target the same dated wellness resource rather than creating another local diary entry; this does not promise exactly-once network delivery or remote conflict protection.
 
-Evidence: `backend/nutrition/sync.py::IntervalsNutritionSyncService.sync_day`, `backend/nutrition/sync.py::UNSET_REMOTE_NUMBER`; `tests/test_nutrition_api_and_sync.py::IntervalsNutritionSyncServiceTests.test_sync_day_calls_intervals_api_and_marks_synced`, `tests/test_nutrition_api_and_sync.py::IntervalsNutritionSyncServiceTests.test_sync_clears_unknown_macros_remotely_and_marks_date_synced`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_deleting_last_synced_entry_keeps_empty_date_pending`. The last scenario combines inspected deletion/requeue and export behavior; there was no live empty-day provider write in this backfill.
+Evidence: `backend/nutrition/sync.py::IntervalsNutritionSyncService.sync_day`, `backend/nutrition/sync.py::UNSET_REMOTE_NUMBER`; `tests/test_nutrition_api_and_sync.py::IntervalsNutritionSyncServiceTests.test_sync_day_calls_intervals_api_and_marks_synced`, `tests/test_nutrition_api_and_sync.py::IntervalsNutritionSyncServiceTests.test_sync_clears_unknown_macros_remotely_and_marks_date_synced`, `tests/test_nutrition_api_and_sync.py::IntervalsNutritionSyncServiceTests.test_sync_of_an_emptied_day_sends_unset_values_not_zeros`, `tests/test_nutrition_api_and_sync.py::IntervalsNutritionSyncServiceTests.test_an_empty_day_has_unknown_totals`, `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_deleting_last_synced_entry_keeps_empty_date_pending`. The last scenario combines inspected deletion/requeue and export behavior; there was no live empty-day provider write in this backfill.
 
 ### Requirement: Export completion is revision-safe and retryable
 The system SHALL mark a date synced only if its local revision still matches the sent snapshot. A provider failure or concurrent local edit SHALL retain pending work, and a batch result SHALL distinguish synced, pending, and failed dates.

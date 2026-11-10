@@ -19,7 +19,7 @@ class YazioRouteTests(unittest.TestCase):
         auth.authenticated_session.return_value = session
         food = Mock()
         nutrition = NutritionPostRoutes(
-            Mock(), lambda: SimpleNamespace(food_database=food), Mock()
+            Mock(), lambda: SimpleNamespace(food_database=food)
         )
         routes = SimpleNamespace(
             **{
@@ -109,7 +109,7 @@ class YazioRouteTests(unittest.TestCase):
             "checked_at": "time",
         }
         routes = NutritionPostRoutes(
-            Mock(), lambda: SimpleNamespace(food_database=food), Mock()
+            Mock(), lambda: SimpleNamespace(food_database=food)
         )
         handler = Mock()
         self.assertTrue(routes.handle(handler, "/api/nutrition/yazio/check"))

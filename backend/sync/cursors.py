@@ -44,3 +44,11 @@ def write_cursor(
             updated_at,
         ),
     )
+
+
+def clear_cursor(db: Any, provider: str, stream: str) -> None:
+    """Forget a stream's cursor, so its chain starts again from the newest day."""
+    db.execute(
+        "DELETE FROM provider_sync_cursors WHERE provider=? AND stream=?",
+        (provider, stream),
+    )

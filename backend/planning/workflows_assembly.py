@@ -12,6 +12,7 @@ from backend.planning.adaptive_preview_service import (
 )
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.daily_context_service import DailyPlanningContextService
+from backend.planning.illness_return_signals import overnight_reader
 from backend.planning.library_plan_service import WorkoutLibraryPlanService
 from backend.planning.local_plan_creation_service import (
     LocalTrainingPlanCreationService,
@@ -237,4 +238,10 @@ class PlanningWorkflowAssembly:
                 self._weather_adaptive_max_minutes,
             ),
             self._run_caps,
+            overnight_reader(
+                self._database_manager(),
+                self._observation_reader,
+                self._source_preferences,
+                self._local_date,
+            ),
         )

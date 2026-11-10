@@ -6,7 +6,8 @@ workout is validated and mapped locally before the first remote write, so a
 Wahoo that is not connected, or a request that is stale, writes nothing. The
 Wahoo plan id lives in ``remote_links`` (provider ``wahoo``); the Intervals.icu
 slots of the library row are never touched. A second run updates the plan it
-created instead of uploading a duplicate. The link's baseline also covers the
+created instead of uploading a duplicate. An entry with ``remove`` deletes the
+Wahoo plan of a library entry that no longer exists (``planning.wahoo_orphans``). The link's baseline also covers the
 references the relative steps use (#1686), so a later threshold change or text
 edit leaves a trace the library state compares against (#1769); a re-run sends
 the current values.
@@ -68,9 +69,7 @@ class WahooPlanPushService:
             )
         if not self._configured():
             raise AppError(409, WAHOO_NOT_CONFIGURED_MESSAGE, reason="not_configured")
-        requested = planning_library.library_bulk_request_entries(
-            payload.get("entries"), require_hash=True
-        )
+        requested = _entries(payload.get("entries"))
         # The gate rejects remote writes while a Wahoo resync reset holds it.
         operation = self._gate.operation() if self._gate is not None else nullcontext()
         with operation, self._lock:
@@ -100,6 +99,9 @@ class WahooPlanPushService:
         prepared: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
         for item in requested:
             local_id = item["library_workout_id"]
+            if item.get("remove"):
+                results[local_id] = self._remove(export, local_id)
+                continue
             outcome = self._prepare(export, item)
             if isinstance(outcome, tuple):
                 workout, envelope = outcome
@@ -120,6 +122,40 @@ class WahooPlanPushService:
             except Exception as exc:  # noqa: BLE001 - isolate each selected entry
                 results[local_id] = self._error(local_id, exc)
         return [results[item["library_workout_id"]] for item in requested]
+
+    def _remove(self, export: WahooWorkoutExport, local_id: str) -> dict[str, Any]:
+        """Delete the Wahoo plan of a library entry that is gone, then its link."""
+        with self._database_manager().unit_of_work() as db:
+            link = _REMOTE_LINKS.get(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id, WAHOO_ID
+            )
+            exists = db.execute(
+                "SELECT 1 FROM workout_library WHERE local_id=?", (local_id,)
+            ).fetchone()
+        if link is None:
+            return {"library_workout_id": local_id, "status": "already_synced"}
+        if exists:
+            return {
+                "library_workout_id": local_id,
+                "status": "conflict",
+                "error": "Die Einheit ist noch in der Bibliothek",
+            }
+        try:
+            if link.remote_id:
+                export.delete_library(link.remote_id)
+            with self._database_manager().unit_of_work() as db:
+                _REMOTE_LINKS.delete(
+                    db, RemoteEntityKind.LIBRARY_WORKOUT, local_id, WAHOO_ID
+                )
+        except WahooReconnectRequiredError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - isolate each selected entry
+            return self._error(local_id, exc)
+        return {
+            "library_workout_id": local_id,
+            "status": "synced",
+            "action": "removed",
+        }
 
     def _prepare(
         self, export: WahooWorkoutExport, item: dict[str, Any]
@@ -211,6 +247,32 @@ class WahooPlanPushService:
             "status": "error",
             "error": self._redact(str(error))[:500],
         }
+
+
+def _entries(entries: Any) -> list[dict[str, Any]]:
+    """Split removals from pushes; both are validated before the first write."""
+    if not isinstance(entries, list) or not entries:
+        raise AppError(
+            400, "Mindestens eine Bibliothekseinheit muss ausgewählt werden."
+        )
+    result = [
+        {
+            "library_workout_id": planning_library.workout_library_entry_id(
+                entry.get("library_workout_id")
+            ),
+            "remove": True,
+        }
+        if isinstance(entry, dict) and entry.get("remove") is True
+        else planning_library.library_bulk_request_entries([entry], require_hash=True)[
+            0
+        ]
+        for entry in entries
+    ]
+    if len({item["library_workout_id"] for item in result}) != len(result):
+        raise AppError(
+            400, "Eine Bibliothekseinheit darf nur einmal ausgewählt werden."
+        )
+    return result
 
 
 def plan_baseline(plan: dict[str, Any]) -> str:

@@ -66,7 +66,7 @@ from backend.performance.session_rpe_load import session_load
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 
 METHOD_ID: Final = "local-tss-load"
-METHOD_VERSION: Final = 6
+METHOD_VERSION: Final = 7
 CARD: Final = "M6"
 
 POWER_BRANCH: Final = "power"
@@ -841,6 +841,8 @@ def _rating(
     if au is None or entry["rpe"] is None:
         reason = str(entry.get("reason") or "no_rating")
         return "no_rating" if reason == "no_rating" else reason
+    if entry["rpe_scale"] not in _RATING_SOURCES:
+        return "no_rating"
     return SessionRating(au=au, rpe=float(entry["rpe"]), rpe_scale=entry["rpe_scale"])
 
 

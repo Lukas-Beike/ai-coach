@@ -8,37 +8,13 @@ import unittest
 from typing import Any
 from unittest import mock
 
-from canonical_detail_support import (
-    NOW,
-    add_session_record,
-    open_manager,
-    seed_intervals_activity,
-)
+from canonical_detail_support import NOW, add_session_record, open_manager
 
 from backend.canonical.vocabulary import ProviderId
 from backend.db import DatabaseManager
 from backend.diagnostics.provider_composition import summarize_provider_composition
 
 _PRIVATE = "private athlete text"
-
-
-def _add_raw_activity(
-    manager: DatabaseManager, provider_activity_id: str, source: str
-) -> None:
-    with manager.unit_of_work() as db:
-        db.execute(
-            "INSERT INTO provider_records(provider, record_kind, source_record_id, "
-            "payload, payload_hash, fetched_at, created_at, updated_at) "
-            "VALUES ('intervals', 'activity', ?, ?, ?, ?, ?, ?)",
-            (
-                provider_activity_id,
-                json.dumps({"source": source, "name": _PRIVATE}),
-                "0" * 64,
-                NOW,
-                NOW,
-                NOW,
-            ),
-        )
 
 
 def _add_observation(
@@ -92,130 +68,64 @@ class ProviderCompositionDiagnosticsTests(unittest.TestCase):
         with self.manager.read_snapshot() as db:
             return summarize_provider_composition(db)
 
-    def test_counts_sessions_by_providers_and_intervals_only_by_year_and_source(
-        self,
-    ) -> None:
-        # Ingested the way a sync does: the raw payload names the source.
-        seed_intervals_activity(self.manager, "i1", source="ZWIFT")
-        seed_intervals_activity(
-            self.manager, "i2", source="MANUAL", start_date_local="2021-03-01T07:00:00"
-        )
-        add_session_record(self.manager, ProviderId.INTERVALS, "i3", "act_i3")
+    def test_counts_sessions_by_the_providers_of_their_active_records(self) -> None:
+        add_session_record(self.manager, ProviderId.GARMIN, "g1", "act_g1")
+        add_session_record(self.manager, ProviderId.GARMIN, "g2", "act_g2")
+        add_session_record(self.manager, ProviderId.WAHOO, "w1", "act_w1")
         add_session_record(
-            self.manager, ProviderId.GARMIN, "g3", "act_g3", merged_into="act_i3"
+            self.manager, ProviderId.GARMIN, "g3", "act_g3", merged_into="act_w1"
         )
-        add_session_record(self.manager, ProviderId.GARMIN, "g4", "act_g4")
-        # No raw record, and the Garmin record of the session is deleted.
-        add_session_record(self.manager, ProviderId.INTERVALS, "i5", "act_i5")
+        # The Garmin record of this session is deleted, a deleted session is not counted.
+        add_session_record(self.manager, ProviderId.WAHOO, "w2", "act_w2")
         add_session_record(
-            self.manager, ProviderId.GARMIN, "g5", "act_g5", merged_into="act_i5"
+            self.manager, ProviderId.GARMIN, "g4", "act_g4", merged_into="act_w2"
         )
-        # A deleted session is not counted.
-        add_session_record(self.manager, ProviderId.INTERVALS, "i6", "act_i6")
-        # Two Intervals.icu copies of one double-tracked session.
-        add_session_record(self.manager, ProviderId.INTERVALS, "i7", "act_i7")
-        add_session_record(
-            self.manager,
-            ProviderId.INTERVALS,
-            "i8",
-            "act_i8",
-            recorded_by="wahoo",
-            merged_into="act_i7",
-        )
-        _add_raw_activity(self.manager, "i7", "GARMIN_CONNECT")
-        _add_raw_activity(self.manager, "i8", "wahoo")
-        # Free text outside the source enum is never reported.
-        add_session_record(self.manager, ProviderId.INTERVALS, "i9", "act_i9")
-        _add_raw_activity(self.manager, "i9", _PRIVATE)
+        add_session_record(self.manager, ProviderId.GARMIN, "g5", "act_g5")
         with self.manager.unit_of_work() as db:
             db.execute(
                 "UPDATE activity_records SET state = 'deleted' "
-                "WHERE provider_activity_id = 'g5'"
+                "WHERE provider_activity_id = 'g4'"
             )
             db.execute(
                 "UPDATE activity_sessions SET state = 'deleted' "
-                "WHERE activity_id = 'act_i6'"
+                "WHERE activity_id = 'act_g5'"
             )
 
         summary = self.summary()
 
         self.assertEqual(
-            {
-                "total": 7,
-                "by_providers": {"garmin": 1, "garmin+intervals": 1, "intervals": 5},
-                "intervals_only": {
-                    "total": 5,
-                    "by_year": {"2021": 1, "2026": 4},
-                    "by_source": {
-                        "GARMIN_CONNECT+WAHOO": 1,
-                        "MANUAL": 1,
-                        "ZWIFT": 1,
-                        "other": 1,
-                        "unknown": 1,
-                    },
-                    "by_year_and_source": {
-                        "2021": {"MANUAL": 1},
-                        "2026": {
-                            "GARMIN_CONNECT+WAHOO": 1,
-                            "ZWIFT": 1,
-                            "other": 1,
-                            "unknown": 1,
-                        },
-                    },
-                },
-            },
+            {"total": 4, "by_providers": {"garmin": 2, "garmin+wahoo": 1, "wahoo": 1}},
             summary["sessions"],
         )
         serialized = json.dumps(summary)
-        for private in (_PRIVATE, "act_", "Ride i1", "2021-03-01", "2026-09-10"):
+        for private in ("act_", "2026-09-10"):
             self.assertNotIn(private, serialized)
 
-    def test_counts_observation_days_only_intervals_holds(self) -> None:
-        _add_observation(self.manager, "ctl", "intervals", "2024-01-01")
-        _add_observation(self.manager, "ctl", "intervals", "2025-01-01")
-        _add_observation(self.manager, "hrv_rmssd", "intervals", "2023-05-01")
-        _add_observation(self.manager, "hrv_rmssd", "intervals", "2026-01-01")
-        _add_observation(self.manager, "hrv_rmssd", "garmin", "2026-01-01")
-        _add_observation(self.manager, "hrv_rmssd", "garmin", "2026-01-02")
-        # A local value (no provider) on the same day is another source.
-        _add_observation(self.manager, "ftp", "intervals", "2026-01-01", sport="ride")
+    def test_no_intervals_only_subsection_remains(self) -> None:
+        summary = self.summary()
+
+        self.assertNotIn("intervals_only", summary["sessions"])
+        self.assertEqual({"unrecognized_kinds": 0}, summary["observations"])
+        self.assertNotIn("intervals_only", json.dumps(summary))
+        self.assertNotIn("only_from_intervals", json.dumps(summary))
+
+    def test_counts_observation_kinds_outside_the_vocabulary_without_naming_them(
+        self,
+    ) -> None:
+        _add_observation(self.manager, "ctl", "garmin", "2024-01-01")
         _add_observation(self.manager, "ftp", None, "2026-01-01", sport="ride")
-        _add_observation(self.manager, "weight", "garmin", "2026-01-01")
         _add_observation(
-            self.manager, "resting_hr", "intervals", "2026-01-01", state="retired"
+            self.manager, "resting_hr", "garmin", "2026-01-01", state="retired"
         )
-        # Text outside the vocabulary is only counted, never summed into a key.
-        _add_observation(self.manager, _PRIVATE, "intervals", "2026-01-01")
-        _add_observation(self.manager, "private_two", "intervals", "2026-01-01")
-        _add_observation(self.manager, "ctl", "intervals", "2026-01-01", sport=_PRIVATE)
+        # Text outside the vocabulary is only counted, never reported.
+        _add_observation(self.manager, _PRIVATE, "garmin", "2026-01-01")
+        _add_observation(self.manager, "private_two", "garmin", "2026-01-01")
+        _add_observation(self.manager, "private_two", "garmin", "2026-01-02")
+        _add_observation(self.manager, "ctl", "garmin", "2026-01-01", sport=_PRIVATE)
 
         summary = self.summary()["observations"]
 
-        self.assertEqual(["ctl"], summary["only_from_intervals"])
-        self.assertEqual(3, summary["unrecognized_kinds"])
-        self.assertEqual(
-            {
-                "ctl": {
-                    "intervals_days": 2,
-                    "intervals_only_days": 2,
-                    "other_days": 0,
-                    "intervals_only_days_by_year": {"2024": 1, "2025": 1},
-                },
-                "ftp/ride": {
-                    "intervals_days": 1,
-                    "intervals_only_days": 0,
-                    "other_days": 1,
-                    "intervals_only_days_by_year": {},
-                },
-                "hrv_rmssd": {
-                    "intervals_days": 2,
-                    "intervals_only_days": 1,
-                    "other_days": 2,
-                    "intervals_only_days_by_year": {"2023": 1},
-                },
-            },
-            summary["by_kind"],
-        )
+        self.assertEqual({"unrecognized_kinds": 3}, summary)
         serialized = json.dumps(summary)
         for private in (_PRIVATE, "private_two"):
             self.assertNotIn(private, serialized)

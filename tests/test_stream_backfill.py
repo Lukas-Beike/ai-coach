@@ -31,6 +31,7 @@ from backend.canonical.vocabulary import (
     RecordingOrigin,
     SourceKind,
     Sport,
+    StreamChannel,
 )
 from backend.db import canonical_store
 from backend.db.activity_detail_store import detail_sets_for, full_stream_keys
@@ -39,6 +40,7 @@ from backend.db.schema import initialize_schema
 from backend.diagnostics.stream_backfill import summarize_stream_backfill
 from backend.errors import AppError
 from backend.providers import http as provider_http
+from backend.providers.fit_activity_detail_mapping import MAPPER_VERSION
 from backend.providers.garmin_fit_history import (
     FitTransportMissing,
     collect_activity_fit_files,
@@ -69,6 +71,7 @@ from backend.sync.stream_backfill import (
     FAILURE_LIMIT,
     StreamBackfillService,
     StreamCandidate,
+    StreamReplay,
     StreamSelection,
     select_stream_candidates,
     state_key,
@@ -342,6 +345,7 @@ def wahoo_service(
     sleeps: list[float] | None = None,
     batch_limit: int = 40,
     truncated: bool = False,
+    replay_days: int | None = None,
 ) -> tuple[StreamBackfillService, _Lister, _Downloads]:
     lister = _Lister(rows, truncated=truncated)
     downloads = _Downloads(files)
@@ -362,6 +366,7 @@ def wahoo_service(
         earliest_date=FLOOR,
         batch_limit=batch_limit,
         operation=ProviderResyncGate(WAHOO).operation,
+        replay_days=replay_days,
     )
     return service, lister, downloads
 
@@ -753,6 +758,205 @@ class WahooBackfillTests(unittest.TestCase):
             )
 
 
+TODAY = date(2026, 11, 8)
+
+
+def stream_points(env: Env, identifier: str) -> int:
+    streams = stored_sets(env, WAHOO, identifier)["streams"]
+    return len(streams.detail.channels[StreamChannel.TIME_S])
+
+
+def stored_versions(env: Env, identifier: str) -> set[int]:
+    return {item.mapper_version for item in detail_sets_for(env.db, WAHOO, identifier)}
+
+
+class ReplayTests(unittest.TestCase):
+    """A mapper upgrade reaches Wahoo sessions of the last 365 days (#1936)."""
+
+    def setUp(self) -> None:
+        self.env = make_env(self)
+
+    def stored_old_session(self, number: int, age_days: int, *, points: int = 5) -> str:
+        """A Wahoo session that holds streams written by an older mapper."""
+        env = self.env
+        identifier = seed(env, WAHOO, number, TODAY - timedelta(days=age_days))
+        first, _lister, _downloads = wahoo_service(
+            env, [wahoo_row(number)], {number: fit_bytes(records=points)}
+        )
+        # The sets a release before the current mapper stored, hashes included.
+        with patch.object(WahooStreamMapping, "mapper_version", MAPPER_VERSION - 1):
+            first.backfill(None)
+        return identifier
+
+    def replay_service(
+        self, files: dict[int, Any], rows: list[dict[str, Any]]
+    ) -> tuple[StreamBackfillService, _Lister, _Downloads]:
+        return wahoo_service(self.env, rows, files, replay_days=365)
+
+    def test_selection_takes_outdated_streams_inside_the_window_only(self) -> None:
+        env = self.env
+        inside = self.stored_old_session(1, 200)
+        self.stored_old_session(2, 400)
+        current = seed(env, WAHOO, 3, TODAY - timedelta(days=100))
+        service, _lister, _downloads = wahoo_service(
+            env, [wahoo_row(3)], {3: fit_bytes()}
+        )
+        service.backfill(None)
+        replay = StreamReplay(MAPPER_VERSION, TODAY - timedelta(days=365))
+
+        plain = select_stream_candidates(env.db, WAHOO, earliest=FLOOR)
+        selected = select_stream_candidates(
+            env.db, WAHOO, earliest=FLOOR, replay=replay
+        )
+
+        ids = [c.provider_activity_id for c in selected.candidates]
+        self.assertEqual((), plain.candidates)
+        self.assertEqual([inside], ids)
+        self.assertNotIn(current, ids)
+        self.assertEqual(3, selected.with_streams)
+
+    def test_an_outdated_session_is_replayed_once_and_not_selected_again(self) -> None:
+        env = self.env
+        identifier = self.stored_old_session(1, 120, points=5)
+        self.assertEqual({MAPPER_VERSION - 1}, stored_versions(env, identifier))
+        service, lister, downloads = self.replay_service(
+            {1: fit_bytes(records=8)}, [wahoo_row(1)]
+        )
+        service.rearm()
+        self.assertIsNone(cursor_of(env, WAHOO))
+
+        result = service.backfill(None)
+
+        self.assertEqual(1, result["stored"])
+        self.assertEqual(8, stream_points(env, identifier))
+        self.assertEqual({MAPPER_VERSION}, stored_versions(env, identifier))
+        self.assertEqual(1, len(downloads.urls))
+        self.assertEqual(FLOOR.isoformat(), cursor_of(env, WAHOO))
+        again = service.backfill(None)
+        self.assertEqual(0, again["candidates"])
+        self.assertEqual(1, len(downloads.urls))
+        self.assertEqual(1, len(lister.calls))
+
+    def test_a_session_older_than_the_window_keeps_its_streams(self) -> None:
+        env = self.env
+        identifier = self.stored_old_session(1, 366, points=5)
+        service, lister, downloads = self.replay_service(
+            {1: fit_bytes(records=8)}, [wahoo_row(1)]
+        )
+        service.rearm()
+
+        result = service.backfill(None)
+
+        self.assertEqual(0, result["candidates"])
+        self.assertEqual([], downloads.urls)
+        self.assertEqual([], lister.calls)
+        self.assertEqual(5, stream_points(env, identifier))
+        self.assertEqual({MAPPER_VERSION - 1}, stored_versions(env, identifier))
+
+    def test_a_failed_download_keeps_the_old_streams(self) -> None:
+        env = self.env
+        identifier = self.stored_old_session(1, 120, points=5)
+        service, _lister, _downloads = self.replay_service(
+            {1: WahooFitUnavailable("unavailable")}, [wahoo_row(1)]
+        )
+        service.rearm()
+
+        with self.assertRaises(AppError) as raised:
+            service.backfill(None)
+
+        self.assertEqual(503, raised.exception.status)
+        self.assertEqual(5, stream_points(env, identifier))
+        self.assertEqual({MAPPER_VERSION - 1}, stored_versions(env, identifier))
+        self.assertIsNone(cursor_of(env, WAHOO))
+
+    def test_a_file_without_sensor_records_replaces_nothing(self) -> None:
+        env = self.env
+        identifier = self.stored_old_session(1, 120, points=5)
+        service, _lister, _downloads = self.replay_service(
+            {1: no_sensor_fit()}, [wahoo_row(1)]
+        )
+        service.rearm()
+
+        result = service.backfill(None)
+
+        self.assertEqual(1, result["no_streams"])
+        self.assertEqual(5, stream_points(env, identifier))
+        self.assertEqual({MAPPER_VERSION - 1}, stored_versions(env, identifier))
+        self.assertEqual(0, service.backfill(None)["candidates"])
+
+    def test_rearm_restarts_a_finished_chain_once_per_mapper_version(self) -> None:
+        env = self.env
+        self.stored_old_session(1, 120)
+        state = state_of(env, WAHOO)
+        state["skipped_ids"] = ["77"]
+        state["failures"] = {"88": 2}
+        env.key_values.set(env.db, state_key(WAHOO), json.dumps(state))
+        service, _lister, _downloads = self.replay_service({}, [])
+        self.assertEqual(FLOOR.isoformat(), cursor_of(env, WAHOO))
+
+        service.rearm()
+
+        self.assertIsNone(cursor_of(env, WAHOO))
+        after = state_of(env, WAHOO)
+        self.assertEqual(MAPPER_VERSION, after["replay_mapper_version"])
+        self.assertEqual(([], {}), (after["skipped_ids"], after["failures"]))
+        write_cursor(env.db, WAHOO, STREAM_HISTORY_CURSOR, "2026-05-01", "", NOW)
+        service.rearm()
+        self.assertEqual("2026-05-01", cursor_of(env, WAHOO))
+
+    def test_rearm_leaves_a_walking_chain_until_it_reaches_the_floor(self) -> None:
+        env = self.env
+        self.stored_old_session(1, 120)
+        service, _lister, _downloads = self.replay_service({}, [])
+        write_cursor(env.db, WAHOO, STREAM_HISTORY_CURSOR, "2026-05-01", "", NOW)
+
+        service.rearm()
+
+        # A queued job may still carry the old end_date: keep the walk, record
+        # nothing, so the first refresh after the floor restarts from the newest day.
+        self.assertEqual("2026-05-01", cursor_of(env, WAHOO))
+        self.assertEqual(0, state_of(env, WAHOO)["replay_mapper_version"])
+        write_cursor(env.db, WAHOO, STREAM_HISTORY_CURSOR, FLOOR.isoformat(), "", NOW)
+        service.rearm()
+        self.assertIsNone(cursor_of(env, WAHOO))
+        self.assertEqual(MAPPER_VERSION, state_of(env, WAHOO)["replay_mapper_version"])
+
+    def test_without_a_replay_window_rearm_changes_nothing(self) -> None:
+        env = self.env
+        self.stored_old_session(1, 120)
+        service, _lister, _downloads = wahoo_service(env, [], {})
+
+        service.rearm()
+
+        self.assertEqual(FLOOR.isoformat(), cursor_of(env, WAHOO))
+        self.assertEqual(0, state_of(env, WAHOO)["replay_mapper_version"])
+        self.assertEqual(0, service.backfill(None)["candidates"])
+
+    def test_a_finished_refresh_rearms_the_wahoo_chain(self) -> None:
+        calls: list[str] = []
+
+        class Sync:
+            def sync(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+                calls.append("sync")
+                return {"status": "ok"}
+
+        class Backfill:
+            def available(self) -> bool:
+                return True
+
+            def backfill(self, end: Any) -> dict[str, Any]:
+                raise AssertionError("a refresh must not read files")
+
+            def rearm(self) -> None:
+                calls.append("rearm")
+
+        adapter = WahooJobAdapter(sync=Sync(), stream_backfill=Backfill())
+
+        adapter.execute({"id": "job"}, {}, "r", job_type="refresh")
+
+        self.assertEqual(["sync", "rearm"], calls)
+
+
 class GarminBackfillTests(unittest.TestCase):
     def setUp(self) -> None:
         self.env = make_env(self)
@@ -984,6 +1188,9 @@ class VisibilityTests(unittest.TestCase):
             def backfill(self, end: Any) -> dict[str, Any]:
                 seen.append(end)
                 return {"status": "ok"}
+
+            def rearm(self) -> None:
+                raise AssertionError("a stream job must not rearm the chain")
 
         class Sync:
             def sync(self, *args: Any, **kwargs: Any) -> dict[str, Any]:

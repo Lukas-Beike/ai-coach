@@ -6,7 +6,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from backend.db import row_factory
@@ -18,6 +18,7 @@ from backend.planning.adaptive_preview_service import (
     AdaptivePreviewLimits,
     AdaptiveReplanPreviewService,
 )
+from backend.planning.plan_checks import ILLNESS_DAYS
 
 
 class _Checkins:
@@ -103,7 +104,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
             lambda: self.today,
             lambda: self.now_value,
             self._next_id,
-            AdaptivePreviewLimits(56, 1000, 3, 90),
+            AdaptivePreviewLimits(56, 1000, adaptive.DEFAULT_ILLNESS_PAUSE_DAYS, 90),
         )
 
     def _next_id(self):
@@ -156,11 +157,12 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
                 "needs_replan": True,
                 "replan_changes": 1,
                 "illness_pause_pending": True,
+                "illness_return_pending": False,
             },
         )
         self.assertEqual(
             self.service.latest_illness_pause(),
-            ("preview", {"illness": "Infekt", "approved": False}),
+            ("applied", {"illness": "Erkältung"}),
         )
 
     def test_no_training_event_is_visible_and_preview_archives_future_workout(self):
@@ -327,6 +329,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
                 "needs_replan": False,
                 "replan_changes": 0,
                 "illness_pause_pending": False,
+                "illness_return_pending": False,
             },
         )
         self.assertEqual(
@@ -367,6 +370,48 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         self.assertEqual(self.weather.calls, [{"refresh": False}])
         self.assertEqual(self.id_count, 1)
 
+    def _run(self, unit_id: str, day: str, minutes: int = 60) -> dict:
+        return {
+            "id": unit_id,
+            "date": day,
+            "name": "Long run",
+            "type": "Run",
+            "duration_minutes": minutes,
+            "description": f"- {minutes}m Z2 HR",
+        }
+
+    def test_available_minutes_apply_only_to_the_checkin_day(self):
+        self.feedback.update(checkin_date="2026-09-20", available_minutes=30)
+        self.drafts[:] = [
+            self._run("today", "2026-09-20"),
+            self._run("tomorrow", "2026-09-21"),
+            self._run("later", "2026-10-18"),
+        ]
+
+        result = self.service.preview()
+
+        self.assertEqual(
+            [change["library_workout_id"] for change in result["changes"]], ["today"]
+        )
+        self.assertIn("1 zukünftige lokale Einheit(en)", result["message"])
+        self.assertIn("nur am Check-in-Tag", result["scope"])
+
+    def test_pain_and_stress_apply_only_to_the_checkin_day(self):
+        self.feedback.update(
+            checkin_date="2026-09-20", pain="Knie zwickt", soreness=8, stress=9
+        )
+        self.drafts[:] = [
+            self._run("today", "2026-09-20"),
+            self._run("tomorrow", "2026-09-21"),
+            self._run("four-weeks", "2026-10-18"),
+        ]
+
+        result = self.service.preview()
+
+        self.assertEqual(
+            [change["library_workout_id"] for change in result["changes"]], ["today"]
+        )
+
     def test_preview_refuses_instead_of_silently_truncating_future_units(self):
         def drafts(count):
             return [
@@ -400,7 +445,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
     def test_combined_illness_calendar_weather_preview_keeps_triggers_and_fingerprint(
         self,
     ):
-        target = "2026-09-21"
+        target = self.today.isoformat()
         draft = {
             "id": "ride-1",
             "date": target,
@@ -459,10 +504,10 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
             ],
         )
         self.assertEqual(result["illness_pause"]["start_date"], self.today.isoformat())
-        self.assertEqual(result["illness_pause"]["end_date"], "2026-09-22")
+        self.assertEqual(result["illness_pause"]["end_date"], "2026-09-24")
         self.assertEqual(
             result["message"],
-            "Krankheitsprognose: 3 Tage Sportpause bis 2026-09-22. 1 zukünftige lokale Einheit(en) brauchen eine Prüfung.",
+            "Krankheitsprognose: 5 Tage Sportpause bis 2026-09-24. 1 zukünftige lokale Einheit(en) brauchen eine Prüfung.",
         )
         self.assertEqual(len(result["changes"]), 1)
         change = result["changes"][0]
@@ -609,6 +654,75 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         self.assertTrue(result["illness_pause"]["approved"])
         self.assertEqual(result["changes"], [])
         self.assertFalse(self.service.status()["illness_pause_pending"])
+
+    def _pause_payload(self, start, end, **extra):
+        return json.dumps(
+            {
+                "illness_pause": {
+                    "start_date": start,
+                    "end_date": end,
+                    "illness": "Infekt",
+                    **extra,
+                }
+            }
+        )
+
+    def test_approval_survives_three_later_previews(self):
+        self.feedback.update(
+            {"checkin_date": self.today.isoformat(), "illness": "Infekt"}
+        )
+        self.insert_adjustment(
+            "applied-pause",
+            self._pause_payload("2026-09-20", "2026-09-24", approved=True),
+            "applied",
+            "2026-09-20T08:00:00+00:00",
+        )
+        for number in range(3):
+            result = self.service.preview()
+            self.assertTrue(result["illness_pause"]["approved"])
+            self.assertFalse(self.service.status()["illness_pause_pending"])
+            self.assertEqual(self.service.latest_illness_pause()[0], "applied")
+            self.assertEqual(number + 1, self.id_count)
+
+    def test_second_day_report_does_not_extend_the_approved_pause(self):
+        self.insert_adjustment(
+            "applied-pause",
+            self._pause_payload("2026-09-19", "2026-09-23", approved=True),
+            "applied",
+            "2026-09-19T08:00:00+00:00",
+        )
+        self.feedback.update(
+            {"checkin_date": self.today.isoformat(), "illness": "Infekt"}
+        )
+
+        result = self.service.preview()
+
+        pause = result["illness_pause"]
+        self.assertTrue(pause["approved"])
+        self.assertEqual(
+            (pause["start_date"], pause["end_date"]), ("2026-09-19", "2026-09-23")
+        )
+        self.assertFalse(self.service.status()["illness_pause_pending"])
+
+    def test_report_after_the_approved_window_asks_again(self):
+        self.insert_adjustment(
+            "applied-pause",
+            self._pause_payload("2026-09-10", "2026-09-14", approved=True),
+            "applied",
+            "2026-09-10T08:00:00+00:00",
+        )
+        self.feedback.update(
+            {"checkin_date": self.today.isoformat(), "illness": "Infekt"}
+        )
+
+        result = self.service.preview()
+
+        self.assertFalse(result["illness_pause"].get("approved"))
+        self.assertEqual(result["illness_pause"]["start_date"], "2026-09-20")
+        self.assertEqual(
+            result["illness_pause"]["end_date"],
+            (self.today + timedelta(days=ILLNESS_DAYS - 1)).isoformat(),
+        )
 
     def test_preview_persists_once_and_reads_back(self):
         class CountingRepository(PlanAdjustmentRepository):

@@ -449,10 +449,11 @@ class FitActivityDetailMappingTests(unittest.TestCase):
             for index, value in enumerate((0, 1, 2, 3, 4, 5, 9))
         ]
         lap_set = _only(_map(_fit(laps=laps)), ActivityLapSet)
+        # The set has rest and recovery laps, so its active lap is a work lap.
         self.assertEqual(
             [lap.kind for lap in lap_set.laps],
             [
-                LapKind.LAP,
+                LapKind.WORK,
                 LapKind.RECOVERY,
                 LapKind.WARMUP,
                 LapKind.COOLDOWN,
@@ -462,6 +463,62 @@ class FitActivityDetailMappingTests(unittest.TestCase):
             ],
         )
         self.assertEqual([lap.index for lap in lap_set.laps], [0, 1, 2, 3, 4, 5, 6])
+
+    def test_active_laps_are_work_laps_beside_recovery_laps(self):
+        # warm-up, active, recovery, active, recovery, active, cool-down
+        intensities = (2, 0, 4, 0, 4, 0, 3)
+        laps = [
+            _lap(start=1000 + 60 * index, elapsed=60000, intensity=value)
+            for index, value in enumerate(intensities)
+        ]
+        lap_set = _only(_map(_fit(laps=laps)), ActivityLapSet)
+        self.assertEqual(
+            [lap.kind for lap in lap_set.laps],
+            [
+                LapKind.WARMUP,
+                LapKind.WORK,
+                LapKind.RECOVERY,
+                LapKind.WORK,
+                LapKind.RECOVERY,
+                LapKind.WORK,
+                LapKind.COOLDOWN,
+            ],
+        )
+
+    def test_rest_laps_also_make_active_laps_work_laps(self):
+        laps = [
+            _lap(start=1000 + 60 * index, elapsed=60000, intensity=value)
+            for index, value in enumerate((0, 1, 0))
+        ]
+        lap_set = _only(_map(_fit(laps=laps)), ActivityLapSet)
+        self.assertEqual(
+            [lap.kind for lap in lap_set.laps],
+            [LapKind.WORK, LapKind.RECOVERY, LapKind.WORK],
+        )
+
+    def test_active_laps_stay_laps_without_rest_or_recovery_laps(self):
+        laps = [
+            _lap(start=1000 + 60 * index, elapsed=60000, intensity=value)
+            for index, value in enumerate((2, 0, 0, 3))
+        ]
+        lap_set = _only(_map(_fit(laps=laps)), ActivityLapSet)
+        self.assertEqual(
+            [lap.kind for lap in lap_set.laps],
+            [LapKind.WARMUP, LapKind.LAP, LapKind.LAP, LapKind.COOLDOWN],
+        )
+
+    def test_compressed_timestamp_records_keep_their_stream_points(self):
+        # The second definition has no field 253, as the FIT protocol lays out
+        # records with a compressed timestamp header.
+        builder = fit_builder.FitBuilder()
+        builder.define(0, 20, RECORD_FIELDS)
+        builder.data(0, _record(1000, hr=120))
+        builder.define(1, 20, [(3, UINT8)])
+        builder.data(1, {3: 121}, time_offset=(1001 & 0x1F))
+        builder.data(1, {3: 122}, time_offset=(1002 & 0x1F))
+        channels = _channels(_map(builder.build()))
+        self.assertEqual(channels[StreamChannel.TIME_S], (0.0, 1.0, 2.0))
+        self.assertEqual(channels[StreamChannel.HEART_RATE_BPM], (120, 121, 122))
 
     def test_lap_after_dropped_lap_is_reindexed_from_zero(self):
         result = _map(_fit(laps=[_lap(start=1000), _lap(start=1060, elapsed=60000)]))

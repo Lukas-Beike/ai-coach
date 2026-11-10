@@ -13,11 +13,14 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 
+from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import DatabaseManager, row_factory
+from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning.library_service import WorkoutLibraryService
 from backend.planning.sport import with_activity_type
+from backend.planning.wahoo_orphans import find_wahoo_orphans
 
 NOW = "2026-09-20T08:00:00+00:00"
 
@@ -634,6 +637,61 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
         self.assertTrue(diff["before_present"])
         self.assertFalse(diff["after_present"])
         self.assertEqual(diff["fields"]["sync_status"]["before"], "local")
+
+    def _wahoo_link(self, local_id: str):
+        with self.database_manager.unit_of_work() as db:
+            return RemoteLinkRepository().get(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id, "wahoo"
+            )
+
+    def _link_wahoo(self, local_id: str) -> None:
+        with self.database_manager.unit_of_work() as db:
+            RemoteLinkRepository().upsert(
+                db,
+                RemoteLink(
+                    entity_kind=RemoteEntityKind.LIBRARY_WORKOUT,
+                    local_id=local_id,
+                    provider="wahoo",
+                    sync_state=RemoteLinkState.SYNCED,
+                    remote_id="501",
+                ),
+            )
+
+    def test_deleting_an_entry_sent_to_wahoo_keeps_the_wahoo_link(self) -> None:
+        entry = self.service.create_local_entry(self._workout())
+        self._link_wahoo(entry["id"])
+
+        self.service.update(entry["id"], {"action": "delete"})
+
+        self.assertIsNone(self._library_row(entry["id"]))
+        self.assertEqual("501", self._wahoo_link(entry["id"]).remote_id)
+        with self.database_manager.reader() as db:
+            self.assertEqual(
+                [entry["id"]], [o.local_id for o in find_wahoo_orphans(db)[0]]
+            )
+
+    def test_undoing_the_creation_of_a_wahoo_entry_keeps_the_wahoo_link(self) -> None:
+        entry = self.service.create_local_entry(self._workout())
+        self._link_wahoo(entry["id"])
+        current = self._library_row(entry["id"])
+
+        with self.database_manager.unit_of_work() as db:
+            self.service.restore_in_transaction(db, entry["id"], current, None)
+
+        self.assertIsNone(self._library_row(entry["id"]))
+        self.assertEqual("501", self._wahoo_link(entry["id"]).remote_id)
+
+    def test_restoring_a_deleted_wahoo_entry_adopts_its_link_again(self) -> None:
+        entry = self.service.create_local_entry(self._workout())
+        self._link_wahoo(entry["id"])
+        self.service.update(entry["id"], {"action": "delete"})
+
+        with self.database_manager.unit_of_work() as db:
+            self.service.restore_in_transaction(db, entry["id"], None, entry)
+
+        with self.database_manager.reader() as db:
+            self.assertEqual([], find_wahoo_orphans(db)[0])
+        self.assertEqual("501", self._wahoo_link(entry["id"]).remote_id)
 
     def test_synchronized_entry_cannot_be_deleted_but_can_be_archived(self) -> None:
         local_id = str(uuid.UUID(int=80))

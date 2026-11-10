@@ -8,6 +8,7 @@ from contextlib import AbstractContextManager
 from datetime import datetime
 from typing import Any
 
+from backend import change_history
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import (
     NutritionProductRepository,
@@ -22,6 +23,7 @@ from backend.nutrition.photo import NutritionPhotoExtractionService
 from backend.nutrition.photo_service import PhotoExtractionService
 
 SAVED_MEAL_NOT_FOUND = "Gespeicherte Mahlzeit nicht gefunden."
+TEMPLATE_ENTITY_TYPE = "nutrition_template"
 
 
 def validate_component_payload(payload: dict[str, Any]) -> None:
@@ -70,6 +72,10 @@ class NutritionMealLibraryService:
             self._component_calculator,
         )
         self._photo_service = PhotoExtractionService(photo_extractor)
+
+    @property
+    def product_catalog(self) -> ProductCatalogService:
+        return self._product_catalog
 
     def list_products(
         self,
@@ -235,6 +241,14 @@ class NutritionMealLibraryService:
                 payload, prepared, existing, name, template_id
             )
             self._templates.save(db, template)
+            change_history.record_change(
+                db,
+                TEMPLATE_ENTITY_TYPE,
+                template["id"],
+                "update" if existing else "create",
+                existing,
+                template,
+            )
             return template
 
     def _build_template(
@@ -311,6 +325,46 @@ class NutritionMealLibraryService:
 
     def delete_template(self, template_id: str) -> dict[str, Any]:
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            if not self._templates.delete(db, template_id):
+            existing = self._templates.get(db, template_id)
+            if not existing or not self._templates.delete(db, template_id):
                 raise AppError(404, SAVED_MEAL_NOT_FOUND)
-        return {"deleted_id": template_id}
+            record = change_history.record_change(
+                db, TEMPLATE_ENTITY_TYPE, template_id, "delete", existing, None
+            )
+        result: dict[str, Any] = {"deleted_id": template_id}
+        if record:
+            result["change"] = {
+                field: record[field] for field in change_history.UNDO_REFERENCE_FIELDS
+            }
+        return result
+
+    def current(
+        self, db: Any, entity_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """The stored saved meal of one recorded change, for change history."""
+        value = self._templates.get(db, entity_id)
+        return value, change_history.audit_projection(TEMPLATE_ENTITY_TYPE, value)
+
+    def restore_in_transaction(
+        self,
+        db: Any,
+        entity_id: str,
+        current: dict[str, Any] | None,
+        target: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Put one saved meal back as recorded; a taken name is refused."""
+        if target is None:
+            # Undo of a created meal.
+            self._templates.delete(db, entity_id)
+            return None
+        template = {
+            # A field recorded as None before a delete is absent from the diff.
+            **dict.fromkeys(change_history.NUTRITION_TEMPLATE_FIELDS),
+            **(current or {}),
+            **target,
+            "id": entity_id,
+            "updated_at": self._utc_now(),
+        }
+        self._validate_template_name(db, template["name"], entity_id, current)
+        self._templates.save(db, template)
+        return template

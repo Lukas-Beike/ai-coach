@@ -10,6 +10,7 @@ from backend.activities.identity import activity_kind
 from backend.canonical.sports import (
     classify_environment_text,
     classify_sport_text,
+    is_outdoor_endurance,
     legacy_activity_family,
 )
 from backend.canonical.vocabulary import Environment, Sport
@@ -251,6 +252,20 @@ class LegacyActivityFamilyTests(unittest.TestCase):
                     legacy_activity_family(classify_sport_text(text)),
                 )
                 self.assertEqual(expected, activity_kind({"type": text}))
+
+
+class OutdoorEnduranceTests(unittest.TestCase):
+    def test_rides_and_runs_that_are_not_known_indoors(self) -> None:
+        for sport in ("ride", "run", Sport.RIDE, Sport.RUN):
+            for environment in ("outdoor", "unknown", Environment.OUTDOOR):
+                with self.subTest(sport=sport, environment=environment):
+                    self.assertTrue(is_outdoor_endurance(sport, environment))
+            for environment in ("indoor", "virtual", Environment.VIRTUAL):
+                with self.subTest(sport=sport, environment=environment):
+                    self.assertFalse(is_outdoor_endurance(sport, environment))
+        for sport in ("swim", "strength", "other", Sport.WALK):
+            with self.subTest(sport=sport):
+                self.assertFalse(is_outdoor_endurance(sport, "outdoor"))
 
 
 if __name__ == "__main__":

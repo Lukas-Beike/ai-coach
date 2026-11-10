@@ -179,7 +179,13 @@ class PlannedCalendarSyncService:
             ).fetchone()
             self._require_unchanged(current, original_payload)
             self._state_writer.persist(
-                db, normalized_id, "synced", None, None, now=self._now()
+                db,
+                normalized_id,
+                "synced",
+                None,
+                None,
+                now=self._now(),
+                clear_remote_event=True,
             )
 
     def _remove_event(
@@ -194,6 +200,25 @@ class PlannedCalendarSyncService:
     def _require_calendar_access(self) -> None:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
+
+    def _require_open_linked_event(self, workout: dict[str, Any]) -> None:
+        """Refuse to overwrite an existing event of a unit dated before today.
+
+        The day may already be done and its event paired with the activity. The
+        date rule needs no read of the event, so a bulk push costs no extra calls.
+        """
+        if not workout.get("remote_event_id"):
+            return
+        try:
+            planned_date = date.fromisoformat(str(workout.get("date") or ""))
+        except ValueError:
+            return  # the export validation names the bad date
+        if planned_date < self._today():
+            raise AppError(
+                409,
+                "Die zugeordnete Einheit liegt vor heute und wird nicht überschrieben.",
+                reason="intervals_workout_identity_conflict",
+            )
 
     def _event_payload(
         self,
@@ -275,6 +300,7 @@ class PlannedCalendarSyncService:
         if workout.get("local_deleted") or workout.get("archived"):
             self._remove_event(normalized_id, row, workout)
             return None
+        self._require_open_linked_event(workout)
         run_lthr = self._run_lthr_for(workout) if stored_cap(workout) else None
         event_payload = self._event_payload(normalized_id, workout, run_lthr)
         event = self._remote_event(
@@ -332,6 +358,12 @@ class _PlannedCalendarRepairContext:
     other_remote_ids: set[str]
     other_external_ids: set[str]
     newest: str
+    # The unit as sent (its description may carry the capped bpm range).
+    sent: dict[str, Any] | None = None
+
+    @property
+    def readback_workout(self) -> dict[str, Any]:
+        return self.sent or self.workout
 
 
 class PlannedCalendarRepairBatch:
@@ -687,6 +719,11 @@ class PlannedCalendarRepairService:
             payload["external_id"] = (
                 context.export.event_external_id(keeper) or payload["external_id"]
             )
+        context.sent = {
+            **context.workout,
+            "description": payload.get("description")
+            or context.workout.get("description"),
+        }
         context.identities.add(payload["external_id"])
         self._recheck(context, PLANNED_CALENDAR_RECHECK_ERROR)
         response = context.export.upsert([payload])
@@ -766,7 +803,7 @@ class PlannedCalendarRepairService:
                 "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestätigt.",
                 reason="intervals_workout_verification_failed",
             )
-        context.export.verify_readback(context.workout, result)
+        context.export.verify_readback(context.readback_workout, result)
 
     def _delete_duplicates(
         self,
@@ -821,7 +858,7 @@ class PlannedCalendarRepairService:
                         "Der Kalender bestätigt Datum oder Namen der reparierten Einheit nicht.",
                         reason="intervals_workout_verification_failed",
                     )
-                context.export.verify_readback(context.workout, event)
+                context.export.verify_readback(context.readback_workout, event)
                 verified = event
             with self._database_manager.unit_of_work() as db:
                 current = db.execute(
@@ -843,6 +880,7 @@ class PlannedCalendarRepairService:
                     None,
                     verified,
                     now=self._now(),
+                    clear_remote_event=context.removing,
                 )
             return verified
 

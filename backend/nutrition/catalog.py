@@ -7,6 +7,7 @@ import uuid
 from contextlib import AbstractContextManager
 from typing import Any
 
+from backend import change_history
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import NutritionProductRepository
 from backend.errors import AppError
@@ -16,6 +17,7 @@ from backend.nutrition.models import nutrition_number
 from backend.nutrition.photo import validate_packaging_extraction
 
 PRODUCT_NOT_FOUND = "Produkt nicht gefunden."
+PRODUCT_ENTITY_TYPE = "nutrition_product"
 
 
 class ProductCatalogService:
@@ -95,7 +97,17 @@ class ProductCatalogService:
                     "Diese EAN ist bereits einem lokalen Produkt zugeordnet.",
                     reason="nutrition_product_barcode_conflict",
                 )
-            return self._products.save(db, normalized)
+            previous = self._products.get(db, normalized["id"])
+            saved = self._products.save(db, normalized)
+            change_history.record_change(
+                db,
+                PRODUCT_ENTITY_TYPE,
+                saved["id"],
+                "update" if previous else "create",
+                previous,
+                saved,
+            )
+            return saved
 
     def update_product(
         self, product_id: str, payload: dict[str, Any]
@@ -123,14 +135,16 @@ class ProductCatalogService:
     def archive_product(self, product_id: str) -> dict[str, Any]:
         product_id = str(product_id or "").strip()
         with self._db_lock, self._database_manager.unit_of_work() as db:
+            previous = self._products.get(db, product_id)
             if not self._products.archive(db, product_id, self._utc_now()):
                 raise AppError(
                     404, PRODUCT_NOT_FOUND, reason="nutrition_product_not_found"
                 )
-            return self._products.get(db, product_id) or {
-                "id": product_id,
-                "status": "archived",
-            }
+            archived = self._products.get(db, product_id)
+            change_history.record_change(
+                db, PRODUCT_ENTITY_TYPE, product_id, "update", previous, archived
+            )
+            return archived or {"id": product_id, "status": "archived"}
 
     def lookup_product(
         self, arguments: dict[str, Any], *, online_fallback: bool = True
@@ -277,3 +291,47 @@ class ProductCatalogService:
             "created_at": str(payload.get("created_at") or now),
             "updated_at": now,
         }
+
+    def current(
+        self, db: Any, entity_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """The stored product of one recorded change, for change history."""
+        value = self._products.get(db, entity_id)
+        return value, change_history.audit_projection(PRODUCT_ENTITY_TYPE, value)
+
+    def restore_in_transaction(
+        self,
+        db: Any,
+        entity_id: str,
+        current: dict[str, Any] | None,
+        target: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Put one product back as recorded, validated like a new save.
+
+        Diary entries and saved meals keep their own nutrient snapshots, so they
+        are left as they are; a barcode taken since is refused.
+        """
+        if target is None:
+            # Undo of a created product.
+            self._products.delete(db, entity_id)
+            return None
+        # The target holds only changed fields, so a stored None would be missing.
+        merged = {
+            **dict.fromkeys(change_history.NUTRITION_PRODUCT_FIELDS),
+            **(current or {}),
+            **target,
+            "id": entity_id,
+        }
+        merged["confidence"] = merged.get("extraction_confidence")
+        restored = self.normalize_product(merged)
+        if restored.get("barcode"):
+            taken = self._products.list(
+                db, barcode=restored["barcode"], include_archived=True
+            )
+            if taken and taken[0]["id"] != entity_id:
+                raise AppError(
+                    409,
+                    "Diese EAN ist bereits einem lokalen Produkt zugeordnet.",
+                    reason="nutrition_product_barcode_conflict",
+                )
+        return self._products.save(db, restored)

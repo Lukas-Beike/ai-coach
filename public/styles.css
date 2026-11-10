@@ -928,8 +928,8 @@ h2 {
 .planned-focus-field { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; }
 .planned-focus-field select { min-height: 36px; padding: 4px 8px; }
 .planned-focus-status { color: var(--muted); font-size: .72rem; }
-.planned-session-line .planned-sync-button { position: relative; display: inline-flex; margin-left: 6px; min-height: 32px; padding: 2px 12px; border-radius: 10px; font-size: .72rem; line-height: 1.2; vertical-align: middle; }
-.planned-session-line .planned-sync-button::before { content: ""; position: absolute; inset: -7px 0; }
+.planned-entry-details .planned-sync-button { position: relative; display: inline-flex; min-height: 32px; padding: 2px 12px; border-radius: 10px; font-size: .72rem; line-height: 1.2; justify-self: start; }
+.planned-entry-details .planned-sync-button::before { content: ""; position: absolute; inset: -7px 0; }
 .planned-description { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
 .planned-week-totals { margin: 0; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--subtle); font-size: .72rem; line-height: 1.5; }
 .planned-week-metrics[data-columns="1"] { grid-template-columns: auto minmax(0, 1fr); }
@@ -957,9 +957,8 @@ h2 {
   .planned-week-heading { padding: 14px 12px; }
 }
 
-.more-segment-nav { display: flex; gap: 4px; margin: 0 0 16px; padding: 4px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; border: 1px solid var(--line); border-radius: 14px; background: var(--translucent-surface); }
-.more-segment-nav::-webkit-scrollbar { display: none; }
-.more-segment-nav a { display: grid; min-height: 44px; flex: 0 0 auto; place-items: center; padding: 9px 16px; border-radius: 10px; color: var(--muted); font-size: .8rem; font-weight: 700; text-align: center; text-decoration: none; white-space: nowrap; }
+.more-segment-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: var(--translucent-surface); }
+.more-segment-nav a { display: grid; min-height: 44px; min-width: 0; flex: 1 1 calc(33.333% - 4px); place-items: center; padding: 9px 6px; overflow-wrap: anywhere; border-radius: 10px; color: var(--muted); font-size: .8rem; font-weight: 700; text-align: center; text-decoration: none; }
 .more-segment-nav a:hover { color: var(--ink); background: var(--accent-soft); }
 .more-segment-nav a.active { color: var(--white); background: var(--accent); }
 .more-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
@@ -1308,6 +1307,7 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   #settingsPanel > .section-heading { grid-column: 1 / -1; }
   #settingsPanel > .more-segment-nav { position: sticky; top: 24px; grid-column: 1; grid-row: 2 / span 8; display: grid; align-content: start; gap: 4px; margin: 0; overflow: visible; }
   #settingsPanel > .more-segment-nav a { flex: none; white-space: normal; min-height: 46px; justify-content: start; padding: 10px 12px; text-align: left; }
+  #profilePanel > .more-segment-nav a { flex: 0 0 auto; padding: 9px 16px; white-space: nowrap; }
   #settingsPanel > .settings-section { grid-column: 2; width: 100%; min-width: 0; }
 }
 

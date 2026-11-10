@@ -86,6 +86,17 @@ def classify_environment_text(text: str) -> Environment:
     return Environment.UNKNOWN
 
 
+def is_outdoor_endurance(sport: Sport | str, environment: Environment | str) -> bool:
+    """Whether a ride or run is not known to be indoor or virtual.
+
+    An UNKNOWN environment passes: it only means no source named the place.
+    """
+    return sport in {Sport.RIDE, Sport.RUN} and environment not in {
+        Environment.INDOOR,
+        Environment.VIRTUAL,
+    }
+
+
 def legacy_activity_family(sport: Sport) -> str:
     """Return the legacy ``activity_kind`` label for a canonical sport."""
     return _LEGACY_FAMILIES.get(sport, "other")

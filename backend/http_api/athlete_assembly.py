@@ -13,6 +13,7 @@ from backend.activities.session_corrections import SessionCorrectionService
 from backend.activities.zone_settings import effective_zone_configuration
 from backend.athlete.checkins import CheckinService
 from backend.athlete.equipment import EquipmentService
+from backend.athlete.equipment_history import equipment_history_records
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
 from backend.canonical.activity_summary import ActivitySummary
@@ -102,6 +103,9 @@ class AthleteDataAssembly:
             self._utc_now,
             gear_reader=CanonicalTableReader(),
         )
+
+    def equipment_history(self) -> dict[str, Any]:
+        return equipment_history_records(self._utc_now, self.activity_summaries)
 
     def zones(self) -> ZoneConfigurationService:
         return ZoneConfigurationService(
