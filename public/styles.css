@@ -957,9 +957,8 @@ h2 {
   .planned-week-heading { padding: 14px 12px; }
 }
 
-.more-segment-nav { display: flex; gap: 4px; margin: 0 0 16px; padding: 4px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; border: 1px solid var(--line); border-radius: 14px; background: var(--translucent-surface); }
-.more-segment-nav::-webkit-scrollbar { display: none; }
-.more-segment-nav a { display: grid; min-height: 44px; flex: 0 0 auto; place-items: center; padding: 9px 16px; border-radius: 10px; color: var(--muted); font-size: .8rem; font-weight: 700; text-align: center; text-decoration: none; white-space: nowrap; }
+.more-segment-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: 14px; background: var(--translucent-surface); }
+.more-segment-nav a { display: grid; min-height: 44px; min-width: 0; flex: 1 1 calc(33.333% - 4px); place-items: center; padding: 9px 6px; overflow-wrap: anywhere; border-radius: 10px; color: var(--muted); font-size: .8rem; font-weight: 700; text-align: center; text-decoration: none; }
 .more-segment-nav a:hover { color: var(--ink); background: var(--accent-soft); }
 .more-segment-nav a.active { color: var(--white); background: var(--accent); }
 .more-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }

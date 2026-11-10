@@ -61,7 +61,7 @@ test("@responsive a closed profile section opens when it holds the invalid value
   await expect(sources).toHaveAttribute("open", "");
 });
 
-test("@responsive Mehr keeps its title and shows the active area in one row", async ({ page }) => {
+test("@responsive Mehr keeps its title and shows the active area and fits all six items without scrolling", async ({ page }) => {
   for (const segment of ["profile", "connections", "operations"]) {
     await openMore(page, segment);
     const panel = page.locator(".panel.active");
@@ -75,7 +75,18 @@ test("@responsive Mehr keeps its title and shows the active area in one row", as
     const activeBox = await active.boundingBox();
     expect(activeBox.x).toBeGreaterThanOrEqual(navBox.x - 1);
     expect(activeBox.x + activeBox.width).toBeLessThanOrEqual(navBox.x + navBox.width + 1);
-    if (page.viewportSize().width < 1100) expect(navBox.height).toBeLessThan(70);
+    if (page.viewportSize().width < 1100) {
+      expect(await nav.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      const links = nav.locator("a");
+      await expect(links).toHaveCount(6);
+      for (const link of await links.all()) {
+        await expect(link).toBeInViewport();
+        const box = await link.boundingBox();
+        expect(box.x).toBeGreaterThanOrEqual(navBox.x - 1);
+        expect(box.x + box.width).toBeLessThanOrEqual(navBox.x + navBox.width + 1);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+      }
+    }
   }
 });
 
