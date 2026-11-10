@@ -10,10 +10,11 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
 from backend.errors import AppError
 from backend.providers.descriptors import WAHOO_ID
 from backend.providers.wahoo_client import WahooWorkoutFetch
-from backend.sync.canonical_coverage_store import coverage_key
+from backend.sync.canonical_coverage_store import CanonicalCoverageStore, coverage_key
 from backend.sync.commands import WahooSynchronousRefresh
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
@@ -206,6 +207,35 @@ class IngestTests(WahooSyncCase):
             first["activities_retrieved_at"], second["activities_retrieved_at"]
         )
         self.assertNotEqual(first["retrieved_at"], second["retrieved_at"])
+
+    def test_coverage_reports_stored_totals_and_the_last_fetch_apart(self) -> None:
+        self.source.fetch = WahooWorkoutFetch(
+            (workout(1, EARLIER_UTC), workout(2, EARLIER_UTC), workout(3, EARLIER_UTC))
+        )
+        self.service.sync()
+        self.advance(hours=1)
+        # A shorter window lists one workout; two older ones stay stored.
+        self.source.fetch = WahooWorkoutFetch(
+            (workout(1, EARLIER_UTC),), truncated=True
+        )
+
+        self.service.sync()
+
+        coverage = CanonicalCoverageStore(self.key_values)
+        with self.database.unit_of_work() as db:
+            stored = coverage.load(db, ProviderId.WAHOO, zone=ZONE)
+
+            class Reader:
+                def coverage(self, _db):
+                    return (stored,)
+
+                def metric_windows(self, _db):
+                    return ()
+
+            summary = summarize_canonical_coverage(Reader(), db)
+        wahoo = summary["providers"][0]
+        self.assertEqual(3, wahoo["activities"])
+        self.assertEqual({"activities": 1, "observations": 0}, wahoo["last_fetch"])
 
     def states(self) -> dict[str, str]:
         return {

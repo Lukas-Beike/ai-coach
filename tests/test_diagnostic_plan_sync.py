@@ -64,6 +64,30 @@ class PlanSyncDiagnosticsTests(unittest.TestCase):
             ],
         )
 
+    def test_a_unit_with_an_invalid_payload_has_no_date_and_does_not_fail(self):
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        db.executescript(
+            """
+            CREATE TABLE sync_jobs (id, provider, type, status, payload,
+                requested_by, attempts, available_at, started_at, finished_at,
+                error_class, created_at, updated_at);
+            CREATE TABLE sync_job_items (id, job_id, item_key, operation,
+                remote_id, status, attempts, error_class, error_detail,
+                created_at, updated_at);
+            CREATE TABLE planned_units (local_id, payload, sync_state,
+                sync_error, tombstone);
+            """
+        )
+        db.execute(
+            "INSERT INTO planned_units VALUES ('bad','{not json','pending',NULL,0)"
+        )
+
+        report = summarize_plan_sync(db)
+
+        self.assertEqual(report["unsynced_total"], 1)
+        self.assertIsNone(report["unsynced_units"][0]["date"])
+
 
 if __name__ == "__main__":
     unittest.main()

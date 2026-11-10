@@ -320,6 +320,7 @@ from backend.providers.model_assembly import (
     ModelTransportAssembly,
     ModelTransportClock,
 )
+from backend.providers.observed_opener import Opener, observed_opener
 from backend.providers.openai_error_classifier import OpenAIErrorClassifier
 from backend.providers.transport_assembly import (
     IntervalsTransportSettings,
@@ -1227,6 +1228,17 @@ WAHOO_CONNECTION = WahooConnectionAssembly(
 )
 
 
+def observed_provider_opener(service: str, *, include_path: bool = True) -> Opener:
+    """Observe a raw provider request in the log and the diagnostic capture."""
+    return observed_opener(
+        service,
+        logger=LOGGER,
+        diagnostic_capture=DIAGNOSTIC_CAPTURE,
+        operation_context=sync_observation.operation_context,
+        include_path=include_path,
+    )
+
+
 def disconnect_wahoo_grant() -> dict[str, object]:
     """Revoke the Wahoo grant best effort and drop its tokens (privacy purge)."""
     return WAHOO_CONNECTION.service().disconnect()
@@ -1259,6 +1271,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         resync_gate=WAHOO_RESYNC_GATE,
         export_thresholds=EXPORT_THRESHOLDS,
         history_earliest_date=SYNC_EARLIEST_DATE,
+        fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
     )
 )
 NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
@@ -1279,6 +1292,7 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
                 openai_path=OPENAI_RESPONSES_PATH,
             ),
             athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
+            observed_opener=observed_provider_opener,
         ),
     )
 )

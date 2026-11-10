@@ -59,7 +59,9 @@ class ProviderCoverage:
     """Counts describing one provider's contribution to the canonical layer.
 
     ``issue_counts`` may omit reasons that did not occur; an absent reason means
-    zero. ``count_issues`` always returns every reason.
+    zero. ``count_issues`` always returns every reason. The record counts are what
+    the tables hold when a provider reports stored totals; ``fetched_*`` then keep
+    the counts of the last fetch alone (None when the counts are the fetch's own).
     """
 
     provider: ProviderId
@@ -71,6 +73,8 @@ class ProviderCoverage:
     last_observed_on: date | None
     activities_retrieved_at: datetime | None = None
     observations_retrieved_at: datetime | None = None
+    fetched_activity_count: int | None = None
+    fetched_observation_count: int | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.provider, ProviderId, "provider")
@@ -81,6 +85,9 @@ class ProviderCoverage:
         )
         _require_count(self.activity_count, "activity_count")
         _require_count(self.observation_count, "observation_count")
+        for name in ("fetched_activity_count", "fetched_observation_count"):
+            if getattr(self, name) is not None:
+                _require_count(getattr(self, name), name)
         object.__setattr__(self, "issue_counts", _copy_issue_counts(self.issue_counts))
         _validate_observed_range(self.first_observed_on, self.last_observed_on)
 

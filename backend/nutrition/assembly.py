@@ -19,6 +19,8 @@ from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.photo import NutritionPhotoExtractionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.providers.intervals import IntervalsApiClient
+from backend.providers.observed_opener import Opener
+from backend.providers.open_food_facts import OpenFoodFactsClient
 from backend.providers.yazio import YazioClient
 from backend.runtime.ports import ObservationReader
 
@@ -39,6 +41,8 @@ class NutritionRuntime:
     photo_extractor: Callable[[], NutritionPhotoExtractionService] | None = None
     # The profile sex Yazio searches send; empty sends none (#1774).
     athlete_sex: Callable[[], str] = lambda: ""
+    # Observed openers for the Yazio and Open Food Facts requests, by service name.
+    observed_opener: Callable[[str], Opener] | None = None
 
 
 class NutritionAssembly:
@@ -64,10 +68,20 @@ class NutritionAssembly:
         self._food_mirror = FoodDatabaseMirror(
             self._database_manager, self._database_lock, self._utc_now
         )
+        observe = dependencies.runtime.observed_opener
+        yazio_options: dict[str, Any] = (
+            {} if observe is None else {"opener": observe("yazio")}
+        )
+        off_options: dict[str, Any] = (
+            {} if observe is None else {"opener": observe("open_food_facts")}
+        )
         self._food_database = FoodDatabaseService(
+            off=OpenFoodFactsClient(**off_options),
             mirror=self._food_mirror,
             yazio=YazioClient(
-                self._config, athlete_sex=dependencies.runtime.athlete_sex
+                self._config,
+                athlete_sex=dependencies.runtime.athlete_sex,
+                **yazio_options,
             ),
         )
         self._product_repository = NutritionProductRepository()
