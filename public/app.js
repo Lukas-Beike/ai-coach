@@ -66,6 +66,7 @@ $("#wahooSyncButton").addEventListener("click", syncWahoo);
 $("#wahooFullResyncButton").addEventListener("click", () => fullResync(providerIds().wahoo));
 for (const provider of Object.keys(CREDENTIAL_FORMS)) {
   $("#" + credentialFormIds(provider).form).addEventListener("submit", (event) => saveProviderCredentials(event, provider));
+  $("#" + credentialFormIds(provider).form).addEventListener("input", () => syncCredentialPasswordRow(provider));
   for (const field of CREDENTIAL_FORMS[provider]) {
     $("#" + credentialFieldIds(field).clear).addEventListener("click", () => clearProviderCredential(field, provider));
   }

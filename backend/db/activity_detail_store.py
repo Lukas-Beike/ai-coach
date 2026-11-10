@@ -214,7 +214,8 @@ def _rehash_stream_set(db: Any, provider: str, provider_activity_id: str) -> Non
     key = (provider, provider_activity_id, ActivityDetailKind.STREAMS.value)
     header = db.execute(
         "SELECT mapper_version, origin, source_kind, recorded_by, source_record_id, "
-        "resolution FROM activity_detail_sets WHERE provider = ? "
+        "resolution, hr_source, power_source, sensors, dfa_alpha1 "
+        "FROM activity_detail_sets WHERE provider = ? "
         "AND provider_activity_id = ? AND detail_kind = ?",
         key,
     ).fetchone()
@@ -230,17 +231,23 @@ def _rehash_stream_set(db: Any, provider: str, provider_activity_id: str) -> Non
         points, valid = _pack_series(values)
         children.append((row["channel"], row["point_count"], valid, points))
     content = _content_hash(
-        {
-            "detail_kind": key[2],
-            "mapper_version": header["mapper_version"],
-            "origin": header["origin"],
-            "source_kind": header["source_kind"],
-            "recorded_by": header["recorded_by"],
-            "source_record_id": header["source_record_id"],
-            "resolution": header["resolution"],
-            "lap_source": None,
-            "zone_boundary_source": None,
-        },
+        _header_fields(
+            detail_kind=key[2],
+            mapper_version=header["mapper_version"],
+            origin=header["origin"],
+            source_kind=header["source_kind"],
+            recorded_by=header["recorded_by"],
+            source_record_id=header["source_record_id"],
+            resolution=header["resolution"],
+            lap_source=None,
+            zone_boundary_source=None,
+            optional={
+                "hr_source": header["hr_source"],
+                "power_source": header["power_source"],
+                "sensors": header["sensors"],
+                "dfa_alpha1": header["dfa_alpha1"],
+            },
+        ),
         children,
     )
     db.execute(
@@ -955,45 +962,102 @@ def analysis_export_rows(db: Any) -> Iterable[dict[str, Any]]:
 
 def _header(detail: ActivityDetailSet, mapper_version: int) -> dict[str, Any]:
     provenance = detail.provenance
-    header: dict[str, Any] = {
-        "detail_kind": detail.kind.value,
-        "mapper_version": mapper_version,
-        "origin": detail.origin.value,
-        "source_kind": provenance.source_kind.value,
-        "recorded_by": provenance.recorded_by.value,
-        "source_record_id": provenance.source_record_id,
-        "resolution": (
-            detail.resolution.value if isinstance(detail, ActivityStreamSet) else None
-        ),
-        "lap_source": (
+    stream = detail if isinstance(detail, ActivityStreamSet) else None
+    return _header_fields(
+        detail_kind=detail.kind.value,
+        mapper_version=mapper_version,
+        origin=detail.origin.value,
+        source_kind=provenance.source_kind.value,
+        recorded_by=provenance.recorded_by.value,
+        source_record_id=provenance.source_record_id,
+        resolution=stream.resolution.value if stream else None,
+        lap_source=(
             detail.lap_source.value if isinstance(detail, ActivityLapSet) else None
         ),
-        "zone_boundary_source": (
+        zone_boundary_source=(
             detail.boundary_source.value
             if isinstance(detail, ZoneDistribution)
             else None
         ),
+        optional={
+            "set_source": (
+                detail.source.value
+                if isinstance(detail, ActivityStrengthSetSet)
+                else None
+            ),
+            "hr_source": stream.hr_source.value
+            if stream and stream.hr_source
+            else None,
+            "power_source": (
+                stream.power_source.value if stream and stream.power_source else None
+            ),
+            "sensors": (
+                json.dumps(
+                    [_sensor_json(sensor) for sensor in stream.sensors],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                if stream and stream.sensors
+                else None
+            ),
+            "dfa_alpha1": (
+                json.dumps(
+                    _dfa_json(stream.dfa_alpha1), sort_keys=True, separators=(",", ":")
+                )
+                if stream and stream.dfa_alpha1 is not None
+                else None
+            ),
+        },
+    )
+
+
+_OPTIONAL_HEADER_KEYS = (
+    "set_source",
+    "hr_source",
+    "power_source",
+    "sensors",
+    "dfa_alpha1",
+)
+
+
+def _header_fields(
+    *,
+    detail_kind: str,
+    mapper_version: int,
+    origin: str,
+    source_kind: str,
+    recorded_by: str,
+    source_record_id: str | None,
+    resolution: str | None,
+    lap_source: str | None,
+    zone_boundary_source: str | None,
+    optional: Mapping[str, str | None],
+) -> dict[str, Any]:
+    """The hashed header of a detail set, from values as they are stored.
+
+    The single place that decides which keys are hashed: a write builds it from
+    the detail through ``_header`` and a rehash from the stored row, so both
+    produce the same content hash for the same set.
+    """
+    header: dict[str, Any] = {
+        "detail_kind": detail_kind,
+        "mapper_version": mapper_version,
+        "origin": origin,
+        "source_kind": source_kind,
+        "recorded_by": recorded_by,
+        "source_record_id": source_record_id,
+        "resolution": resolution,
+        "lap_source": lap_source,
+        "zone_boundary_source": zone_boundary_source,
     }
-    if isinstance(detail, ActivityStrengthSetSet):
-        # Only strength sets carry the key, so other kinds keep their content hash.
-        header["set_source"] = detail.source.value
-    if isinstance(detail, ActivityStreamSet):
-        # Only a set that names a source or sensor carries the keys, so streams
-        # without them keep their content hash.
-        if detail.hr_source is not None:
-            header["hr_source"] = detail.hr_source.value
-        if detail.power_source is not None:
-            header["power_source"] = detail.power_source.value
-        if detail.sensors:
-            header["sensors"] = json.dumps(
-                [_sensor_json(sensor) for sensor in detail.sensors],
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-        if detail.dfa_alpha1 is not None:
-            header["dfa_alpha1"] = json.dumps(
-                _dfa_json(detail.dfa_alpha1), sort_keys=True, separators=(",", ":")
-            )
+    # Only a set that carries a value has its key, so sets without them keep
+    # their content hash.
+    # ``optional`` carries set_source, hr_source, power_source, sensors and
+    # dfa_alpha1 as stored text.
+    for key in _OPTIONAL_HEADER_KEYS:
+        value = optional.get(key)
+        if value:
+            header[key] = value
     return header
 
 
@@ -1025,6 +1089,7 @@ def stored_dfa_alpha1(text: object) -> ActivityDfaAlpha1 | None:
 
 
 def _sensor_json(sensor: ActivitySensor) -> dict[str, Any]:
+    # ``key`` is a pseudonymous hash of the serial, not the serial itself.
     return {
         "role": sensor.role.value,
         "key": sensor.key,

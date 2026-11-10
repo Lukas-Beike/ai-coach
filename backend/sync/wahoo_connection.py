@@ -350,11 +350,13 @@ class WahooConnectionService:
     def disconnect(self) -> dict[str, Any]:
         """Revoke access at Wahoo on a best-effort basis and drop local tokens."""
         remote_revoked = False
+        revoke_attempted = False
         # Holding the refresh lock keeps an in-flight refresh from writing
         # fresh tokens back after the athlete disconnected.
         with self._refresh_lock:
             self._generation += 1
             if self._stored_tokens() is not None:
+                revoke_attempted = True
                 try:
                     self._oauth().deauthorize(self._access_token_locked())
                     remote_revoked = True
@@ -364,5 +366,6 @@ class WahooConnectionService:
         return {
             "status": "ok",
             "connected": False,
+            "remote_revoke_attempted": revoke_attempted,
             "remote_revoked": remote_revoked,
         }

@@ -135,7 +135,12 @@ def _power_source(*, meter: bool, trainer: bool, garmin_device: bool) -> PowerSo
 
 
 def sensor_key(manufacturer: int | None, product: int | None, serial: int) -> str:
-    """The hash that identifies one physical sensor without exposing its serial."""
+    """A pseudonymous hash that identifies one physical sensor across activities.
+
+    Unsalted SHA-256 of manufacturer, product and a 32-bit serial: the serial is
+    not stored, but a short serial could be recovered by brute force, so the id
+    is a pseudonym, not an anonymous value.
+    """
     text = f"pacecraft-sensor:{manufacturer}:{product}:{serial}"
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

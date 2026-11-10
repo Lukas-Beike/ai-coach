@@ -289,6 +289,29 @@ class SessionAuthService:
             )
         return {"csrf_hash": row["csrf_hash"], "expires_at": expires_at}
 
+    def password_matches(self, password: object) -> bool:
+        """Constant-time comparison with the APP_PASSWORD."""
+        return isinstance(password, str) and hmac.compare_digest(
+            password.encode("utf-8"), self._config.app_password.encode("utf-8")
+        )
+
+    def require_password(self, handler: Any, password: object) -> None:
+        """Ask the session holder to prove the APP_PASSWORD again for a risky change."""
+        allowed, retry_after = self._rate_limiter.allow(
+            f"reauth:{self.client_ip(handler)}", 10, 900
+        )
+        if not allowed:
+            raise AppError(
+                429,
+                f"Zu viele Versuche. Erneut versuchen in etwa {retry_after} Sekunden.",
+                reason="rate_limited",
+                retry_after_seconds=retry_after,
+            )
+        if not self.password_matches(password):
+            raise AppError(
+                403, "Das App-Passwort fehlt oder ist falsch. Es wurde nichts geändert."
+            )
+
     def login_user(self, handler: Any, password: str | None = None) -> dict[str, Any]:
         if app_config.security_configuration_error(
             self._config, sqlcipher_available=self._sqlcipher_available
@@ -309,9 +332,7 @@ class SessionAuthService:
             password = (
                 str(payload.get("password") or "") if isinstance(payload, dict) else ""
             )
-        if not hmac.compare_digest(
-            str(password).encode("utf-8"), self._config.app_password.encode("utf-8")
-        ):
+        if not self.password_matches(password):
             raise AppError(401, "Ungültiges Passwort.")
         token = secrets.token_urlsafe(32)
         csrf = secrets.token_urlsafe(32)

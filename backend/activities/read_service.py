@@ -21,6 +21,8 @@ from backend.runtime.ports import (
 )
 
 ALL_DAYS = -1
+# Upper bound of the days filter; larger values are clamped, never an overflow.
+MAX_PAGE_DAYS = 3650
 PAGE_DEFAULT = 100
 PAGE_MAX = 250
 # Version 3 pages by session start and local session id; older cursors restart.
@@ -153,10 +155,10 @@ class ActivityReadService:
             days_value = int(days)
         except TypeError, ValueError:
             days_value = ALL_DAYS
+        if days_value != ALL_DAYS:
+            days_value = min(MAX_PAGE_DAYS, max(1, days_value))
         start = (
-            None
-            if days_value == ALL_DAYS
-            else today - timedelta(days=max(1, days_value) - 1)
+            None if days_value == ALL_DAYS else today - timedelta(days=days_value - 1)
         )
         page_size = _page_limit(limit)
         with self._database_manager.read_snapshot() as db:

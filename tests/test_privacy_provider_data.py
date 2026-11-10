@@ -12,7 +12,7 @@ from contextlib import contextmanager, nullcontext
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, patch
 
 from canonical_domain_support import (
     GEAR_SOURCE,
@@ -63,7 +63,9 @@ from backend.db.canonical_domain_store import (
     replace_sleep_periods,
     replace_zone_configurations,
 )
+from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
+from backend.errors import AppError
 from backend.observability import REDACTED_VALUE, sanitized_provider_payload
 from backend.privacy import (
     _REMOTE_LINK_KINDS_BY_CATEGORY,
@@ -71,6 +73,10 @@ from backend.privacy import (
     PrivacyDeleteDependencies,
     PrivacyDeleteService,
 )
+from backend.provider_credentials import WAHOO_TOKENS_KEY
+from backend.providers.wahoo_oauth import WahooOAuthClient
+from backend.sync.wahoo_connection import WahooConnectionService
+from tests.test_wahoo_connection import make_config
 
 STAMP = "2026-10-01T08:00:00+00:00"
 PROVIDER = "synthetic-provider"
@@ -673,6 +679,88 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
             "LOKALE DATEN LÖSCHEN"
         )
         self.assertEqual(cancelled, [True])
+
+    def connected_wahoo(self, request):
+        """A real Wahoo connection service over the fixture database, already connected."""
+        config = make_config()
+        service = WahooConnectionService(
+            config=lambda: config,
+            oauth=lambda: WahooOAuthClient(lambda: config, request),
+            database_manager=lambda: _Manager(self.db),
+            database_lock=lambda: MagicMock(),
+            key_values=KeyValueRepository(lambda: "2026-11-09T08:00:00+00:00"),
+            utc_now=lambda: "2026-11-09T08:00:00+00:00",
+            token_factory=lambda: "state-1",
+        )
+        service.start_authorization()
+        request.return_value = {
+            "access_token": "access-synthetic",
+            "refresh_token": "refresh-synthetic",
+            "expires_in": 3600,
+        }
+        self.assertEqual(
+            service.complete_authorization("code-1", "state-1"), "connected"
+        )
+        request.reset_mock()
+        return service
+
+    def wahoo_tokens_stored(self):
+        return (
+            self.db.execute(
+                "SELECT 1 FROM kv WHERE key = ?", (WAHOO_TOKENS_KEY,)
+            ).fetchone()
+            is not None
+        )
+
+    def test_delete_revokes_the_wahoo_grant_before_wiping_the_tokens(self):
+        request = Mock()
+        wahoo = self.connected_wahoo(request)
+        self.assertTrue(self.wahoo_tokens_stored())
+        result = self.service(disconnect_wahoo=wahoo.disconnect).delete(
+            "LOKALE DATEN LÖSCHEN"
+        )
+        self.assertEqual(request.call_args.args[0], "DELETE")
+        self.assertTrue(result["wahoo_revoke_attempted"])
+        self.assertTrue(result["wahoo_revoked"])
+        self.assertFalse(self.wahoo_tokens_stored())
+        self.assertFalse(wahoo.status()["connected"])
+        self.assertTrue(
+            any("Wahoo" in line for line in result["remote_untouched"]),
+        )
+        self.assertNotIn("synthetic", json.dumps(result))
+
+    def test_a_failed_wahoo_revoke_is_reported_and_the_purge_completes(self):
+        request = Mock()
+        wahoo = self.connected_wahoo(request)
+        request.side_effect = AppError(502, "down", upstream_status=500)
+        result = self.service(disconnect_wahoo=wahoo.disconnect).delete(
+            "LOKALE DATEN LÖSCHEN"
+        )
+        self.assertTrue(result["local_data_deleted"])
+        self.assertTrue(result["wahoo_revoke_attempted"])
+        self.assertFalse(result["wahoo_revoked"])
+        self.assertFalse(self.wahoo_tokens_stored())
+
+    def test_a_crashing_wahoo_disconnect_does_not_block_the_purge(self):
+        def explode():
+            raise RuntimeError("synthetic")
+
+        result = self.service(disconnect_wahoo=explode).delete("LOKALE DATEN LÖSCHEN")
+        self.assertTrue(result["local_data_deleted"])
+        self.assertTrue(result["wahoo_revoke_attempted"])
+        self.assertFalse(result["wahoo_revoked"])
+
+    def test_a_purge_without_a_wahoo_grant_attempts_no_revoke(self):
+        request = Mock()
+        wahoo = self.connected_wahoo(request)
+        wahoo.disconnect()
+        request.reset_mock()
+        result = self.service(disconnect_wahoo=wahoo.disconnect).delete(
+            "LOKALE DATEN LÖSCHEN"
+        )
+        request.assert_not_called()
+        self.assertFalse(result["wahoo_revoke_attempted"])
+        self.assertFalse(result["wahoo_revoked"])
 
     def seed_recovery_files(self):
         stamp = "20261101120000-" + "a" * 32

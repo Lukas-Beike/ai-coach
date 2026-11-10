@@ -8,6 +8,8 @@ const {
   CREDENTIAL_FORMS,
   credentialFieldIds,
   credentialFormIds,
+  credentialNeedsPassword,
+  credentialPasswordIds,
   credentialSavePayload,
   credentialSourceView,
   garminCardView,
@@ -152,6 +154,86 @@ test("saving sends only non-blank values and leaves no secret in the DOM", async
   }
   assert.equal(harness.toasts.at(-1).message, "Zugangsdaten gespeichert");
   assert.equal(harness.invalidatedCount(), 1);
+});
+
+test("only the OpenAI base URL and the Wahoo client settings need the app password", () => {
+  assert.equal(credentialNeedsPassword({ openai_base_url: "https://proxy.example.test/v1" }), true);
+  assert.equal(credentialNeedsPassword({ wahoo_client_id: "id" }), true);
+  assert.equal(credentialNeedsPassword({ wahoo_client_secret: "secret" }), true);
+  assert.equal(credentialNeedsPassword({ openai_api_key: "key", intervals_athlete_id: "i1" }), false);
+  assert.equal(credentialNeedsPassword({}), false);
+});
+
+test("the password input appears only while a protected field is filled in", () => {
+  const harness = loadProviderConnections();
+  const row = harness.element(credentialPasswordIds("openai").row);
+  harness.element("cred-openai_api_key").value = "sk-plain";
+  harness.fn("syncCredentialPasswordRow")("openai");
+  assert.equal(row.hidden, true);
+  harness.element("cred-openai_base_url").value = "https://proxy.example.test/v1";
+  harness.fn("syncCredentialPasswordRow")("openai");
+  assert.equal(row.hidden, false);
+  harness.element(credentialPasswordIds("openai").input).value = "typed";
+  harness.element("cred-openai_base_url").value = "";
+  harness.fn("syncCredentialPasswordRow")("openai");
+  assert.equal(row.hidden, true);
+  assert.equal(harness.element(credentialPasswordIds("openai").input).value, "");
+});
+
+test("a protected save without the password sends nothing and keeps the entries", async () => {
+  const harness = loadProviderConnections();
+  harness.setData({ credentials: { fields: statusFields } });
+  harness.element("cred-openai_base_url").value = "https://proxy.example.test/v1";
+
+  await harness.fn("saveProviderCredentials")(event(), "openai");
+
+  assert.equal(harness.calls.length, 0);
+  assert.equal(harness.element(credentialFormIds("openai").error).textContent, "Bitte das App-Passwort eingeben.");
+  assert.equal(harness.element("cred-openai_base_url").value, "https://proxy.example.test/v1");
+});
+
+test("a protected save sends the password once and clears it from the DOM", async () => {
+  const harness = loadProviderConnections();
+  const password = "synthetic-app-password";
+  harness.setData({ credentials: { fields: statusFields } });
+  harness.element("cred-wahoo_client_id").value = "new-client";
+  harness.element(credentialPasswordIds("wahoo").input).value = password;
+  harness.setApi(async () => ({ fields: statusFields }));
+
+  await harness.fn("saveProviderCredentials")(event(), "wahoo");
+
+  assert.deepEqual(JSON.parse(harness.calls[0].body), { wahoo_client_id: "new-client", app_password: password });
+  for (const el of harness.elements.values()) {
+    assert.ok(!String(el.value).includes(password), `value of ${el.id} holds the password`);
+    assert.ok(!String(el.textContent).includes(password), `text of ${el.id} holds the password`);
+  }
+  assert.equal(harness.element(credentialPasswordIds("wahoo").row).hidden, true);
+});
+
+test("a rejected password shows the server message and clears every entry", async () => {
+  const harness = loadProviderConnections();
+  harness.setData({ credentials: { fields: statusFields } });
+  harness.element("cred-openai_base_url").value = "https://proxy.example.test/v1";
+  harness.element(credentialPasswordIds("openai").input).value = "wrong";
+  harness.setApi(async () => { throw new Error("Das App-Passwort fehlt oder ist falsch. Es wurde nichts geändert."); });
+
+  await harness.fn("saveProviderCredentials")(event(), "openai");
+
+  assert.match(harness.element(credentialFormIds("openai").error).textContent, /App-Passwort/);
+  assert.equal(harness.element(credentialPasswordIds("openai").input).value, "");
+  assert.equal(harness.element("cred-openai_base_url").value, "");
+});
+
+test("unprotected saves never send a password", async () => {
+  const harness = loadProviderConnections();
+  harness.setData({ credentials: { fields: statusFields } });
+  harness.element("cred-openai_api_key").value = "sk-plain";
+  harness.element(credentialPasswordIds("openai").input).value = "stray";
+  harness.setApi(async () => ({ fields: statusFields }));
+
+  await harness.fn("saveProviderCredentials")(event(), "openai");
+
+  assert.deepEqual(JSON.parse(harness.calls[0].body), { openai_api_key: "sk-plain" });
 });
 
 test("a save with only blank inputs is rejected without a request", async () => {

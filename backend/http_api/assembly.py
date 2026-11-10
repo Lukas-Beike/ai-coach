@@ -620,7 +620,9 @@ class HttpApiAssembly:
         )
         self.settings_put_routes = SettingsPutRoutes(settings)
         provider_credentials = dependencies.domains.provider_credentials
-        self.credentials_put_routes = _when(provider_credentials, CredentialsPutRoutes)
+        self.credentials_put_routes = _when(
+            provider_credentials, CredentialsPutRoutes, session_auth_service
+        )
         self.athlete_put_routes = AthletePutRoutes(
             athlete_context_service,
             profile_service,
