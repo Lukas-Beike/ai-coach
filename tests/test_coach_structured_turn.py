@@ -136,7 +136,6 @@ class StructuredTurnTests(unittest.TestCase):
             context,
             command_receipts=[],
             attachments=[],
-            has_prior_openai_attachments=False,
         ).name
 
         self.service.run(

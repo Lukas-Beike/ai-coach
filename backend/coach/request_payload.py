@@ -76,14 +76,15 @@ def request_context_selection(
     *,
     command_receipts: list[dict[str, Any]],
     attachments: list[dict[str, Any]],
-    has_prior_openai_attachments: bool,
     request_kind: str | None = None,
 ) -> CoachContextSelection:
     """Select the initial request context for the turn and its payload."""
+    # Only this turn's uploads select nutrition context; earlier uploads keep
+    # just the summary notice and conversation retention.
     return select_coach_context(
         message,
         context,
-        attachments=bool(attachments or has_prior_openai_attachments),
+        attachments=bool(attachments),
         has_receipts=bool(command_receipts),
         request_kind=request_kind,
     )
@@ -123,7 +124,6 @@ class CoachRequestPayloadService:
             context,
             command_receipts=command_receipts,
             attachments=attachments,
-            has_prior_openai_attachments=has_prior_openai_attachments,
             request_kind=request_kind,
         )
         training_context = self._training_context.build(

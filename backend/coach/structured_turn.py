@@ -133,7 +133,6 @@ class CoachStructuredTurnService:
             context,
             command_receipts=command_receipts,
             attachments=attachments,
-            has_prior_openai_attachments=has_prior_openai_attachments,
             request_kind=request_kind,
         ).name
         model_instructions, request_payload = self._deps.payload.build(
