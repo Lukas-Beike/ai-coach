@@ -1968,6 +1968,31 @@ def linkable_activity_rows(db: Any, *, start: str, end: str) -> list[dict[str, A
     )
 
 
+def linkable_dates_with_providers(db: Any, providers: Sequence[str]) -> list[str]:
+    """Return the ISO local dates holding an active record of every given provider.
+
+    Only records session linking may bundle count: their session is active or an
+    alias and not athlete-confirmed, as in ``linkable_activity_rows``.
+    """
+    rows = _fetch_all(
+        db,
+        "SELECT r.local_date AS local_date FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.state = ? AND s.state IN (?, ?) AND s.athlete_confirmed = 0 "
+        f"AND r.provider IN ({_placeholders(list(providers))}) "
+        "GROUP BY r.local_date HAVING COUNT(DISTINCT r.provider) = ? "
+        "ORDER BY r.local_date",
+        (
+            ActivityRecordState.ACTIVE.value,
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.DUPLICATE.value,
+            *providers,
+            len(set(providers)),
+        ),
+    )
+    return [str(row["local_date"]) for row in rows]
+
+
 def provider_activity_record_rows(
     db: Any, provider: str, provider_activity_ids: Sequence[str]
 ) -> list[dict[str, Any]]:

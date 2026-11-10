@@ -455,6 +455,7 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutSyncAssembly,
 )
 from backend.sync.session_focus_backfill import SessionFocusBackfill
+from backend.sync.session_rebundle import SessionRebundle
 from backend.sync.state import SyncStateRepository
 from backend.sync.wahoo_connection import WahooSecretRegistry
 from backend.sync.wahoo_connection_assembly import (
@@ -2203,6 +2204,13 @@ PROFILE_WEEKLY_PLAN_REMOVAL = ProfileWeeklyPlanRemoval(
     key_values=KEY_VALUE_REPOSITORY, clock=runtime_clock.utc_now
 )
 
+SESSION_REBUNDLE = SessionRebundle(
+    key_values=KEY_VALUE_REPOSITORY,
+    clock=runtime_clock.utc_now,
+    zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
+    database_manager=database_manager,
+)
+
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -2221,7 +2229,11 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     # The heart-rate branch's TRIMP constants follow the profile sex (M6 v3).
     athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
     # The one-time focus backfill of future units (#1849) runs after all stages.
-    extra_followups=(PROFILE_WEEKLY_PLAN_REMOVAL, SESSION_FOCUS_BACKFILL),
+    extra_followups=(
+        PROFILE_WEEKLY_PLAN_REMOVAL,
+        SESSION_REBUNDLE,
+        SESSION_FOCUS_BACKFILL,
+    ),
     # Weather during outdoor sessions (#1868); only 2-decimal coordinates leave.
     activity_weather_fetch=lambda *position: (
         activity_weather_provider.ActivityWeatherClient(

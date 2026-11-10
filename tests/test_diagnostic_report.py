@@ -208,6 +208,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "session_analysis",
                 "session_focus_backfill",
                 "profile_weekly_plan_removal",
+                "session_rebundle",
                 "logs",
                 "debug_capture",
                 "note",
