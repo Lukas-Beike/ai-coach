@@ -118,10 +118,7 @@ class PlannedUnitSyncStateWriter:
         if changed and state == "synced":
             _apply_remote_event(baseline_payload, state, remote_event)
         if clear_remote_event:
-            # The event is gone, so a restored unit must not send its old id.
-            for target in (payload, baseline_payload):
-                target.pop("remote_event_id", None)
-                target.pop("remote_event_external_id", None)
+            _drop_remote_event_ids(payload, baseline_payload)
         persisted_state = "local" if changed and state == "synced" else state
         if changed:
             payload["sync_status"] = persisted_state
@@ -197,3 +194,10 @@ class PlannedUnitSyncStateWriter:
                 local_id,
             ),
         )
+
+
+def _drop_remote_event_ids(*targets: dict[str, Any]) -> None:
+    """The event is gone, so a restored unit must not send its old id."""
+    for target in targets:
+        target.pop("remote_event_id", None)
+        target.pop("remote_event_external_id", None)

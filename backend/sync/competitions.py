@@ -459,27 +459,15 @@ class CompetitionSyncService:
             event = by_id.get(event_id) or by_external.get(external_id)
             if event is None and event_id:
                 event = self._read_event(client, event_id)
-            reason = (
-                planning_competitions.COMPETITION_DELETE_SKIP_NOT_FOUND
-                if event is None
-                else planning_competitions.competition_delete_skip_reason(
-                    event, today=today
-                )
-            )
+            reason = _delete_skip_reason(event, today)
             if reason is None:
                 identifiers.extend(
                     planning_competitions.competition_delete_identifiers([row])
                 )
-                continue
-            label = labels.get(str(row["id"])) or {}
-            skipped.append(
-                {
-                    "name": label.get("name") or str((event or {}).get("name") or ""),
-                    "event_date": label.get("event_date")
-                    or str((event or {}).get("start_date_local") or "")[:10],
-                    "reason": reason,
-                }
-            )
+            else:
+                skipped.append(
+                    _skipped_deletion(labels.get(str(row["id"])) or {}, event, reason)
+                )
         return identifiers, skipped
 
     @staticmethod
@@ -495,3 +483,22 @@ class CompetitionSyncService:
     def _set_kv(self, key: str, value: str) -> None:
         with self._database_manager.unit_of_work() as db:
             self._key_value_repository.set(db, key, value)
+
+
+def _delete_skip_reason(event: dict[str, Any] | None, today: Any) -> str | None:
+    if event is None:
+        return planning_competitions.COMPETITION_DELETE_SKIP_NOT_FOUND
+    return planning_competitions.competition_delete_skip_reason(event, today=today)
+
+
+def _skipped_deletion(
+    label: dict[str, Any], event: dict[str, Any] | None, reason: str
+) -> dict[str, str]:
+    """Name a deletion left alone, from the stored label or the remote event."""
+    remote = event or {}
+    return {
+        "name": label.get("name") or str(remote.get("name") or ""),
+        "event_date": label.get("event_date")
+        or str(remote.get("start_date_local") or "")[:10],
+        "reason": reason,
+    }
