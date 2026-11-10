@@ -14,6 +14,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, AppError
 from backend.planning import library, workouts
 from backend.planning.sport import with_activity_type
+from backend.providers.descriptors import WAHOO_ID
 from backend.providers.intervals_workouts import (
     INTERVALS_DEFAULT_WORKOUT_TYPE,
     INTERVALS_TEMPLATE_WORKOUT_TYPES,
@@ -58,8 +59,9 @@ class WorkoutLibraryService:
         """Restore a history snapshot using the caller's transaction."""
         if target is None:
             db.execute("DELETE FROM workout_library WHERE local_id=?", (entity_id,))
+            # A Wahoo plan stays removable by its link.
             _REMOTE_LINKS.delete_for_entity(
-                db, RemoteEntityKind.LIBRARY_WORKOUT, entity_id
+                db, RemoteEntityKind.LIBRARY_WORKOUT, entity_id, keep=(WAHOO_ID,)
             )
             return None
 
@@ -192,7 +194,10 @@ class WorkoutLibraryService:
                 "Synchronisierte Bibliothekseinheiten können nicht lokal gelöscht werden. Archiviere sie stattdessen.",
             )
         db.execute("DELETE FROM workout_library WHERE local_id=?", (local_id,))
-        _REMOTE_LINKS.delete_for_entity(db, RemoteEntityKind.LIBRARY_WORKOUT, local_id)
+        # A Wahoo plan stays removable by its link until the athlete's Wahoo sync.
+        _REMOTE_LINKS.delete_for_entity(
+            db, RemoteEntityKind.LIBRARY_WORKOUT, local_id, keep=(WAHOO_ID,)
+        )
         change_history.record_change(
             db, "workout_library", local_id, "delete", before, None
         )

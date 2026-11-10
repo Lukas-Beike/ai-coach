@@ -14,17 +14,17 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from backend.canonical.planning_fields import STRENGTH_STRUCTURE
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind, Sport
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import strength_structure
-from backend.planning.garmin_orphans import GarminOrphan
-from backend.planning.intervals_orphans import IntervalsOrphan
+from backend.planning.leftovers import nearest_first
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.planning.sport import planned_sport_environment
+from backend.providers.descriptors import WAHOO_ID
 from backend.providers.garmin_strength_workout import (
     PAYLOAD_VERSION,
     GarminExercise,
@@ -33,6 +33,11 @@ from backend.providers.garmin_strength_workout import (
     resolved_exercises,
     suggestions,
 )
+
+if TYPE_CHECKING:
+    from backend.planning.garmin_orphans import GarminOrphan
+    from backend.planning.intervals_orphans import IntervalsOrphan
+    from backend.planning.wahoo_orphans import WahooOrphan
 
 # States from which an explicit Intervals.icu push helps; a conflict needs a
 # decision first, and "syncing" is already on its way.
@@ -81,7 +86,7 @@ def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _pushable_fingerprint(
+def pushable_fingerprint(
     payload: dict[str, Any], remembered: Mapping[str, GarminExercise]
 ) -> tuple[str | None, str | None]:
     """The Garmin fingerprint when every exercise maps, else why Garmin is blocked.
@@ -128,7 +133,9 @@ def unmapped_exercises(
 
 
 def _cleanup_lists(
-    orphans: Sequence[GarminOrphan], intervals_orphans: Sequence[IntervalsOrphan]
+    orphans: Sequence[GarminOrphan],
+    intervals_orphans: Sequence[IntervalsOrphan],
+    wahoo_orphans: Sequence[WahooOrphan],
 ) -> dict[str, list[dict[str, str]]]:
     """The leftovers each provider's sync removes, as the calendar receives them."""
     return {
@@ -144,6 +151,10 @@ def _cleanup_lists(
                 "hash": item.payload_hash,
             }
             for item in intervals_orphans
+        ],
+        WAHOO_ID: [
+            {"id": item.local_id, "name": item.name, "date": item.date}
+            for item in wahoo_orphans
         ],
     }
 
@@ -176,20 +187,25 @@ def attach_push_state(
     orphans: Sequence[GarminOrphan] = (),
     intervals_orphans: Sequence[IntervalsOrphan] = (),
     today: date = date.min,
+    wahoo_orphans: Sequence[WahooOrphan] = (),
 ) -> None:
     """Add ``payload_hash``, ``push_pending`` and ``push_blocked`` to each pair.
 
     An upcoming unit a provider waits for also lists, per provider, the
     leftovers its sync removes (``push_cleanup``): ``orphans`` are Garmin
     workouts, ``intervals_orphans`` Intervals.icu events of deleted or replaced
-    units.
+    units, ``wahoo_orphans`` Wahoo plans of deleted library entries. Leftovers no
+    unit waits to carry (no pending unit, and Wahoo never has one) go on the
+    unit nearest to ``today``, so the calendar can always offer their removal.
 
     ``resync`` holds the local ids of synced units whose exported heart-rate range
     moved only with the threshold HR. ``push_blocked`` names why a strength unit cannot reach Garmin, so the
     calendar says so instead of offering only Intervals.icu silently.
     """
-    lists = _cleanup_lists(orphans, intervals_orphans)
+    lists = _cleanup_lists(orphans, intervals_orphans, wahoo_orphans)
+    payloads: list[dict[str, Any]] = []
     for row, payload in pairs:
+        payloads.append(payload)
         digest = plan_push_payload_hash(row["payload"])
         # A synced run unit whose heart-rate range moved with the threshold HR
         # (the bpm path of the cap export) is changed too.
@@ -201,7 +217,7 @@ def attach_push_state(
         # A unit in a sync conflict needs the athlete's decision first; no
         # provider is offered, so the conflicted version never reaches the watch.
         conflicted = str(row["sync_state"] or "") == "conflict"
-        fingerprint, blocked = _pushable_fingerprint(payload, remembered or {})
+        fingerprint, blocked = pushable_fingerprint(payload, remembered or {})
         if fingerprint is not None:
             pending[ProviderId.GARMIN.value] = (
                 not conflicted and baselines.get(str(row["local_id"])) != fingerprint
@@ -219,3 +235,21 @@ def attach_push_state(
             if blocked == "unmapped"
             else []
         )
+    _carry_unclaimed_cleanup(lists, payloads, today)
+
+
+def _carry_unclaimed_cleanup(
+    lists: dict[str, list[dict[str, str]]],
+    payloads: list[dict[str, Any]],
+    today: date,
+) -> None:
+    """Put each provider's leftovers on one unit when no pending unit carries them."""
+    carrier = next(
+        iter(nearest_first(payloads, today, lambda p: str(p.get("date") or "")[:10])),
+        None,
+    )
+    if carrier is None:
+        return
+    for provider, items in lists.items():
+        if items and not any(provider in p.get("push_cleanup", {}) for p in payloads):
+            carrier.setdefault("push_cleanup", {})[provider] = items
