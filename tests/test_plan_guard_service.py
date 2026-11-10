@@ -713,6 +713,15 @@ class PlanBriefTests(unittest.TestCase):
         self.assertEqual("Erkältung", recent_illness(rows, TODAY))
         self.assertEqual("", recent_illness(rows[1:], TODAY))
 
+    def test_recent_illness_ignores_future_rows_and_a_cleared_day(self) -> None:
+        rows = [
+            {"checkin_date": "2026-11-04", "illness": "Erkältung"},
+            {"checkin_date": "2026-11-03", "illness": "Erkältung"},
+            {"checkin_date": "2026-11-02", "illness": ""},
+        ]
+        self.assertEqual("", recent_illness(rows, TODAY))
+        self.assertEqual("Erkältung", recent_illness(rows[:1], date(2026, 11, 4)))
+
     def test_schema_enum_matches_rule_codes(self) -> None:
         self.assertEqual(
             list(plan_checks.BLOCKING_CODES), ACCEPT_PLAN_FINDINGS["items"]["enum"]

@@ -96,16 +96,24 @@ def _approve_existing_pause(
     previous: tuple[str, dict[str, Any]] | None,
     today: str,
 ) -> dict[str, Any] | None:
+    """Carry an approved pause window over while it runs for the same illness.
+
+    The stored window decides, not the date of the report, so a later report
+    inside the window neither asks again nor extends the pause.
+    """
     if not illness_pause or not previous:
         return illness_pause
     previous_status, previous_pause = previous
+    start = str(previous_pause.get("start_date") or "")
+    end = str(previous_pause.get("end_date") or "")
     same_pause = (
         previous_status in {"applied", "partial"}
-        and str(previous_pause.get("start_date") or "") == today
+        and start <= today <= end
         and str(previous_pause.get("illness") or "") == illness_pause["illness"]
     )
     if same_pause:
-        illness_pause["approved"] = True
+        illness_pause.update(start_date=start, end_date=end, approved=True)
+        illness_pause["status"] = "approved"
     return illness_pause
 
 
@@ -487,8 +495,10 @@ class AdaptiveReplanPreviewService:
             except TypeError, ValueError:
                 continue
             pause = payload.get("illness_pause") if isinstance(payload, dict) else None
-            if isinstance(pause, dict):
-                return str(row.get("status") or ""), pause
+            status = str(row.get("status") or "")
+            # A preview never holds the approval; the applied row does.
+            if isinstance(pause, dict) and status in {"applied", "partial"}:
+                return status, pause
         return None
 
     def preview(self) -> dict[str, Any]:

@@ -199,6 +199,27 @@ class CheckinService:
             return None
         return {field: record[field] for field in change_history.UNDO_REFERENCE_FIELDS}
 
+    def add_illness_in_transaction(self, db: Any, illness: str, marker: str) -> None:
+        """Add an illness text and note marker to today's check-in, with history.
+
+        Existing answers stay; the new text joins an existing illness text.
+        """
+        today = self._today()
+        day = today.isoformat()
+        existing = self._repository.get(db, day) or {}
+        known = str(existing.get("illness") or "").strip()
+        combined = known or illness
+        if known and illness and illness not in known:
+            combined = f"{known}; {illness}"
+        notes = str(existing.get("notes") or "").strip()
+        if marker not in notes:
+            notes = f"{notes} · {marker}".strip(" ·")
+        checkin = normalize_checkin(
+            {**existing, "checkin_date": day, "illness": combined, "notes": notes},
+            today=today,
+        )
+        self._write(db, checkin)
+
     def _save_normalized(
         self,
         checkin: dict[str, Any],

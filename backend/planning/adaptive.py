@@ -10,7 +10,11 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend import change_history
-from backend.athlete.checkins import CHECKIN_TEXT_LIMITS, reports_complaint
+from backend.athlete.checkins import (
+    CHECKIN_TEXT_LIMITS,
+    CheckinService,
+    reports_complaint,
+)
 from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.canonical.planning_fields import (
     HR_CAP,
@@ -19,15 +23,17 @@ from backend.canonical.planning_fields import (
     STRENGTH_STRUCTURE,
 )
 from backend.canonical.vocabulary import Sport
+from backend.db.repositories import CheckinRepository
 from backend.errors import AppError
 from backend.planning import calendar as planning_calendar
 from backend.planning import strength_structure
 from backend.planning import workouts as planning_workouts
+from backend.planning.plan_checks import ILLNESS_DAYS
 from backend.planning.planned_unit_service import UPDATE_SQL as PLANNED_UNIT_UPDATE_SQL
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_activity_type, planned_sport_environment
 
-DEFAULT_ILLNESS_PAUSE_DAYS = 3
+DEFAULT_ILLNESS_PAUSE_DAYS = ILLNESS_DAYS
 WEATHER_ADAPTIVE_MAX_MINUTES = 90
 # The only planned-unit fields an adaptive replacement may change on apply.
 ADAPTIVE_REPLACEMENT_KEYS = (
@@ -351,6 +357,7 @@ class AdaptiveReplanApplyService:
         self._today = today
         self._now = now
         self._calendar_conflict_service = calendar_conflict_service
+        self._checkins = CheckinService(database_manager, CheckinRepository(now), today)
 
     def apply(self, adjustment_id: Any) -> dict[str, Any]:
         try:
@@ -395,10 +402,14 @@ class AdaptiveReplanApplyService:
             if updated:
                 self._revision_service.bump(db)
             if active_illness_pause:
-                updated_checkins = self._fill_illness_checkins(
-                    db, active_illness_pause, now
+                updated_checkins = self._fill_illness_checkin(
+                    db, active_illness_pause, today
                 )
-                payload["illness_pause"] = {**active_illness_pause, "approved": True}
+                payload["illness_pause"] = {
+                    **active_illness_pause,
+                    "approved": True,
+                    "status": "approved",
+                }
             if stale and not updated:
                 status = "stale"
             elif stale:
@@ -450,60 +461,18 @@ class AdaptiveReplanApplyService:
                 applicable.append(change)
         return applicable, stale
 
-    @staticmethod
-    def _illness_checkin_values(
-        existing: Any, illness: str, marker: str
-    ) -> tuple[str, str]:
-        values = dict(existing)
-        existing_illness = str(values.get("illness") or "").strip()
-        combined_illness = existing_illness or illness
-        if existing_illness and illness and illness not in existing_illness:
-            combined_illness = f"{existing_illness}; {illness}"[
-                : CHECKIN_TEXT_LIMITS["illness"]
-            ]
-        notes = str(values.get("notes") or "").strip()
-        if marker not in notes:
-            notes = f"{notes} · {marker}".strip(" ·")[: CHECKIN_TEXT_LIMITS["notes"]]
-        return combined_illness, notes
-
-    @classmethod
-    def _upsert_illness_checkin(
-        cls, db: Any, date_key: str, illness: str, marker: str, now: str
-    ) -> None:
-        existing = db.execute(
-            "SELECT illness, notes FROM athlete_checkins WHERE checkin_date=?",
-            (date_key,),
-        ).fetchone()
-        if existing:
-            combined_illness, notes = cls._illness_checkin_values(
-                existing, illness, marker
-            )
-            db.execute(
-                "UPDATE athlete_checkins SET illness=?, notes=?, updated_at=? WHERE checkin_date=?",
-                (combined_illness, notes, now, date_key),
-            )
-            return
-        db.execute(
-            "INSERT INTO athlete_checkins(checkin_date, soreness, stress, motivation, session_rpe, day_form, illness, pain, available_minutes, availability_notes, notes, created_at, updated_at) "
-            "VALUES (?, NULL, NULL, NULL, NULL, '', ?, '', NULL, '', ?, ?, ?)",
-            (date_key, illness, marker, now, now),
-        )
-
-    @classmethod
-    def _fill_illness_checkins(cls, db: Any, pause: dict[str, Any], now: str) -> int:
+    def _fill_illness_checkin(self, db: Any, pause: dict[str, Any], today: date) -> int:
+        """Mark today's check-in while the approved pause runs; never a future day."""
+        start = LocalDate.parse(pause["start_date"]).to_date()
+        end = LocalDate.parse(pause["end_date"]).to_date()
+        if not start <= today <= end:
+            return 0
         illness = str(pause.get("illness") or "Krankheit").strip()[
             : CHECKIN_TEXT_LIMITS["illness"]
         ]
-        start = LocalDate.parse(pause["start_date"]).to_date()
-        end = LocalDate.parse(pause["end_date"]).to_date()
         marker = f"Krankheitspause prognostiziert ab {start.isoformat()}"
-        filled = 0
-        current = start
-        while current <= end:
-            cls._upsert_illness_checkin(db, current.isoformat(), illness, marker, now)
-            filled += 1
-            current += timedelta(days=1)
-        return filled
+        self._checkins.add_illness_in_transaction(db, illness, marker)
+        return 1
 
     @staticmethod
     def _adaptive_change_stale_reason(

@@ -1828,7 +1828,7 @@ def _plan_guard_service() -> PlanGuardService:
         ),
         competitions=lambda: PLANNING_DATA.competition().list(),
         illness=lambda: recent_illness(
-            ATHLETE_DATA.checkin().list(3), ATHLETE_CLOCK.now().date()
+            ATHLETE_DATA.checkin().list(10), ATHLETE_CLOCK.now().date()
         ),
         progress=lambda: read_progress(HTTP_API.training_reports()),
         training_model=lambda: str(

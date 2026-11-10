@@ -143,10 +143,15 @@ def read_progress(reports: Any) -> Mapping[str, Any]:
 
 
 def recent_illness(checkins: Sequence[Mapping[str, Any]], today: date) -> str:
-    """Illness text of the newest check-in of today or the last two days."""
+    """Illness text of the newest check-in of the last two days up to today."""
     first = (today - timedelta(days=2)).isoformat()
+    last = today.isoformat()
     latest = max(
-        (row for row in checkins if str(row.get("checkin_date") or "") >= first),
+        (
+            row
+            for row in checkins
+            if first <= str(row.get("checkin_date") or "") <= last
+        ),
         key=lambda row: str(row["checkin_date"]),
         default=None,
     )
