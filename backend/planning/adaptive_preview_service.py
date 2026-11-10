@@ -6,17 +6,19 @@ import json
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.checkins import reports_complaint
 from backend.athlete.local_date import LocalDate
 from backend.errors import AppError
-from backend.planning import adaptive, calendar
+from backend.planning import adaptive, calendar, illness_return, plan_checks
 from backend.planning.context import external_calendar_event_dates
 from backend.weather.adaptive import weather_adaptive_reason
 
 MAX_PREVIEW_PLANNED_UNITS = 500
+# A session made easy for the return stays below the long-session threshold.
+RETURN_EASY_MAX_MINUTES = 60
 
 
 @dataclass(frozen=True)
@@ -217,6 +219,7 @@ def _change_state(
     illness_pause: dict[str, Any] | None,
     events_by_date: dict[str, list[dict[str, Any]]],
     weather_days: dict[str, dict[str, Any]],
+    return_stage: int | None = None,
 ) -> dict[str, Any] | None:
     if not draft.get("date") or str(draft.get("date") or "") < today:
         return None
@@ -264,7 +267,22 @@ def _change_state(
         "no_intensity_limited": no_intensity_limited,
         "no_training": no_training,
         "calendar_limited": calendar_limited,
+        "return_limited": _return_limited(draft, draft_date, today_date, return_stage),
+        "return_stage": return_stage,
     }
+
+
+def _return_limited(
+    draft: dict[str, Any], draft_date: str, today_date: date, stage: int | None
+) -> bool:
+    """A session above the return stage inside the stage horizon."""
+    if stage is None:
+        return False
+    last = today_date + timedelta(days=illness_return.RETURN_HORIZON_DAYS - 1)
+    return (
+        draft_date <= last.isoformat()
+        and plan_checks.session_level(draft) > illness_return.STAGE_MAX_LEVEL[stage]
+    )
 
 
 def _without_focus(replacement: dict[str, Any]) -> dict[str, Any]:
@@ -284,6 +302,7 @@ def _replacement(
         for limit in (
             state["calendar_limit"] if state["calendar_limited"] else None,
             max_minutes if state["weather_reason"] else None,
+            RETURN_EASY_MAX_MINUTES if state["return_limited"] else None,
         )
         if limit is not None
     ]
@@ -328,6 +347,7 @@ def _needs_change(draft: dict[str, Any], state: dict[str, Any]) -> bool:
         or state["no_intensity_limited"]
         or state["no_training"]
         or state["weather_reason"]
+        or state["return_limited"]
     )
 
 
@@ -376,6 +396,7 @@ def _change(
     weather_days: dict[str, dict[str, Any]],
     weather_adaptive_max_minutes: int,
     run_caps: dict[str, dict[str, Any]] | None = None,
+    return_stage: int | None = None,
 ) -> dict[str, Any] | None:
     state = _change_state(
         draft,
@@ -385,6 +406,7 @@ def _change(
         illness_pause=illness_pause,
         events_by_date=events_by_date,
         weather_days=weather_days,
+        return_stage=return_stage,
     )
     if state is None or not _needs_change(draft, state):
         return None
@@ -403,6 +425,12 @@ def _change(
         state["no_training"],
         state["weather_reason"],
     )
+    if state["return_limited"]:
+        reasons.append(
+            f"return after illness, stage {return_stage}: "
+            f"{illness_return.STAGE_LABELS[state['return_stage']]}"
+        )
+        blocking_triggers.append("illness")
     reason = "; ".join(reasons)
     replacement = _replacement(
         draft, reason, state, weather_adaptive_max_minutes, run_caps
@@ -442,8 +470,13 @@ class AdaptiveReplanPreviewService:
         id_factory: Callable[[], Any],
         limits: AdaptivePreviewLimits,
         run_caps: Callable[[], dict[str, dict[str, Any]]] | None = None,
+        overnight: Callable[[], dict[str, dict[str, Any]]] | None = None,
     ) -> None:
-        """``run_caps`` gives the athlete's effective run heart-rate caps."""
+        """``run_caps`` gives the athlete's effective run heart-rate caps.
+
+        ``overnight`` reads this morning's HRV and resting heart rate baselines
+        for the return after an illness pause; without it the check-in decides.
+        """
         self._database_manager = database_manager
         self._adjustment_repository = adjustment_repository
         self._checkin_service = checkin_service
@@ -455,6 +488,7 @@ class AdaptiveReplanPreviewService:
         self._id_factory = id_factory
         self._limits = limits
         self._run_caps = run_caps
+        self._overnight = overnight
 
     def latest_preview(self, *, db: Any | None = None) -> dict[str, Any] | None:
         if db is None:
@@ -488,14 +522,22 @@ class AdaptiveReplanPreviewService:
             and not preview["illness_pause"].get("approved")
         )
         change_count = len(changes) if isinstance(changes, list) else 0
+        block = preview.get("illness_return") if isinstance(preview, dict) else None
+        illness_return_pending = bool(
+            preview
+            and preview.get("status") == "preview"
+            and isinstance(block, dict)
+            and block.get("pending")
+        )
         return {
             "needs_replan": bool(
                 preview
                 and preview.get("status") == "preview"
-                and (change_count or illness_pause_pending)
+                and (change_count or illness_pause_pending or illness_return_pending)
             ),
             "replan_changes": change_count,
             "illness_pause_pending": illness_pause_pending,
+            "illness_return_pending": illness_return_pending,
         }
 
     def latest_illness_pause(self) -> tuple[str, dict[str, Any]] | None:
@@ -512,6 +554,52 @@ class AdaptiveReplanPreviewService:
             if isinstance(pause, dict) and status in {"applied", "partial"}:
                 return status, pause
         return None
+
+    def latest_illness_return(self) -> dict[str, Any] | None:
+        """The return state of the newest applied adjustment that holds one."""
+        with self._database_manager.reader() as db:
+            rows = self._adjustment_repository.list_recent(db)
+        for row in rows:
+            if str(row.get("status") or "") not in {"applied", "partial"}:
+                continue
+            try:
+                payload = json.loads(row.get("payload") or "{}")
+            except TypeError, ValueError:
+                continue
+            block = payload.get("illness_return") if isinstance(payload, dict) else None
+            state = block.get("state_after") if isinstance(block, dict) else None
+            if isinstance(state, dict):
+                return state
+        return None
+
+    def active_illness_return(self) -> dict[str, Any] | None:
+        """The running return after an approved pause, from stored approvals only."""
+        pause = self.latest_illness_pause()
+        return illness_return.current_state(
+            pause[1] if pause else None, self.latest_illness_return(), self._today()
+        )
+
+    def enforced_return_stage(self) -> int | None:
+        """The approved stage the plan guard enforces; None without a return."""
+        return illness_return.enforced_stage(self.active_illness_return())
+
+    def _illness_return_block(
+        self, today: date, feedback: dict[str, Any], illness_pause: Any
+    ) -> dict[str, Any] | None:
+        """Stage decision for this morning; a new pause forecast outranks it."""
+        state = None if illness_pause else self.active_illness_return()
+        if state is None or illness_return.enforced_stage(state) is None:
+            return None
+        overnight = self._overnight() if self._overnight else {}
+        decision = illness_return.decide(state, today, feedback, overnight)
+        after = illness_return.state_after(state, decision, today)
+        stage = decision["stage"]
+        return {
+            **decision,
+            "pending": stage != state["stage"],
+            "state_after": after,
+            "stage_label": illness_return.STAGE_LABELS[stage],
+        }
 
     def preview(self) -> dict[str, Any]:
         today_date = self._today()
@@ -551,6 +639,17 @@ class AdaptiveReplanPreviewService:
                 "Bitte zuerst nicht mehr benötigte Einheiten archivieren.",
             )
         run_caps = self._run_caps() if self._run_caps else None
+        return_block = self._illness_return_block(today_date, feedback, illness_pause)
+        return_stage = (
+            illness_return.enforced_stage(return_block["state_after"])
+            if return_block
+            else None
+        )
+        if return_block:
+            signals.append(
+                f"illness return: stage {return_block['stage']} "
+                f"({return_block['action']})"
+            )
         changes = [
             change
             for draft in drafts
@@ -565,6 +664,7 @@ class AdaptiveReplanPreviewService:
                     weather_days=weather_days,
                     weather_adaptive_max_minutes=self._limits.weather_adaptive_max_minutes,
                     run_caps=run_caps,
+                    return_stage=return_stage,
                 )
             )
             is not None
@@ -579,6 +679,11 @@ class AdaptiveReplanPreviewService:
                 f"Krankheitsprognose: {illness_pause['recommended_pause_days']} Tage "
                 f"Sportpause bis {illness_pause['end_date']}. {change_message}"
             )
+        elif return_block:
+            message = (
+                f"Rückkehr nach Krankheit: Stufe {return_block['stage']} "
+                f"({return_block['stage_label']}). {change_message}"
+            )
         else:
             message = change_message
         preview = {
@@ -587,6 +692,7 @@ class AdaptiveReplanPreviewService:
             "signals": signals,
             "changes": changes,
             "illness_pause": illness_pause,
+            "illness_return": return_block,
             "weather_forecast": _forecast_freshness(weather),
             "message": message,
             "scope": (

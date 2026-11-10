@@ -533,8 +533,9 @@ function adaptiveIllnessPending(data, preview) {
   return needsForecast || pendingPause;
 }
 
-function adaptiveCaption(illnessPending, count) {
+function adaptiveCaption(illnessPending, count, returnPending = false) {
   if (illnessPending) return "Krankheit gemeldet: Sportpause prognostizieren und bestätigen.";
+  if (returnPending && !count) return "Rückkehr nach Krankheit: nächste Stufe bestätigen.";
   if (count === 1) return "Ein zukünftiger Entwurf braucht eine Anpassung.";
   return `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
 }
@@ -743,7 +744,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const changes = Array.isArray(preview?.changes) ? preview.changes : [];
     const illnessPending = adaptiveIllnessPending(data, preview);
     const required = Boolean(planning.needs_replan || illnessPending);
-    const caption = adaptiveCaption(illnessPending, Number(planning.replan_changes || changes.length));
+    const caption = adaptiveCaption(illnessPending, Number(planning.replan_changes || changes.length), Boolean(planning.illness_return_pending));
     const weatherChanged = changes.some((change) => Array.isArray(change?.blocking_triggers) && change.blocking_triggers.includes("weather"));
     const forecastNote = weatherChanged ? adaptiveForecastNote(preview?.weather_forecast, formatTime) : "";
     const coachNotice = $("#coachAdaptivePlanningNotice");

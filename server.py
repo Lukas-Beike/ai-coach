@@ -1835,6 +1835,9 @@ def _plan_guard_service() -> PlanGuardService:
                 or (None, None)
             )[1],
         ),
+        return_stage=lambda: (
+            PLANNING_WORKFLOWS.adaptive_replan_preview_service().enforced_return_stage()
+        ),
         progress=lambda: read_progress(HTTP_API.training_reports()),
         training_model=lambda: str(
             ATHLETE_DATA.profile().get().get("training_model") or ""
