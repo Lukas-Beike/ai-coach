@@ -20,6 +20,7 @@ class ChangeHistoryService:
         feedback_service: Any | None = None,
         session_corrections: Any | None = None,
         nutrition_diary: Any | None = None,
+        checkin_service: Any | None = None,
     ):
         self._database_manager = database_manager
         self._profile_repository = profile_repository
@@ -27,6 +28,7 @@ class ChangeHistoryService:
         self._feedback_service = feedback_service
         self._session_corrections = session_corrections
         self._nutrition_diary = nutrition_diary
+        self._checkin_service = checkin_service
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         # Retention is enforced on read in SQL; recording a change prunes rows.
@@ -61,6 +63,8 @@ class ChangeHistoryService:
             return self._session_corrections.current(db, entity_id)
         elif entity_type == "nutrition_entry" and self._nutrition_diary is not None:
             return self._nutrition_diary.current(db, entity_id)
+        elif entity_type == "checkin" and self._checkin_service is not None:
+            return self._checkin_service.current(db, entity_id)
         else:
             value = self._current_record(db, entity_type, entity_id)
         return value, change_history.audit_projection(entity_type, value)

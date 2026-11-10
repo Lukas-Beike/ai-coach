@@ -5,8 +5,14 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend import change_history
 from backend.db.repositories import CheckinRepository
 from backend.errors import AppError
+
+ENTITY_TYPE = "checkin"
+# The kv keys of the tag answers and the day status; the check-in date follows.
+TAGS_KEY = "checkin_tags:"
+DAY_STATUS_KEY = "checkin_day_status:"
 
 # Check-in answers that report no complaint (pain or illness).
 NO_COMPLAINT = frozenset(
@@ -139,41 +145,78 @@ class CheckinService:
         with self._manager.read_snapshot() as db:
             rows = self._repository.list(db, bounded_limit)
             for row in rows:
-                tags = db.execute(
-                    "SELECT value FROM kv WHERE key=?",
-                    ("checkin_tags:" + row["checkin_date"],),
-                ).fetchone()
-                if tags:
-                    row["tag_answers"] = json.loads(tags["value"])
-                status = db.execute(
-                    "SELECT value FROM kv WHERE key=?",
-                    ("checkin_day_status:" + row["checkin_date"],),
-                ).fetchone()
-                if status:
-                    row["day_status"] = json.loads(status["value"])
+                self._add_stored_answers(db, row)
             return rows
 
-    def _save_normalized(self, checkin: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _add_stored_answers(db: Any, row: dict[str, Any]) -> None:
+        """Add the tag answers and day status kept beside the row, when set."""
+        tags = db.execute(
+            "SELECT value FROM kv WHERE key=?",
+            (TAGS_KEY + row["checkin_date"],),
+        ).fetchone()
+        if tags:
+            row["tag_answers"] = json.loads(tags["value"])
+        status = db.execute(
+            "SELECT value FROM kv WHERE key=?",
+            (DAY_STATUS_KEY + row["checkin_date"],),
+        ).fetchone()
+        if status:
+            row["day_status"] = json.loads(status["value"])
+
+    def _stored(self, db: Any, checkin_date: str) -> dict[str, Any] | None:
+        """The stored check-in of one day as change history records it."""
+        row = self._repository.get(db, checkin_date)
+        if row is None:
+            return None
+        row["checkin_date"] = checkin_date
+        self._add_stored_answers(db, row)
+        return row
+
+    def _set_kv(self, db: Any, key: str, value: Any) -> None:
+        if value is None:
+            db.execute("DELETE FROM kv WHERE key=?", (key,))
+            return
+        db.execute(
+            "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+            (key, json.dumps(value), self._today().isoformat()),
+        )
+
+    def _write(self, db: Any, checkin: dict[str, Any]) -> dict[str, str] | None:
+        """Upsert one day and record the change in the caller's transaction."""
+        day = checkin["checkin_date"]
+        before = self._stored(db, day)
+        self._repository.upsert(db, checkin)
+        if "day_status" in checkin:
+            self._set_kv(db, DAY_STATUS_KEY + day, checkin["day_status"])
+        if "tag_answers" in checkin:
+            self._set_kv(db, TAGS_KEY + day, checkin["tag_answers"])
+        after = self._stored(db, day)
+        record = change_history.record_change(
+            db, ENTITY_TYPE, day, "update" if before else "create", before, after
+        )
+        if record is None:
+            return None
+        return {field: record[field] for field in change_history.UNDO_REFERENCE_FIELDS}
+
+    def _save_normalized(
+        self,
+        checkin: dict[str, Any],
+        clear_fields: tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
+        """Save one day; with ``clear_fields`` omitted edit fields keep their value.
+
+        The merge, the write and the change record share one transaction, so a
+        concurrent write of the same day cannot be lost.
+        """
         with self._manager.unit_of_work() as db:
-            self._repository.upsert(db, checkin)
-            if "day_status" in checkin:
-                db.execute(
-                    "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
-                    (
-                        "checkin_day_status:" + checkin["checkin_date"],
-                        json.dumps(checkin["day_status"]),
-                        self._today().isoformat(),
-                    ),
-                )
-            if "tag_answers" in checkin:
-                db.execute(
-                    "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
-                    (
-                        "checkin_tags:" + checkin["checkin_date"],
-                        json.dumps(checkin["tag_answers"]),
-                        self._today().isoformat(),
-                    ),
-                )
+            if clear_fields is not None:
+                existing = self._repository.get(db, checkin["checkin_date"])
+                if existing:
+                    for field in COACH_PRESERVED_FIELDS:
+                        if field not in clear_fields and checkin[field] in (None, ""):
+                            checkin[field] = existing[field]
+            change = self._write(db, checkin)
         saved = next(
             (
                 item
@@ -182,7 +225,41 @@ class CheckinService:
             ),
             checkin,
         )
-        return {"status": "ok", "checkin": saved}
+        return {"status": "ok", "checkin": saved, "change": change}
+
+    def current(
+        self, db: Any, entity_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """The stored check-in of one recorded change, for change history."""
+        value = self._stored(db, entity_id)
+        return value, change_history.audit_projection(ENTITY_TYPE, value)
+
+    def restore_in_transaction(
+        self,
+        db: Any,
+        entity_id: str,
+        current: dict[str, Any] | None,
+        target: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Put one day back as recorded, including cleared fields and tags."""
+        if target is None:
+            # Undo of a first check-in: the day had no row, status or tags.
+            self._repository.delete(db, entity_id)
+            self._set_kv(db, DAY_STATUS_KEY + entity_id, None)
+            self._set_kv(db, TAGS_KEY + entity_id, None)
+            return None
+        restored = {
+            **dict.fromkeys(CHECKIN_SCORE_FIELDS + ("available_minutes",)),
+            **dict.fromkeys(CHECKIN_TEXT_LIMITS, ""),
+            **(current or {}),
+            **target,
+            "checkin_date": entity_id,
+        }
+        self._repository.upsert(db, restored)
+        for key, field in ((DAY_STATUS_KEY, "day_status"), (TAGS_KEY, "tag_answers")):
+            if field in target:
+                self._set_kv(db, key + entity_id, target[field])
+        return self._stored(db, entity_id)
 
     def save(self, value: Any) -> dict[str, Any]:
         checkin = normalize_checkin(value, today=self._today())
@@ -208,13 +285,10 @@ class CheckinService:
                     "Ein Check-in-Feld kann nicht zugleich einen Wert erhalten und gelöscht werden.",
                 )
         normalized = normalize_checkin(value, today=self._today())
-        with self._manager.unit_of_work() as db:
-            existing = self._repository.get(db, normalized["checkin_date"])
-        if existing:
-            for field in COACH_PRESERVED_FIELDS:
-                if field not in clear_fields and normalized[field] in (None, ""):
-                    normalized[field] = existing[field]
-        return {"stored_locally": True, **self._save_normalized(normalized)}
+        return {
+            "stored_locally": True,
+            **self._save_normalized(normalized, clear_fields),
+        }
 
     def context(self) -> dict[str, Any]:
         checkins = self.list()

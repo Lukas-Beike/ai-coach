@@ -856,6 +856,7 @@ HISTORY = HistoryAssembly(
             session_corrections=ATHLETE_DATA.session_corrections,
             # Defined further down; resolved only when a history service is built.
             nutrition_diary=lambda: NUTRITION_ASSEMBLY.diary_service(),
+            checkin_service=ATHLETE_DATA.checkin,
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,

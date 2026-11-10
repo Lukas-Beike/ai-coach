@@ -889,6 +889,11 @@ class CheckinRepository:
             ),
         )
 
+    def delete(self, db: Any, checkin_date: str) -> None:
+        db.execute(
+            "DELETE FROM athlete_checkins WHERE checkin_date = ?", (checkin_date,)
+        )
+
 
 _ACTIVITY_FEEDBACK_ID_CHUNK = 500
 

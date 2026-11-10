@@ -24,6 +24,7 @@ class HistoryAthleteServices:
     feedback_service: Callable[[], Any] | None = None
     session_corrections: Callable[[], Any] | None = None
     nutrition_diary: Callable[[], Any] | None = None
+    checkin_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class HistoryAssembly:
         self._feedback_service = dependencies.athlete.feedback_service
         self._session_corrections = dependencies.athlete.session_corrections
         self._nutrition_diary = dependencies.athlete.nutrition_diary
+        self._checkin_service = dependencies.athlete.checkin_service
         self._workout_library_service = dependencies.planning.workout_library_service
         self._planned_unit_service = dependencies.planning.planned_unit_service
         self._training_plan_service = dependencies.planning.training_plan_service
@@ -71,7 +73,11 @@ class HistoryAssembly:
             feedback_service=self._feedback(),
             session_corrections=self._corrections(),
             nutrition_diary=self._nutrition(),
+            checkin_service=self._checkins(),
         )
+
+    def _checkins(self) -> Any | None:
+        return None if self._checkin_service is None else self._checkin_service()
 
     def _nutrition(self) -> Any | None:
         return None if self._nutrition_diary is None else self._nutrition_diary()
@@ -101,5 +107,6 @@ class HistoryAssembly:
             feedback_service=self._feedback(),
             session_corrections=self._corrections(),
             nutrition_diary=self._nutrition(),
+            checkin_service=self._checkins(),
             profile_mutation_coordinator=self._profile_service().mutation_coordinator,
         )
