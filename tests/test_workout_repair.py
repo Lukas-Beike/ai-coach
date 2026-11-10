@@ -438,7 +438,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
             [
                 {
-                    "date": "2026-09-09",
+                    "date": server.ATHLETE_CLOCK.now().date().isoformat(),
                     "name": "Synthetic swim",
                     "sport": "Swim",
                     "description": "- 60m Z3 Pace",
