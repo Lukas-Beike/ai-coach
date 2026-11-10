@@ -58,6 +58,7 @@ class ThreadModelRuleHookTests(unittest.TestCase):
             launch("claude-sonnet-5-5", "low"),
             launch("claude-opus-5-5", "medium"),
             launch(effort="max"),
+            launch(effort="high"),
         ):
             with self.subTest(payload=payload):
                 result = run_hook(payload, OPUS_LOW)

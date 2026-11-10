@@ -61,6 +61,10 @@ def violation(model, effort, rule):
     ):
         return f"effort {effort} is above the {CAP} cap"
     if model is None:
+        # The inherited model is unknown: no allowed model may exceed its limit.
+        limit = max(rule.values(), key=EFFORTS.index)
+        if effort is not None and EFFORTS.index(effort) > EFFORTS.index(limit):
+            return f"effort {effort} is above {limit} for any allowed model"
         return None
     limit = next((rule[key] for key in rule if key in str(model).lower()), None)
     if limit is None:
