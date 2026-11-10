@@ -35,6 +35,7 @@ from backend.providers.garmin import (
     ExternalCall,
     normalize_range_records,
     preserve_weight_response,
+    resting_rows,
 )
 from backend.providers.garmin_personal import wrap_daily_sleep
 
@@ -133,7 +134,7 @@ def collect_wellness_history(
         payload[source] = records
         pagination[source] = {"records": len(records)}
     if "daily_stats" in payload:
-        payload["resting_hr"] = _resting_rows(payload["daily_stats"])
+        payload["resting_hr"] = resting_rows(payload["daily_stats"])
     payload["provider_sync"] = {"pagination": pagination}
     return payload
 
@@ -294,30 +295,3 @@ def _weigh_ins(
         # A range without weigh-ins is no record: an empty envelope is not stored.
         return []
     return preserve_weight_response(value)
-
-
-def _resting_value(row: Mapping[str, Any]) -> float | None:
-    heart_rate = row.get("heartRate")
-    for value in (
-        row.get("restingHeartRate"),
-        heart_rate.get("restingValue") if isinstance(heart_rate, Mapping) else None,
-    ):
-        if (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and value > 0
-        ):
-            return float(value)
-    return None
-
-
-def _resting_rows(summaries: list[Any]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for row in summaries:
-        if not isinstance(row, Mapping):
-            continue
-        day = record_day(row)
-        value = _resting_value(row)
-        if day is not None and value is not None:
-            rows.append({"calendarDate": day, "restingHeartRate": value})
-    return rows

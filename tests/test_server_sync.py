@@ -1124,11 +1124,72 @@ class ServerSyncTests(ServerTestCase):
         )
         self.assertEqual(
             [row["calendarDate"] for row in result["training_status"]],
-            ["2026-08-30", "2026-08-31"],
+            ["2026-08-31"],
         )
         self.assertEqual(
-            result["provider_sync"]["pagination"]["training_status"]["records"], 2
+            result["provider_sync"]["pagination"]["training_status"]["records"], 1
         )
+
+    def test_garmin_recovery_reads_skip_days_the_daily_summaries_cover(self):
+        from backend.providers.garmin import collect_garmin_data
+
+        class FakeGarmin:
+            def __init__(self):
+                self.calls = {"get_heart_rates": 0, "get_training_status": 0}
+
+            def __getattr__(self, name):
+                # Every other collector source reads nothing in this test.
+                if name.startswith("get_"):
+                    return lambda *_args, **_kwargs: []
+                raise AttributeError(name)
+
+            def get_daily_summaries(self, start, end):
+                first = date.fromisoformat(start)
+                days = (date.fromisoformat(end) - first).days + 1
+                return [
+                    {
+                        "calendarDate": (first + timedelta(days=offset)).isoformat(),
+                        "restingHeartRate": 50,
+                    }
+                    for offset in range(days)
+                    if offset % 2 == 0
+                ]
+
+            def get_user_summary(self, current):
+                return {"calendarDate": current}
+
+            def get_heart_rates(self, current):
+                self.calls["get_heart_rates"] += 1
+                return {"restingHeartRate": 51}
+
+            def get_training_status(self, current):
+                self.calls["get_training_status"] += 1
+                return {"acuteTrainingLoadDTO": {"acuteTrainingLoad": 480}}
+
+        for days in (7, 90):
+            with self.subTest(days=days):
+                client = FakeGarmin()
+                end = date(2026, 8, 31)
+                start = end - timedelta(days=days - 1)
+                result = collect_garmin_data(
+                    client,
+                    [(start, end)],
+                    start=start,
+                    today=end,
+                    synced_at="2026-09-01T00:00:00+00:00",
+                    external_call=lambda _s, _o, operation, _d: operation(),
+                    redact=lambda _value: "[redacted]",
+                )
+                self.assertEqual(client.calls["get_heart_rates"], days // 2)
+                self.assertEqual(client.calls["get_training_status"], 1)
+                self.assertEqual(len(result["resting_hr"]), days)
+                self.assertEqual(
+                    sorted(row["calendarDate"] for row in result["resting_hr"]),
+                    [
+                        (start + timedelta(days=offset)).isoformat()
+                        for offset in range(days)
+                    ],
+                )
 
     def test_garmin_source_observed_at_uses_latest_nested_valid_date(self):
         observed_at = garmin_payload_metrics.garmin_source_observed_at(
