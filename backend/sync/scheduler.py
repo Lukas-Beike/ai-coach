@@ -23,7 +23,7 @@ from backend.sync.queue import SyncJobQueueService
 from backend.sync.schedule_policies import build_schedule_policies
 from backend.sync.state import SyncStateRepository
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("intervals_coach")
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
 _HISTORICAL_BACKFILL = "historical_backfill"
 
@@ -102,8 +102,10 @@ class DailySyncScheduler:
             "Scheduling a provider refresh failed",
             extra={
                 "event": "daily_sync_provider_failed",
-                "provider": provider_id,
-                "error_class": type(exc).__name__,
+                "context": {
+                    "provider": provider_id,
+                    "error_class": type(exc).__name__,
+                },
             },
         )
 

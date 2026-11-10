@@ -221,7 +221,7 @@ class DailySyncSchedulerTests(unittest.TestCase):
         scheduler = self.make_scheduler(markers=Failing())
         morning = Mock()
 
-        with self.assertLogs("backend.sync.scheduler", level="ERROR") as logged:
+        with self.assertLogs("intervals_coach", level="ERROR") as logged:
             DailySyncLoop(
                 scheduler,
                 morning,
@@ -234,7 +234,7 @@ class DailySyncSchedulerTests(unittest.TestCase):
         morning.refresh.assert_called_once_with()
         record = logged.records[0]
         self.assertEqual(record.event, "daily_sync_provider_failed")
-        self.assertEqual(record.error_class, "RuntimeError")
+        self.assertEqual(record.context["error_class"], "RuntimeError")
         self.assertNotIn("private provider detail", logged.output[0])
 
     def test_a_maintenance_refusal_still_stops_the_scheduling_pass(self):
