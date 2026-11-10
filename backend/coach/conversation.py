@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.constants import AI_PROVIDER
+from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.service import command_receipt
 from backend.coach.streams import ChatStreamRegistry
 from backend.db.manager import DatabaseManager
@@ -164,7 +165,11 @@ class CoachConversationResetService:
                 db.execute(
                     "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
                     (
-                        json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
+                        json.dumps(
+                            compact_receipt(receipt),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
                         now,
                         row["client_turn_id"],
                     ),

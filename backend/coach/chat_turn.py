@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.coach.conversation import CoachConversationProvisionService
 from backend.coach.conversation_gate import CoachConversationGate
+from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.coach.service import command_receipt
@@ -99,7 +100,11 @@ class CoachChatTurnService:
         db.execute(
             "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=? AND status='running'",
             (
-                json.dumps(recovered, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(
+                    compact_receipt(recovered),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
                 self._utc_now(),
                 client_turn_id,
             ),

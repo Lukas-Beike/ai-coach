@@ -1024,8 +1024,8 @@ def refresh_runtime_config() -> app_config.Config:
     return PROVIDER_CREDENTIAL_SERVICE.refresh()
 
 
-# Each flush rewrites the whole capture, so captures are merged on a timer and
-# written as background work that yields to Coach and athlete writes.
+# Each flush rewrites the whole capture (at most 2 MiB), so captures are merged
+# on a timer and written as background work that yields to Coach and athlete writes.
 DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS = 30.0
 DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     lambda key: key_value_service().get(key),

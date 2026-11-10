@@ -215,20 +215,63 @@ class CoachJobStoreTests(unittest.TestCase):
         self.manager.close()
         self.manager = self._manager()  # The same store must resolve this manager.
 
-        merged = self.store.merge_receipt("active", {"cancel_requested": True})
-        self.assertEqual(merged["phase"], "queued")
-        self.assertTrue(merged["cancel_requested"])
+        self.store.merge_receipt("active", {"cancel_requested": True})
         self.store.merge_receipt("done", {"cancel_requested": True})
 
+        active = self._receipt("active")
+        self.assertEqual(active["phase"], "queued")
+        self.assertTrue(active["cancel_requested"])
+        self.assertNotIn("cancel_requested", self._receipt("done"))
+
+    def _receipt(self, turn_id):
         with self.manager.unit_of_work() as db:
-            active = db.execute(
-                "SELECT receipt FROM coach_commands WHERE client_turn_id='active'"
+            row = db.execute(
+                "SELECT receipt FROM coach_commands WHERE client_turn_id=?",
+                (turn_id,),
             ).fetchone()
-            done = db.execute(
-                "SELECT receipt FROM coach_commands WHERE client_turn_id='done'"
-            ).fetchone()
-        self.assertTrue(json.loads(active["receipt"])["cancel_requested"])
-        self.assertNotIn("cancel_requested", json.loads(done["receipt"]))
+        return json.loads(row["receipt"])
+
+    def test_receipt_merge_changes_only_the_named_keys(self):
+        steps = [{"tool": "get_plan", "result": {"ok": True, "text": "keep ä"}}]
+        self._insert(
+            "active",
+            {"mode": "background", "command_receipts": steps, "phase": "queued"},
+        )
+
+        self.store.merge_receipt(
+            "active", {"phase": "executing_tools", "pending_tool_calls": [{"a": 1}]}
+        )
+
+        merged = self._receipt("active")
+        self.assertEqual(merged["command_receipts"], steps)
+        self.assertEqual(merged["mode"], "background")
+        self.assertEqual(merged["phase"], "executing_tools")
+        self.assertEqual(merged["pending_tool_calls"], [{"a": 1}])
+
+    def test_receipt_merge_stores_null_and_nested_values_and_replaces_lists(self):
+        self._insert(
+            "active", {"openai_response_id": "r1", "pending_tool_outputs": [1]}
+        )
+
+        self.store.merge_receipt(
+            "active",
+            {"openai_response_id": None, "pending_tool_outputs": [], "k": {"x": "y"}},
+        )
+
+        self.assertEqual(
+            self._receipt("active"),
+            {"openai_response_id": None, "pending_tool_outputs": [], "k": {"x": "y"}},
+        )
+
+    def test_receipt_merge_repairs_a_malformed_receipt_of_an_open_command(self):
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO coach_commands VALUES ('broken', 'running', 'not json', '{}', '1', '1')"
+            )
+
+        self.store.merge_receipt("broken", {"phase": "waiting_openai"})
+
+        self.assertEqual(self._receipt("broken"), {"phase": "waiting_openai"})
 
     def test_restart_requeues_all_background_jobs(self):
         self._insert(

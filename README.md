@@ -56,7 +56,7 @@ Set variables in the container environment or a root `.env`. Full reference: [do
 | `CALENDAR_ICAL_URL` | none | Private read-only ICS feed. |
 | `COOKIE_SECURE` | `false` | `true` behind an HTTPS proxy. |
 | `TRUSTED_PROXY_IPS` | none | Proxy addresses whose `X-Forwarded-For` is trusted. |
-| `DATA_RETENTION_DAYS` | `-1` | `-1` keeps everything; positive values (30-3650) prune old chats and snapshots. |
+| `DATA_RETENTION_DAYS` | `-1` | `-1` keeps everything; positive values (30-3650) prune old chats, snapshots and Coach receipts. |
 | `SYNC_HISTORY_EARLIEST_DATE` | `2000-01-01` | Earliest date of the historical Garmin backfill. |
 | `PORT` | `8090` | Listening port. |
 | `DATA_DIR` | `/data` | Encrypted database and legacy token file. |

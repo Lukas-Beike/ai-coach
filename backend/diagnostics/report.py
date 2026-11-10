@@ -250,8 +250,12 @@ class DiagnosticReportService:
                 },
                 "note": (
                     "Die Diagnose enthält technische Anfrageformen, Provider-Metadaten und "
-                    "Fehlerdetails. Athleteninhalte, Zugangsdaten, Schlüssel, Tokens und "
-                    "Sitzungsdaten werden vor dem Speichern entfernt. Binäre Inhalte werden "
-                    "ausgelassen; Größenlimits und Kürzungen sind ausgewiesen."
+                    "Fehlerdetails. Anfragen an Garmin, Wahoo, Intervals.icu und weitere "
+                    "Dienste sowie alle Antworten werden nur als Form gespeichert "
+                    "(Feldnamen, Typen, Längen), nie mit Werten. Anfragen an OpenAI können "
+                    "Dialog- und Trainingskontext des Coaches enthalten. Zugangsdaten, "
+                    "Schlüssel, Tokens, Sitzungsdaten und OpenAI-Fehlertexte werden vor dem "
+                    "Speichern entfernt. Binäre Inhalte werden ausgelassen; Einträge älter "
+                    "als 7 Tage entfallen; Größenlimits und Kürzungen sind ausgewiesen."
                 ),
             }

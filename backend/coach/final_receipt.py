@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.coach.change_receipts import change_summary
 from backend.coach.constants import AI_PROVIDER
+from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
@@ -134,11 +135,13 @@ class CoachFinalReceiptService:
                 "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
                 (
                     json.dumps(
-                        {
-                            key: value
-                            for key, value in final_receipt.items()
-                            if key != "text"
-                        },
+                        compact_receipt(
+                            {
+                                key: value
+                                for key, value in final_receipt.items()
+                                if key != "text"
+                            }
+                        ),
                         ensure_ascii=False,
                     ),
                     self._now(),
