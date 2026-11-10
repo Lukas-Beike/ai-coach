@@ -32,6 +32,32 @@ function plannedPushTargetLabel(provider, entry, ids = {}) {
 }
 
 // Controls sit in the card summary; a click must not toggle the card.
+// Before a rebuild: remember which cards are open and which control has focus.
+function rememberPlannedEntryState(root) {
+  openPlannedEntries = new Set([...root.querySelectorAll(".planned-entry[data-entry-key]")].filter((card) => card.open).map((card) => card.dataset.entryKey));
+  for (const key of plannedFocusStatuses.keys()) if (!openPlannedEntries.has(key)) plannedFocusStatuses.delete(key);
+  const active = document.activeElement;
+  const card = active?.closest?.(".planned-entry[data-entry-key]");
+  if (!card || !root.contains(card)) return null;
+  return { key: card.dataset.entryKey, name: active.matches("select") ? active.name : "" };
+}
+
+function restorePlannedEntryFocus(root, focused) {
+  if (!focused) return;
+  const card = [...root.querySelectorAll(".planned-entry[data-entry-key]")].find((node) => node.dataset.entryKey === focused.key);
+  const target = focused.name ? card?.querySelector(`select[name="${focused.name}"]`) : null;
+  (target || card?.querySelector("summary"))?.focus({ preventScroll: true });
+}
+
+// The unit's description, or a placeholder when the card body would stay empty.
+function appendPlannedDescription(details, text) {
+  if (!text && details.childElementCount) return;
+  const description = document.createElement("p");
+  description.className = "planned-description";
+  description.textContent = text || "Keine weiteren Details hinterlegt.";
+  details.append(description);
+}
+
 function stopSummaryToggle(event) {
   event.preventDefault();
   event.stopPropagation();
@@ -1218,18 +1244,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     appendPlannedCalendarComparison(details, entry, actual);
     const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);
-    if (entry.description) {
-      const description = document.createElement("p");
-      description.className = "planned-description";
-      description.textContent = entry.description;
-      details.append(description);
-    }
-    if (!details.childElementCount) {
-      const description = document.createElement("p");
-      description.className = "planned-description";
-      description.textContent = "Keine weiteren Details hinterlegt.";
-      details.append(description);
-    }
+    appendPlannedDescription(details, entry.description);
     // The sync button lives in the card body; a button inside <summary> is nested-interactive.
     const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
     if (syncButton) details.append(syncButton);
@@ -1374,23 +1389,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   }
 
   let plannedRenderSnapshot = null;
-
-  // Before a rebuild: remember which cards are open and which control has focus.
-  function rememberPlannedEntryState(root) {
-    openPlannedEntries = new Set([...root.querySelectorAll(".planned-entry[data-entry-key]")].filter((card) => card.open).map((card) => card.dataset.entryKey));
-    for (const key of plannedFocusStatuses.keys()) if (!openPlannedEntries.has(key)) plannedFocusStatuses.delete(key);
-    const active = document.activeElement;
-    const card = active?.closest?.(".planned-entry[data-entry-key]");
-    if (!card || !root.contains(card)) return null;
-    return { key: card.dataset.entryKey, name: active.matches("select") ? active.name : "" };
-  }
-
-  function restorePlannedEntryFocus(root, focused) {
-    if (!focused) return;
-    const card = [...root.querySelectorAll(".planned-entry[data-entry-key]")].find((node) => node.dataset.entryKey === focused.key);
-    const target = focused.name ? card?.querySelector(`select[name="${focused.name}"]`) : null;
-    (target || card?.querySelector("summary"))?.focus({ preventScroll: true });
-  }
 
   function renderPlanned(trainingCalendar) {
     const root = $("#plannedCalendar");
