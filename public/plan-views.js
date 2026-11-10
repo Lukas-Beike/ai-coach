@@ -18,9 +18,9 @@ async function runPlanPush(provider, entries) {
 }
 
 // The job entry that removes one listed leftover of a deleted or replaced unit:
-// a Garmin workout by a remove entry, an Intervals.icu event by the hidden unit's own entry.
+// a Garmin workout or Wahoo plan by a remove entry, an Intervals.icu event by the hidden unit's own entry.
 function leftoverEntry(provider, item, ids) {
-  return provider === ids.garmin ? { library_workout_id: item.id, remove: true } : { library_workout_id: item.id, expected_payload_hash: item.hash };
+  return provider !== ids.intervals ? { library_workout_id: item.id, remove: true } : { library_workout_id: item.id, expected_payload_hash: item.hash };
 }
 
 // What one successful push delivered: Garmin gets the structured workout,
@@ -1003,6 +1003,57 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     });
   }
 
+  // Leftovers no pending sync removes with it (Wahoo plans of deleted library entries, or a
+  // provider with no unit waiting): one item with its own explicit removal, on the card that carries them.
+  function plannedLeftovers(entry, dateKey, todayKey, actual) {
+    const lists = entry.push_cleanup;
+    if (!lists || typeof lists !== "object") return [];
+    const ids = providerIds();
+    const configured = { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured), [ids.wahoo]: Boolean(state.data?.wahoo?.connected) };
+    const targets = plannedTargets(entry, dateKey, todayKey, actual);
+    return [ids.garmin, ids.intervals, ids.wahoo]
+      .filter((provider) => !targets.includes(provider) && configured[provider] === true && Array.isArray(lists[provider]) && lists[provider].length && claimCleanup(provider, entry.local_id))
+      .map((provider) => plannedLeftoverItem(provider, lists[provider], ids));
+  }
+
+  function plannedLeftoverItem(provider, items, ids) {
+    const shown = items.slice(0, 28);
+    const names = items.slice(0, 3).map((item) => [item.name, item.date ? dateLabel(item.date) : ""].filter(Boolean).join(" "));
+    const more = items.length > 3 ? " + " + (items.length - 3) + " weitere" : "";
+    const providerName = coachProviderLabel(provider);
+    const note = document.createElement("span");
+    note.className = "planned-conflict planned-cleanup planned-leftovers";
+    const text = document.createElement("span");
+    text.textContent = names.join(", ") + more;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button planned-conflict-button planned-leftovers-button";
+    button.textContent = `${items.length} ${items.length === 1 ? "alter Eintrag" : "alte Einträge"} bei ${providerName} entfernen`;
+    state.plannedSyncInFlight ||= new Set();
+    const key = "leftovers:" + provider;
+    button.disabled = state.plannedSyncInFlight.has(key);
+    button.addEventListener("click", async (event) => {
+      // The item sits in the card summary; a click must not toggle the card.
+      stopSummaryToggle(event);
+      if (state.plannedSyncInFlight.has(key)) return;
+      state.plannedSyncInFlight.add(key);
+      button.disabled = true;
+      let failure = "";
+      try {
+        const done = await runPlanPush(provider, shown.map((item) => leftoverEntry(provider, item, ids)));
+        if (done.status !== "completed") failure = globalThis.providerJobErrorDetail?.(done) || "Entfernen fehlgeschlagen";
+      } catch (error) {
+        failure = error.message;
+      }
+      state.plannedSyncInFlight.delete(key);
+      globalThis.toast?.(failure || `${shown.length} bei ${providerName} entfernt`, Boolean(failure));
+      button.disabled = false;
+      await globalThis.load?.();
+    });
+    note.append(text, button);
+    return note;
+  }
+
   // One provider's sync of a unit, then the listed leftovers in a job of their own, so one that
   // cannot be removed never fails the unit.
   async function pushToProvider(provider, entry, ids) {
@@ -1171,7 +1222,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (conflict) cardSummary.append(conflict);
     const garminBlocked = plannedGarminBlocked(entry, dateKey, todayKey, actual);
     if (garminBlocked) cardSummary.append(garminBlocked);
-    cardSummary.append(...plannedCleanup(entry, dateKey, todayKey, actual));
+    cardSummary.append(...plannedCleanup(entry, dateKey, todayKey, actual), ...plannedLeftovers(entry, dateKey, todayKey, actual));
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
