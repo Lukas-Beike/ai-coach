@@ -316,6 +316,15 @@ class SessionLoadWorkedExampleTests(unittest.TestCase):
             "no_duration",
         )
 
+    def test_a_zero_moving_duration_falls_back_to_the_elapsed_duration(self) -> None:
+        thresholds = SessionThresholds(ftp=_threshold(250.0))
+        base = _summary(normalized_power=200.0, elapsed_duration_s=3600.0)
+        zero = session_local_load({**base, "moving_duration_s": 0.0}, thresholds)
+        none = session_local_load({**base, "moving_duration_s": None}, thresholds)
+        assert isinstance(zero, LocalLoad) and isinstance(none, LocalLoad)
+        self.assertAlmostEqual(zero.load, 64.0, places=6)
+        self.assertEqual(zero.load, none.load)
+
     def test_fingerprint_follows_inputs_and_thresholds(self) -> None:
         summary = _summary(normalized_power=230.0, moving_duration_s=4200.0)
         first = _load(summary, SessionThresholds(ftp=_threshold(250.0)))
@@ -718,6 +727,12 @@ class SessionRpeCalibrationTests(unittest.TestCase):
         self.assertAlmostEqual(load.load, 90.0, places=6)
         self.assertEqual(load.branch, "session_rpe")
         self.assertEqual(load.details["calibration"]["pairs"], 20)
+
+    def test_strength_ignores_a_relayed_intervals_rating(self) -> None:
+        rides = [_ride(i, DAY - timedelta(days=i)) for i in range(20)]
+        gym = _strength(DAY)
+        gym["sources"] = {"rpe": "Intervals.icu"}
+        self.assertEqual(self._loads(rides, gym)["act_gym"], "no_rating")
 
     def test_fewer_than_twenty_pairs_are_not_calibrated(self) -> None:
         rides = [_ride(i, DAY - timedelta(days=i)) for i in range(19)]

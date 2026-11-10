@@ -50,6 +50,32 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertEqual({"120": 98.0, "150": 40.0}, result["seconds"])
         self.assertEqual(138.0, result["covered_s"])
 
+    def test_histogram_counts_downsampled_and_smart_recording_steps(self):
+        times = [index * 5.4 for index in range(2000)]
+        result = heart_rate_histogram(
+            {"streams": {"time": times, "heartrate": [140] * 2000}}
+        )
+        self.assertAlmostEqual(1999 * 5.4, result["covered_s"], places=1)
+        steps = [1, 2, 3, 4, 6, 7, 8]
+        smart = [0.0]
+        for index in range(600):
+            smart.append(smart[-1] + steps[index % len(steps)])
+        result = heart_rate_histogram(
+            {"streams": {"time": smart, "heartrate": [140] * len(smart)}}
+        )
+        self.assertAlmostEqual(smart[-1], result["covered_s"], places=2)
+
+    def test_decoupling_works_on_a_downsampled_ride(self):
+        result = aerobic_analysis(ride([index * 5.4 for index in range(2000)]))
+        self.assertEqual("ok", result["status"])
+
+    def test_a_real_pause_above_the_adaptive_gap_is_still_skipped(self):
+        times = [float(i) for i in range(100)] + [200.0 + i for i in range(100)]
+        result = heart_rate_histogram(
+            {"streams": {"time": times, "heartrate": [140] * len(times)}}
+        )
+        self.assertEqual(198.0, result["covered_s"])
+
     def test_heart_rate_histogram_needs_a_matching_stream(self):
         self.assertIsNone(heart_rate_histogram({"streams": {"time": [0, 1, 2]}}))
         self.assertIsNone(

@@ -177,6 +177,21 @@ def _variability(summary: Mapping[str, Any]) -> tuple[float, dict[str, Any]] | N
     return index, {}
 
 
+def _stream_work(times: list, watts: list, flags: list | None) -> tuple[float, float]:
+    """Joules and covered seconds of the valid, moving power samples."""
+    joules = covered = 0.0
+    for index in range(len(times) - 1):
+        step = float(times[index + 1]) - float(times[index])
+        power = _number(watts[index])
+        if power is None or power < 0 or not 0 < step <= MAX_SAMPLE_GAP_S:
+            continue
+        if flags and (index >= len(flags) or flags[index] != 1):
+            continue
+        joules += power * step
+        covered += step
+    return joules, covered
+
+
 def _work(
     summary: Mapping[str, Any], activity: Mapping[str, Any] | None
 ) -> tuple[float, dict[str, Any]] | None:
@@ -194,16 +209,7 @@ def _work(
     flags = streams.get("moving") or None
     if len(times) < 2 or len(watts) != len(times) or not moving:
         return None
-    joules = covered = 0.0
-    for index in range(len(times) - 1):
-        step = float(times[index + 1]) - float(times[index])
-        power = _number(watts[index])
-        if power is None or power < 0 or not 0 < step <= MAX_SAMPLE_GAP_S:
-            continue
-        if flags and (index >= len(flags) or flags[index] != 1):
-            continue
-        joules += power * step
-        covered += step
+    joules, covered = _stream_work(times, watts, flags)
     coverage = covered / moving
     if coverage < MIN_WORK_COVERAGE or joules <= 0:
         return None

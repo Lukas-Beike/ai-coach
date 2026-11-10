@@ -185,7 +185,7 @@ def aerobic_analysis(
         "method": METHOD,
         "source": f"derived from {source_label} original streams",
         "warmup_excluded_seconds": 600,
-        "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps >5 seconds, stops and non-positive output excluded. No universal fitness cutoff.",
+        "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps above max(30 s, 3 x the median step), stops and non-positive output excluded. No universal fitness cutoff.",
     }
     sensor = _aerobic_sensor(activity)
     times = (activity.get("streams") or {}).get("time") or []
