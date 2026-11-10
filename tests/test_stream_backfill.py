@@ -526,17 +526,23 @@ class WahooBackfillTests(unittest.TestCase):
             env, [wahoo_row(1), wahoo_row(2)], files
         )
 
-        for _ in range(FAILURE_LIMIT):
+        for _ in range(FAILURE_LIMIT - 1):
             # Every retry of the first batch carries no end day: counts persist.
             with self.assertRaises(AppError) as raised:
                 service.backfill(None)
             self.assertEqual(503, raised.exception.status)
         self.assertFalse(full_streams(env, "2"))
+        self.assertEqual([], state_of(env, WAHOO)["skipped_ids"])
+
+        third = service.backfill(None)
+
+        # The third failure skips the file without failing the job: the chain
+        # continues at the same window and the failing file no longer blocks it.
         self.assertEqual(["1"], state_of(env, WAHOO)["skipped_ids"])
-
-        result = service.backfill(None)
-
-        # The failing file no longer blocks the rest.
+        self.assertEqual("ok", third["status"])
+        self.assertEqual("2026-11-03", third["historical_next_end"])
+        self.assertIsNone(cursor_of(env, WAHOO))
+        result = service.backfill(date(2026, 11, 3))
         self.assertEqual(1, result["stored"])
         self.assertTrue(full_streams(env, "2"))
 
@@ -607,14 +613,20 @@ class WahooBackfillTests(unittest.TestCase):
 
         mapping.map = broken
 
-        for _ in range(FAILURE_LIMIT):
+        for _ in range(FAILURE_LIMIT - 1):
             with self.assertRaises(AppError):
                 service.backfill(None)
-        result = service.backfill(None)
+        third = service.backfill(None)
 
+        # The third failure skips the corrupt file; the job completes with a
+        # continuation instead of ending the chain.
         self.assertEqual(["1"], state_of(env, WAHOO)["skipped_ids"])
+        self.assertEqual("ok", third["status"])
+        self.assertEqual("2026-11-03", third["historical_next_end"])
+        result = service.backfill(date(2026, 11, 3))
         self.assertEqual(1, result["stored"])
         self.assertTrue(full_streams(env, "2"))
+        self.assertIsNone(result["historical_next_end"])
 
     def test_a_file_without_sensor_records_is_marked_and_replaces_nothing(
         self,

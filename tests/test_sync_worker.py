@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import sqlite3
+import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from backend.errors import AppError
+from backend.db.manager import DatabaseManager
+from backend.errors import AppError, DatabaseBusyError
+from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.executor import SyncJobExecutor
+from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
 from backend.sync.worker import SyncJobWorker
 
@@ -282,6 +289,117 @@ class SyncJobWorkerTests(unittest.TestCase):
         finally:
             worker.stop()
             _join_worker(worker)
+
+
+class LostOutcomeTests(unittest.TestCase):
+    """A job whose outcome cannot be stored must not stay running."""
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.manager = DatabaseManager(
+            Path(self.directory.name) / "jobs.sqlite",
+            sqlite3,
+            row_factory=sqlite3.Row,
+        )
+        self.addCleanup(self.manager.close)
+        with self.manager.unit_of_work() as db:
+            db.executescript(
+                """
+                CREATE TABLE sync_jobs (
+                    id TEXT PRIMARY KEY, provider TEXT NOT NULL, type TEXT NOT NULL,
+                    status TEXT NOT NULL, payload TEXT NOT NULL, requested_by TEXT NOT NULL,
+                    attempts INTEGER NOT NULL, progress_total INTEGER NOT NULL,
+                    progress_completed INTEGER NOT NULL, error_class TEXT,
+                    available_at TEXT, started_at TEXT, finished_at TEXT,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE sync_job_items (
+                    id TEXT PRIMARY KEY, job_id TEXT NOT NULL, item_key TEXT NOT NULL,
+                    operation TEXT NOT NULL, payload_hash TEXT NOT NULL, remote_id TEXT,
+                    status TEXT NOT NULL, attempts INTEGER NOT NULL, error_class TEXT,
+                    error_detail TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    UNIQUE(job_id, item_key),
+                    FOREIGN KEY(job_id) REFERENCES sync_jobs(id) ON DELETE CASCADE
+                );
+                """
+            )
+        self.identifiers = iter(f"job-{index}" for index in range(1, 10))
+        self.store = SyncJobStore(
+            self.manager,
+            lambda: datetime(2026, 11, 10, 8, 0, tzinfo=UTC).isoformat(),
+            lambda: next(self.identifiers),
+        )
+
+    def test_row_does_not_stay_running_after_two_writer_timeouts(self) -> None:
+        job, _ = self.store.enqueue(
+            {"provider": "garmin", "type": "refresh", "payload": {}}, "test", None, None
+        )
+        outcomes = SyncJobOutcomeService(
+            self.store,
+            Mock(spec=StateEventBuffer),
+            threading.Event(),
+            str,
+            Mock(),
+            lambda: datetime(2026, 11, 10, 8, 0, tzinfo=UTC),
+            retry_base_seconds=1,
+            retry_max_seconds=2,
+        )
+        writer_down = {"down": True}
+
+        class WriterTimeouts:
+            """The real outcome service, whose writes time out while the writer is down."""
+
+            def __getattr__(self, name: str) -> Any:
+                if writer_down["down"]:
+                    raise DatabaseBusyError("synthetic writer timeout")
+                return getattr(outcomes, name)
+
+        executor = SyncJobExecutor(
+            historical_sync=Mock(),
+            outcome_service=cast(SyncJobOutcomeService, WriterTimeouts()),
+            all_sync_days=-1,
+            job_owners={},
+        )
+        worker = SyncJobWorker(
+            self.store,
+            executor,
+            MaintenanceGate(),
+            poll_seconds=0,
+            requeue_unowned=self.store.requeue_unowned_running,
+        )
+        runs: list[str] = []
+
+        def finish_after_two_runs(claimed: dict[str, Any]) -> dict[str, Any]:
+            state = self.store.state(claimed["id"])
+            assert state is not None
+            runs.append(state["status"])
+            if len(runs) == 2:
+                # The writer is back and this run ends the loop.
+                writer_down["down"] = False
+                worker.stop()
+            return {"status": "ok"}
+
+        # Without the requeue the row stays running and the loop would never end.
+        watchdog = threading.Timer(5, worker.stop)
+        self.addCleanup(watchdog.cancel)
+        watchdog.start()
+        with (
+            patch.object(executor, "execute", side_effect=finish_after_two_runs),
+            self.assertLogs("backend.sync.executor", level="ERROR"),
+            self.assertLogs("backend.sync.worker", level="WARNING") as worker_logs,
+        ):
+            worker.run_loop()
+
+        self.assertEqual(["running", "running"], runs)
+        self.assertIn(
+            "sync_job_outcome_lost",
+            [r.__dict__.get("event") for r in worker_logs.records],
+        )
+        final = self.store.state(job["id"])
+        assert final is not None
+        self.assertEqual("completed", final["status"])
+        self.assertEqual(2, final["attempts"])
 
 
 class _RecordingRunner:

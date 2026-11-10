@@ -312,7 +312,7 @@ class GarminRatingBackfillService:
             if isinstance(failure, RatingReadStopped) and failure.kind == FAILED
             else None
         )
-        counts = self._write(
+        counts, file_skipped = self._write(
             rows,
             skipped,
             failed=failed,
@@ -321,6 +321,12 @@ class GarminRatingBackfillService:
             oldest=oldest,
             more=more,
         )
+        next_end = _next_end(oldest) if more else None
+        if file_skipped:
+            # The session just moved to the skipped ids is no longer a candidate:
+            # the chain reads the same window again without it instead of failing.
+            failure = None
+            next_end = batch[0].day
         if isinstance(failure, RatingReadStopped):
             raise _stop_error(failure)
         if failure is not None:
@@ -330,7 +336,7 @@ class GarminRatingBackfillService:
             "synced_at": fetched_at,
             "candidates": len(batch),
             "window_records": len(rows),
-            "historical_next_end": _next_end(oldest) if more else None,
+            "historical_next_end": next_end,
             "skipped": len(skipped),
             **counts,
         }
@@ -345,7 +351,8 @@ class GarminRatingBackfillService:
         advance: bool,
         oldest: str | None,
         more: bool,
-    ) -> dict[str, int]:
+    ) -> tuple[dict[str, int], bool]:
+        """Store rows, state and cursor; return counts and whether ``failed`` was skipped."""
         with self._guard(), self._database_manager.unit_of_work() as db:
             stored: list[dict[str, Any]] = []
             raws: list[dict[str, Any]] = []
@@ -378,7 +385,7 @@ class GarminRatingBackfillService:
                 or row.get("directWorkoutFeel") is not None
             )
             state = _read_state(self._key_values, db)
-            _record_outcome(state, stored, skipped, missing, failed)
+            file_skipped = _record_outcome(state, stored, skipped, missing, failed)
             finished = bool(state["finished"]) or (
                 advance and not more and self._history_complete(db)
             )
@@ -403,11 +410,12 @@ class GarminRatingBackfillService:
                         fetched_at,
                         fetched_at,
                     )
-        return {
+        counts = {
             "backfilled": backfilled,
             "no_rating": len(stored) - backfilled,
             "no_raw_row": len(missing),
         }
+        return counts, file_skipped
 
     def _history_complete(self, db: Any) -> bool:
         """Return whether the activity chains that can still add sessions hit the floor.
@@ -433,8 +441,11 @@ def _record_outcome(
     skipped: list[str],
     missing: list[str],
     failed: str | None,
-) -> None:
-    """Fold one run into the state: ids kept out of later selections, failure counts."""
+) -> bool:
+    """Fold one run into the state: ids kept out of later selections, failure counts.
+
+    Returns whether ``failed`` reached the failure limit and was skipped for good.
+    """
     failures: dict[str, int] = state["failures"]
     for identifier in [str(row["activityId"]) for row in stored] + skipped + missing:
         failures.pop(identifier, None)
@@ -445,6 +456,8 @@ def _record_outcome(
         if failures[failed] >= FAILURE_LIMIT:
             del failures[failed]
             state["skipped_ids"] = sorted({*state["skipped_ids"], failed})
+            return True
+    return False
 
 
 def _stop_error(failure: RatingReadStopped) -> AppError:

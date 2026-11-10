@@ -1068,6 +1068,9 @@ GARMIN_LOGIN: GarminLoginService = GarminLoginService(
     ),
     tokens=GARMIN_TOKENS,
     registry=GARMIN_SECRET_REGISTRY,
+    on_connected=lambda: SYNC_SCHEDULERS.backfill_resumer().resume_provider(
+        GARMIN_ID, requested_by="connection"
+    ),
 )
 GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
     dependencies=GarminAssembly.Inputs(
@@ -1210,6 +1213,9 @@ WAHOO_CONNECTION = WahooConnectionAssembly(
         key_values=KEY_VALUE_REPOSITORY,
         utc_now=runtime_clock.utc_now,
         secret_registry=WAHOO_SECRET_REGISTRY,
+        on_connected=lambda: SYNC_SCHEDULERS.backfill_resumer().resume_provider(
+            WAHOO_ID, requested_by="connection"
+        ),
     )
 )
 
@@ -1675,7 +1681,7 @@ PROVIDER_RETRY_HOLD = ProviderRetryHold(
     },
 )
 
-SYNC_SCHEDULERS = SyncSchedulerAssembly(
+SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
     dependencies=SyncSchedulerAssembly.Inputs(
         owners=SyncScheduleOwners(
             profile_service=ATHLETE_DATA.profile,

@@ -13,6 +13,7 @@ from backend.athlete.profile import ProfileService
 from backend.config import Config
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import scheduler
+from backend.sync.backfill_resume import BackfillChainResumer
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.provider_runtime import (
@@ -134,6 +135,28 @@ class SyncSchedulerAssembly:
             ),
             registry=None if runtime is None else runtime.static,
             retry_held=self._retry_held,
+            backfill_resumer=self.backfill_resumer().resume,
+        )
+
+    def backfill_resumer(self) -> BackfillChainResumer:
+        """Create the resumer of stopped backfill chains for the current providers."""
+        config = self._config()
+        profile = self._profile_service()
+        garmin = self._garmin_sync_service()
+        runtime = self._runtime()
+        return BackfillChainResumer(
+            self._queue_service(),
+            self._sync_state_repository(),
+            self._schedule_policies(
+                profile=profile,
+                garmin=garmin,
+                calendar_enabled=bool(config.calendar_ical_url),
+            )
+            if runtime is None
+            else runtime.schedule_policies()["daily"],
+            chunk_days=self._sync_chunk_days,
+            earliest_date=self._sync_earliest_date,
+            registry=None if runtime is None else runtime.static,
         )
 
     def startup_scheduler(self) -> scheduler.StartupSyncScheduler:

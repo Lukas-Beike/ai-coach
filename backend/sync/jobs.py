@@ -198,7 +198,7 @@ _SETTLED_ITEMS = "status NOT IN ('completed', 'skipped')"
 # Only automatic requesters coalesce; an explicit user or coach request always
 # queues. A "backfill" continuation carries the next chunk's end_date cursor, so it
 # is never folded into another job: that would drop the cursor and stop the chain.
-_COALESCED_REQUESTERS = frozenset({"scheduler", "startup"})
+_COALESCED_REQUESTERS = frozenset({"scheduler", "startup", "connection"})
 _COALESCED_TYPES = frozenset({"refresh", *BACKFILL_JOB_TYPES})
 
 
@@ -802,27 +802,7 @@ class SyncJobStore:
     def resume_interrupted(self) -> int:
         now = self._now()
         with self._database_manager.unit_of_work() as db:
-            jobs = db.execute(
-                "SELECT id FROM sync_jobs WHERE status='running'"
-            ).fetchall()
-            for job in jobs:
-                self._transition(
-                    db,
-                    job["id"],
-                    "running",
-                    "queued",
-                    {
-                        "available_at": now,
-                        "started_at": None,
-                        "error_class": "process_interrupted",
-                        "updated_at": now,
-                    },
-                )
-                db.execute(
-                    "UPDATE sync_job_items SET status='queued', error_class='process_interrupted', "
-                    "error_detail=NULL, updated_at=? WHERE job_id=? AND status='running'",
-                    (now, job["id"]),
-                )
+            resumed = self._requeue_running(db, now)
             # Callers run before the workers start or under the drained restore
             # gate, so no competition sync can be in flight either.
             db.execute(
@@ -835,7 +815,52 @@ class SyncJobStore:
                 "WHERE key='competition_sync_status' AND value!=''",
                 (now,),
             )
-            return len(jobs)
+            return resumed
+
+    def requeue_unowned_running(self) -> int:
+        """Requeue ``running`` jobs while the single worker is between claims.
+
+        Only the worker runs jobs and it calls this before each claim, so a row
+        still ``running`` then lost its outcome (a failed write); it runs again
+        instead of blocking its provider's scheduled work until a restart. A job
+        that used up its attempts is marked failed instead.
+        """
+        with self._database_manager.reader() as db:
+            attempts = {
+                row["id"]: int(row["attempts"] or 0)
+                for row in db.execute(
+                    "SELECT id, attempts FROM sync_jobs WHERE status='running'"
+                ).fetchall()
+            }
+        if not attempts:
+            return 0
+        for job_id, used in attempts.items():
+            if used >= SYNC_JOB_MAX_ATTEMPTS:
+                self.update(job_id, "failed", "outcome_not_persisted")
+        with self._database_manager.unit_of_work() as db:
+            return self._requeue_running(db, self._now())
+
+    def _requeue_running(self, db: Any, now: str) -> int:
+        jobs = db.execute("SELECT id FROM sync_jobs WHERE status='running'").fetchall()
+        for job in jobs:
+            self._transition(
+                db,
+                job["id"],
+                "running",
+                "queued",
+                {
+                    "available_at": now,
+                    "started_at": None,
+                    "error_class": "process_interrupted",
+                    "updated_at": now,
+                },
+            )
+            db.execute(
+                "UPDATE sync_job_items SET status='queued', error_class='process_interrupted', "
+                "error_detail=NULL, updated_at=? WHERE job_id=? AND status='running'",
+                (now, job["id"]),
+            )
+        return len(jobs)
 
     def claim(self) -> dict[str, Any] | None:
         """Claim the oldest due job; backfill jobs yield to all other work.

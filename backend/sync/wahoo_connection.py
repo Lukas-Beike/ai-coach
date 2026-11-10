@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import threading
 from collections.abc import Callable
@@ -31,6 +32,7 @@ from backend.provider_credentials import (  # noqa: F401 - keys re-exported for 
 )
 from backend.providers.wahoo_oauth import WahooOAuthClient, WahooTokenGrant
 
+_LOGGER = logging.getLogger(__name__)
 STATE_TTL = timedelta(minutes=10)
 REFRESH_MARGIN = timedelta(minutes=5)
 MAX_CALLBACK_VALUE_LENGTH = 2048
@@ -135,7 +137,9 @@ class WahooConnectionService:
         utc_now: Callable[[], str],
         token_factory: Callable[[], str] = lambda: secrets.token_urlsafe(32),
         secret_registry: WahooSecretRegistry | None = None,
+        on_connected: Callable[[], None] | None = None,
     ) -> None:
+        self._on_connected = on_connected
         self._config = config
         self._oauth = oauth
         self._database_manager = database_manager
@@ -254,6 +258,17 @@ class WahooConnectionService:
                 return CALLBACK_ERROR
             now = self._now()
             self._store_grant(grant, now, connected_at=now)
+        if self._on_connected is not None:
+            try:
+                self._on_connected()
+            except Exception as exc:  # noqa: BLE001 - the connection is already stored
+                _LOGGER.warning(
+                    "Wahoo connected hook failed",
+                    extra={
+                        "event": "wahoo_connected_hook_failed",
+                        "error_class": type(exc).__name__,
+                    },
+                )
         return CALLBACK_CONNECTED
 
     # Tokens --------------------------------------------------------------

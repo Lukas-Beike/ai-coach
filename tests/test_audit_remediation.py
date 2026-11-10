@@ -262,7 +262,9 @@ with patch.object(Path, 'read_text', deny):
             marker_service.return_value.is_due.return_value = True
             server.SYNC_SCHEDULERS.daily_scheduler().schedule()
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
-            rows = db.execute("SELECT provider, payload FROM sync_jobs").fetchall()
+            rows = db.execute(
+                "SELECT provider, payload FROM sync_jobs WHERE type='refresh'"
+            ).fetchall()
         self.assertEqual([row["provider"] for row in rows], ["garmin"])
         self.assertEqual(json.loads(rows[0]["payload"])["days"], 84)
 

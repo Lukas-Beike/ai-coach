@@ -16,6 +16,7 @@ from backend.sync.jobs import (
     ALLOWED_JOB_TRANSITIONS,
     JOB_TYPES,
     PROVIDERS,
+    SYNC_JOB_MAX_ATTEMPTS,
     UNSUPPORTED_JOB_FIELDS_ERROR,
     JobValidationError,
     SyncJobInvalidOperationError,
@@ -1104,6 +1105,54 @@ class SyncJobStoreTests(unittest.TestCase):
                 "competition_sync_status": "",
             },
         )
+
+    def test_requeue_unowned_running_runs_a_lost_outcome_again(self):
+        job, _ = self.enqueue()
+        self.assertEqual(self.store.claim()["id"], job["id"])
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO kv(key, value, updated_at) "
+                "VALUES ('competition_sync_running', '1', ?)",
+                (self.now,),
+            )
+
+        self.assertEqual(self.store.requeue_unowned_running(), 1)
+
+        requeued = self.store.state(job["id"])
+        self.assertEqual(requeued["status"], "queued")
+        self.assertEqual(requeued["error_class"], "process_interrupted")
+        self.assertEqual(requeued["items"][0]["status"], "queued")
+        # Unlike a restart, a running competition sync of another thread is kept.
+        with self.manager.reader() as db:
+            marker = db.execute(
+                "SELECT value FROM kv WHERE key='competition_sync_running'"
+            ).fetchone()
+        self.assertEqual(marker["value"], "1")
+        self.assertEqual(self.store.claim()["attempts"], 2)
+
+    def test_requeue_unowned_running_leaves_other_states_and_reports_zero(self):
+        queued, _ = self.enqueue()
+        done, _ = self.enqueue("weather")
+        self._set_item_statuses(done["id"], "completed", item_0="completed")
+
+        self.assertEqual(self.store.requeue_unowned_running(), 0)
+
+        self.assertEqual(self.store.state(queued["id"])["status"], "queued")
+        self.assertEqual(self.store.state(done["id"])["status"], "completed")
+
+    def test_requeue_unowned_running_fails_a_job_without_attempts_left(self):
+        job, _ = self.enqueue()
+        for attempt in range(1, SYNC_JOB_MAX_ATTEMPTS + 1):
+            self.assertEqual(self.store.claim()["id"], job["id"])
+            if attempt < SYNC_JOB_MAX_ATTEMPTS:
+                self.assertEqual(self.store.requeue_unowned_running(), 1)
+
+        self.assertEqual(self.store.requeue_unowned_running(), 0)
+
+        failed = self.store.state(job["id"])
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(failed["error_class"], "outcome_not_persisted")
+        self.assertIsNone(self.store.claim())
 
     def test_automatic_refresh_and_backfill_requests_coalesce_atomically(self):
         for job_type, payload in (

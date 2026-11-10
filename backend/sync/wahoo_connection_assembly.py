@@ -27,6 +27,8 @@ class WahooConnectionInputs:
     key_values: KeyValueRepository
     utc_now: Callable[[], str]
     secret_registry: WahooSecretRegistry | None = None
+    # Runs once the athlete connected Wahoo while the app runs.
+    on_connected: Callable[[], None] | None = None
 
 
 class WahooConnectionAssembly:
@@ -51,5 +53,6 @@ class WahooConnectionAssembly:
                     key_values=inputs.key_values,
                     utc_now=inputs.utc_now,
                     secret_registry=inputs.secret_registry,
+                    on_connected=inputs.on_connected,
                 )
             return self._service

@@ -1631,6 +1631,104 @@ class ReprojectionTests(BackfillFixture):
         self.assertEqual(providers[INTERVALS]["skipped_invalid"], 1)
         self.assertEqual(providers[INTERVALS]["retired"], 1)
 
+    def bump_and_reproject_with_raising_record(
+        self, backfill: CanonicalBackfill, raising_id: str
+    ) -> None:
+        real = backfill_module.reprojection_plan
+
+        def plan(row: Mapping[str, Any], **kwargs: Any) -> Any:
+            if row["source_record_id"] == raising_id:
+                raise ValueError("synthetic payload text that must not be logged")
+            return real(row, **kwargs)
+
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        with (
+            patch.dict(
+                canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+            ),
+            patch.object(backfill_module, "reprojection_plan", plan),
+        ):
+            self.run_to_completion(backfill)
+
+    def test_a_raising_mapper_skips_only_that_record_and_the_pass_completes(
+        self,
+    ) -> None:
+        backfill = self.populate()
+        before = self.rows(
+            "SELECT state FROM activity_records WHERE provider = ? "
+            "AND provider_activity_id = '1'",
+            (INTERVALS,),
+        )
+
+        with self.assertLogs(
+            "backend.sync.canonical_backfill", level="WARNING"
+        ) as logs:
+            self.bump_and_reproject_with_raising_record(backfill, "1")
+
+        summary = self.summary(backfill)
+        self.assertEqual("complete", summary["status"])
+        counters = summary["providers"][INTERVALS]
+        self.assertEqual(1, counters["skipped_invalid"])
+        self.assertEqual(3, counters["reprojected"])
+        # The record keeps what it projected before; the others moved on.
+        self.assertEqual(
+            before,
+            self.rows(
+                "SELECT state FROM activity_records WHERE provider = ? "
+                "AND provider_activity_id = '1'",
+                (INTERVALS,),
+            ),
+        )
+        self.assertEqual(
+            {"canonical_reprojection_record_skipped"},
+            {record.__dict__.get("event") for record in logs.records},
+        )
+        self.assertEqual(
+            ["ValueError"], [r.__dict__.get("error_class") for r in logs.records]
+        )
+        self.assertNotIn("synthetic payload text", logs.output[0])
+
+    def test_follow_up_stages_run_after_a_pass_with_a_raising_record(self) -> None:
+        backfill = self.populate()
+        ran: list[str] = []
+
+        class Followup:
+            stage = "followup"
+
+            def run_batch(self, db: Any) -> BatchReport:
+                ran.append("followup")
+                return BatchReport(items=0, done=True)
+
+            def mark_failed(self, db: Any) -> None:
+                ran.append("failed")
+
+        worker = CanonicalBackfillWorker(
+            backfill=backfill,
+            database=lambda: self.manager,
+            maintenance_gate=MaintenanceGate(),
+            poll_seconds=0,
+            followups=[Followup()],
+        )
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        real = backfill_module.reprojection_plan
+
+        def plan(row: Mapping[str, Any], **kwargs: Any) -> Any:
+            if row["source_record_id"] == "1":
+                raise ValueError("synthetic")
+            return real(row, **kwargs)
+
+        with (
+            patch.dict(
+                canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+            ),
+            patch.object(backfill_module, "reprojection_plan", plan),
+            self.assertLogs("backend.sync.canonical_backfill", level="WARNING"),
+        ):
+            worker.run_loop()
+
+        self.assertEqual(["followup"], ran)
+        self.assertEqual("complete", self.summary(backfill)["status"])
+
     def test_version_bump_during_a_partial_run_restarts_the_record_from_its_first_item(
         self,
     ) -> None:

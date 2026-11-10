@@ -153,12 +153,14 @@ class GarminLoginTests(unittest.TestCase):
             tokenstore_path=lambda: str(self.tokenstore),
             registry=self.registry,
         )
+        self.connected: list[str] = []
         self.service = GarminLoginService(
             config=lambda: self.config,
             client_factory=self._factory,
             tokens=self.tokens,
             registry=self.registry,
             clock=self.clock,
+            on_connected=lambda: self.connected.append("connected"),
         )
 
     def tearDown(self) -> None:
@@ -194,6 +196,30 @@ class GarminLoginTests(unittest.TestCase):
         )
         self.assertNotIn(PASSWORD, stored_values)
         self.assertNotIn(PASSWORD, self.registry.values())
+
+    def test_connect_hook_runs_after_login_and_after_mfa_but_not_before(self):
+        self.next_client = FakeClient(needs_mfa=True, mfa_codes=("123456",))
+        self.service.login(self._login_body())
+        self.assertEqual(self.connected, [])
+        with self.assertRaises(AppError):
+            self.service.submit_mfa({"code": "000000"})
+        self.assertEqual(self.connected, [])
+        self.service.submit_mfa({"code": "123456"})
+        self.assertEqual(self.connected, ["connected"])
+
+        self.next_client = FakeClient()
+        self.service.login(self._login_body())
+        self.assertEqual(self.connected, ["connected", "connected"])
+
+    def test_a_failing_connect_hook_keeps_the_stored_login(self):
+        def failing() -> None:
+            raise RuntimeError("synthetic")
+
+        self.service._on_connected = failing
+        self.next_client = FakeClient()
+        result = self.service.login(self._login_body())
+        self.assertEqual(result["status"], "connected")
+        self.assertEqual(self._stored(GARMIN_TOKENS_KEY), BLOB)
 
     def test_login_success_clears_the_skipped_sdk_hint(self):
         self.key_values.set(
