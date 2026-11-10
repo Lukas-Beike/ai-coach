@@ -212,7 +212,7 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
 
         state_service = WorkoutLibrarySyncStateService(
             self.database_manager,
-            TestRedactor(),
+            self.workout_library_sync_state_service._redactor,
             KeyValueRepository(lambda: NOW),
             lambda: NOW,
             resync,
