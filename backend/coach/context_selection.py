@@ -313,19 +313,7 @@ class CoachContextSelection:
                 result[key] = self.dated_items(result[key], today)
         activities = result.get("activities")
         if isinstance(activities, dict):
-            activities = dict(activities)
-            activities.pop("planned_workouts", None)
-            recent = activities.get("recent_activities_by_sport")
-            if isinstance(recent, dict):
-                activities["recent_activities_by_sport"] = {
-                    sport: rows[: self.activity_limit]
-                    if isinstance(rows, list)
-                    else rows
-                    for sport, rows in recent.items()
-                }
-            if "scope" in activities:
-                activities["scope"] = _activities_scope(self.activity_limit)
-            result["activities"] = activities
+            result["activities"] = self._projected_activities(activities)
         performance = result.get("current_performance")
         if isinstance(performance, dict) and self.name not in {
             "activity_analysis",
@@ -340,6 +328,19 @@ class CoachContextSelection:
                 if key not in {"comparisons", "activity_validation"}
             }
         return result
+
+    def _projected_activities(self, activities: dict[str, Any]) -> dict[str, Any]:
+        activities = dict(activities)
+        activities.pop("planned_workouts", None)
+        recent = activities.get("recent_activities_by_sport")
+        if isinstance(recent, dict):
+            activities["recent_activities_by_sport"] = {
+                sport: rows[: self.activity_limit] if isinstance(rows, list) else rows
+                for sport, rows in recent.items()
+            }
+        if "scope" in activities:
+            activities["scope"] = _activities_scope(self.activity_limit)
+        return activities
 
     def dated_items(self, items: Any, today: date) -> Any:
         if not isinstance(items, list) or self.horizon_days is None:
