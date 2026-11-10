@@ -34,7 +34,10 @@ Rules (references are observational or practice-based, not individual advice):
 - leg_strength_before_key_session, leg_strength_frequency: counted and graded in
   ``leg_strength`` (number and intensity of leg sessions only); see that module.
 - illness_hard: the latest check-in reports illness and a hard session or a
-  session of 90 minutes or more is planned within the next 3 days.
+  session of 90 minutes or more is planned within the next 3 days. During the
+  stepwise return after an approved pause (``illness_return``) it also flags a
+  session above the current stage's level (stage 1 easy, stage 2 up to moderate)
+  today and tomorrow.
 """
 
 from __future__ import annotations
@@ -53,7 +56,9 @@ from backend.canonical.planning_fields import HR_CAP, STRENGTH_STRUCTURE
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.planning import (
+    calendar,
     calendar_load,
+    illness_return,
     leg_strength,
     load_checks,
     run_hr_cap,
@@ -123,7 +128,7 @@ _RULE_TEXT = {
     "back_to_back_hard": "hard run or ride on consecutive days.",
     "strength_hard_same_day": "heavy strength and a hard run or ride less than 6 h apart.",
     "missing_taper": "final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
-    "illness_hard": "hard or 90+ minute session within 5 days of a reported illness (today included).",
+    "illness_hard": "hard or 90+ minute session within 5 days of a reported illness (today included), or a session above the current stage of the return after an illness pause (today and tomorrow).",
     "strength_incomplete": "a strength unit the Coach created, moved or changed without strength_structure, session_focus and strength_intensity.",
     "focus_missing": "a run or ride unit the Coach created, moved or changed without session_focus.",
     "hr_cap_invalid": "a recovery, easy or long run unit the Coach created or changed without a heart-rate cap (percentages and source) within the effective cap.",
@@ -404,6 +409,54 @@ def _illness_hard(
     ]
 
 
+# Easy focus values of a unit, besides light strength and explicitly easy text.
+_RETURN_EASY_FOCI = frozenset({"recovery", "easy", "mobility", "core"})
+
+
+def session_level(unit: Mapping[str, Any]) -> int:
+    """Intensity level of a planned unit: 0 easy, 1 moderate, 2 hard (or heavy)."""
+    if is_hard(unit) or is_heavy_strength(unit):
+        return 2
+    focus = session_focus(unit)
+    if focus.value is None and focus.strength_intensity is None:
+        easy = calendar.workout_is_explicitly_easy(dict(unit))
+    else:
+        easy = focus.value in _RETURN_EASY_FOCI or focus.strength_intensity == "light"
+    return 0 if easy and _duration_s(unit) < LONG_SESSION_S else 1
+
+
+def _return_stage_hard(
+    units: Sequence[Mapping[str, Any]],
+    stage: int | None,
+    today: date,
+    skip: set[str],
+) -> list[dict]:
+    """Sessions above the return stage within the stage horizon (#2042)."""
+    if stage is None:
+        return []
+    last = (today + timedelta(days=illness_return.RETURN_HORIZON_DAYS - 1)).isoformat()
+    allowed = illness_return.STAGE_MAX_LEVEL[stage]
+    return [
+        _finding(
+            "illness_hard",
+            [unit],
+            f"Return after illness, stage {stage}: only "
+            f"{illness_return.STAGE_LABELS[stage]} until the stage advances.",
+            {
+                "through": last,
+                "planned_minutes": round(_duration_s(unit) / 60),
+                "hard": is_hard(unit),
+                "return_stage": stage,
+                "session_level": session_level(unit),
+            },
+        )
+        for unit in units
+        if str(unit.get("local_id") or unit.get("id")) not in skip
+        and today.isoformat() <= _day(unit) <= last
+        and session_level(unit) > allowed
+    ]
+
+
 _HR_CAP_CONTENT = (
     "name",
     "description",
@@ -643,6 +696,7 @@ def check_plan(
     thresholds: load_checks.LoadThresholds | None = None,
     expects_strength: bool = False,
     calendar_events: Sequence[Mapping[str, Any]] = (),
+    return_stage: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return all findings for the resulting future planned units.
 
@@ -653,6 +707,8 @@ def check_plan(
     )
     units = _with_computed_hard(units, sessions)
     calendar_notes = _calendar_findings(units, calendar_events, today)
+    illness_findings = _illness_hard(units, illness, today)
+    flagged = {item for found in illness_findings for item in found["local_ids"]}
     return [
         *calendar_notes,
         *_drafted(load_checks.run_distance_spikes(sessions, completed, today)),
@@ -666,7 +722,8 @@ def check_plan(
         *_drafted(leg_strength.before_key_session(units, is_hard, is_heavy_strength)),
         *_drafted(leg_strength.frequency(units, today, expects_strength, completed)),
         *_missing_taper(units, completed, competitions, today),
-        *_illness_hard(units, illness, today),
+        *illness_findings,
+        *_return_stage_hard(units, return_stage, today, flagged),
     ]
 
 

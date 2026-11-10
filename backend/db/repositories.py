@@ -772,6 +772,15 @@ class PlanAdjustmentRepository:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_applied(self, db: Any) -> list[dict[str, Any]]:
+        """Every applied or partial adjustment, newest first, without a row limit."""
+        rows = db.execute(
+            "SELECT payload, status FROM plan_adjustments "
+            "WHERE status IN ('applied', 'partial') "
+            "ORDER BY created_at DESC, rowid DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def get(self, db: Any, adjustment_id: str) -> dict[str, Any] | None:
         row = db.execute(
             "SELECT payload, status FROM plan_adjustments WHERE id = ?",

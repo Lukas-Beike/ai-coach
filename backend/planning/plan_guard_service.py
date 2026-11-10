@@ -457,6 +457,7 @@ class PlanGuardService:
         history: BriefHistory | None = None,
     ) -> None:
         self._history = history or BriefHistory()
+        self._return_stage: Callable[[], int | None] = lambda: None
         self._profile = profile
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -472,6 +473,7 @@ class PlanGuardService:
         self._calendar_cache: tuple[Sequence[Mapping[str, Any]], ...] | None = None
         self._threshold_cache: tuple[LoadThresholds | None] | None = None
         self._illness_cache: tuple[str] | None = None
+        self._return_stage_cache: tuple[int | None] | None = None
 
     def _planned_weeks(
         self,
@@ -502,6 +504,7 @@ class PlanGuardService:
                 completed=completed,
                 competitions=self._competitions(),
                 illness=self._reported_illness(),
+                return_stage=self._current_return_stage(),
                 thresholds=self._load_thresholds(),
                 expects_strength=self._expects_strength(),
                 calendar_events=self._events(),
@@ -527,6 +530,19 @@ class PlanGuardService:
         if self._illness_cache is None:
             self._illness_cache = (self._illness(),)
         return self._illness_cache[0]
+
+    def with_return_stage(
+        self, return_stage: Callable[[], int | None]
+    ) -> PlanGuardService:
+        """Enforce the stage of the return after an illness pause (#2042)."""
+        self._return_stage = return_stage
+        return self
+
+    def _current_return_stage(self) -> int | None:
+        """One snapshot per service, like the reported illness."""
+        if self._return_stage_cache is None:
+            self._return_stage_cache = (self._return_stage(),)
+        return self._return_stage_cache[0]
 
     def _load_thresholds(self) -> LoadThresholds | None:
         """One snapshot per service, so before and after a write compare alike."""

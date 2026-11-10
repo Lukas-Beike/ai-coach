@@ -1870,6 +1870,10 @@ def _plan_guard_service() -> PlanGuardService:
                 days=LAST_TEST_DAYS,
             ),
         ),
+    ).with_return_stage(
+        lambda: (
+            PLANNING_WORKFLOWS.adaptive_replan_preview_service().enforced_return_stage()
+        )
     )
 
 

@@ -339,6 +339,12 @@ def _overlaid(current: dict[str, Any], replacement: dict[str, Any]) -> dict[str,
     }
 
 
+def _return_stage_pending(payload: dict[str, Any]) -> bool:
+    """Whether the approved preview also moves the stage of the illness return."""
+    block = payload.get("illness_return")
+    return isinstance(block, dict) and bool(block.get("pending"))
+
+
 class AdaptiveReplanApplyService:
     """Apply one local adaptive preview atomically, without remote side effects."""
 
@@ -410,7 +416,7 @@ class AdaptiveReplanApplyService:
                     "approved": True,
                     "status": "approved",
                 }
-            if stale and not updated:
+            if stale and not updated and not _return_stage_pending(payload):
                 status = "stale"
             elif stale:
                 status = "partial"

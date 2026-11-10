@@ -157,6 +157,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
                 "needs_replan": True,
                 "replan_changes": 1,
                 "illness_pause_pending": True,
+                "illness_return_pending": False,
             },
         )
         self.assertEqual(
@@ -328,6 +329,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
                 "needs_replan": False,
                 "replan_changes": 0,
                 "illness_pause_pending": False,
+                "illness_return_pending": False,
             },
         )
         self.assertEqual(

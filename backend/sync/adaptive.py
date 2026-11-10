@@ -44,8 +44,10 @@ class AdaptivePreviewFollowupService:
         try:
             preview = self._preview_service.preview()
             changes = preview.get("changes", []) if isinstance(preview, dict) else []
+            block = preview.get("illness_return") if isinstance(preview, dict) else None
+            return_pending = isinstance(block, dict) and bool(block.get("pending"))
             return {
-                "needs_replan": bool(changes),
+                "needs_replan": bool(changes) or return_pending,
                 "replan_changes": len(changes) if isinstance(changes, list) else 0,
             }
         except Exception:
