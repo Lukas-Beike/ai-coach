@@ -16,6 +16,7 @@ from support import mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.activities.hr_cap import effective_caps
+from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
 from backend.planning import library as planning_library
@@ -2013,7 +2014,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             turn="friday-repair",
         )
         model.assert_not_called()
-        self.assertEqual(replay, result)
+        self.assertEqual(replay, compact_receipt(result))
 
         def sync_read_selection(payload):
             current = json.loads(payload["input"][0]["output"])

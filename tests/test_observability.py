@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -677,6 +678,73 @@ class ObservabilityTests(unittest.TestCase):
         )
         self.assertIsNone(capture._flush_timer)
 
+    def test_capture_drops_entries_older_than_seven_days(self):
+        store = _KeyValueStore()
+        now = [datetime(2026, 11, 1, tzinfo=UTC)]
+        capture = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), clock=lambda: now[0]
+        )
+        capture.capture("old_event", {"index": 1})
+        now[0] += timedelta(days=6)
+        capture.capture("middle_event", {"index": 2})
+        capture.flush()
+        self.assertEqual(capture.status()["maximum_age_days"], 7)
+        self.assertEqual(len(capture.entries()), 2)
+
+        now[0] += timedelta(days=2)
+        self.assertEqual([e["event"] for e in capture.entries()], ["middle_event"])
+        self.assertEqual(capture.status()["entries"], 1)
+        capture.capture("new_event", {"index": 3})
+        capture.flush()
+
+        stored = json.loads(store.get("diagnostic_capture_entries"))
+        self.assertEqual([e["event"] for e in stored], ["middle_event", "new_event"])
+        restarted = DiagnosticCapture(
+            store.get, store.set, Redactor(_config), clock=lambda: now[0]
+        )
+        self.assertEqual(len(restarted.entries()), 2)
+        now[0] += timedelta(days=30)
+        self.assertEqual(restarted.entries(), [])
+
+    def test_stored_entries_older_than_seven_days_are_removed_on_load(self):
+        store = _KeyValueStore()
+        old = (datetime(2026, 11, 1, tzinfo=UTC)).isoformat()
+        recent = (datetime(2026, 11, 9, tzinfo=UTC)).isoformat()
+        store.set(
+            "diagnostic_capture_entries",
+            json.dumps(
+                [
+                    {"timestamp": old, "event": "stale", "details": {}},
+                    {"timestamp": recent, "event": "fresh", "details": {}},
+                ]
+            ),
+        )
+        capture = DiagnosticCapture(
+            store.get,
+            store.set,
+            Redactor(_config),
+            clock=lambda: datetime(2026, 11, 10, tzinfo=UTC),
+        )
+
+        self.assertEqual([e["event"] for e in capture.entries()], ["fresh"])
+        capture.flush()
+        self.assertEqual(
+            [e["event"] for e in json.loads(store.get("diagnostic_capture_entries"))],
+            ["fresh"],
+        )
+
+    def test_capture_flush_stays_within_the_two_mebibyte_default(self):
+        store = _KeyValueStore()
+        capture = DiagnosticCapture(store.get, store.set, Redactor(_config))
+        self.assertEqual(capture.status()["maximum_bytes"], 2 * 1024 * 1024)
+        for index in range(60):
+            capture.capture("coach_request", {"index": index, "body": "x" * 100_000})
+        capture.flush()
+
+        self.assertLessEqual(len(store.get("diagnostic_capture_entries").encode()), 2 * 1024 * 1024)
+        self.assertLessEqual(capture.status()["bytes"], 2 * 1024 * 1024)
+        self.assertEqual(capture.entries()[-1]["details"]["index"], 59)
+
     def test_diagnostic_capture_default_retains_more_than_1500_entries(self):
         store = _KeyValueStore()
         capture = DiagnosticCapture(store.get, store.set, Redactor(_config))
@@ -964,7 +1032,7 @@ class DiagnosticCaptureDiscardTests(unittest.TestCase):
         # The swapped-in database carries its own captured diagnostics.
         restored = [
             {
-                "timestamp": "2026-10-01T00:00:00+00:00",
+                "timestamp": datetime.now(UTC).isoformat(),
                 "event": "restored_marker",
                 "details": {"text": "synthetic restored"},
             }

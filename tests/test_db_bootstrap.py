@@ -244,8 +244,126 @@ class DatabaseBootstrapTests(unittest.TestCase):
                 "retention_days": 30,
                 "messages_deleted": 1,
                 "snapshots_deleted": 1,
+                "coach_commands_deleted": 0,
+                "coach_plan_artifacts_deleted": 0,
+                "coach_action_proposals_deleted": 0,
             },
         )
+
+    def _insert_command(self, db, turn_id, created_at, receipt, *, status="completed"):
+        db.execute(
+            "INSERT INTO coach_commands(id, client_turn_id, intent, target_system, "
+            "status, receipt, created_at, updated_at, artifact_id) "
+            "VALUES (?, ?, 'chat', 'none', ?, ?, ?, ?, NULL)",
+            (turn_id, turn_id, status, receipt, created_at, created_at),
+        )
+
+    def _insert_artifact(self, db, artifact_id, status, created_at):
+        db.execute(
+            "INSERT INTO coach_plan_artifacts(id, base_revision, status, payload, "
+            "created_at, updated_at) VALUES (?, 0, ?, '{}', ?, ?)",
+            (artifact_id, status, created_at, created_at),
+        )
+
+    def test_retention_purges_old_receipts_artifacts_and_expired_proposals(self):
+        db = self.make_connection()
+        self.addCleanup(db.close)
+        self.bootstrap(db)
+        old = (self.current_time - timedelta(days=45)).isoformat()
+        recent = (self.current_time - timedelta(days=5)).isoformat()
+        open_undo = json.dumps(
+            {"change_summary": {"undoable": True, "undone_at": None}}
+        )
+        undone = json.dumps(
+            {"change_summary": {"undoable": True, "undone_at": "2026-08-01"}}
+        )
+        not_undoable = json.dumps(
+            {"change_summary": {"undoable": False, "undone_at": None}}
+        )
+        self._insert_command(db, "old-plain", old, json.dumps({"text": "chat copy"}))
+        self._insert_command(db, "old-open-undo", old, open_undo)
+        self._insert_command(db, "old-undone", old, undone)
+        self._insert_command(db, "old-not-undoable", old, not_undoable)
+        self._insert_command(db, "old-broken", old, "not json")
+        self._insert_command(db, "old-null", old, None)
+        self._insert_command(db, "old-running", old, "{}", status="running")
+        self._insert_command(db, "recent", recent, "{}")
+        self._insert_artifact(db, "art-old-committed", "committed", old)
+        self._insert_artifact(db, "art-old-superseded", "superseded", old)
+        self._insert_artifact(db, "art-old-draft", "draft", old)
+        self._insert_artifact(db, "art-recent", "committed", recent)
+        self._insert_artifact(db, "art-linked", "committed", old)
+        db.execute(
+            "UPDATE coach_commands SET artifact_id='art-linked' "
+            "WHERE client_turn_id='old-open-undo'"
+        )
+        now = self.current_time.timestamp()
+        for proposal_id, expires_at in (
+            ("expired", now - 1),
+            ("live", now + 600),
+        ):
+            db.execute(
+                "INSERT INTO coach_action_proposals(id, session_csrf_hash, "
+                "action_type, target_system, object_ids, diff, payload, "
+                "payload_hash, status, expires_at, created_at) "
+                "VALUES (?, 'h', 'local_coach_write', 'local', '{}', '{}', '{}', "
+                "'p', 'ready', ?, ?)",
+                (proposal_id, expires_at, recent),
+            )
+        db.execute(
+            "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) "
+            "VALUES ('unit', 'unit', '{}', ?, ?)",
+            (old, old),
+        )
+        profile_before = self.key_values.get(db, "profile")
+
+        with self.assertLogs("intervals_coach", level="INFO") as logs:
+            self.bootstrap(db, retention_days=30)
+
+        self.assertEqual(
+            sorted(
+                row[0]
+                for row in db.execute("SELECT client_turn_id FROM coach_commands")
+            ),
+            ["old-open-undo", "old-running", "recent"],
+        )
+        self.assertEqual(
+            sorted(row[0] for row in db.execute("SELECT id FROM coach_plan_artifacts")),
+            ["art-linked", "art-old-draft", "art-recent"],
+        )
+        self.assertEqual(
+            [row[0] for row in db.execute("SELECT id FROM coach_action_proposals")],
+            ["live"],
+        )
+        (record,) = logs.records
+        self.assertEqual(record.context["coach_commands_deleted"], 5)
+        self.assertEqual(record.context["coach_plan_artifacts_deleted"], 2)
+        self.assertEqual(record.context["coach_action_proposals_deleted"], 1)
+        self.assertEqual(
+            db.execute("SELECT COUNT(*) FROM planned_units").fetchone()[0], 1
+        )
+        self.assertEqual(self.key_values.get(db, "profile"), profile_before)
+
+    def test_unlimited_retention_keeps_old_receipts_and_expired_proposals(self):
+        db = self.make_connection()
+        self.addCleanup(db.close)
+        self.bootstrap(db)
+        old = (self.current_time - timedelta(days=4000)).isoformat()
+        self._insert_command(db, "old", old, "{}")
+        db.execute(
+            "INSERT INTO coach_action_proposals(id, session_csrf_hash, action_type, "
+            "target_system, object_ids, diff, payload, payload_hash, status, "
+            "expires_at, created_at) VALUES ('e', 'h', 'local_coach_write', 'local', "
+            "'{}', '{}', '{}', 'p', 'ready', 1.0, ?)",
+            (old,),
+        )
+
+        self.bootstrap(db)
+
+        for table in ("coach_commands", "coach_action_proposals"):
+            self.assertEqual(
+                db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 1
+            )
 
     def test_retention_keeps_the_newest_snapshot_after_a_long_sync_gap(self):
         db = self.make_connection()

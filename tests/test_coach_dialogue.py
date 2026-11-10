@@ -24,6 +24,7 @@ from backend.coach import structured_tool_round
 from backend.coach.chat_turn import CoachChatTurnService
 from backend.coach.dialogue import validate_request
 from backend.coach.outcomes import unresolved_coach_steps
+from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.errors import AppError
 from backend.sync import queue as sync_queue
@@ -668,7 +669,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             turn="profile-acceptance",
         )
         model.assert_not_called()
-        self.assertEqual(replay, result)
+        self.assertEqual(replay, compact_receipt(result))
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_profile_patch_conflict_is_atomic_and_can_be_repaired(self):
@@ -1559,7 +1560,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         ]
         result, _ = self.turn("Die Beine sind heute schwer", steps, turn="same-turn")
         replay, model = self.turn("Die Beine sind heute schwer", [], turn="same-turn")
-        self.assertEqual(result, replay)
+        self.assertEqual(compact_receipt(result), replay)
         model.assert_not_called()
 
     def test_automatic_advice_cannot_write(self):
@@ -1643,7 +1644,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             "Samstag 100 km flach, Montag Recoverylauf", [], turn="scope-repaired"
         )
         model.assert_not_called()
-        self.assertEqual(replay, result)
+        self.assertEqual(replay, compact_receipt(result))
         self.assertEqual(len(self.state()["planned_units"]), 2)
 
     def test_successful_plan_replacement_resolves_invalid_patch_for_same_request(self):
@@ -2515,7 +2516,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(result["command_receipts"][0]["result"]["ok"])
         replay, model = self.turn("Heute müde", [], turn="summary-failure")
         model.assert_not_called()
-        self.assertEqual(replay, result)
+        self.assertEqual(replay, compact_receipt(result))
 
     def test_cancel_before_tools_has_no_local_effect(self):
         import threading

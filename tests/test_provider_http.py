@@ -220,6 +220,53 @@ class ProviderHTTPTests(unittest.TestCase):
             [("op-1", "first"), ("op-2", "second")],
         )
 
+    def test_capture_of_a_metric_export_keeps_only_the_request_shape(self):
+        client = self._client(lambda _request, *, timeout: _JSONResponse(b"{}"))
+        payload = {
+            "weight": 72.4,
+            "notes": "Intervalle 5x5 am Donnerstag, Knie links",
+            "plan": [{"day": "2026-11-12", "description": "Schwellenintervalle"}],
+        }
+
+        for service in ("wahoo", "intervals", "garmin"):
+            client.request(
+                "POST",
+                "https://example.test/api/v1/metrics",
+                payload=payload,
+                service=service,
+            )
+
+        started = [
+            details
+            for event, details in self.capture.entries
+            if event == "external_http_started"
+        ]
+        self.assertEqual(len(started), 3)
+        rendered = repr(started)
+        for leaked in ("72.4", "Knie", "Intervalle", "Schwellen", "2026-11-12"):
+            self.assertNotIn(leaked, rendered)
+        shape = started[0]["request"]["shape"]
+        self.assertEqual(shape["type"], "object")
+        self.assertEqual(shape["fields"], ["weight", "notes", "plan"])
+
+    def test_capture_keeps_the_sanitized_openai_request_body(self):
+        client = self._client(lambda _request, *, timeout: _JSONResponse(b"{}"))
+
+        client.request(
+            "POST",
+            "https://api.openai.com/v1/responses",
+            payload={"input": "Wie war mein Training?", "api_key": "sk-synthetic"},
+            service="openai",
+        )
+
+        (details,) = [
+            details
+            for event, details in self.capture.entries
+            if event == "external_http_started"
+        ]
+        self.assertEqual(details["request"]["input"], "Wie war mein Training?")
+        self.assertNotIn("sk-synthetic", repr(self.capture.entries))
+
     def test_json_http_client_classifies_openai_http_error_and_retry_after(self):
         state = _ProviderState()
         body = _JSONResponse(b'{"error":{"code":"rate_limit_exceeded"}}')

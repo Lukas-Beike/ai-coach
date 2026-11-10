@@ -179,6 +179,43 @@ class CoachTurnFailureTests(unittest.TestCase):
         history.apply_many.assert_called_once()
         self.assertEqual(self._stored()[1]["change_summary"]["undone_at"], self.now())
 
+    def test_failure_receipt_drops_bulky_tool_results_and_keeps_ids_and_changes(
+        self,
+    ) -> None:
+        with self.manager.unit_of_work() as db:
+            user = self.chat.add(db, "user", "Lies den Plan", client_turn_id="turn-1")
+        self._seed(
+            {
+                "user_message_id": user["id"],
+                "command_receipts": [
+                    {
+                        "tool": "update_profile",
+                        "result": {
+                            "ok": True,
+                            "status": "saved",
+                            "artifact_id": "art-1",
+                            "profile": {"notes": "synthetic bulk " * 1000},
+                        },
+                        "changes": [{"id": "change-1"}],
+                    }
+                ],
+            }
+        )
+
+        self.service.persist(
+            "turn-1",
+            {"operation": "update_profile"},
+            AppError(503, "failed", reason="provider_unavailable"),
+        )
+
+        _, stored = self._stored()
+        step = stored["command_receipts"][0]
+        self.assertEqual(
+            step["result"], {"ok": True, "status": "saved", "artifact_id": "art-1"}
+        )
+        self.assertEqual(step["changes"], [{"id": "change-1"}])
+        self.assertNotIn("synthetic bulk", json.dumps(stored))
+
     def test_cancellation_clears_pending_and_completed_replay_does_not_duplicate(
         self,
     ) -> None:

@@ -19,6 +19,7 @@ from backend.coach.outcomes import (
     coach_observed_sync_lines,
     unresolved_coach_steps,
 )
+from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ChatRepository, KeyValueRepository
@@ -153,7 +154,7 @@ class CoachTurnFailureService:
                 "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? "
                 "WHERE client_turn_id=?",
                 (
-                    json.dumps(receipt, ensure_ascii=False),
+                    json.dumps(compact_receipt(receipt), ensure_ascii=False),
                     deps.utc_now(),
                     client_turn_id,
                 ),

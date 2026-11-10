@@ -274,6 +274,16 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         ):
             self.assertNotIn(private, serialized)
 
+    def test_note_states_what_the_capture_keeps(self):
+        note = self.service.report()["note"]
+
+        # Non-OpenAI requests and all responses: shape only. OpenAI requests may
+        # carry Coach context. Entries expire after seven days.
+        self.assertIn("nur als Form gespeichert", note)
+        self.assertIn("Anfragen an OpenAI können", note)
+        self.assertIn("7 Tage", note)
+        self.assertNotIn("Athleteninhalte", note)
+
     def test_database_counts_and_kv_reads_share_one_read_snapshot(self):
         self.service.report()
 

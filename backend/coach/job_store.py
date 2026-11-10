@@ -204,27 +204,27 @@ class CoachJobStore:
             ).fetchone()
         return bool(row and command_receipt(row["receipt"]).get("cancel_requested"))
 
-    def merge_receipt(
-        self, client_turn_id: str, updates: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Merge progress into a queued/running command in one locked UOW."""
+    def merge_receipt(self, client_turn_id: str, updates: dict[str, Any]) -> None:
+        """Write only the changed top-level keys of a queued/running command.
+
+        ``json_set`` stores each key in place, so a progress step does not decode
+        and re-encode the receipt's other, possibly large, values.
+        """
+        if not updates:
+            return
+        paths = ", ".join("?, json(?)" for _ in updates)
+        values: list[str] = []
+        for key, value in updates.items():
+            values.append("$." + json.dumps(str(key)))
+            values.append(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
         with self._database_lock, self._database_manager().unit_of_work() as db:
-            row = db.execute(
-                SELECT_RECEIPT_SQL,
-                (client_turn_id,),
-            ).fetchone()
-            receipt = command_receipt((row or {}).get("receipt"))
-            receipt.update(updates)
             db.execute(
-                "UPDATE coach_commands SET receipt=?, updated_at=? "
+                "UPDATE coach_commands SET receipt=json_set("
+                "CASE WHEN json_valid(receipt) AND json_type(receipt)='object' "
+                f"THEN receipt ELSE '{{}}' END, {paths}), updated_at=? "
                 "WHERE client_turn_id=? AND status IN ('queued', 'running')",
-                (
-                    json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
-                    self._utc_now(),
-                    client_turn_id,
-                ),
+                (*values, self._utc_now(), client_turn_id),
             )
-        return receipt
 
     def resume_interrupted(self, failures: CoachTurnFailureService) -> int:
         """Recover durable turns after a process restart."""

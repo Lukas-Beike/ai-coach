@@ -514,7 +514,7 @@ class JsonHttpClient:
                 "query_keys": request_context.get("query_keys", []),
                 "request_bytes": request_context["request_bytes"],
                 "content_type": request_headers.get("Content-Type"),
-                "request": payload,
+                "request": _captured_request(request_context["service"], payload),
                 "binary_request_bytes": len(raw_body) if raw_body else 0,
             },
         )
@@ -811,6 +811,13 @@ def _external_call_error_code(error: BaseException) -> str:
     if isinstance(error, TimeoutError):
         return "timeout"
     return "internal_error"
+
+
+def _captured_request(service: str, payload: Any) -> Any:
+    """Keep the OpenAI request body (sanitized on capture); other services get its shape."""
+    if service == "openai":
+        return payload
+    return observability.diagnostic_capture_response(payload)
 
 
 def external_call(
