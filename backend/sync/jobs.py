@@ -488,10 +488,12 @@ def _normalize_plan_push_entry(entry: Any, *, removable: bool) -> dict[str, Any]
     if not isinstance(entry, dict) or not re.fullmatch(r"[0-9a-f-]{36}", workout_id):
         raise JobValidationError("Jede Plan-Push-Einheit benötigt eine lokale UUID.")
     if "remove" in entry:
-        # Only Garmin removes a pushed workout; elsewhere the flag would be
+        # Only Garmin and Wahoo remove what they hold; elsewhere the flag would be
         # dropped and the entry silently pushed instead.
         if not removable or entry["remove"] is not True:
-            raise JobValidationError("remove ist nur für Garmin mit true zulässig.")
+            raise JobValidationError(
+                "remove ist nur für Garmin und Wahoo mit true zulässig."
+            )
         return {"library_workout_id": workout_id, "remove": True}
     payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
     if not SHA256_PATTERN.fullmatch(payload_hash):
@@ -515,7 +517,7 @@ def _normalize_plan_push_job(
         raise JobValidationError(
             "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten."
         )
-    removable = provider == ProviderId.GARMIN.value
+    removable = provider in {ProviderId.GARMIN.value, ProviderId.WAHOO.value}
     normalized_entries = [
         _normalize_plan_push_entry(entry, removable=removable) for entry in entries
     ]

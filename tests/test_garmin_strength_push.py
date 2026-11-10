@@ -327,9 +327,15 @@ class JobValidationTests(unittest.TestCase):
             result["payload"]["entries"],
         )
 
-    def test_remove_is_garmin_only_and_must_be_true(self) -> None:
+    def test_remove_is_garmin_and_wahoo_only_and_must_be_true(self) -> None:
+        self.assertEqual(
+            [{"library_workout_id": U1, "remove": True}],
+            self.normalize("wahoo", [{"library_workout_id": U1, "remove": True}])[
+                "payload"
+            ]["entries"],
+        )
         for provider, entry in (
-            ("wahoo", {"library_workout_id": U1, "remove": True}),
+            ("wahoo", {"library_workout_id": U1, "remove": False}),
             ("intervals", {"library_workout_id": U1, "remove": True}),
             ("garmin", {"library_workout_id": U1, "remove": False}),
             ("garmin", {"library_workout_id": U1}),
@@ -814,6 +820,32 @@ class PushTests(unittest.TestCase):
         self.update(U1, {**UNIT, "sport": "Ride"})
 
         self.assertEqual([U1], self.orphan_ids())
+
+    def test_a_linked_unit_that_became_unpushable_is_an_orphan(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+        unmapped = [{"name": "Copenhagen Plank", "sets": 2, "reps": 8}]
+        for name, structure in (("empty", []), ("unmapped", unmapped)):
+            with self.subTest(structure=name):
+                self.update(U1, {**UNIT, "strength_structure": structure})
+
+                self.assertEqual([U1], self.orphan_ids())
+                result = self.service.sync(
+                    {
+                        "entries": removal_entries(
+                            find_orphans_listed(self.database_manager)
+                        )
+                    }
+                )
+
+                self.assertEqual("ok", result["status"])
+                self.assertIsNone(self.link(U1))
+                self.assertEqual({}, self.garmin.workouts)
+                self.push((U1, self.update(U1, UNIT)))
+
+    def test_a_linked_unit_with_a_mappable_structure_is_no_orphan(self) -> None:
+        self.push((U1, self.insert(U1, UNIT)))
+
+        self.assertEqual([], self.orphan_ids())
 
     def test_a_unit_with_an_unreadable_payload_is_no_orphan(self) -> None:
         self.push((U1, self.insert(U1, UNIT)))

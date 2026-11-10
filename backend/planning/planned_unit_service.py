@@ -34,6 +34,7 @@ from backend.planning.repository import (
     planned_unit_rows_between,
 )
 from backend.planning.session_focus import carry_focus
+from backend.planning.wahoo_orphans import find_wahoo_orphans
 
 _REMOTE_LINKS = RemoteLinkRepository()
 UPDATE_SQL = (
@@ -381,6 +382,7 @@ class PlannedUnitService:
             intervals_orphans = (
                 find_intervals_orphans(db, self._today())[0] if push_state else []
             )
+            wahoo_orphans = find_wahoo_orphans(db)[0] if push_state else []
             pairs = [
                 (row, payload)
                 for row in rows
@@ -400,6 +402,7 @@ class PlannedUnitService:
                 orphans,
                 intervals_orphans,
                 self._today(),
+                wahoo_orphans,
             )
         return [payload for _row, payload in pairs]
 

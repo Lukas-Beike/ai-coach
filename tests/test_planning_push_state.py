@@ -7,6 +7,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -16,11 +17,14 @@ from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.schema import initialize_schema
 from backend.planning import strength_structure
 from backend.planning.exercise_mappings import remembered_exercises
+from backend.planning.garmin_orphans import GarminOrphan
+from backend.planning.intervals_orphans import IntervalsOrphan
 from backend.planning.push_state import (
     attach_push_state,
     garmin_baselines,
     garmin_fingerprint,
 )
+from backend.planning.wahoo_orphans import WahooOrphan
 from backend.providers.garmin_strength_workout import catalogue_available
 
 STRENGTH = {
@@ -69,6 +73,88 @@ class PushStateTests(unittest.TestCase):
                     baseline_hash=baseline,
                 ),
             )
+
+    def test_leftovers_ride_on_a_unit_even_when_no_provider_waits(self) -> None:
+        orphan = GarminOrphan("o1", "Alte Kraft", "2026-11-05")
+        wahoo = WahooOrphan("w1")
+        rows = [
+            {"local_id": "r1", "payload": json.dumps(RIDE), "sync_state": "synced"},
+            {
+                "local_id": "r2",
+                "payload": json.dumps({**RIDE, "date": "2026-11-12"}),
+                "sync_state": "synced",
+            },
+        ]
+        pairs = [(row, json.loads(row["payload"])) for row in rows]
+
+        attach_push_state(
+            pairs,
+            {},
+            orphans=[orphan],
+            wahoo_orphans=[wahoo],
+            today=date(2026, 11, 10),
+        )
+
+        self.assertNotIn("push_cleanup", pairs[0][1])
+        self.assertEqual(
+            {
+                "garmin": [{"id": "o1", "name": "Alte Kraft", "date": "2026-11-05"}],
+                "wahoo": [{"id": "w1", "name": wahoo.name, "date": ""}],
+            },
+            pairs[1][1]["push_cleanup"],
+        )
+
+    def test_a_deleted_unit_nearest_today_never_carries_the_leftovers(self) -> None:
+        rows = [
+            {
+                "local_id": "gone",
+                "payload": json.dumps(
+                    {**RIDE, "date": "2026-11-10", "local_deleted": True}
+                ),
+                "sync_state": "synced",
+            },
+            {
+                "local_id": "shown",
+                "payload": json.dumps({**RIDE, "date": "2026-11-14"}),
+                "sync_state": "synced",
+            },
+        ]
+        pairs = [(row, json.loads(row["payload"])) for row in rows]
+
+        attach_push_state(
+            pairs,
+            {},
+            orphans=[GarminOrphan("o1", "Alte Kraft", "2026-11-05")],
+            wahoo_orphans=[],
+            today=date(2026, 11, 10),
+        )
+
+        self.assertNotIn("push_cleanup", pairs[0][1])
+        self.assertIn("garmin", pairs[1][1]["push_cleanup"])
+
+    def test_a_pending_unit_keeps_the_leftovers_instead_of_a_second_carrier(
+        self,
+    ) -> None:
+        rows = [
+            {"local_id": "r1", "payload": json.dumps(RIDE), "sync_state": "synced"},
+            {
+                "local_id": "r2",
+                "payload": json.dumps({**RIDE, "date": "2026-11-12"}),
+                "sync_state": "local",
+            },
+        ]
+        pairs = [(row, json.loads(row["payload"])) for row in rows]
+
+        attach_push_state(
+            pairs,
+            {},
+            intervals_orphans=[IntervalsOrphan("i1", "Alt", "2026-11-11", "h")],
+            today=date(2026, 11, 10),
+        )
+
+        self.assertEqual(
+            [False, True], ["push_cleanup" in payload for _row, payload in pairs]
+        )
 
     @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
     def test_each_unit_carries_its_push_hash_and_pending_targets(self) -> None:

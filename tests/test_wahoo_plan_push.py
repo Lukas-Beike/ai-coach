@@ -17,6 +17,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning import library as planning_library
+from backend.planning.wahoo_orphans import find_wahoo_orphans
 from backend.providers.wahoo_client import WahooReconnectRequiredError
 from backend.providers.wahoo_plan_mapping import WahooPlanReferences
 from backend.sync.wahoo_plan_push import WahooPlanPushService, plan_baseline
@@ -308,6 +309,91 @@ class PushTests(PushCase):
         with self.assertRaises(AppError):
             self.service.sync({"entries": [{"library_workout_id": W1}]})
         self.assertEqual([], self.wahoo.calls)
+
+
+class RemoveTests(PushCase):
+    def link(self, local_id: str):
+        with self.database_manager.unit_of_work() as db:
+            return RemoteLinkRepository().get(
+                db, RemoteEntityKind.LIBRARY_WORKOUT, local_id, "wahoo"
+            )
+
+    def delete_row(self, local_id: str) -> None:
+        with self.database_manager.unit_of_work() as db:
+            db.execute("DELETE FROM workout_library WHERE local_id=?", (local_id,))
+
+    def orphan_ids(self) -> list[str]:
+        with self.database_manager.reader() as db:
+            return [item.local_id for item in find_wahoo_orphans(db)[0]]
+
+    def test_a_deleted_entry_is_listed_and_its_plan_removed_on_request(self) -> None:
+        digest = self.insert(W1, RIDE)
+        self.push((W1, digest))
+        self.delete_row(W1)
+        self.assertEqual([W1], self.orphan_ids())
+
+        result = self.service.sync(
+            {"entries": [{"library_workout_id": W1, "remove": True}]}
+        )
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(
+            ("synced", "removed"),
+            (result["results"][0]["status"], result["results"][0]["action"]),
+        )
+        self.assertEqual({}, self.wahoo.plans)
+        self.assertIsNone(self.link(W1))
+        self.assertEqual([], self.orphan_ids())
+
+    def test_a_live_entry_is_no_orphan_and_is_not_removed(self) -> None:
+        self.push((W1, self.insert(W1, RIDE)))
+        self.wahoo.calls.clear()
+
+        result = self.service.sync(
+            {"entries": [{"library_workout_id": W1, "remove": True}]}
+        )
+
+        self.assertEqual([], self.orphan_ids())
+        self.assertEqual("conflict", result["results"][0]["status"])
+        self.assertEqual([], self.wahoo.calls)
+        self.assertIsNotNone(self.link(W1))
+
+    def test_a_failed_delete_keeps_the_link_for_the_next_try(self) -> None:
+        self.push((W1, self.insert(W1, RIDE)))
+        self.delete_row(W1)
+        self.wahoo.delete_plan = Mock(
+            side_effect=AppError(
+                502, "SECRET", reason="upstream_rejected", upstream_status=500
+            )
+        )
+
+        result = self.service.sync(
+            {"entries": [{"library_workout_id": W1, "remove": True}]}
+        )
+
+        self.assertEqual("error", result["status"])
+        self.assertNotIn("SECRET", result["results"][0]["error"])
+        self.assertIsNotNone(self.link(W1))
+        self.assertEqual([W1], self.orphan_ids())
+
+    def test_remove_without_a_link_has_nothing_left_to_do(self) -> None:
+        result = self.service.sync(
+            {"entries": [{"library_workout_id": W2, "remove": True}]}
+        )
+
+        self.assertEqual("already_synced", result["results"][0]["status"])
+        self.assertEqual([], self.wahoo.calls)
+
+    def test_a_removal_may_not_name_an_entry_twice(self) -> None:
+        with self.assertRaises(AppError):
+            self.service.sync(
+                {
+                    "entries": [
+                        {"library_workout_id": W1, "remove": True},
+                        {"library_workout_id": W1, "remove": True},
+                    ]
+                }
+            )
 
 
 class DeleteTests(PushCase):
