@@ -40,7 +40,11 @@ class WeatherCacheStore:
             )
 
     def store_refresh(
-        self, state: cache.WeatherCacheState, refreshed_cache: dict[str, Any]
+        self,
+        state: cache.WeatherCacheState,
+        refreshed_cache: dict[str, Any],
+        *,
+        today: date,
     ) -> bool:
         """Return true if the location changed before the atomic writes."""
         with self._database_manager.unit_of_work() as db:
@@ -50,6 +54,7 @@ class WeatherCacheStore:
                 history.decode_history(self._key_values.get(db, cache.HISTORY_KEY)),
                 state.cached if state.cache_matches else {},
                 refreshed_cache,
+                today=today,
             )
             self._key_values.set(
                 db,
@@ -210,9 +215,12 @@ class WeatherService:
         refresh_id = self._refresh_journal.start() if track_refresh else None
         try:
             with self._refresh_lock:
+                if not force and self._adopt_stored_fresh(state):
+                    self._refresh_journal.finish(refresh_id, "skipped", "already_fresh")
+                    return False
                 refreshed_cache = self._client_factory().fetch(state.query)
                 location_changed = self._cache_store.store_refresh(
-                    state, refreshed_cache
+                    state, refreshed_cache, today=self._today()
                 )
             if location_changed:
                 self._refresh_journal.finish(refresh_id, "skipped", "location_changed")
@@ -225,6 +233,31 @@ class WeatherService:
         except Exception as exc:  # noqa: BLE001 - provider boundary normalizes failures
             return self._record_failure(state, exc, refresh_id)
         return False
+
+    def _adopt_stored_fresh(self, state: cache.WeatherCacheState) -> bool:
+        """Take a fresh forecast another refresh stored while this one waited."""
+        query, cached_value, failure_value = self._cache_store.read()
+        if query != state.query:
+            return False
+        stored = cache.cache_state(
+            query,
+            cached_value,
+            failure_value,
+            now=self._now(),
+            cache_seconds=self._retry_policy.cache_seconds,
+        )
+        if (
+            not stored.cache_matches
+            or stored.failure
+            or stored.cache_age >= self._retry_policy.cache_seconds
+        ):
+            return False
+        state.cached = stored.cached
+        state.cache_matches = True
+        state.cache_age = stored.cache_age
+        state.failure = {}
+        state.error = None
+        return True
 
     def refresh_due(self) -> bool:
         """Return whether an unforced refresh would read the forecast now."""

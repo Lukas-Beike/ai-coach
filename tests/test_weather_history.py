@@ -1,7 +1,8 @@
 import unittest
-from datetime import date
+from datetime import date, timedelta
 
 from backend.weather.history import (
+    HISTORY_HORIZON_DAYS,
     add_to_planned,
     calendar_state,
     decode_history,
@@ -45,7 +46,12 @@ class WeatherHistoryTests(unittest.TestCase):
         }
 
         remembered = remember_forecasts(
-            history, None, {"forecast": []}, first_cache, second_cache
+            history,
+            None,
+            {"forecast": []},
+            first_cache,
+            second_cache,
+            today=date(2026, 9, 20),
         )
 
         self.assertEqual(history, {"2026-09-18": {"note": "preserve"}})
@@ -93,6 +99,44 @@ class WeatherHistoryTests(unittest.TestCase):
         self.assertFalse(state["days"][2]["archived_forecast"])
         self.assertEqual(history["2026-09-20"]["temperature_max"], 1)
         self.assertNotIn("archived_forecast", weather["days"][0])
+
+    def test_history_older_than_the_horizon_is_pruned_when_remembering(self):
+        today = date(2026, 9, 20)
+        horizon = today - timedelta(days=HISTORY_HORIZON_DAYS)
+        history = {
+            (horizon - timedelta(days=1)).isoformat(): {"date": "too old"},
+            horizon.isoformat(): {"date": "kept"},
+            "2026-09-19": {"date": "2026-09-19"},
+        }
+        self.assertEqual(HISTORY_HORIZON_DAYS, 14)
+
+        remembered = remember_forecasts(history, today=today)
+
+        self.assertEqual(sorted(remembered), [horizon.isoformat(), "2026-09-19"])
+        self.assertEqual(horizon.isoformat(), "2026-09-06")
+
+    def test_a_cache_day_beyond_the_horizon_is_not_archived(self):
+        cache = {
+            "fetched_at": "saved",
+            "forecast": {
+                "daily": {
+                    "time": ["2026-01-01", "2026-09-19"],
+                    "temperature_2m_max": [1, 2],
+                }
+            },
+        }
+        remembered = remember_forecasts({}, cache, today=date(2026, 9, 20))
+        self.assertEqual(sorted(remembered), ["2026-09-19"])
+
+    def test_calendar_state_stays_bounded_for_an_old_unpruned_history(self):
+        today = date(2026, 9, 20)
+        days = [
+            (today - timedelta(days=offset)).isoformat() for offset in range(1, 400)
+        ]
+        history = {day: {"date": day} for day in days}
+        state = calendar_state(history, {"days": []}, today=today)
+        self.assertEqual(len(state["days"]), HISTORY_HORIZON_DAYS)
+        self.assertEqual(state["days"][0]["date"], "2026-09-06")
 
     def test_calendar_state_accepts_malformed_inputs(self):
         self.assertEqual(
