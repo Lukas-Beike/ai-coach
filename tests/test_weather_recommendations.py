@@ -49,14 +49,24 @@ class WeatherRecommendationsTests(unittest.TestCase):
             {"type": "Ride", "environment": "indoor", "name": "Rolle"},
             {"sport": "ride", "environment": "virtual"},
             {"sport": "run", "environment": "indoor"},
+            # A resolved type with an unknown environment still reads indoor names.
+            {"type": "Ride", "name": "Rolle"},
+            {"type": "Ride", "name": "Zwift Rennen"},
+            {"type": "Run", "name": "Laufband Intervalle"},
+            {"name": "Ablauf Besprechung"},
         ):
             self.assertFalse(is_outdoor_activity(event), event)
         for event in (
             {"type": "Run", "name": "Strukturlauf"},
             {"sport": "run", "environment": "outdoor"},
-            {"type": "Ride", "name": "Rolle"},
+            {"type": "Ride", "name": "Ausfahrt"},
             {"name": "Dauerlauf locker"},
             {"name": "Rennrad Tour"},
+            {"name": "Tempolauf"},
+            {"name": "Waldlauf"},
+            {"name": "Regenerationslauf"},
+            {"name": "Rennradtour"},
+            {"name": "Radausfahrt"},
         ):
             self.assertTrue(is_outdoor_activity(event), event)
         self.assertTrue(is_cycling_activity({"type": "Ride", "name": "Laufrad"}))

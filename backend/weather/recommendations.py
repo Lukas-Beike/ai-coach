@@ -25,9 +25,12 @@ _INDOOR_WORDS = re.compile(
 )
 _RIDE_WORDS = re.compile(
     r"\b(?:rides?|riding|cycling|bik(?:e|es|ing)|bicycle|rad|radfahren|radtour|"
-    r"rennrad|velo|gravel\w*|mtb|mountain.?bik\w*)\b"
+    r"(?:renn)?rad\w*|velo|gravel\w*|mtb|mountain.?bik\w*)\b"
 )
-_RUN_WORDS = re.compile(r"\b(?:runs?|running|jog\w*|(?:dauer|intervall)?lauf\w*)\b")
+# German compounds end in -lauf ("Tempolauf", "Waldlauf"); indoor words win first.
+_RUN_WORDS = re.compile(
+    r"\b(?:runs?|running|jog\w*)\b|\b(?!ab|ver)\w*lauf(?:e|en|s)?\b"
+)
 
 
 def _event_sport(event: dict[str, Any]) -> tuple[Sport | None, Environment]:
@@ -39,7 +42,14 @@ def _event_sport(event: dict[str, Any]) -> tuple[Sport | None, Environment]:
             texts.append(value)
             resolved = resolve_workout_sport(value, event.get("environment"))
             if resolved is not None:
-                return resolved.sport, resolved.environment
+                environment = resolved.environment
+                name = str(event.get("name") or "")
+                if environment is Environment.UNKNOWN and _INDOOR_WORDS.search(
+                    f"{value} {name}".casefold()
+                ):
+                    # "Ride" named "Zwift Rennen" or "Run" on the Laufband.
+                    environment = Environment.INDOOR
+                return resolved.sport, environment
     environment = parse_environment(event.get("environment")) or Environment.UNKNOWN
     text = " ".join([*texts, str(event.get("name") or "")]).casefold()
     if environment is Environment.UNKNOWN and _INDOOR_WORDS.search(text):
