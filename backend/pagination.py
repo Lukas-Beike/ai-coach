@@ -8,6 +8,8 @@ from typing import Any
 
 API_PAGE_DEFAULT = 100
 API_PAGE_MAX = 250
+# Real cursors are a few dozen characters; anything longer is crafted input.
+PAGE_CURSOR_MAX_CHARS = 512
 
 
 def api_page_limit(
@@ -25,10 +27,10 @@ def encode_page_cursor(value: Any) -> str:
 
 
 def decode_page_cursor(value: Any) -> Any | None:
-    if not value:
+    if not value or len(str(value)) > PAGE_CURSOR_MAX_CHARS:
         return None
     try:
         padding = "=" * (-len(str(value)) % 4)
         return json.loads(base64.urlsafe_b64decode(f"{value}{padding}"))
-    except TypeError, ValueError:
+    except TypeError, ValueError, RecursionError:
         return None

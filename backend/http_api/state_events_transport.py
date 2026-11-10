@@ -1,10 +1,15 @@
 """Transport orchestration for the authenticated public state-event stream."""
 
+import logging
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from backend.errors import AppError, ClientDisconnected
+from backend.errors import AppError, ClientDisconnected, DatabaseBusyError
+
+_LOGGER = logging.getLogger("intervals_coach")
+# Event ids are positive integers that fit a signed 64-bit value.
+_MAX_CURSOR_DIGITS = 19
 
 
 class StateEventTransport:
@@ -41,7 +46,11 @@ class StateEventTransport:
     ) -> None:
         query = parse_qs(urlparse(request_target).query)
         raw_since = query.get("since", ["0"])[0]
-        if not (raw_since.isascii() and raw_since.isdigit()):
+        if not (
+            raw_since.isascii()
+            and raw_since.isdigit()
+            and len(raw_since) <= _MAX_CURSOR_DIGITS
+        ):
             raise AppError(
                 400, "Die Event-ID ist ungültig.", reason="invalid_event_cursor"
             )
@@ -49,6 +58,12 @@ class StateEventTransport:
         set_connection_timeout(None)
         try:
             send_headers()
+        except ClientDisconnected:
+            return
+        # The 200 status line is out: an error from here on must end the stream,
+        # never become a second HTTP response written into it. The client's
+        # event source reconnects with its last event id.
+        try:
             since, _ = self.send_batch(
                 self.event_buffer.since(since), since, send_event
             )
@@ -67,3 +82,14 @@ class StateEventTransport:
                     )
         except ClientDisconnected:
             return
+        except Exception as exc:
+            expected = isinstance(exc, AppError | DatabaseBusyError)
+            _LOGGER.log(
+                logging.WARNING if expected else logging.ERROR,
+                "State event stream ended after an error",
+                extra={
+                    "event": "state_events_stream_error",
+                    "context": {"error_type": type(exc).__name__},
+                },
+                exc_info=not expected,
+            )

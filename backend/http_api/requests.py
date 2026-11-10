@@ -148,17 +148,18 @@ def read_json(
     """Read an object-shaped JSON request with the standard body limit."""
     if "application/json" not in str(headers.get("Content-Type", "")):
         raise error(415, "Content-Type muss application/json sein.")
+    body = read_body(
+        headers,
+        read_bytes,
+        max_bytes,
+        error=error,
+        too_large_status_threshold=too_large_status_threshold,
+    )
     try:
-        payload = json.loads(
-            read_body(
-                headers,
-                read_bytes,
-                max_bytes,
-                error=error,
-                too_large_status_threshold=too_large_status_threshold,
-            )
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        payload = json.loads(body)
+    # UnicodeDecodeError, JSONDecodeError and the integer digit limit are all
+    # ValueErrors; deeply nested input raises RecursionError.
+    except (ValueError, RecursionError) as exc:
         raise error(400, "Ungültiges JSON.") from exc
     if not isinstance(payload, dict):
         raise error(400, "Der JSON-Inhalt muss ein Objekt sein.")

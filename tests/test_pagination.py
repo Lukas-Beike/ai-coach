@@ -1,4 +1,6 @@
+import base64
 import unittest
+from unittest.mock import patch
 
 from backend.http_api.pagination import (
     api_page_limit,
@@ -16,6 +18,21 @@ class PaginationTests(unittest.TestCase):
     def test_invalid_or_empty_cursor_decodes_to_none(self):
         self.assertIsNone(decode_page_cursor(None))
         self.assertIsNone(decode_page_cursor("not-a-cursor"))
+
+    def test_oversize_cursor_is_rejected_before_decoding(self):
+        # A valid cursor that only exceeds the 512-character bound.
+        long_value = encode_page_cursor("1" * 5000)
+        self.assertGreater(len(long_value), 512)
+        with patch("backend.pagination.json.loads") as loads:
+            self.assertIsNone(decode_page_cursor(long_value))
+        loads.assert_not_called()
+        self.assertEqual(decode_page_cursor(encode_page_cursor("1" * 300)), "1" * 300)
+
+    def test_cursor_decoding_survives_recursion_errors(self):
+        cursor = base64.urlsafe_b64encode(b"[" * 380).decode().rstrip("=")
+        self.assertLessEqual(len(cursor), 512)
+        with patch("backend.pagination.json.loads", side_effect=RecursionError):
+            self.assertIsNone(decode_page_cursor(cursor))
 
     def test_page_limit_uses_default_and_bounds(self):
         self.assertEqual(api_page_limit(None, 10, 20), 10)
