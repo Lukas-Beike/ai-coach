@@ -159,7 +159,7 @@ _STRENGTH_PATTERNS: Final = (
     ("mobility", "mobility|mobilit(?:ä|a|ae)t|dehn|stretch"),
 )
 _ENDURANCE_PATTERNS: Final = (
-    ("recovery", r"regeneration|recovery|\bregen\b"),
+    ("recovery", r"regeneration|recovery"),
     ("threshold", r"schwelle|threshold"),
     ("vo2max", r"vo2|intervalle|\bintervals\b(?!\.icu)"),
     ("tempo", r"\btempo"),

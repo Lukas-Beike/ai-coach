@@ -480,5 +480,17 @@ class UnambiguousValuesTests(unittest.TestCase):
         )
 
 
+class RainIsNotRecoveryTests(unittest.TestCase):
+    def test_regen_the_weather_does_not_derive_recovery(self):
+        for text in ("Lauf im Regen", "bei Regen Laufband", "Regen-Lauf"):
+            with self.subTest(text=text):
+                found = session_focus(unit("Run", name=text, description="- 45m Z2 HR"))
+                self.assertNotEqual(found.value, "recovery")
+        for text in ("Regeneration", "Recovery"):
+            with self.subTest(text=text):
+                found = session_focus(unit("Run", name=text, description=""))
+                self.assertEqual(found.value, "recovery")
+
+
 if __name__ == "__main__":
     unittest.main()

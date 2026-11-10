@@ -28,6 +28,7 @@ from backend.history.undo_service import HistoryUndoService
 from backend.planning import planned_units
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.changes import StructuredTrainingChangeValidator
+from backend.planning.local_start import known_start
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
 from backend.providers import garmin_strength_workout
@@ -556,6 +557,29 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(before["sync_status"], "synced")
         self.assertEqual(after["sync_status"], "local")
         self.assertEqual(self.events, ["changed"])
+
+    def test_update_rejects_invalid_duration_and_past_date_without_saving(self):
+        self.service.create(self.workout())
+        before = self.state()
+        for values in (
+            {"duration_minutes": 0},
+            {"duration_minutes": 2000},
+            {"duration_minutes": "45.5"},
+            {"date": "2026-08-20"},
+        ):
+            with self.subTest(values=values), self.assertRaises(AppError) as caught:
+                self.service.update(str(self.id), values)
+            self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(self.state(), before)
+        self.service.update(str(self.id), {"duration_minutes": "30"})
+        payload = json.loads(self.state()[0][0]["payload"])
+        self.assertEqual(payload["duration_minutes"], 30)
+
+    def test_unknown_start_stays_unknown_across_date_move_and_undo(self):
+        self.service.create(self.workout())
+        self.service.update(str(self.id), {"date": "2026-09-23"})
+        payload = json.loads(self.state()[0][0]["payload"])
+        self.assertIsNone(known_start(payload))
 
     def test_environment_only_update_is_persisted(self):
         self.service.create(self.workout())

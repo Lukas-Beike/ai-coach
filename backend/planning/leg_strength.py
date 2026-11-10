@@ -22,13 +22,14 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Final
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
 from backend.planning import running_week
+from backend.planning.local_start import known_start
 from backend.planning.season import target_phase
 from backend.planning.session_focus import (
     SessionFocus,
@@ -173,16 +174,6 @@ def _monday(unit: Mapping[str, Any]) -> date | None:
     return day - timedelta(days=day.weekday())
 
 
-def _start(unit: Mapping[str, Any]) -> datetime | None:
-    try:
-        start = datetime.fromisoformat(str(unit.get("starts_at_local") or ""))
-    except ValueError:
-        return None
-    start = start.replace(tzinfo=None)
-    # Imported workouts without a time carry a synthetic midnight: unknown.
-    return None if start.time() == time.min else start
-
-
 def _by_week(
     units: Iterable[Mapping[str, Any]],
 ) -> dict[date, list[Mapping[str, Any]]]:
@@ -287,7 +278,7 @@ def _seconds(unit: Mapping[str, Any]) -> float:
 
 
 def _gap_hours(strength: Mapping[str, Any], key: Mapping[str, Any]) -> float | None:
-    first, second = _start(strength), _start(key)
+    first, second = known_start(strength), known_start(key)
     if first is None or second is None:
         return None
     return (second - first).total_seconds() / 3600
@@ -444,7 +435,7 @@ def _strength_hours(
 ) -> tuple[bool, float | None]:
     """Whether a strength unit lies in the window before ``start``, and its gap."""
     if planned:
-        when = _start(unit)
+        when = known_start(unit)
         if when is None:
             # A date-only plan has no time: only the whole day before counts.
             day = date.fromisoformat(_day(unit) or "9999-12-31")

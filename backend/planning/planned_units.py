@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import uuid
+from datetime import date
 from typing import Any
 
 from backend.activities.workout_text import canonical_workout_zones
@@ -21,6 +22,10 @@ from backend.planning import library as planning_library
 from backend.planning import strength_structure
 from backend.planning import workouts as planning_workouts
 from backend.planning.sport import apply_sport_update
+from backend.planning.workout_export import (
+    past_export_horizon,
+    validated_duration_minutes,
+)
 from backend.providers.intervals_workouts import (
     DERIVED_WORKOUT_KEYS,
     PLANNING_DURATION_FIELD,
@@ -245,6 +250,10 @@ def _apply_planned_workout_update(
         if key in values:
             candidate[key] = values.get(key)
     strength_structure.drop_stale(candidate, values)
+    if "duration_minutes" in values:
+        candidate["duration_minutes"] = validated_duration_minutes(
+            values["duration_minutes"]
+        )
     if "starts_at_local" in values:
         candidate["starts_at_local"] = planning_workouts.validate_workout_start_date(
             values["starts_at_local"], str(candidate.get("date") or "")
@@ -254,7 +263,7 @@ def _apply_planned_workout_update(
 
 
 def prepare_planned_workout_date(
-    candidate: dict[str, Any], current: dict[str, Any]
+    candidate: dict[str, Any], current: dict[str, Any], *, today: date
 ) -> bool:
     candidate["date"] = str(candidate.get("date") or "").strip()
     try:
@@ -268,6 +277,12 @@ def prepare_planned_workout_date(
     except TypeError, ValueError:
         current_date = str(current.get("date") or "")
     date_changed = candidate["date"] != current_date
+    if (
+        date_changed
+        and past_export_horizon(candidate["date"], today)
+        and not past_export_horizon(current_date, today)
+    ):
+        raise AppError(400, "Eine Einheit in der Vergangenheit wird nicht geplant.")
     if date_changed and candidate.get("starts_at_local") in (
         None,
         current.get("starts_at_local"),
