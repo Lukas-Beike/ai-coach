@@ -1,12 +1,11 @@
-# Spec Delta
+# isolated-test-execution Specification
 
 ## Purpose
-
 Provide developers and CI with reproducible, isolated test execution that reduces avoidable setup and fixture work while retaining the selected functional, responsive, security, and persistence checks and their failure signals.
 
-Implemented by `scripts/run_browser_tests.py`, `scripts/run_sqlcipher_tests.py` (via `tests/run_sqlcipher_tests.ps1`), `scripts/browser_environment.json`, `e2e/browser_durations.json` and the `e2e` jobs of `.github/workflows/publish-container.yml`. Measured wall-time and hosted-runner goals are not yet verified; see the change tasks.
+Implemented by `scripts/run_browser_tests.py`, `scripts/run_sqlcipher_tests.py` (via `tests/run_sqlcipher_tests.ps1`), `scripts/browser_environment.json`, `e2e/browser_durations.json` and the `e2e` jobs of `.github/workflows/publish-container.yml`. Measured wall-time and hosted-runner goals are not yet verified; open measurement tasks are tracked in issue #2149.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Explicit selection preserves the complete validation set
 The test entry points SHALL expose explicit focused and complete selections. Complete execution SHALL preserve the existing test cases, assertions, and project assignments. Focused execution SHALL identify its limited selection and SHALL NOT represent itself as complete validation.
@@ -159,4 +158,4 @@ Performance comparisons SHALL distinguish setup, fixture, authentication, test e
 - **WHEN** a benchmark lacks Docker, a browser, SQLCipher support, or a recoverable terminal result
 - **THEN** that evidence is reported as blocked, not run, or unverified rather than successful.
 
-Evidence: the `Measuring validation performance` section of `README.md`, the phase timings in each run `manifest.json`, `tests/test_durations.json`. No comparable local browser baseline or five hosted runs have been recorded, so the goals are unverified (tasks 1.2, 7.2, 7.3).
+Evidence: the `Measuring validation performance` section of `docs/testing.md`, the phase timings in each run `manifest.json`, `tests/test_durations.json`. No comparable local browser baseline or five hosted runs have been recorded, so the goals are unverified (tasks 1.2, 7.2, 7.3).
