@@ -97,6 +97,12 @@ SYNC_JOB_LIST_LIMIT = 50
 SYNC_JOB_RETENTION_DAYS = 30
 SYNC_JOB_KEEP_NEWEST = 200
 SYNC_JOB_MAX_ATTEMPTS = 3
+# Served by idx_sync_jobs_backfill_end; keep the filter and the expression in step.
+BACKFILL_CONTINUATION_SQL = (
+    "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? "
+    "AND requested_by='backfill' AND json_extract(payload, '$.end_date')=? "
+    "AND created_at>=? AND id!=? LIMIT 1"
+)
 MAX_JOB_REFRESH_DAYS = 3660
 MAX_EMPTY_BACKFILL_CHUNKS = 100
 INVALID_NUTRITION_MANIFEST_ERROR = "Invalid nutrition approval manifest."
@@ -727,9 +733,7 @@ class SyncJobStore:
         """
         with self._database_manager.reader() as db:
             row = db.execute(
-                "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? "
-                "AND requested_by='backfill' AND json_extract(payload, '$.end_date')=? "
-                "AND created_at>=? AND id!=? LIMIT 1",
+                BACKFILL_CONTINUATION_SQL,
                 (provider, job_type, end_date, created_since, exclude_job_id),
             ).fetchone()
             return row is not None

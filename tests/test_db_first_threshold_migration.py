@@ -26,7 +26,7 @@ from backend.db.schema import (
     database_schema_signature,
     initialize_schema,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V24
+from backend.db.schema_history import SHAPE_SCHEMA_V24, SHAPE_SCHEMA_V25
 
 RELEASES = (21, 22, 23, 24)
 NEW_COLUMN = "dfa_alpha1"
@@ -77,7 +77,7 @@ class FirstThresholdMigrationTests(unittest.TestCase):
                     db.execute("PRAGMA user_version").fetchone()[0],
                     CURRENT_SCHEMA_VERSION,
                 )
-                self.assertEqual(CURRENT_SCHEMA_VERSION, 25)
+                self.assertEqual(CURRENT_SCHEMA_VERSION, 26)
                 self.assertTrue(database_schema_is_current(db))
                 self.assertEqual(detail_rows(db), before)
                 self.assertEqual(
@@ -121,7 +121,7 @@ class FirstThresholdMigrationTests(unittest.TestCase):
                 with (
                     mock.patch.dict(
                         migrations.UPGRADE_STEPS,
-                        {SHAPE_SCHEMA_V24: (SHAPE_CURRENT, failing_last_step)},
+                        {SHAPE_SCHEMA_V24: (SHAPE_SCHEMA_V25, failing_last_step)},
                     ),
                     self.assertRaisesRegex(RuntimeError, "injected"),
                 ):

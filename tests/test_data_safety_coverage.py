@@ -167,7 +167,7 @@ EXPORT_COLUMNS_NOT_EXPORTED: dict[str, dict[str, str]] = {
 # Schema version -> export format version that documents it. Bump both together.
 # Format 14 adds provider_settings.json without a schema change; format 17
 # adds table bookkeeping and coach_action_proposals.jsonl, also without one.
-EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 14, 24: 15, 25: 17}
+EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 14, 24: 15, 25: 17, 26: 17}
 
 # Key/value families (exact key or prefix ending in ":") and what the privacy
 # export does with them. "exported": application_state.json; "excluded": never

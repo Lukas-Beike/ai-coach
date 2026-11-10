@@ -27,6 +27,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V22,
     SHAPE_SCHEMA_V23,
     SHAPE_SCHEMA_V24,
+    SHAPE_SCHEMA_V25,
     released_shape,
 )
 
@@ -42,8 +43,10 @@ V22_FIXTURE = FIXTURES / "schema_v22.sql.txt"
 V23_FIXTURE = FIXTURES / "schema_v23.sql.txt"
 # Schema version 24: heart rate and power source and sensors of stream sets.
 V24_FIXTURE = FIXTURES / "schema_v24.sql.txt"
+# Schema version 25: the first threshold estimate of stream sets.
+V25_FIXTURE = FIXTURES / "schema_v25.sql.txt"
 OLDEST_SUPPORTED_FIXTURE = V21_FIXTURE
-RELEASED_FIXTURES = (V21_FIXTURE, V22_FIXTURE, V23_FIXTURE, V24_FIXTURE)
+RELEASED_FIXTURES = (V21_FIXTURE, V22_FIXTURE, V23_FIXTURE, V24_FIXTURE, V25_FIXTURE)
 CURRENT_FIXTURE = FIXTURES / f"schema_v{CURRENT_SCHEMA_VERSION}.sql.txt"
 
 try:
@@ -239,6 +242,13 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         db.executescript(V24_FIXTURE.read_text(encoding="utf-8"))
         self.assertEqual(
             released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V24
+        )
+
+    def test_frozen_v25_fixture_is_the_recorded_released_shape(self):
+        db = self.connect()
+        db.executescript(V25_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V25
         )
 
     def test_every_released_schema_upgrades_to_the_frozen_current_signature(self):
