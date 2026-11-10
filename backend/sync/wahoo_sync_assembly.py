@@ -32,6 +32,7 @@ from backend.sync.wahoo_library_state import WahooLibraryState
 from backend.sync.wahoo_plan_push import WahooPlanPushService
 from backend.sync.wahoo_stream_backfill import (
     WAHOO_BATCH_LIMIT,
+    WAHOO_REPLAY_DAYS,
     WahooStreamMapping,
     WahooStreamSource,
 )
@@ -151,6 +152,7 @@ class WahooSyncAssembly:
             earliest_date=inputs.history_earliest_date,
             batch_limit=WAHOO_BATCH_LIMIT,
             operation=inputs.resync_gate.operation,
+            replay_days=WAHOO_REPLAY_DAYS,
         )
 
     def workout_export(self) -> WahooWorkoutExport:
