@@ -1337,7 +1337,7 @@ function coachActionDescription(proposal) {
     const target = proposal.target_system === providerIds().garmin ? "deine Garmin-Uhr" : "Intervals.icu";
     return `Diese Änderung wird an ${target} gesendet. Sie wird erst ausgeführt, wenn du sie hier freigibst.`;
   }
-  return "Diese Garmin-Aufzeichnung ist nahezu identisch mit der Wahoo-Einheit. Nur das Garmin-Duplikat aus Intervals.icu löschen?";
+  return "Unbekannte Aktion";
 }
 
 function coachActionExpired(proposal) {
@@ -1368,7 +1368,6 @@ function coachActionDiff(proposal) {
 }
 
 function coachActionButtons(proposal) {
-  const undo = proposal.action_type === "undo_change";
   const localWrite = proposal.action_type === "local_coach_write";
   const remoteWrite = proposal.action_type === "remote_coach_write";
   const actions = document.createElement("div");
@@ -1404,10 +1403,8 @@ function coachActionButtons(proposal) {
     confirm.textContent = proposal.object_ids?.operation === "save_nutrition_product"
       ? "Produkt speichern"
       : "Mahlzeitvorlage speichern";
-  } else if (undo) {
-    confirm.textContent = "Änderung zurücknehmen";
   } else {
-    confirm.textContent = "Garmin-Duplikat löschen";
+    confirm.textContent = "Änderung zurücknehmen";
   }
   confirm.addEventListener("click", () => executeCoachActionProposal(proposal, confirm));
   actions.append(later, confirm);
@@ -1421,6 +1418,12 @@ function coachActionCard(proposal) {
   const description = document.createElement("p");
   description.textContent = coachActionDescription(proposal);
   card.append(description);
+  // An unknown type is an error card without any button: it can neither be confirmed nor cancelled here.
+  if (!["undo_change", "remote_coach_write", "local_coach_write"].includes(proposal.action_type)) {
+    card.dataset.proposalStatus = "unknown";
+    description.setAttribute("role", "alert");
+    return card;
+  }
   if (state.coachActionUnknownIds?.has(proposal.id)) {
     const status = document.createElement("p");
     status.textContent = "Ausführung unklar. Die Freigabe bleibt gesperrt, bis der Status geprüft ist.";
@@ -1452,7 +1455,7 @@ function renderCoachActionReview() {
   const root = $("#coachActionReview");
   const content = $("#coachActionReviewContent");
   if (!root || !content) return;
-  const proposals = (state.coachActionProposals || []).filter((proposal) => ["undo_change", "remote_coach_write", "local_coach_write"].includes(proposal.action_type));
+  const proposals = state.coachActionProposals || [];
   content.replaceChildren(...proposals.map(coachActionCard));
   root.hidden = proposals.length === 0;
   $("#coachActionReviewTitle").textContent = "Aktion prüfen";

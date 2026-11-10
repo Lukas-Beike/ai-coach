@@ -61,9 +61,11 @@ class IntervalsNutritionSyncService:
                 reason="not_configured",
             )
 
+        # A day emptied after an earlier sync has no intake: send "unset", not 0.
+        kcal = None if summary.get("entry_count") == 0 else summary["total_kcal"]
         payload: dict[str, Any] = {
             "id": meal_date,
-            "kcalConsumed": summary["total_kcal"],
+            "kcalConsumed": UNSET_REMOTE_NUMBER if kcal is None else kcal,
         }
         # Intervals.icu only updates the fields that are sent, so an unknown
         # macro must be sent as -1 ("unset") to clear a value synced earlier.
@@ -88,7 +90,7 @@ class IntervalsNutritionSyncService:
                 "pending": not current,
                 "remote_endpoint": endpoint,
                 "synced_summary": {
-                    "kcalConsumed": summary["total_kcal"],
+                    "kcalConsumed": kcal,
                     "carbs": summary.get("total_carbs_g"),
                     "protein": summary.get("total_protein_g"),
                     "fat": summary.get("total_fat_g"),

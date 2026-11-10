@@ -104,6 +104,9 @@ def split_unmatched_sessions(
     """
     if not touched_dates:
         return 0
+    # Sessions whose joined copies vanished earlier, for example in the 2.0.0
+    # Intervals.icu purge, would still read as linked.
+    canonical_store.reset_unbundled_link_kinds(db, now=now)
     rows = canonical_store.linkable_activity_rows(
         db,
         start=(min(touched_dates) - LINK_MARGIN).isoformat(),

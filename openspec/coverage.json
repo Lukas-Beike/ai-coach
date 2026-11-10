@@ -1452,13 +1452,6 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/diagnostics/canonical_counts.py",
-      "capabilities": [
-        "diagnostics-and-observability"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
       "path": "backend/diagnostics/canonical_coverage.py",
       "capabilities": [
         "diagnostics-and-observability"
@@ -2933,14 +2926,6 @@
     },
     {
       "path": "backend/providers/intervals.py",
-      "capabilities": [
-        "provider-connections",
-        "provider-normalization-and-provenance"
-      ],
-      "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
-    },
-    {
-      "path": "backend/providers/intervals_activity_fields.py",
       "capabilities": [
         "provider-connections",
         "provider-normalization-and-provenance"

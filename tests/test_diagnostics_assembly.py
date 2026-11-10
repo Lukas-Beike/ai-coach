@@ -28,7 +28,6 @@ class DiagnosticsAssemblyTests(unittest.TestCase):
             "app_name": "Pacecraft · AI Coach",
             "app_version": "test",
             "utc_now": Mock(),
-            "sync_state": Mock(),
             "garmin_projection": Mock(),
             "garmin_client_factory": Mock(),
             "garmin_fixture_loader": Mock(),
@@ -58,7 +57,6 @@ class DiagnosticsAssemblyTests(unittest.TestCase):
                     app_version=self.deps["app_version"],
                 ),
                 provider_health=DiagnosticProviderHealth(
-                    sync_state=self.deps["sync_state"],
                     provider_state=self.deps["provider_state"],
                     provider_freshness=self.deps["provider_freshness"],
                     redactor=self.deps["redactor"],

@@ -89,7 +89,7 @@ activity IDs no longer resolve.
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |
 | POST | `/api/equipment/sensor` | Link a recorded sensor to equipment, or unlink it | CSRF |
 | POST | `/api/profile/first-threshold/adopt` | Store the shown first threshold estimate (`percent_lthr`) as the profile's first threshold with origin `estimated`; `replace_measured: true` is needed when a measured value is stored | CSRF |
-| POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/entry/add-product`, `/api/nutrition/sync` | Write, delete or synchronize nutrition entries, or add a saved product to a logged meal | CSRF |
+| POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/entry/add-product` | Write or delete nutrition entries, or add a saved product to a logged meal | CSRF |
 | POST | `/api/nutrition/yazio/check` | Explicitly check Yazio authentication and record an in-memory result | CSRF |
 | POST | `/api/providers/{id}/check` | Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result | CSRF |
 | POST | `/api/nutrition/products`, `/api/nutrition/products/lookup`, `/api/nutrition/products/extract`, `/api/nutrition/products/archive`, `/api/nutrition/products/favorite`, `/api/nutrition/products/database/delete` | Save, look up, extract, archive or mark as favorite products, or forget a food database entry | CSRF |

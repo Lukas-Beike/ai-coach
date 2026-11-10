@@ -16,6 +16,7 @@ from nutrition_service_support import build_nutrition_services
 
 from backend.config import Config
 from backend.db.manager import DatabaseManager
+from backend.db.repositories import nutrition_macro_totals
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.handler import RequestHandler
@@ -53,9 +54,6 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.auth = Mock()
         self.diary_service = Mock()
         self.meal_library_service = Mock()
-        self.sync_service = Mock()
-        self.sync_job_queue = Mock()
-        self.sync_job_queue.enqueue.return_value = {"id": "nutrition-job-1"}
         self.nutrition_refresh_service = Mock()
         self.local_now = lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 
@@ -68,7 +66,6 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.post_routes = NutritionPostRoutes(
             diary_service=lambda: self.diary_service,
             meal_library_service=lambda: self.meal_library_service,
-            sync_job_queue=lambda: self.sync_job_queue,
             nutrition_refresh_service=lambda: self.nutrition_refresh_service,
             local_now=self.local_now,
         )
@@ -250,34 +247,10 @@ class NutritionHttpApiTests(unittest.TestCase):
             200, {"ok": True, "status": "ok", "deleted_id": "entry-123"}
         )
 
-    def test_post_sync_route(self) -> None:
-        self.handler.headers = {"Content-Length": "15"}
-        self.handler.read_json.return_value = {"date": "2026-09-24"}
-        self.sync_service.sync_day.return_value = {"ok": True, "date": "2026-09-24"}
-        handled = self.post_routes.handle(self.handler, "/api/nutrition/sync")
-        self.assertTrue(handled)
-        self.sync_job_queue.enqueue.assert_called_once_with(
-            "intervals",
-            "nutrition_sync",
-            {"date": "2026-09-24"},
-            requested_by="http_api",
-        )
-        self.handler.send_json.assert_called_once_with(
-            202,
-            {
-                "ok": True,
-                "status": "queued",
-                "sync_job_id": "nutrition-job-1",
-            },
-        )
-
-    def test_post_sync_pending_route_queues_bounded_provider_job(self) -> None:
-        self.handler.headers = {"Content-Length": "11"}
-        self.handler.read_json.return_value = {"limit": 3}
-        self.post_routes.handle(self.handler, "/api/nutrition/sync")
-        self.sync_job_queue.enqueue.assert_called_once_with(
-            "intervals", "nutrition_sync", {"pending_limit": 3}, requested_by="http_api"
-        )
+    def test_the_removed_sync_route_is_not_handled(self) -> None:
+        self.assertFalse(self.post_routes.handle(self.handler, "/api/nutrition/sync"))
+        self.handler.read_json.assert_not_called()
+        self.handler.send_json.assert_not_called()
 
     def test_nutrition_refresh_diary_reads_local_meals_and_only_daily_energy(self) -> None:
         self.handler.read_json.return_value = {"area": "diary", "date": "2026-09-23"}
@@ -293,7 +266,6 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.nutrition_refresh_service.refresh.assert_called_once_with(
             "daily_stats", date(2026, 9, 23), date(2026, 9, 23)
         )
-        self.sync_job_queue.enqueue.assert_not_called()
         self.handler.send_json.assert_called_once_with(
             200,
             {
@@ -417,9 +389,7 @@ class NutritionRouteBodyTests(unittest.TestCase):
             lambda: "2026-09-24T12:00:00+00:00",
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
-        self.post_routes = NutritionPostRoutes(
-            lambda: self.diary, lambda: self.library, sync_job_queue=Mock
-        )
+        self.post_routes = NutritionPostRoutes(lambda: self.diary, lambda: self.library)
         self.put_routes = NutritionPutRoutes(lambda: self.diary, lambda: self.library)
 
     def test_put_entry_applies_the_calorie_alias_to_the_stored_entry(self) -> None:
@@ -648,6 +618,50 @@ class IntervalsNutritionSyncServiceTests(unittest.TestCase):
         self.assertIsNone(result["synced_summary"]["carbs"])
         self.assertEqual(result["synced_summary"]["protein"], 20)
         nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 7)
+
+    def test_sync_of_an_emptied_day_sends_unset_values_not_zeros(self) -> None:
+        config = Mock(spec=Config)
+        config.intervals_athlete_id = "i12345"
+        api = Mock()
+        nutrition = Mock()
+        nutrition.get_sync_snapshot.return_value = {
+            "date": "2026-09-24",
+            "total_kcal": 0,
+            "total_carbs_g": None,
+            "total_protein_g": None,
+            "total_fat_g": None,
+            "entry_count": 0,
+            "sync_revision": 8,
+        }
+        nutrition.mark_date_synced.return_value = True
+
+        result = IntervalsNutritionSyncService(config, api, nutrition).sync_day(
+            "2026-09-24"
+        )
+
+        self.assertEqual(
+            api.put.call_args.args[1],
+            {
+                "id": "2026-09-24",
+                "kcalConsumed": -1,
+                "carbohydrates": -1,
+                "protein": -1,
+                "fatTotal": -1,
+            },
+        )
+        self.assertIsNone(result["synced_summary"]["kcalConsumed"])
+        nutrition.mark_date_synced.assert_called_once_with("2026-09-24", 8)
+
+    def test_an_empty_day_has_unknown_totals(self) -> None:
+        totals = nutrition_macro_totals([])
+
+        for field in ("total_carbs_g", "total_protein_g", "total_fat_g"):
+            self.assertIsNone(totals[field])
+        self.assertEqual(
+            totals["known_macro_totals"],
+            {"carbs_g": None, "protein_g": None, "fat_g": None},
+        )
+        self.assertEqual(totals["entries_without_macros"], 0)
 
     def test_sync_pending_processes_all_dates(self) -> None:
         mock_config = Mock(spec=Config)

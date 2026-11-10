@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 from backend.calendar.external import (
     ExternalCalendarReader,
+    event_counts,
     list_events,
     list_events_in_window,
     state,
@@ -183,6 +184,23 @@ class ExternalCalendarTests(unittest.TestCase):
 
         self.assertEqual(1, len(list_events(self.db, today=self.today, limit=0)))
         self.assertEqual(1000, len(list_events(self.db, today=self.today, limit=2000)))
+
+    def test_event_counts_are_one_uncapped_query_for_total_and_upcoming(self):
+        self.assertEqual(
+            {"total": 0, "upcoming": 0}, event_counts(self.db, today=self.today)
+        )
+        for index in range(400):
+            self.add_event(f"event-{index:04d}")
+        self.add_event("past", start="2026-09-01T09:00:00", end="2026-09-01T10:00:00")
+        queries: list[str] = []
+        self.db.set_trace_callback(queries.append)
+
+        counts = event_counts(self.db, today=self.today)
+        reader = ExternalCalendarReader(Manager(self.db), lambda: self.today)
+
+        self.assertEqual({"total": 401, "upcoming": 400}, counts)
+        self.assertEqual(counts, reader.event_counts(self.db))
+        self.assertEqual(2, sum("COUNT(*)" in query for query in queries))
 
     def test_window_query_is_not_capped_so_day_markers_see_late_events(self):
         window_start = date(2026, 9, 21)

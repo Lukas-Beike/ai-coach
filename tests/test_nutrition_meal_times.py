@@ -233,7 +233,6 @@ class NutritionMealTimeTests(unittest.TestCase):
         routes = NutritionPostRoutes(
             diary_service=lambda: self.service,
             meal_library_service=lambda: Mock(),
-            sync_job_queue=lambda: Mock(),
         )
 
         self.assertTrue(routes.handle(handler, "/api/nutrition/entry"))

@@ -1,12 +1,15 @@
 """Training-load rollups.
 
-Loads are summed on the TSS scale only (Intervals.icu training load or TSS). A
-session without such a load, such as a Garmin-only session whose Garmin load is
-EPOC-based, is left out of the sum and counted as ``load_missing_sessions``. Its
-session-RPE load, when rated, is reported beside the sum in AU
-(``load_missing_session_rpe_au``) and never added to it. Hours of e-bike
-sessions count in the time-based volume and are also reported on their own as
-``electric_assist_hours``.
+A summary's ``training_load`` is the local TSS-scale load of card M6, stored by
+``backend.sync.local_load`` and set on the summaries by ``with_local_loads``;
+provider loads (for example Garmin's EPOC-based value) are never summed. A
+session without a local load, for lack of the thresholds, heart rate or power
+the method needs, is left out of the sum and counted as
+``load_missing_sessions``. Its session-RPE load, when rated, is reported beside
+the sum in AU (``load_missing_session_rpe_au``, with the labels of its RPE
+sources in ``load_missing_session_rpe_source``) and never added to it. Hours of
+e-bike sessions count in the time-based volume and are also reported on their
+own as ``electric_assist_hours``.
 """
 
 import math

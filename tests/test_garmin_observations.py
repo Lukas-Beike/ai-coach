@@ -8,6 +8,7 @@ from backend.performance.garmin_observations import (
 )
 from backend.sync.garmin_payload_metrics import (
     garmin_record_observation_date,
+    garmin_sleep_observed_at,
     garmin_source_observed_at,
 )
 
@@ -47,6 +48,35 @@ class GarminObservationTests(unittest.TestCase):
         original = copy.deepcopy(source)
         self.assertEqual(garmin_source_observed_at(source), "2026-09-06")
         self.assertEqual(source, original)
+
+    def test_sleep_observed_at_is_the_primary_calendar_date(self):
+        night = {
+            "calendarDate": "2026-11-09",
+            "dailySleepDTO": {
+                "calendarDate": "2026-11-09",
+                "sleepEndTimestampGMT": 1,
+                "levels": [{"startTimeGMT": "2026-11-10T05:00:00+00:00"}],
+            },
+        }
+        self.assertEqual(garmin_source_observed_at(night), "2026-11-10")
+        self.assertEqual(garmin_sleep_observed_at(night), "2026-11-09")
+        self.assertEqual(
+            garmin_sleep_observed_at(
+                [
+                    {"dailySleepDTO": {"calendarDate": "2026-11-08"}},
+                    night,
+                    "invalid",
+                ]
+            ),
+            "2026-11-09",
+        )
+
+    def test_sleep_without_a_primary_date_falls_back_to_the_nested_search(self):
+        self.assertEqual(
+            garmin_sleep_observed_at({"nested": [{"summaryDate": "2026-09-03"}]}),
+            "2026-09-03",
+        )
+        self.assertIsNone(garmin_sleep_observed_at({"dailySleepDTO": []}))
 
     def test_deep_lists_are_traversed_iteratively(self):
         value = {"calendarDate": "2026-09-01"}

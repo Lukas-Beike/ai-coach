@@ -69,7 +69,7 @@ The diagnostic report SHALL compose local configuration flags, provider/job stat
 
 #### Scenario: Plan-sync outcomes
 - **WHEN** the report is generated
-- **THEN** it lists the recent Intervals.icu plan-push jobs with their unsettled items and the unsynced planned units (upcoming first, with their total count), with error classes only and no provider error text or workout content
+- **THEN** it lists the recent plan-push jobs of every provider with their unsettled items and the unsynced planned units (upcoming first, with their total count), with error classes only and no provider error text or workout content
 
 #### Scenario: Canonical session conflicts
 - **WHEN** the report is generated
@@ -77,11 +77,11 @@ The diagnostic report SHALL compose local configuration flags, provider/job stat
 
 #### Scenario: Canonical provider composition
 - **WHEN** the report is generated
-- **THEN** `canonical_provider_composition` counts the surviving canonical sessions by the set of providers of their active records, counts the sessions backed only by Intervals.icu by year and by the Intervals.icu `source` enum value of those records, counts per metric and sport the days with active Intervals.icu observations and the days no other source holds, lists the metrics and sports no other source holds at all, and counts active sleep period, zone configuration and power curve rows per provider
-- **AND** it carries only provider identifiers, source enum values, years, metric and sport identifiers, table names and counts; other provider or source text is reported as `other` or `unknown` and observation kinds outside the vocabulary only as a count, never as ids, names, dates or values
+- **THEN** `canonical_provider_composition` counts the surviving canonical sessions by the set of providers of their active records, counts the stored observation kinds outside the vocabulary, and counts active sleep period, zone configuration and power curve rows per provider
+- **AND** it carries only provider identifiers, table names and counts; other provider text is reported as `other` and observation kinds outside the vocabulary only as a count, never as ids, names, dates or values
 - **AND** a failing count reports the section as `unavailable` without details instead of failing the report
 
-Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `backend/diagnostics/plan_sync.py::summarize_plan_sync`; `tests/test_diagnostic_plan_sync.py`; `backend/diagnostics/session_conflicts.py::summarize_session_conflicts`; `tests/test_diagnostic_session_conflicts.py`; `backend/diagnostics/provider_composition.py::summarize_provider_composition`; `tests/test_diagnostic_provider_composition.py`; `backend/diagnostics/canonical_counts.py`; `backend/diagnostics/canonical_coverage.py`; `backend/runtime/memory.py::process_memory`. Tests: `tests/test_diagnostic_report.py::test_report_shape_counts_redaction_and_privacy`; `tests/test_diagnostic_report.py::test_database_counts_and_kv_reads_share_one_read_snapshot`; `tests/test_diagnostic_report.py::test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload`.
+Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `backend/diagnostics/plan_sync.py::summarize_plan_sync`; `tests/test_diagnostic_plan_sync.py`; `backend/diagnostics/session_conflicts.py::summarize_session_conflicts`; `tests/test_diagnostic_session_conflicts.py`; `backend/diagnostics/provider_composition.py::summarize_provider_composition`; `tests/test_diagnostic_provider_composition.py`; `backend/diagnostics/provider_sync.py::summarize_provider_sync`; `tests/test_diagnostic_provider_sync.py`; `backend/diagnostics/canonical_coverage.py`; `backend/runtime/memory.py::process_memory`. Tests: `tests/test_diagnostic_report.py::test_report_shape_counts_redaction_and_privacy`; `tests/test_diagnostic_report.py::test_database_counts_and_kv_reads_share_one_read_snapshot`; `tests/test_diagnostic_report.py::test_payload_sizes_count_utf8_bytes_without_fetching_the_payload`.
 
 ### Requirement: Content-free migration and method state in the report
 

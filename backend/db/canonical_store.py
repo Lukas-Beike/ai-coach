@@ -1236,41 +1236,6 @@ def mark_placeholder_deleted(
     return True
 
 
-def tombstone_provider_activities(
-    db: Any, provider: str, *, record_kind: str, now: str
-) -> int:
-    """Tombstone every stored activity of one provider, with its raw record and session.
-
-    Each record that is not deleted yet, or whose session is not, takes the
-    deletion path of a removed activity, oldest first: a deleted surviving
-    session hands its aliases to a new survivor and keeps it as
-    ``merged_into_retained``, so its id still resolves. Returns the number of
-    records passed.
-    """
-    rows = _fetch_all(
-        db,
-        "SELECT r.provider_activity_id, r.activity_id FROM activity_records AS r "
-        "LEFT JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-        "WHERE r.provider = ? AND (r.state <> ? OR s.state <> ?) "
-        "ORDER BY r.started_at, r.provider_activity_id",
-        (
-            provider,
-            ActivityRecordState.DELETED.value,
-            ActivitySessionState.DELETED.value,
-        ),
-    )
-    for row in rows:
-        _delete_activity(
-            db,
-            provider,
-            record_kind=record_kind,
-            provider_activity_id=row["provider_activity_id"],
-            activity_id=row["activity_id"],
-            now=now,
-        )
-    return len(rows)
-
-
 def _delete_activity(
     db: Any,
     provider: str,
@@ -1319,6 +1284,18 @@ def _delete_activity(
     )
     if cursor.rowcount == 1:
         _repoint_aliases(db, activity_id, now=now)
+        # The survivor of a deleted alias, or the new survivor of a deleted
+        # primary, may bundle nothing else any more.
+        retained = _fetch_all(
+            db,
+            "SELECT merged_into_retained FROM activity_sessions "
+            "WHERE activity_id = ? AND merged_into_retained IS NOT NULL",
+            (activity_id,),
+        )
+        if retained:
+            reset_unbundled_link_kinds(
+                db, now=now, activity_id=retained[0]["merged_into_retained"]
+            )
 
 
 def _repoint_aliases(db: Any, deleted_id: str, *, now: str) -> None:
@@ -2178,6 +2155,41 @@ def _follow_merges(targets: dict[str, str | None], activity_id: str) -> str:
         seen.add(target)
         current = target
     return current
+
+
+def reset_unbundled_link_kinds(
+    db: Any, *, now: str, activity_id: str | None = None
+) -> int:
+    """Store ``single`` on active sessions that bundle no other session's record.
+
+    A matched link kind (``exact`` or ``heuristic``) describes how a session's
+    records were joined, so it has to fall back to ``single`` once the last
+    joined copy is gone, for example after a provider removed it. The athlete's
+    ``confirmed`` kind stays. Only the stored kind changes; records, aliases and
+    the athlete's confirmation stay as they are. ``activity_id`` limits the
+    check to one session. Returns the number of sessions changed.
+    """
+    scope = " AND activity_id = ?" if activity_id is not None else ""
+    cursor = db.execute(
+        "UPDATE activity_sessions SET link_kind = ?, updated_at = ? "
+        "WHERE state = ? AND link_kind IN (?, ?)"
+        f"{scope} AND NOT EXISTS ("
+        "SELECT 1 FROM activity_sessions AS alias "
+        "WHERE alias.merged_into = activity_sessions.activity_id AND alias.state = ? "
+        "AND EXISTS (SELECT 1 FROM activity_records AS r "
+        "WHERE r.activity_id = alias.activity_id AND r.state = ?))",
+        (
+            ActivityLinkKind.SINGLE.value,
+            now,
+            ActivitySessionState.ACTIVE.value,
+            ActivityLinkKind.EXACT.value,
+            ActivityLinkKind.HEURISTIC.value,
+            *((activity_id,) if activity_id is not None else ()),
+            ActivitySessionState.DUPLICATE.value,
+            ActivityRecordState.ACTIVE.value,
+        ),
+    )
+    return cursor.rowcount
 
 
 def set_activity_session_link_kind(

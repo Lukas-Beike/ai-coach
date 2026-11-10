@@ -9,7 +9,6 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from backend import change_history
-from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.http_api.auth import SessionAuthService
 from backend.nutrition.diary import NutritionDiaryService
@@ -133,13 +132,11 @@ class NutritionPostRoutes:
         self,
         diary_service: Callable[[], NutritionDiaryService],
         meal_library_service: Callable[[], NutritionMealLibraryService],
-        sync_job_queue: Callable[[], Any],
         nutrition_refresh_service: Callable[[], Any] | None = None,
         local_now: Callable[[], datetime] | None = None,
     ) -> None:
         self._diary_service = diary_service
         self._meal_library_service = meal_library_service
-        self._sync_job_queue = sync_job_queue
         self._nutrition_refresh_service = nutrition_refresh_service
         self._local_now = local_now or datetime.now
 
@@ -149,7 +146,6 @@ class NutritionPostRoutes:
             NUTRITION_ENTRY_PATH: self._create,
             f"{NUTRITION_ENTRY_PATH}/delete": self._delete,
             f"{NUTRITION_ENTRY_PATH}/add-product": self._add_product,
-            "/api/nutrition/sync": self._sync,
             "/api/nutrition/refresh": self._refresh,
             NUTRITION_PRODUCTS_PATH: self._save_product,
             f"{NUTRITION_PRODUCTS_PATH}/lookup": self._lookup_product,
@@ -194,25 +190,6 @@ class NutritionPostRoutes:
         with change_history.collect_changes() as changes:
             result = self._diary_service().delete_meal(str(entry_id))
         handler.send_json(200, {"ok": True, **result, **_change(changes)})
-
-    def _sync(self, handler: Any) -> None:
-        payload = _read_object(handler) if handler.headers.get("Content-Length") else {}
-        meal_date = payload.get("date") or payload.get("meal_date")
-        job_payload = (
-            {"date": meal_date}
-            if meal_date
-            else {"pending_limit": payload.get("limit") or 14}
-        )
-        job = self._sync_job_queue().enqueue(
-            ProviderId.INTERVALS.value,
-            "nutrition_sync",
-            job_payload,
-            requested_by="http_api",
-        )
-        handler.send_json(
-            202,
-            {"ok": True, "status": "queued", "sync_job_id": job["id"]},
-        )
 
     def _refresh(self, handler: Any) -> None:
         payload = _read_object(handler)

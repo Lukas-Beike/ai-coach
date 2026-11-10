@@ -51,6 +51,16 @@ def list_events(
     return [dict(row) for row in rows]
 
 
+def event_counts(db: Any, *, today: date) -> dict[str, int]:
+    """Count the stored events and those not yet over, in one query."""
+    row = db.execute(
+        "SELECT COUNT(*) AS total, COALESCE(SUM(end_local > ?), 0) AS upcoming "
+        "FROM external_calendar_events",
+        (today.isoformat() + _LOCAL_MIDNIGHT,),
+    ).fetchone()
+    return {"total": row["total"], "upcoming": row["upcoming"]}
+
+
 def list_events_in_window(
     db: Any,
     *,
@@ -117,6 +127,10 @@ class ExternalCalendarReader:
                 limit=limit,
                 training_relevant_only=training_relevant_only,
             )
+
+    def event_counts(self, db: Any) -> dict[str, int]:
+        """Count the events on a connection the caller already holds."""
+        return event_counts(db, today=self._today())
 
     def list_events_in_window(
         self, window_days: int, training_relevant_only: bool = False
