@@ -1106,18 +1106,62 @@ def _bounded_list(value: list[Any], limit: int) -> list[Any]:
     return result
 
 
-def _bounded_dict(value: dict[Any, Any], limit: int) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, item in value.items():
-        candidate = dict(result)
+# Highest first: the untrusted-data notes, the day view, recovery and current
+# performance survive before calendars and other low-value sections.
+COACH_CONTEXT_SECTION_PRIORITY = (
+    "projection",
+    "source_policy",
+    "canonical_data_status",
+    "recovery",
+    "current_performance",
+    "daily_planning_context",
+    "durable_profile",
+    "target_competitions",
+    "local_planned_workouts",
+    "planning",
+    "planning_brief",
+    "local_feedback",
+    "activity_feedback",
+    "training_plans",
+    "activities",
+    "weather",
+    "nutrition_products",
+    "calendar",
+    "external_calendar",
+)
+
+# Losing one of these is worth a warning; other budget drops log at INFO.
+_HIGH_PRIORITY_SECTIONS = frozenset(COACH_CONTEXT_SECTION_PRIORITY[:6])
+
+
+def _bounded_dict(
+    value: dict[Any, Any], limit: int, order: Sequence[Any] | None = None
+) -> dict[str, Any]:
+    """Fill keys in ``order`` with the remaining budget; skip what no longer fits."""
+    kept: dict[str, Any] = {}
+    for key in order if order is not None else value:
+        used = coach_context_json_size(kept)
         key_overhead = coach_context_json_size({str(key): None}) + 2
-        candidate[str(key)] = bounded_coach_context_value(
-            item, max(0, limit - key_overhead)
+        bounded = bounded_coach_context_value(
+            value[key], max(0, limit - used - key_overhead)
         )
-        if coach_context_json_size(candidate) > limit:
-            break
-        result = candidate
-    return result
+        if bounded is None and value[key] is not None:
+            continue
+        candidate = {**kept, str(key): bounded}
+        if coach_context_json_size(candidate) <= limit:
+            kept = candidate
+    return {str(key): kept[str(key)] for key in value if str(key) in kept}
+
+
+def bounded_coach_context_sections_by_priority(
+    value: dict[str, Any], limit: int
+) -> dict[str, Any]:
+    """Fit top-level context sections by priority, truncating before omitting."""
+    if coach_context_json_size(value) <= limit:
+        return value
+    rank = {key: index for index, key in enumerate(COACH_CONTEXT_SECTION_PRIORITY)}
+    order = sorted(value, key=lambda key: rank.get(key, len(rank)))
+    return _bounded_dict(value, limit, order)
 
 
 def bounded_coach_context_value(value: Any, limit: int) -> Any:
@@ -1244,6 +1288,25 @@ def _note_omitted_sections(
         )
 
 
+def _log_budget_applied(
+    characters: int, budget: int, omitted: list[str], truncated: list[str]
+) -> None:
+    LOGGER.log(
+        logging.WARNING if set(omitted) & _HIGH_PRIORITY_SECTIONS else logging.INFO,
+        "Coach context exceeds projection budget",
+        extra={
+            "event": "coach_context_budget_applied",
+            "context": {
+                "characters": characters,
+                "budget": budget,
+                "omitted_section_count": len(omitted),
+                "omitted_sections": omitted,
+                "truncated_sections": truncated,
+            },
+        },
+    )
+
+
 class CoachTrainingContextService:
     """Assemble the exact bounded prompt context from local read services."""
 
@@ -1341,7 +1404,7 @@ class CoachTrainingContextService:
             "\nLOCAL TRAINING LIBRARY (bounded selection of local templates; templates available to the coach):\n"
             + library_text
             + (
-                "\nOmitted sections are not missing data. Use read_coach_context to load them and enable additional tools. Selection never authorizes writes.\n"
+                "\nOmitted sections are not missing data. Use read_coach_context to load them; every available tool is already enabled. Selection never authorizes writes.\n"
                 if selection
                 else ""
             )
@@ -1352,15 +1415,17 @@ class CoachTrainingContextService:
             "Coach context projection",
             extra={
                 "event": "coach_context_projection",
-                "context_profile": selection.name if selection else "full",
-                "request_kind": selection.kind if selection else None,
-                "section_characters": {
-                    key: coach_context_json_size(value)
-                    for key, value in prompt_context.items()
-                    if value is not None
+                "context": {
+                    "context_profile": selection.name if selection else "full",
+                    "request_kind": selection.kind if selection else None,
+                    "section_characters": {
+                        key: coach_context_json_size(value)
+                        for key, value in prompt_context.items()
+                        if value is not None
+                    },
+                    "library_characters": len(library_text),
+                    "static_instruction_characters": len(COACH_PROMPT),
                 },
-                "library_characters": len(library_text),
-                "static_instruction_characters": len(COACH_PROMPT),
             },
         )
         if len(context) > self._total_char_limit:
@@ -1379,7 +1444,7 @@ class CoachTrainingContextService:
                 - len(context_suffix)
                 - note_reserve,
             )
-            clipped_context = bounded_coach_context_value(
+            clipped_context = bounded_coach_context_sections_by_priority(
                 prompt_context, structured_limit
             )
             if not isinstance(clipped_context, dict):
@@ -1419,14 +1484,11 @@ class CoachTrainingContextService:
                 json.dumps(prompt_context, ensure_ascii=False, separators=(",", ":"))
             )
             context = context_prefix + structured_text + context_suffix
-            LOGGER.warning(
-                "Coach context exceeds projection budget",
-                extra={
-                    "event": "coach_context_budget_applied",
-                    "characters": len(context),
-                    "budget": self._total_char_limit,
-                    "omitted_section_count": len(omitted_sections),
-                },
+            _log_budget_applied(
+                len(context),
+                self._total_char_limit,
+                omitted_sections,
+                truncated_sections,
             )
         return context
 

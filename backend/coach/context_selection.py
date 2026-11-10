@@ -221,6 +221,13 @@ CLARIFICATION_ANSWER_PATTERN = (
 )
 
 
+def _needs_full_context(matched: list[str], planning: bool, normalized: str) -> bool:
+    # A plan sync names the plan; only a provider-data refresh needs every section.
+    if "provider_refresh_or_sync" in matched and not planning:
+        return True
+    return _requires_full_time_context(planning, normalized)
+
+
 def _domain_of_profiles(profiles: set[str]) -> str | None:
     profiles = profiles - {"today_training"} if len(profiles) > 1 else profiles
     if not profiles:
@@ -648,9 +655,7 @@ def _message_selection(
     if planning:
         sections.update({"planning", "training_plans"})
     sections |= _daily_sections(normalized, matched, planning)
-    if "provider_refresh_or_sync" in matched or _requires_full_time_context(
-        planning, normalized
-    ):
+    if _needs_full_context(matched, planning, normalized):
         return CoachContextSelection(
             name, FULL_SECTIONS | food, retain_pending_request=is_pending_active
         )

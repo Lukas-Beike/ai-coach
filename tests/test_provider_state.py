@@ -264,7 +264,14 @@ class ProviderStateServiceTests(unittest.TestCase):
         )
         second = self.service.record_usage(
             "openai",
-            {"usage": {"input_tokens": 4, "output_tokens": 1, "total_tokens": 5}},
+            {
+                "usage": {
+                    "input_tokens": 4,
+                    "output_tokens": 1,
+                    "total_tokens": 5,
+                    "input_tokens_details": {"cached_tokens": 3},
+                }
+            },
             "stream",
         )
         self.assertEqual(
@@ -286,6 +293,7 @@ class ProviderStateServiceTests(unittest.TestCase):
                 "input_tokens": 4,
                 "output_tokens": 1,
                 "total_tokens": 5,
+                "cached_tokens": 3,
             },
         )
 
