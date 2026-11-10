@@ -14,7 +14,7 @@ from backend.http_api.post_dispatch import (
 
 class HttpPostDispatcherTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.routes = [Mock() for _ in range(14)]
+        self.routes = [Mock() for _ in range(13)]
         for route in self.routes:
             route.handle.return_value = False
         authenticated_routes = HttpAuthenticatedPostRoutes(*self.routes[3:])
@@ -78,11 +78,11 @@ class HttpPostDispatcherTests(unittest.TestCase):
             self.handler, "/api/chat/stream", self.session
         )
 
-        for route in self.routes[3:8]:
+        for route in self.routes[3:7]:
             route.handle.assert_called_once()
             self.assertFalse(route.handle.return_value)
-        self.routes[8].handle.assert_called_once_with(self.handler, self.session)
-        for route in self.routes[9:]:
+        self.routes[7].handle.assert_called_once_with(self.handler, self.session)
+        for route in self.routes[8:]:
             route.handle.assert_not_called()
 
 

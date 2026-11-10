@@ -183,7 +183,6 @@ class ServerHttpArchitectureTests(unittest.TestCase):
                 "COACH_ACTIONS_POST_ROUTES",
                 "CHAT_POST_ROUTES",
                 "TRANSCRIBE_POST_ROUTES",
-                "PLANNING_COMMANDS_POST_ROUTES",
                 "FEEDBACK_POST_ROUTES",
                 "CHAT_STREAM_TRANSPORT",
                 "SYNC_COMMAND_POST_ROUTE",
@@ -480,18 +479,6 @@ class ServerHttpArchitectureTests(unittest.TestCase):
                 for node in ast.walk(route_tree)
             )
         )
-
-    def test_planning_commands_post_route_is_owned_by_http_api_module(self) -> None:
-        self._assert_write_route_owned(
-            "_handle_coach_post",
-            "PLANNING_COMMANDS_POST_ROUTES",
-            ("/api/planning/commands",),
-            "PlanningCommandsPostRoutes(coach_planning_command_service, lambda: COACH_CONVERSATION.provision_service())",
-        )
-        route_source = (
-            BACKEND_ROOT / "http_api" / "planning_commands_post.py"
-        ).read_text(encoding="utf-8")
-        self.assertNotIn("server", route_source.casefold())
 
     def test_feedback_post_route_is_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(

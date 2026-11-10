@@ -783,6 +783,41 @@ class RemoteTierTests(unittest.TestCase):
                 self.assertFalse(_authority(reply, previous).remote_requested)
         self.assertFalse(_authority("ja", "Soll ich den Lauf kürzen?").remote_requested)
 
+    def test_everyday_planning_words_grant_no_remote_write(self):
+        for text in (
+            "Ich habe heute doppelt so lange trainiert, pass bitte den Plan an.",
+            "Trag mir den Lauf in den Kalender ein.",
+            "Kannst du den Konflikt am Dienstag lösen?",
+            "Zeig mir das Duplikat im Kalender.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(gate.remote_requested(text))
+                decision = _check("start_intervals_plan_sync", text)
+                self.assertEqual(decision.reason, "remote_not_requested")
+        for text in (
+            "Synchronisiere mit Intervals",
+            "Lade den Kalender zu Intervals hoch.",
+            "Sync den Kalender.",
+            "Bitte den Konflikt im Kalender reparieren",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(gate.remote_requested(text))
+
+    def test_a_yes_grants_a_sync_only_after_a_closing_sync_question(self):
+        for previous in (
+            "Der Kalender ist aktuell. Soll ich die Woche kürzen?",
+            "Ich kann das mit Intervals synchronisieren. Soll ich den Lauf kürzen?",
+            "Am Dienstag gibt es einen Konflikt. Passt das so?",
+            "Dein Kalender ist eingetragen.",
+        ):
+            with self.subTest(previous=previous):
+                self.assertFalse(_authority("ja", previous).remote_requested)
+        self.assertTrue(
+            _authority(
+                "ja", "Die Woche ist angepasst. Soll ich sie zu Intervals hochladen?"
+            ).remote_requested
+        )
+
     def test_pending_origin_carries_a_sync_request(self):
         origin = gate.PendingOrigin(3, "Sync den Plan zu Intervals")
         self.assertTrue(_authority("nochmal", pending_origin=origin).remote_requested)

@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from backend.coach.context_selection import select_coach_context
+from backend.coach.context_selection import request_chain_ids, select_coach_context
 from backend.coach.write_gate import (
     REMOTE_DENIALS,
     REMOTE_GARMIN,
@@ -76,6 +76,15 @@ def _guidance(decision: GateDecision) -> str:
     return _DENIAL_GUIDANCE.get(decision.reason, _DEFAULT_GUIDANCE)
 
 
+def _entry_records(entry: Mapping[str, Any]) -> int:
+    """Records one earlier call counted; receipts without a count use history rows."""
+    count = entry.get("record_count")
+    if type(count) is int and count >= 0:
+        return count
+    changes = entry.get("changes")
+    return len(changes) if isinstance(changes, list) else 0
+
+
 def _previous_assistant_text(context: Mapping[str, Any]) -> str:
     """Return the directly preceding chat message, only when it is the Coach's."""
     current_id = context.get("current_user_message_id")
@@ -105,12 +114,9 @@ def _pending_origin(
         or not select_coach_context(message, dict(context)).retain_pending_request
     ):
         return None
-    source_ids = pending.get("source_message_ids")
-    wanted = {
-        value
-        for value in (source_ids if isinstance(source_ids, list) else [])
-        if isinstance(value, int)
-    } - {current_id}
+    # Only the server-recorded chain (the request and its clarification answers);
+    # older ids the model cited never widen the authority.
+    wanted = set(request_chain_ids(pending)) - {current_id}
     origins = [
         item
         for item in context.get("messages") or []
@@ -157,11 +163,7 @@ class CoachTurnWriteGate:
         ]
         self._state = TurnGateState(
             writes_count=len(writes),
-            records_count=sum(
-                len(changes)
-                for entry in writes
-                if isinstance(changes := entry.get("changes"), list)
-            ),
+            records_count=sum(_entry_records(entry) for entry in writes),
         )
         self._model = model
         self._read_only_tools = read_only_tools

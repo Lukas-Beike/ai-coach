@@ -344,6 +344,7 @@ class CoachTurnFailureService:
                         {
                             "summary": user["content"],
                             "source_message_ids": [receipt["user_message_id"]],
+                            "origin_message_ids": [receipt["user_message_id"]],
                             "status": "failed",
                             "domain": domain,
                             "question": None,

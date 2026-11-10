@@ -22,7 +22,6 @@ from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.metric_export_post import MetricExportPostRoutes
 from backend.http_api.nutrition import NutritionPostRoutes
 from backend.http_api.planned_unit_focus_post import PlannedUnitFocusPostRoutes
-from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
 from backend.http_api.provider_connections import ProviderConnectionPostRoutes
@@ -38,7 +37,6 @@ class HttpAuthenticatedPostRoutes:
     coach_actions: CoachActionsPostRoutes
     chat: ChatPostRoutes
     transcribe: TranscribePostRoutes
-    planning_commands: PlanningCommandsPostRoutes
     feedback: FeedbackPostRoutes
     chat_stream: CoachChatStreamTransport
     sync_commands: SyncCommandPostRoute
@@ -73,7 +71,6 @@ class HttpPostDispatcher:
         self._coach_actions = authenticated_routes.coach_actions
         self._chat = authenticated_routes.chat
         self._transcribe = authenticated_routes.transcribe
-        self._planning_commands = authenticated_routes.planning_commands
         self._feedback = authenticated_routes.feedback
         self._chat_stream = authenticated_routes.chat_stream
         self._sync_commands = authenticated_routes.sync_commands
@@ -111,8 +108,6 @@ class HttpPostDispatcher:
         if self._chat.handle(handler, path, session):
             return
         if self._transcribe.handle(handler, path):
-            return
-        if self._planning_commands.handle(handler, path, session):
             return
         if self._feedback.handle(handler, path):
             return

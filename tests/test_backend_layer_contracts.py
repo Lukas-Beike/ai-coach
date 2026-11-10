@@ -106,11 +106,6 @@ DOMAIN_EXECUTE_CALLS = {
         "self._coach_proposal_execution_service().execute",
     ): 1,
     (
-        "backend/http_api/planning_commands_post.py",
-        "PlanningCommandsPostRoutes.handle",
-        "self._coach_planning_command_service().execute",
-    ): 1,
-    (
         "backend/http_api/sync_commands_post.py",
         "SyncCommandPostRoute.handle",
         "endpoint.execute",

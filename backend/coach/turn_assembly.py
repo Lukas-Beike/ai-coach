@@ -8,7 +8,6 @@ from typing import Any
 from backend.coach.chat_turn import CoachChatTurnService
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.coach.final_receipt import CoachFinalReceiptService
-from backend.coach.planning_commands import CoachPlanningCommandService
 from backend.coach.receipt_reads import CoachCommandReceiptService
 from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.structured_response import CoachStructuredResponseService
@@ -114,16 +113,6 @@ class CoachTurnAssembly:
     def command_receipt_service(self) -> CoachCommandReceiptService:
         return CoachCommandReceiptService(
             self._database_manager, now=self._receipt_clock
-        )
-
-    def planning_command_service(self) -> CoachPlanningCommandService:
-        return CoachPlanningCommandService(
-            self._database_manager(),
-            self._database_lock,
-            self.command_receipt_service(),
-            self._tool_dispatch_service(),
-            self._turn_failure_service(),
-            self._utc_now,
         )
 
     def turn_opening_service(self) -> CoachTurnOpeningService:

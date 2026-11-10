@@ -42,7 +42,6 @@ from backend.http_api.nutrition import (
     NutritionPutRoutes,
 )
 from backend.http_api.planned_unit_focus_post import PlannedUnitFocusPostRoutes
-from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.post_dispatch import (
     HttpAuthenticatedPostRoutes,
@@ -169,8 +168,6 @@ class HttpCoachWriteActions:
     proposal_confirmation_service: Callable[[], Any]
     proposal_execution_service: Callable[[], Any]
     reset_service: Callable[[], Any]
-    provision_service: Callable[[], Any]
-    planning_command_service: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -381,10 +378,8 @@ class HttpApiAssembly:
         proposal_confirmation_service = coach_writes.proposal_confirmation_service
         proposal_execution_service = coach_writes.proposal_execution_service
         coach_reset_service = coach_writes.reset_service
-        coach_provision_service = coach_writes.provision_service
         max_chat_request_bytes = coach_stream.max_chat_request_bytes
         chat_stream_registry = coach_stream.chat_stream_registry
-        coach_planning_command_service = coach_writes.planning_command_service
         public_bootstrap_service = public.bootstrap
         public_plan_state_service = public.plan_state
         public_weather_state_service = public.weather_state
@@ -630,10 +625,6 @@ class HttpApiAssembly:
             athlete.zones,
             athlete.body_export,
         )
-        self.planning_commands_post_routes = PlanningCommandsPostRoutes(
-            coach_planning_command_service,
-            coach_provision_service,
-        )
         self.feedback_post_routes = FeedbackPostRoutes(
             checkin_service,
             athlete.activity_feedback,
@@ -720,7 +711,6 @@ class HttpApiAssembly:
             self.coach_actions_post_routes,
             self.chat_post_routes,
             self.transcribe_post_routes,
-            self.planning_commands_post_routes,
             self.feedback_post_routes,
             self.chat_stream_transport,
             self.sync_command_post_route,

@@ -40,7 +40,6 @@ class YazioRouteTests(unittest.TestCase):
             "coach_actions",
             "chat",
             "transcribe",
-            "planning_commands",
             "feedback",
             "chat_stream",
             "sync_commands",

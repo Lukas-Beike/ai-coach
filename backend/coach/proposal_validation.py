@@ -125,6 +125,12 @@ def _validate_local_coach_write(payload: dict[str, Any]) -> None:
     )
     values = arguments.get("payload") if isinstance(arguments, dict) else None
     product_write = tool == "save_nutrition_product"
+    record_id = values.get("id") if isinstance(values, dict) else None
+    # An update is authorized by its own object token; the broad token is for
+    # creation only.
+    object_token = (
+        f"{'nutrition_product' if product_write else 'nutrition_template'}:{record_id}"
+    )
     valid_payload = (
         isinstance(values, dict)
         and isinstance(values.get("name"), str)
@@ -148,12 +154,10 @@ def _validate_local_coach_write(payload: dict[str, Any]) -> None:
         or not isinstance(request, dict)
         or not source_ids_ok
         or not isinstance(scope, list)
-        or not ({"local_nutrition", "local_nutrition_product"} & set(scope))
-        or (
-            product_write
-            and isinstance(values, dict)
-            and values.get("id")
-            and f"nutrition_product:{values.get('id')}" not in scope
+        or not (
+            object_token in scope
+            if record_id
+            else {"local_nutrition", "local_nutrition_product"} & set(scope)
         )
         or not valid_payload
     ):

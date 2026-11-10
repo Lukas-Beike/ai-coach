@@ -422,6 +422,9 @@ class CoachDialogueActionService:
             "update_nutrition_entry",
             "delete_nutrition_entry",
         }:
+            template_id = CoachDialogueActionService._nutrition_template_id(
+                name, arguments
+            )
             if name == "save_nutrition_product":
                 product_id = str((arguments.get("payload") or {}).get("id") or "")
                 require_coach_scope(
@@ -430,11 +433,8 @@ class CoachDialogueActionService:
                     if product_id
                     else "local_nutrition_product",
                 )
-            else:
+            elif name != "save_nutrition_template" or template_id is None:
                 require_coach_scope(action, "local_nutrition")
-            template_id = CoachDialogueActionService._nutrition_template_id(
-                name, arguments
-            )
             if template_id is not None:
                 require_coach_scope(action, f"nutrition_template:{template_id}")
 

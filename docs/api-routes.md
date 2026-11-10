@@ -70,7 +70,6 @@ activity IDs no longer resolve.
 | --- | --- | --- | --- |
 | POST | `/api/chat`, `/api/chat/stream`, `/api/chat/reset`, `/api/chat/cancel` | Submit, stream, reset or cancel Coach work | CSRF |
 | POST | `/api/coach/actions/confirm`, `/api/coach/actions/cancel`, `/api/coach/actions/execute` | Confirm, cancel or execute a Coach proposal | CSRF |
-| POST | `/api/planning/commands` | Apply an approved local planning command | CSRF |
 | POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback; activity feedback returns a `change` undo reference | CSRF |
 | POST | `/api/activities/{id}/session` | Confirm, split, merge or delete one session bundle | CSRF |
 | POST | `/api/planned-units/{id}/focus` | Set or clear `session_focus` and `strength_intensity` of a planned unit; returns the unit | CSRF |

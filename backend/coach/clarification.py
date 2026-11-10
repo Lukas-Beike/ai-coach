@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from backend.coach.context_selection import infer_coach_domain
+from backend.coach.context_selection import (
+    extend_request_chain,
+    infer_coach_domain,
+    select_coach_context,
+)
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -64,10 +68,25 @@ class CoachClarificationService:
             )
 
         domain = infer_coach_domain(f"{summary} {question}")
+        # The write gate reads the request chain the server recorded, never the
+        # ids the model cited: the original request plus this answer.
+        prior = context.get("pending_request")
+        current_text = next(
+            str(item.get("content") or "")
+            for item in context["messages"]
+            if isinstance(item, dict) and item.get("id") == current_user_id
+        )
+        retained = (
+            prior
+            if isinstance(prior, dict)
+            and select_coach_context(current_text, context).retain_pending_request
+            else None
+        )
         pending = {
             "summary": summary,
             "question": question,
             "source_message_ids": ids,
+            "origin_message_ids": extend_request_chain(retained, current_user_id),
             "status": "needs_clarification",
             "domain": domain,
         }

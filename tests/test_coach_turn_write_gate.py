@@ -9,6 +9,7 @@ import unittest
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
+from backend import change_history
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
     CoachStructuredToolRoundService,
@@ -149,6 +150,24 @@ class TurnWriteGateTests(unittest.TestCase):
         gate, _factory = make_gate("Verschieb die Woche", receipts=receipts)
         denial = denied(gate, "update_profile", {})
         self.assertEqual(denial["gate_reason"], "impact_not_confirmed")
+
+    def test_resumed_budget_adds_up_the_gates_own_record_counts(self) -> None:
+        # A 4-unit create stores 4 argument records, however many history rows it wrote.
+        receipts = [
+            {
+                "tool": "apply_training_patch",
+                "record_count": 4,
+                "changes": [{}] * (BULK_THRESHOLD + 5),
+            }
+        ]
+        gate, _factory = make_gate("Verschieb den Lauf", receipts=receipts)
+        self.assertIsNone(gate.denial("update_profile", {}))
+
+        full = [{"tool": "apply_training_patch", "record_count": BULK_THRESHOLD}]
+        gate, _factory = make_gate("Verschieb die Woche", receipts=full)
+        self.assertEqual(
+            denied(gate, "update_profile", {})["gate_reason"], "impact_not_confirmed"
+        )
 
     def test_remote_writes_need_a_named_sync_and_never_the_classifier(self) -> None:
         classifier = Mock(return_value=verdict(sorted(DOMAINS), True, True))
@@ -323,6 +342,74 @@ class TurnWriteGateTests(unittest.TestCase):
             "nochmal", "Das hat nicht geklappt.", "Lösch das Rennen"
         )
 
+    def test_a_cited_old_message_does_not_widen_the_pending_origin(self) -> None:
+        messages = [
+            {"id": 2, "role": "user", "content": "Sync den Plan zu Intervals"},
+            {"id": 3, "role": "assistant", "content": "Erledigt."},
+            {"id": 4, "role": "user", "content": "Lösch das Rennen"},
+            {"id": 5, "role": "assistant", "content": "Welches Rennen?"},
+            {"id": 10, "role": "user", "content": "nochmal"},
+        ]
+        pending = {
+            "status": "needs_clarification",
+            "source_message_ids": [2, 4],
+            "origin_message_ids": [4],
+        }
+        classifier = Mock(return_value=verdict(["competition"], delete=True))
+        gate, _factory = make_gate(
+            "nochmal", context(messages, pending=pending), classifier=classifier
+        )
+        denial = denied(gate, "start_intervals_plan_sync", {})
+        self.assertEqual(denial["gate_reason"], "remote_not_requested")
+        self.assertIsNone(gate.denial("delete_competition", {}))
+        classifier.assert_called_once_with(
+            "nochmal", "Welches Rennen?", "Lösch das Rennen"
+        )
+
+    def test_a_pending_request_without_a_chain_trusts_only_its_newest_id(self) -> None:
+        messages = [
+            {"id": 2, "role": "user", "content": "Sync den Plan zu Intervals"},
+            {"id": 4, "role": "user", "content": "die nächste"},
+            {"id": 10, "role": "user", "content": "nochmal"},
+        ]
+        legacy = {"status": "failed", "source_message_ids": [2, 4]}
+        gate, _factory = make_gate("nochmal", context(messages, pending=legacy))
+        denial = denied(gate, "start_intervals_plan_sync", {})
+        self.assertEqual(denial["gate_reason"], "remote_not_requested")
+
+    def test_a_retried_clarified_request_keeps_the_original_wording(self) -> None:
+        messages = [
+            {"id": 2, "role": "user", "content": "Sync meinen Plan zu Intervals"},
+            {"id": 3, "role": "assistant", "content": "Welche Woche?"},
+            {"id": 4, "role": "user", "content": "die nächste"},
+            {"id": 5, "role": "assistant", "content": "Das hat nicht geklappt."},
+            {"id": 10, "role": "user", "content": "nochmal"},
+        ]
+        pending = {
+            "status": "failed",
+            "source_message_ids": [2, 4],
+            "origin_message_ids": [2, 4],
+        }
+        gate, _factory = make_gate("nochmal", context(messages, pending=pending))
+        self.assertIsNone(gate.denial("start_intervals_plan_sync", {}))
+
+        delete = [
+            {"id": 2, "role": "user", "content": "Lösch das Rennen"},
+            {"id": 4, "role": "user", "content": "das am 12.5."},
+            {"id": 5, "role": "assistant", "content": "Das hat nicht geklappt."},
+            {"id": 10, "role": "user", "content": "nochmal"},
+        ]
+        classifier = Mock(return_value=verdict(["competition"], delete=True))
+        gate, _factory = make_gate(
+            "nochmal", context(delete, pending=pending), classifier=classifier
+        )
+        self.assertIsNone(gate.denial("delete_competition", {}))
+        classifier.assert_called_once_with(
+            "nochmal",
+            "Das hat nicht geklappt.",
+            "Lösch das Rennen\ndas am 12.5.",
+        )
+
     def test_cap_counts_allowed_calls_and_resumed_receipts(self) -> None:
         gate, _factory = make_gate("Trainingsplan anpassen")
         for _ in range(WRITE_CAP):
@@ -476,6 +563,27 @@ class ChokePointTests(unittest.TestCase):
         self.execution.execute.assert_called_once()
         self.assertEqual(len(state.command_receipts), 1)
         self.logger.warning.assert_not_called()
+
+    def test_only_write_tools_collect_changes_and_store_the_gates_record_count(
+        self,
+    ) -> None:
+        seen = []
+
+        def execute(*_args, **_kwargs):
+            seen.append(change_history._collected_changes.get())
+            return {"ok": True}
+
+        self.execution.execute.side_effect = execute
+        state = self.state("Trag meinen Wettkampf am 12.5. ein")
+
+        self.execute(state, "save_competition")
+        self.execute(state, "start_provider_refresh")
+
+        self.assertEqual(seen[0], [])
+        self.assertIsNone(seen[1])
+        write, refresh = state.command_receipts
+        self.assertEqual((write["record_count"], write["changes"]), (1, []))
+        self.assertEqual((refresh["record_count"], refresh["changes"]), (0, []))
 
     def test_gate_sees_request_remote_write_flag_after_preparation(self) -> None:
         self.preparation.prepare.return_value = {

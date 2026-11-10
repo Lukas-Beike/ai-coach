@@ -7,7 +7,7 @@ import logging
 import threading
 from collections import Counter
 from collections.abc import Callable
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,7 +34,7 @@ from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.coach.turn_write_gate import CoachTurnWriteGate, CoachWriteGateService
-from backend.coach.write_gate import ILLNESS_CODE
+from backend.coach.write_gate import ILLNESS_CODE, TOOL_DOMAIN, record_count
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.planning.plan_guard_service import (
@@ -281,6 +281,10 @@ class CoachStructuredToolRoundService:
             # The classifier is a network call: ask before the writer lock; the
             # plan guard reads the cached verdict and asks only on a real finding.
             self._turn_write_gate(state).confirms_illness_override()
+        # A refresh or read tool records no athlete change to undo.
+        recorder: AbstractContextManager[list[dict[str, str]]] = (
+            change_history.collect_changes() if name in TOOL_DOMAIN else nullcontext([])
+        )
         local_transaction = name not in {
             "start_provider_refresh",
             "apply_adaptive_replan",
@@ -295,7 +299,7 @@ class CoachStructuredToolRoundService:
             if local_transaction
             else nullcontext(),
             # Kept on the receipt so the athlete can undo the turn's changes.
-            change_history.collect_changes() as changes,
+            recorder as changes,
         ):
             # Checked under the same lock as stale-turn release, so a turn
             # released while this worker was busy cannot finish its writes.
@@ -327,6 +331,11 @@ class CoachStructuredToolRoundService:
                     "request": action.get("request"),
                     "result": result,
                     "changes": changes,
+                    # The gate's own count, so a resumed turn adds it up as fresh
+                    # calls do instead of counting history rows.
+                    "record_count": record_count(name, metadata.get("arguments"))
+                    if name in TOOL_DOMAIN
+                    else 0,
                 }
             )
             self._jobs.merge_receipt(
