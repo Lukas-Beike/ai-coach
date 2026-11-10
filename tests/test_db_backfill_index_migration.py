@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from test_db_strength_sets_migration import connect, populate
+from support import connect
+from test_db_strength_sets_migration import populate
 
 from backend.db import migrations
 from backend.db.migrations import migrate_schema

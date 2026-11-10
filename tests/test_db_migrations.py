@@ -8,10 +8,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
+from support import temp_database
+
 from backend.canonical.vocabulary import ProviderId
 from backend.db import migrations
 from backend.db.bootstrap import initialize_application_database
-from backend.db.manager import DatabaseManager
 from backend.db.migrations import OlderSchemaError, migrate_schema
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import (
@@ -133,7 +134,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                 db.execute(f"PRAGMA user_version = {OLDEST_SUPPORTED_VERSION - 1}")
                 db.commit()
                 before = list(db.iterdump())
-            manager = DatabaseManager(path, sqlite3, row_factory=sqlite3.Row)
+            manager = temp_database(self, path=path)
             try:
                 with (
                     self.assertRaisesRegex(OlderSchemaError, "Release 1.13.44"),
@@ -345,18 +346,18 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "encrypted.db"
             options = {
+                "backend": cipher_backend,
                 "password": "synthetic-migration-test-key",
                 "configure": configure_cipher,
-                "row_factory": cipher_backend.Row,
             }
-            manager = DatabaseManager(path, cipher_backend, **options)
+            manager = temp_database(self, path=path, **options)
             try:
                 with manager.unit_of_work() as db:
                     initialize_schema(db)
                     migrate_schema(db)
             finally:
                 manager.close()
-            reopened = DatabaseManager(path, cipher_backend, **options)
+            reopened = temp_database(self, path=path, **options)
             try:
                 with reopened.unit_of_work() as db:
                     migrate_schema(db)
