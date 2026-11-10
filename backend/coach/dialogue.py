@@ -18,6 +18,7 @@ from backend.coach.conversation import CoachMessageService
 from backend.coach.service import command_receipt
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
 __all__ = [
     "INSTRUCTIONS",
@@ -65,7 +66,7 @@ def _lookup_matches(result: dict[str, Any]) -> list[dict[str, Any]]:
     ][:_LOOKUP_MATCHES_PER_STEP]
 
 
-INSTRUCTIONS = """
+_INSTRUCTIONS_TEMPLATE = """
 You are the athlete's conversational Coach. Understand the current message in
 the local dialogue and pending_request, including short replies, corrections,
 pronouns and implicit continuations. Never require trigger words, tool names,
@@ -130,8 +131,8 @@ competition:<id>, local_competitions (competition creation/sync), local_profile,
 activity_feedback, local_nutrition (diary/meals/templates), local_nutrition_product (new product),
 nutrition_product:<id> (editing that product), nutrition_template:<id> (editing that saved meal),
 local_equipment, local_activity_session, artifact:<id>, adaptive_replan:<id>, change:<id>,
-sync_job:<id>, garmin_refresh, calendar_refresh,
-weather_refresh, intervals_sync. Use exact existing object tokens for edits.
+sync_job:<id>, __SCOPE_TOKENS__.
+Use exact existing object tokens for edits.
 An external write requires the athlete's corresponding synchronization request
 in this current or pending dialogue request, remote_write=true, and its own
 provider target. Never infer a sync from planning, 'save', or provider data.
@@ -174,7 +175,8 @@ constraints and calendar blockers; use replace_training_plan with the exact
 inclusive period. Never replace sessions outside it. Keep explicitly preserved
 sessions using apply_training_patch instead. Persist plan-specific constraints
 with the plan; do not turn them into permanent profile preferences.
-Keep the existing one-workout-per-date rule. Do not invent completed sessions,
+Several units per day are allowed; avoid two hard endurance units on the same day.
+Do not invent completed sessions,
 feedback, observations or unavailable data. Merely mentioning a completed
 workout as planning context does not ask to save separate feedback.
 
@@ -239,13 +241,13 @@ stage_training_plan is for requested drafts only. commit_training_plan may use
 only a draft actually referenced in this local dialogue; include the draft's
 source_message_id as well as the current acceptance in source_message_ids.
 Never choose arbitrary outstanding artifacts. Read related drafts by conversation context, never ask
-the user to type an artifact ID. You are as powerful as possible and proactively resolve all operations, conflicts,
-and errors. For undo requests or confirmations,
+the user to type an artifact ID. Resolve operations, conflicts and errors directly within the authorized scope.
+For undo requests or confirmations,
 use undo_training_change with apply=true to revert an update or deletion directly; undoing
 a creation returns a confirmation card for the athlete instead. For sync conflicts,
 use resolve_training_sync_conflict with keep_local or adopt_remote, asking the athlete if their
 choice is not known. For failed sync jobs, retry with resolve_training_sync_conflict using job_id.
-For plan calendar sync conflicts, repair using start_intervals_plan_sync with repair=true.
+For plan calendar sync conflicts, offer the repair sync (rule 6k).
 Applying a self-proposed adaptive preview still requires athlete approval of that preview.
 Keep hypothetical advice read-only.
 
@@ -256,6 +258,21 @@ and distinguish queued synchronization from completion. A failure must never
 be described as success. End with a concise natural response in the user's
 language. Never mention internal authorization scopes or classification errors.
 """
+
+
+def provider_scope_tokens(
+    registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
+) -> list[str]:
+    """Return the _request scope tokens of the registry's refresh and write targets."""
+    return [
+        *(f"{target}_refresh" for target in registry.coach_refresh_targets()),
+        *(f"{target}_sync" for target in registry.coach_write_targets()),
+    ]
+
+
+INSTRUCTIONS = _INSTRUCTIONS_TEMPLATE.replace(
+    "__SCOPE_TOKENS__", ", ".join(provider_scope_tokens())
+)
 
 
 class CoachDialogueReadService:

@@ -116,6 +116,19 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
             ),
         )
 
+    def test_coach_labels_the_local_fitness_curve_without_renaming_its_keys(
+        self,
+    ) -> None:
+        load = {"ctl": 41.0, "atl": 38.5, "tsb": 2.5}
+        reader = cast(Any, self.service)._performance_reader
+        reader.current_performance = Mock(return_value={"load": load})
+
+        shown = cast(Any, self.service)._current_performance(None)["load"]
+
+        self.assertEqual(41.0, shown["ctl"])
+        self.assertIn("lokale Fitness (M7)", shown["label"])
+        self.assertNotIn("label", load)
+
     def test_build_uses_snapshot_fallback_and_projects_safe_provider_context(
         self,
     ) -> None:

@@ -12,7 +12,7 @@ from backend.activities.hr_cap import (
     cap_table_text,
 )
 from backend.athlete.profile import COACH_READ_ONLY_FIELDS
-from backend.planning.plan_checks import BLOCKING_CODES
+from backend.planning.plan_checks import BLOCKING_CODES, REQUIRED_CODES
 from backend.planning.session_focus import (
     ALL_FOCI,
     ENDURANCE_FOCI,
@@ -25,7 +25,13 @@ ACCEPT_PLAN_FINDINGS: dict[str, Any] = {
     "type": "array",
     "maxItems": len(BLOCKING_CODES),
     "items": {"type": "string", "enum": list(BLOCKING_CODES)},
-    "description": "The server checks the resulting plan. A blocking finding (illness_hard) saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. Other findings save the plan and come back as plan_check_notes, which are shown in the change receipt. Justify them without repeating or contradicting the receipt. Otherwise send an empty list.",
+    "description": (
+        "The server checks the resulting plan. The blocking finding "
+        + ", ".join(BLOCKING_CODES)
+        + " saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. "
+        + ", ".join(REQUIRED_CODES)
+        + " also save nothing but can never be accepted: write the missing fields. Other findings save the plan and come back as plan_check_notes, which are shown in the change receipt. Justify them without repeating or contradicting the receipt. Otherwise send an empty list."
+    ),
 }
 
 
@@ -535,7 +541,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "replace_training_plan",
-            "Atomically replace local plan units, including locally stored Intervals units, within the requested period. Use the planning revision returned by read_training_state. "
+            "Atomically replace local plan units within the requested period. Use the planning revision returned by read_training_state. "
             "This operation may create, update, and archive a different number of sessions and never writes remotely.",
             {
                 "payload": {
