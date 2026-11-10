@@ -102,7 +102,7 @@ class DailySyncMarkerService:
     def is_due(self, source: str, now: datetime | None = None) -> bool:
         """Check whether the latest provider attempt or success is due."""
         current = now or self._local_now()
-        with self._database_manager.unit_of_work() as db:
+        with self._database_manager.reader() as db:
             return daily_sync_is_due(
                 source,
                 current,

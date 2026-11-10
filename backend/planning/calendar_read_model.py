@@ -159,6 +159,49 @@ def _resolved_hr_cap(
     return {"hr_cap_bpm": {"low": resolved[0], "high": resolved[1]}}
 
 
+def _with_planned_profiles(
+    rows: list[dict[str, Any]],
+    sport_thresholds: Sequence[Observation],
+    zone_configurations: Sequence[ZoneConfiguration],
+) -> list[dict[str, Any]]:
+    """Rows with the workout profile of their planned steps, where they have one."""
+    return [
+        {**row, "workout_profile": profile}
+        if (
+            profile := planned_profile(
+                row, _zone_settings(row, sport_thresholds, zone_configurations)
+            )
+        )
+        else row
+        for row in rows
+    ]
+
+
+def project_training_day(
+    local_planned: list[Any],
+    activities: list[Any],
+    *,
+    today: date,
+    sport_thresholds: Sequence[Observation] = (),
+    zone_configurations: Sequence[ZoneConfiguration] = (),
+) -> list[dict[str, Any]]:
+    """The ``training_calendar`` of ``project_planning_calendar`` for few days.
+
+    Only the planned units and activities supplied are projected, without
+    weather, competitions or external events, so a caller that needs one day's
+    sessions need not read the whole calendar.
+    """
+    compliance_planned, _weekly = calendar_projection.planning_compliance_state(
+        canonical.canonical_planned_workouts(local_planned), activities, today
+    )
+    return calendar_projection.training_calendar_items(
+        _with_planned_profiles(
+            compliance_planned, sport_thresholds, zone_configurations
+        ),
+        activities,
+    )
+
+
 def project_planning_calendar(
     local_planned: list[Any],
     activities: list[Any],
@@ -188,16 +231,9 @@ def project_planning_calendar(
     weather_planned = history.add_to_planned(
         compliance_planned, weather, default_name=default_name
     )
-    weather_planned = [
-        {**row, "workout_profile": profile}
-        if (
-            profile := planned_profile(
-                row, _zone_settings(row, sport_thresholds, zone_configurations)
-            )
-        )
-        else row
-        for row in weather_planned
-    ]
+    weather_planned = _with_planned_profiles(
+        weather_planned, sport_thresholds, zone_configurations
+    )
     weather_planned = [
         _with_session_focus(row, sport_thresholds, zone_configurations)
         for row in weather_planned

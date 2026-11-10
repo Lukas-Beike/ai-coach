@@ -126,13 +126,27 @@ class NutritionHttpApiTests(unittest.TestCase):
             lambda: self.diary_service,
             lambda: self.meal_library_service,
             self.local_now,
-            lambda: (90, None),
+            lambda day: (90, None),
         )
         routes.handle(self.handler, "/api/nutrition/day")
         payload = self.handler.send_json.call_args.args[1]
         self.assertEqual(payload["macro_ranges"]["carbs_g"], (270, 450))
         self.assertEqual(payload["macro_ranges"]["protein_g"], (153, 207))
         self.assertEqual(payload["macro_ranges"]["fat_g"], (60, 90))
+
+    def test_day_reference_is_requested_for_the_requested_day_only(self) -> None:
+        self.handler.path = "/api/nutrition/day?date=2026-09-24"
+        self.diary_service.get_day_summary.return_value = {"date": "2026-09-24"}
+        context = Mock(return_value=(90, None))
+        routes = NutritionGetRoutes(
+            lambda: self.auth,
+            lambda: self.diary_service,
+            lambda: self.meal_library_service,
+            self.local_now,
+            context,
+        )
+        routes.handle(self.handler, "/api/nutrition/day")
+        context.assert_called_once_with("2026-09-24")
 
     def test_day_reference_failure_preserves_diary(self) -> None:
         self.handler.path = "/api/nutrition/day?date=2026-09-24"
@@ -141,7 +155,7 @@ class NutritionHttpApiTests(unittest.TestCase):
             "total_kcal": 2700,
         }
 
-        def unavailable():
+        def unavailable(day):
             raise RuntimeError("unavailable")
 
         routes = NutritionGetRoutes(

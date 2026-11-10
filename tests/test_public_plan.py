@@ -226,6 +226,35 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         self.assertEqual(snapshot.call_count, 2)
         services["manager"].unit_of_work.assert_not_called()
 
+    def test_training_day_read_is_windowed_and_builds_no_full_read_model(self):
+        service, services, _projection, *_ = self.make_service()
+        activity_rows = service._activity_rows
+        activity_rows.between.return_value = [{"id": "a1"}]
+        services["planned"].list_between.return_value = [{"id": "u1"}]
+        with (
+            patch("backend.http_api.public_plan.calendar_profiles", return_value={}),
+            patch(
+                "backend.http_api.public_plan.calendar_read_model.project_training_day",
+                return_value=[{"id": "u1", "planned_load": 30}],
+            ) as project,
+            patch(
+                "backend.http_api.public_plan.calendar_read_model.project_planning_calendar"
+            ) as full,
+        ):
+            entries = service.read_training_day(date(2026, 11, 2))
+
+        window = (date(2026, 11, 1), date(2026, 11, 3))
+        services["planned"].list_between.assert_called_once_with(*window)
+        self.assertEqual(window, activity_rows.between.call_args.args[1:])
+        self.assertEqual([{"id": "a1"}], project.call_args.args[1])
+        self.assertEqual([{"id": "u1", "training_load": 30}], entries)
+        full.assert_not_called()
+        services["planned"].list.assert_not_called()
+        activity_rows.compact.assert_not_called()
+        for untouched in ("weather", "competitions", "external", "plans", "checkins"):
+            self.assertEqual([], services[untouched].method_calls)
+        services["manager"].unit_of_work.assert_not_called()
+
     def test_local_read_uses_one_snapshot_without_writer(self):
         service, services, _projection, *_ = self.make_service()
         with patch(

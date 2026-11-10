@@ -23,6 +23,7 @@ from backend.sync.queue import SyncJobQueueService
 from backend.sync.schedule_policies import build_schedule_policies
 from backend.sync.state import SyncStateRepository
 
+LOGGER = logging.getLogger("intervals_coach")
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
 _HISTORICAL_BACKFILL = "historical_backfill"
 
@@ -78,9 +79,35 @@ class DailySyncScheduler:
             for provider_id in self._registry.daily_order():
                 policy = self._policies.get(provider_id)
                 if policy is not None:
-                    self._schedule_provider(provider_id, policy)
+                    self._schedule_provider_safely(provider_id, policy)
             if self._backfill_resumer is not None:
                 self._backfill_resumer()
+
+    def _schedule_provider_safely(
+        self, provider_id: str, policy: ProviderSchedulePolicy
+    ) -> None:
+        """Schedule one provider; its failure never skips the providers after it."""
+        try:
+            self._schedule_provider(provider_id, policy)
+        except AppError as exc:
+            if exc.reason == "maintenance":
+                raise
+            self._log_provider_failure(provider_id, exc)
+        except Exception as exc:  # noqa: BLE001 - one provider must not stop the pass
+            self._log_provider_failure(provider_id, exc)
+
+    @staticmethod
+    def _log_provider_failure(provider_id: str, exc: Exception) -> None:
+        LOGGER.error(
+            "Scheduling a provider refresh failed",
+            extra={
+                "event": "daily_sync_provider_failed",
+                "context": {
+                    "provider": provider_id,
+                    "error_class": type(exc).__name__,
+                },
+            },
+        )
 
     def _schedule_provider(
         self, provider_id: str, policy: ProviderSchedulePolicy

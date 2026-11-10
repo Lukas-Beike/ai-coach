@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from backend.calendar import canonical as calendar_canonical
 from backend.canonical.domain_records import ZoneConfiguration
-from backend.canonical.public_metrics import neutral_calendar_state
+from backend.canonical.public_metrics import (
+    neutral_calendar_entries,
+    neutral_calendar_state,
+)
 from backend.canonical.records import Observation
 from backend.db.manager import DatabaseManager
 from backend.performance.session_analysis_reads import calendar_profiles
@@ -100,6 +103,33 @@ class PublicPlanStateService:
         # Every read below shares one read-only snapshot.
         with manager.read_snapshot() as db:
             return self._read(weather, db)
+
+    def read_training_day(self, day: date) -> list[dict[str, Any]]:
+        """Return the public training-calendar entries around one local day.
+
+        Reads only the planned units and activities of the day and its two
+        neighbours (a unit can be completed on the next day) in one snapshot,
+        not the full calendar read model; callers pick the entries they need.
+        """
+        start, end = day - timedelta(days=1), day + timedelta(days=1)
+        manager = self._database_manager_factory()
+        with manager.read_snapshot() as db:
+            planned = self._planned_units.list_between(start, end)
+            activities = (
+                self._activity_rows.between(db, start, end)
+                if self._activity_rows
+                else []
+            )
+            thresholds = self._sport_thresholds(db)
+        profiles = calendar_profiles(manager)
+        calendar = calendar_read_model.project_training_day(
+            planned,
+            [self._with_profile(row, profiles) for row in activities],
+            today=self._today(),
+            sport_thresholds=thresholds,
+            zone_configurations=self._zone_configurations(),
+        )
+        return neutral_calendar_entries(calendar)
 
     def _history_and_profiles(self) -> tuple[Any, dict[str, Any]]:
         """Read the weather history and the stored workout profiles by session."""

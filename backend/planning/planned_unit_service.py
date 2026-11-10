@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 from collections.abc import Callable
 from datetime import date
@@ -26,7 +27,11 @@ from backend.planning.exercise_mappings import remembered_exercises
 from backend.planning.garmin_orphans import find_orphans
 from backend.planning.intervals_orphans import find_intervals_orphans
 from backend.planning.push_state import attach_push_state, garmin_baselines
-from backend.planning.repository import planned_unit_payload, planned_unit_rows
+from backend.planning.repository import (
+    planned_unit_payload,
+    planned_unit_rows,
+    planned_unit_rows_between,
+)
 from backend.planning.session_focus import carry_focus
 
 _REMOTE_LINKS = RemoteLinkRepository()
@@ -391,6 +396,14 @@ class PlannedUnitService:
                 self._today(),
             )
         return [payload for _row, payload in pairs]
+
+    def list_between(self, start: date, end: date) -> builtins.list[dict[str, Any]]:
+        """Return the unarchived planned units from ``start`` to ``end`` inclusive."""
+        with self._database_manager.reader() as db:
+            rows = planned_unit_rows_between(db, start, end)
+        return [
+            payload for row in rows if (payload := planned_unit_payload(row, False))
+        ]
 
     def list_for_coach(self, limit: int = 250) -> dict[str, Any]:
         """Return the future local planned units in the Coach calendar shape."""
