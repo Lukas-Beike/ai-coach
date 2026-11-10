@@ -8,8 +8,10 @@ from typing import Any
 
 API_PAGE_DEFAULT = 100
 API_PAGE_MAX = 250
-# Real cursors are a few dozen characters; anything longer is crafted input.
-PAGE_CURSOR_MAX_CHARS = 512
+# Planning and library cursors carry the last workout name (at most 200
+# characters, up to 4 UTF-8 bytes each) plus keys, so about 1,400 base64
+# characters at most; the bound leaves headroom and only stops crafted input.
+PAGE_CURSOR_MAX_CHARS = 4096
 
 
 def api_page_limit(
