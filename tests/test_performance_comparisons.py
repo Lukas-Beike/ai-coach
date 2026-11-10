@@ -131,6 +131,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
             "last_7": {"training_load": 100, "duration_hours": 10},
             "previous_7": {"training_load": 90, "duration_hours": 8},
             "previous_30": {"training_load": 400, "duration_hours": 30},
+            "base_30_before_7": {"training_load": 400, "duration_hours": 30},
         }
         return (metrics, recovery, load_context)
 

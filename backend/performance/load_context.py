@@ -130,6 +130,10 @@ def performance_load_context(
     previous_30 = performance_load.activity_rollup(
         activities, 30, today - timedelta(days=30), session_feedback=feedback
     )
+    # The 30 days before the last 7 (days -36..-7): the base of the 7-day volume.
+    base_30 = performance_load.activity_rollup(
+        activities, 30, today - timedelta(days=7), session_feedback=feedback
+    )
     curve = local_fitness_curve(
         canonical,
         activities,
@@ -143,4 +147,5 @@ def performance_load_context(
         "previous_7": previous_7,
         "last_30": last_30,
         "previous_30": previous_30,
+        "base_30_before_7": base_30,
     }
