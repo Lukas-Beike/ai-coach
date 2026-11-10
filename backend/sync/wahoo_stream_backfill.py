@@ -41,6 +41,9 @@ WAHOO_BATCH_LIMIT: Final = 100
 # Pages of 50 workouts: far more than the athlete's whole Wahoo history.
 HISTORY_WORKOUT_PAGES: Final = 200
 DOWNLOAD_DELAY_SECONDS: Final = 1.0
+# Sessions this recent get their streams downloaded again after a mapper upgrade
+# (#1936); older ones keep the streams they have (athlete decision 2026-11-10).
+WAHOO_REPLAY_DAYS: Final = 365
 _RATE_LIMITED: Final = "rate_limited"
 _TRANSIENT: Final = "unavailable"
 

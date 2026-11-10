@@ -156,6 +156,9 @@ class _Service:
     def backfill(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._hit()
 
+    def rearm(self) -> None:
+        """The Wahoo refresh restarts the stream chain; the double has none."""
+
     def sync_approved(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return {**self._hit(), "synced_dates": []}
 

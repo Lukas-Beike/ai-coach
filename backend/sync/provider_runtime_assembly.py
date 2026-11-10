@@ -45,8 +45,8 @@ from backend.sync.executor import (
     GarminJobAdapter,
     IntervalsJobAdapter,
     PerJobOwner,
-    StreamBackfill,
     WahooJobAdapter,
+    WahooStreamBackfill,
 )
 from backend.sync.freshness_sources import DEFAULT_FRESHNESS_SOURCES
 from backend.sync.gates import ProviderResyncGate
@@ -74,7 +74,7 @@ class WahooRuntimeDependencies:
     sync_service: Callable[[], WahooSyncService]
     plan_push_service: Callable[[], WahooPlanPushService]
     resync_gate: ProviderResyncGate
-    stream_backfill_service: Callable[[], StreamBackfill] | None = None
+    stream_backfill_service: Callable[[], WahooStreamBackfill] | None = None
 
 
 @dataclass(frozen=True)

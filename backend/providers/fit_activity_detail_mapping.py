@@ -100,7 +100,9 @@ from backend.providers.fit_sensor_mapping import sensor_profile
 # that carries RR intervals (hrv messages); the intervals are not stored.
 # Version 7: Bluetooth LE sensor roles with the FIT SDK source type numbers.
 # Version 8: running dynamics channels from the record messages (#1870).
-MAPPER_VERSION: Final = 8
+# Version 9: ``active`` laps are work laps when the file has rest or recovery laps,
+# and records with a compressed timestamp header keep their timestamp (#1936).
+MAPPER_VERSION: Final = 9
 
 # Same limit as the Garmin and Intervals mappers, so issues stay bounded.
 MAX_FIT_ACTIVITY_ID_LENGTH: Final = 200
@@ -202,6 +204,9 @@ _LAP_METRIC_FIELDS: Final[tuple[tuple[str, int], ...]] = (
     ("elevation_gain_m", 21),
     ("normalized_power", 33),
 )
+# FIT lap intensity: 0 active, 1 rest, 4 recovery.
+_ACTIVE_INTENSITY: Final = 0
+_REST_INTENSITIES: Final = frozenset({1, 4})
 _LAP_KINDS: Final[Mapping[int, LapKind]] = {
     0: LapKind.LAP,
     1: LapKind.RECOVERY,
@@ -452,9 +457,13 @@ def _lap_set(
         if not starts:
             return None
         zero = starts[0][0]
+    # An ``active`` lap only means a work step beside rest or recovery laps.
+    active_is_work = any(
+        _lap_intensity(fields) in _REST_INTENSITIES for _, fields in starts
+    )
     kept: list[ActivityLap] = []
     for start, fields in starts:
-        lap = _lap(ref, start - zero, fields, issues)
+        lap = _lap(ref, start - zero, fields, issues, active_is_work=active_is_work)
         if lap is not None:
             kept.append(lap)
     if len(kept) > MAX_LAPS:
@@ -483,6 +492,8 @@ def _lap(
     start_offset: float,
     fields: Mapping[int, object],
     issues: list[MappingIssue],
+    *,
+    active_is_work: bool = False,
 ) -> ActivityLap | None:
     """Build one lap, or return None with the issue that drops it."""
     if start_offset < 0:
@@ -504,7 +515,7 @@ def _lap(
     try:
         return ActivityLap(
             index=0,
-            kind=_lap_kind(fields),
+            kind=_lap_kind(fields, active_is_work),
             start_offset_s=start_offset,
             end_offset_s=start_offset + elapsed,
             **metrics,
@@ -514,11 +525,20 @@ def _lap(
         return None
 
 
-def _lap_kind(fields: Mapping[int, object]) -> LapKind:
+def _lap_intensity(fields: Mapping[int, object]) -> int | None:
     intensity = fields.get(_LAP_INTENSITY_FIELD)
     if isinstance(intensity, int) and not isinstance(intensity, bool):
-        return _LAP_KINDS.get(intensity, LapKind.LAP)
-    return LapKind.LAP
+        return intensity
+    return None
+
+
+def _lap_kind(fields: Mapping[int, object], active_is_work: bool) -> LapKind:
+    intensity = _lap_intensity(fields)
+    if intensity == _ACTIVE_INTENSITY and active_is_work:
+        return LapKind.WORK
+    if intensity is None:
+        return LapKind.LAP
+    return _LAP_KINDS.get(intensity, LapKind.LAP)
 
 
 def _lap_accepts(name: str, value: float) -> bool:
