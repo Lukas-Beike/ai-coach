@@ -228,11 +228,13 @@ class SyncCommandEndpoint:
             }
         provider: Any = payload.get("provider")
         self._require_provider_configured(provider)
+        job_type = payload.get("type", "refresh")
         return 202, self._queue.enqueue(
             provider,
-            payload.get("type", "refresh"),
+            job_type,
             envelope,
             requested_by="user",
+            item_operations=_plan_push_item_operations(job_type, envelope),
         )
 
     def _require_provider_configured(self, provider: Any) -> None:
@@ -298,3 +300,26 @@ class SyncCommandEndpoint:
         # browser polls its state.
         result = self._full_resync.start(provider, self._operation_id_factory())
         return (202 if result["status"] == "started" else 200), result
+
+
+def _plan_push_item_operations(
+    job_type: Any, envelope: Any
+) -> list[dict[str, str]] | None:
+    """One job item per plan_push entry, as the Coach path stores them."""
+    entries = envelope.get("entries") if isinstance(envelope, dict) else None
+    if job_type != "plan_push" or not isinstance(entries, list):
+        return None
+    operations: dict[str, dict[str, str]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return None
+        workout_id = str(entry.get("library_workout_id") or "")
+        operations.setdefault(
+            workout_id,
+            {
+                "item_key": workout_id,
+                "operation": "plan_push",
+                "payload_hash": str(entry.get("expected_payload_hash") or ""),
+            },
+        )
+    return list(operations.values()) or None

@@ -209,6 +209,32 @@ class SyncJobContractTests(unittest.TestCase):
             },
         )
 
+    def test_job_error_detail_is_the_failed_items_redacted_cause(self):
+        def item(key, status, detail):
+            return {
+                "id": key,
+                "item_key": key,
+                "operation": "plan_push",
+                "status": status,
+                "error_detail": detail,
+            }
+
+        job = {"id": "job-3", "provider": "garmin", "type": "plan_push"}
+        result = job_dto(
+            job,
+            [
+                item("a", "completed", None),
+                item("b", "queued", "Retry later."),
+                item("c", "failed", "Unit rejected."),
+            ],
+        )
+        self.assertEqual(result["error_detail"], "Unit rejected.")
+        self.assertEqual(
+            [entry["status"] for entry in result["items"]],
+            ["completed", "queued", "failed"],
+        )
+        self.assertIsNone(job_dto(job, [item("a", "completed", None)])["error_detail"])
+
     def test_persistence_helpers_use_caller_owned_connection(self):
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row

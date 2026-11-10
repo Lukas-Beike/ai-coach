@@ -93,7 +93,17 @@ class HttpTargetTests(unittest.TestCase):
 
         self.assertEqual(202, status)
         self.queue.enqueue.assert_called_once_with(
-            "wahoo", "plan_push", {"entries": [ENTRY]}, requested_by="user"
+            "wahoo",
+            "plan_push",
+            {"entries": [ENTRY]},
+            requested_by="user",
+            item_operations=[
+                {
+                    "item_key": ENTRY["library_workout_id"],
+                    "operation": "plan_push",
+                    "payload_hash": ENTRY["expected_payload_hash"],
+                }
+            ],
         )
 
 

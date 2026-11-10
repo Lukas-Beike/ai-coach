@@ -196,7 +196,11 @@ class DefaultRegistryDispatchTests(unittest.TestCase):
             ),
         )
         queue.enqueue.assert_called_once_with(
-            5, "refresh", {"reason": "manual"}, requested_by="user"
+            5,
+            "refresh",
+            {"reason": "manual"},
+            requested_by="user",
+            item_operations=None,
         )
 
     def test_unknown_path_is_rejected_by_execute(self) -> None:

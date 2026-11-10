@@ -1,6 +1,7 @@
 async function syncGarmin() {
   const button = $("#garminSyncButton");
   if (!button) return;
+  if (state.localSync.garmin) return;
   state.localSync.garmin = true;
   button.disabled = true;
   button.textContent = "Garmin wird synchronisiert…";
@@ -8,7 +9,7 @@ async function syncGarmin() {
     const configuredDays = $("#garminSyncDays")?.value || state.data?.sync_settings?.garmin_days || 84;
     const result = await api("/api/garmin/sync", { method: "POST", body: JSON.stringify({ days: configuredDays }) });
     const completed = await waitForSyncJob(result.id);
-    if (completed.status === "failed") throw new Error(globalThis.AppApi.messageForReason(completed.reason, "Garmin-Synchronisierung fehlgeschlagen."));
+    if (completed.status === "failed") throw new Error(providerJobErrorDetail(completed) || globalThis.AppApi.messageForReason(completed.reason, "Garmin-Synchronisierung fehlgeschlagen."));
     toast(`Garmin ${completed.status === "partial" ? "teilweise " : ""}synchronisiert`);
     invalidateContextPreview();
     await load();
@@ -19,13 +20,14 @@ async function syncGarmin() {
 async function syncExternalCalendar() {
   const button = $("#externalCalendarSyncButton");
   if (!button) return;
+  if (state.localSync.externalCalendar) return;
   state.localSync.externalCalendar = true;
   button.disabled = true;
   button.textContent = "Synchronisierung läuft…";
   try {
     const result = await api("/api/external-calendar/sync", { method: "POST", body: "{}" });
     const completed = await waitForSyncJob(result.id);
-    if (completed.status === "failed") throw new Error(globalThis.AppApi.messageForReason(completed.reason, "Kalender-Synchronisierung fehlgeschlagen."));
+    if (completed.status === "failed") throw new Error(providerJobErrorDetail(completed) || globalThis.AppApi.messageForReason(completed.reason, "Kalender-Synchronisierung fehlgeschlagen."));
     toast(`Kalender ${completed.status === "partial" ? "teilweise " : ""}synchronisiert`);
     invalidateContextPreview();
     await load();
@@ -36,6 +38,7 @@ async function syncExternalCalendar() {
 async function syncWeather() {
   const button = $("#weatherSyncButton");
   if (!button) return;
+  if (state.localSync.weather) return;
   state.localSync.weather = true;
   button.disabled = true;
   button.classList.add("busy");
@@ -43,7 +46,7 @@ async function syncWeather() {
   try {
     const result = await api("/api/weather/sync", { method: "POST", body: "{}" });
     const completed = await waitForSyncJob(result.id);
-    if (completed.status === "failed") throw new Error(globalThis.AppApi.messageForReason(completed.reason, "Wetter-Synchronisierung fehlgeschlagen."));
+    if (completed.status === "failed") throw new Error(providerJobErrorDetail(completed) || globalThis.AppApi.messageForReason(completed.reason, "Wetter-Synchronisierung fehlgeschlagen."));
     toast(completed.status === "partial" ? "Open-Meteo teilweise aktualisiert" : "Open-Meteo-Wetter aktualisiert");
     invalidateContextPreview();
     await load();
@@ -58,6 +61,7 @@ async function syncWeather() {
 async function syncWahoo() {
   const button = $("#wahooSyncButton");
   if (!button) return;
+  if (state.localSync.wahoo) return;
   state.localSync.wahoo = true;
   button.disabled = true;
   button.textContent = "Synchronisierung läuft…";
@@ -181,7 +185,7 @@ function renderFullResyncControls(source) {
   else renderGarminFullResync(data);
 }
 
-// The job DTO exposes the redacted explanation on its items; the job itself has no error_detail.
+// job.error_detail is the DTO's one redacted cause (an item's detail, failed items first); items stay as the fallback.
 function providerJobErrorDetail(job) {
   const details = (Array.isArray(job?.items) ? job.items : []).filter((item) => typeof item?.error_detail === "string" && item.error_detail);
   const actionable = details.find((item) => providerErrorIsNonRetryable(item.error_class)) || details.find((item) => item.status === "failed");
@@ -208,7 +212,7 @@ async function waitForSyncJob(jobId) {
     const job = await api(`/api/sync/jobs/${encodeURIComponent(jobId)}`);
     // A non-retryable error (for example a missing provider configuration) will
     // not change while polling, so stop now and show the job's own message.
-    if ([job.error_class, job.error_code].some((value) => providerErrorIsNonRetryable(value))) {
+    if (providerErrorIsNonRetryable(job.error_class)) {
       throw new Error(providerJobErrorDetail(job) || "Die Anbindung ist nicht vollständig konfiguriert. Bitte die Verbindungseinstellungen unter Mehr prüfen.");
     }
     if (["completed", "partial", "failed"].includes(job.status)) return job;

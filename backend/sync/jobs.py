@@ -171,6 +171,9 @@ def job_dto(
         for item in normalized_items
     ]
     completed, total = bounded_progress(item_dtos)
+    # The one documented, redacted cause: an item's already redacted detail, failed items first.
+    detailed = [item for item in item_dtos if item["error_detail"]]
+    detailed.sort(key=lambda item: item["status"] != "failed")
     return {
         "id": job["id"],
         "provider": job["provider"],
@@ -184,6 +187,7 @@ def job_dto(
         "started_at": job.get("started_at"),
         "finished_at": job.get("finished_at"),
         "error_class": job.get("error_class"),
+        "error_detail": detailed[0]["error_detail"] if detailed else None,
         "items": item_dtos,
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
