@@ -136,14 +136,14 @@ class ServerProvidersTests(ServerTestCase):
         sync.assert_not_called()
 
     def test_garmin_capability_breaker_pauses_repeated_same_error(self):
-        error = server.AppError(503, "provider unavailable", reason="network_error")
+        error = server.AppError(429, "provider limited", reason="rate_limited")
         service = server.GARMIN_ASSEMBLY.sync_state_service()
         for _ in range(garmin_sync.GARMIN_CAPABILITY_FAILURE_LIMIT):
             service.record_capability_failure("body_battery", error)
         self.assertFalse(service.capability_allowed("body_battery"))
         state = service.capability_state("body_battery")
         self.assertEqual(state["count"], garmin_sync.GARMIN_CAPABILITY_FAILURE_LIMIT)
-        self.assertEqual(state["error_class"], "network_error")
+        self.assertEqual(state["error_class"], "rate_limited")
         service.record_capability_success("body_battery")
         self.assertTrue(service.capability_allowed("body_battery"))
 
@@ -1088,7 +1088,6 @@ class ServerProvidersTests(ServerTestCase):
         self.assertEqual(completed["context"]["operation"], "get_sleep_daily")
         self.assertEqual(completed["context"]["result_items"], 1)
 
-
     def test_provider_refresh_history_is_bounded_and_diagnostic_safe(self):
         for index in range(sync_freshness.PROVIDER_REFRESH_MAX_ROWS + 5):
             refresh_id = server.PROVIDER_SYNC.refresh_tracker().start(
@@ -1105,7 +1104,6 @@ class ServerProvidersTests(ServerTestCase):
         report = server.DIAGNOSTICS_ASSEMBLY.report_service().report()
         self.assertIn("provider_freshness", report)
         self.assertNotIn("operation-", json.dumps(report))
-
 
 
 if __name__ == "__main__":

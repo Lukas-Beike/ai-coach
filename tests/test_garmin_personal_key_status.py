@@ -165,6 +165,13 @@ class _KeyValues:
     def delete(self, _db: Any, key: str) -> None:
         self.values.pop(key, None)
 
+    def delete_prefix(self, _db: Any, prefix: str) -> None:
+        self.values = {
+            key: value
+            for key, value in self.values.items()
+            if not key.startswith(prefix)
+        }
+
 
 class KeyChangeClearsExpiryTests(unittest.TestCase):
     def test_saving_or_removing_the_key_clears_its_expiry(self) -> None:
@@ -204,7 +211,13 @@ class KeyChangeClearsExpiryTests(unittest.TestCase):
         self.assertEqual(holder["config"].garmin_personal_api_key_expires, "2026-12-31")
 
         key_values.values["garmin_personal_key_rejected"] = "2026-11-06T08:00:00Z"
+        key_values.values["garmin_capability_activities"] = '{"count":3}'
+        key_values.values["garmin_capability_wellness_backfill_sleep"] = '{"count":3}'
+        key_values.values["garmin_sdk_threshold_failures"] = '{"count":2}'
         service.update({"garmin_personal_api_key": "renewed-key-1723"})
+        self.assertNotIn("garmin_capability_activities", key_values.values)
+        self.assertNotIn("garmin_capability_wellness_backfill_sleep", key_values.values)
+        self.assertIn("garmin_sdk_threshold_failures", key_values.values)
         self.assertNotIn("garmin_personal_api_key_expires", stored())
         self.assertNotIn("garmin_personal_key_rejected", key_values.values)
         self.assertEqual(holder["config"].garmin_personal_api_key_expires, "")
@@ -306,6 +319,38 @@ class CheckStoredLoginTests(unittest.TestCase):
             reader.check_stored_login()
         personal.verify_key.assert_called_once_with()
         factory.create.assert_not_called()
+
+    def test_accepted_key_clears_the_capability_pauses(self) -> None:
+        reader = _reader(_config(), _factory(None), _Tokens(False))
+        with patch(
+            "backend.sync.garmin_service._personal_client",
+            return_value=self._personal(),
+        ):
+            reader.check_stored_login()
+        reader._state_service.clear_capability_state.assert_called_once_with()
+
+    def test_successful_sdk_login_check_clears_the_capability_pauses(self) -> None:
+        config = _config(garmin_personal_api_key="")
+        reader = _reader(config, _factory(None), _Tokens(True))
+        with patch(
+            "backend.sync.garmin_service.garmin_adapter.authenticate_client",
+            return_value=(Mock(), None),
+        ):
+            reader.check_stored_login()
+        reader._state_service.clear_capability_state.assert_called_once_with()
+
+    def test_failed_checks_keep_the_capability_pauses(self) -> None:
+        rejected = provider_http.classify_provider_status(401, "garmin")
+        reader = _reader(_config(), _factory(None), _Tokens(True))
+        with (
+            patch(
+                "backend.sync.garmin_service._personal_client",
+                return_value=self._personal(rejected),
+            ),
+            self.assertRaises(AppError),
+        ):
+            reader.check_stored_login()
+        reader._state_service.clear_capability_state.assert_not_called()
 
     def test_rejected_key_names_the_key_without_its_value(self) -> None:
         rejected = provider_http.classify_provider_status(401, "garmin")

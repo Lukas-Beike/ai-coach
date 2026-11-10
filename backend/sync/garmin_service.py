@@ -27,6 +27,7 @@ from backend.providers.garmin import (
     collect_garmin_activity_detail,
     collect_garmin_data,
 )
+from backend.providers.garmin_capability import WELLNESS_BACKFILL_PREFIX
 from backend.providers.garmin_fields import GARMIN_EXTENDED_DATE_ALIASES
 from backend.providers.garmin_fit_history import (
     FileSink,
@@ -159,6 +160,27 @@ def _skippable_history_error(error: BaseException) -> bool:
     """Only a client error or an unreadable answer may skip history; others retry."""
     return isinstance(error, (TypeError, ValueError)) or (
         sync_job_error_class(error) == "client_error"
+    )
+
+
+def _wellness_hooks(
+    state: Any, needs_night: Callable[[str], bool]
+) -> WellnessHistoryHooks:
+    """Hooks of the wellness backfill, with capability state under its own keys."""
+
+    def failure(source: str, error: BaseException) -> None:
+        state.record_capability_failure(WELLNESS_BACKFILL_PREFIX + source, error)
+
+    return WellnessHistoryHooks(
+        skippable=_skippable_history_error,
+        needs_night=needs_night,
+        capability_allowed=lambda source: state.capability_allowed(
+            WELLNESS_BACKFILL_PREFIX + source
+        ),
+        capability_failure=failure,
+        capability_success=lambda source: state.record_capability_success(
+            WELLNESS_BACKFILL_PREFIX + source
+        ),
     )
 
 
@@ -413,8 +435,8 @@ class GarminRemoteReader:
     ) -> dict[str, Any]:
         """Read one wellness history window for the one-off backfill (#1730).
 
-        Paused sources and their failures share the regular sync's capability
-        state, so a rate limit pauses this walk as it pauses the hourly sync.
+        Paused sources and their failures use their own capability state
+        (``WELLNESS_BACKFILL_PREFIX``), so this walk cannot pause the hourly sync.
         """
         if not self.configured():
             raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
@@ -428,13 +450,7 @@ class GarminRemoteReader:
                 start,
                 end,
                 external_call=call_external,
-                hooks=WellnessHistoryHooks(
-                    skippable=_skippable_history_error,
-                    needs_night=needs_night,
-                    capability_allowed=self._state_service.capability_allowed,
-                    capability_failure=self._state_service.record_capability_failure,
-                    capability_success=self._state_service.record_capability_success,
-                ),
+                hooks=_wellness_hooks(self._state_service, needs_night),
             )
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
@@ -552,6 +568,8 @@ class GarminRemoteReader:
         personal = self._personal()
         if personal is not None:
             self._check_personal_key(personal)
+            # The accepted key starts without a pause from the rejected one.
+            self._state_service.clear_capability_state()
             if tokens is None or not tokens.connected():
                 return
         if tokens is None or not tokens.connected():
@@ -582,6 +600,7 @@ class GarminRemoteReader:
                 401, GARMIN_MFA_REQUIRED_MESSAGE, reason="reconnect_required"
             )
         self._state_service.clear_sdk_skipped()
+        self._state_service.clear_capability_state()
 
     def _check_personal_key(self, personal: GarminPersonalClient) -> None:
         """Exchange the Personal API key once; a rejection names the key."""

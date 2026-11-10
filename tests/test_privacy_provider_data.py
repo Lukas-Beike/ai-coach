@@ -680,6 +680,21 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         )
         self.assertEqual(cancelled, [True])
 
+    def test_delete_clears_every_garmin_capability_pause(self):
+        for key in (
+            "garmin_capability_activities",
+            "garmin_capability_wellness_backfill_sleep",
+        ):
+            self.db.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+                (key, '{"count":3}', "2026-11-09T08:00:00+00:00"),
+            )
+        self.service().delete("LOKALE DATEN LÖSCHEN")
+        remaining = self.db.execute(
+            "SELECT key FROM kv WHERE instr(key, 'capability') > 0"
+        ).fetchall()
+        self.assertEqual(remaining, [])
+
     def connected_wahoo(self, request):
         """A real Wahoo connection service over the fixture database, already connected."""
         config = make_config()

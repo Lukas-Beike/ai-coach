@@ -26,6 +26,11 @@ from backend.observability import Redactor
 from backend.performance.freshness import GarminSyncStatus
 from backend.provider_credentials import GARMIN_PERSONAL_KEY_REJECTED_KEY
 from backend.providers.descriptors import GARMIN_ID
+from backend.providers.garmin_capability import (
+    capability_failure_class,
+    capability_key,
+    clear_capability_state,
+)
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
 from backend.providers.garmin_gear_fields import garmin_gear_id
 from backend.sync.canonical_ingest import DeletionWindow, fetch_deletion_window
@@ -37,7 +42,6 @@ from backend.sync.garmin_snapshot_writer import (
     GarminSnapshotWriter,
     complete_activity_read_window,
 )
-from backend.sync.refresh import sync_job_error_class
 from backend.sync.state import SyncStateRepository
 
 GARMIN_CAPABILITY_FAILURE_LIMIT = 3
@@ -761,7 +765,7 @@ class GarminSyncStateService:
 
     def capability_state(self, source: str) -> dict[str, Any]:
         try:
-            value = json.loads(self._get(f"garmin_capability_{source}") or "{}")
+            value = json.loads(self._get(capability_key(source)) or "{}")
         except TypeError, ValueError:
             value = {}
         return value if isinstance(value, dict) else {}
@@ -775,9 +779,19 @@ class GarminSyncStateService:
             return True
 
     def record_capability_failure(self, source: str, error: BaseException) -> None:
+        """Count a capability failure; three in a row of one class pause the source.
+
+        Only the classes of ``capability_failure_class`` count (rate limited,
+        not found, unsupported); a network error, timeout or 5xx is ignored and
+        leaves the count as it is. An expired pause starts the count again, so
+        one later failure does not pause for another day.
+        """
+        error_class = capability_failure_class(error)
+        if error_class is None:
+            return
         state = self.capability_state(source)
-        error_class = sync_job_error_class(error)
-        if state.get("error_class") != error_class:
+        expired = bool(state.get("paused_until")) and self.capability_allowed(source)
+        if expired or state.get("error_class") != error_class:
             state = {"error_class": error_class, "count": 0}
         count = int(state.get("count") or 0) + 1
         state["count"] = count
@@ -788,13 +802,18 @@ class GarminSyncStateService:
                 + timedelta(seconds=GARMIN_CAPABILITY_PAUSE_SECONDS)
             ).isoformat()
         self._set(
-            f"garmin_capability_{source}",
+            capability_key(source),
             json.dumps(state, ensure_ascii=False, separators=(",", ":")),
         )
 
     def record_capability_success(self, source: str) -> None:
         if self.capability_state(source):
-            self._set(f"garmin_capability_{source}", "")
+            self._set(capability_key(source), "")
+
+    def clear_capability_state(self) -> None:
+        """Forget every capability pause after a new key, login or reconnect."""
+        with self._database_manager.unit_of_work() as db:
+            clear_capability_state(db, self._key_value_repository)
 
     def record_sdk_skipped(self, reason: str) -> None:
         """Keep the last SDK login skip so the card can ask for a new login."""

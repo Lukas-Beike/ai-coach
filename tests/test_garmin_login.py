@@ -232,6 +232,20 @@ class GarminLoginTests(unittest.TestCase):
         self.service.login(self._login_body())
         self.assertIsNone(self._stored("garmin_sdk_skipped"))
 
+    def test_login_success_clears_every_capability_pause(self):
+        for key in (
+            "garmin_capability_activities",
+            "garmin_capability_wellness_backfill_sleep",
+        ):
+            self.key_values.set(self.connection, key, '{"count":3}')
+        self.key_values.set(self.connection, "garmin_sdk_threshold_failures", "{}")
+        self.connection.commit()
+        self.next_client = FakeClient()
+        self.service.login(self._login_body())
+        self.assertIsNone(self._stored("garmin_capability_activities"))
+        self.assertIsNone(self._stored("garmin_capability_wellness_backfill_sleep"))
+        self.assertIsNotNone(self._stored("garmin_sdk_threshold_failures"))
+
     def test_mfa_wrong_code_keeps_slot_then_correct_code_connects(self):
         self.next_client = FakeClient(needs_mfa=True, mfa_codes=("123456",))
         result = self.service.login(self._login_body())
