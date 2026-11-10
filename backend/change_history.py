@@ -28,6 +28,7 @@ ENTITY_TYPES = {
     "activity_session",
     "nutrition_entry",
     "nutrition_template",
+    "nutrition_product",
     "checkin",
     "metric_export",
 }
@@ -192,12 +193,31 @@ NUTRITION_TEMPLATE_FIELDS = (
     "description",
     "meal_type",
     "meal_type_explicit",
+# A saved food product; the update time is not tracked, so a save without a change
+# records nothing. The favorite flag is a display preference and stays out, so
+# toggling it neither enters the history nor blocks undo of an earlier change.
+NUTRITION_PRODUCT_FIELDS = (
+    "id",
+    "barcode",
+    "name",
+    "brand",
+    "basis_amount",
+    "basis_unit",
     "kcal",
     "carbs_g",
     "protein_g",
     "fat_g",
     "source",
     "nutrition_basis",
+    "sugar_g",
+    "fiber_g",
+    "salt_g",
+    "source",
+    "source_url",
+    "external_id",
+    "provenance",
+    "extraction_confidence",
+    "status",
 )
 # One daily check-in; its entity id is the check-in date. The day status and the
 # tag answers live beside the row and are present only once the athlete set them.
@@ -263,6 +283,7 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "activity_session": set(ACTIVITY_SESSION_FIELDS),
         "nutrition_entry": set(NUTRITION_ENTRY_FIELDS),
         "nutrition_template": set(NUTRITION_TEMPLATE_FIELDS),
+        "nutrition_product": set(NUTRITION_PRODUCT_FIELDS),
         "checkin": set(CHECKIN_FIELDS),
         METRIC_EXPORT_ENTITY: set(METRIC_EXPORT_FIELDS),
     }

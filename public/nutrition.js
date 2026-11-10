@@ -819,7 +819,12 @@ function appendNutritionProductActions(card, product, local) {
     const remove = document.createElement("button"); remove.type = "button"; remove.className = "secondary-button"; remove.textContent = "Löschen";
     remove.addEventListener("click", async () => {
       if (!await requestConfirmation(`Produkt „${product.name}“ wirklich löschen?`)) return;
-      try { await api("/api/nutrition/products/archive", { method: "POST", body: JSON.stringify({ id: product.id, confirmed: true }) }); await loadNutritionProducts(document.querySelector("#nutritionProductQuery").value.trim()); }
+      try {
+        const result = await api("/api/nutrition/products/archive", { method: "POST", body: JSON.stringify({ id: product.id, confirmed: true }) });
+        const reload = () => loadNutritionProducts(document.querySelector("#nutritionProductQuery").value.trim());
+        await reload();
+        showNutritionReceipt(document.querySelector("#nutritionProductStatus"), `Produkt „${product.name}“ gelöscht.`, result.change, reload);
+      }
       catch (error) { document.querySelector("#nutritionProductStatus").textContent = `Produkt konnte nicht gelöscht werden: ${error.message}`; }
     });
     actions.append(use, edit, remove); card.append(actions);
@@ -1048,7 +1053,8 @@ async function saveNutritionProduct(product) {
       const payload = nutritionProductPayload(form);
       const saved = await api("/api/nutrition/products", { method: payload.id ? "PUT" : "POST", body: JSON.stringify({ ...payload, confirmed: true }) });
       if (generation !== state.sessionGeneration) return;
-      editor.hidden = true; editor.replaceChildren(); document.querySelector("#nutritionProductStatus").textContent = `Produkt „${saved.product?.name || "Produkt"}“ lokal gespeichert.`; await loadNutritionProducts();
+      editor.hidden = true; editor.replaceChildren(); await loadNutritionProducts();
+      if (generation === state.sessionGeneration) showNutritionReceipt(document.querySelector("#nutritionProductStatus"), `Produkt „${saved.product?.name || "Produkt"}“ lokal gespeichert.`, saved.change, () => loadNutritionProducts());
     } catch (error) { if (generation === state.sessionGeneration) document.querySelector("#nutritionProductStatus").textContent = `Produkt konnte nicht gespeichert werden: ${error.message}`; }
     return;
   }

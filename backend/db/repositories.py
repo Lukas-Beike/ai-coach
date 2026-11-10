@@ -185,6 +185,14 @@ class NutritionProductRepository:
             > 0
         )
 
+    def delete(self, db: Any, product_id: str) -> bool:
+        return (
+            db.execute(
+                "DELETE FROM nutrition_products WHERE id=?", (product_id,)
+            ).rowcount
+            > 0
+        )
+
     def archive(self, db: Any, product_id: str, updated_at: str) -> bool:
         return (
             db.execute(
