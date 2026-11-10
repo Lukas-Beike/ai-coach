@@ -213,7 +213,7 @@ comparable selections and environments before claiming an improved median;
 report failed and cold-cache runs separately. Do not dispatch extra workflows
 just to populate a benchmark.
 
-The provisional goals for `accelerate-test-execution` are a GitHub validation
+The provisional goals of the archived `accelerate-test-execution` change (open measurements: #2149) are a GitHub validation
 median below six minutes and at least 30% less local wall time for each complete
 Python and browser selection against its own newly captured baseline. Report
 each goal as met, missed, or unverified. Timing goals do not change correctness
