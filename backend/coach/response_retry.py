@@ -31,8 +31,13 @@ class CoachResponseRetryPolicy:
         attempt: int,
         request_delta_emitted: bool,
         response_id_exists: bool = False,
+        remote_conversation: bool = False,
     ) -> float | None:
-        if self._transient(exc, response_id_exists=response_id_exists):
+        if self._transient(
+            exc,
+            response_id_exists=response_id_exists,
+            remote_conversation=remote_conversation,
+        ):
             if attempt >= len(self.TRANSIENT_BACKOFF_SECONDS) or request_delta_emitted:
                 return None
             return (
@@ -53,13 +58,16 @@ class CoachResponseRetryPolicy:
             base_delay = 5 * (attempt + 1)
         return base_delay + secrets.randbelow(1000) / 1000
 
-    def _transient(self, exc: AppError, *, response_id_exists: bool) -> bool:
-        reason = exc.reason
-        if reason == "provider_timeout":
-            # A timeout after the response exists belongs to the resume path.
-            return not response_id_exists
-        return reason in self.TRANSIENT_REASONS or (
-            reason == "response_failed"
+    def _transient(
+        self, exc: AppError, *, response_id_exists: bool, remote_conversation: bool
+    ) -> bool:
+        if response_id_exists or remote_conversation:
+            # The provider may already hold this turn (a running response or a
+            # server-side conversation); a repeat could duplicate it. The resume
+            # path owns a known response.
+            return False
+        return exc.reason in self.TRANSIENT_REASONS or (
+            exc.reason == "response_failed"
             and getattr(exc, "provider_error_code", None) == "server_error"
         )
 

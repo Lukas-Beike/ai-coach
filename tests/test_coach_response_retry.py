@@ -98,13 +98,21 @@ class CoachResponseRetryPolicyTests(unittest.TestCase):
             )
         )
 
-    def test_provider_timeout_after_a_response_exists_is_left_to_resume(self) -> None:
-        failure = self.error(reason="provider_timeout")
-        self.assertIsNone(
-            self.policy.retry_delay(
-                failure, attempt=0, request_delta_emitted=False, response_id_exists=True
-            )
-        )
+    def test_transient_failures_are_not_retried_once_the_provider_may_hold_the_turn(
+        self,
+    ) -> None:
+        for reason in ("provider_timeout", "provider_unavailable", "network_error"):
+            failure = self.error(reason=reason)
+            for flags in (
+                {"response_id_exists": True},
+                {"remote_conversation": True},
+            ):
+                with self.subTest(reason=reason, **flags):
+                    self.assertIsNone(
+                        self.policy.retry_delay(
+                            failure, attempt=0, request_delta_emitted=False, **flags
+                        )
+                    )
 
     def test_other_failures_are_not_retried(self) -> None:
         for failure in (
