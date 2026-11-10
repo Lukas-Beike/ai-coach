@@ -32,6 +32,32 @@ function plannedPushTargetLabel(provider, entry, ids = {}) {
 }
 
 // Controls sit in the card summary; a click must not toggle the card.
+// Before a rebuild: remember which cards are open and which control has focus.
+function rememberPlannedEntryState(root) {
+  openPlannedEntries = new Set([...root.querySelectorAll(".planned-entry[data-entry-key]")].filter((card) => card.open).map((card) => card.dataset.entryKey));
+  for (const key of plannedFocusStatuses.keys()) if (!openPlannedEntries.has(key)) plannedFocusStatuses.delete(key);
+  const active = document.activeElement;
+  const card = active?.closest?.(".planned-entry[data-entry-key]");
+  if (!card || !root.contains(card)) return null;
+  return { key: card.dataset.entryKey, name: active.matches("select") ? active.name : "" };
+}
+
+function restorePlannedEntryFocus(root, focused) {
+  if (!focused) return;
+  const card = [...root.querySelectorAll(".planned-entry[data-entry-key]")].find((node) => node.dataset.entryKey === focused.key);
+  const target = focused.name ? card?.querySelector(`select[name="${focused.name}"]`) : null;
+  (target || card?.querySelector("summary"))?.focus({ preventScroll: true });
+}
+
+// The unit's description, or a placeholder when the card body would stay empty.
+function appendPlannedDescription(details, text) {
+  if (!text && details.childElementCount) return;
+  const description = document.createElement("p");
+  description.className = "planned-description";
+  description.textContent = text || "Keine weiteren Details hinterlegt.";
+  details.append(description);
+}
+
 function stopSummaryToggle(event) {
   event.preventDefault();
   event.stopPropagation();
@@ -562,6 +588,26 @@ function appendFocusChip(root, entry) {
   root.append(row);
 }
 
+// A unit is identified by its local id, else by provider id and day; the open
+// cards and the "Gespeichert" status survive the re-render of a calendar reload.
+function plannedEntryKey(entry, dateKey) {
+  if (entry?.local_id) return `local:${entry.local_id}`;
+  const id = entry?.id ?? entry?.activity_id;
+  return id ? `id:${id}@${dateKey}` : "";
+}
+
+let openPlannedEntries = new Set();
+const plannedFocusStatuses = new Map();
+
+// The summary chip follows the saved focus without waiting for the next reload.
+function refreshFocusChip(card, entry) {
+  const holder = document.createElement("span");
+  appendFocusChip(holder, entry);
+  const row = card.querySelector("summary [data-focus-chip]");
+  if (row) row.replaceWith(...holder.childNodes);
+  else card.querySelector("summary .planned-session-line")?.append(...holder.childNodes);
+}
+
 function focusSelect(label, name, options, selected) {
   const field = document.createElement("label");
   field.className = "planned-focus-field";
@@ -919,7 +965,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return analysisSvg("polygon", { points: `${start},54 ${start},${left} ${end},${right} ${end},54`, "data-zone": zone });
   }
 
-  function plannedFocusForm(entry) {
+  function plannedFocusForm(entry, dateKey) {
     const sport = focusSport(entry);
     if (!sport || !entry.local_id || entry.is_completed_activity) return null;
     const isSet = entry.focus_origin === "set";
@@ -931,14 +977,24 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const status = document.createElement("span");
     status.className = "planned-focus-status";
     status.setAttribute("role", "status");
+    const statusKey = plannedEntryKey(entry, dateKey);
+    status.textContent = plannedFocusStatuses.get(statusKey) || "";
     const previous = parts.map((part) => part.select.value);
     const save = async () => {
       status.textContent = "";
+      plannedFocusStatuses.delete(statusKey);
       try {
         const body = { session_focus: focus.select.value || null, strength_intensity: parts[1]?.select.value || null };
         await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/focus`, { method: "POST", body: JSON.stringify(body) });
         previous.splice(0, previous.length, ...parts.map((part) => part.select.value));
         status.textContent = "Gespeichert";
+        if (statusKey) plannedFocusStatuses.set(statusKey, "Gespeichert");
+        const card = form.closest(".planned-entry");
+        if (card) {
+          const saved = { ...entry, session_focus: focus.select.value || entry.session_focus, focus_origin: focus.select.value ? "set" : entry.focus_origin };
+          if (parts[1]?.select.value) Object.assign(saved, { strength_intensity: parts[1].select.value, intensity_origin: "set" });
+          refreshFocusChip(card, saved);
+        }
         return true;
       } catch (error) {
         parts.forEach((part, index) => { part.select.value = previous[index]; });
@@ -1031,10 +1087,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     button.textContent = "Synchronisieren";
     button.setAttribute("aria-label", `${entry.name || "Einheit"} synchronisieren`);
     button.disabled = state.plannedSyncInFlight.has(entry.local_id);
-    button.addEventListener("click", async (event) => {
-      // The button sits in the card summary; a click must not toggle the card.
-      event.preventDefault();
-      event.stopPropagation();
+    button.addEventListener("click", async () => {
       if (state.plannedSyncInFlight.has(entry.local_id)) return;
       state.plannedSyncInFlight.add(entry.local_id);
       button.disabled = true;
@@ -1138,6 +1191,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return row;
   }
 
+  function plannedActivityButton(actual) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button";
+    button.textContent = "Aktivität analysieren";
+    button.addEventListener("click", () => globalThis.ActivityDetails.open(actual, { api, showDialog: showAccessibleDialog }));
+    return button;
+  }
+
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
     const actual = calendarActualActivity(entry);
     const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -1145,7 +1207,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const status = restDayLabel ? "skipped" : baseStatus;
     const card = document.createElement("details");
     card.className = `planned-entry is-${status}`;
-    card.open = false;
+    const entryKey = plannedEntryKey(entry, dateKey);
+    if (entryKey) card.dataset.entryKey = entryKey;
+    card.open = openPlannedEntries.has(entryKey);
     const cardSummary = document.createElement("summary");
     const meta = document.createElement("span");
     meta.className = "planned-meta";
@@ -1161,8 +1225,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     cardSummary.append(plannedSessionHeader(entry, actual, title, (line) => {
       appendPlannedEntryStatus(line, entry, status, restDayLabel, dateKey, todayKey, weekHasPlan);
       appendFocusChip(line, entry);
-      const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
-      if (syncButton) line.append(syncButton);
     }), meta);
     appendPlannedExecution(cardSummary, entry, status);
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
@@ -1178,32 +1240,14 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const metrics = plannedSessionMetrics(entry, actual);
     if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
-    if (actual && (actual.id || actual.activity_id)) {
-      const activityButton = document.createElement("button");
-      activityButton.type = "button";
-      activityButton.className = "secondary-button";
-      activityButton.textContent = "Aktivität analysieren";
-      activityButton.addEventListener("click", () => globalThis.ActivityDetails.open(actual, {
-        api,
-        showDialog: showAccessibleDialog,
-      }));
-      details.append(activityButton);
-    }
+    if (actual && (actual.id || actual.activity_id)) details.append(plannedActivityButton(actual));
     appendPlannedCalendarComparison(details, entry, actual);
-    const focusForm = plannedFocusForm(entry);
+    const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);
-    if (entry.description) {
-      const description = document.createElement("p");
-      description.className = "planned-description";
-      description.textContent = entry.description;
-      details.append(description);
-    }
-    if (!details.childElementCount) {
-      const description = document.createElement("p");
-      description.className = "planned-description";
-      description.textContent = "Keine weiteren Details hinterlegt.";
-      details.append(description);
-    }
+    appendPlannedDescription(details, entry.description);
+    // The sync button lives in the card body; a button inside <summary> is nested-interactive.
+    const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
+    if (syncButton) details.append(syncButton);
     card.append(cardSummary, details);
     return card;
   }
@@ -1369,6 +1413,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const previousDayOpenState = new Map(
       [...root.querySelectorAll(".planned-day[data-date] > .planned-day-toggle")].map((toggle) => [toggle.parentElement.dataset.date, toggle.open]),
     );
+    const focusedEntry = rememberPlannedEntryState(root);
     root.replaceChildren();
     const weeklyCompliance = new Map(
       (Array.isArray(state.data?.planning_compliance) ? state.data.planning_compliance : [])
@@ -1408,6 +1453,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       weeklyCompliance,
     };
     for (let weekIndex = 0; weekIndex < pastWeeks + futureWeeks + 1; weekIndex += 1) root.append(renderPlannedWeek(view, weekIndex));
+    restorePlannedEntryFocus(root, focusedEntry);
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
   }
 
