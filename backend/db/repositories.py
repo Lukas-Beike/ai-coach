@@ -329,6 +329,10 @@ class KeyValueRepository:
     def delete(self, db: Any, key: str) -> None:
         db.execute("DELETE FROM kv WHERE key = ?", (key,))
 
+    def delete_prefix(self, db: Any, prefix: str) -> None:
+        # substr, not LIKE: "_" in a prefix would match any character.
+        db.execute("DELETE FROM kv WHERE substr(key, 1, ?) = ?", (len(prefix), prefix))
+
 
 class SessionRepository:
     """Persist authentication sessions without owning their transaction."""

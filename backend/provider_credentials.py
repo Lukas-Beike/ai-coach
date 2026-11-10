@@ -27,6 +27,7 @@ from backend.config import Config, validated_openai_base_url
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
+from backend.providers.garmin_capability import clear_capability_state
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +48,8 @@ CREDENTIAL_KV_KEYS = frozenset(
 ) | (WAHOO_SECRET_KEYS)
 
 PERSONAL_KEY_FIELD = "garmin_personal_api_key"
+# Saving one of these replaces how the app reaches Garmin.
+GARMIN_ACCESS_FIELDS = frozenset({PERSONAL_KEY_FIELD, "garmin_email"})
 # The athlete-entered expiry date of the Personal API key; it belongs to one key.
 PERSONAL_KEY_EXPIRES_FIELD = "garmin_personal_api_key_expires"
 # Secret values: never returned, only their source and presence.
@@ -351,6 +354,9 @@ class ProviderCredentialService:
         self, db: Any, current: dict[str, str], changes: Mapping[str, str | None]
     ) -> None:
         """A new or removed key keeps neither the old expiry nor its rejection."""
+        if GARMIN_ACCESS_FIELDS & changes.keys():
+            # A paused Garmin capability belongs to the replaced access.
+            clear_capability_state(db, self._key_values)
         if PERSONAL_KEY_FIELD not in changes:
             return
         if PERSONAL_KEY_EXPIRES_FIELD not in changes:

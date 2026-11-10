@@ -16,14 +16,22 @@ from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.observability import Redactor
+from backend.providers.garmin_capability import WELLNESS_BACKFILL_PREFIX
+from backend.providers.garmin_wellness_history import (
+    WellnessSourcePaused,
+    collect_wellness_history,
+)
+from backend.providers.http import ProviderHTTPError
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin import (
+    GARMIN_CAPABILITY_FAILURE_LIMIT,
     GarminFixtureLoader,
     GarminSyncStateService,
     collection_complete,
     merge_sources,
     normalize_fixture_sleep_dates,
 )
+from backend.sync.garmin_service import _wellness_hooks
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.refresh import ProviderRefreshTracker, retry_at, sync_job_error_class
 from backend.sync.state import SyncStateRepository
@@ -479,13 +487,14 @@ class GarminSyncStateServiceTests(unittest.TestCase):
         self.assertTrue(self.service.capability_allowed("sleep"))
 
     def test_failure_class_changes_reset_count_and_success_clears_existing_state(self):
-        self.service.record_capability_failure("sleep", TimeoutError("network"))
-        self.service.record_capability_failure("sleep", TimeoutError("network"))
+        limited = AppError(429, "synthetic", reason="rate_limited")
+        self.service.record_capability_failure("sleep", limited)
+        self.service.record_capability_failure("sleep", limited)
         state = self.service.capability_state("sleep")
-        self.assertEqual(state["error_class"], "network_error")
+        self.assertEqual(state["error_class"], "rate_limited")
         self.assertEqual(state["count"], 2)
 
-        self.service.record_capability_failure("sleep", TimeoutError("network"))
+        self.service.record_capability_failure("sleep", limited)
         state = self.service.capability_state("sleep")
         self.assertEqual(state["count"], 3)
         self.assertEqual(state["last_failed_at"], UTC_NOW)
@@ -495,13 +504,159 @@ class GarminSyncStateServiceTests(unittest.TestCase):
         )
         self.assertFalse(self.service.capability_allowed("sleep"))
 
-        self.service.record_capability_failure("sleep", RuntimeError("provider"))
+        self.service.record_capability_failure(
+            "sleep", AppError(404, "synthetic", reason="not_found")
+        )
         state = self.service.capability_state("sleep")
-        self.assertEqual(state["error_class"], "temporary_error")
+        self.assertEqual(state["error_class"], "not_found")
         self.assertEqual(state["count"], 1)
         self.assertNotIn("paused_until", state)
         self.service.record_capability_success("sleep")
         self.assertEqual(self._get("garmin_capability_sleep"), "")
+
+    def _record(self, source, error, times=1):
+        for _ in range(times):
+            self.service.record_capability_failure(source, error)
+
+    def test_network_timeout_5xx_and_auth_failures_never_pause(self):
+        errors = (
+            TimeoutError("synthetic"),
+            OSError("synthetic"),
+            RuntimeError("synthetic"),
+            AppError(
+                503, "synthetic", upstream_status=503, reason="provider_http_error"
+            ),
+            AppError(502, "synthetic", reason="provider_network_error"),
+            AppError(401, "synthetic", reason="auth_required"),
+            ProviderHTTPError("garmin", "http", 500),
+        )
+        for source in ("activities", "sleep", "hrv"):
+            for error in errors:
+                with self.subTest(source=source, error=repr(error)):
+                    self._record(source, error, 3)
+                    self.assertTrue(self.service.capability_allowed(source))
+                    self.assertEqual(self.service.capability_state(source), {})
+                    self.assertIsNone(self._get(f"garmin_capability_{source}"))
+
+    def test_rate_limited_not_found_and_unsupported_failures_pause(self):
+        cases = {
+            "activities": AppError(429, "synthetic", reason="rate_limited"),
+            "sleep": ProviderHTTPError("garmin", "http", 404),
+            "hrv": NotImplementedError("Unsupported Garmin hrv range"),
+        }
+        for source, error in cases.items():
+            with self.subTest(source=source):
+                self._record(source, error, 2)
+                self.assertTrue(self.service.capability_allowed(source))
+                self._record(source, error)
+                self.assertFalse(self.service.capability_allowed(source))
+
+    def test_the_wrapped_provider_error_is_classified_by_its_cause(self):
+        for cause in (
+            ProviderHTTPError("garmin", "rate_limited", 429),
+            ProviderHTTPError("garmin", "http", 404),
+        ):
+            wrapper = AppError(502, "synthetic", reason="provider_client_error")
+            wrapper.__cause__ = cause
+            with self.subTest(cause=repr(cause)):
+                self._record("sleep", wrapper, 3)
+                self.assertFalse(self.service.capability_allowed("sleep"))
+                self.service.record_capability_success("sleep")
+        wrapper = AppError(502, "synthetic", reason="provider_client_error")
+        wrapper.__cause__ = ProviderHTTPError("garmin", "http", 503)
+        self._record("sleep", wrapper, 3)
+        self.assertTrue(self.service.capability_allowed("sleep"))
+
+    def test_an_ignored_failure_keeps_the_count_of_capability_failures(self):
+        limited = AppError(429, "synthetic", reason="rate_limited")
+        self._record("sleep", limited, 2)
+        self._record("sleep", TimeoutError("synthetic"))
+        self.assertEqual(self.service.capability_state("sleep")["count"], 2)
+        self._record("sleep", limited)
+        self.assertFalse(self.service.capability_allowed("sleep"))
+
+    def test_one_failure_after_an_expired_pause_does_not_pause_again(self):
+        limited = AppError(429, "synthetic", reason="rate_limited")
+        self._record("sleep", limited, 3)
+        self.assertFalse(self.service.capability_allowed("sleep"))
+
+        self.now += timedelta(hours=24, seconds=1)
+        self.assertTrue(self.service.capability_allowed("sleep"))
+        self._record("sleep", limited)
+
+        state = self.service.capability_state("sleep")
+        self.assertEqual(state["count"], 1)
+        self.assertNotIn("paused_until", state)
+        self.assertTrue(self.service.capability_allowed("sleep"))
+        self._record("sleep", limited, 2)
+        self.assertFalse(self.service.capability_allowed("sleep"))
+
+    def test_a_paused_sdk_detail_part_leaves_the_other_parts_allowed(self):
+        limited = AppError(429, "synthetic", reason="rate_limited")
+        self._record("activity_power_zones", limited, 3)
+
+        self.assertFalse(self.service.capability_allowed("activity_power_zones"))
+        for part in ("activity_details", "activity_splits", "activity_fit"):
+            self.assertTrue(self.service.capability_allowed(part))
+
+    def test_clear_capability_state_drops_every_pause_and_only_pauses(self):
+        limited = AppError(429, "synthetic", reason="rate_limited")
+        self._record("activities", limited, 3)
+        self._record(WELLNESS_BACKFILL_PREFIX + "sleep", limited, 3)
+        self._set("garmin_sdk_threshold_failures", '{"count":2}')
+        self._set("garmin_sdk_skipped", "{}")
+
+        self.service.clear_capability_state()
+
+        self.assertTrue(self.service.capability_allowed("activities"))
+        self.assertTrue(self.service.capability_allowed("wellness_backfill_sleep"))
+        self.assertIsNone(self._get("garmin_capability_activities"))
+        self.assertIsNone(self._get("garmin_capability_wellness_backfill_sleep"))
+        self.assertEqual(self._get("garmin_sdk_threshold_failures"), '{"count":2}')
+        self.assertEqual(self._get("garmin_sdk_skipped"), "{}")
+
+    def test_wellness_backfill_failures_leave_the_regular_sync_state_alone(self):
+        limited = AppError(429, "synthetic", reason="rate_limited")
+
+        class Client:
+            def get_sleep_daily(self, *_args):
+                raise limited
+
+        def call(_service, _operation, fetch, _details):
+            return fetch()
+
+        hooks = _wellness_hooks(self.service, lambda _day: True)
+        for _ in range(GARMIN_CAPABILITY_FAILURE_LIMIT):
+            with self.assertRaises(AppError):
+                collect_wellness_history(
+                    Client(),
+                    date(2026, 9, 1),
+                    date(2026, 9, 7),
+                    external_call=call,
+                    hooks=hooks,
+                )
+        with self.assertRaises(WellnessSourcePaused):
+            collect_wellness_history(
+                Client(),
+                date(2026, 9, 1),
+                date(2026, 9, 7),
+                external_call=call,
+                hooks=hooks,
+            )
+
+        self.assertTrue(self.service.capability_allowed("sleep"))
+        self.assertEqual(self.service.capability_state("sleep"), {})
+        self.assertIsNone(self._get("garmin_capability_sleep"))
+        self.assertFalse(self.service.capability_allowed("wellness_backfill_sleep"))
+
+    def test_regular_sync_failures_leave_the_wellness_backfill_alone(self):
+        limited = AppError(429, "synthetic", reason="rate_limited")
+        self._record("sleep", limited, 3)
+
+        hooks = _wellness_hooks(self.service, lambda _day: True)
+
+        self.assertFalse(self.service.capability_allowed("sleep"))
+        self.assertTrue(hooks.capability_allowed("sleep"))
 
     def test_error_entries_filter_non_dicts_and_preserve_compact_unicode_json(self):
         raw_errors = [

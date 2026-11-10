@@ -64,15 +64,12 @@ BACKFILL_WINDOW: Final = timedelta(days=90)
 BACKFILL_RATE_LIMIT_PAUSE: Final = timedelta(seconds=GARMIN_CAPABILITY_PAUSE_SECONDS)
 BACKFILL_STATE_KEY: Final = "garmin_activity_detail_backfill"
 BACKFILL_RETRY_ATTEMPTS: Final = 3
-# The optional ``activity_fit`` and ``activity_exercise_sets`` parts pause only
-# themselves, never the other parts. Exercise sets are fetched for strength
-# activities only.
-DETAIL_CAPABILITIES: Final = (
-    "activity_details",
-    "activity_splits",
-    "activity_hr_zones",
-    "activity_power_zones",
-)
+# The backfill needs only ``activity_details``, the part both transports serve.
+# The SDK-only parts (splits, HR and power zones, exercise sets) and the Personal
+# API-only FIT file pause only themselves; the collector skips a paused part
+# without a call, so a paused part never gates the others or the backfill.
+# Exercise sets are fetched for strength activities only.
+DETAIL_CAPABILITIES: Final = ("activity_details",)
 
 
 @dataclass(frozen=True)

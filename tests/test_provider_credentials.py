@@ -138,6 +138,35 @@ class ProviderCredentialTests(unittest.TestCase):
         self.assertEqual(self.holder["config"].openai_api_key, "env-openai-key")
         self.assertEqual(self.holder["config"].app_password, "runtime-password")
 
+    def _seed_capability_pauses(self) -> None:
+        for key in (
+            "garmin_capability_activities",
+            "garmin_capability_wellness_backfill_sleep",
+        ):
+            self.connection.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES (?, '{}', 't')", (key,)
+            )
+
+    def test_garmin_access_change_clears_every_capability_pause(self):
+        for values in (
+            {"garmin_personal_api_key": "synthetic-new-key-1"},
+            {"garmin_email": "new@example.test"},
+            {"garmin_personal_api_key": None},
+        ):
+            with self.subTest(values=values):
+                self._seed_capability_pauses()
+                self.service.update(values)
+                for key in (
+                    "garmin_capability_activities",
+                    "garmin_capability_wellness_backfill_sleep",
+                ):
+                    self.assertIsNone(self._stored_row(key))
+
+    def test_unrelated_credential_change_keeps_capability_pauses(self):
+        self._seed_capability_pauses()
+        self.service.update({"openai_api_key": "db-openai-key"})
+        self.assertIsNotNone(self._stored_row("garmin_capability_activities"))
+
     def test_empty_string_clears_like_null(self):
         self.service.update({"intervals_api_key": "db-intervals"})
         self.service.update({"intervals_api_key": "   "})

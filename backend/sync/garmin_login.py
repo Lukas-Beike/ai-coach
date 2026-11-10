@@ -35,6 +35,7 @@ from backend.provider_credentials import (
     GARMIN_TOKENSTORE_DISCONNECTED,
     GARMIN_TOKENSTORE_STATE_KEY,
 )
+from backend.providers.garmin_capability import clear_capability_state
 from backend.sync.garmin_personal_status import SDK_SKIPPED_KEY
 
 _LOGGER = logging.getLogger(__name__)
@@ -208,6 +209,8 @@ class GarminTokenStore:
             self._key_values.delete(db, GARMIN_TOKENSTORE_STATE_KEY)
             # A fresh login replaces the one a sync skipped; drop its card hint.
             self._key_values.delete(db, SDK_SKIPPED_KEY)
+            # ...and a paused capability belongs to the old login.
+            clear_capability_state(db, self._key_values)
         self._registry.replace_tokens(blob)
 
     def write_back(self, client: Any, login_argument: str) -> None:

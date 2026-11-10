@@ -680,11 +680,24 @@ class BackfillBatchTests(_Base):
         reader = _Details({"1001": _payload("1001")})
 
         result = self.service(
-            reader, allowed=lambda capability: capability != "activity_splits"
+            reader, allowed=lambda capability: capability != "activity_details"
         ).backfill()
 
         self.assertEqual(result["status"], "paused")
         self.assertEqual(reader.calls, [])
+
+    def test_paused_sdk_only_parts_do_not_pause_the_backfill(self) -> None:
+        sdk_parts = {"activity_splits", "activity_hr_zones", "activity_power_zones"}
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        reader = _Details({"1001": _payload("1001")})
+
+        result = self.service(
+            reader, allowed=lambda capability: capability not in sdk_parts
+        ).backfill()
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["fetched"], 1)
+        self.assertEqual(reader.fetched, ["1001"])
 
     def test_all_parts_failing_stops_without_marking(self) -> None:
         _seed(
