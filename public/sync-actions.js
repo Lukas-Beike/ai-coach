@@ -160,7 +160,10 @@ async function waitForFullResync(source) {
     try {
       const resync = await api(`/api/${source}/full-resync`);
       failures = 0;
+      const { outcome, ...current } = resync;
+      if (state.data?.provider_resync) state.data.provider_resync[source] = current;
       if (!resync.running) return resync;
+      renderFullResyncControls(source);
     } catch {
       failures += 1;
       if (failures >= FULL_RESYNC_POLL_FAILURES) throw new Error("Der Resync-Status ist nicht erreichbar. Er läuft auf dem Server weiter.");
