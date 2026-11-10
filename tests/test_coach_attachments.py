@@ -252,7 +252,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(gpx_summary(separated)["distance_km"], 0)
         self.assertEqual(gpx_summary(separated)["elevation_point_count"], 0)
 
-    def test_fit_is_validated_and_passed_as_the_original_file(self):
+    def test_fit_is_validated_and_sent_as_parsed_measurements(self):
         attachment = self.upload(FIT, "ride.fit")
         validated = validate_attachments([attachment])
         self.assertEqual(validated[0]["type"], "fit")
@@ -269,7 +269,9 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         envelope = json.loads(
             base64.b64decode(raw_part["file_data"].split(",", 1)[1]).decode("utf-8")
         )
-        self.assertEqual(envelope["raw_base64"], attachment["data"])
+        self.assertNotIn("raw_base64", envelope)
+        self.assertNotIn(attachment["data"], json.dumps(envelope))
+        self.assertEqual(envelope["sessions"][0]["avg_heart_rate_bpm"], 145)
 
     def test_fit_records_use_standard_headers_fields_and_compressed_timestamps(self):
         summary = fit_summary(FIT_RECORDS)
@@ -501,7 +503,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         envelope = json.loads(
             base64.b64decode(fit_file["file_data"].split(",", 1)[1]).decode("utf-8")
         )
-        self.assertEqual(envelope["raw_base64"], self.upload(FIT, "ride.fit")["data"])
+        self.assertNotIn("raw_base64", envelope)
 
     def test_background_model_receives_saved_attachments(self):
         server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(

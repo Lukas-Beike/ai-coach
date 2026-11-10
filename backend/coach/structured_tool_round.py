@@ -8,7 +8,7 @@ import threading
 from collections import Counter
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from backend import change_history
@@ -91,6 +91,8 @@ class StructuredCoachRoundState:
     request_kind: str | None = None
     # Set when the model still requested tools after the last allowed round.
     budget_exhausted: bool = False
+    # Stateless chaining: every item sent so far in this turn, resent each round.
+    chain_items: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -143,6 +145,20 @@ def _log_budget_exhausted(state: StructuredCoachRoundState, rounds: int) -> None
             },
         },
     )
+
+
+def _replayable_output(response: dict[str, Any]) -> list[dict[str, Any]]:
+    """Output items a stateless request may resend.
+
+    A reasoning item needs its encrypted content: the provider kept nothing to
+    look it up by id.
+    """
+    return [
+        dict(item)
+        for item in response.get("output") or []
+        if isinstance(item, dict)
+        and (item.get("type") != "reasoning" or item.get("encrypted_content"))
+    ]
 
 
 class CoachStructuredToolRoundService:
@@ -404,7 +420,7 @@ class CoachStructuredToolRoundService:
             for step in state.command_receipts
         ):
             followup["tools"] = state.tools
-        followup = self._chained(followup, response)
+        followup = self._chained(followup, response, state)
         result = self._respond(followup, state)
         calls = self._journal.function_calls(result)
         # Only a model still asking for tools after the last round leaves work
@@ -426,13 +442,36 @@ class CoachStructuredToolRoundService:
             ],
             "tool_choice": "none",
         }
-        return self._respond(self._chained(final, result), state)
+        return self._respond(self._chained(final, result, state), state)
 
     @staticmethod
-    def _chained(request: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
-        if response.get("id") and not request.get("conversation"):
-            return {**request, "previous_response_id": response["id"]}
-        return request
+    def _chained(
+        request: dict[str, Any],
+        response: dict[str, Any],
+        state: StructuredCoachRoundState,
+    ) -> dict[str, Any]:
+        """Continue a turn: by response id where one is stored, else by items."""
+        if request.get("conversation"):
+            return request
+        if state.background_owned:
+            if response.get("id"):
+                return {**request, "previous_response_id": response["id"]}
+            return request
+        # Nothing is stored remotely: resend the turn's items so far, the
+        # model's calls and (encrypted) reasoning, and the new tool outputs.
+        if not state.chain_items:
+            first = state.request_payload.get("input")
+            state.chain_items = (
+                [dict(item) for item in first if isinstance(item, dict)]
+                if isinstance(first, list)
+                else [{"role": "user", "content": str(first or "")}]
+            )
+        state.chain_items = [
+            *state.chain_items,
+            *_replayable_output(response),
+            *request["input"],
+        ]
+        return {**request, "input": list(state.chain_items)}
 
     def _respond(
         self, followup: dict[str, Any], state: StructuredCoachRoundState

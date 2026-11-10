@@ -81,6 +81,9 @@ class CoachConversationRecoveryService:
             ),
             attachments,
         )
+        # Later stateless rounds chain from the request's input, so they must
+        # start from the rebuilt local dialogue and not the original input.
+        request_payload["input"] = payload["input"]
         payload["instructions"] += (
             "\nThe remote conversation was unavailable. Continue only unfinished work "
             "using local dialogue and confirmed_steps. Earlier image pixels may be "

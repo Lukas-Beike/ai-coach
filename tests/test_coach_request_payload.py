@@ -10,6 +10,11 @@ from unittest.mock import Mock
 from backend.coach import dialogue
 from backend.coach.request_payload import CoachRequestPayloadService
 
+PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAA"
+    "SUVORK5CYII="
+)
+
 
 class CoachRequestPayloadTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -54,16 +59,26 @@ class CoachRequestPayloadTests(unittest.TestCase):
         _, local = self.build(has_prior_openai_attachments=True)
 
         self.assertEqual(retained["conversation"], "conversation-1")
+        # The attachment conversation keeps its items at the provider anyway.
         self.assertTrue(retained["store"])
+        self.assertNotIn("include", retained)
         retained_input = json.loads(retained["input"])
         self.assertNotIn("dialogue", retained_input)
         self.assertEqual(retained_input["timezone"], "Europe/Berlin")
 
         self.assertNotIn("conversation", local)
-        self.assertTrue(local["store"])
+        self.assertIs(local["store"], False)
+        self.assertEqual(local["include"], ["reasoning.encrypted_content"])
         self.assertIs(local["parallel_tool_calls"], False)
         self.assertIn("dialogue", json.loads(local["input"]))
         self.assertIn("Earlier image pixels are unavailable", local["instructions"])
+
+    def test_background_turn_stays_stored_for_polling_and_resume(self) -> None:
+        _, payload = self.build(background_owned=True)
+
+        self.assertIs(payload["store"], True)
+        self.assertNotIn("include", payload)
+        self.assertNotIn("conversation", payload)
 
     def _dialogue_text(self, payload: dict) -> str:
         """Dialogue JSON text of a payload whose input carries attachment parts."""
@@ -76,7 +91,7 @@ class CoachRequestPayloadTests(unittest.TestCase):
             "type": "image",
             "name": "synthetic.png",
             "mime": "image/png",
-            "data": "AAAA",
+            "data": PNG,
         }
         _, payload = self.build(
             attachments=[attachment],
@@ -119,7 +134,7 @@ class CoachRequestPayloadTests(unittest.TestCase):
             "type": "image",
             "name": "synthetic.png",
             "mime": "image/png",
-            "data": "AAAA",
+            "data": PNG,
         }
         for message in (
             "Synchronisiere den Plan",

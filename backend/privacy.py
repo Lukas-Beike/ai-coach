@@ -228,7 +228,13 @@ class PrivacyDeleteService:
             "confirmation_text": PRIVACY_DELETE_CONFIRMATION_TEXT,
             "categories": categories,
             "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
-            "openai_conversation": "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; ein Fehlschlag wird separat ausgewiesen.",
+            "openai_conversation": (
+                "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; "
+                "ein Fehlschlag wird separat ausgewiesen. Gewöhnliche Coach-Antworten speichert "
+                "OpenAI nicht (store: false). Antworten des Anhang-Dialogs und von "
+                "Hintergrundläufen liegen dort bis zur Aufbewahrungsfrist von OpenAI; diese App "
+                "löscht sie nicht einzeln."
+            ),
         }
 
     def gps_state(self) -> dict[str, Any]:

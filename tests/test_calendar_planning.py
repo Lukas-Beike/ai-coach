@@ -38,6 +38,7 @@ class CalendarPlanningTests(unittest.TestCase):
         self.assertLessEqual(coach_context_json_size(result), 20_000)
         self.assertNotIn("private description", str(result))
         reader.list_events.assert_not_called()
+        reader.list_events.return_value = []
         context.external_calendar()
         reader.list_events.assert_called_once_with(
             limit=50, training_relevant_only=True

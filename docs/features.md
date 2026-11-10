@@ -101,9 +101,9 @@
 ## Multimodal Inputs & File Attachments
 - **Push-to-Talk Voice Input**: Low-latency voice recording in chat with real-time server-side transcription and zero persistence of raw audio recordings.
 - **Multi-File Attachment Support**: Seamless file upload supporting up to 4 concurrent GPX tracks, FIT files, or image files (PNG, JPEG, WebP) up to 5 MB each.
-- **Server-Side GPX Processing**: In-memory parsing of GPX tracks calculating total distance, un-smoothed elevation gain, and sampled geographic coordinates for the Coach.
-- **Binary FIT Activity Summaries**: Local extraction of binary FIT files summarizing elapsed time, distance, normalized power, average heart rate, and cadence.
-- **Visual Technique Analysis**: Image forwarding to multimodal AI models enabling visual evaluation of training charts, race routes, or workout screenshots.
+- **Server-Side GPX Processing**: In-memory parsing of GPX tracks calculating total distance, un-smoothed elevation gain, and sampled geographic coordinates for the Coach. The Coach receives the parsed points, not the file: no author or device metadata, and no positions within 500 m of the start and end.
+- **Binary FIT Activity Summaries**: Local extraction of binary FIT files summarizing elapsed time, distance, normalized power, average heart rate, and cadence. The Coach receives the parsed records, laps and sessions, not the original file, without device serial numbers, the FIT user profile or positions within 500 m of the start and end.
+- **Visual Technique Analysis**: Image forwarding to multimodal AI models enabling visual evaluation of training charts, race routes, or workout screenshots, with EXIF and other metadata removed first.
 - **Encrypted Attachment Storage**: Durable storage of uploaded attachments within the encrypted SQLite database, included in full backups and privacy exports.
 
 ## PWA, Mobile Experience & Offline Capabilities

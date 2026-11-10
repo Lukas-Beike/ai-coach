@@ -11,6 +11,11 @@ from unittest.mock import MagicMock, Mock
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.errors import AppError
 
+PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAA"
+    "SUVORK5CYII="
+)
+
 
 class CoachConversationRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -107,6 +112,8 @@ class CoachConversationRecoveryTests(unittest.TestCase):
                 "response_input": payload["input"],
             },
         )
+        # Later stateless tool rounds seed their chain from the request's input.
+        self.assertEqual(request_payload["input"], payload["input"])
         self.logger.warning.assert_called_once()
 
     def test_no_remote_conversation_does_not_clear_stored_conversation(self) -> None:
@@ -139,7 +146,7 @@ class CoachConversationRecoveryTests(unittest.TestCase):
             "type": "image",
             "name": "Beweis.png",
             "mime": "image/png",
-            "data": "AA==",
+            "data": PNG,
         }
         recovered, payload, _, _ = self.recover(attachments=[attachment])
         self.assertTrue(recovered)
@@ -148,7 +155,8 @@ class CoachConversationRecoveryTests(unittest.TestCase):
             json.dumps({"untrusted_attachment_name": "Beweis.png"}, ensure_ascii=False),
         )
         self.assertEqual(
-            payload["input"][0]["content"][2]["image_url"], "data:image/png;base64,AA=="
+            payload["input"][0]["content"][2]["image_url"],
+            "data:image/png;base64," + PNG,
         )
 
 

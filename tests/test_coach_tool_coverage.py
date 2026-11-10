@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import snapshot_seed
 from canonical_detail_support import seed_intervals_activity
-from support import mark_tables_serving
+from support import latest_tool_outputs, mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.activities.hr_cap import effective_caps
@@ -295,7 +295,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.athlete_state(), before)
 
         def save(payload):
-            profile = json.loads(payload["input"][0]["output"])["profile"]
+            profile = json.loads(latest_tool_outputs(payload)[0]["output"])["profile"]
             return self.call(
                 "update_profile",
                 {
@@ -883,7 +883,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             )
 
         def answer(payload):
-            seen.append(json.loads(payload["input"][0]["output"]))
+            seen.append(json.loads(latest_tool_outputs(payload)[0]["output"]))
             return {"output_text": "Soll ich die Anpassung übernehmen?"}
 
         self.turn(message, [apply, answer])
@@ -941,7 +941,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             seen = []
 
             def preview_again(payload):
-                seen.append(json.loads(payload["input"][0]["output"]))
+                seen.append(json.loads(latest_tool_outputs(payload)[0]["output"]))
                 return self.call("preview_adaptive_replan", {}, ["adaptive_replan"])
 
             self.turn(
@@ -1948,7 +1948,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
         def repair(payload):
             self.assertEqual(self.state()["planned_units"], initial["planned_units"])
-            current = json.loads(payload["input"][0]["output"])
+            current = json.loads(latest_tool_outputs(payload)[0]["output"])
             corrected.update(
                 changes=[change], expected_revision=current["planning_revision"]
             )
@@ -2017,7 +2017,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(replay, compact_receipt(result))
 
         def sync_read_selection(payload):
-            current = json.loads(payload["input"][0]["output"])
+            current = json.loads(latest_tool_outputs(payload)[0]["output"])
             entry = next(u for u in current["planned_units"] if u["local_id"] == friday)
             return self.call(
                 "start_intervals_plan_sync",
@@ -2131,7 +2131,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         before = self.state()["planned_units"]
 
         def premature(payload):
-            preview = json.loads(payload["input"][0]["output"])
+            preview = json.loads(latest_tool_outputs(payload)[0]["output"])
             return self.call(
                 "apply_adaptive_replan",
                 {"adjustment_id": preview["id"]},

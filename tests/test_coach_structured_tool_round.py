@@ -298,6 +298,84 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.assertEqual(phases[1]["phase"], "waiting_final_response")
         self.assertEqual(phases[-1], {"pending_tool_outputs": []})
 
+    def test_stateless_rounds_resend_items_and_never_point_at_a_response(
+        self,
+    ) -> None:
+        state = self.state()
+        state.background_owned = False
+        state.request_payload = {"input": '{"current_message":"hi"}', "store": False}
+        self.service._limits = CoachStructuredToolRoundLimits(
+            max_rounds=3,
+            background_horizon_days=7,
+            default_max_output_tokens=6000,
+            long_plan_max_output_tokens=32000,
+        )
+        reasoning = {"type": "reasoning", "id": "rs-1", "encrypted_content": "enc-1"}
+        unusable = {"type": "reasoning", "id": "rs-2"}
+        first_call = self.call()
+        second_call = {**self.call(), "call_id": "call-two"}
+        self.response.respond.side_effect = [
+            {"id": "response-two", "output": [second_call]},
+            {"id": "response-three", "output": []},
+        ]
+
+        with patch.object(
+            self.service,
+            "_execute_tool_call",
+            side_effect=lambda item, **_: (
+                item["name"],
+                item["call_id"],
+                {"ok": True},
+                {},
+            ),
+        ):
+            self.service.run(
+                {"id": "response-one", "output": [reasoning, unusable, first_call]},
+                rounds=0,
+                question="",
+                cancelled=False,
+                state=state,
+            )
+
+        first, second = (call.args[0] for call in self.response.respond.call_args_list)
+        answer = {"type": "function_call_output", "output": '{"ok": true}'}
+        expected_first = [
+            {"role": "user", "content": '{"current_message":"hi"}'},
+            reasoning,
+            first_call,
+            {**answer, "call_id": "call-one"},
+        ]
+        self.assertEqual(first["input"], expected_first)
+        self.assertEqual(
+            second["input"],
+            [*expected_first, second_call, {**answer, "call_id": "call-two"}],
+        )
+        for request in (first, second):
+            self.assertNotIn("previous_response_id", request)
+            self.assertIs(request["store"], False)
+
+    def test_attachment_conversation_follows_up_with_outputs_only(self) -> None:
+        state = self.state()
+        state.background_owned = False
+        state.request_payload = {"conversation": "conv-1", "input": "text"}
+
+        with patch.object(
+            self.service,
+            "_execute_tool_call",
+            return_value=("read_profile", "call-one", {"ok": True}, {}),
+        ):
+            self.service.run(
+                {"id": "response-one", "output": [self.call()]},
+                rounds=0,
+                question="",
+                cancelled=False,
+                state=state,
+            )
+
+        followup = self.response.respond.call_args.args[0]
+        self.assertNotIn("previous_response_id", followup)
+        self.assertEqual([item["call_id"] for item in followup["input"]], ["call-one"])
+
     def test_exhausted_budget_tells_model_and_logs_only_counts(self) -> None:
         state = self.state()
         state.tools.append({"name": "lookup_food"})

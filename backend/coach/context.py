@@ -515,18 +515,8 @@ class CoachPlanningContextReader:
                 "omitted_count": len(events),
                 "events": [],
             }
-            keys = (
-                "name",
-                "start_local",
-                "end_local",
-                "all_day",
-                "no_training",
-                "no_intensity",
-                "short_only",
-            )
             for event in events:
-                item = {key: event.get(key) for key in keys}
-                item["name"] = str(item["name"] or "")[:200]
+                item = coach_calendar_event(event)
                 candidate = {
                     **result,
                     "omitted_count": len(events) - len(result["events"]) - 1,
@@ -543,10 +533,45 @@ class CoachPlanningContextReader:
             "provider": "iCalendar",
             "read_only": True,
             "trust": "untrusted_external_text",
-            "events": self._external_calendar_reader.list_events(
-                limit=50, training_relevant_only=True
-            ),
+            "events": [
+                coach_calendar_event(event)
+                for event in self._external_calendar_reader.list_events(
+                    limit=50, training_relevant_only=True
+                )
+            ],
         }
+
+
+_COACH_CALENDAR_EVENT_KEYS = (
+    "name",
+    "start_local",
+    "end_local",
+    "all_day",
+    "no_training",
+    "no_intensity",
+    "short_only",
+)
+
+
+def coach_calendar_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Project an iCalendar row to what the Coach needs; no uid, id or sync time."""
+    item = {key: event.get(key) for key in _COACH_CALENDAR_EVENT_KEYS}
+    item["name"] = str(item["name"] or "")[:200]
+    return item
+
+
+def coach_weather_projection(weather: Any) -> Any:
+    """Name the weather place without its geocoded coordinates."""
+    if not isinstance(weather, dict) or not isinstance(weather.get("location"), dict):
+        return weather
+    location = weather["location"]
+    return {
+        **weather,
+        "location": {
+            "name": location.get("name"),
+            "country_code": location.get("country_code"),
+        },
+    }
 
 
 def coach_performance_projection(performance: Any) -> Any:
@@ -916,7 +941,7 @@ class CoachStructuredContextService:
             "recovery": self._performance_reader.recovery()
             if "recovery" in included
             else None,
-            "weather": weather,
+            "weather": coach_weather_projection(weather),
             "daily_planning_context": daily_context,
             "nutrition_products": self._compact_nutrition_products()
             if "nutrition_products" in included
