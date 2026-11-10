@@ -359,9 +359,17 @@ class GarminPayloadService:
         if _daily_metrics_due(snapshot, self._local_today()):
             minimum_days = max(minimum_days, GARMIN_RECONCILIATION_DAYS)
         freshness = snapshot.get("source_freshness") or {}
-        sources = GARMIN_WINDOW_SOURCES | (
-            set(freshness) & {"daily_stats", "resting_hr", "training_status"}
-        )
+        optional = set(freshness) & {"daily_stats", "resting_hr", "training_status"}
+        last_read = (snapshot.get("provider_sync") or {}).get("pagination")
+        if isinstance(last_read, dict) and {"daily_stats", "resting_hr"} & set(
+            last_read
+        ):
+            # A source the current transport no longer serves (an SDK-only
+            # collection after an SDK disconnect) keeps its stored coverage but
+            # must not pin the window to its old end. Only a run that read the
+            # recovery collections tells this; a backfill chunk skips them all.
+            optional &= set(last_read)
+        sources = GARMIN_WINDOW_SOURCES | optional
         today = self._local_today()
         oldest_end: date | None = None
         for source in sources:

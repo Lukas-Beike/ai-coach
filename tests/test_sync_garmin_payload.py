@@ -350,6 +350,84 @@ class GarminPayloadServiceTests(unittest.TestCase):
             historical["source_freshness"]["activities"]["synced_end"], "2026-09-20"
         )
 
+    def sdk_payload(self, start, end, *, training_status=True, failed=None):
+        payload = self.collection_payload(start, end, failed=failed)
+        if training_status:
+            payload["training_status"] = []
+            payload["provider_sync"]["pagination"]["training_status"] = {
+                "complete": failed != "training_status"
+            }
+        return payload
+
+    def test_sdk_only_source_that_stopped_advancing_does_not_freeze_the_window(self):
+        for stale_end in ("2026-09-12", "2026-07-21", "2026-06-21", "2026-05-22"):
+            with self.subTest(stale_end=stale_end):
+                self.setUp()
+                old_start = (
+                    date.fromisoformat(stale_end) - timedelta(days=83)
+                ).isoformat()
+                self.store_garmin_snapshot(
+                    self.service.prepare_remote(self.sdk_payload(old_start, stale_end))
+                )
+                personal = self.service.prepare_remote(
+                    self.sdk_payload(old_start, "2026-09-20", training_status=False)
+                )
+                self.store_garmin_snapshot(personal)
+                self.assertEqual(
+                    personal["source_freshness"]["training_status"]["synced_end"],
+                    stale_end,
+                )
+                self.assertEqual(self.service.automatic_sync_window(2), (2, None))
+                self.store_garmin_snapshot(
+                    self.service.prepare_remote(
+                        self.sdk_payload(
+                            "2026-09-19", "2026-09-20", training_status=False
+                        )
+                    )
+                )
+                self.assertEqual(self.service.automatic_sync_window(2), (2, None))
+
+    def test_served_sdk_source_still_drives_the_window(self):
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(self.sdk_payload("2026-06-21", "2026-09-12"))
+        )
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.sdk_payload("2026-09-12", "2026-09-20", failed="training_status")
+            )
+        )
+        self.assertEqual(self.service.automatic_sync_window(2), (9, None))
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(self.sdk_payload("2026-09-12", "2026-09-20"))
+        )
+        self.assertEqual(self.service.automatic_sync_window(2), (2, None))
+
+    def test_backfill_without_recovery_reads_keeps_lagging_sources_in_the_window(
+        self,
+    ):
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(self.sdk_payload("2026-06-21", "2026-09-12"))
+        )
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.sdk_payload("2026-09-12", "2026-09-20", failed="daily_stats")
+            )
+        )
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                {
+                    "start": "2026-01-01",
+                    "end": "2026-03-31",
+                    "synced_at": "2026-09-20T13:00:00",
+                    "activities": [],
+                    "provider_sync": {
+                        "pagination": {"activities": {"complete": True}}
+                    },
+                }
+            )
+        )
+        self.assertEqual(self.service.automatic_sync_window(2), (9, None))
+
     def test_long_outage_is_bounded_and_disjoint_windows_are_not_called_continuous(
         self,
     ):
