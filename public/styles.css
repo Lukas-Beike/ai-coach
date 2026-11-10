@@ -1307,6 +1307,7 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   #settingsPanel > .section-heading { grid-column: 1 / -1; }
   #settingsPanel > .more-segment-nav { position: sticky; top: 24px; grid-column: 1; grid-row: 2 / span 8; display: grid; align-content: start; gap: 4px; margin: 0; overflow: visible; }
   #settingsPanel > .more-segment-nav a { flex: none; white-space: normal; min-height: 46px; justify-content: start; padding: 10px 12px; text-align: left; }
+  #profilePanel > .more-segment-nav a { flex: 0 0 auto; padding: 9px 16px; white-space: nowrap; }
   #settingsPanel > .settings-section { grid-column: 2; width: 100%; min-width: 0; }
 }
 
