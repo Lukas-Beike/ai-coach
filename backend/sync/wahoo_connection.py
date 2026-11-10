@@ -32,7 +32,7 @@ from backend.provider_credentials import (  # noqa: F401 - keys re-exported for 
 )
 from backend.providers.wahoo_oauth import WahooOAuthClient, WahooTokenGrant
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 STATE_TTL = timedelta(minutes=10)
 REFRESH_MARGIN = timedelta(minutes=5)
 MAX_CALLBACK_VALUE_LENGTH = 2048
@@ -266,7 +266,7 @@ class WahooConnectionService:
                     "Wahoo connected hook failed",
                     extra={
                         "event": "wahoo_connected_hook_failed",
-                        "error_class": type(exc).__name__,
+                        "context": {"error_class": type(exc).__name__},
                     },
                 )
         return CALLBACK_CONNECTED

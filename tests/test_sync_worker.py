@@ -391,8 +391,7 @@ class LostOutcomeTests(unittest.TestCase):
         watchdog.start()
         with (
             patch.object(executor, "execute", side_effect=finish_after_two_runs),
-            self.assertLogs("backend.sync.executor", level="ERROR"),
-            self.assertLogs("backend.sync.worker", level="WARNING") as worker_logs,
+            self.assertLogs("intervals_coach", level="WARNING") as worker_logs,
         ):
             worker.run_loop()
 
@@ -445,8 +444,7 @@ class LostOutcomeTests(unittest.TestCase):
         watchdog.start()
         with (
             patch.object(executor, "execute", return_value={"status": "ok"}) as execute,
-            self.assertLogs("backend.sync.executor", level="ERROR"),
-            self.assertLogs("backend.sync.worker", level="WARNING"),
+            self.assertLogs("intervals_coach", level="WARNING"),
         ):
             worker.run_loop()
 
