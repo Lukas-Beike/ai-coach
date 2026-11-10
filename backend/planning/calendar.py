@@ -8,13 +8,15 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar.markers import has_marker
+from backend.planning.session_focus import session_focus
 from backend.providers.intervals_workouts import WORKOUT_INTERVALS_FIELD
 
 _HARD_KEYWORD_PATTERN = re.compile(
     r"\b(intervals?|vo2(max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b"
 )
 _HARD_PERCENT_PATTERN = re.compile(r"\b(9\d|[1-9]\d{2})%", re.ASCII)
-# [NO_INTENSITY] and rest classification stay conservative: a named zone from Z2 up is not easy.
+# Without a set session_focus, [NO_INTENSITY] and rest classification stay
+# conservative: a named zone from Z2 up is not easy. A set easy focus wins.
 _HARD_EFFORT_PATTERNS = (
     _HARD_KEYWORD_PATTERN,
     re.compile(r"\bz(one)?\s*[2-9]\b"),
@@ -46,8 +48,23 @@ def workout_is_hard_effort(workout: dict[str, Any]) -> bool:
     return any(pattern.search(text) for pattern in _RACE_HARD_EFFORT_PATTERNS)
 
 
+_EASY_FOCI = frozenset({"recovery", "easy", "endurance", "long", "mobility"})
+
+
+def _set_focus_is_easy(workout: dict[str, Any]) -> bool:
+    focus = session_focus(workout)
+    if focus.origin == "set" and focus.value in _EASY_FOCI:
+        return True
+    return focus.intensity_origin == "set" and focus.strength_intensity == "light"
+
+
 def workout_is_explicitly_easy(workout: dict[str, Any]) -> bool:
-    """Return whether a workout explicitly opts into easy effort."""
+    """Return whether a workout explicitly opts into easy effort.
+
+    A set easy session_focus decides first; otherwise the text heuristic applies.
+    """
+    if _set_focus_is_easy(workout):
+        return True
     text = _effort_text(workout)
     if any(pattern.search(text) for pattern in _HARD_EFFORT_PATTERNS):
         return False

@@ -847,7 +847,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     @covers("preview_adaptive_replan:success", "apply_adaptive_replan:local")
     def test_adaptive_preview_requires_later_acceptance_before_changing_workout(self):
         server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [{**self.workout(), "duration_minutes": 90}]
+            [
+                {
+                    **self.workout(server.ATHLETE_CLOCK.now().date().isoformat()),
+                    "duration_minutes": 90,
+                }
+            ]
         )
         server.ATHLETE_DATA.checkin().save({"soreness": 8, "available_minutes": 30})
         before = self.state()["planned_units"]
@@ -2232,7 +2237,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
     def test_stale_adaptive_preview_preserves_intervening_edit(self):
         unit = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [{**self.workout(), "duration_minutes": 90}]
+            [
+                {
+                    **self.workout(server.ATHLETE_CLOCK.now().date().isoformat()),
+                    "duration_minutes": 90,
+                }
+            ]
         )[0]
         server.ATHLETE_DATA.checkin().save({"available_minutes": 30})
         preview = self.run_tool("preview_adaptive_replan", {}, ["adaptive_replan"])

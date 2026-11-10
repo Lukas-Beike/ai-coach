@@ -217,8 +217,11 @@ def _change_state(
     except ValueError:
         return None
     duration = _as_number(draft.get("duration_minutes"))
-    available_minutes = _as_number(feedback.get("available_minutes"))
-    motivation = _as_number(feedback.get("motivation"))
+    # Check-in limits (time, pain, soreness, stress) bind only the check-in day.
+    on_checkin_day = draft_date == str(feedback.get("checkin_date") or today)
+    day_feedback = feedback if on_checkin_day else {}
+    available_minutes = _as_number(day_feedback.get("available_minutes"))
+    motivation = _as_number(day_feedback.get("motivation"))
     calendar_events = events_by_date.get(str(draft.get("date") or ""), [])
     (
         calendar_limit,
@@ -233,10 +236,10 @@ def _change_state(
             and not illness_pause.get("approved")
             and illness_pause["start_date"] <= draft_date <= illness_pause["end_date"]
         ),
-        "severe": reports_complaint(feedback.get("pain"))
-        or (feedback.get("soreness") or 0) >= 8,
+        "severe": reports_complaint(day_feedback.get("pain"))
+        or (day_feedback.get("soreness") or 0) >= 8,
         "high_load": bool(
-            (feedback.get("stress") or 0) >= 8
+            (day_feedback.get("stress") or 0) >= 8
             or (motivation is not None and motivation <= 2)
         ),
         "available_minutes": available_minutes,
@@ -254,6 +257,11 @@ def _change_state(
         "no_training": no_training,
         "calendar_limited": calendar_limited,
     }
+
+
+def _without_focus(replacement: dict[str, Any]) -> dict[str, Any]:
+    """The generated easy focus is no evidence; judge a replacement by its text."""
+    return {**replacement, "session_focus": None, "strength_intensity": None}
 
 
 def _replacement(
@@ -290,7 +298,7 @@ def _replacement(
             run_caps,
         )
         if state["no_intensity_limited"] and not calendar.workout_is_explicitly_easy(
-            replacement
+            _without_focus(replacement)
         ):
             replacement["name"] = adaptive.ADAPTIVE_EASY_NAME
     if state["calendar_limited"]:
@@ -397,7 +405,11 @@ def _change(
     blockers = [
         decision
         for event in state["calendar_events"]
-        if (decision := calendar.calendar_constraint_decision(replacement, event))
+        if (
+            decision := calendar.calendar_constraint_decision(
+                _without_focus(replacement), event
+            )
+        )
     ]
     if not replacement.get("archived") and calendar.adaptive_change_calendar_blocked(
         change, blockers
@@ -568,7 +580,8 @@ class AdaptiveReplanPreviewService:
             "weather_forecast": _forecast_freshness(weather),
             "message": message,
             "scope": (
-                "Nur nach Bestätigung werden lokale zukünftige Einheiten angepasst "
+                "Zeit-, Schmerz- und Belastungsangaben des Check-ins gelten nur "
+                "am Check-in-Tag. Nur nach Bestätigung werden lokale zukünftige Einheiten angepasst "
                 "und die prognostizierten Krankheitstage eingetragen. Intervals.icu "
                 "wird nur bei ausdrücklicher Auswahl synchronisiert."
             ),
