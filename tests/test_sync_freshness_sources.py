@@ -85,8 +85,6 @@ class DefaultFreshnessSourceTests(unittest.TestCase):
         self.assertEqual(bound, declared)
         self.assertIsInstance(DEFAULT_FRESHNESS_SOURCES, MappingProxyType)
 
-
-
     def test_garmin_is_configured_by_any_single_credential_source(self) -> None:
         source = DEFAULT_FRESHNESS_SOURCES[GARMIN_ID]["data"]
         cases: tuple[tuple[Config, dict[str, bool], bool], ...] = (
@@ -164,7 +162,9 @@ class DefaultFreshnessSourceTests(unittest.TestCase):
     def test_calendar_reads_stored_settings_and_configured_url(self) -> None:
         source = DEFAULT_FRESHNESS_SOURCES[CALENDAR_ID]["events"]
         inputs = _inputs(
-            config=make_config(calendar_ical_url="https://calendar.example.test/feed.ics"),
+            config=make_config(
+                calendar_ical_url="https://calendar.example.test/feed.ics"
+            ),
             values={
                 "last_external_calendar_sync_at": "calendar-at",
                 "last_external_calendar_sync_error": "calendar-error",
@@ -178,8 +178,6 @@ class DefaultFreshnessSourceTests(unittest.TestCase):
 
 def _getter(values: dict[str, Any]) -> Callable[[str], Any]:
     return lambda key: values.get(key)
-
-
 
 
 def _acme_runtime(*, running: Any = None) -> ProviderRuntimeRegistry:
@@ -253,6 +251,43 @@ class AcmeMockProjectionTests(_DatabaseCase):
                 self.assertEqual(item["last_success_at"], last_sync.isoformat())
                 self.assertEqual(item["last_attempt_at"], last_sync.isoformat())
                 self.assertTrue(item["has_last_good"])
+
+    def test_a_skipped_row_is_neither_a_success_nor_the_latest_attempt(self) -> None:
+        runtime = _acme_runtime()
+        rows = (
+            ("ok", NOW - timedelta(hours=3), "success", None),
+            ("failed", NOW - timedelta(hours=2), "error", "provider_error"),
+            # Lock contention: a newer row that must not hide the failure above.
+            ("busy", NOW - timedelta(hours=1), "skipped", None),
+        )
+        with self.manager.unit_of_work() as db:
+            for row_id, started, status, error_code in rows:
+                db.execute(
+                    "INSERT INTO provider_refresh_history(id, provider, area, "
+                    "operation_id, trigger, started_at, finished_at, phase, status, "
+                    "error_code) VALUES (?, ?, ?, 'op', 'test', ?, ?, 'complete', ?, ?)",
+                    (
+                        row_id,
+                        ACME_ID,
+                        ACME_AREA,
+                        started.isoformat(),
+                        (started + timedelta(minutes=1)).isoformat(),
+                        status,
+                        error_code,
+                    ),
+                )
+
+        [item] = self._project(runtime, {"acme_enabled": True})
+
+        self.assertEqual(item["state"], "stale")
+        self.assertEqual(item["error_code"], "provider_error")
+        self.assertEqual(
+            item["last_attempt_at"], (NOW - timedelta(hours=2)).isoformat()
+        )
+        self.assertEqual(
+            item["last_success_at"],
+            (NOW - timedelta(hours=3) + timedelta(minutes=1)).isoformat(),
+        )
 
     def test_output_only_area_never_ages_into_stale(self) -> None:
         area = dataclasses.replace(
@@ -383,7 +418,9 @@ class AcmeMockStatusTests(_DatabaseCase):
         jobs = Mock()
         jobs.list.return_value = []
         status = SyncPublicStateService(
-            make_config(garmin_tokenstore=str(Path(self.temporary_directory.name) / "t")),
+            make_config(
+                garmin_tokenstore=str(Path(self.temporary_directory.name) / "t")
+            ),
             self.manager,
             self.key_values,
             freshness,

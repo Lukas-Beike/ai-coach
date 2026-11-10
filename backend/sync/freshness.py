@@ -132,8 +132,11 @@ def _provider_freshness_entry(
     *,
     now: datetime,
 ) -> dict[str, Any]:
+    # A skipped row (a hold or lock contention) is no outcome: it is neither the
+    # latest attempt nor a success, so a concurrent failed run stays visible.
     row = db.execute(
-        "SELECT * FROM provider_refresh_history WHERE provider=? AND area=? ORDER BY started_at DESC LIMIT 1",
+        "SELECT * FROM provider_refresh_history WHERE provider=? AND area=? "
+        "AND status != 'skipped' ORDER BY started_at DESC LIMIT 1",
         (provider_id, area.area),
     ).fetchone()
     last_success = db.execute(

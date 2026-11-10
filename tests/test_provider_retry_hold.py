@@ -113,6 +113,14 @@ class ProviderRetryHoldTests(unittest.TestCase):
 
         self.assertFalse(self.hold.held("garmin"))
 
+    def test_a_skipped_attempt_does_not_release_an_earlier_failure_hold(self) -> None:
+        self.record(
+            "error", minutes_ago=60, error_code="provider_error", retry_in_minutes=30
+        )
+        self.record("skipped", minutes_ago=10)
+
+        self.assertTrue(self.hold.held("garmin"))
+
     def test_auth_required_holds_until_the_athlete_acts(self) -> None:
         self.record("error", error_code="auth_required")
 

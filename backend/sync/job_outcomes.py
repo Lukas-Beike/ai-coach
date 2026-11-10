@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any
@@ -12,6 +12,12 @@ from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 from backend.sync.jobs import SyncJobInvalidOperationError, SyncJobStore, retry_delay
 from backend.sync.refresh import sync_job_error_class
+
+# A job that meets a busy provider lock retries soon and keeps its attempts. A
+# lock held for longer than the age limit fails the job as before.
+CONTENTION_RETRY_SECONDS = 30
+CONTENTION_MAX_AGE = timedelta(minutes=30)
+CONTENDED_STATUS = "queued"
 
 
 class SyncJobOutcomeService:
@@ -37,10 +43,20 @@ class SyncJobOutcomeService:
         self._retry_base_seconds = retry_base_seconds
         self._retry_max_seconds = retry_max_seconds
 
-    def complete(self, job_id: str, result: Any) -> str:
-        """Persist the result and return its legacy fallback status."""
+    def complete(
+        self, job_id: str, result: Any, *, job: Mapping[str, Any] | None = None
+    ) -> str:
+        """Persist the result and return its legacy fallback status.
+
+        A result that met a busy provider lock requeues the claimed ``job`` after
+        a short delay without consuming an attempt and returns ``"queued"``.
+        Without a claimed job, or once the job is older than the contention age
+        limit, it raises a temporary conflict for the normal retry path.
+        """
         result_status = result.get("status") if isinstance(result, dict) else "ok"
         if result_status == "already_running":
+            if job is not None and self._defer_contended(job):
+                return CONTENDED_STATUS
             raise AppError(
                 409, "Der Provider ist noch beschäftigt.", reason="temporary_error"
             )
@@ -55,6 +71,28 @@ class SyncJobOutcomeService:
         )
         self._publish(snapshot)
         return fallback_status
+
+    def _defer_contended(self, job: Mapping[str, Any]) -> bool:
+        current_time = self._utc(self._current_time())
+        try:
+            created = datetime.fromisoformat(str(job.get("created_at") or ""))
+        except ValueError:
+            created = current_time
+        if current_time - self._utc(created) > CONTENTION_MAX_AGE:
+            return False
+        available_at = (
+            current_time + timedelta(seconds=CONTENTION_RETRY_SECONDS)
+        ).isoformat()
+        if not self._job_store.defer(job, available_at):
+            return False
+        self._wake_event.set()
+        return True
+
+    @staticmethod
+    def _utc(value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     def update(
         self,

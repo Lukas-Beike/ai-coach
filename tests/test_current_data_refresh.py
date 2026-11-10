@@ -31,7 +31,7 @@ def _command_service(
     wahoo_sync.sync.return_value = {"status": "ok"}
     refreshes: dict[str, SynchronousRefresh] = {
         GARMIN_ID: GarminSynchronousRefresh(garmin_sync, MagicMock(), -1),
-        WAHOO_ID: WahooSynchronousRefresh(wahoo_sync, -1, poll_seconds=0.001),
+        WAHOO_ID: WahooSynchronousRefresh(wahoo_sync, -1),
     }
     # The refresh owners never receive an Intervals.icu client.
     del intervals_client
@@ -70,16 +70,18 @@ class CurrentDataRefreshTests(unittest.TestCase):
         queue.enqueue.assert_not_called()
         self.assertEqual([], intervals_client.method_calls)
 
-    def test_a_running_wahoo_sync_is_awaited_before_the_refresh_reads(self) -> None:
+    def test_the_wahoo_read_waits_for_a_running_sync_on_the_lock_itself(self) -> None:
         garmin_sync, wahoo_sync, intervals_client = Mock(), Mock(), Mock()
         service, _queue = _command_service(garmin_sync, wahoo_sync, intervals_client)
-        wahoo_sync.running.side_effect = [True, True, False]
 
         result = service.start(WAHOO_ID, {"_wait_for_completion": True})
 
         self.assertEqual("completed", result["status"])
-        self.assertEqual(3, wahoo_sync.running.call_count)
-        wahoo_sync.sync.assert_called_once_with(7, "Chat-Anfrage")
+        # One call that waits inside the sync: no running() poll, no gap in between.
+        wahoo_sync.running.assert_not_called()
+        wahoo_sync.sync.assert_called_once_with(
+            7, "Chat-Anfrage", wait_seconds=120.0, cancel_event=None
+        )
 
     def test_a_partial_or_busy_wahoo_read_is_reported_honestly(self) -> None:
         garmin_sync, wahoo_sync, intervals_client = Mock(), Mock(), Mock()
@@ -136,14 +138,15 @@ class CurrentDataRefreshTests(unittest.TestCase):
                 refresh = WahooSynchronousRefresh(
                     wahoo_sync,
                     -1,
-                    poll_seconds=0.001,
                     stored_days=Mock(return_value=stored),
                 )
                 arguments = {} if requested is None else {"days": requested}
 
                 refresh.refresh(WAHOO_ID, arguments, None)
 
-                wahoo_sync.sync.assert_called_once_with(expected, "Chat-Anfrage")
+                wahoo_sync.sync.assert_called_once_with(
+                    expected, "Chat-Anfrage", wait_seconds=120.0, cancel_event=None
+                )
 
     def test_intervals_has_no_refresh_to_wait_for_or_queue(self) -> None:
         garmin_sync, wahoo_sync, intervals_client = Mock(), Mock(), Mock()

@@ -50,6 +50,7 @@ class SyncOperationObserverTests(unittest.TestCase):
         self.assertEqual(operation_result_count({"updated": 3}), 3)
         self.assertIsNone(operation_result_count({"updated": -1}))
         self.assertEqual(refresh_status({"status": "not_configured"}), "skipped")
+        self.assertEqual(refresh_status({"status": "already_running"}), "skipped")
         self.assertEqual(refresh_status({"status": "partial"}), "partial")
         self.assertEqual(refresh_status({"status": "ok"}), "success")
 
@@ -73,6 +74,14 @@ class SyncOperationObserverTests(unittest.TestCase):
             ["operation_started", "operation_count", "operation_completed"],
         )
         self.assertEqual(logger.records[1][2]["context"]["count"], 4)
+
+    def test_lock_contention_records_a_skipped_row_not_a_success(self):
+        observer, tracker, _ = self.make_observer()
+
+        with observer.observe("garmin", "data", "background") as scope:
+            scope.result = {"status": "already_running"}
+
+        tracker.finish.assert_called_once_with("refresh-1", "skipped", "complete")
 
     def test_memory_counters_bracket_sync_without_payloads(self):
         observer, _, logger = self.make_observer()

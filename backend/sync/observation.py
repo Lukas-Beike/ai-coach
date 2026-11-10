@@ -80,6 +80,8 @@ def refresh_status(result: Any) -> str:
     status: Any = result.get("status") if isinstance(result, dict) else None
     return {
         "not_configured": "skipped",
+        # Lock contention: another run owns the work, so this one is no outcome.
+        "already_running": "skipped",
         "stale": "error",
         "error": "error",
         "failed": "error",

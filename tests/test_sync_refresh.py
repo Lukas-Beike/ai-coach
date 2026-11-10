@@ -156,6 +156,26 @@ class SyncRefreshTests(unittest.TestCase):
             )
         )
 
+    def test_retry_at_ignores_skipped_rows_inside_a_failure_streak(self):
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        rows = [
+            {"status": "skipped", "error_code": None},
+            {"status": "error", "error_code": "timeout"},
+            {"status": "skipped", "error_code": None},
+            {"status": "error", "error_code": "timeout"},
+            {"status": "success", "error_code": None},
+            {"status": "error", "error_code": "timeout"},
+        ]
+        retry = retry_at(
+            rows,
+            current_error_code="timeout",
+            now=now,
+            base_seconds=10,
+            max_seconds=1000,
+        )
+        # Three failures before the success; the skipped rows count for nothing.
+        self.assertEqual(retry, "2026-01-01T00:00:40+00:00")
+
     def test_refresh_records_use_caller_owned_connection(self):
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
