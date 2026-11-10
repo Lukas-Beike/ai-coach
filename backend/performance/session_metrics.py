@@ -37,7 +37,8 @@ METHOD_ID: Final = "local-session-metrics"
 # v2: grade-adjusted Pa:HR of outdoor runs (#1770).
 # v3: the decoupling's output per heartbeat is named apart from the session EF,
 # and run work names Garmin's running-power model (card M8 v3, #1773).
-METHOD_VERSION: Final = 3
+# v4: positive duration fallback; stream work counts moving samples only (#1950).
+METHOD_VERSION: Final = 4
 CARD: Final = "M8"
 
 METRIC_SPORTS: Final = frozenset({Sport.RIDE.value, Sport.RUN.value})
@@ -190,6 +191,7 @@ def _work(
     streams = (activity or {}).get("streams") or {}
     times, watts = streams.get("time") or [], streams.get("watts") or []
     moving = summary_duration_s(summary)
+    flags = streams.get("moving") or None
     if len(times) < 2 or len(watts) != len(times) or not moving:
         return None
     joules = covered = 0.0
@@ -197,6 +199,8 @@ def _work(
         step = float(times[index + 1]) - float(times[index])
         power = _number(watts[index])
         if power is None or power < 0 or not 0 < step <= MAX_SAMPLE_GAP_S:
+            continue
+        if flags and (index >= len(flags) or flags[index] != 1):
             continue
         joules += power * step
         covered += step

@@ -1,8 +1,8 @@
 # M6 — Local TSS-scale session load and intensity
 
 - **Card:** M6
-- **Card version:** 6
-- **Method ID:** local-tss-load v6 (#1725, v2 #1726, v3 #1774, v4 #1771, v5 #1773, v6 #1892)
+- **Card version:** 7
+- **Method ID:** local-tss-load v7 (#1725, v2 #1726, v3 #1774, v4 #1771, v5 #1773, v6 #1892, v7 #1950)
 - **Status:** implemented (`backend/performance/local_tss.py`, `backend/sync/local_load.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-08
@@ -208,7 +208,7 @@ General rules:
   - `observed_on`: the session's local day.
   - `sport`: the session's sport.
   - `source_kind`: `derived`.
-  - `method`: `local-tss-load`, `method_version`: 6.
+  - `method`: `local-tss-load`, `method_version`: 7.
   - The owner is the canonical session.
   - `details` hold the branch, the pace basis, and the thresholds used with
     their sources and dates; a heart-rate value also holds the sex the
@@ -361,7 +361,7 @@ hour, or a mix of branches on one scale.
   seconds of at least 80 % of the TSS duration and a positive TRIMP; else
   `0 < HRr ≤ 1` for the average HR.
 - Session RPE (strength): a rated session with a positive elapsed duration
-  (`no_rating` otherwise) and at least 20 calibration pairs within 2 RPE of
+  (`no_rating` otherwise; only a local or Garmin rating counts, v7) and at least 20 calibration pairs within 2 RPE of
   its rating in the window (`not_calibrated` otherwise). An RPE of 0 gives
   0 AU and so 0 TSS without a factor.
 - An IF above 2.0 is rejected as implausible (`implausible_intensity`).
@@ -384,7 +384,7 @@ hour, or a mix of branches on one scale.
 | Unset sex | male constants, marked `sex_assumed` | product assumption | Athlete decision 2026-11-07 (#1774); keeps existing values for the male athlete. |
 | HR distribution | TRIMP summed per bpm over the moving samples, scaled by TSS duration / covered seconds | source | R52 weights the impulse by the heart-rate distribution of the session; the Banister weights of R19 replace its individual ones (product assumption). Athlete decision 2026-11-08 (v5). |
 | HR coverage minimum | 80 % of the TSS duration, else the average-HR TRIMP | product assumption | Keeps a mostly missing stream from scaling up a short part; not a published value. Athlete decision 2026-11-08 (v5). |
-| HR distribution samples | moving samples, gaps over 5 s excluded, 30-240 bpm | product assumption | Same sample rules as the stream analyses (M8); readings outside the range are sensor faults. |
+| HR distribution samples | moving samples, steps above `max(30 s, 3 × median step)` excluded, 30-240 bpm | product assumption | Same sample rules as the stream analyses (M8); readings outside the range are sensor faults. |
 | HR normalisation | 60 min at threshold HR = 100 | product assumption | Vendor convention (V2); no peer-reviewed source. |
 | HR guards | HR_rest < threshold HR < HR_max, 0 < HRr ≤ 1 | product assumption | Keeps HRr defined and the normalisation positive; not a published rule. |
 | Resting HR look-back | 7 days, else the earliest later value within 90 days, flagged | product assumption | Keeps HRr on a recent resting HR; the later stand-in follows the athlete decision of 2026-11-06 after the count on the 2026-10-24 copy (2,334 sessions had none within 7 days); not a published value. |
@@ -406,7 +406,7 @@ hour, or a mix of branches on one scale.
 | Threshold precedence | local zones in effect, Garmin watch zone set (heart rate), then the source policy | product assumption | One accessor for load, zones, Coach, plan and exports; athlete decision 2026-11-09 (v6). |
 | Threshold after the session | earliest later threshold, flagged | product assumption | Athlete decision 2026-11-06; fills history before the first stored threshold. |
 | Later threshold cap | observed at most 90 days after the session day, else missing | product assumption | A threshold from much later may not describe the athlete at the session; athlete decision 2026-11-08 (v5). |
-| Duration | moving, else elapsed | product assumption | `summary_duration_s` in `backend/canonical/activity_summary.py`. |
+| Duration | the positive moving duration, else the positive elapsed duration (a moving 0 falls back, v7) | product assumption | `summary_duration_s` in `backend/canonical/activity_summary.py`. |
 
 ## Allowed statements
 

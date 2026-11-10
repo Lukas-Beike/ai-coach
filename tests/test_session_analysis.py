@@ -37,9 +37,9 @@ def run(environment="outdoor", grade=True):
 
 class SessionAnalysisTests(unittest.TestCase):
     def test_heart_rate_histogram_counts_moving_seconds_per_bpm(self):
-        # 100 s at 120 bpm, a 20 s gap (nothing counted), 50 s at 150 bpm of
+        # 100 s at 120 bpm, a 40 s pause (nothing counted), 50 s at 150 bpm of
         # which the first 10 s are stopped; 25 and 250 bpm are no readings.
-        times = list(range(101)) + [120 + second for second in range(51)]
+        times = list(range(101)) + [140 + second for second in range(51)]
         heart = [120.4] * 101 + [150] * 51
         moving = [True] * 101 + [False] * 10 + [True] * 41
         heart[10] = 25
@@ -117,7 +117,7 @@ class SessionAnalysisTests(unittest.TestCase):
                     100 if i % 2 else 300 for i in range(3601)
                 ]
             else:
-                activity = ride([0, 600, 2100, 3600])
+                activity = ride(list(range(601)) + list(range(2100, 3601)))
             with self.subTest(variant=variant):
                 self.assertEqual(
                     "insufficient_data", aerobic_analysis(activity)["status"]

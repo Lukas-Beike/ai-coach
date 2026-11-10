@@ -1,8 +1,8 @@
 # M8 — Local efficiency factor, variability index, work and decoupling
 
 - **Card:** M8
-- **Card version:** 3
-- **Method ID:** local-session-metrics v3 (#1680, #1770, #1773)
+- **Card version:** 4
+- **Method ID:** local-session-metrics v4 (#1680, #1770, #1773, #1950)
 - **Status:** implemented (`backend/performance/session_metrics.py`, `backend/sync/session_metrics.py`)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-11-07
@@ -58,8 +58,8 @@ Athlete decisions (2026-11-07, #1680):
 4. **Work, ride or run with power:** the device's work total (Wahoo
    `work_accum`, `basis: device_total`), else
    `W = Σ P_i × Δt_i / 1000` in kJ over the power stream (`basis:
-   power_stream`). Samples with `Δt > 5 s`, a missing or negative power are
-   skipped. Run work records `power_model: running_power_model`: it is the
+   power_stream`). Samples with `Δt > 5 s`, a missing or negative power and,
+   when a `moving` stream exists, stopped samples are skipped (v4). Run work records `power_model: running_power_model`: it is the
    output of the device's running-power model (R40), not a measured force.
 5. **Aerobic decoupling:** the drift of `aerobic_analysis`
    (`backend/performance/session_analysis.py`, method
@@ -85,7 +85,7 @@ Athlete decisions (2026-11-07, #1680):
 
 - Each value is a derived observation owned by its canonical session:
   `observed_on` is the session's local day, `source_kind` `derived`,
-  `method` `local-session-metrics`, `method_version` 3, natural key series
+  `method` `local-session-metrics`, `method_version` 4, natural key series
   `session:<id>`.
 - Kinds: `efficiency_factor`, `variability_index`, `mechanical_work`,
   `aerobic_decoupling`. The derivation holds the basis, the unit of EF, the
@@ -191,7 +191,9 @@ uncontrolled outdoor sessions.
 - VI: ride with `NP > 0` and `P_avg > 0`; a VI outside 0.5-5.0 is dropped.
 - Work: a positive device total, else a power stream whose valid samples
   cover at least 85 % of the moving (else elapsed) duration and a positive
-  sum.
+  sum; with a `moving` stream only moving samples count toward coverage and
+  work, so stopped samples cannot fill a power dropout (v4). A moving
+  duration of 0 falls back to the elapsed duration (v4).
 - Decoupling, from `aerobic_analysis`:
   - ride with power, or road run (trail runs excluded) with speed; an
     outdoor run also needs a grade, or altitude and distance;
@@ -199,8 +201,8 @@ uncontrolled outdoor sessions.
   - at least 85 % paired output and HR time in each half;
   - an output coefficient of variation of at most 15 % in each half;
   - the halves' mean outputs within 10 % of each other;
-  - HR within 30-240 bpm, output above 0, samples longer than 5 s, stops
-    excluded.
+  - HR within 30-240 bpm, output above 0, steps above the adaptive gap rule
+    `max(30 s, 3 × median step)` of the zone times, stops excluded (v4).
 - A session without a value has no row; it is never zero.
 
 ## Numeric rules
@@ -213,7 +215,7 @@ uncontrolled outdoor sessions.
 | VI plausibility | 0.5-5.0 | product assumption | Guard against a wrong unit or a broken summary; V5 (unverified snippet) lists steady rides at 1.00-1.02 and MTB up to 1.50. |
 | Work | device total, else Σ P × Δt | product assumption | Physical definition of work; Wahoo reports its own total. |
 | Work coverage | at least 85 % of the moving duration | product assumption | Same coverage as the decoupling halves; not a published value. |
-| Sample gap | over 5 s skipped | product assumption | Same as `backend/performance/session_analysis.py:_samples`. |
+| Sample gap | work: over 5 s skipped; decoupling: over `max(30 s, 3 × median step)` skipped | product assumption | Decoupling uses the zone times' rule (`stream_zones.max_step_s`) so downsampled and smart-recording streams count. Analysis method v7, histogram v2 (#1950). |
 | Decoupling formula | (EF₁ − EF₂) / EF₁ × 100 | source | Vendor definition V3; R38 uses the same split for power:HR. |
 | Warm-up exclusion | 10 minutes | product assumption | `aerobic_analysis`; drift starts after about 10-20 minutes (R32, R34), which motivates an exclusion but validates no cut-off. |
 | Minimum recording | 30 minutes | product assumption | `aerobic_analysis` requires 30 minutes (20 after the warm-up); V5 (unverified snippet) names 20 minutes. |
