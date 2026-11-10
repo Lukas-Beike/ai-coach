@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from threading import Event
@@ -18,6 +19,17 @@ from backend.sync.refresh import sync_job_error_class
 CONTENTION_RETRY_SECONDS = 30
 CONTENTION_MAX_AGE = timedelta(minutes=30)
 CONTENDED_STATUS = "queued"
+
+
+# First collision per job id; the outcome service is built per request, so the
+# map lives at module level for the single sync worker of this process.
+_CONTENDED_SINCE: dict[str, datetime] = {}
+_CONTENTION_LOCK = threading.Lock()
+
+
+def _clear_contention(job_id: str) -> None:
+    with _CONTENTION_LOCK:
+        _CONTENDED_SINCE.pop(job_id, None)
 
 
 class SyncJobOutcomeService:
@@ -50,10 +62,12 @@ class SyncJobOutcomeService:
 
         A result that met a busy provider lock requeues the claimed ``job`` after
         a short delay without consuming an attempt and returns ``"queued"``.
-        Without a claimed job, or once the job is older than the contention age
-        limit, it raises a temporary conflict for the normal retry path.
+        Without a claimed job, or once the job has been contended longer than the
+        age limit, it raises a temporary conflict for the normal retry path.
         """
         result_status = result.get("status") if isinstance(result, dict) else "ok"
+        if result_status != "already_running":
+            _clear_contention(str((job or {}).get("id") or job_id))
         if result_status == "already_running":
             if job is not None and self._defer_contended(job):
                 return CONTENDED_STATUS
@@ -74,11 +88,14 @@ class SyncJobOutcomeService:
 
     def _defer_contended(self, job: Mapping[str, Any]) -> bool:
         current_time = self._utc(self._current_time())
-        try:
-            created = datetime.fromisoformat(str(job.get("created_at") or ""))
-        except ValueError:
-            created = current_time
-        if current_time - self._utc(created) > CONTENTION_MAX_AGE:
+        job_id = str(job.get("id") or "")
+        # The bound counts from the first collision of this job, not from its
+        # creation: a job that waited in the queue or retried earlier still
+        # gets the short defers. Kept per process; a restart starts afresh.
+        with _CONTENTION_LOCK:
+            since = _CONTENDED_SINCE.setdefault(job_id, current_time)
+        if current_time - since > CONTENTION_MAX_AGE:
+            _clear_contention(job_id)
             return False
         available_at = (
             current_time + timedelta(seconds=CONTENTION_RETRY_SECONDS)

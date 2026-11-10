@@ -9,12 +9,15 @@ from unittest.mock import Mock
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
+from backend.sync import job_outcomes
 from backend.sync.job_outcomes import CONTENTION_MAX_AGE, SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
 
 
 class SyncJobOutcomeServiceTests(unittest.TestCase):
     def setUp(self):
+        job_outcomes._CONTENDED_SINCE.clear()
+        self.addCleanup(job_outcomes._CONTENDED_SINCE.clear)
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary_directory.cleanup)
         self.manager = DatabaseManager(
@@ -190,13 +193,29 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
     def test_contention_past_the_age_limit_fails_over_to_the_retry_path(self):
         job = self.enqueue()
         claimed = self.claim(job)
+        self.service.complete(job["id"], {"status": "already_running"}, job=claimed)
         self.current_time += CONTENTION_MAX_AGE + timedelta(seconds=1)
+        claimed = self.claim(job)
 
         with self.assertRaises(AppError) as raised:
             self.service.complete(job["id"], {"status": "already_running"}, job=claimed)
 
         self.assertEqual(raised.exception.reason, "temporary_error")
         self.assertEqual(self.store.state(job["id"])["status"], "running")
+
+    def test_the_age_limit_counts_from_the_first_collision_not_creation(self):
+        # A job that waited in the queue (or retried) for longer than the limit
+        # still gets the short defer on its first collision.
+        job = self.enqueue()
+        self.current_time += CONTENTION_MAX_AGE + timedelta(minutes=15)
+        claimed = self.claim(job)
+
+        status = self.service.complete(
+            job["id"], {"status": "already_running"}, job=claimed
+        )
+
+        self.assertEqual(status, "queued")
+        self.assertEqual(self.store.state(job["id"])["status"], "queued")
 
     def test_retryable_failure_requeues_wakes_and_publishes_no_event(self):
         job = self.enqueue()
