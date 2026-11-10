@@ -135,6 +135,38 @@ class PerformanceComparisonsTests(unittest.TestCase):
         }
         return (metrics, recovery, load_context)
 
+    def test_complete_load_weeks_keep_a_neutral_numeric_comparison(self):
+        values = self._inputs()
+        result = performance_comparisons(*values, TODAY, garmin_history=self._history())
+        load = result["training_load_7d"]
+        self.assertEqual(
+            (load["current"], load["average"], load["delta"]), (100, 90, 10)
+        )
+        self.assertEqual((load["direction"], load["color"]), ("up", "neutral"))
+        self.assertEqual(load["load_missing_sessions"], {"last_7": 0, "previous_7": 0})
+
+    def test_load_weeks_with_sessions_without_load_give_no_verdict(self):
+        metrics, recovery, load_context = self._inputs()
+        load_context["last_7"] = {
+            "training_load": 100,
+            "duration_hours": 10,
+            "load_missing_sessions": 4,
+        }
+        load_context["previous_7"] = {
+            "training_load": 30,
+            "duration_hours": 8,
+            "load_missing_sessions": 6,
+        }
+        result = performance_comparisons(
+            metrics, recovery, load_context, TODAY, garmin_history=self._history()
+        )
+        load = result["training_load_7d"]
+        self.assertEqual(load["load_missing_sessions"], {"last_7": 4, "previous_7": 6})
+        self.assertEqual((load["current"], load["average"]), (100, 30))
+        self.assertIsNone(load["delta"])
+        self.assertIsNone(load["direction"])
+        self.assertIsNone(load["color"])
+
     def test_comparisons_preserve_keys_units_labels_and_direction_flags(self):
         values = self._inputs()
         history = self._history()
@@ -145,7 +177,8 @@ class PerformanceComparisonsTests(unittest.TestCase):
         self.assertEqual(result["sleep_hours"]["days"], 7)
         self.assertEqual(result["sleep_hours"]["color"], "good")
         self.assertEqual(result["resting_hr_bpm"]["color"], "good")
-        self.assertEqual(result["fatigue_atl"]["color"], "bad")
+        self.assertEqual(result["fatigue_atl"]["color"], "neutral")
+        self.assertEqual(result["fatigue_atl"]["direction"], "up")
         self.assertEqual(result["weight_kg_30d"]["color"], "neutral")
         self.assertEqual(result["training_load_7d"]["label"], "vorherigen 7 Tagen")
         self.assertEqual(

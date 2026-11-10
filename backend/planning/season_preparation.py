@@ -314,13 +314,9 @@ def load_scenarios(
             "planned_load_estimated": bool(estimated),
             "estimated_planned_units": estimated,
         }
-    if any(number(row.get("training_load")) is None for row in completed_today):
-        return {
-            **base,
-            "status": "insufficient_data",
-            "reason": "Eine heute absolvierte Einheit hat keine bekannte Belastung.",
-        }
-    actual_today_load = sum(float(row["training_load"]) for row in completed_today)
+    known_today = [number(row.get("training_load")) for row in completed_today]
+    actual_today_load = sum(load for load in known_today if load is not None)
+    unloaded_today = known_today.count(None)
     curves = [
         _scenario_curve(
             planned_loads,
@@ -342,6 +338,14 @@ def load_scenarios(
         },
         "planned_load_estimated": bool(estimated),
         "estimated_planned_units": estimated,
+        **(
+            {
+                "completed_today_without_load": unloaded_today,
+                "note": "Heute absolvierte Einheiten ohne bekannte Belastung fehlen im Startwert (Karte M7); die Kurven kennen nur die bekannten Lasten.",
+            }
+            if unloaded_today
+            else {}
+        ),
         "apply": "Request an adaptive preview using current planning state, then explicitly approve. Simulation does not change local or remote workouts.",
     }
 
