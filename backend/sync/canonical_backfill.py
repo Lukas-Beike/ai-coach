@@ -136,7 +136,7 @@ class _Work:
     domain_batches: tuple[DomainBatch, ...] = ()
     # The owning raw record ids and their days (see IngestPlan).
     observation_owners: Mapping[str, str] = field(default_factory=dict)
-    # The mapper raised for the record: what it projected before stays as it is.
+    # The mapper raised for the record: nothing is written for it (see _complete_reprojection).
     unmappable: bool = False
 
 
@@ -489,15 +489,21 @@ def _complete_reprojection(
     bucket = state["counters"].setdefault(
         row["provider"], dict.fromkeys(COUNTER_NAMES, 0)
     )
-    if not work.unmappable:
-        bucket["retired"] += _retire_unemitted(db, row, work, now=now)
-        bucket["retired"] += _retire_unemitted_observations(db, row, work, now=now)
-        bucket["retired"] += _replace_domain_rows(
-            db, row, work, version=version, now=now
-        )
-        # After the retirement, so an activity the new projection drops is never
-        # bundled.
-        _link_work_sessions(db, work, zone=zone, now=now)
+    if work.unmappable:
+        # The mapper raised: nothing is written and the version stays behind, so
+        # a later mapper version retries the record. This pass moves on. Once it
+        # completes, the reader serves only observations of the current version,
+        # so the record's observations of an older version stay stored but are
+        # hidden until a later mapper version projects the record; its activity
+        # rows are not version-filtered and stay served.
+        bucket["skipped_invalid"] += work.skipped_invalid
+        _leave_reprojection(state, current)
+        return
+    bucket["retired"] += _retire_unemitted(db, row, work, now=now)
+    bucket["retired"] += _retire_unemitted_observations(db, row, work, now=now)
+    bucket["retired"] += _replace_domain_rows(db, row, work, version=version, now=now)
+    # After the retirement, so an activity the new projection drops is never bundled.
+    _link_work_sessions(db, work, zone=zone, now=now)
     canonical_store.set_mapped_version(
         db, record_id=current["id"], mapper_version=version, now=now
     )

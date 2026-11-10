@@ -81,9 +81,10 @@ class SyncJobQueueService:
         end_date: str,
         created_since: str,
         job_type: str = "historical_backfill",
+        exclude_job_id: str = "",
     ) -> bool:
         return self._store.has_backfill_continuation(
-            provider, end_date, created_since, job_type
+            provider, end_date, created_since, job_type, exclude_job_id
         )
 
     def enqueue(

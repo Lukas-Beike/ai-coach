@@ -16,6 +16,7 @@ from backend.sync.backfill_resume import (
     historical_backfill_payload,
 )
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.executor import HistoricalSyncJobOwner
 from backend.sync.job_outcomes import SyncJobOutcomeService
 from backend.sync.jobs import STREAM_BACKFILL, STREAM_HISTORY_CURSOR
 from backend.sync.scheduler import DailySyncScheduler, DailySyncSchedulerConfig
@@ -82,6 +83,16 @@ class BackfillChainResumerTests(SyncQueueFixtureMixin, unittest.TestCase):
             for row in rows
             if job_type is None or row["type"] == job_type
         ]
+
+    def continuations(self) -> list[dict[str, Any]]:
+        with self.manager.reader() as db:
+            return [
+                dict(row)
+                for row in db.execute(
+                    "SELECT id, provider, type, created_at FROM sync_jobs "
+                    "WHERE requested_by='backfill' ORDER BY created_at, id"
+                ).fetchall()
+            ]
 
     def fail_last_attempt(self, job_id: str) -> None:
         """Fail the claimed job on its last attempt, as the executor does."""
@@ -208,6 +219,35 @@ class BackfillChainResumerTests(SyncQueueFixtureMixin, unittest.TestCase):
         self.resumer().resume_provider(WAHOO, requested_by="connection")
 
         self.assertEqual(1, len(self.jobs(STREAM_BACKFILL)))
+
+    def test_a_chunk_that_re_reads_its_own_window_still_queues_its_continuation(
+        self,
+    ) -> None:
+        owner = HistoricalSyncJobOwner(
+            sync_state_repository=self.sync_state,  # type: ignore[arg-type]
+            queue_service=self.service,
+            local_now=lambda: datetime(2026, 9, 20, 12, 0, tzinfo=UTC),
+            sync_period_defaults={},
+            all_sync_days=-1,
+            sync_chunk_days=CHUNK_DAYS,
+            sync_earliest_date=FLOOR,
+        )
+        job = self.service.enqueue(
+            WAHOO,
+            STREAM_BACKFILL,
+            {"days": CHUNK_DAYS, "end_date": "2026-03-01"},
+            requested_by="startup",
+        )
+        window = {"historical_next_end": "2026-03-01"}
+
+        # Each skipped file hands over to a job with the same end day; the
+        # second one must not be taken for the first one's successor.
+        for expected in (1, 2, 3):
+            self.now = f"2026-09-20T12:0{expected}:00+00:00"
+            owner.queue_next(job, window, "completed")
+            continuations = self.continuations()
+            self.assertEqual(expected, len(continuations))
+            job = continuations[-1]
 
     def test_the_daily_scheduler_pass_resumes_chains_after_its_refreshes(self) -> None:
         calls: list[str] = []

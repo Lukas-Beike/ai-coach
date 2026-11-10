@@ -51,6 +51,7 @@ from backend.sync.canonical_backfill import (
     _reprojection_work,
     _Work,
     _write_reprojection,
+    completed_observation_versions,
 )
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
@@ -1669,8 +1670,22 @@ class ReprojectionTests(BackfillFixture):
         self.assertEqual("complete", summary["status"])
         counters = summary["providers"][INTERVALS]
         self.assertEqual(1, counters["skipped_invalid"])
-        self.assertEqual(3, counters["reprojected"])
-        # The record keeps what it projected before; the others moved on.
+        self.assertEqual(2, counters["reprojected"])
+        # The record keeps what it projected before and its old mapper version, so
+        # a later version retries it; the others moved on.
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        self.assertEqual(
+            {"1": old},
+            {
+                row["source_record_id"]: row["mapped_version"]
+                for row in self.rows(
+                    "SELECT source_record_id, mapped_version FROM provider_records "
+                    "WHERE provider = ? AND source_record_id IN ('0', '1', '2')",
+                    (INTERVALS,),
+                )
+                if row["mapped_version"] <= old
+            },
+        )
         self.assertEqual(
             before,
             self.rows(
@@ -1687,6 +1702,66 @@ class ReprojectionTests(BackfillFixture):
             ["ValueError"], [r.__dict__.get("error_class") for r in logs.records]
         )
         self.assertNotIn("synthetic payload text", logs.output[0])
+
+    def test_a_raising_mapper_leaves_the_old_observations_stored_but_hidden(
+        self,
+    ) -> None:
+        backfill = self.make_backfill(batch_size=100)
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                resting_hr={"calendarDate": "2026-09-19", "restingHeartRate": 49}
+            ),
+        )
+        self.run_to_completion(backfill)
+        key = (GARMIN, HEALTH_KIND)
+        version = canonical_plans._MAPPER_VERSIONS[key]
+        stored = "SELECT mapper_version FROM observations WHERE provider = ?"
+        self.assertEqual(
+            {version}, {r["mapper_version"] for r in self.rows(stored, (GARMIN,))}
+        )
+
+        def raising(*_args: Any, **_kwargs: Any) -> Any:
+            raise ValueError("synthetic")
+
+        with (
+            patch.dict(canonical_plans._MAPPER_VERSIONS, {key: version + 1}),
+            patch.object(backfill_module, "reprojection_plan", raising),
+            self.assertLogs("backend.sync.canonical_backfill", level="WARNING"),
+        ):
+            self.run_to_completion(backfill)
+            with self.manager.reader() as db:
+                reader = CanonicalTableReader(
+                    oldest_versions=lambda db: completed_observation_versions(
+                        self.key_values, db
+                    )
+                )
+                served = [
+                    item
+                    for kind in MetricKind
+                    for item in reader.observations(db, kind)
+                ]
+
+        # The pass completed and counted the record as skipped, not reprojected.
+        counters = self.summary(backfill)["providers"][GARMIN]
+        self.assertEqual("complete", self.summary(backfill)["status"])
+        self.assertEqual((1, 0), (counters["skipped_invalid"], counters["reprojected"]))
+        # Nothing was written: the record keeps its old mapper version ...
+        self.assertEqual(
+            0,
+            self.rows(
+                "SELECT COUNT(*) AS n FROM provider_records WHERE provider = ? "
+                "AND record_kind = ? AND mapped_version = ?",
+                (GARMIN, HEALTH_KIND, version + 1),
+            )[0]["n"],
+        )
+        self.assertEqual(
+            {version}, {r["mapper_version"] for r in self.rows(stored, (GARMIN,))}
+        )
+        # ... and, once the pass is complete, the reader serves only the current
+        # version, so the old observations stay stored but are hidden until a later
+        # mapper version projects the record.
+        self.assertEqual([], served)
 
     def test_follow_up_stages_run_after_a_pass_with_a_raising_record(self) -> None:
         backfill = self.populate()

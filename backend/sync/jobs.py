@@ -51,6 +51,10 @@ BACKFILL_CURSOR_STREAMS: dict[str, str] = {
     STREAM_BACKFILL: STREAM_HISTORY_CURSOR,
 }
 BACKFILL_JOB_TYPES = frozenset(BACKFILL_CURSOR_STREAMS)
+# Jobs that only read providers and store the result locally: running one again
+# is safe. Every other type (plan_push, competition_push, nutrition_sync) may
+# have written to a remote service, so a lost outcome is never replayed for it.
+REPLAYABLE_JOB_TYPES = frozenset({"refresh", "activity_details", *BACKFILL_JOB_TYPES})
 _BACKFILL_PROVIDER_MESSAGES = {
     "historical_backfill": ("Historischer Backfill ist nur für Garmin zulässig."),
     WELLNESS_BACKFILL: "Der Wellness-Backfill ist nur für Garmin zulässig.",
@@ -708,14 +712,19 @@ class SyncJobStore:
         end_date: str,
         created_since: str,
         job_type: str = "historical_backfill",
+        exclude_job_id: str = "",
     ) -> bool:
-        """Report whether a backfill chain already continued to ``end_date``."""
+        """Report whether a backfill chain already continued to ``end_date``.
+
+        ``exclude_job_id`` is the job asking: a chunk that re-reads its own window
+        (a skipped file) names its own end day and must not count as its successor.
+        """
         with self._database_manager.reader() as db:
             row = db.execute(
                 "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? "
                 "AND requested_by='backfill' AND json_extract(payload, '$.end_date')=? "
-                "AND created_at>=? LIMIT 1",
-                (provider, job_type, end_date, created_since),
+                "AND created_at>=? AND id!=? LIMIT 1",
+                (provider, job_type, end_date, created_since, exclude_job_id),
             ).fetchone()
             return row is not None
 
@@ -818,27 +827,32 @@ class SyncJobStore:
             return resumed
 
     def requeue_unowned_running(self) -> int:
-        """Requeue ``running`` jobs while the single worker is between claims.
+        """Settle ``running`` jobs while the single worker is between claims.
 
         Only the worker runs jobs and it calls this before each claim, so a row
-        still ``running`` then lost its outcome (a failed write); it runs again
-        instead of blocking its provider's scheduled work until a restart. A job
-        that used up its attempts is marked failed instead.
+        still ``running`` then lost its outcome (a failed write). A read-only job
+        (``REPLAYABLE_JOB_TYPES``) runs again instead of blocking its provider's
+        scheduled work until a restart. A job that may have written to a remote
+        service, or that used up its attempts, is marked failed with
+        ``outcome_not_persisted`` and its open items fail with it: only the
+        athlete's explicit resolve runs it again. Returns how many jobs were settled.
         """
         with self._database_manager.reader() as db:
-            attempts = {
-                row["id"]: int(row["attempts"] or 0)
-                for row in db.execute(
-                    "SELECT id, attempts FROM sync_jobs WHERE status='running'"
-                ).fetchall()
-            }
-        if not attempts:
-            return 0
-        for job_id, used in attempts.items():
-            if used >= SYNC_JOB_MAX_ATTEMPTS:
-                self.update(job_id, "failed", "outcome_not_persisted")
+            running = db.execute(
+                "SELECT id, type, attempts FROM sync_jobs WHERE status='running'"
+            ).fetchall()
+        failed = 0
+        for row in running:
+            if (
+                row["type"] not in REPLAYABLE_JOB_TYPES
+                or int(row["attempts"] or 0) >= SYNC_JOB_MAX_ATTEMPTS
+            ):
+                self.update(row["id"], "failed", "outcome_not_persisted")
+                failed += 1
+        if len(running) == failed:
+            return failed
         with self._database_manager.unit_of_work() as db:
-            return self._requeue_running(db, self._now())
+            return failed + self._requeue_running(db, self._now())
 
     def _requeue_running(self, db: Any, now: str) -> int:
         jobs = db.execute("SELECT id FROM sync_jobs WHERE status='running'").fetchall()

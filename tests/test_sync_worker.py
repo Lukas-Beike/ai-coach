@@ -401,6 +401,60 @@ class LostOutcomeTests(unittest.TestCase):
         self.assertEqual("completed", final["status"])
         self.assertEqual(2, final["attempts"])
 
+    def test_a_job_with_remote_effects_is_not_replayed_after_a_lost_outcome(
+        self,
+    ) -> None:
+        job, _ = self.store.enqueue(
+            {"provider": "intervals", "type": "plan_push", "payload": {"entries": []}},
+            "test",
+            [{"item_key": "workout-1", "operation": "push"}],
+            None,
+        )
+        down = Mock()
+        down.complete.side_effect = DatabaseBusyError("synthetic writer timeout")
+        down.record_failure.side_effect = DatabaseBusyError("synthetic writer timeout")
+        down.update.side_effect = DatabaseBusyError("synthetic writer timeout")
+        executor = SyncJobExecutor(
+            historical_sync=Mock(),
+            outcome_service=down,
+            all_sync_days=-1,
+            job_owners={},
+        )
+        recovered: list[int] = []
+
+        def recover() -> int:
+            recovered.append(self.store.requeue_unowned_running())
+            if len(recovered) == 2:
+                worker.stop()
+            return recovered[-1]
+
+        worker = SyncJobWorker(
+            self.store,
+            executor,
+            MaintenanceGate(),
+            poll_seconds=0,
+            requeue_unowned=recover,
+        )
+        watchdog = threading.Timer(5, worker.stop)
+        self.addCleanup(watchdog.cancel)
+        watchdog.start()
+        with (
+            patch.object(executor, "execute", return_value={"status": "ok"}) as execute,
+            self.assertLogs("backend.sync.executor", level="ERROR"),
+            self.assertLogs("backend.sync.worker", level="WARNING"),
+        ):
+            worker.run_loop()
+
+        # The push ran once; the lost outcome is settled as failed, not replayed.
+        self.assertEqual(1, execute.call_count)
+        self.assertEqual([0, 1], recovered)
+        final = self.store.state(job["id"])
+        assert final is not None
+        self.assertEqual("failed", final["status"])
+        self.assertEqual("outcome_not_persisted", final["error_class"])
+        self.assertEqual(["failed"], [item["status"] for item in final["items"]])
+        self.assertEqual(1, final["attempts"])
+
 
 class _RecordingRunner:
     def __init__(self) -> None:

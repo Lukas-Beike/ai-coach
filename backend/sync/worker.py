@@ -103,7 +103,7 @@ class SyncJobWorker:
                 with self._maintenance_gate.operation(), background_writer():
                     if self._requeue_unowned is not None and self._requeue_unowned():
                         _LOGGER.warning(
-                            "Synchronization job without a stored outcome requeued",
+                            "Synchronization job without a stored outcome settled",
                             extra={"event": "sync_job_outcome_lost"},
                         )
                     job = self._store.claim()

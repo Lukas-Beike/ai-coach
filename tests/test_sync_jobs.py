@@ -1130,6 +1130,42 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertEqual(marker["value"], "1")
         self.assertEqual(self.store.claim()["attempts"], 2)
 
+    def test_requeue_unowned_running_never_replays_a_job_with_remote_effects(self):
+        pushed, _ = self.enqueue(
+            "intervals",
+            "plan_push",
+            {"entries": []},
+            [
+                {"item_key": "done", "operation": "push"},
+                {"item_key": "uncertain", "operation": "push"},
+                {"item_key": "other", "operation": "push"},
+            ],
+        )
+        refresh, _ = self.enqueue("garmin", "refresh")
+        self.assertEqual(self.store.claim()["id"], pushed["id"])
+        self.assertEqual(self.store.claim()["id"], refresh["id"])
+        self._set_item_statuses(
+            pushed["id"], "running", done="completed", uncertain="running"
+        )
+
+        self.assertEqual(self.store.requeue_unowned_running(), 2)
+
+        settled = self.store.state(pushed["id"])
+        self.assertEqual(settled["status"], "partial")
+        self.assertEqual(settled["error_class"], "outcome_not_persisted")
+        items = {item["item_key"]: item for item in settled["items"]}
+        self.assertEqual(
+            {k: v["status"] for k, v in items.items()},
+            {"done": "completed", "uncertain": "failed", "other": "failed"},
+        )
+        self.assertEqual(items["uncertain"]["error_class"], "outcome_not_persisted")
+        # The read-only refresh is requeued; the push waits for the athlete.
+        self.assertEqual(self.store.state(refresh["id"])["status"], "queued")
+        self.assertEqual(self.store.claim()["id"], refresh["id"])
+        self.assertIsNone(self.store.claim())
+        # An explicit resolve is the only way back to a run.
+        self.assertEqual(self.store.resolve(pushed["id"])["status"], "queued")
+
     def test_requeue_unowned_running_leaves_other_states_and_reports_zero(self):
         queued, _ = self.enqueue()
         done, _ = self.enqueue("weather")
@@ -1147,7 +1183,7 @@ class SyncJobStoreTests(unittest.TestCase):
             if attempt < SYNC_JOB_MAX_ATTEMPTS:
                 self.assertEqual(self.store.requeue_unowned_running(), 1)
 
-        self.assertEqual(self.store.requeue_unowned_running(), 0)
+        self.assertEqual(self.store.requeue_unowned_running(), 1)
 
         failed = self.store.state(job["id"])
         self.assertEqual(failed["status"], "failed")
@@ -1258,6 +1294,27 @@ class SyncJobStoreTests(unittest.TestCase):
         self.assertFalse(found("garmin", "2025-11-01", self.now))
         self.assertFalse(found("wahoo", "2025-12-01", self.now))
         self.assertFalse(found("garmin", "2025-12-01", "2026-09-20T12:06:00+00:00"))
+
+    def test_backfill_continuation_never_matches_the_asking_job(self):
+        self.current_now = "2026-09-20T12:05:00+00:00"
+        job, _ = self.store.enqueue(
+            {
+                "provider": "garmin",
+                "type": "historical_backfill",
+                "payload": {"days": 30, "end_date": "2025-12-01"},
+            },
+            "backfill",
+            None,
+            None,
+        )
+
+        found = self.store.has_backfill_continuation
+        self.assertFalse(
+            found("garmin", "2025-12-01", self.now, "historical_backfill", job["id"])
+        )
+        self.assertTrue(
+            found("garmin", "2025-12-01", self.now, "historical_backfill", "other")
+        )
 
     def test_concurrent_scheduler_enqueues_create_a_single_job(self):
         def enqueue_once(_):
