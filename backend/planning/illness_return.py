@@ -17,6 +17,8 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 from backend.athlete.checkins import reports_complaint
+from backend.canonical.vocabulary import ProviderId
+from backend.providers.source_labels import SourceView, provider_label
 
 LAST_STAGE: Final = 3
 MIN_STAGE_DAYS: Final = 2
@@ -31,7 +33,7 @@ RETURN_HORIZON_DAYS: Final = MIN_STAGE_DAYS
 RETURN_MAX_DAYS: Final = 28
 HISTORY_LIMIT: Final = 20
 CHECKIN_SOURCE: Final = "Check-in (lokal)"
-GARMIN_SOURCE: Final = "Garmin"
+GARMIN_SOURCE: Final = provider_label(ProviderId.GARMIN, SourceView.DAILY_HEALTH)
 # Highest session level a stage allows: 0 easy, 1 moderate, 2 hard (normal plan).
 STAGE_MAX_LEVEL: Final = {1: 0, 2: 1, 3: 2}
 STAGE_LABELS: Final = {

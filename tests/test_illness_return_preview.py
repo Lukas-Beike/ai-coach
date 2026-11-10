@@ -223,6 +223,26 @@ class IllnessReturnPreviewTests(unittest.TestCase):
         self.apply_preview(self.service.preview(), "2026-09-22T12:00:00+00:00")
         self.assertIsNone(self.service.enforced_return_stage())
 
+    def test_state_survives_more_than_a_hundred_newer_previews(self) -> None:
+        with self.manager.unit_of_work() as db:
+            for number in range(150):
+                db.execute(
+                    "INSERT INTO plan_adjustments(id, payload, status, created_at) "
+                    "VALUES (?, '{}', 'preview', ?)",
+                    (f"noise-{number}", f"2026-09-19T10:{number % 60:02d}:00+00:00"),
+                )
+        self.apply_preview(self.service.preview(), "2026-09-20T12:00:00+00:00")
+        with self.manager.unit_of_work() as db:
+            for number in range(150):
+                db.execute(
+                    "INSERT INTO plan_adjustments(id, payload, status, created_at) "
+                    "VALUES (?, '{}', 'preview', ?)",
+                    (f"later-{number}", f"2026-09-21T10:{number % 60:02d}:00+00:00"),
+                )
+
+        self.assertEqual(2, self.service.enforced_return_stage())
+        self.assertIsNotNone(self.service.latest_illness_pause())
+
     def test_unapplied_preview_does_not_move_the_stage(self) -> None:
         self.service.preview()
 

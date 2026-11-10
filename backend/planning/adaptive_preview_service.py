@@ -542,7 +542,7 @@ class AdaptiveReplanPreviewService:
 
     def latest_illness_pause(self) -> tuple[str, dict[str, Any]] | None:
         with self._database_manager.reader() as db:
-            rows = self._adjustment_repository.list_recent(db)
+            rows = self._adjustment_repository.list_applied(db)
         for row in rows:
             try:
                 payload = json.loads(row.get("payload") or "{}")
@@ -558,7 +558,7 @@ class AdaptiveReplanPreviewService:
     def latest_illness_return(self) -> dict[str, Any] | None:
         """The return state of the newest applied adjustment that holds one."""
         with self._database_manager.reader() as db:
-            rows = self._adjustment_repository.list_recent(db)
+            rows = self._adjustment_repository.list_applied(db)
         for row in rows:
             if str(row.get("status") or "") not in {"applied", "partial"}:
                 continue
