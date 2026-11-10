@@ -5,6 +5,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
+from support import latest_tool_outputs
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.activities.workout_text import canonical_workout_zones, structured_steps
@@ -36,7 +37,14 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         initial, followup = [call.args[0] for call in model.call_args_list]
         self.assertNotIn("conversation", initial)
         self.assertNotIn("previous_response_id", initial)
-        self.assertEqual(followup["previous_response_id"], "resp_read")
+        # Nothing is stored at the provider: the follow-up resends the call and
+        # its output instead of pointing at a response.
+        self.assertNotIn("previous_response_id", followup)
+        self.assertIs(followup["store"], False)
+        self.assertEqual(
+            [item.get("type") for item in followup["input"][1:]],
+            ["function_call", "function_call_output"],
+        )
         self.assertNotIn("conversation", followup)
         self.assertTrue(followup["instructions"])
         _, next_model = self.turn(
@@ -92,7 +100,11 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             model.call_args_list[1].args[0], model.call_args_list[2].args[0]
         )
-        self.assertEqual(model.call_args.args[0]["previous_response_id"], "resp_sync")
+        self.assertNotIn("previous_response_id", model.call_args.args[0])
+        self.assertEqual(
+            [item.get("type") for item in model.call_args.args[0]["input"][1:]],
+            ["function_call", "function_call_output"],
+        )
         self.assertEqual(
             server.SYNC_JOB_QUEUE.service().state(result["sync_job_ids"][0])["status"],
             "queued",
@@ -252,7 +264,7 @@ class CoachLanguageRecoveryTests(DialogueHarness, unittest.TestCase):
         def repair(payload):
             self.assertEqual(self.state(), before)
             self.assertEqual(
-                json.loads(payload["input"][0]["output"])["reason"],
+                json.loads(latest_tool_outputs(payload)[0]["output"])["reason"],
                 "missing_workout_target",
             )
             args["changes"][0]["description"] = "- 1km Z1 HR\n- 6km Z1 HR\n- 1km Z1 HR"

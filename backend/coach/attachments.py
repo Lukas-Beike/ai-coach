@@ -8,6 +8,13 @@ import math
 import struct
 import xml.etree.ElementTree as ET
 
+from backend.coach.attachment_privacy import (
+    fit_document,
+    gpx_document,
+    haversine_m,
+    hidden_position_indexes,
+)
+from backend.coach.image_metadata import strip_image_metadata
 from backend.providers.fit_file import (
     fit_messages,
     fit_metric,
@@ -275,14 +282,7 @@ def _gpx_segment_stats(group):
             continue
         point = _gpx_point(node)
         if previous:
-            a, b = math.radians(previous[0]), math.radians(point[0])
-            h = (
-                math.sin((b - a) / 2) ** 2
-                + math.cos(a)
-                * math.cos(b)
-                * math.sin(math.radians(point[1] - previous[1]) / 2) ** 2
-            )
-            distance += 6371000 * 2 * math.asin(math.sqrt(min(1, max(0, h))))
+            distance += haversine_m(previous[0], previous[1], point[0], point[1])
             if point[2] is not None and previous[2] is not None:
                 difference = point[2] - previous[2]
                 ascent += max(0, difference)
@@ -314,18 +314,24 @@ def gpx_summary(data):
         points.extend(segment_points)
     if not points:
         raise ValueError("No route or track points")
-    stride = max(1, math.ceil(len(points) / 200))
-    return {
+    # Positions near the start and end of the track stay on this machine; the
+    # distance and elevation above were measured on the whole track.
+    hidden = hidden_position_indexes([(p[0], p[1]) for p in points])
+    shared = [p for index, p in enumerate(points) if index not in hidden]
+    stride = max(1, math.ceil(len(shared) / 200))
+    summary = {
         "source": "uploaded_gpx",
         "point_count": len(points),
         "distance_km": round(distance / 1000, 3),
         "ascent_m_raw": round(ascent),
         "descent_m_raw": round(descent),
         "elevation_point_count": sum(p[2] is not None for p in points),
-        "note": "Distance and elevation are GPS estimates; elevation is unsmoothed. Coordinates are sampled.",
-        "sampled_coordinates_lat_lon_ele": points[::stride],
-        "end": points[-1],
+        "note": "Distance and elevation are GPS estimates; elevation is unsmoothed. Coordinates are sampled and omit the first and last 500 m of the track.",
+        "sampled_coordinates_lat_lon_ele": shared[::stride],
     }
+    if shared:
+        summary["end"] = shared[-1]
+    return summary
 
 
 def _decode_attachment(item):
@@ -403,6 +409,10 @@ def _validated_attachment(item):
     mime = _image_mime(name, data)
     if not mime:
         raise ValueError("Unsupported attachment")
+    try:
+        strip_image_metadata(data, mime)
+    except ValueError, struct.error:
+        raise ValueError("Invalid image") from None
     return {"name": name, "type": "image", "mime": mime, "data": encoded}
 
 
@@ -438,11 +448,10 @@ def model_input(text, attachments):
         )
         if item["type"] in {"gpx", "fit"}:
             data, mime = openai_attachment_data(item)
-            filename = item["name"] + ".json" if item["type"] == "fit" else item["name"]
             parts.append(
                 {
                     "type": "input_file",
-                    "filename": filename,
+                    "filename": item["name"] + ".json",
                     "file_data": f"data:{mime};base64,{data}",
                 }
             )
@@ -450,7 +459,7 @@ def model_input(text, attachments):
             parts.append(
                 {
                     "type": "input_image",
-                    "image_url": f"data:{item['mime']};base64,{item['data']}",
+                    "image_url": f"data:{item['mime']};base64,{openai_attachment_data(item)[0]}",
                     "detail": "auto",
                 }
             )
@@ -458,18 +467,28 @@ def model_input(text, attachments):
 
 
 def openai_attachment_data(item):
-    """Return a provider-safe representation without changing persisted bytes."""
+    """Return the provider-safe representation without changing persisted bytes.
+
+    The provider gets measurements only: GPX and FIT as parsed JSON without the
+    first and last 500 m of positions, file metadata, device and user records,
+    and images without EXIF or other metadata.
+    """
     data = str(item.get("data") or "")
-    if item.get("type") != "fit":
+    kind = item.get("type")
+    if kind == "image":
+        stripped = strip_image_metadata(
+            base64.b64decode(data, validate=True), str(item.get("mime") or "")
+        )
+        return base64.b64encode(stripped).decode("ascii"), str(item["mime"])
+    if kind not in {"gpx", "fit"}:
         return data, str(item.get("mime") or "")
-    document = {
-        "format": "FIT",
-        "filename": str(item.get("name") or "activity.fit"),
-        "summary": item.get("summary") if isinstance(item.get("summary"), dict) else {},
-        # This is the exact original upload, encoded as a valid JSON string so
-        # providers do not have to interpret binary bytes as text.
-        "raw_base64": data,
-    }
+    name = str(item.get("name") or "activity")
+    raw = base64.b64decode(data, validate=True)
+    document = (
+        fit_document(name, item.get("summary"), raw)
+        if kind == "fit"
+        else gpx_document(name, raw.decode("utf-8-sig"))
+    )
     encoded = base64.b64encode(
         json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")

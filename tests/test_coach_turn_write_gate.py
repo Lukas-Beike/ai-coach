@@ -9,6 +9,8 @@ import unittest
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
+from support import latest_tool_outputs
+
 from backend import change_history
 from backend.coach.structured_tool_round import (
     CoachStructuredToolRoundLimits,
@@ -661,7 +663,7 @@ class ChokePointTests(unittest.TestCase):
 
         self.assertEqual(result[1:4], (1, "", False))
         followup = self.response.respond.call_args.args[0]
-        output = json.loads(followup["input"][0]["output"])
+        output = json.loads(latest_tool_outputs(followup)[0]["output"])
         self.assertEqual(output["status"], "not_performed")
         self.assertEqual(output["gate_reason"], "impact_not_confirmed")
         self.classifier.assert_called_once()

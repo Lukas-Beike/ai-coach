@@ -132,6 +132,16 @@ _FIT_FIELD_SCALES: Final[Mapping[tuple[int, int], tuple[str, int, int]]] = {
     (18, 124): ("enhanced_avg_speed_m_s", 1000, 0),
     (18, 125): ("enhanced_max_speed_m_s", 1000, 0),
 }
+# Message number -> its listed fields, so a message can be projected to named
+# values without visiting the whole table.
+_FIT_NAMED_FIELDS: Final[Mapping[int, tuple[tuple[int, str, int, int], ...]]] = {
+    message: tuple(
+        (field, name, scale, offset)
+        for (number, field), (name, scale, offset) in _FIT_FIELD_SCALES.items()
+        if number == message
+    )
+    for message in {number for number, _ in _FIT_FIELD_SCALES}
+}
 # Ordered candidates per base field: the FIT enhanced field is preferred per
 # message; invalid sentinels decode to None and fall through to the base field.
 _FIT_FIELD_PREFERENCES: Final[Mapping[tuple[int, int], tuple[int, ...]]] = {
@@ -450,6 +460,27 @@ def fit_scaled(
         value = fit_field(fields, message_number, field_number)
         if value is not None:
             values.append(value)
+    return values
+
+
+def fit_named_values(
+    fields: Mapping[int, object], message_number: int
+) -> dict[str, int | float]:
+    """Return the scaled values of one message's listed fields by name.
+
+    Only fields in the scale table appear, so identifiers such as serial
+    numbers, user data, strings and developer fields never pass through.
+    Invalid, missing and array values are skipped.
+    """
+    values: dict[str, int | float] = {}
+    for field, name, scale, offset in _FIT_NAMED_FIELDS.get(message_number, ()):
+        value = fields.get(field)
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        ):
+            values[name] = (value / scale) + offset
     return values
 
 

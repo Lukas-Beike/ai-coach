@@ -207,6 +207,60 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
             self.assertNotIn("description", result["external_calendar"]["events"][0])
             self.external_calendar_reader.list_events_in_window.assert_called_with(days)
 
+    def test_calendar_events_reach_the_coach_without_identifiers_or_sync_times(
+        self,
+    ) -> None:
+        row = {
+            "id": 7,
+            "uid": "synthetic-uid@calendar.example",
+            "name": "Zahnarzt",
+            "event_date": "2026-09-25",
+            "start_local": "2026-09-25T09:00:00",
+            "end_local": "2026-09-25T10:00:00",
+            "duration_minutes": 60,
+            "all_day": 0,
+            "training_relevant": 1,
+            "no_training": 0,
+            "no_intensity": 0,
+            "short_only": 0,
+            "updated_at": "2026-09-20T10:00:00Z",
+        }
+        self.external_calendar_reader.list_events.return_value = [row]
+        self.external_calendar_reader.list_events_in_window.return_value = [row]
+
+        general = self.service.build()["external_calendar"]["events"][0]
+        planning = self.service.build(
+            selection=select_coach_context("Plan", {}, request_kind="plan_week")
+        )["external_calendar"]["events"][0]
+
+        self.assertEqual(general, planning)
+        self.assertEqual(general["name"], "Zahnarzt")
+        self.assertEqual(general["start_local"], "2026-09-25T09:00:00")
+        for key in ("id", "uid", "updated_at", "event_date", "duration_minutes"):
+            self.assertNotIn(key, general)
+
+    def test_weather_place_is_named_without_coordinates(self) -> None:
+        self.weather_service.state.return_value = {
+            "days": [{"date": "2026-09-24", "rain_probability": 10}],
+            "location": {
+                "name": "Freiburg",
+                "country": "Deutschland",
+                "country_code": "DE",
+                "latitude": 47.9959,
+                "longitude": 7.8522,
+                "timezone": "Europe/Berlin",
+            },
+        }
+
+        weather = self.service.build()["weather"]
+
+        self.assertEqual(
+            weather["location"], {"name": "Freiburg", "country_code": "DE"}
+        )
+        self.assertEqual(weather["days"][0]["date"], "2026-09-24")
+        self.assertNotIn("47.99", str(weather))
+        self.assertNotIn("7.85", str(weather))
+
     def test_adjust_week_reads_planned_units_back_to_monday(self) -> None:
         missed = {"id": "tue", "date": "2026-09-22", "name": "Schwelle", "type": "Run"}
         self.planned_unit_service.list.return_value = [missed]

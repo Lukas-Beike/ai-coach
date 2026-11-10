@@ -14,6 +14,7 @@ import server_test_support as fixtures
 from support import (
     canonical_backfill_stopped,
     isolated_server,
+    latest_tool_outputs,
     reset_application_state,
 )
 
@@ -1051,7 +1052,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             )
 
         def answer(payload):
-            seen.append(json.loads(payload["input"][0]["output"]))
+            seen.append(json.loads(latest_tool_outputs(payload)[0]["output"]))
             return {"output_text": "Fertig."}
 
         result, _ = self.turn(message, [retry, answer])
@@ -1667,7 +1668,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             return call
 
         def replace_plan(model_payload):
-            repair_output = json.loads(model_payload["input"][0]["output"])
+            repair_output = json.loads(latest_tool_outputs(model_payload)[0]["output"])
             self.assertEqual(repair_output["validation_reason"], "request_provenance")
             return self.call(
                 "replace_training_plan",
@@ -1953,7 +1954,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         seen = []
 
         def answer(payload):
-            seen.append(json.loads(payload["input"][0]["output"]))
+            seen.append(json.loads(latest_tool_outputs(payload)[0]["output"]))
             return {"output_text": "Soll ich den Giro wirklich löschen?"}
 
         result, _ = self.turn(
@@ -2389,7 +2390,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         # is forced to a final answer without them.
         self.assertEqual(model.call_args_list[1].args[0]["tool_choice"], "auto")
         self.assertEqual(
-            model.call_args_list[1].args[0]["input"][0]["type"], "function_call_output"
+            latest_tool_outputs(model.call_args_list[1].args[0])[0]["type"],
+            "function_call_output",
         )
         self.assertEqual(
             model.call_args_list[0].args[0]["model"],
@@ -2418,8 +2420,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         followup = model.call_args_list[2].args[0]
         self.assertEqual(followup["tool_choice"], "none")
         self.assertIn("Tool step limit reached", followup["instructions"])
-        self.assertEqual(followup["input"][0]["call_id"], "call-after-limit")
-        self.assertIn("tool_step_limit_reached", followup["input"][0]["output"])
+        refused = latest_tool_outputs(followup)[0]
+        self.assertEqual(refused["call_id"], "call-after-limit")
+        self.assertIn("tool_step_limit_reached", refused["output"])
         self.assertEqual(self.meal_count(), 0)
         self.assertTrue(result["tool_budget_exhausted"])
         self.assertIn("Schrittlimit", result["message"]["content"])

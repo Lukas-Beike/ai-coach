@@ -11,6 +11,11 @@ from unittest.mock import MagicMock, Mock
 from backend.coach.conversation_recovery import CoachConversationRecoveryService
 from backend.errors import AppError
 
+PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFOsAAAAA"
+    "SUVORK5CYII="
+)
+
 
 class CoachConversationRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -139,7 +144,7 @@ class CoachConversationRecoveryTests(unittest.TestCase):
             "type": "image",
             "name": "Beweis.png",
             "mime": "image/png",
-            "data": "AA==",
+            "data": PNG,
         }
         recovered, payload, _, _ = self.recover(attachments=[attachment])
         self.assertTrue(recovered)
@@ -148,7 +153,8 @@ class CoachConversationRecoveryTests(unittest.TestCase):
             json.dumps({"untrusted_attachment_name": "Beweis.png"}, ensure_ascii=False),
         )
         self.assertEqual(
-            payload["input"][0]["content"][2]["image_url"], "data:image/png;base64,AA=="
+            payload["input"][0]["content"][2]["image_url"],
+            "data:image/png;base64," + PNG,
         )
 
 

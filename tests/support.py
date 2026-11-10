@@ -58,6 +58,19 @@ class IntervalsRequestRecorder:
         ]
 
 
+def latest_tool_outputs(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """The function_call_output items closing a request's input.
+
+    A stateless follow-up resends the whole turn, so the outputs of its latest
+    tool round are the trailing items, not the whole input.
+    """
+    items = payload["input"]
+    start = len(items)
+    while start and items[start - 1].get("type") == "function_call_output":
+        start -= 1
+    return items[start:]
+
+
 def parsed_workout_fixture(
     duration=1800, *, sport="Ride", kind="power", units="%ftp", value=85, distance=None
 ):
