@@ -278,8 +278,7 @@ class ReturnGuardTests(unittest.TestCase):
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
             estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
-            return_stage=lambda: 1,
-        )
+        ).with_return_stage(lambda: 1)
 
         codes = [item["code"] for item in guard.findings()]
 

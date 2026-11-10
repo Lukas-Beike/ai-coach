@@ -455,10 +455,9 @@ class PlanGuardService:
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
         profile: Callable[[], Mapping[str, Any]] = dict,
         history: BriefHistory | None = None,
-        return_stage: Callable[[], int | None] = lambda: None,
     ) -> None:
         self._history = history or BriefHistory()
-        self._return_stage = return_stage
+        self._return_stage: Callable[[], int | None] = lambda: None
         self._profile = profile
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -531,6 +530,13 @@ class PlanGuardService:
         if self._illness_cache is None:
             self._illness_cache = (self._illness(),)
         return self._illness_cache[0]
+
+    def with_return_stage(
+        self, return_stage: Callable[[], int | None]
+    ) -> PlanGuardService:
+        """Enforce the stage of the return after an illness pause (#2042)."""
+        self._return_stage = return_stage
+        return self
 
     def _current_return_stage(self) -> int | None:
         """One snapshot per service, like the reported illness."""
