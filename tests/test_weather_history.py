@@ -108,12 +108,12 @@ class WeatherHistoryTests(unittest.TestCase):
             horizon.isoformat(): {"date": "kept"},
             "2026-09-19": {"date": "2026-09-19"},
         }
-        self.assertEqual(HISTORY_HORIZON_DAYS, 120)
+        self.assertEqual(HISTORY_HORIZON_DAYS, 14)
 
         remembered = remember_forecasts(history, today=today)
 
         self.assertEqual(sorted(remembered), [horizon.isoformat(), "2026-09-19"])
-        self.assertEqual(horizon.isoformat(), "2026-05-23")
+        self.assertEqual(horizon.isoformat(), "2026-09-06")
 
     def test_a_cache_day_beyond_the_horizon_is_not_archived(self):
         cache = {
@@ -136,7 +136,7 @@ class WeatherHistoryTests(unittest.TestCase):
         history = {day: {"date": day} for day in days}
         state = calendar_state(history, {"days": []}, today=today)
         self.assertEqual(len(state["days"]), HISTORY_HORIZON_DAYS)
-        self.assertEqual(state["days"][0]["date"], "2026-05-23")
+        self.assertEqual(state["days"][0]["date"], "2026-09-06")
 
     def test_calendar_state_accepts_malformed_inputs(self):
         self.assertEqual(

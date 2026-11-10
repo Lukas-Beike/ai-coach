@@ -10,7 +10,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.weather import projection
 
 # Archived forecast days older than this are dropped; the calendar shows no more.
-HISTORY_HORIZON_DAYS = 120
+HISTORY_HORIZON_DAYS = 14
 
 
 def decode_history(value: Any) -> dict[str, Any]:
