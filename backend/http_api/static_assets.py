@@ -48,6 +48,9 @@ ASSET_MANIFEST = "manifest.webmanifest"
 ASSET_LOGO = "logo.png"
 ASSET_ICON = "icon.svg"
 ASSET_APPLE_TOUCH_ICON = "apple-touch-icon.png"
+ASSET_ICON_192 = "icon-192.png"
+ASSET_ICON_512 = "icon-512.png"
+ASSET_ICON_MASKABLE = "icon-maskable-512.png"
 STATIC_TARGETS = (
     ASSET_INDEX_HTML,
     ASSET_API_JS,
@@ -85,6 +88,9 @@ STATIC_TARGETS = (
     ASSET_LOGO,
     ASSET_ICON,
     ASSET_APPLE_TOUCH_ICON,
+    ASSET_ICON_192,
+    ASSET_ICON_512,
+    ASSET_ICON_MASKABLE,
 )
 VERSIONED_STATIC_ASSETS = frozenset(
     {
@@ -266,7 +272,7 @@ class StaticAssetService:
                 ("Referrer-Policy", "no-referrer"),
                 (
                     "Content-Security-Policy",
-                    "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+                    "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'",
                 ),
             ),
             data,

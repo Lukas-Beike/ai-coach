@@ -53,3 +53,46 @@ test("a service worker update reloads an idle page once", async ({ page }) => {
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
   expect(await loads(page)).toBe(3);
 });
+
+async function openProfileForms(page) {
+  await page.goto("/#more/profile");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.locator("#zoneSettings > summary").click();
+  await expect(page.locator("#zoneLimits")).toBeVisible();
+}
+
+async function openYazioForm(page) {
+  await page.goto("/#more/connections");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const section = page.locator('details[data-more-segment-panel="connections"]');
+  if (!(await section.evaluate((element) => element.open))) await section.locator("summary").first().click();
+  await expect(page.locator("#cred-yazio_email")).toBeVisible();
+}
+
+const settle = (page) => page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+
+for (const [name, open, field, save, value] of [
+  ["zone form", openProfileForms, "#zoneLimits", "#zoneSaveButton", "55 75 90"],
+  ["Yazio form", openYazioForm, "#cred-yazio_email", "#cred-submit-yazio", "athlet@example.test"],
+]) {
+  test(`@responsive a service worker update keeps a typed ${name} value while focus leaves and the save button is pressed`, async ({ page }) => {
+    await controlledApp(page);
+    await page.route("**/api/zones", (route) => route.fulfill({ status: 400, json: { error: "fixture" } }));
+    await page.route("**/api/settings/credentials", (route) => route.fulfill({ status: 400, json: { error: "fixture" } }));
+    await open(page);
+    const before = await loads(page);
+    await page.locator(field).fill(value);
+    await replaceWorker(page);
+    // Pressing the save button moves focus away first; the click follows the press.
+    const box = await page.locator(save).boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await settle(page);
+    await expect(page.locator(field)).toHaveValue(value);
+    expect(await loads(page)).toBe(before);
+    await page.mouse.up();
+    await settle(page);
+    await expect(page.locator(field)).toHaveValue(value);
+    expect(await loads(page)).toBe(before);
+  });
+}
