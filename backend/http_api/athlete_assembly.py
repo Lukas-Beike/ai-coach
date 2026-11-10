@@ -90,7 +90,7 @@ class AthleteDataAssembly:
         self._run_lthr_resolver = runtime.run_lthr_resolver
 
     def activity_summaries(self) -> tuple[ActivitySummary, ...]:
-        with self._database_manager().unit_of_work() as db:
+        with self._database_manager().reader() as db:
             return self._activity_rows().activity_summaries(db)
 
     def equipment(self) -> EquipmentService:
