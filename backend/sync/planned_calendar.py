@@ -332,6 +332,12 @@ class _PlannedCalendarRepairContext:
     other_remote_ids: set[str]
     other_external_ids: set[str]
     newest: str
+    # The unit as sent (its description may carry the capped bpm range).
+    sent: dict[str, Any] | None = None
+
+    @property
+    def readback_workout(self) -> dict[str, Any]:
+        return self.sent or self.workout
 
 
 class PlannedCalendarRepairBatch:
@@ -687,6 +693,11 @@ class PlannedCalendarRepairService:
             payload["external_id"] = (
                 context.export.event_external_id(keeper) or payload["external_id"]
             )
+        context.sent = {
+            **context.workout,
+            "description": payload.get("description")
+            or context.workout.get("description"),
+        }
         context.identities.add(payload["external_id"])
         self._recheck(context, PLANNED_CALENDAR_RECHECK_ERROR)
         response = context.export.upsert([payload])
@@ -766,7 +777,7 @@ class PlannedCalendarRepairService:
                 "Intervals.icu hat Datum oder Namen der reparierten Einheit nicht bestätigt.",
                 reason="intervals_workout_verification_failed",
             )
-        context.export.verify_readback(context.workout, result)
+        context.export.verify_readback(context.readback_workout, result)
 
     def _delete_duplicates(
         self,
@@ -821,7 +832,7 @@ class PlannedCalendarRepairService:
                         "Der Kalender bestätigt Datum oder Namen der reparierten Einheit nicht.",
                         reason="intervals_workout_verification_failed",
                     )
-                context.export.verify_readback(context.workout, event)
+                context.export.verify_readback(context.readback_workout, event)
                 verified = event
             with self._database_manager.unit_of_work() as db:
                 current = db.execute(
