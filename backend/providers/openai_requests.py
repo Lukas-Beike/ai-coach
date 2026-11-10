@@ -238,10 +238,11 @@ def request_with_conversation_retry(
     raise AssertionError("unreachable")
 
 
-@dataclass(frozen=True)
 # Best-effort usage lookup after a cancel; well below the 15 s reset wait.
 FINAL_USAGE_LOOKUP_TIMEOUT_SECONDS = 5
 
+
+@dataclass(frozen=True)
 class ResponsesClock:
     monotonic: Callable[[], float] = time.monotonic
     wait: Callable[[float], Any] = time.sleep
