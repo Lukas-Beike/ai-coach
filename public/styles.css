@@ -5,6 +5,7 @@
 :root {
   color-scheme: dark;
   --bg: #0b0b0d;
+  --status-bar-band: #0b0b0d;
   --surface: rgba(30, 30, 32, .88);
   --surface-raised: #242426;
   --surface-input: #2c2c2e;
@@ -1738,4 +1739,4 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 }
 
 /* iOS black-translucent status bar: keep the clock and battery legible over the light page. */
-:root[data-theme="light"] body::before { content: ""; position: fixed; inset: 0 0 auto; z-index: 1000; height: env(safe-area-inset-top); background: #0b0b0d; pointer-events: none; }
+:root[data-theme="light"] body::before { content: ""; position: fixed; inset: 0 0 auto; z-index: 1000; height: env(safe-area-inset-top); background: var(--status-bar-band); pointer-events: none; }
