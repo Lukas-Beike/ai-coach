@@ -1234,7 +1234,7 @@ Payload evidence for this scope: the sanitized payload files contain the Garmin 
 ### `garmin_activity_detail_mapping.py`
 
 Status: Live. Called by `_map_collected` in `backend/sync/garmin_activity_details.py` for every Garmin activity detail fetch and backfill; stored with `replace_detail_set(mapper_version=MAPPER_VERSION)`.
-Mapper version: **9**
+Mapper version: **10**
 Inputs: the dict from `collect_garmin_activity_detail` (`backend/providers/garmin.py`) with the parts `details`, `splits`, `hr_zones`, `power_zones`, `exercise_sets` (strength activities only) and `fit`. Transport: the Personal API serves `details` (with `maxChartSize` 2,000) and the original FIT file (`download_activity_fit`, unzipped by `fit_from_archive`); the unofficial login serves `splits`, the two zone parts and `exercise_sets`. A part that is absent gives no set and no issue; a present but malformed part gives one value-free issue and no set for it.
 Evidence: documented only (fixtures `tests/fixtures/providers/garmin/activity_detail/details.json`, `splits.json`, `hr_zones.json`, `power_zones.json`; strength and FIT cases are built inline in `tests/test_garmin_activity_detail_mapping.py`). The sanitized payload files `garmin_activity_detail_run_2026-11-03` and `garmin_personal_activity_detail_run_2026-11-03` hold the activity summary only.
 
@@ -1267,7 +1267,7 @@ Streams from `details` (`_stream_set`, `_metric_columns`). Columns are read by `
 | `cadence_rpm` | `directBikeCadence` → `directRunCadence` (`_cadence_points`) | rpm; none | The bike column wins; the run column is used only when the bike column has no usable point. `directRunCadence` already counts one leg, kept as reported. |
 | `grade_pct` | none | | Not produced. |
 | `moving` | none | | Not produced; averages and zone counting then use every point. |
-| `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m` | none | | Not produced from the chart: its running dynamics metric keys are unverified. Only the FIT file (mapper below) carries them; its sets ride on this mapper's version 9. |
+| `ground_contact_time_ms`, `ground_contact_balance_pct`, `vertical_oscillation_cm`, `vertical_ratio_pct`, `step_length_m` | none | | Not produced from the chart: its running dynamics metric keys are unverified. Only the FIT file (mapper below) carries them; its sets ride on this mapper's version 10. |
 | `resolution` | | `downsampled` | Fixed. |
 | `origin` | | `fetch` | Fixed. |
 
@@ -1327,8 +1327,8 @@ Not mapped: `directDoubleCadence`, every other metric descriptor key (for exampl
 
 ### `fit_activity_detail_mapping.py`
 
-Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 9.
-Mapper version: **8**
+Status: Live. Called by `_fit_sets` in `garmin_activity_detail_mapping.py` (Garmin FIT from the Personal API) and by `WahooActivityDetailImport._import_one` in `backend/sync/wahoo_activity_details.py` (Wahoo FIT). Both store with `replace_detail_set(mapper_version=MAPPER_VERSION)`, Garmin with its own version 10.
+Mapper version: **9**
 Inputs: the raw bytes of one FIT activity file (`bytes`); decoding and scaling by `fit_file.py` (`fit_messages`, `fit_field`). Anything else gives one `fit` `invalid_type` issue. The caller passes `provider_activity_id` (Garmin activity id or Wahoo workout id) and the provenance (see the provenance table).
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes built in `tests/test_fit_activity_detail_mapping.py` and `tests/test_fit_file.py`; there is no FIT file or Wahoo payload in the payload files).
 
@@ -1372,7 +1372,7 @@ Laps, lap message 19 (`_lap_set`, `_lap`, `_LAP_METRIC_FIELDS`, `_LAP_KINDS`):
 | `index` | position after sorting by lap `start_time` | | Laps without `start_time` are dropped (`start_time` `missing`); a lap that starts before time zero is dropped (`out_of_range`). |
 | `start_offset_s` | lap `start_time` (2) | s; minus time zero | |
 | `end_offset_s` | lap `total_elapsed_time` (7) | /1000 s; start plus elapsed | A lap without it is dropped (`total_elapsed_time` `missing`). |
-| `kind` | lap `intensity` (23, raw) | 0 `lap`, 1 `recovery`, 2 `warmup`, 3 `cooldown`, 4 `recovery`, 5 `work`; any other or missing gives `lap` | `_lap_kind`. |
+| `kind` | lap `intensity` (23, raw) | 0 `lap` (`work` when the lap set also has a rest (1) or recovery (4) lap, from version 9), 1 `recovery`, 2 `warmup`, 3 `cooldown`, 4 `recovery`, 5 `work`; any other or missing gives `lap` | `_lap_kind`. |
 | `moving_duration_s` | lap `total_timer_time` (8) | /1000 s | |
 | `distance_m` | lap `total_distance` (9) | /100 m | |
 | `avg_speed_mps` | lap `enhanced_avg_speed` (110) → `avg_speed` (13) | /1000 m/s | |
@@ -1407,7 +1407,7 @@ Not mapped: the session (18), activity and file messages, developer fields (skip
 
 ### `fit_sensor_mapping.py`
 
-Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (8) and by `garmin_activity_detail_mapping.py` version 9.
+Status: Live. Called by `_stream_set` in `fit_activity_detail_mapping.py` for every FIT stream set (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (9) and by `garmin_activity_detail_mapping.py` version 10.
 Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 8 and `garmin_activity_detail_mapping.py` v 9.
 Inputs: the decoded FIT messages and the provenance provider; device information is message 23 (`device_index` 0, `device_type` 1, `manufacturer` 2, `serial_number` 3, `product` 4, `source_type` 25).
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_sensor_mapping.py`). Whether Garmin and Wahoo files list a strap paired to a watch this way, and the Bluetooth LE device type numbers (the Garmin FIT SDK profile: 1 heart_rate, 2 bike_power, 7 bike_trainer), are unverified on real files; only the antplus (or unnamed) and Bluetooth LE sources name roles.
@@ -1424,7 +1424,7 @@ Not mapped: every other device type (cadence, speed, light and radar sensors), t
 
 ### `fit_rr_mapping.py`
 
-Status: Live. Called by `_first_threshold` in `fit_activity_detail_mapping.py` for the stream set of every FIT file whose heart rate source is a chest strap (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (8) and by `garmin_activity_detail_mapping.py` version 9.
+Status: Live. Called by `_first_threshold` in `fit_activity_detail_mapping.py` for the stream set of every FIT file whose heart rate source is a chest strap (Garmin Personal API and Wahoo files), so it is replayed by that mapper's version (9) and by `garmin_activity_detail_mapping.py` version 10.
 Mapper version: none of its own. Replayed by `fit_activity_detail_mapping.py` v 8 and `garmin_activity_detail_mapping.py` v 9.
 Inputs: the decoded FIT messages; the hrv message is global number 78, field 0 `time`, an array of up to five uint16 values in seconds (scale 1000, 0xFFFF invalid). Garmin writes it only while HRV logging is enabled for the heart rate sensor.
 Evidence: documented only (FIT SDK profile; synthetic FIT bytes in `tests/test_fit_rr_mapping.py` and `tests/test_fit_file.py`). Whether real Garmin and Wahoo files carry hrv messages this way is unverified.
