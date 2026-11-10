@@ -199,9 +199,7 @@ class DefaultDescriptorParityTests(unittest.TestCase):
 
     def test_capabilities_are_assigned_per_provider(self) -> None:
         registry = DEFAULT_PROVIDER_REGISTRY
-        self.assertEqual(
-            ("garmin", "wahoo"), registry.ids_with(Capability.ACTIVITIES)
-        )
+        self.assertEqual(("garmin", "wahoo"), registry.ids_with(Capability.ACTIVITIES))
         self.assertEqual(
             ("intervals", "wahoo"), registry.ids_with(Capability.WORKOUT_EXPORT)
         )
@@ -430,8 +428,8 @@ PREVIOUS_PERIOD_MESSAGES = {
 }
 PREVIOUS_NOT_CONFIGURED_MESSAGES = {
     "intervals": (
-        "Intervals.icu ist nicht konfiguriert. Bitte INTERVALS_API_KEY in der "
-        "Serverkonfiguration hinterlegen."
+        "Intervals.icu ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen "
+        "hinterlegen."
     ),
     "garmin": (
         "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "

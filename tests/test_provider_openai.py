@@ -1781,7 +1781,10 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(
             (raised.exception.status, raised.exception.message),
-            (503, "OPENAI_API_KEY ist nicht konfiguriert."),
+            (
+                503,
+                "OpenAI ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen hinterlegen.",
+            ),
         )
 
     def test_conversation_delete_keeps_remote_write_boundary_and_timeout(self):
