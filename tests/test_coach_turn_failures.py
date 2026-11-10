@@ -274,6 +274,12 @@ class CoachTurnFailureTests(unittest.TestCase):
             "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.",
         )
 
+    def test_background_budget_exhaustion_uses_the_timeout_message(self) -> None:
+        self._assert_persisted_failure(
+            "background_budget_exceeded",
+            "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.",
+        )
+
     def test_model_not_found_is_a_persisted_actionable_chat_message(self) -> None:
         self._assert_persisted_failure(
             "not_found",

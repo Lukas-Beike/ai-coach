@@ -2052,11 +2052,17 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 503, "Synthetic model unavailable", reason="provider_unavailable"
             )
 
-        with patch.object(
-            sync_queue.SyncJobQueueService,
-            "enqueue",
-            wraps=server.SYNC_JOB_QUEUE.service().enqueue,
-        ) as enqueue:
+        # The outage outlasts the transient retries (three attempts in all).
+        with (
+            patch.object(
+                sync_queue.SyncJobQueueService,
+                "enqueue",
+                wraps=server.SYNC_JOB_QUEUE.service().enqueue,
+            ) as enqueue,
+            patch(
+                "backend.coach.response_retry.CoachResponseRetryPolicy.wait"
+            ) as retry_wait,
+        ):
             result, _ = self.turn(
                 "Sync zu intervals.icu durchführen",
                 [
@@ -2069,6 +2075,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                         sync_scope="all_pending",
                     ),
                     broken,
+                    broken,
+                    broken,
                 ],
                 turn="sync-followup-failure",
             )
@@ -2076,6 +2084,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 "Sync zu intervals.icu durchführen", [], turn="sync-followup-failure"
             )
         enqueue.assert_called_once()
+        self.assertEqual(retry_wait.call_count, 2)
         model.assert_not_called()
         self.assertEqual(
             replay["command_receipts"][0]["result"]["status"], "approval_required"

@@ -36,6 +36,7 @@ from backend.providers.openai import (
     safe_log_reason,
     validate_response,
 )
+from backend.providers.openai_requests import RESUMABLE_POLL_REASONS
 
 
 def body(error=None):
@@ -544,7 +545,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             ),
             (
                 504,
-                "provider_timeout",
+                "background_budget_exceeded",
                 "Die Hintergrundplanung hat das Zeitlimit überschritten.",
             ),
         )
@@ -570,7 +571,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(
             (raised.exception.status, raised.exception.reason),
-            (504, "provider_timeout"),
+            (504, "background_budget_exceeded"),
         )
 
     def test_poll_background_response_cancels_once_when_retrieve_fails(self):
@@ -617,6 +618,12 @@ class OpenAIProviderErrorTests(unittest.TestCase):
             )
 
         self.assertIs(raised.exception, retrieve_error)
+
+    def test_background_budget_exhaustion_is_not_resumable(self):
+        self.assertNotIn("background_budget_exceeded", RESUMABLE_POLL_REASONS)
+        self.assertEqual(
+            safe_log_reason("background_budget_exceeded"), "background_budget_exceeded"
+        )
 
     def test_poll_background_response_keeps_resumable_failures_running(self):
         for reason in ("provider_unavailable", "provider_timeout", "invalid_response"):
@@ -726,7 +733,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
         self.assertEqual(cancelled, ["resp_deadline_backoff"])
         self.assertEqual(
             (raised.exception.status, raised.exception.reason),
-            (504, "provider_timeout"),
+            (504, "background_budget_exceeded"),
         )
 
     def test_poll_background_response_rejects_invalid_initial_response_id(self):
@@ -1918,7 +1925,7 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(
             (raised.exception.status, raised.exception.reason),
-            (504, "provider_timeout"),
+            (504, "background_budget_exceeded"),
         )
         self.assertEqual(waits, [0.25])
         self.assertEqual(

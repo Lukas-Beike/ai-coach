@@ -124,7 +124,15 @@ class CoachStructuredResponseService:
                         request_delta_emitted=state.request_delta_emitted,
                         attempt=attempt,
                     ):
-                        self._wait_before_retry(exc, state, cancel_event, attempt)
+                        self._wait_before_retry(
+                            exc,
+                            state,
+                            cancel_event,
+                            attempt,
+                            remote_conversation=bool(
+                                request_payload.get("conversation")
+                            ),
+                        )
                     state.resume_id = ""
                     attempt += 1
                     continue
@@ -151,16 +159,20 @@ class CoachStructuredResponseService:
         state: _ResponseState,
         cancel_event: threading.Event | None,
         attempt: int,
+        *,
+        remote_conversation: bool = False,
     ) -> None:
         delay = self._retry_policy.retry_delay(
             exc,
             attempt=attempt,
             request_delta_emitted=state.request_delta_emitted,
+            response_id_exists=bool(state.resume_id),
+            remote_conversation=remote_conversation,
         )
         if delay is None:
             raise exc
         state.resume_id = ""
-        self._retry_policy.wait(delay, cancel_event, attempt)
+        self._retry_policy.wait(delay, cancel_event, attempt, exc.reason)
 
     def _spent_on_reasoning(
         self, response: dict[str, Any], payload: dict[str, Any], state: _ResponseState
