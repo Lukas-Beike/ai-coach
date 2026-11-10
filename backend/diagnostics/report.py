@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import platform
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.calendar.external import ExternalCalendarReader
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.morning import MorningCheckinStateService
-from backend.config import Config
+from backend.config import DEFAULT_OPENAI_BASE_URL, Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.diagnostics.canonical_backfill import (
@@ -32,6 +33,7 @@ from backend.diagnostics.provider_composition import summarize_provider_composit
 from backend.diagnostics.rating_backfill import summarize_rating_backfill
 from backend.diagnostics.session_conflicts import summarize_session_conflicts
 from backend.diagnostics.stream_backfill import summarize_stream_backfill
+from backend.diagnostics.wahoo_state import summarize_wahoo
 from backend.observability import DiagnosticCapture, Redactor
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
@@ -58,6 +60,8 @@ from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
 from backend.sync.state import SyncStateRepository
+
+LOGGER = logging.getLogger("intervals_coach")
 
 
 @dataclass(frozen=True)
@@ -131,30 +135,47 @@ class DiagnosticReportService:
         """Clear the captured technical diagnostic entries."""
         return self._deps.diagnostic_capture.clear()
 
+    @staticmethod
+    def _section(name: str, build: Callable[[], Any]) -> Any:
+        """Build one report section; a failing one must not break the endpoint."""
+        try:
+            return build()
+        except Exception as exc:  # noqa: BLE001 - one bad row must not hide the report.
+            LOGGER.warning(
+                "Diagnostics section unavailable",
+                extra={
+                    "event": "diagnostics_section_unavailable",
+                    "context": {"section": name, "error_type": type(exc).__name__},
+                },
+            )
+            return {"status": "unavailable"}
+
+    @staticmethod
+    def _schema_version(db: Any) -> int:
+        return int(db.execute("PRAGMA user_version").fetchone()["user_version"])
+
     def report(self) -> dict[str, Any]:
         deps = self._deps
+        section = self._section
         diagnostic_capture_entries = deps.diagnostic_capture.entries()
         diagnostic_capture_status = deps.diagnostic_capture.status()
         # Reading the rotated log files must not hold the WAL snapshot open.
         log_entries = deps.recent_logs.report_entries()
         # The report only reads, so it takes one WAL snapshot instead of the writer.
         with deps.database_manager.read_snapshot() as db:
-            snapshot = deps.sync_state.latest_snapshot()
-            garmin_status = deps.garmin_projection.public_state()
-            database_counts = self._database_counts(db)
-            return {
-                "generated_at": deps.utc_now(),
-                "app": {"name": deps.app_name, "version": deps.app_version},
-                "runtime": {
-                    "python": platform.python_version(),
-                    "platform": platform.platform(),
-                    "process_memory": process_memory(),
-                },
-                "configuration": {
+            garmin_status = section(
+                ProviderId.GARMIN.value, deps.garmin_projection.public_state
+            )
+
+            def configuration() -> dict[str, Any]:
+                return {
                     "openai_configured": bool(deps.config.openai_api_key),
+                    # Only whether the endpoint differs from the default, never the URL.
+                    "openai_base_url_custom": deps.config.openai_base_url
+                    != DEFAULT_OPENAI_BASE_URL,
                     "intervals_configured": bool(deps.config.intervals_api_key),
                     "garmin_library_available": deps.garmin_client_factory.available(),
-                    "garmin_configured": garmin_status["configured"],
+                    "garmin_configured": garmin_status.get("configured"),
                     "garmin_fixture_configured": deps.garmin_fixture_loader.path()
                     is not None,
                     "model": deps.settings.selected_model(),
@@ -163,10 +184,11 @@ class DiagnosticReportService:
                         option["id"]
                         for option in deps.settings.available_model_options()
                     ],
-                },
-                "openai": deps.provider_state.summary("openai"),
-                "coach_commands": deps.coach_history.history(),
-                "sync": {
+                }
+
+            def sync() -> dict[str, Any]:
+                snapshot = deps.sync_state.latest_snapshot()
+                return {
                     "last_success": self._get_value(db, "last_sync_at"),
                     "last_error": deps.redactor.redact_text(
                         self._get_value(db, "last_sync_error") or ""
@@ -183,9 +205,10 @@ class DiagnosticReportService:
                         if snapshot
                         else 0,
                     },
-                },
-                ProviderId.GARMIN.value: garmin_status,
-                "provider_freshness": deps.provider_freshness.current(
+                }
+
+            def provider_freshness() -> Any:
+                return deps.provider_freshness.current(
                     profile=deps.profile.get(),
                     garmin_has_core_error=bool(
                         deps.garmin_sync_state.core_error_entries()
@@ -195,8 +218,10 @@ class DiagnosticReportService:
                         deps.config.garmin_tokenstore,
                     ),
                     read_only=True,
-                ),
-                "external_calendar": {
+                )
+
+            def external_calendar() -> dict[str, Any]:
+                return {
                     "configured": bool(deps.config.calendar_ical_url),
                     "last_sync_at": self._get_value(
                         db, "last_external_calendar_sync_at"
@@ -207,16 +232,51 @@ class DiagnosticReportService:
                     or None,
                     "running": deps.external_calendar_sync.running(),
                     "events": len(deps.external_calendar_reader.list_events()),
-                },
-                "morning_checkin": deps.morning_checkin.state(),
-                "database": {
-                    **database_counts,
+                }
+
+            def database() -> dict[str, Any]:
+                return {
+                    "schema_version": self._schema_version(db),
+                    **self._database_counts(db),
                     "workout_library_state": deps.workout_library_sync_state.summary(),
                     "external_calendar_events": len(
                         deps.external_calendar_reader.list_events()
                     ),
+                }
+
+            key_values = deps.key_values
+            return {
+                "generated_at": deps.utc_now(),
+                "app": {"name": deps.app_name, "version": deps.app_version},
+                "runtime": {
+                    "python": platform.python_version(),
+                    "platform": platform.platform(),
+                    "process_memory": process_memory(),
                 },
-                "plan_sync": summarize_plan_sync(db),
+                "configuration": section("configuration", configuration),
+                "openai": section(
+                    "openai", lambda: deps.provider_state.summary("openai")
+                ),
+                "coach_commands": section("coach_commands", deps.coach_history.history),
+                "sync": section("sync", sync),
+                ProviderId.GARMIN.value: garmin_status,
+                "provider_freshness": section("provider_freshness", provider_freshness),
+                "external_calendar": section("external_calendar", external_calendar),
+                "morning_checkin": section(
+                    "morning_checkin", deps.morning_checkin.state
+                ),
+                "database": section("database", database),
+                ProviderId.WAHOO.value: section(
+                    ProviderId.WAHOO.value,
+                    lambda: summarize_wahoo(
+                        key_values,
+                        db,
+                        deps.config,
+                        deps.redactor.redact_text,
+                        datetime.fromisoformat(deps.utc_now()),
+                    ),
+                ),
+                "plan_sync": section("plan_sync", lambda: summarize_plan_sync(db)),
                 "canonical_coverage": summarize_canonical_coverage(
                     deps.canonical_coverage, db
                 ),
@@ -224,24 +284,52 @@ class DiagnosticReportService:
                     deps.canonical_backfill, db
                 ),
                 "canonical_read": summarize_canonical_read(deps.canonical_read, db),
-                "canonical_session_conflicts": summarize_session_conflicts(db),
-                "canonical_provider_composition": summarize_provider_composition(db),
-                "local_load": summarize_local_load(deps.key_values, db),
-                "rating_backfill": summarize_rating_backfill(
-                    deps.key_values, db, deps.config.sync_history_earliest_date
+                "canonical_session_conflicts": section(
+                    "canonical_session_conflicts",
+                    lambda: summarize_session_conflicts(db),
                 ),
-                "stream_backfill": summarize_stream_backfill(
-                    deps.key_values, db, deps.config.sync_history_earliest_date
+                "canonical_provider_composition": section(
+                    "canonical_provider_composition",
+                    lambda: summarize_provider_composition(db),
                 ),
-                "session_metrics": summarize_session_metrics(deps.key_values, db),
-                "activity_weather": summarize_activity_weather(deps.key_values, db),
-                "activity_routes": summarize_activity_routes(deps.key_values, db),
-                "session_analysis": summarize_session_analysis(deps.key_values, db),
-                "session_focus_backfill": summarize_session_focus_backfill(
-                    deps.key_values, db
+                "local_load": section(
+                    "local_load", lambda: summarize_local_load(key_values, db)
                 ),
-                "profile_weekly_plan_removal": summarize_profile_weekly_plan_removal(
-                    deps.key_values, db
+                "rating_backfill": section(
+                    "rating_backfill",
+                    lambda: summarize_rating_backfill(
+                        key_values, db, deps.config.sync_history_earliest_date
+                    ),
+                ),
+                "stream_backfill": section(
+                    "stream_backfill",
+                    lambda: summarize_stream_backfill(
+                        key_values, db, deps.config.sync_history_earliest_date
+                    ),
+                ),
+                "session_metrics": section(
+                    "session_metrics",
+                    lambda: summarize_session_metrics(key_values, db),
+                ),
+                "activity_weather": section(
+                    "activity_weather",
+                    lambda: summarize_activity_weather(key_values, db),
+                ),
+                "activity_routes": section(
+                    "activity_routes",
+                    lambda: summarize_activity_routes(key_values, db),
+                ),
+                "session_analysis": section(
+                    "session_analysis",
+                    lambda: summarize_session_analysis(key_values, db),
+                ),
+                "session_focus_backfill": section(
+                    "session_focus_backfill",
+                    lambda: summarize_session_focus_backfill(key_values, db),
+                ),
+                "profile_weekly_plan_removal": section(
+                    "profile_weekly_plan_removal",
+                    lambda: summarize_profile_weekly_plan_removal(key_values, db),
                 ),
                 "logs": log_entries,
                 "debug_capture": {

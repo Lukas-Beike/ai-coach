@@ -17,6 +17,7 @@ from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.performance.current_thresholds import ThresholdKey
+from backend.providers.observed_opener import Opener
 from backend.providers.wahoo_client import WahooClient
 from backend.providers.wahoo_fit_download import download_wahoo_fit
 from backend.providers.wahoo_plan_mapping import WahooPlanReferences
@@ -62,6 +63,8 @@ class WahooSyncInputs:
     export_thresholds: Callable[[Any], Mapping[ThresholdKey, Observation]]
     # The oldest day the stream backfill reaches.
     history_earliest_date: date
+    # Observes the FIT downloads; without it they run unobserved.
+    fit_opener: Callable[[], Opener] | None = None
 
 
 class WahooSyncAssembly:
@@ -117,11 +120,18 @@ class WahooSyncAssembly:
                     database_manager=inputs.database_manager,
                     database_lock=inputs.database_lock,
                     key_values=inputs.key_values,
-                    download=download_wahoo_fit,
+                    download=self.fit_download(),
                     monotonic=time.monotonic,
                     logger=inputs.logger,
                 )
             return self._details
+
+    def fit_download(self) -> Callable[[str], bytes]:
+        """Return the FIT download, observed when the composition supplies an opener."""
+        factory = self._inputs.fit_opener
+        if factory is None:
+            return download_wahoo_fit
+        return lambda url: download_wahoo_fit(url, opener=factory())
 
     def stream_backfill_service(self) -> StreamBackfillService:
         """Compose the backfill of the FIT streams of past Wahoo workouts."""
@@ -130,7 +140,7 @@ class WahooSyncAssembly:
             provider=ProviderId.WAHOO.value,
             source=WahooStreamSource(
                 client=self.client,
-                download=download_wahoo_fit,
+                download=self.fit_download(),
             ),
             mapping=WahooStreamMapping(),
             database_manager=inputs.database_manager,

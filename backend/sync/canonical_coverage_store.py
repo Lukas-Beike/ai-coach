@@ -78,10 +78,22 @@ def garmin_ingest_coverage(
     the observed range come from the tables, which hold everything ingested so far.
     The fetch time and the mapping issue counts are those of the written payload.
     """
-    fetched = garmin_payload_coverage(payload, zone=zone)
+    return _stored_totals(
+        db, garmin_payload_coverage(payload, zone=zone), keep_fetched=False
+    )
+
+
+def _stored_totals(
+    db: Any, fetched: ProviderCoverage | None, *, keep_fetched: bool
+) -> ProviderCoverage | None:
+    """Replace a fetch's record counts and observed range by the tables' totals.
+
+    ``keep_fetched`` keeps the fetch's own counts for a provider whose fetch window
+    varies; a Garmin write carries only the sections it fetched, so it does not.
+    """
     if fetched is None:
         return None
-    totals = canonical_store.provider_totals(db, ProviderId.GARMIN.value)
+    totals = canonical_store.provider_totals(db, fetched.provider.value)
     oldest, newest = totals["oldest"], totals["newest"]
     return cast(
         ProviderCoverage,
@@ -91,6 +103,10 @@ def garmin_ingest_coverage(
             observation_count=totals["observations"],
             first_observed_on=None if oldest is None else date.fromisoformat(oldest),
             last_observed_on=None if newest is None else date.fromisoformat(newest),
+            fetched_activity_count=fetched.activity_count if keep_fetched else None,
+            fetched_observation_count=fetched.observation_count
+            if keep_fetched
+            else None,
         ),
     )
 
@@ -114,6 +130,20 @@ def wahoo_payload_coverage(payload: object, *, zone: tzinfo) -> ProviderCoverage
         retrieved_at=stored_at,
     )
     return summarize_provider(ProviderId.WAHOO, stored_at, activities, thresholds)
+
+
+def wahoo_ingest_coverage(
+    db: Any, payload: object, *, zone: tzinfo
+) -> ProviderCoverage | None:
+    """Summarize Wahoo after one ingest, on the same stored-totals basis as Garmin.
+
+    The listing window changes what one fetch returns, so the record counts and the
+    observed range come from the tables; the fetch's own counts stay in
+    ``fetched_*`` and its mapping issues and fetch time are those of the payload.
+    """
+    return _stored_totals(
+        db, wahoo_payload_coverage(payload, zone=zone), keep_fetched=True
+    )
 
 
 class CanonicalCoverageStore:
@@ -158,7 +188,7 @@ class CanonicalCoverageStore:
 
 
 def _encode(coverage: ProviderCoverage, zone: tzinfo) -> dict[str, Any]:
-    return {
+    encoded = {
         "provider": coverage.provider.value,
         "mapper_versions": current_mapper_versions(),
         "zone": str(zone),
@@ -173,6 +203,10 @@ def _encode(coverage: ProviderCoverage, zone: tzinfo) -> dict[str, Any]:
         "first_observed_on": _iso(coverage.first_observed_on),
         "last_observed_on": _iso(coverage.last_observed_on),
     }
+    if coverage.fetched_activity_count is not None:
+        encoded["fetched_activity_count"] = coverage.fetched_activity_count
+        encoded["fetched_observation_count"] = coverage.fetched_observation_count
+    return encoded
 
 
 def _decode(
@@ -212,6 +246,8 @@ def _decode(
         },
         first_observed_on=None if first is None else date.fromisoformat(first),
         last_observed_on=None if last is None else date.fromisoformat(last),
+        fetched_activity_count=data.get("fetched_activity_count"),
+        fetched_observation_count=data.get("fetched_observation_count"),
     )
 
 

@@ -44,7 +44,7 @@ from backend.providers.wahoo_client import (
 )
 from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
-    wahoo_payload_coverage,
+    wahoo_ingest_coverage,
 )
 from backend.sync.canonical_ingest import fetch_deletion_window, ingest_plan
 from backend.sync.daily import DailySyncMarkerService
@@ -262,7 +262,7 @@ class WahooSyncService:
                 ),
                 zone=zone,
             )
-            coverage = wahoo_payload_coverage(payload, zone=zone)
+            coverage = wahoo_ingest_coverage(db, payload, zone=zone)
             if coverage is not None and (fetch.truncated or fetch.skipped):
                 # Only a complete listing moves the activity fetch time.
                 previous = self._coverage.load(

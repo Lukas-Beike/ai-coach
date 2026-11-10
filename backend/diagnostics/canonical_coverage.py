@@ -78,7 +78,7 @@ def _provider_summary(
     item: ProviderCoverage, windows: Sequence[MetricWindow]
 ) -> dict[str, Any]:
     metrics = _metric_summaries(windows)
-    return {
+    summary: dict[str, Any] = {
         "provider": str(item.provider),
         "sync_time_stored": item.retrieved_at is not None,
         "activity_sync_time_stored": item.activities_retrieved_at is not None,
@@ -92,6 +92,13 @@ def _provider_summary(
         "metrics": metrics,
         "stalled_metrics": sum(1 for metric in metrics if metric["stalled"]),
     }
+    if item.fetched_activity_count is not None:
+        # The totals above are the stored ones; a fetch window changes only these.
+        summary["last_fetch"] = {
+            "activities": item.fetched_activity_count,
+            "observations": item.fetched_observation_count,
+        }
+    return summary
 
 
 def _metric_summaries(windows: Sequence[MetricWindow]) -> list[dict[str, Any]]:

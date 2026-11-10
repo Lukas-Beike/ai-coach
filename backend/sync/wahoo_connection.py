@@ -89,6 +89,21 @@ def connection_status(config: Config, raw_tokens: str | None) -> dict[str, Any]:
     }
 
 
+def access_token_state(raw_tokens: str | None, now: datetime) -> str | None:
+    """Classify the stored access token without exposing it or its expiry time.
+
+    ``valid``, ``expired`` (it is refreshed on the next use) or ``unknown`` when
+    the record carries no readable expiry; None without a stored connection.
+    """
+    tokens = _decode_object(raw_tokens)
+    if not (tokens and tokens.get("access_token") and tokens.get("refresh_token")):
+        return None
+    expires_at = _parse_time(tokens.get("expires_at"))
+    if expires_at is None:
+        return "unknown"
+    return "valid" if expires_at > now else "expired"
+
+
 class WahooSecretRegistry:
     """Runtime-only Wahoo secret values for the log redactor.
 
