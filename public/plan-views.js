@@ -109,6 +109,12 @@ const PLANNED_AQI_FLAG_MIN = 60; // European AQI "schlecht" and worse
 const PLANNED_CAMS_POLLEN_FLAG_MIN = 10; // grains/m³; DWD levels count from 1
 const PLANNED_DAY_STATUS_LABELS = new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]]);
 
+function externalCalendarDetail(calendar) {
+  if (calendar.last_error) return "Fehler bei letzter Aktualisierung";
+  const skipped = Number(calendar.skipped_events) || 0;
+  return skipped ? `${skipped} Termine übersprungen` : "";
+}
+
 function stripCalendarMarkers(text) {
   return String(text || "").replace(CALENDAR_MARKER_PATTERN, "").replace(/\s{2,}/g, " ").trim();
 }
@@ -753,7 +759,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const syncButton = $("#externalCalendarSyncButton");
     setConnectionChip("#externalCalendarConnectionStatus", connectionKind({ configured: calendar.configured, error: Boolean(calendar.last_error) }));
     const detail = $("#externalCalendarConnectionDetail");
-    if (detail) detail.textContent = calendar.last_error ? "Fehler bei letzter Aktualisierung" : "";
+    if (detail) detail.textContent = externalCalendarDetail(calendar);
     if (syncButton) {
       syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
       syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";

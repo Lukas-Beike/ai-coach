@@ -42,10 +42,15 @@ def feed(*events: str) -> bytes:
     ).encode()
 
 
-def parse(payload: bytes, *, start=date(2026, 9, 1), end=None, zone=UTC):
+def parse(payload: bytes, *, start=date(2026, 9, 1), end=None, zone=UTC, skips=None):
     end = end or start + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS)
     return parse_ical_calendar(
-        payload, local_zone=zone, today=start, window_start=start, window_end=end
+        payload,
+        local_zone=zone,
+        today=start,
+        window_start=start,
+        window_end=end,
+        skips=skips,
     )
 
 
@@ -586,8 +591,9 @@ class CalendarProviderTests(unittest.TestCase):
                 window_start=date(2026, 9, 1),
                 window_end=date(2026, 10, 28),
             )
-        with self.assertRaisesRegex(AppError, "UID und DTSTART"):
-            parse(feed("UID:missing"))
+        skips: dict[str, int] = {}
+        self.assertEqual(parse(feed("UID:missing"), skips=skips), [])
+        self.assertEqual(skips, {"component": 1})
 
     def test_unfold_default_and_configurable_payload_limit(self):
         payload = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
@@ -745,8 +751,12 @@ class CalendarProviderTests(unittest.TestCase):
         over = feed(
             "UID:many\r\nDTSTART:20260901T100000Z\r\nRRULE:FREQ=DAILY;COUNT=1001"
         )
-        with self.assertRaisesRegex(AppError, "COUNT.*zwischen"):
-            parse(over, start=date(2026, 9, 1), end=date(2026, 10, 27))
+        skips: dict[str, int] = {}
+        self.assertEqual(
+            parse(over, start=date(2026, 9, 1), end=date(2026, 10, 27), skips=skips),
+            [],
+        )
+        self.assertEqual(skips, {"recurrence": 1})
 
     def test_date_only_until_includes_the_until_day_in_the_source_zone(self):
         berlin = ZoneInfo("Europe/Berlin")
@@ -810,8 +820,9 @@ class CalendarProviderTests(unittest.TestCase):
             ["2026-09-01", "2026-09-03", "2026-09-08", "2026-09-10"],
         )
         for malformed in (b"BYDAY=MO,", b"BYDAY=MO,,TU", b"BYDAY=,"):
-            with self.assertRaises(AppError):
-                parse(weekly.replace(b"BYDAY=TU,TH", malformed))
+            skips: dict[str, int] = {}
+            events = parse(weekly.replace(b"BYDAY=TU,TH", malformed), skips=skips)
+            self.assertEqual((events, skips), ([], {"recurrence": 1}))
 
     def test_rdate_exdate_recurrence_id_and_cancelled(self):
         events = parse(
@@ -847,17 +858,100 @@ class CalendarProviderTests(unittest.TestCase):
         )
 
     def test_unsupported_rules_and_markers(self):
-        with self.assertRaisesRegex(AppError, "nicht unterstützt"):
-            parse(feed("UID:x\r\nDTSTART:20260901T100000Z\r\nRRULE:FREQ=HOURLY"))
-        with self.assertRaisesRegex(AppError, "BYDAY"):
-            parse(
-                feed("UID:x\r\nDTSTART:20260901T100000Z\r\nRRULE:FREQ=DAILY;BYDAY=2MO")
-            )
+        for rule in ("FREQ=HOURLY", "FREQ=DAILY;BYDAY=2MO"):
+            skips: dict[str, int] = {}
+            payload = feed(f"UID:x\r\nDTSTART:20260901T100000Z\r\nRRULE:{rule}")
+            self.assertEqual(parse(payload, skips=skips), [])
+            self.assertEqual(skips, {"recurrence": 1})
         self.assertTrue(ical_training_impact("before [short_only]"))
         self.assertTrue(ical_training_relevant("anything"))
         self.assertFalse(ical_training_relevant("[NO_TRAINING]"))
         self.assertTrue(ical_no_intensity("x [NO_INTENSITY] y"))
         self.assertFalse(ical_short_only("x"))
+
+    def test_unsupported_series_is_skipped_and_counted_without_event_text(self):
+        valid = "UID:ok\r\nDTSTART:20260905T100000Z\r\nSUMMARY:Urlaub\r\nDESCRIPTION:[NO_TRAINING]"
+        for rule in (
+            "RRULE:FREQ=WEEKLY;BYWEEKNO=20",
+            "RRULE:FREQ=WEEKLY;BYHOUR=9",
+            "RDATE;VALUE=PERIOD:20260910T100000Z/PT1H",
+            "RRULE:FREQ=DAILY;COUNT=3\r\nEXRULE:FREQ=DAILY",
+        ):
+            skips: dict[str, int] = {}
+            events = parse(
+                feed(
+                    valid,
+                    f"UID:odd\r\nDTSTART:20260101T100000Z\r\nSUMMARY:Geheim\r\n{rule}",
+                ),
+                skips=skips,
+            )
+            self.assertEqual([item["uid"] for item in events], ["ok"], rule)
+            self.assertTrue(events[0]["no_training"])
+            self.assertEqual(skips, {"recurrence": 1}, rule)
+            self.assertNotIn("Geheim", repr(skips))
+
+    def test_past_only_series_is_dropped_silently(self):
+        skips: dict[str, int] = {}
+        events = parse(
+            feed(
+                "UID:ok\r\nDTSTART:20260905T100000Z",
+                "UID:old\r\nDTSTART:20150101T090000Z\r\n"
+                "RRULE:FREQ=WEEKLY;BYHOUR=9;UNTIL=20150301T000000Z",
+            ),
+            skips=skips,
+        )
+        self.assertEqual([item["uid"] for item in events], ["ok"])
+        self.assertEqual(skips, {})
+
+    def test_ical_duration_accepts_weeks_and_combined_forms(self):
+        self.assertEqual(ical_duration("P1W"), timedelta(days=7))
+        self.assertEqual(ical_duration("P2W"), timedelta(days=14))
+        self.assertEqual(ical_duration("P1W2D"), timedelta(days=9))
+        self.assertEqual(
+            ical_duration("P1DT2H3M4S"),
+            timedelta(days=1, hours=2, minutes=3, seconds=4),
+        )
+        for invalid in ("P", "PT", "P0W", "-P1W", "1W", "P1X"):
+            self.assertIsNone(ical_duration(invalid), invalid)
+
+    def test_week_duration_blocks_seven_days(self):
+        events = parse(
+            feed(
+                "UID:holiday\r\nDTSTART;VALUE=DATE:20260907\r\nDURATION:P1W\r\n"
+                "DESCRIPTION:[NO_TRAINING]"
+            )
+        )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["duration_minutes"], 7 * 24 * 60)
+        self.assertEqual(events[0]["end_local"][:10], "2026-09-14")
+        self.assertTrue(events[0]["no_training"])
+
+    def test_property_split_ignores_colons_inside_quoted_parameters(self):
+        events = parse(
+            feed(
+                "UID:alt\r\nDTSTART:20260905T100000Z\r\n"
+                'DESCRIPTION;ALTREP="https://h.example/a":[NO_INTENSITY] text'
+            )
+        )
+        records = provider_calendar_events(
+            feed(
+                "UID:alt\r\nDTSTART:20260905T100000Z\r\n"
+                'DESCRIPTION;ALTREP="https://h.example/a":[NO_INTENSITY] text'
+            ),
+            local_zone=UTC,
+            today=date(2026, 9, 1),
+        )
+        self.assertEqual(records[0]["description"], "[NO_INTENSITY] text")
+        self.assertTrue(events[0]["no_intensity"])
+        quoted_semicolon = provider_calendar_events(
+            feed(
+                "UID:q\r\nDTSTART:20260905T100000Z\r\n"
+                'DESCRIPTION;ALTREP="mailto:a;b:c";LANGUAGE=de:Text'
+            ),
+            local_zone=UTC,
+            today=date(2026, 9, 1),
+        )
+        self.assertEqual(quoted_semicolon[0]["description"], "Text")
 
     def test_recurrence_iteration_caps_are_fixed_not_tautological(self):
         base = datetime(1900, 1, 1, tzinfo=UTC)

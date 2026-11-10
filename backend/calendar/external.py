@@ -1,5 +1,6 @@
 """Read-only queries and state projection for an external iCalendar feed."""
 
+import json
 from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
@@ -83,6 +84,15 @@ def list_events_in_window(
     return [dict(row) for row in rows]
 
 
+def _skipped_count(raw: Any) -> int:
+    """Count the components the last sync skipped; the kv value is a reason map."""
+    try:
+        reasons = json.loads(raw) if raw else {}
+        return sum(int(count) for count in reasons.values())
+    except TypeError, ValueError, AttributeError:
+        return 0
+
+
 def state(
     db: Any,
     *,
@@ -91,20 +101,17 @@ def state(
     today: date,
     window_days: int,
 ) -> dict[str, Any]:
-    last_sync_row = db.execute(
-        "SELECT value FROM kv WHERE key = ?", ("last_external_calendar_sync_at",)
-    ).fetchone()
-    last_error_row = db.execute(
-        "SELECT value FROM kv WHERE key = ?", ("last_external_calendar_sync_error",)
-    ).fetchone()
-    last_error = last_error_row["value"] if last_error_row else None
+    last_sync = _kv_value(db, "last_external_calendar_sync_at")
+    last_error = _kv_value(db, "last_external_calendar_sync_error")
+    skipped = _kv_value(db, "last_external_calendar_sync_skipped")
     return {
         "configured": configured,
         "provider": "iCalendar",
         "read_only": True,
         "running": running,
-        "last_sync_at": last_sync_row["value"] if last_sync_row else None,
+        "last_sync_at": last_sync,
         "last_error": last_error or None,
+        "skipped_events": _skipped_count(skipped or ""),
         "events": list_events(db, today=today),
         "window_days": window_days,
     }
@@ -154,3 +161,8 @@ class ExternalCalendarReader:
                 today=self._today(),
                 window_days=window_days,
             )
+
+
+def _kv_value(db: Any, key: str) -> str | None:
+    row = db.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
