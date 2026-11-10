@@ -27,6 +27,7 @@ ENTITY_TYPES = {
     "activity_feedback",
     "activity_session",
     "nutrition_entry",
+    "nutrition_template",
     "checkin",
     "metric_export",
 }
@@ -183,6 +184,21 @@ NUTRITION_ENTRY_FIELDS = (
     "nutrition_basis",
     "logged_time_known",
 )
+# A saved meal; the update time is not tracked, so a save without a change
+# records nothing and a restore stamps the time again.
+NUTRITION_TEMPLATE_FIELDS = (
+    "id",
+    "name",
+    "description",
+    "meal_type",
+    "meal_type_explicit",
+    "kcal",
+    "carbs_g",
+    "protein_g",
+    "fat_g",
+    "source",
+    "nutrition_basis",
+)
 # One daily check-in; its entity id is the check-in date. The day status and the
 # tag answers live beside the row and are present only once the athlete set them.
 CHECKIN_FIELDS = (
@@ -205,6 +221,7 @@ _FIELD_LIMITS = {
     "activity_feedback": 400_000,
     "activity_session": 20_000,
     "nutrition_entry": 100_000,
+    "nutrition_template": 100_000,
     # Free-text notes reach 4000 characters, more once JSON-escaped.
     "checkin": 20_000,
 }
@@ -245,6 +262,7 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "activity_feedback": set(ACTIVITY_FEEDBACK_FIELDS),
         "activity_session": set(ACTIVITY_SESSION_FIELDS),
         "nutrition_entry": set(NUTRITION_ENTRY_FIELDS),
+        "nutrition_template": set(NUTRITION_TEMPLATE_FIELDS),
         "checkin": set(CHECKIN_FIELDS),
         METRIC_EXPORT_ENTITY: set(METRIC_EXPORT_FIELDS),
     }
