@@ -33,6 +33,8 @@ def record(
     started_at: datetime = START,
     duration_s: float | None = 3600.0,
     distance_m: float | None = 30000.0,
+    moving_duration_s: float | None = None,
+    elapsed_duration_s: float | None = None,
 ) -> ActivityRecord:
     return ActivityRecord(
         activity_id=identifier,
@@ -54,6 +56,8 @@ def record(
         avg_hr=None,
         avg_power=None,
         name=None,
+        moving_duration_s=moving_duration_s,
+        elapsed_duration_s=elapsed_duration_s,
     )
 
 
@@ -179,19 +183,137 @@ class GarminAgainstWahooTests(unittest.TestCase):
         cases: dict[str, tuple[dict[str, Any], bool]] = {
             "duration beyond tolerance": ({"duration_s": 7200.0}, False),
             "distance beyond tolerance": ({"distance_m": 60000.0}, False),
-            "missing distance": ({"distance_m": None}, False),
             "missing duration": ({"duration_s": None}, False),
-            "zero distance": ({"distance_m": 0.0}, False),
+            "missing distance falls back to duration and a close start": (
+                {"distance_m": None},
+                True,
+            ),
+            "zero distance falls back to duration and a close start": (
+                {"distance_m": 0.0},
+                True,
+            ),
+            "missing distance beyond the close start": (
+                {"distance_m": None, "started_at": START + timedelta(minutes=11)},
+                False,
+            ),
+            "distance with a wider start": (
+                {"started_at": START + timedelta(minutes=25)},
+                True,
+            ),
             "outside the window": (
                 {"started_at": START + timedelta(minutes=31)},
                 False,
             ),
             "run is not a cycling ride": ({"sport": Sport.RUN}, False),
+            "strength is not a cycling ride": ({"sport": Sport.STRENGTH}, False),
+            "an unclassified sport is compatible": ({"sport": Sport.OTHER}, True),
         }
         for name, (fields, expected) in cases.items():
             with self.subTest(name):
                 sessions = self._bundle(garmin(**fields), wahoo())
                 self.assertEqual(len(sessions) == 1, expected)
+
+    def test_copies_of_other_sports_bundle_on_duration(self) -> None:
+        for sport, distance in (
+            (Sport.RUN, 10000.0),
+            (Sport.WALK, 4000.0),
+            (Sport.YOGA, None),
+            (Sport.STRENGTH, 0.0),
+            (Sport.RIDE, None),
+        ):
+            with self.subTest(sport.value, distance=distance):
+                sessions = self._bundle(
+                    garmin(sport=sport, distance_m=distance),
+                    wahoo(
+                        sport=sport,
+                        distance_m=None if distance is None else distance + 50.0,
+                        started_at=START + timedelta(minutes=2),
+                    ),
+                )
+                self.assertEqual(links(sessions), {("w-1", "g-1", "heuristic")})
+
+    def test_a_distance_disagreement_blocks_copies_of_any_sport(self) -> None:
+        sessions = self._bundle(
+            garmin(sport=Sport.RUN, distance_m=10000.0),
+            wahoo(sport=Sport.RUN, distance_m=14000.0),
+        )
+        self.assertEqual(len(sessions), 2)
+
+    def test_moving_and_elapsed_durations_are_candidates(self) -> None:
+        cases = {
+            "moving against the other timer": (
+                {"duration_s": 3900.0, "moving_duration_s": 3300.0},
+                {"duration_s": 3300.0},
+            ),
+            "elapsed against elapsed": (
+                {"duration_s": 3900.0, "elapsed_duration_s": 3900.0},
+                {"duration_s": 3300.0, "elapsed_duration_s": 3900.0},
+            ),
+        }
+        for name, (garmin_fields, wahoo_fields) in cases.items():
+            with self.subTest(name):
+                sessions = self._bundle(garmin(**garmin_fields), wahoo(**wahoo_fields))
+                self.assertEqual(links(sessions), {("w-1", "g-1", "heuristic")})
+        with self.subTest("no duration pair agrees"):
+            sessions = self._bundle(garmin(duration_s=3900.0), wahoo(duration_s=3300.0))
+            self.assertEqual(len(sessions), 2)
+
+    def test_two_separate_sessions_never_merge_across_sports(self) -> None:
+        # A run and a strength session close together stay apart.
+        sessions = self._bundle(
+            garmin(sport=Sport.RUN, distance_m=None, duration_s=1800.0),
+            wahoo(sport=Sport.STRENGTH, distance_m=None, duration_s=1800.0),
+        )
+        self.assertEqual(len(sessions), 2)
+
+    def test_two_sessions_on_one_day_stay_apart(self) -> None:
+        sessions = self._bundle(
+            garmin(),
+            record(ProviderId.GARMIN, "g-2", started_at=START + timedelta(hours=6)),
+            wahoo(),
+        )
+        self.assertEqual(links(sessions), {("w-1", "g-1", "heuristic")})
+        self.assertEqual(len(sessions), 2)
+
+    def test_a_watch_recording_and_a_relayed_copy_both_join_the_wahoo_session(
+        self,
+    ) -> None:
+        relayed = record(
+            ProviderId.GARMIN,
+            "g-relay",
+            origin=RecordingOrigin.WAHOO,
+            started_at=START + timedelta(minutes=4),
+        )
+        watch = record(
+            ProviderId.GARMIN,
+            "g-watch",
+            origin=RecordingOrigin.GARMIN,
+            started_at=START + timedelta(minutes=1),
+            duration_s=3700.0,
+        )
+        sessions = self._bundle(relayed, watch, wahoo())
+        self.assertEqual(
+            links(sessions),
+            {("w-1", "g-relay", "heuristic"), ("w-1", "g-watch", "heuristic")},
+        )
+
+    def test_one_origin_still_takes_one_garmin_record_per_session(self) -> None:
+        sessions = self._bundle(
+            record(
+                ProviderId.GARMIN,
+                "g-1",
+                origin=RecordingOrigin.GARMIN,
+                started_at=START + timedelta(minutes=1),
+            ),
+            record(
+                ProviderId.GARMIN,
+                "g-2",
+                origin=RecordingOrigin.GARMIN,
+                started_at=START + timedelta(minutes=2),
+            ),
+            wahoo(),
+        )
+        self.assertEqual(len(sessions), 2)
 
     def test_garmin_joins_the_intervals_session_through_wahoo(self) -> None:
         # The Garmin ride starts 31 minutes after the Intervals copy, so it cannot
