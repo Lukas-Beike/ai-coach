@@ -172,7 +172,11 @@ class HistoricalSyncJobOwner:
         # A chunk that ran again (a retry or a restart) may already have queued
         # its continuation; queuing again would start a second chain.
         if self._queue_service.backfill_continued(
-            job["provider"], next_end, str(job.get("created_at") or ""), job_type
+            job["provider"],
+            next_end,
+            str(job.get("created_at") or ""),
+            job_type,
+            str(job.get("id") or ""),
         ):
             return
         payload: dict[str, Any] = {

@@ -506,17 +506,23 @@ class ServiceTests(unittest.TestCase):
         client = _Client({"2": http_error(500), "1": (50, None)})
         service, _reader = make_service(env, client)
 
-        for run in range(1, FAILURE_LIMIT + 1):
+        for run in range(1, FAILURE_LIMIT):
             with self.assertRaises(AppError) as raised:
                 service.backfill(None)
             self.assertEqual("provider_unavailable", raised.exception.reason)
             self.assertIsNone(cursor_of(env))
-            if run < FAILURE_LIMIT:
-                self.assertEqual({"2": run}, state_of(env)["failures"])
+            self.assertEqual({"2": run}, state_of(env)["failures"])
 
+        # The third failure skips the activity without failing the job: the
+        # chain continues at the same window, so it does not end here.
+        third = service.backfill(None)
+
+        self.assertEqual("ok", third["status"])
+        self.assertEqual("2026-11-02", third["historical_next_end"])
+        self.assertIsNone(cursor_of(env))
         self.assertEqual(["2"], state_of(env)["skipped_ids"])
         self.assertEqual({}, state_of(env)["failures"])
-        result = service.backfill(None)
+        result = service.backfill(date(2026, 11, 2))
         self.assertEqual(1, result["backfilled"])
         self.assertEqual(5.0, garmin_record(env, 1)["rpe"])
         self.assertIsNotNone(cursor_of(env))

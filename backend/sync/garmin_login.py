@@ -303,7 +303,9 @@ class GarminLoginService:
         tokens: GarminTokenStore,
         registry: GarminSecretRegistry,
         clock: Callable[[], float] = time.monotonic,
+        on_connected: Callable[[], None] | None = None,
     ) -> None:
+        self._on_connected = on_connected
         self._config = config
         self._client_factory = client_factory
         self._tokens = tokens
@@ -364,6 +366,7 @@ class GarminLoginService:
                         )
                     return {"status": "mfa_required", **self.status()}
                 self._store(client, generation)
+                self._notify_connected()
                 return {"status": "connected", **self.status()}
 
     def submit_mfa(self, body: object) -> dict[str, Any]:
@@ -396,6 +399,7 @@ class GarminLoginService:
                 if self._pending is pending:
                     self._pending = None
             self._store(pending.client, pending.generation)
+            self._notify_connected()
             return {"status": "connected", **self.status()}
 
     def cancel(self) -> None:
@@ -408,6 +412,20 @@ class GarminLoginService:
         self.cancel()
         self._tokens.clear()
         return {"status": "disconnected", **self.status()}
+
+    def _notify_connected(self) -> None:
+        if self._on_connected is None:
+            return
+        try:
+            self._on_connected()
+        except Exception as exc:  # noqa: BLE001 - the login is already stored
+            _LOGGER.warning(
+                "Garmin connected hook failed",
+                extra={
+                    "event": "garmin_connected_hook_failed",
+                    "error_class": type(exc).__name__,
+                },
+            )
 
     def _ensure_current(self, generation: int) -> None:
         """Callers must hold ``self._lock``."""

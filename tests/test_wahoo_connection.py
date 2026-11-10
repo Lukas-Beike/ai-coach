@@ -160,6 +160,7 @@ class WahooConnectionServiceTests(unittest.TestCase):
         self.clock = Clock()
         self.values = FakeKeyValues()
         self.request = Mock(return_value=grant_payload())
+        self.on_connected = Mock()
         self.states = iter(f"state-{index}" for index in range(10))
         self.service = self.make_service(lambda: self.config)
 
@@ -174,6 +175,7 @@ class WahooConnectionServiceTests(unittest.TestCase):
             key_values=self.values,
             utc_now=self.clock,
             token_factory=lambda: next(self.states),
+            on_connected=self.on_connected,
         )
 
     def connect(self):
@@ -216,6 +218,28 @@ class WahooConnectionServiceTests(unittest.TestCase):
         self.assertEqual(status["connected_at"], NOW.isoformat())
         self.assertNotIn("access-1", json.dumps(status))
         self.assertNotIn("refresh-1", json.dumps(status))
+
+    def test_connecting_runs_the_hook_once_and_a_failing_hook_keeps_the_connection(
+        self,
+    ):
+        self.assertEqual(self.connect(), "connected")
+        self.on_connected.assert_called_once_with()
+
+        self.on_connected.reset_mock(side_effect=True)
+        self.on_connected.side_effect = RuntimeError("synthetic")
+        self.assertEqual(self.connect_again(), "connected")
+        self.assertTrue(self.service.status()["connected"])
+
+    def connect_again(self):
+        self.states = iter(f"state-{index}" for index in range(10, 20))
+        self.service.start_authorization()
+        return self.service.complete_authorization("code-2", "state-10")
+
+    def test_failed_callbacks_do_not_run_the_hook(self):
+        self.service.start_authorization()
+        self.service.complete_authorization(None, "state-0", "access_denied")
+        self.service.complete_authorization("code", "wrong-state")
+        self.on_connected.assert_not_called()
 
     def test_state_is_single_use(self):
         self.assertEqual(self.connect(), "connected")

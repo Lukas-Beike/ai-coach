@@ -264,7 +264,7 @@ class StreamBackfillService:
             if isinstance(failure, RatingReadStopped) and failure.kind == FAILED
             else None
         )
-        self._write(
+        file_skipped = self._write(
             state,
             outcome,
             failed=failed,
@@ -274,6 +274,12 @@ class StreamBackfillService:
             oldest=oldest,
             more=more,
         )
+        next_end = _next_end(oldest) if more and not blocked else None
+        if file_skipped:
+            # The file just moved to the skipped ids is no longer a candidate: the
+            # chain reads the same window again without it instead of failing.
+            failure = None
+            next_end = batch[0].day
         if isinstance(failure, RatingReadStopped):
             raise stop_error(failure)
         if failure is not None:
@@ -283,7 +289,7 @@ class StreamBackfillService:
             "synced_at": fetched_at,
             "candidates": len(batch),
             "window_records": len(outcome.stored),
-            "historical_next_end": _next_end(oldest) if more and not blocked else None,
+            "historical_next_end": next_end,
             "stored": len(outcome.stored),
             "no_file": len(outcome.no_file),
             "no_streams": len(outcome.no_streams),
@@ -386,9 +392,10 @@ class StreamBackfillService:
         advance: bool,
         oldest: str | None,
         more: bool,
-    ) -> None:
+    ) -> bool:
+        """Store the state and cursor; return whether ``failed`` was skipped for good."""
         with self._guard(), self._database_manager().unit_of_work() as db:
-            _record_outcome(state, outcome, failed)
+            file_skipped = _record_outcome(state, outcome, failed)
             state.update(
                 stored=state["stored"] + len(outcome.stored),
                 blocked=blocked,
@@ -410,6 +417,7 @@ class StreamBackfillService:
                     fetched_at,
                     fetched_at,
                 )
+        return file_skipped
 
 
 def state_key(provider: str) -> str:
@@ -438,8 +446,11 @@ def stop_error(failure: RatingReadStopped) -> AppError:
 
 def _record_outcome(
     state: dict[str, Any], outcome: _Outcome, failed: str | None
-) -> None:
-    """Fold one batch into the state: ids kept out of later selections, failure counts."""
+) -> bool:
+    """Fold one batch into the state: ids kept out of later selections, failure counts.
+
+    Returns whether ``failed`` reached the failure limit and was skipped for good.
+    """
     failures: dict[str, int] = state["failures"]
     for identifier in (
         *outcome.stored,
@@ -456,6 +467,8 @@ def _record_outcome(
         if failures[failed] >= FAILURE_LIMIT:
             del failures[failed]
             state["skipped_ids"] = sorted({*state["skipped_ids"], failed})
+            return True
+    return False
 
 
 def _excluded(state: Mapping[str, Any]) -> frozenset[str]:

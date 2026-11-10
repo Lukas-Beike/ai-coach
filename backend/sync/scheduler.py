@@ -6,14 +6,14 @@ import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
-from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
 from backend.errors import AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.backfill_resume import historical_backfill_payload
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS
@@ -49,9 +49,12 @@ class DailySyncScheduler:
         schedule_policies: Mapping[str, ProviderSchedulePolicy] | None = None,
         registry: ProviderRegistry | None = None,
         retry_held: Callable[[str], bool] | None = None,
+        backfill_resumer: Callable[[], None] | None = None,
     ) -> None:
         self._queue = queue
         self._markers = markers
+        # Re-queues backfill chains that stopped before the history floor.
+        self._backfill_resumer = backfill_resumer
         # True while a provider's failed refresh says its retry is not due yet.
         self._retry_held = retry_held
         self._maintenance_gate = maintenance_gate
@@ -76,6 +79,8 @@ class DailySyncScheduler:
                 policy = self._policies.get(provider_id)
                 if policy is not None:
                     self._schedule_provider(provider_id, policy)
+            if self._backfill_resumer is not None:
+                self._backfill_resumer()
 
     def _schedule_provider(
         self, provider_id: str, policy: ProviderSchedulePolicy
@@ -245,22 +250,11 @@ class StartupSyncScheduler:
     def _historical_backfill_payload(
         self, provider: str, job_type: str = _HISTORICAL_BACKFILL
     ) -> dict[str, Any] | None:
-        stream = BACKFILL_CURSOR_STREAMS[job_type]
-        cursor = self._sync_state.cursor(provider, stream).get("cursor")
-        if cursor and str(cursor) <= self._config.sync_earliest_date.isoformat():
-            return None
-        try:
-            resume_end = (
-                date.fromisoformat(iso_date_prefix(str(cursor))) - timedelta(days=1)
-                if cursor
-                else None
-            )
-        except ValueError:
-            resume_end = None
-        payload: dict[str, Any] = {
-            "days": self._config.sync_chunk_days,
-            "reason": f"startup {job_type.replace('_', ' ')}",
-        }
-        if resume_end is not None:
-            payload["end_date"] = resume_end.isoformat()
-        return payload
+        return historical_backfill_payload(
+            self._sync_state,
+            provider,
+            job_type,
+            chunk_days=self._config.sync_chunk_days,
+            earliest_date=self._config.sync_earliest_date,
+            reason=f"startup {job_type.replace('_', ' ')}",
+        )

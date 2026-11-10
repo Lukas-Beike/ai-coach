@@ -29,10 +29,12 @@ class SyncJobWorkerAssembly:
 
     def create(self) -> worker.SyncJobWorker:
         """Create an unstarted worker using the shared queue wake event."""
+        store = self._store()
         return worker.SyncJobWorker(
-            self._store(),
+            store,
             self._executor(),
             self._maintenance_gate,
             self._poll_seconds,
             wake_event=self._wake_event(),
+            requeue_unowned=store.requeue_unowned_running,
         )

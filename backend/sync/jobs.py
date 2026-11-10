@@ -51,6 +51,10 @@ BACKFILL_CURSOR_STREAMS: dict[str, str] = {
     STREAM_BACKFILL: STREAM_HISTORY_CURSOR,
 }
 BACKFILL_JOB_TYPES = frozenset(BACKFILL_CURSOR_STREAMS)
+# Jobs that only read providers and store the result locally: running one again
+# is safe. Every other type (plan_push, competition_push, nutrition_sync) may
+# have written to a remote service, so a lost outcome is never replayed for it.
+REPLAYABLE_JOB_TYPES = frozenset({"refresh", "activity_details", *BACKFILL_JOB_TYPES})
 _BACKFILL_PROVIDER_MESSAGES = {
     "historical_backfill": ("Historischer Backfill ist nur für Garmin zulässig."),
     WELLNESS_BACKFILL: "Der Wellness-Backfill ist nur für Garmin zulässig.",
@@ -198,7 +202,7 @@ _SETTLED_ITEMS = "status NOT IN ('completed', 'skipped')"
 # Only automatic requesters coalesce; an explicit user or coach request always
 # queues. A "backfill" continuation carries the next chunk's end_date cursor, so it
 # is never folded into another job: that would drop the cursor and stop the chain.
-_COALESCED_REQUESTERS = frozenset({"scheduler", "startup"})
+_COALESCED_REQUESTERS = frozenset({"scheduler", "startup", "connection"})
 _COALESCED_TYPES = frozenset({"refresh", *BACKFILL_JOB_TYPES})
 
 
@@ -708,14 +712,19 @@ class SyncJobStore:
         end_date: str,
         created_since: str,
         job_type: str = "historical_backfill",
+        exclude_job_id: str = "",
     ) -> bool:
-        """Report whether a backfill chain already continued to ``end_date``."""
+        """Report whether a backfill chain already continued to ``end_date``.
+
+        ``exclude_job_id`` is the job asking: a chunk that re-reads its own window
+        (a skipped file) names its own end day and must not count as its successor.
+        """
         with self._database_manager.reader() as db:
             row = db.execute(
                 "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? "
                 "AND requested_by='backfill' AND json_extract(payload, '$.end_date')=? "
-                "AND created_at>=? LIMIT 1",
-                (provider, job_type, end_date, created_since),
+                "AND created_at>=? AND id!=? LIMIT 1",
+                (provider, job_type, end_date, created_since, exclude_job_id),
             ).fetchone()
             return row is not None
 
@@ -802,27 +811,7 @@ class SyncJobStore:
     def resume_interrupted(self) -> int:
         now = self._now()
         with self._database_manager.unit_of_work() as db:
-            jobs = db.execute(
-                "SELECT id FROM sync_jobs WHERE status='running'"
-            ).fetchall()
-            for job in jobs:
-                self._transition(
-                    db,
-                    job["id"],
-                    "running",
-                    "queued",
-                    {
-                        "available_at": now,
-                        "started_at": None,
-                        "error_class": "process_interrupted",
-                        "updated_at": now,
-                    },
-                )
-                db.execute(
-                    "UPDATE sync_job_items SET status='queued', error_class='process_interrupted', "
-                    "error_detail=NULL, updated_at=? WHERE job_id=? AND status='running'",
-                    (now, job["id"]),
-                )
+            resumed = self._requeue_running(db, now)
             # Callers run before the workers start or under the drained restore
             # gate, so no competition sync can be in flight either.
             db.execute(
@@ -835,7 +824,57 @@ class SyncJobStore:
                 "WHERE key='competition_sync_status' AND value!=''",
                 (now,),
             )
-            return len(jobs)
+            return resumed
+
+    def requeue_unowned_running(self) -> int:
+        """Settle ``running`` jobs while the single worker is between claims.
+
+        Only the worker runs jobs and it calls this before each claim, so a row
+        still ``running`` then lost its outcome (a failed write). A read-only job
+        (``REPLAYABLE_JOB_TYPES``) runs again instead of blocking its provider's
+        scheduled work until a restart. A job that may have written to a remote
+        service, or that used up its attempts, is marked failed with
+        ``outcome_not_persisted`` and its open items fail with it: only the
+        athlete's explicit resolve runs it again. Returns how many jobs were settled.
+        """
+        with self._database_manager.reader() as db:
+            running = db.execute(
+                "SELECT id, type, attempts FROM sync_jobs WHERE status='running'"
+            ).fetchall()
+        failed = 0
+        for row in running:
+            if (
+                row["type"] not in REPLAYABLE_JOB_TYPES
+                or int(row["attempts"] or 0) >= SYNC_JOB_MAX_ATTEMPTS
+            ):
+                self.update(row["id"], "failed", "outcome_not_persisted")
+                failed += 1
+        if len(running) == failed:
+            return failed
+        with self._database_manager.unit_of_work() as db:
+            return failed + self._requeue_running(db, self._now())
+
+    def _requeue_running(self, db: Any, now: str) -> int:
+        jobs = db.execute("SELECT id FROM sync_jobs WHERE status='running'").fetchall()
+        for job in jobs:
+            self._transition(
+                db,
+                job["id"],
+                "running",
+                "queued",
+                {
+                    "available_at": now,
+                    "started_at": None,
+                    "error_class": "process_interrupted",
+                    "updated_at": now,
+                },
+            )
+            db.execute(
+                "UPDATE sync_job_items SET status='queued', error_class='process_interrupted', "
+                "error_detail=NULL, updated_at=? WHERE job_id=? AND status='running'",
+                (now, job["id"]),
+            )
+        return len(jobs)
 
     def claim(self) -> dict[str, Any] | None:
         """Claim the oldest due job; backfill jobs yield to all other work.

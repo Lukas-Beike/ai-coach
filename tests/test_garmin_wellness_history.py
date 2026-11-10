@@ -693,7 +693,12 @@ class _Queue:
         self.calls.append((args, kwargs))
 
     def backfill_continued(
-        self, provider: str, end_date: str, created_since: str, job_type: str
+        self,
+        provider: str,
+        end_date: str,
+        created_since: str,
+        job_type: str,
+        exclude_job_id: str = "",
     ) -> bool:
         return any(
             args[:2] == (provider, job_type) and args[2]["end_date"] == end_date
