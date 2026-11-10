@@ -23,6 +23,7 @@ class StructuredTurnTests(unittest.TestCase):
         self.attachments.load_for_receipt.return_value = ([], False, False)
         self.conversations = Mock()
         self.conversations.rotate.return_value = "synthetic-rotated-conversation"
+        self.conversations.bind_remote.return_value = "synthetic-remote-conversation"
         self.dialogue = Mock()
         self.dialogue.context.return_value = {"synthetic": True}
         self.payload = Mock()
@@ -182,6 +183,24 @@ class StructuredTurnTests(unittest.TestCase):
         self.run_turn()
 
         self.conversations.rotate.assert_not_called()
+        self.conversations.bind_remote.assert_called_once_with(
+            "synthetic-turn", "synthetic-conversation"
+        )
+        self.assertEqual(
+            self.payload.build.call_args.kwargs["conversation_id"],
+            "synthetic-remote-conversation",
+        )
+
+    def test_turn_without_attachment_context_never_creates_remote_conversation(
+        self,
+    ) -> None:
+        self.attachments.load_for_receipt.return_value = ([], False, False)
+
+        self.run_turn()
+
+        self.conversations.rotate.assert_not_called()
+        self.conversations.bind_remote.assert_not_called()
+        self.conversations.ensure.assert_not_called()
         self.assertEqual(
             self.payload.build.call_args.kwargs["conversation_id"],
             "synthetic-conversation",
@@ -198,7 +217,7 @@ class StructuredTurnTests(unittest.TestCase):
         )
         self.assertEqual(
             self.payload.build.call_args.kwargs["conversation_id"],
-            "synthetic-conversation",
+            "synthetic-remote-conversation",
         )
 
     def test_failure_persists_safe_receipt_without_session_key(self) -> None:

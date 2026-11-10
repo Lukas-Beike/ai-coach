@@ -19,6 +19,14 @@ class FakeHttpClient:
         return self.response
 
 
+class FakeProviderState:
+    def __init__(self):
+        self.usage = []
+
+    def record_usage(self, provider, response, operation):
+        self.usage.append((provider, response, operation))
+
+
 class AudioProviderTests(unittest.TestCase):
     def client(self, *, http_response=None, **kwargs):
         self.http = FakeHttpClient(http_response)
@@ -78,6 +86,29 @@ class AudioProviderTests(unittest.TestCase):
         self.assertIn(b"Content-Type: audio/webm", body)
         self.assertIn(b"Intervals.icu", body)
         self.assertIn(audio, body)
+
+    def test_transcription_records_usage_without_audio_or_transcript(self):
+        state = FakeProviderState()
+        usage = {"type": "tokens", "input_tokens": 12, "output_tokens": 3}
+        client = self.client(
+            http_response={"text": "Hallo", "usage": usage}, provider_state=state
+        )
+
+        client.transcribe(b"voice", "audio/webm")
+
+        self.assertEqual(len(state.usage), 1)
+        provider, response, operation = state.usage[0]
+        self.assertEqual((provider, operation), ("openai", "transcription"))
+        self.assertEqual(response["usage"], usage)
+        self.assertNotIn(b"voice", repr(state.usage).encode())
+
+    def test_transcription_without_usage_still_counts_the_request(self):
+        state = FakeProviderState()
+        client = self.client(http_response={"text": "Hallo"}, provider_state=state)
+
+        client.transcribe(b"voice", "audio/webm")
+
+        self.assertEqual([entry[2] for entry in state.usage], ["transcription"])
 
     def test_validation_precedes_provider_io_and_keeps_order(self):
         client = self.client()

@@ -114,7 +114,7 @@ class CoachReviewTests(unittest.TestCase):
                 server.COACH_CONVERSATION,
                 "provision_service",
                 return_value=Mock(
-                    ensure=Mock(return_value="summary-recovery-conversation")
+                    binding=Mock(return_value="summary-recovery-conversation")
                 ),
             ),
             patch(

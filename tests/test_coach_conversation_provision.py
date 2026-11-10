@@ -153,6 +153,45 @@ class CoachConversationProvisionTests(unittest.TestCase):
             yield self._service(lock)
         self.assertEqual(transaction_depth, 0)
 
+    def test_binding_is_local_per_chat_generation_without_provider_call(self):
+        self.assertEqual(self.service.binding(), "local-initial")
+        self.save("chat_generation", "gen-two")
+
+        self.assertEqual(self.service.binding(), "local-gen-two")
+        self.openai.request.assert_not_called()
+        self.assertIsNone(self.stored("openai_conversation_id"))
+
+    def test_binding_prefers_the_stored_remote_conversation(self):
+        self.save("openai_conversation_id", "conv-existing")
+
+        self.assertEqual(self.service.binding(), "conv-existing")
+        self.openai.request.assert_not_called()
+
+    def test_bind_remote_creates_conversation_and_rebinds_the_turn(self):
+        self._command("turn-1", "local-initial")
+        self.openai.request.return_value = {"id": "conv-created"}
+
+        self.assertEqual(
+            self.service.bind_remote("turn-1", "local-initial"), "conv-created"
+        )
+
+        self.assertEqual(self.stored("openai_conversation_id"), "conv-created")
+        self.assertEqual(self._receipt_flag("turn-1"), (None, "conv-created"))
+
+    def test_bind_remote_keeps_a_remote_binding_without_provider_call(self):
+        self.assertEqual(self.service.bind_remote("turn-1", "conv-old"), "conv-old")
+        self.openai.request.assert_not_called()
+
+    def test_rotate_from_local_binding_creates_remote_without_deleting(self):
+        self._command("turn-1", "local-initial")
+        self.openai.request.return_value = {"id": "conv-new"}
+
+        self.assertEqual(self.service.rotate("turn-1", "local-initial"), "conv-new")
+
+        self.openai.delete_conversation.assert_not_called()
+        self.assertEqual(self.stored("openai_conversation_id"), "conv-new")
+        self.assertEqual(self._receipt_flag("turn-1"), (1, "conv-new"))
+
     def test_rotate_keeps_unused_conversation_without_provider_call(self):
         self.save("openai_conversation_id", "conv-current")
         self._command("turn-1", "conv-current")

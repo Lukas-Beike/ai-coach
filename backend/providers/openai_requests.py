@@ -319,16 +319,41 @@ class OpenAIResponsesClient:
             request_payload,
             **request_kwargs,  # type: ignore[arg-type]
         )
-        result = self.provider_state.validate_openai_response(path, result)
-        if not isinstance(result, dict):
-            raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
-        if not (
+        background_start = (
             path == self.responses_path and request_payload.get("background") is True
-        ):
-            self.provider_state.record_usage(
-                "openai", result, path.strip("/") or "request"
-            )
+        )
+        operation = (
+            "responses_background" if background_start else path.strip("/") or "request"
+        )
+        result = self._validated(path, result, operation)
+        if not background_start:
+            self.provider_state.record_usage("openai", result, operation)
         return result
+
+    def _validated(self, path: str, result: Any, operation: str) -> dict[str, Any]:
+        """Validate a decoded response, billing the usage of a failed one first."""
+        try:
+            validated = self.provider_state.validate_openai_response(path, result)
+        except AppError as exc:
+            if exc.reason != "invalid_response":
+                self._record_terminal_usage(result, operation)
+            raise
+        if not isinstance(validated, dict):
+            raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
+        return validated
+
+    def _record_terminal_usage(self, result: Any, operation: str) -> None:
+        """Record usage carried by a failed, cancelled, or incomplete response body."""
+        if isinstance(result, dict):
+            self.provider_state.record_usage("openai", result, operation)
+
+    def _record_final_usage(self, active_response_id: str) -> None:
+        """Retrieve a cancelled or timed-out response once and record its usage."""
+        try:
+            result = self._get_response(active_response_id)
+        except Exception:  # noqa: BLE001 - usage lookup is best effort
+            return
+        self._record_terminal_usage(result, "responses_background")
 
     def request(self, path: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Send one OpenAI JSON request and observe its response."""
@@ -347,9 +372,13 @@ class OpenAIResponsesClient:
 
     def retrieve(self, response_id: str) -> dict[str, Any]:
         """Retrieve one background response without exposing its identifier."""
+        result = self._get_response(response_id)
+        return self._validated(self.responses_path, result, "responses_background")
+
+    def _get_response(self, response_id: str) -> Any:
         self._require_api_key()
         normalized_id = _validate_response_id(response_id)
-        result = self.http_client.request(
+        return self.http_client.request(
             "GET",
             endpoint(
                 self.base_url,
@@ -360,12 +389,6 @@ class OpenAIResponsesClient:
             timeout=self.response_timeout_seconds,
             service="openai",
         )
-        result = self.provider_state.validate_openai_response(
-            self.responses_path, result
-        )
-        if not isinstance(result, dict):
-            raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
-        return result
 
     def cancel(self, response_id: str) -> None:
         """Best-effort cancellation for an active background response."""
@@ -437,21 +460,22 @@ class OpenAIResponsesClient:
         remaining_seconds = max(
             0.0, self.background_max_seconds - (self.monotonic() - started)
         )
-        current = poll_background_response(
-            {**current, "id": active_response_id},
-            retrieve=self.retrieve,
-            cancel=self.cancel,
-            cancel_event=cancel_event,
-            poll_seconds=self.background_poll_seconds,
-            max_seconds=remaining_seconds,
-            monotonic=self.monotonic,
-            wait=self.wait,
-        )
-        current = self.provider_state.validate_openai_response(
-            self.responses_path, current
-        )
-        if not isinstance(current, dict):
-            raise AppError(502, OPENAI_UNEXPECTED_RESPONSE_MESSAGE)
+        try:
+            current = poll_background_response(
+                {**current, "id": active_response_id},
+                retrieve=self.retrieve,
+                cancel=self.cancel,
+                cancel_event=cancel_event,
+                poll_seconds=self.background_poll_seconds,
+                max_seconds=remaining_seconds,
+                monotonic=self.monotonic,
+                wait=self.wait,
+            )
+        except AppError as exc:
+            if exc.reason in {"chat_cancelled", "background_budget_exceeded"}:
+                self._record_final_usage(active_response_id)
+            raise
+        current = self._validated(self.responses_path, current, "responses_background")
         self.provider_state.record_usage("openai", current, "responses_background")
         return current
 

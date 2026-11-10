@@ -112,6 +112,10 @@ class CoachStructuredTurnService:
                 client_turn_id, conversation_id
             )
             receipt["openai_conversation_rotated"] = True
+        elif retain_openai_attachment_context:
+            conversation_id = self._deps.conversations.bind_remote(
+                client_turn_id, conversation_id
+            )
         background_owned = background_job and receipt.get("mode") == "background"
         context = self._deps.dialogue.context(client_turn_id)
         self._deps.attachments.add_evidence(context)

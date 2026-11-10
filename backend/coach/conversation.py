@@ -47,6 +47,11 @@ PRIOR_OPENAI_ATTACHMENT_QUERY = (
 CONVERSATION_IN_USE_QUERY = (
     "SELECT 1 FROM coach_commands WHERE conversation_id=? AND client_turn_id!=? LIMIT 1"
 )
+BIND_CONVERSATION_QUERY = (
+    "UPDATE coach_commands SET conversation_id=? WHERE client_turn_id=?"
+)
+# Prefix of the locally generated binding id used until a turn needs OpenAI state.
+LOCAL_BINDING_PREFIX = "local-"
 MARK_CONVERSATION_ROTATED_QUERY = (
     "UPDATE coach_commands SET receipt=json_set(receipt, "
     "'$.openai_conversation_rotated', json('true')) WHERE client_turn_id=?"
@@ -253,6 +258,30 @@ class CoachConversationProvisionService:
             raise AppError(502, "OpenAI hat keine Konversations-ID zurückgegeben.")
         return conversation_id
 
+    @staticmethod
+    def is_local_binding(conversation_id: str) -> bool:
+        return conversation_id.startswith(LOCAL_BINDING_PREFIX)
+
+    def binding(self) -> str:
+        """Return the id that scopes proposals and plan artifacts to this chat.
+
+        The remote conversation is only created for attachment turns, so without
+        one the binding is derived from the local chat generation.
+        """
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            existing = self._key_values.get(db, "openai_conversation_id")
+            generation = self._key_values.get(db, "chat_generation") or "initial"
+        return existing or LOCAL_BINDING_PREFIX + generation
+
+    def bind_remote(self, client_turn_id: str, current_conversation_id: str) -> str:
+        """Replace a local binding with the remote conversation for this turn."""
+        if not self.is_local_binding(current_conversation_id):
+            return current_conversation_id
+        remote_id = self.ensure()
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            db.execute(BIND_CONVERSATION_QUERY, (remote_id, client_turn_id))
+        return remote_id
+
     def ensure(self) -> str:
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._key_values.get(db, "openai_conversation_id")
@@ -269,6 +298,11 @@ class CoachConversationProvisionService:
         An unused conversation is kept and only flagged. A used one is replaced
         and deleted remotely in the background; the flag makes resumes idempotent.
         """
+        if self.is_local_binding(current_conversation_id):
+            remote_id = self.ensure()
+            with self._db_lock, self._database_manager.unit_of_work() as db:
+                db.execute(ROTATE_CONVERSATION_QUERY, (remote_id, client_turn_id))
+            return remote_id
         with self._db_lock, self._database_manager.unit_of_work() as db:
             in_use = db.execute(
                 CONVERSATION_IN_USE_QUERY, (current_conversation_id, client_turn_id)
