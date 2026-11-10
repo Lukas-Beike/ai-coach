@@ -57,6 +57,7 @@ class MetricExportRunner:
         # Guarded by _lock: True from start until the thread decided to exit.
         self._active = False
         self._rerun = False
+        self._thread: threading.Thread | None = None
 
     def request(self) -> None:
         """Start a delayed run, or ask the active thread for one more."""
@@ -71,9 +72,10 @@ class MetricExportRunner:
                 return
             self._active = True
             self._rerun = False
-            self._thread_factory(
+            self._thread = self._thread_factory(
                 target=self._run_loop, name="metric-export", daemon=True
-            ).start()
+            )
+            self._thread.start()
 
     def after_job(self, job: Mapping[str, Any]) -> None:
         """A sync-job hook: a successful Wahoo sync can change the resolved FTP."""
@@ -86,6 +88,13 @@ class MetricExportRunner:
     def stop(self) -> None:
         """Cancel a pending run; an active run finishes its current write."""
         self._stop_event.set()
+
+    def join(self, timeout: float | None = None) -> None:
+        """Wait for the run thread to end; call after stop()."""
+        with self._lock:
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
 
     @staticmethod
     def _log_failure(exc: Exception) -> None:
