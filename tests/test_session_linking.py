@@ -467,6 +467,226 @@ class ProtectedSessionTests(LinkingCase):
         self.assertEqual(self._sessions()[WAHOO_ID]["state"], "duplicate")
 
 
+def _states(sessions: dict[str, dict[str, Any]]) -> dict[str, str]:
+    return {key: row["state"] for key, row in sessions.items()}
+
+
+def _yoga_workout() -> dict[str, Any]:
+    return wahoo_workout(
+        workout_type_id=66, workout_summary={"duration_active_accum": "3600"}
+    )
+
+
+class AllSportsBundlingTests(LinkingCase):
+    """A Garmin and a Wahoo copy of one session bundle whatever the sport."""
+
+    def _assert_bundled(
+        self, garmin_rows: list[dict[str, Any]], wahoo_rows: list[dict[str, Any]]
+    ) -> None:
+        self._ingest_garmin(garmin_rows, FIRST)
+        counters = self._ingest_wahoo(wahoo_rows, SECOND)
+        self.assertEqual(counters.linked, 1)
+        sessions = self._sessions()
+        self.assertEqual(
+            _states(sessions), {GARMIN_ID: "active", WAHOO_ID: "duplicate"}
+        )
+        self.assertEqual(
+            sessions[WAHOO_ID]["merged_into"], sessions[GARMIN_ID]["activity_id"]
+        )
+
+    def test_a_run_recorded_twice_is_one_session(self) -> None:
+        self._assert_bundled(
+            [garmin_ride(activityType={"typeKey": "running"}, distance=10000.0)],
+            [
+                wahoo_workout(
+                    workout_type_id=1,
+                    workout_summary={
+                        "duration_active_accum": "3600",
+                        "distance_accum": "10050",
+                    },
+                )
+            ],
+        )
+
+    def test_a_walk_recorded_twice_is_one_session(self) -> None:
+        self._assert_bundled(
+            [garmin_ride(activityType={"typeKey": "walking"}, distance=4000.0)],
+            [
+                wahoo_workout(
+                    workout_type_id=6,
+                    workout_summary={
+                        "duration_active_accum": "3600",
+                        "distance_accum": "4020",
+                    },
+                )
+            ],
+        )
+
+    def test_a_yoga_session_without_distance_is_one_session(self) -> None:
+        self._assert_bundled(
+            [garmin_ride(activityType={"typeKey": "yoga"}, distance=None)],
+            [_yoga_workout()],
+        )
+
+    def test_an_indoor_ride_without_garmin_distance_is_one_session(self) -> None:
+        self._assert_bundled(
+            [garmin_ride(activityType={"typeKey": "indoor_cycling"}, distance=0.0)],
+            [
+                wahoo_workout(
+                    workout_type_id=12,
+                    workout_summary={
+                        "duration_active_accum": "3600",
+                        "distance_accum": "25000",
+                    },
+                )
+            ],
+        )
+
+    def test_a_ride_with_a_stop_and_elapsed_only_garmin_time_is_one_session(
+        self,
+    ) -> None:
+        # Garmin sends only the 3900 s elapsed time; Wahoo moved for 3300 s.
+        self._assert_bundled(
+            [garmin_ride(duration=3900.0)],
+            [
+                wahoo_workout(
+                    workout_summary={
+                        "duration_active_accum": "3300",
+                        "duration_total_accum": "3900",
+                        "distance_accum": "30100",
+                    }
+                )
+            ],
+        )
+
+    def test_a_watch_recording_and_a_relayed_copy_join_the_wahoo_ride(self) -> None:
+        self._ingest_wahoo([wahoo_workout()], FIRST)
+        self._ingest_garmin(
+            [
+                garmin_ride("9001", manufacturer="WAHOO_FITNESS"),
+                garmin_ride(
+                    "9002",
+                    manufacturer="GARMIN",
+                    startTimeLocal="2026-09-10 07:01:00",
+                    duration=3700.0,
+                ),
+            ],
+            SECOND,
+        )
+        self.assertEqual(
+            _states(self._sessions()),
+            {WAHOO_ID: "active", "9001": "duplicate", "9002": "duplicate"},
+        )
+
+    def test_a_run_and_a_yoga_session_stay_two_sessions(self) -> None:
+        self._ingest_garmin(
+            [garmin_ride(activityType={"typeKey": "running"}, distance=None)], FIRST
+        )
+        self._ingest_wahoo([_yoga_workout()], SECOND)
+        self.assertEqual(
+            _states(self._sessions()), {GARMIN_ID: "active", WAHOO_ID: "active"}
+        )
+
+    def test_two_separate_sessions_on_one_day_stay_apart(self) -> None:
+        self._ingest_garmin(
+            [
+                garmin_ride(activityType={"typeKey": "yoga"}, distance=None),
+                garmin_ride(
+                    "9002",
+                    activityType={"typeKey": "yoga"},
+                    distance=None,
+                    startTimeLocal="2026-09-10 15:00:00",
+                ),
+            ],
+            FIRST,
+        )
+        self._ingest_wahoo([_yoga_workout()], SECOND)
+        sessions = self._sessions()
+        self.assertEqual(
+            _states(sessions),
+            {GARMIN_ID: "active", "9002": "active", WAHOO_ID: "duplicate"},
+        )
+        self.assertEqual(
+            sessions[WAHOO_ID]["merged_into"], sessions[GARMIN_ID]["activity_id"]
+        )
+
+
+class ConfirmedBundleRevivalTests(LinkingCase):
+    def _confirmed_bundle(self) -> None:
+        self._ingest_garmin([garmin_ride()], FIRST)
+        self._ingest_wahoo([wahoo_workout()], SECOND)
+        self._set_session(GARMIN_ID, athlete_confirmed=1, link_kind="confirmed")
+
+    def _delete_garmin(self) -> None:
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                ProviderId.GARMIN.value,
+                record_kind=ACTIVITY_RECORD_KIND,
+                provider_activity_id=GARMIN_ID,
+                now=THIRD.isoformat(),
+            )
+
+    def test_a_confirmed_survivor_deleted_and_redelivered_stays_one_session(
+        self,
+    ) -> None:
+        self._confirmed_bundle()
+        self._delete_garmin()
+        after_delete = self._sessions()
+        self.assertEqual(after_delete[WAHOO_ID]["state"], "active")
+        self.assertEqual(after_delete[WAHOO_ID]["athlete_confirmed"], 1)
+        self._ingest_garmin([garmin_ride(duration=3601.0)], LATER)
+        sessions = self._sessions()
+        self.assertEqual(
+            _states(sessions), {GARMIN_ID: "duplicate", WAHOO_ID: "active"}
+        )
+        self.assertEqual(
+            sessions[GARMIN_ID]["merged_into"], sessions[WAHOO_ID]["activity_id"]
+        )
+        self.assertEqual(sessions[GARMIN_ID]["athlete_confirmed"], 0)
+        self.assertEqual(sessions[WAHOO_ID]["athlete_confirmed"], 1)
+
+    def test_a_second_redelivery_changes_nothing(self) -> None:
+        self._confirmed_bundle()
+        self._delete_garmin()
+        self._ingest_garmin([garmin_ride(duration=3601.0)], LATER)
+        before = self._snapshot()
+        self._ingest_garmin([garmin_ride(duration=3601.0)], LATER)
+        self.assertEqual(self._snapshot(), before)
+
+    def test_an_unconfirmed_bundle_is_one_session_after_a_redelivery(self) -> None:
+        self._ingest_garmin([garmin_ride()], FIRST)
+        self._ingest_wahoo([wahoo_workout()], SECOND)
+        self._delete_garmin()
+        self._ingest_garmin([garmin_ride(duration=3601.0)], LATER)
+        self.assertEqual(
+            _states(self._sessions()), {GARMIN_ID: "duplicate", WAHOO_ID: "active"}
+        )
+
+    def test_a_revived_copy_that_no_longer_matches_an_unconfirmed_bundle_splits(
+        self,
+    ) -> None:
+        self._ingest_garmin([garmin_ride()], FIRST)
+        self._ingest_wahoo([wahoo_workout()], SECOND)
+        self._delete_garmin()
+        self._ingest_garmin([garmin_ride(startTimeLocal="2026-09-10 15:00:00")], LATER)
+        self.assertEqual(
+            _states(self._sessions()), {GARMIN_ID: "active", WAHOO_ID: "active"}
+        )
+
+    def test_a_session_the_athlete_deleted_stays_deleted_on_redelivery(self) -> None:
+        self._ingest_garmin([garmin_ride()], FIRST)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_sessions SET state = 'deleted', "
+                "merged_into_retained = activity_id "
+                "WHERE primary_provider_activity_id = ?",
+                (GARMIN_ID,),
+            )
+        self._ingest_garmin([garmin_ride(duration=3601.0)], LATER)
+        self.assertEqual(self._sessions()[GARMIN_ID]["state"], "deleted")
+
+
 class ExactLinkTests(LinkingCase):
     def _garmin_copy(self, external_id: str, **fields: Any) -> dict[str, Any]:
         return intervals_ride(

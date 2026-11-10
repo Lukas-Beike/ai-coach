@@ -716,12 +716,14 @@ def sensor_uses(db: Any) -> list[SensorUse]:
     """Return the sensor lists of every live session's stream sets, oldest first.
 
     Records of one session that name the same sensors are separate entries; the
-    registry de-duplicates by sensor key. Rows with an unreadable start or
-    sensor list are skipped.
+    registry de-duplicates by sensor key. A merged alias reports the session it
+    is merged into, so a bundled activity counts once for a sensor. Rows with an
+    unreadable start or sensor list are skipped.
     """
     uses: list[SensorUse] = []
     for row in db.execute(
-        "SELECT r.activity_id AS session_id, r.sport, r.started_at, d.sensors "
+        "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE r.activity_id END "
+        "AS session_id, r.sport, r.started_at, d.sensors "
         "FROM activity_detail_sets AS d "
         "JOIN activity_records AS r ON r.provider = d.provider "
         "AND r.provider_activity_id = d.provider_activity_id "
@@ -729,6 +731,7 @@ def sensor_uses(db: Any) -> list[SensorUse]:
         "WHERE d.detail_kind = ? AND d.sensors IS NOT NULL AND r.state = ? "
         "AND s.state <> ? ORDER BY julianday(r.started_at), r.provider_activity_id",
         (
+            ActivitySessionState.DUPLICATE.value,
             ActivityDetailKind.STREAMS.value,
             ActivityRecordState.ACTIVE.value,
             ActivitySessionState.DELETED.value,
