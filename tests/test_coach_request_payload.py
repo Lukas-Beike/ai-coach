@@ -114,6 +114,27 @@ class CoachRequestPayloadTests(unittest.TestCase):
         self.assertIn("dialogue", json.loads(payload["input"]))
         self.assertIn("Earlier image pixels are unavailable", payload["instructions"])
 
+    def test_only_current_turn_attachments_select_nutrition_context(self) -> None:
+        attachment = {
+            "type": "image",
+            "name": "synthetic.png",
+            "mime": "image/png",
+            "data": "AAAA",
+        }
+        for message in (
+            "Synchronisiere den Plan",
+            "Analysiere meine letzte Einheit",
+            "Was trainiere ich heute?",
+        ):
+            with self.subTest(message=message):
+                self.build(message=message, has_prior_openai_attachments=True)
+                prior = self.training_context.build.call_args.kwargs["selection"]
+                self.assertNotIn("nutrition_products", prior.sections)
+                self.assertNotEqual("attachment_analysis", prior.name)
+                self.build(message=message, attachments=[attachment])
+                current = self.training_context.build.call_args.kwargs["selection"]
+                self.assertIn("nutrition_products", current.sections)
+
     def test_request_size_log_reports_attachment_mode_without_content(self) -> None:
         cases = (
             ({"retain_openai_attachment_context": True}, "retained"),
