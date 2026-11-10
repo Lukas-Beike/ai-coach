@@ -1105,12 +1105,18 @@ class Execution:
             pool.shutdown(wait=True, cancel_futures=True)
 
 
+def worktree_image_tag(root):
+    """App image tag of one checkout, so parallel worktrees keep their own build."""
+    digest = hashlib.sha256(str(Path(root).resolve()).encode()).hexdigest()
+    return f"pacecraft:e2e-{digest[:8]}"
+
+
 def parser():
     result = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     result.add_argument(
-        "--project", required=True, help="exact configured project name, or all"
+        "--project", help="exact configured project name, or all (required)"
     )
     result.add_argument(
         "--spec",
@@ -1129,8 +1135,11 @@ def parser():
     )
     result.add_argument(
         "--image",
-        default="pacecraft:e2e",
-        help="already-built current-source app image",
+        default=worktree_image_tag(ROOT),
+        help="already-built current-source app image (default: one tag per checkout)",
+    )
+    result.add_argument(
+        "--print-image", action="store_true", help="print the image tag and exit"
     )
     result.add_argument(
         "--browser-image",
@@ -1182,6 +1191,11 @@ def source_hashes(root, durations):
 
 def main(argv=None):
     args = parser().parse_args(argv)
+    if args.print_image:
+        print(args.image)
+        return 0
+    if not args.project:
+        parser().error("--project is required")
     run_id = uuid.uuid4().hex
     args.results_dir = args.results_dir.resolve()
     directory = args.results_dir / run_id

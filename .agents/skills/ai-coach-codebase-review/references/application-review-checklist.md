@@ -103,7 +103,7 @@ Use this as a coverage map, not as a request to manufacture one finding per sect
 
 ## 13. PWA, service worker, and offline behavior
 
-- Compare every referenced frontend asset, query version, cache name, and precache entry. Installed clients must receive changed assets without a mixed-version shell.
+- Compare every stamped frontend asset reference, cache name, and precache entry of the served output; sources carry no versions. Installed clients must receive changed assets without a mixed-version shell.
 - Verify API/auth/private responses are not cached; inspect cache keys, scope, first activation, offline fallback, failed fetches, and navigation.
 - Check manifest metadata, icons, start URL, display mode, install/update UX, notification click handling, and HTTPS expectations.
 - Review failure modes when an old tab, new service worker, and changed API contract coexist.

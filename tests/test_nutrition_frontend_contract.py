@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from backend.http_api.static_assets import StaticAssetService
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -72,10 +74,9 @@ class NutritionFrontendContractTests(unittest.TestCase):
             self.assertIn(selector, index)
 
     def test_camera_and_product_assets_are_versioned_in_pwa_cache(self):
-        index = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
-        service_worker = (ROOT / "public" / "service-worker.js").read_text(
-            encoding="utf-8"
-        )
+        service = StaticAssetService(ROOT / "public")
+        index = service.stamped("index.html").decode("utf-8")
+        service_worker = service.stamped("service-worker.js").decode("utf-8")
         self.assertIn("/nutrition.js?v=", index)
         self.assertIn("/nutrition.js?v=", service_worker)
         self.assertIn("/app.js?v=", index)
