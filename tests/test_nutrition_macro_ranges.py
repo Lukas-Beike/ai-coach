@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 from unittest.mock import Mock
 
 from backend.nutrition.macro_context import macro_context
@@ -108,14 +109,34 @@ class MacroRangeTests(unittest.TestCase):
         performance = Mock()
         performance.performance_state.return_value = {"performance": {"metrics": {}}}
         plan = Mock()
-        plan.read_public.side_effect = RuntimeError("unavailable")
+        plan.read_training_day.side_effect = RuntimeError("unavailable")
         profile = Mock()
         profile.get.return_value = {"weight_kg": "90"}
         with self.assertLogs("intervals_coach", level="WARNING"):
             self.assertEqual(
                 (90, None),
-                macro_context(lambda: performance, lambda: plan, lambda: profile),
+                macro_context(
+                    lambda: performance, lambda: plan, lambda: profile, "2026-11-02"
+                ),
             )
+
+    def test_context_reads_only_the_requested_day_not_the_full_plan(self):
+        performance = Mock()
+        performance.performance_state.return_value = {
+            "performance": {"metrics": {"weight_kg": {"value": 90}}}
+        }
+        plan = Mock()
+        plan.read_training_day.return_value = [self.workout(120)]
+        weight, calendar = macro_context(
+            lambda: performance, lambda: plan, lambda: Mock(), "2026-11-02"
+        )
+        self.assertEqual(90, weight)
+        plan.read_training_day.assert_called_once_with(date(2026, 11, 2))
+        plan.read_public.assert_not_called()
+        plan.read.assert_not_called()
+        self.assertEqual(
+            (540, 900), macro_ranges(weight, calendar, "2026-11-02", 2700)["carbs_g"]
+        )
 
 
 if __name__ == "__main__":

@@ -275,6 +275,11 @@ class NutritionDiaryService:
             if "components" in payload
             else None
         )
+        calculation = (
+            self._meal_library.food_database.calculate(payload["food_ingredients"])
+            if "food_ingredients" in payload and "components" not in payload
+            else None
+        )
         with self._db_lock, self._database_manager.unit_of_work() as db:
             existing = self._nutrition_repository.get(db, clean_id)
             if not existing:
@@ -292,7 +297,9 @@ class NutritionDiaryService:
                 }
                 prepared.pop("components", None)
             else:
-                prepared = self._meal_library.prepare_values(merged_payload)
+                prepared = self._meal_library.prepare_values(
+                    merged_payload, calculation
+                )
             entry = normalize_nutrition_entry(
                 prepared, local_now_factory=self._local_now
             )

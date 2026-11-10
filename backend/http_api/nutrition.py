@@ -31,7 +31,7 @@ class NutritionGetRoutes:
         diary_service: Callable[[], NutritionDiaryService],
         meal_library_service: Callable[[], NutritionMealLibraryService],
         local_now: Callable[[], datetime],
-        macro_context: Callable[[], tuple[Any, Any]] | None = None,
+        macro_context: Callable[[str], tuple[Any, Any]] | None = None,
     ) -> None:
         self._session_auth_service = session_auth_service
         self._diary_service = diary_service
@@ -44,7 +44,7 @@ class NutritionGetRoutes:
         if self._macro_context is None:
             return summary
         try:
-            weight, calendar = self._macro_context()
+            weight, calendar = self._macro_context(date_param)
         except AppError, OSError, RuntimeError, ValueError:
             logging.getLogger("intervals_coach").warning(
                 "Nutrition reference data unavailable"

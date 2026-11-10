@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Final
 
 from backend.activities.activity_summary import ActivitySummary
@@ -38,6 +39,10 @@ class ActivitySummarySource:
                 return self.read(own)
         coverage = None if self.coverage is None else self.coverage()
         return self.compact(db), activities_synced_at(coverage, db)
+
+    def between(self, db: Any, start: date, end: date) -> list[ActivitySummary]:
+        """Return the summaries of the days ``start`` to ``end``, newest first."""
+        return list(self.reader().activity_summaries(db, start=start, end=end))
 
     def compact(self, db: Any | None = None) -> list[ActivitySummary]:
         """Return the newest ``RECENT_ACTIVITY_LIMIT`` summaries, newest first.

@@ -144,7 +144,13 @@ class NutritionMealLibraryService:
     ) -> dict[str, Any]:
         return self._component_calculator.calculate(db, components, resolutions)
 
-    def prepare_values(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def prepare_values(
+        self,
+        payload: dict[str, Any],
+        calculation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Normalize nutrient values; pass a precomputed food calculation to
+        keep network lookups outside the caller's database lock."""
         packaging_label = payload.get("packaging_label") is True
         payload = {
             key: value
@@ -152,10 +158,9 @@ class NutritionMealLibraryService:
             if key not in {"nutrition_basis", "packaging_label"}
         }
         if "food_ingredients" in payload:
-            return {
-                **payload,
-                **self.food_database.calculate(payload["food_ingredients"]),
-            }
+            if calculation is None:
+                calculation = self.food_database.calculate(payload["food_ingredients"])
+            return {**payload, **calculation}
         if packaging_label:
             kind = "packaging_label"
         elif payload.get("source") in {"coach", "photo", "voice"}:
@@ -193,6 +198,11 @@ class NutritionMealLibraryService:
             if "components" in payload
             else None
         )
+        calculation = (
+            self.food_database.calculate(payload["food_ingredients"])
+            if "food_ingredients" in payload and "components" not in payload
+            else None
+        )
         with self._db_lock, self._database_manager.unit_of_work() as db:
             if "components" in payload:
                 validate_component_payload(payload)
@@ -204,7 +214,7 @@ class NutritionMealLibraryService:
                 }
                 prepared.pop("components", None)
             elif "food_ingredients" in payload:
-                prepared = self.prepare_values(payload)
+                prepared = self.prepare_values(payload, calculation)
             if expected_calculation is not None and any(
                 prepared.get(key) != value
                 for key, value in expected_calculation.items()

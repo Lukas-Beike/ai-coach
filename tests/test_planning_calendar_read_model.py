@@ -8,9 +8,12 @@ from datetime import date, timedelta
 
 from zone_settings_reference import canonical_sport_inputs
 
+from backend.canonical.public_metrics import neutral_calendar_entries
+from backend.nutrition.macro_ranges import macro_ranges
 from backend.planning.calendar_read_model import (
     planned_unit_conflicts,
     project_planning_calendar,
+    project_training_day,
 )
 
 
@@ -486,6 +489,95 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
         # use the 250 W ride FTP (190 W is 76 % of it).
         self.assertEqual(3, zones["Trainer"])
         self.assertEqual(3, zones["Road"])
+
+
+class TrainingDayProjectionTests(unittest.TestCase):
+    """The day projection feeds the macro ranges the full calendar once did."""
+
+    TODAY = date(2026, 11, 4)
+
+    @staticmethod
+    def _planned(day, name, description, minutes, **extra):
+        return {
+            "id": f"unit-{name}",
+            "date": day,
+            "starts_at_local": f"{day}T07:00:00",
+            "name": name,
+            "type": "Ride",
+            "description": description,
+            "planned_duration_s": minutes * 60,
+            **extra,
+        }
+
+    def _fixture(self):
+        planned = [
+            # Two units on the day: one long easy, one with a high-intensity block.
+            self._planned("2026-11-02", "long", "- 90m Z2", 90),
+            self._planned("2026-11-02", "hard", "- 30m Z2\n- 15m Z4", 45),
+            # Completed the next day by a paired activity.
+            self._planned("2026-11-01", "shifted", "- 60m Z2", 60),
+            # A past unit with no activity is missed and counts nowhere.
+            self._planned("2026-10-31", "missed", "- 120m Z2", 120),
+            # An upcoming unit without a profile.
+            self._planned("2026-11-06", "later", "", 60),
+        ]
+        activities = [
+            {
+                "id": "act-shifted",
+                "planned_event_id": "unit-shifted",
+                "started_at_local": "2026-11-02T18:00:00",
+                "sport": "ride",
+                "moving_duration_s": 7200,
+                "heart_rate_zone_times": [{"id": "Z2", "secs": 7200}],
+            },
+            {
+                "id": "act-run",
+                "started_at_local": "2026-11-03T06:00:00",
+                "sport": "run",
+                "moving_duration_s": 3000,
+                "power_zone_times": [{"id": "Z4", "secs": 900}],
+            },
+        ]
+        return planned, activities
+
+    def test_day_ranges_equal_the_full_calendar_ranges(self) -> None:
+        planned, activities = self._fixture()
+        full = project_planning_calendar(
+            copy.deepcopy(planned),
+            copy.deepcopy(activities),
+            {},
+            [],
+            [],
+            today=self.TODAY,
+            provider_window={},
+            default_name="Planned workout",
+        )["training_calendar"]
+        days = [date(2026, 10, 31) + timedelta(days=offset) for offset in range(8)]
+        seen = set()
+        for day in days:
+            window = {
+                (day + timedelta(days=offset)).isoformat() for offset in (-1, 0, 1)
+            }
+            day_planned = [row for row in planned if row["date"] in window]
+            day_activities = [
+                row for row in activities if row["started_at_local"][:10] in window
+            ]
+            narrow = project_training_day(
+                copy.deepcopy(day_planned),
+                copy.deepcopy(day_activities),
+                today=self.TODAY,
+            )
+            with self.subTest(day=day.isoformat()):
+                old = macro_ranges(
+                    90, neutral_calendar_entries(full), day.isoformat(), 2700
+                )
+                new = macro_ranges(
+                    90, neutral_calendar_entries(narrow), day.isoformat(), 2700
+                )
+                self.assertEqual(old, new)
+                seen.add(old["carbs_g"])
+        # The fixture exercises light, moderate and hard days, not one range.
+        self.assertEqual({(270, 450), (450, 630), (540, 900)}, seen)
 
 
 if __name__ == "__main__":
