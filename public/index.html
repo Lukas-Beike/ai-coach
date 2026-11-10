@@ -286,6 +286,7 @@
               <label id="zoneMaximumField" hidden>Maximale Herzfrequenz (bpm)<input id="zoneMaximum" type="number" min="1" step="any"></label>
             </div>
             <label><span id="zoneLimitsLabel">Zonenobergrenzen (% der FTP)</span><input id="zoneLimits" inputmode="decimal" autocomplete="off" required></label>
+            <div class="form-grid"><label>Gilt ab<input id="zoneValidFrom" type="date" required></label><label id="zoneFromBeginningField" class="chip" hidden><input id="zoneFromBeginning" type="checkbox"><span>Gilt von Anfang an</span></label></div>
             <div class="settings-inline-action"><button id="zoneSaveButton" type="submit" class="secondary-button">Lokal speichern</button><button id="zoneRemoveButton" type="button" class="secondary-button danger-button" hidden>Lokale Zonen entfernen</button></div>
             <p id="zoneReceipt" class="fine-print settings-message" aria-live="polite" hidden></p>
           </form>

@@ -90,6 +90,7 @@ $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings
 $('details[data-more-segment-panel="connections"]').addEventListener("toggle", (event) => { if (event.currentTarget.open) { void loadYazioStatus(); void loadProviderChecks(); } });
 $("#zoneSettings").addEventListener("toggle", (event) => { if (event.currentTarget.open) void loadZones(); });
 ["#zoneSport", "#zoneMetric", "#zoneEnvironment"].forEach((selector) => $(selector).addEventListener("change", renderZoneEditor));
+$("#zoneFromBeginning").addEventListener("change", toggleZoneFromBeginning);
 $("#zoneForm").addEventListener("submit", saveZones);
 $("#zoneRemoveButton").addEventListener("click", removeZones);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
