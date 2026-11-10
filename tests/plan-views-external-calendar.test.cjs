@@ -6,7 +6,7 @@ const { test } = require("node:test");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/plan-views.js"), "utf8");
 const start = source.indexOf("function externalCalendarDetail");
-const end = source.indexOf("function renderExternalCalendar", start);
+const end = source.indexOf("function stripCalendarMarkers", start);
 const context = vm.createContext({});
 vm.runInContext(source.slice(start, end) + ";globalThis.detail = externalCalendarDetail;", context);
 

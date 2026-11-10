@@ -410,13 +410,14 @@ def unfold_ical(
 
 def ical_duration(raw: str) -> timedelta | None:
     """Parse an RFC 5545 duration, also the week form and weeks combined with days."""
-    match = re.fullmatch(
-        r"\+?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?",
-        raw.strip().upper(),
+    match = re.fullmatch(r"\+?P(?:(\d+)W)?(?:(\d+)D)?(?:T(\w*))?", raw.strip().upper())
+    time = re.fullmatch(
+        r"(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", (match.group(3) or "") if match else ""
     )
-    if not match:
+    if not match or not time:
         return None
-    weeks, days, hours, minutes, seconds = (int(value or 0) for value in match.groups())
+    weeks, days = (int(value or 0) for value in match.groups()[:2])
+    hours, minutes, seconds = (int(value or 0) for value in time.groups())
     duration = timedelta(
         weeks=weeks, days=days, hours=hours, minutes=minutes, seconds=seconds
     )
@@ -1165,6 +1166,22 @@ def _ical_note_skip(skips: dict[str, int] | None, error: AppError) -> None:
         skips[reason] = skips.get(reason, 0) + 1
 
 
+def _ical_close_event(
+    current: dict[str, Any] | None,
+    invalid: _IcalSkip | None,
+    events: list[dict[str, Any]],
+    skips: dict[str, int] | None,
+) -> None:
+    """Keep a complete event, or count the component it had to skip."""
+    try:
+        if invalid is None:
+            _ical_append_parsed_event(current, events)
+    except _IcalSkip as error:
+        invalid = error
+    if invalid is not None:
+        _ical_note_skip(skips, invalid)
+
+
 def _ical_parsed_events(
     payload: bytes, local_zone: tzinfo, skips: dict[str, int] | None = None
 ) -> list[dict[str, Any]]:
@@ -1182,13 +1199,7 @@ def _ical_parsed_events(
         if handled:
             continue
         if upper == "END:VEVENT":
-            try:
-                if invalid is None:
-                    _ical_append_parsed_event(current, events)
-            except _IcalSkip as error:
-                invalid = error
-            if invalid is not None:
-                _ical_note_skip(skips, invalid)
+            _ical_close_event(current, invalid, events, skips)
             current = None
             continue
         if current is not None and invalid is None:

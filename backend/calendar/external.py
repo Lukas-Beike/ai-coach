@@ -101,24 +101,17 @@ def state(
     today: date,
     window_days: int,
 ) -> dict[str, Any]:
-    last_sync_row = db.execute(
-        "SELECT value FROM kv WHERE key = ?", ("last_external_calendar_sync_at",)
-    ).fetchone()
-    last_error_row = db.execute(
-        "SELECT value FROM kv WHERE key = ?", ("last_external_calendar_sync_error",)
-    ).fetchone()
-    last_error = last_error_row["value"] if last_error_row else None
-    skipped_row = db.execute(
-        "SELECT value FROM kv WHERE key = ?", ("last_external_calendar_sync_skipped",)
-    ).fetchone()
+    last_sync = _kv_value(db, "last_external_calendar_sync_at")
+    last_error = _kv_value(db, "last_external_calendar_sync_error")
+    skipped = _kv_value(db, "last_external_calendar_sync_skipped")
     return {
         "configured": configured,
         "provider": "iCalendar",
         "read_only": True,
         "running": running,
-        "last_sync_at": last_sync_row["value"] if last_sync_row else None,
+        "last_sync_at": last_sync,
         "last_error": last_error or None,
-        "skipped_events": _skipped_count(skipped_row["value"] if skipped_row else ""),
+        "skipped_events": _skipped_count(skipped or ""),
         "events": list_events(db, today=today),
         "window_days": window_days,
     }
@@ -168,3 +161,8 @@ class ExternalCalendarReader:
                 today=self._today(),
                 window_days=window_days,
             )
+
+
+def _kv_value(db: Any, key: str) -> str | None:
+    row = db.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None

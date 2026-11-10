@@ -83,6 +83,12 @@ const PLANNED_AQI_FLAG_MIN = 60; // European AQI "schlecht" and worse
 const PLANNED_CAMS_POLLEN_FLAG_MIN = 10; // grains/m³; DWD levels count from 1
 const PLANNED_DAY_STATUS_LABELS = new Map([["rest", "Ruhetag"], ["pause", "Trainingspause"]]);
 
+function externalCalendarDetail(calendar) {
+  if (calendar.last_error) return "Fehler bei letzter Aktualisierung";
+  const skipped = Number(calendar.skipped_events) || 0;
+  return skipped ? `${skipped} Termine übersprungen` : "";
+}
+
 function stripCalendarMarkers(text) {
   return String(text || "").replace(CALENDAR_MARKER_PATTERN, "").replace(/\s{2,}/g, " ").trim();
 }
@@ -700,12 +706,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       const detail = coachNotice.querySelector("small");
       if (detail) detail.textContent = required ? [caption, forecastNote ? `${forecastNote}.` : "", "Bitte den Coach um die Anpassung."].filter(Boolean).join(" ") : "";
     }
-  }
-
-  function externalCalendarDetail(calendar) {
-    if (calendar.last_error) return "Fehler bei letzter Aktualisierung";
-    const skipped = Number(calendar.skipped_events) || 0;
-    return skipped ? `${skipped} Termine übersprungen` : "";
   }
 
   function renderExternalCalendar(data) {
