@@ -449,6 +449,22 @@ class StageTests(StageCase):
         self._run_once()
         self.assertEqual([], self.fetch.calls)
 
+    def test_an_unknown_environment_needs_a_stored_start_position(self) -> None:
+        with self.manager.unit_of_work() as db:
+            db.execute("UPDATE activity_records SET environment = 'unknown'")
+        # Never the home fallback: without a position the session stays out.
+        self._run_once()
+        self._run_once()
+        self.assertEqual([], self.fetch.calls)
+        self.assertEqual([], self._rows())
+        store_track(self.manager)
+        self._run_once()
+        self.assertEqual(
+            [(52.51, 13.41, date(2026, 9, 10), date(2026, 9, 10))], self.fetch.calls
+        )
+        self.assertEqual("activity_start", self.block()["location_kind"])
+        self.assertEqual(5, len(self._rows()))
+
     def test_a_session_that_just_ended_waits_for_its_forecast(self) -> None:
         self.now = START + timedelta(hours=2)
         self._run_once()

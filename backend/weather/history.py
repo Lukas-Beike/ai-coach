@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.weather import projection
+
+# Archived forecast days older than this are dropped; the calendar shows no more.
+HISTORY_HORIZON_DAYS = 120
 
 
 def decode_history(value: Any) -> dict[str, Any]:
@@ -22,14 +25,26 @@ def decode_history(value: Any) -> dict[str, Any]:
     return parsed.copy() if isinstance(parsed, dict) else {}
 
 
-def remember_forecasts(history: Any, *caches: Any) -> dict[str, Any]:
-    result = decode_history(history)
+def _horizon_start(today: date) -> str:
+    return (today - timedelta(days=HISTORY_HORIZON_DAYS)).isoformat()
+
+
+def remember_forecasts(history: Any, *caches: Any, today: date) -> dict[str, Any]:
+    """Merge the forecasts into the history and drop days beyond the horizon."""
+    horizon = _horizon_start(today)
+    result = {
+        day: row
+        for day, row in decode_history(history).items()
+        if isinstance(day, str) and day >= horizon
+    }
     for cached in caches:
         if not isinstance(cached, dict) or not isinstance(cached.get("forecast"), dict):
             continue
         location = cached.get("location")
         location_name = location.get("name") if isinstance(location, dict) else None
         for row in projection.daily_summary(cached["forecast"], cached.get("pollen")):
+            if row["date"] < horizon:
+                continue
             result[row["date"]] = {
                 **row,
                 "forecast_saved_at": cached.get("fetched_at"),
@@ -41,10 +56,13 @@ def remember_forecasts(history: Any, *caches: Any) -> dict[str, Any]:
 def calendar_state(history: Any, weather: Any, *, today: date) -> dict[str, Any]:
     source_weather = weather if isinstance(weather, dict) else {}
     today_text = today.isoformat()
+    horizon = _horizon_start(today)
     days = {
         day: {**row, "archived_forecast": True}
         for day, row in decode_history(history).items()
-        if isinstance(day, str) and day < today_text and isinstance(row, dict)
+        if isinstance(day, str)
+        and horizon <= day < today_text
+        and isinstance(row, dict)
     }
     location = source_weather.get("location")
     location_name = location.get("name") if isinstance(location, dict) else None

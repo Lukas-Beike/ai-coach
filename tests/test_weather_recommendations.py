@@ -39,6 +39,29 @@ class WeatherRecommendationsTests(unittest.TestCase):
         self.assertFalse(is_cycling_activity({"type": "Run"}))
         self.assertFalse(is_outdoor_activity(None))
 
+    def test_classification_uses_sport_and_environment_before_the_name(self):
+        for event in (
+            {"type": "Swim", "name": "Grundlagenschwimmen"},
+            {"type": "WeightTraining", "name": "Rumpf Grundübungen"},
+            {"name": "Grundlagenschwimmen"},
+            {"name": "Rumpf Grundübungen"},
+            {"name": "Morgenrunde"},
+            {"type": "Ride", "environment": "indoor", "name": "Rolle"},
+            {"sport": "ride", "environment": "virtual"},
+            {"sport": "run", "environment": "indoor"},
+        ):
+            self.assertFalse(is_outdoor_activity(event), event)
+        for event in (
+            {"type": "Run", "name": "Strukturlauf"},
+            {"sport": "run", "environment": "outdoor"},
+            {"type": "Ride", "name": "Rolle"},
+            {"name": "Dauerlauf locker"},
+            {"name": "Rennrad Tour"},
+        ):
+            self.assertTrue(is_outdoor_activity(event), event)
+        self.assertTrue(is_cycling_activity({"type": "Ride", "name": "Laufrad"}))
+        self.assertFalse(is_cycling_activity({"type": "Run", "name": "Rad-Lauf"}))
+
     def test_weekday_and_friday_windows_are_selected_deterministically(self):
         monday = date(2026, 8, 31)
         friday = date(2026, 9, 4)

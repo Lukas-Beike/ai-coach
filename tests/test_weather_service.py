@@ -196,6 +196,50 @@ class WeatherServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_refresh_that_waited_for_the_lock_reuses_the_fresh_forecast(self):
+        refreshed = {
+            "query": "Berlin",
+            "location": {"name": "Berlin"},
+            "forecast": {"daily": {"time": ["2026-09-20"]}},
+            "fetched_at": self.now.isoformat(),
+        }
+        client = Client(refreshed)
+        service = self.service(client)
+
+        class OtherRefreshFinishesFirst:
+            """Stands in for the lock: the other refresh stores while this waits."""
+
+            def __enter__(_):
+                with self.manager.unit_of_work() as db:
+                    self.key_values.set(db, cache.CACHE_KEY, json.dumps(refreshed))
+
+            def __exit__(_, *exc):
+                return False
+
+        service._refresh_lock = OtherRefreshFinishesFirst()
+        result = service.state([])
+
+        self.assertEqual(client.calls, [])
+        self.assertEqual(result["state"], "ready")
+        self.assertNotIn("_refreshed", result)
+        self.assertEqual(
+            self.tracker.events[-1][2:], ("skipped", "already_fresh", None)
+        )
+
+    def test_forced_refresh_still_fetches_inside_the_lock(self):
+        refreshed = {
+            "query": "Berlin",
+            "forecast": {"daily": {"time": ["2026-09-20"]}},
+            "fetched_at": self.now.isoformat(),
+        }
+        with self.manager.unit_of_work() as db:
+            self.key_values.set(db, cache.CACHE_KEY, json.dumps(refreshed))
+        client = Client(refreshed)
+
+        self.service(client).state([], force=True)
+
+        self.assertEqual(client.calls, ["Berlin"])
+
     def test_location_change_discards_refresh_after_commit(self):
         client = Client({"query": "Berlin", "forecast": {}})
         service = self.service(client)
@@ -265,6 +309,7 @@ class WeatherServiceTests(unittest.TestCase):
                     "forecast": {"daily": {"time": ["2026-09-20"]}},
                     "fetched_at": self.now.isoformat(),
                 },
+                today=date(2026, 9, 20),
             )
 
         self.assertEqual(json.loads(self.get(cache.CACHE_KEY)), old_cache)

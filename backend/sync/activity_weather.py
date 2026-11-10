@@ -13,8 +13,9 @@ coordinates rounded to 2 decimals. The first failure ends the pass, writes
 nothing and delays that session with a growing backoff (kept in memory, so a
 restart tries again). ``run_batch`` then writes the fetched values; coordinates
 live only in local variables of ``prefetch`` and never reach a row, the stage
-state, a log or a diagnostic. A session without a stored position is looked up
-at the saved home location and labelled so; without either it is remembered as
+state, a log or a diagnostic. An outdoor session without a stored position is
+looked up at the saved home location and labelled so; a session of unknown
+environment only with a stored position. Without a location it is remembered as
 empty. Rows of sessions that are gone are retired.
 """
 
@@ -37,6 +38,7 @@ from backend.canonical.records import (
     Provenance,
     fingerprint_inputs,
 )
+from backend.canonical.sports import is_outdoor_endurance
 from backend.canonical.vocabulary import (
     PROVIDER_PRECEDENCE,
     Environment,
@@ -48,7 +50,6 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import activity_detail_store, canonical_store
 from backend.db.repositories import KeyValueRepository
-from backend.performance.session_metrics import METRIC_SPORTS
 from backend.providers.activity_weather import rounded_coordinates
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -169,10 +170,12 @@ def _window(summary: Mapping[str, Any]) -> tuple[datetime, datetime]:
 
 
 def _wants(summary: Mapping[str, Any], now: datetime) -> bool:
-    """Outdoor rides and runs on or after 2022-01-01 whose hours have settled."""
-    if (
-        summary.get("sport") not in METRIC_SPORTS
-        or summary.get("environment") != Environment.OUTDOOR.value
+    """Rides and runs not known to be indoor on or after 2022-01-01, settled.
+
+    An unknown environment is kept; ``_locate`` then needs a stored position.
+    """
+    if not is_outdoor_endurance(
+        str(summary.get("sport")), str(summary.get("environment"))
     ):
         return False
     start, end = _window(summary)
@@ -391,7 +394,8 @@ class ActivityWeatherStage:
         """The kind of location and its coordinates; the start position first."""
         if (position := _start_position(db, str(summary["id"]))) is not None:
             return LOCATION_START, position
-        if home is not None:
+        # A position proves an unknown environment was outdoors; the home does not.
+        if home is not None and summary.get("environment") == Environment.OUTDOOR:
             return LOCATION_HOME, home
         return _NO_LOCATION, None
 

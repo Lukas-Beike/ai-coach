@@ -298,7 +298,7 @@ class AirQualityProjectionTests(unittest.TestCase):
             "fetched_at": "2026-10-17T12:00:00+00:00",
         }
 
-        archived = history.remember_forecasts({}, cached)
+        archived = history.remember_forecasts({}, cached, today=date(2026, 10, 17))
 
         self.assertEqual(archived["2026-10-17"]["pollen"]["source"], "DWD")
 

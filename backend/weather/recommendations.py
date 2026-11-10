@@ -8,6 +8,9 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.sports import is_outdoor_endurance
+from backend.canonical.stored_sports import parse_environment, resolve_workout_sport
+from backend.canonical.vocabulary import Environment, Sport
 from backend.weather import projection as weather_projection
 
 WEATHER_RECOMMENDATION_DAYS = 5
@@ -16,37 +19,50 @@ PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
 
 
+# Used only when an entry names no resolvable sport; whole words, never substrings.
+_INDOOR_WORDS = re.compile(
+    r"\b(?:indoor|virtual|trainer|zwift|treadmill|ergometer|laufband|rolle|smart.?bike)\b"
+)
+_RIDE_WORDS = re.compile(
+    r"\b(?:rides?|riding|cycling|bik(?:e|es|ing)|bicycle|rad|radfahren|radtour|"
+    r"rennrad|velo|gravel\w*|mtb|mountain.?bik\w*)\b"
+)
+_RUN_WORDS = re.compile(r"\b(?:runs?|running|jog\w*|(?:dauer|intervall)?lauf\w*)\b")
+
+
+def _event_sport(event: dict[str, Any]) -> tuple[Sport | None, Environment]:
+    """The canonical sport and environment of an entry; sport None when unknown."""
+    texts = []
+    for key in ("sport", "type", "sport_type"):
+        value = event.get(key)
+        if isinstance(value, str) and value.strip():
+            texts.append(value)
+            resolved = resolve_workout_sport(value, event.get("environment"))
+            if resolved is not None:
+                return resolved.sport, resolved.environment
+    environment = parse_environment(event.get("environment")) or Environment.UNKNOWN
+    text = " ".join([*texts, str(event.get("name") or "")]).casefold()
+    if environment is Environment.UNKNOWN and _INDOOR_WORDS.search(text):
+        environment = Environment.INDOOR
+    if _RIDE_WORDS.search(text):
+        return Sport.RIDE, environment
+    if _RUN_WORDS.search(text):
+        return Sport.RUN, environment
+    return None, environment
+
+
 def is_outdoor_activity(event: Any) -> bool:
     """Return whether an event is a run or outdoor cycling workout."""
     if not isinstance(event, dict):
         return False
-    value = " ".join(
-        str(event.get(key) or "") for key in ("type", "sport", "sport_type", "name")
-    ).casefold()
-    if re.search(
-        r"indoor|virtual|trainer|zwift|treadmill|ergometer|smart.?bike", value
-    ):
-        return False
-    return bool(
-        re.search(
-            r"ride|cycling|bike|bicycle|rad|velo|gravel|mtb|mountain.?bike|run|lauf|jog",
-            value,
-        )
-    )
+    sport, environment = _event_sport(event)
+    return sport is not None and is_outdoor_endurance(sport, environment)
 
 
 def is_cycling_activity(event: Any) -> bool:
     if not isinstance(event, dict):
         return False
-    value = " ".join(
-        str(event.get(key) or "") for key in ("type", "sport", "sport_type", "name")
-    ).casefold()
-    return bool(
-        re.search(
-            r"ride|cycling|bike|bicycle|rad|velo|gravel|mtb|mountain.?bike",
-            value,
-        )
-    )
+    return _event_sport(event)[0] is Sport.RIDE
 
 
 def _weather_training_windows(target_date: date) -> list[tuple[int, int, str]]:
