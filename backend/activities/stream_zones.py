@@ -23,7 +23,7 @@ speed stream against the threshold pace (speed 0 is no reading).
 from __future__ import annotations
 
 import statistics
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from itertools import pairwise
 from types import MappingProxyType
 from typing import Final
@@ -275,6 +275,17 @@ def _derived(
     )
 
 
+def max_step_s(time_s: Sequence[float]) -> float | None:
+    """Longest step still counted as recorded time, or None without a step.
+
+    A step above ``max(MIN_GAP_S, GAP_FACTOR x median step)`` is a pause or dropout.
+    """
+    steps = [right - left for left, right in pairwise(time_s) if right > left]
+    if not steps:
+        return None
+    return max(MIN_GAP_S, GAP_FACTOR * statistics.median(steps))
+
+
 def _seconds(
     time_s: tuple[float, ...],
     values: tuple[float | None, ...],
@@ -286,10 +297,9 @@ def _seconds(
 ) -> list[float]:
     """Seconds per zone; the last sample and samples before a gap count nothing."""
     seconds = [0.0] * zones
-    steps = [right - left for left, right in pairwise(time_s) if right > left]
-    if not steps:
+    max_step = max_step_s(time_s)
+    if max_step is None:
         return seconds
-    max_step = max(MIN_GAP_S, GAP_FACTOR * statistics.median(steps))
     flags = moving if moving is not None else (1.0,) * len(values)
     for (start, end), value, flag in zip(
         pairwise(time_s), values[:-1], flags[:-1], strict=True

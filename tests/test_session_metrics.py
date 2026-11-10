@@ -146,6 +146,36 @@ class SessionMetricsTests(unittest.TestCase):
         )
         self.assertNotIn(MetricKind.MECHANICAL_WORK, result.values)
 
+    def test_work_counts_moving_samples_only(self) -> None:
+        # Power drops out for the first 1800 moving seconds, then 200 W for
+        # 1800 s, then 1800 s stopped at 0 W: the stopped time must not fill
+        # the dropout (card M8 v4).
+        times = tuple(float(second) for second in range(5401))
+        watts = tuple(
+            None if second < 1800 else (200.0 if second < 3600 else 0.0)
+            for second in range(5401)
+        )
+        moving = tuple(second < 3600 for second in range(5401))
+        activity = {
+            "sport": "ride",
+            "streams": {"time": times, "watts": watts, "moving": moving},
+        }
+        result = session_metrics(
+            _ride(moving_duration_s=3600.0, elapsed_duration_s=5400.0),
+            activity,
+            FINGERPRINT,
+        )
+        self.assertNotIn(MetricKind.MECHANICAL_WORK, result.values)
+
+    def test_a_zero_moving_duration_uses_the_elapsed_duration_for_work(self) -> None:
+        activity = {"sport": "ride", "streams": {"time": TIME, "watts": WATTS}}
+        result = session_metrics(
+            _ride(moving_duration_s=0.0, elapsed_duration_s=float(SECONDS)),
+            activity,
+            FINGERPRINT,
+        )
+        self.assertAlmostEqual(result.values[MetricKind.MECHANICAL_WORK], 600.0)
+
     def test_decoupling_is_the_session_analysis_drift(self) -> None:
         activity = {
             "sport": "ride",

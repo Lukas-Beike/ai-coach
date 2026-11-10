@@ -6,6 +6,7 @@ import math
 import re
 from typing import Any
 
+from backend.activities.stream_zones import max_step_s
 from backend.canonical.activity_summary import summary_is_indoor
 from backend.performance.grade_adjustment import grade_adjusted_speeds, grade_stream
 from backend.providers.source_labels import SESSION_SOURCES_LABEL
@@ -33,11 +34,14 @@ def _samples(
     samples: list[tuple[float, float, float]] = []
     if len(values) != len(times):
         return samples
+    max_step = max_step_s([float(time) for time in times])
+    if max_step is None:
+        return samples
     for index in range(len(times) - 1):
         left = max(float(times[index]), start)
         right = min(float(times[index + 1]), end)
         value = _number(values[index])
-        if right <= left or times[index + 1] - times[index] > 5 or value is None:
+        if right <= left or times[index + 1] - times[index] > max_step or value is None:
             continue
         if moving and (index >= len(moving) or moving[index] not in {True}):
             continue
@@ -46,7 +50,8 @@ def _samples(
 
 
 # Bump when ``heart_rate_histogram`` counts differently, so stored rows recompute.
-HEART_RATE_HISTOGRAM_VERSION = 1
+# v2: steps up to the adaptive gap rule of the zone times count (#1950).
+HEART_RATE_HISTOGRAM_VERSION = 2
 HISTOGRAM_MIN_BPM = 30
 HISTOGRAM_MAX_BPM = 240
 
@@ -54,8 +59,8 @@ HISTOGRAM_MAX_BPM = 240
 def heart_rate_histogram(activity: dict[str, Any]) -> dict[str, Any] | None:
     """Seconds per integer bpm of the moving heart-rate samples, or None.
 
-    Counts the samples ``_samples`` keeps (moving, gaps over 5 s left out)
-    with a reading of 30-240 bpm. ``covered_s`` is the counted time.
+    Counts the samples ``_samples`` keeps (moving, pauses over the adaptive
+    gap rule left out) with a reading of 30-240 bpm. ``covered_s`` is the counted time.
     """
     seconds: dict[int, float] = {}
     for _timestamp, weight, value in _samples(
@@ -100,7 +105,7 @@ def interval_quality(
     base = {
         "method": METHOD,
         "source": f"derived from {source_label} original streams and frozen local targets",
-        "tolerance": "Authored ranges; single point targets use an explicit +/-5% measurement band. Missing samples, stopped timer and gaps over 5 seconds are excluded.",
+        "tolerance": "Authored ranges; single point targets use an explicit +/-5% measurement band. Missing samples, stopped timer and gaps above max(30 s, 3 x the median step) are excluded.",
     }
     if not targets or not targets.get("steps"):
         return {
@@ -180,7 +185,7 @@ def aerobic_analysis(
         "method": METHOD,
         "source": f"derived from {source_label} original streams",
         "warmup_excluded_seconds": 600,
-        "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps >5 seconds, stops and non-positive output excluded. No universal fitness cutoff.",
+        "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps above max(30 s, 3 x the median step), stops and non-positive output excluded. No universal fitness cutoff.",
     }
     sensor = _aerobic_sensor(activity)
     times = (activity.get("streams") or {}).get("time") or []
