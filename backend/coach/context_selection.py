@@ -323,6 +323,8 @@ class CoachContextSelection:
                     else rows
                     for sport, rows in recent.items()
                 }
+            if "scope" in activities:
+                activities["scope"] = _activities_scope(self.activity_limit)
             result["activities"] = activities
         performance = result.get("current_performance")
         if isinstance(performance, dict) and self.name not in {
@@ -677,6 +679,18 @@ def _message_selection(
         planning,
         retain_dialogue=bool(continuation or pronoun or has_receipts),
         retain_pending_request=is_pending_active,
+    )
+
+
+def _activities_scope(limit: int) -> str:
+    """Describe the activity rows a projection sends: no planned units, ``limit`` per sport."""
+    recent = (
+        "Letzte abgeschlossene Einheit"
+        if limit == 1
+        else f"Letzte {limit} abgeschlossene Einheiten"
+    )
+    return (
+        f"{recent} je Sportart und Sportartensummen; kein vollständiger Roh-Snapshot."
     )
 
 

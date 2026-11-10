@@ -2,10 +2,12 @@ import hashlib
 import re
 import unittest
 
+from backend.coach.authorization import request_target_enum
 from backend.coach.dialogue import INSTRUCTIONS
+from backend.coach.playbooks import _TASKS, nutrition_playbook, playbook_for
 from backend.coach.prompt import COACH_PROMPT
 
-EXPECTED_SHA256 = "2163c2825864273aaaf67551ccf68e186acccfd34c3f495a7925263dc265862c"
+EXPECTED_SHA256 = "576e097fd126c0778e87c14c35af9d13a8b3f65b266f4644c53bccebb74549cb"
 
 
 class CoachPromptTests(unittest.TestCase):
@@ -67,6 +69,61 @@ class CoachPromptTests(unittest.TestCase):
             "Never combine a clarification or cancellation with write tools",
         ):
             self.assertIn(marker, INSTRUCTIONS)
+
+
+# Rule 3a names the providers whose text reaches the Coach as untrusted data; the
+# output-only and weather targets carry none.
+RULE_PROVIDER_NAMES = {
+    "garmin": "Garmin",
+    "wahoo": "Wahoo",
+    "calendar": "external calendar",
+}
+NO_UNTRUSTED_TEXT_TARGETS = {"local", "intervals", "weather"}
+
+
+class CoachInstructionConsistencyTests(unittest.TestCase):
+    def all_instruction_text(self):
+        playbooks = "".join(playbook_for(kind) for kind in _TASKS)
+        return "\n".join(
+            (COACH_PROMPT, INSTRUCTIONS, playbooks, nutrition_playbook(True))
+        )
+
+    def test_every_request_target_has_a_scope_token_and_a_rule(self):
+        targets = request_target_enum()
+        self.assertEqual(
+            set(RULE_PROVIDER_NAMES), set(targets) - NO_UNTRUSTED_TEXT_TARGETS
+        )
+        rule_3a = re.search(r"^3a\. .*$", COACH_PROMPT, re.MULTILINE).group(0)
+        for target in targets:
+            if target == "local":
+                continue
+            with self.subTest(target=target):
+                self.assertRegex(INSTRUCTIONS, rf"\b{target}_(refresh|sync)\b")
+                if target not in NO_UNTRUSTED_TEXT_TARGETS:
+                    self.assertIn(RULE_PROVIDER_NAMES[target], rule_3a)
+
+    def test_no_stale_one_workout_or_provider_ctl_wording(self):
+        text = self.all_instruction_text()
+        for stale in (
+            "one workout per date",
+            "one-workout-per-date",
+            "provider CTL",
+            "Intervals.icu load",
+        ):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, text)
+
+    def test_plan_repair_is_offered_and_run_only_on_a_named_sync(self):
+        text = self.all_instruction_text()
+        self.assertEqual(
+            1, text.count("only when the athlete explicitly asks for that named sync")
+        )
+        self.assertNotIn("repair using start_intervals_plan_sync", text)
+        self.assertNotIn("proactively resolve all operations", text)
+
+    def test_nutrition_playbook_rules_do_not_reuse_prompt_rule_numbers(self):
+        numbered = re.findall(r"^\d+[a-z]?\. ", nutrition_playbook(True), re.MULTILINE)
+        self.assertEqual([], numbered)
 
 
 if __name__ == "__main__":
