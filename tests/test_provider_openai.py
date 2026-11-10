@@ -1967,6 +1967,8 @@ class OpenAIProviderErrorTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.reason, "chat_cancelled")
         self.assertEqual(http.calls[-1][0][0], "GET")
+        # The lookup is bounded well below the chat reset's lock wait.
+        self.assertEqual(http.calls[-1][1]["timeout"], 5)
         self.assertEqual(state.usage, [])
 
         http = _ClientHTTP(

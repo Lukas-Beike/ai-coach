@@ -239,6 +239,9 @@ def request_with_conversation_retry(
 
 
 @dataclass(frozen=True)
+# Best-effort usage lookup after a cancel; well below the 15 s reset wait.
+FINAL_USAGE_LOOKUP_TIMEOUT_SECONDS = 5
+
 class ResponsesClock:
     monotonic: Callable[[], float] = time.monotonic
     wait: Callable[[float], Any] = time.sleep
@@ -350,7 +353,10 @@ class OpenAIResponsesClient:
     def _record_final_usage(self, active_response_id: str) -> None:
         """Retrieve a cancelled or timed-out response once and record its usage."""
         try:
-            result = self._get_response(active_response_id)
+            # Short bound: the turn still holds the conversation lock here.
+            result = self._get_response(
+                active_response_id, timeout=FINAL_USAGE_LOOKUP_TIMEOUT_SECONDS
+            )
         except Exception:  # noqa: BLE001 - usage lookup is best effort
             return
         self._record_terminal_usage(result, "responses_background")
@@ -375,7 +381,7 @@ class OpenAIResponsesClient:
         result = self._get_response(response_id)
         return self._validated(self.responses_path, result, "responses_background")
 
-    def _get_response(self, response_id: str) -> Any:
+    def _get_response(self, response_id: str, *, timeout: float | None = None) -> Any:
         self._require_api_key()
         normalized_id = _validate_response_id(response_id)
         return self.http_client.request(
@@ -386,7 +392,7 @@ class OpenAIResponsesClient:
                 default_base_url=self.default_base_url,
             ),
             headers=self._headers(),
-            timeout=self.response_timeout_seconds,
+            timeout=timeout or self.response_timeout_seconds,
             service="openai",
         )
 
