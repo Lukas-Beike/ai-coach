@@ -449,6 +449,9 @@ class ProfileRepository:
         self._key_value.set(db, self._KEY, payload)
 
 
+_TOMBSTONE_LABEL_PREFIX = "competition_tombstone:"
+
+
 class CompetitionRepository:
     """Read local competitions without owning a database connection."""
 
@@ -553,7 +556,23 @@ class CompetitionRepository:
         intervals_event_id: Any,
         external_id: Any,
         now: str,
+        *,
+        name: Any = None,
+        event_date: Any = None,
     ) -> None:
+        # The table has no name or date column: the label that lets the approval
+        # card name the deletion lives in the key/value store under the row id.
+        KeyValueRepository(lambda: now).set(
+            db,
+            _TOMBSTONE_LABEL_PREFIX + tombstone_id,
+            json.dumps(
+                {
+                    "name": str(name or "")[:200],
+                    "event_date": str(event_date or "")[:10],
+                },
+                ensure_ascii=False,
+            ),
+        )
         db.execute(
             "INSERT INTO competition_sync_tombstones"
             "(id, intervals_event_id, external_id, created_at, provider) "
@@ -567,6 +586,25 @@ class CompetitionRepository:
                 ProviderId.INTERVALS.value,
             ),
         )
+
+    @staticmethod
+    def tombstone_label(db: Any, tombstone_id: str) -> dict[str, str] | None:
+        """Return the stored name and date of a deleted competition, if kept."""
+        raw = KeyValueRepository(str).get(db, _TOMBSTONE_LABEL_PREFIX + tombstone_id)
+        try:
+            label = json.loads(raw or "")
+        except ValueError:
+            return None
+        if not isinstance(label, dict) or not str(label.get("name") or "").strip():
+            return None
+        return {
+            "name": str(label["name"]),
+            "event_date": str(label.get("event_date") or ""),
+        }
+
+    @staticmethod
+    def clear_tombstone_label(db: Any, tombstone_id: str) -> None:
+        KeyValueRepository(str).delete(db, _TOMBSTONE_LABEL_PREFIX + tombstone_id)
 
     def delete(self, db: Any, competition_id: str) -> None:
         db.execute("DELETE FROM competitions WHERE id=?", (competition_id,))

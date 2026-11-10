@@ -7,13 +7,14 @@ import logging
 import threading
 from collections.abc import Callable
 from typing import Any
+from urllib.error import HTTPError
 
 from backend.canonical.stored_sports import activity_type_environment
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLinkRepository
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.observability import Redactor
 from backend.planning import competitions as planning_competitions
@@ -24,6 +25,12 @@ from backend.sync.authority import competition_push_manifest
 
 _COMPETITION_SYNC_LOCK = threading.Lock()
 _REMOTE_LINKS = RemoteLinkRepository()
+_COMPETITIONS = CompetitionRepository()
+
+
+def _is_not_found(error: AppError) -> bool:
+    cause = error.__cause__
+    return error.status == 404 or (isinstance(cause, HTTPError) and cause.code == 404)
 
 
 def _same_remote_sport(row: dict[str, Any], data: dict[str, Any]) -> bool:
@@ -79,6 +86,17 @@ class CompetitionSyncReconciler:
             ]
         return tombstones, local_rows
 
+    def tombstone_labels(
+        self, tombstones: list[dict[str, Any]]
+    ) -> dict[str, dict[str, str]]:
+        """Return the stored name and date of each tombstone that has them."""
+        with self._database_manager.reader() as db:
+            labels = {
+                str(row["id"]): _COMPETITIONS.tombstone_label(db, str(row["id"]))
+                for row in tombstones
+            }
+        return {key: value for key, value in labels.items() if value}
+
     def clear_tombstones(self, tombstones: list[dict[str, Any]]) -> int:
         if not tombstones:
             return 0
@@ -90,6 +108,8 @@ class CompetitionSyncReconciler:
                     (row["id"], row["created_at"]),
                 )
                 removed += max(0, result.rowcount)
+                if result.rowcount > 0:
+                    _COMPETITIONS.clear_tombstone_label(db, row["id"])
         return removed
 
     def reconcile(
@@ -333,19 +353,23 @@ class CompetitionSyncService:
                 for row in local_rows
                 if row.get("intervals_event_id")
             }
+            calendar_events = client.fetch_competition_events()
             remote_events = [
                 planning_fields_from_intervals(event)
-                for event in client.fetch_competition_events()
+                for event in calendar_events
                 if planning_competitions.is_remote_competition_event(event, linked_ids)
             ]
             plan = planning_competitions.competition_sync_plan(
                 local_rows, tombstones, remote_events
             )
             outbound = list(plan["outbound"])
-            delete_identifiers = plan["delete_identifiers"]
+            delete_identifiers, skipped_deletions = self._checked_deletions(
+                client, tombstones, calendar_events
+            )
             deleted_remote = 0
-            if delete_identifiers:
-                client.bulk_delete_events(delete_identifiers)
+            if tombstones:
+                if delete_identifiers:
+                    client.bulk_delete_events(delete_identifiers)
                 self._reconciler.clear_tombstones(tombstones)
                 deleted_remote = len(delete_identifiers)
             pushed = (
@@ -385,6 +409,7 @@ class CompetitionSyncService:
                 "conflicts": reconciled["conflicts"],
                 "removed": 0,
                 "deleted_remote": deleted_remote,
+                "skipped_deletions": skipped_deletions,
                 "total": len(self._competition_service.list()),
             }
         except Exception as exc:
@@ -405,6 +430,67 @@ class CompetitionSyncService:
                 self._set_kv("competition_sync_status", "")
             finally:
                 self._competition_lock.release()
+
+    def _checked_deletions(
+        self,
+        client: Any,
+        tombstones: list[dict[str, Any]],
+        calendar_events: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        """Split tombstones into deletions to send and events left alone.
+
+        The fetched calendar answers first, so only an event outside that window
+        costs a read. A past, paired, foreign or vanished event is reported, not
+        deleted; the athlete's own deletion only ever removes what this app made.
+        """
+        today = self._competition_service.today()
+        by_id = {str(e["id"]): e for e in calendar_events if e.get("id") is not None}
+        by_external = {
+            str(e["external_id"]): e for e in calendar_events if e.get("external_id")
+        }
+        labels = self._reconciler.tombstone_labels(tombstones)
+        identifiers: list[dict[str, str]] = []
+        skipped: list[dict[str, str]] = []
+        for row in tombstones:
+            event_id = str(row.get("intervals_event_id") or "")
+            external_id = str(row.get("external_id") or "")
+            if not event_id and not external_id:
+                continue
+            event = by_id.get(event_id) or by_external.get(external_id)
+            if event is None and event_id:
+                event = self._read_event(client, event_id)
+            reason = (
+                planning_competitions.COMPETITION_DELETE_SKIP_NOT_FOUND
+                if event is None
+                else planning_competitions.competition_delete_skip_reason(
+                    event, today=today
+                )
+            )
+            if reason is None:
+                identifiers.extend(
+                    planning_competitions.competition_delete_identifiers([row])
+                )
+                continue
+            label = labels.get(str(row["id"])) or {}
+            skipped.append(
+                {
+                    "name": label.get("name") or str((event or {}).get("name") or ""),
+                    "event_date": label.get("event_date")
+                    or str((event or {}).get("start_date_local") or "")[:10],
+                    "reason": reason,
+                }
+            )
+        return identifiers, skipped
+
+    @staticmethod
+    def _read_event(client: Any, event_id: str) -> dict[str, Any] | None:
+        try:
+            event = client.get_event(event_id)
+        except AppError as exc:
+            if _is_not_found(exc):
+                return None
+            raise
+        return event if isinstance(event, dict) else None
 
     def _set_kv(self, key: str, value: str) -> None:
         with self._database_manager.unit_of_work() as db:

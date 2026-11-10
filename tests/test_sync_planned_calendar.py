@@ -6,7 +6,7 @@ import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -497,6 +497,61 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertEqual(self.unit()["sync_state"], "synced")
         self.assertEqual(self.client.read_ids[0], "event-1")
 
+    def test_removed_unit_restored_sends_no_stale_event_id(self):
+        removed = {
+            "id": "event-1",
+            "category": "WORKOUT",
+            "start_date_local": TODAY.isoformat() + "T06:00:00",
+        }
+        self.add_unit(
+            payload=self.workout(
+                archived=True,
+                remote_event_id="event-1",
+                remote_event_external_id="intervals-coach-old",
+            )
+        )
+        self.client.remote_event = removed
+        self.assertIsNone(self.service.sync_entry(LOCAL_ID))
+        stored = json.loads(self.unit()["payload"])
+        self.assertNotIn("remote_event_id", stored)
+        self.assertNotIn("remote_event_external_id", stored)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET payload=? WHERE local_id=?",
+                (
+                    json.dumps({**stored, "archived": False}),
+                    LOCAL_ID,
+                ),
+            )
+        self.client.responses = [[{"id": "event-2", "type": "WeightTraining"}]]
+
+        self.service.sync_entry(LOCAL_ID)
+
+        sent = self.client.upserts[-1][0]
+        self.assertNotIn("id", sent)
+        self.assertEqual(sent["external_id"], f"intervals-coach-{LOCAL_ID}")
+
+    def test_unit_before_today_with_an_event_is_not_overwritten(self):
+        yesterday = (TODAY - timedelta(days=1)).isoformat()
+        self.add_unit(payload=self.workout(date=yesterday, remote_event_id="event-1"))
+
+        with self.assertRaises(AppError) as caught:
+            self.service.sync_entry(LOCAL_ID)
+
+        self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(caught.exception.reason, "intervals_workout_identity_conflict")
+        self.assertEqual(self.client.upserts, [])
+        self.assertEqual(self.client.read_ids, [])
+
+    def test_unit_before_today_without_an_event_can_still_be_created(self):
+        yesterday = (TODAY - timedelta(days=1)).isoformat()
+        self.add_unit(payload=self.workout(date=yesterday))
+        self.client.responses = [[{"id": "event-1", "type": "WeightTraining"}]]
+
+        self.service.sync_entry(LOCAL_ID)
+
+        self.assertEqual(len(self.client.upserts), 1)
+
     def test_removing_a_replaced_unit_leaves_foreign_events_alone(self):
         foreign = {
             "id": "foreign-1",
@@ -701,6 +756,23 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertEqual(len(self.client.upserts), upserts_before_remove)
         self.assertEqual(self.client.deleted, ["event-1"])
         self.assertEqual(self.unit()["sync_state"], "synced")
+
+    def test_repair_removal_drops_the_removed_event_ids(self):
+        self.add_unit(
+            payload=self.workout(
+                archived=True,
+                remote_event_id="event-1",
+                remote_event_external_id=f"intervals-coach-{LOCAL_ID}",
+            )
+        )
+        self.client.events = [self.remote_event("event-1")]
+
+        self.make_repair_service().repair_entry(LOCAL_ID, self.payload_hash())
+
+        stored = json.loads(self.unit()["payload"])
+        self.assertEqual(self.client.deleted, ["event-1"])
+        self.assertNotIn("remote_event_id", stored)
+        self.assertNotIn("remote_event_external_id", stored)
 
     def test_repair_hash_conflict_before_write(self):
         self.add_unit()

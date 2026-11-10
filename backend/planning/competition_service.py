@@ -119,6 +119,10 @@ class CompetitionService:
         self._now = now
         self._local_today = local_today
 
+    def today(self) -> date:
+        """Return the athlete's local calendar day."""
+        return self._local_today()
+
     def list(
         self, limit: int | None = None, *, db: Any | None = None
     ) -> list[dict[str, Any]]:
@@ -219,6 +223,8 @@ class CompetitionService:
                     row.get("intervals_event_id"),
                     row.get("external_id"),
                     now,
+                    name=row.get("name"),
+                    event_date=row.get("event_date"),
                 )
             self._repository.delete(db, normalized_id)
             self._repository.unlink_public_event_candidate(db, normalized_id, now)

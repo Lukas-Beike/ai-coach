@@ -3076,13 +3076,19 @@ class ServerPlanningTests(ServerTestCase):
         )
         local_id = saved["competition"]["id"]
         deleted = []
+        stored = {}
 
         class FakeIntervalsClient:
             def fetch_competition_events(self):
                 return []
 
             def upsert_competition_events(self, events):
-                return [{**events[0], "id": 888}] if events else []
+                saved = [{**events[0], "id": 888}] if events else []
+                stored.update({str(event["id"]): event for event in saved})
+                return saved
+
+            def get_event(self, event_id):
+                return stored[event_id]
 
             def bulk_delete_events(self, identifiers):
                 deleted.extend(identifiers)

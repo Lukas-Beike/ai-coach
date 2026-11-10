@@ -15,6 +15,7 @@ from uuid import UUID
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_models import COACH_ACTION_TTL_SECONDS, coach_action_hash
 from backend.db import DatabaseManager, row_factory
+from backend.db.repositories import CompetitionRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
@@ -396,6 +397,46 @@ class CoachProposalCreationTests(unittest.TestCase):
                     "date": "Freigegebene Löschmarkierung",
                     "id": "remote-1",
                 },
+            ],
+        )
+
+    def test_competition_tombstone_card_names_the_deleted_race(self) -> None:
+        with self.database_manager.unit_of_work() as db:
+            CompetitionRepository().add_tombstone(
+                db,
+                "deleted-1",
+                "remote-1",
+                None,
+                "now",
+                name="Frühjahrsklassiker",
+                event_date="2026-04-12",
+            )
+        intent = {
+            "operation": "sync_competitions",
+            "intent": "remote_sync",
+            "target_system": "intervals",
+            "authorization_scope": ["local_competitions", "intervals_sync"],
+            "request": {"remote_write": True, "source_message_ids": [7]},
+        }
+
+        result = self._service().create_remote_write(
+            "sync_competitions",
+            {"reason": "approved request"},
+            intent,
+            conversation_id="conversation-1",
+            client_turn_id="turn-1",
+            session_csrf_hash="session-1",
+        )
+
+        self.assertEqual(
+            result["proposed_action"]["diff"],
+            [
+                {
+                    "name": "Frühjahrsklassiker",
+                    "date": "2026-04-12",
+                    "sport": "Wird bei Intervals.icu entfernt",
+                    "id": "remote-1",
+                }
             ],
         )
 
