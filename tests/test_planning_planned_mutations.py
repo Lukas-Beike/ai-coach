@@ -1,6 +1,7 @@
 """Boundary tests for pure local planned-unit mutation preparation."""
 
 import copy
+from datetime import date
 import unittest
 
 from backend.errors import (
@@ -16,6 +17,7 @@ from backend.planning.planned_units import (
 )
 
 LOCAL_ID = "e8267245-0d20-456f-9c9b-b4bf3fc3c233"
+TODAY = date(2026, 9, 1)
 
 
 class PreparePlannedWorkoutDateTests(unittest.TestCase):
@@ -28,7 +30,7 @@ class PreparePlannedWorkoutDateTests(unittest.TestCase):
         }
         original_current = copy.deepcopy(current)
 
-        changed = prepare_planned_workout_date(candidate, current)
+        changed = prepare_planned_workout_date(candidate, current, today=TODAY)
 
         self.assertTrue(changed)
         self.assertEqual(
@@ -44,7 +46,7 @@ class PreparePlannedWorkoutDateTests(unittest.TestCase):
         candidate = {"date": "2026-09-21"}
         current = {"date": "2026-09-20", "starts_at_local": "2026-09-20 06:45"}
 
-        changed = prepare_planned_workout_date(candidate, current)
+        changed = prepare_planned_workout_date(candidate, current, today=TODAY)
 
         self.assertTrue(changed)
         self.assertEqual(candidate["starts_at_local"], "2026-09-21T00:00:00")
@@ -57,7 +59,7 @@ class PreparePlannedWorkoutDateTests(unittest.TestCase):
         }
         original_current = copy.deepcopy(current)
 
-        changed = prepare_planned_workout_date(candidate, current)
+        changed = prepare_planned_workout_date(candidate, current, today=TODAY)
 
         self.assertFalse(changed)
         self.assertEqual(candidate["date"], "2026-09-20")
@@ -69,7 +71,7 @@ class PreparePlannedWorkoutDateTests(unittest.TestCase):
         current = {"date": "2026-09-20"}
 
         with self.assertRaises(AppError) as raised:
-            prepare_planned_workout_date(candidate, current)
+            prepare_planned_workout_date(candidate, current, today=TODAY)
 
         self.assertEqual(candidate["date"], "2026-09-21T06:00:00")
         self.assertEqual(raised.exception.status, 400)

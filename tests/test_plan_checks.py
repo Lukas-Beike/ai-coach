@@ -243,5 +243,21 @@ class AdjustWeekMoveTests(unittest.TestCase):
         self.assertNotIn("back_to_back_hard", codes(found))
 
 
+class UnknownStartTests(unittest.TestCase):
+    def test_synthetic_midnight_start_is_unknown_like_an_unset_start(self) -> None:
+        heavy = unit(
+            "s",
+            "2026-11-04",
+            "strength",
+            description="Heavy 5x5",
+            starts_at_local="2026-11-04T07:00:00",
+        )
+        hard = unit("r", "2026-11-04", "run", planned_intensity=0.9)
+        unset = codes(check([heavy, hard]))
+        midnight = {**hard, "starts_at_local": "2026-11-04T00:00:00"}
+        self.assertEqual(["strength_hard_same_day"], unset)
+        self.assertEqual(unset, codes(check([heavy, midnight])))
+
+
 if __name__ == "__main__":
     unittest.main()

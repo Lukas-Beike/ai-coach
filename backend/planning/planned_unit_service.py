@@ -629,7 +629,9 @@ class PlannedUnitService:
         candidate = planned_units.planned_workout_update_candidate(
             current, action, values
         )
-        date_changed = planned_units.prepare_planned_workout_date(candidate, current)
+        date_changed = planned_units.prepare_planned_workout_date(
+            candidate, current, today=self._today()
+        )
         window_changed = calendar_item_window(candidate) != calendar_item_window(
             current
         )

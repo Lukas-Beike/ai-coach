@@ -43,7 +43,7 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.checkins import reports_complaint
@@ -59,6 +59,7 @@ from backend.planning import (
     run_hr_cap,
     strength_structure,
 )
+from backend.planning.local_start import known_start
 from backend.planning.session_focus import (
     FOCUS_KEY,
     INTENSITY_KEY,
@@ -267,17 +268,8 @@ def _back_to_back(units: Sequence[Mapping[str, Any]]) -> list[dict]:
     return findings
 
 
-def _start(unit: Mapping[str, Any]) -> datetime | None:
-    """Local wall-clock start; an offset is dropped so aware and naive starts compare."""
-    try:
-        start = datetime.fromisoformat(str(unit.get("starts_at_local") or ""))
-    except ValueError:
-        return None
-    return start.replace(tzinfo=None)
-
-
 def _gap_too_short(first: Mapping[str, Any], second: Mapping[str, Any]) -> bool:
-    start_a, start_b = _start(first), _start(second)
+    start_a, start_b = known_start(first), known_start(second)
     if start_a is None or start_b is None:
         return True
     return abs(start_a - start_b) < timedelta(hours=MIN_STRENGTH_GAP_H)
