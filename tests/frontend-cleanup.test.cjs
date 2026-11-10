@@ -29,7 +29,8 @@ test("every service-worker asset exists in public/ and is referenced from index.
 
 test("every script and stylesheet of index.html is cached by the service worker", () => {
   const assets = new Set(workerAssets());
-  const referenced = [...index.matchAll(/(?:src|href)="(\/[^"]+\?v=\d+)"/g)].map((match) => match[1]);
+  // Sources carry no versions; the server stamps them when serving (#1902).
+  const referenced = [...index.matchAll(/(?:src|href)="(\/[^"?#]+\.(?:js|css|svg|png))"/g)].map((match) => match[1]);
   assert.ok(referenced.length > 0);
   for (const asset of referenced) assert.ok(assets.has(asset), `${asset} is referenced but not cached`);
 });
