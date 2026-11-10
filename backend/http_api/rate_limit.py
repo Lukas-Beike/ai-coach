@@ -45,3 +45,10 @@ class RateLimiter:
             self.buckets[key] = recent
             retry_after = max(1, int(window_seconds - (now - min(recent or [now]))))
             return allowed, retry_after
+
+    def refund(self, key: str) -> None:
+        """Give back the newest slot of a bucket after a request that must not count."""
+        with self.lock:
+            bucket = self.buckets.get(key)
+            if bucket:
+                bucket.pop()

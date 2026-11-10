@@ -69,7 +69,7 @@ activity IDs no longer resolve.
 
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
-| POST | `/api/chat`, `/api/chat/stream`, `/api/chat/reset`, `/api/chat/cancel` | Submit, stream, reset or cancel Coach work | CSRF |
+| POST | `/api/chat`, `/api/chat/stream`, `/api/chat/reset`, `/api/chat/cancel` | Submit, stream, reset (body `{"confirmed": true}`, else 400 `confirmation_required`) or cancel Coach work | CSRF |
 | POST | `/api/coach/actions/confirm`, `/api/coach/actions/cancel`, `/api/coach/actions/execute` | Confirm, cancel or execute a Coach proposal | CSRF |
 | POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback; activity feedback returns a `change` undo reference | CSRF |
 | POST | `/api/activities/{id}/session` | Confirm, split, merge or delete one session bundle | CSRF |

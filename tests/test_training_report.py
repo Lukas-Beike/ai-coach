@@ -701,7 +701,7 @@ class TrainingReportTests(unittest.TestCase):
                 route.handle(Mock(), path)
         reports.assert_not_called()
 
-    def test_analysis_refresh_authenticates_and_delegates_selected_area(self):
+    def test_analysis_refresh_delegates_selected_area_without_a_second_auth(self):
         auth = Mock()
         refresh = Mock()
         refresh.refresh.return_value = {"area": "recovery", "status": "partial"}
@@ -711,7 +711,7 @@ class TrainingReportTests(unittest.TestCase):
 
         self.assertTrue(route.handle_post(handler, "/api/analysis/refresh"))
 
-        auth.require_auth.assert_called_once_with(handler)
+        auth.require_auth.assert_not_called()
         refresh.refresh.assert_called_once_with("recovery", days=None)
         handler.send_json.assert_called_once_with(200, refresh.refresh.return_value)
 
