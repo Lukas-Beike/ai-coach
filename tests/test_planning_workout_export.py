@@ -169,7 +169,7 @@ class BuildPlannedWorkoutExportTests(unittest.TestCase):
 
 class StoredInvalidDurationTests(unittest.TestCase):
     def test_non_integer_stored_duration_is_a_controlled_400(self):
-        for duration in ("45.5", "abc", None):
+        for duration in ("45.5", "abc", None, 45.7, True):
             with self.subTest(duration=duration), self.assertRaises(AppError) as caught:
                 build_planned_workout_export(
                     workout(duration_minutes=duration), today=TODAY

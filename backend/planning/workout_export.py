@@ -30,10 +30,13 @@ def past_export_horizon(planned_date: Any, today: date) -> bool:
 
 def validated_duration_minutes(value: Any) -> int:
     """Return a whole duration of 5..600 minutes or raise a controlled 400."""
+    message = "Die Trainingsdauer muss eine ganze Zahl sein."
+    if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+        raise AppError(400, message)
     try:
         duration = int(value)
-    except (TypeError, ValueError) as exc:
-        raise AppError(400, "Die Trainingsdauer muss eine ganze Zahl sein.") from exc
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise AppError(400, message) from exc
     if duration < 5 or duration > 600:
         raise AppError(
             400, "Die Trainingsdauer muss zwischen 5 und 600 Minuten liegen."
