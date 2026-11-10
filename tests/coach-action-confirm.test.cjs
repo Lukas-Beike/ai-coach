@@ -102,15 +102,15 @@ test("an expired card shows no action buttons", () => {
   };
   let buttonCalls = 0;
   const context = vm.createContext({
-    document: { createElement: () => ({ append() {}, dataset: {} }) },
+    document: { createElement: () => ({ append() {}, setAttribute() {}, dataset: {} }) },
     state: { coachActionUnknownIds: new Set() },
     coachActionDescription: () => "",
     coachActionDiff: () => "diff",
     coachActionButtons: () => { buttonCalls += 1; return "buttons"; },
   });
   vm.runInContext(["coachActionExpired", "coachActionStatus", "coachActionCard"].map(slice).join("\n"), context);
-  context.coachActionCard({ id: "a", status: "ready", expires_at: Date.now() / 1000 - 1 });
+  context.coachActionCard({ id: "a", status: "ready", action_type: "undo_change", expires_at: Date.now() / 1000 - 1 });
   assert.equal(buttonCalls, 0);
-  context.coachActionCard({ id: "b", status: "ready", expires_at: Date.now() / 1000 + 600 });
+  context.coachActionCard({ id: "b", status: "ready", action_type: "undo_change", expires_at: Date.now() / 1000 + 600 });
   assert.equal(buttonCalls, 1);
 });

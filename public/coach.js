@@ -1411,8 +1411,6 @@ function coachActionButtons(proposal) {
   return actions;
 }
 
-const COACH_ACTION_TYPES = new Set(["undo_change", "remote_coach_write", "local_coach_write"]);
-
 function coachActionCard(proposal) {
   const card = document.createElement("div");
   card.className = "coach-action-card";
@@ -1421,7 +1419,7 @@ function coachActionCard(proposal) {
   description.textContent = coachActionDescription(proposal);
   card.append(description);
   // An unknown type is an error card without any button: it can neither be confirmed nor cancelled here.
-  if (!COACH_ACTION_TYPES.has(proposal.action_type)) {
+  if (!["undo_change", "remote_coach_write", "local_coach_write"].includes(proposal.action_type)) {
     card.dataset.proposalStatus = "unknown";
     description.setAttribute("role", "alert");
     return card;
