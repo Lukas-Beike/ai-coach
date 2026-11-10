@@ -37,6 +37,13 @@ test("@responsive session focus chip and select on a planned unit", async ({ pag
   await select.selectOption("threshold");
   expect((await saved).ok()).toBeTruthy();
   await expect(entry.locator("[data-focus-chip='set'] .planned-badge")).toHaveText("Schwelle");
+  // A calendar reload keeps the card open with its status and focus.
+  await expect(entry.locator(".planned-focus-status")).toHaveText("Gespeichert");
+  await select.focus();
+  await page.evaluate(async () => { await load(); });
+  await expect(entry).toHaveJSProperty("open", true);
+  await expect(entry.locator(".planned-focus-status")).toHaveText("Gespeichert");
+  await expect(entry.locator("select[name='session_focus']")).toBeFocused();
   await page.reload();
   await page.waitForFunction(() => state.initialStateLoaded);
   entry = await openEntry(page, name);

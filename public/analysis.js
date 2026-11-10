@@ -570,6 +570,19 @@ function appendAnalysisPointInspectors(section, svg, series, unit, { x, chartRig
     svg.append(marker);
   });
   if (!candidates.length) return;
+  // Roving tabindex: one tab stop per chart (the latest day); arrows move between days.
+  const markers = candidates.map((candidate) => candidate.marker);
+  const rove = (target) => markers.forEach((node) => node.setAttribute("tabindex", node === target ? "0" : "-1"));
+  rove(markers.at(-1));
+  markers.forEach((marker, index) => {
+    marker.addEventListener("focus", () => rove(marker));
+    marker.addEventListener("keydown", (event) => {
+      const target = { ArrowLeft: Math.max(0, index - 1), ArrowRight: Math.min(markers.length - 1, index + 1), Home: 0, End: markers.length - 1 }[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      markers[target].focus();
+    });
+  });
   const overlay = analysisSvg("rect", { x: 60, y: 26, width: chartRight - 60, height: 137, fill: "transparent", class: "analysis-plot-hit", "aria-hidden": "true" });
   const nearest = (event) => {
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());

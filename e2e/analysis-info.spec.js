@@ -398,6 +398,29 @@ test("@responsive pace ticks stay distinct and faster pace is higher", async ({ 
   expect(Math.min(...labelSizes)).toBeGreaterThanOrEqual(11);
 });
 
+test("@responsive a history chart is one tab stop with arrow-key navigation inside a named group", async ({ page }) => {
+  await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-15", load: { points: [] }, metrics: {
+    run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 300 }, { date: "2026-09-08", value: 295 }, { date: "2026-09-15", value: 290 }] }],
+  } } });
+  await expect(page.getByRole("group", { name: "Leistungsentwicklung der letzten 12 Wochen" })).toBeVisible();
+  const chart = page.locator("#analysisHistoryCharts svg");
+  const markers = chart.locator(".analysis-day-marker");
+  await expect(markers).toHaveCount(3);
+  await expect(chart.locator(".analysis-day-marker[tabindex='0']")).toHaveCount(1);
+  await expect(markers.last()).toHaveAttribute("tabindex", "0");
+  await markers.last().focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(markers.nth(1)).toBeFocused();
+  await expect(markers.nth(1)).toHaveAttribute("tabindex", "0");
+  await expect(chart.locator(".analysis-day-marker[tabindex='0']")).toHaveCount(1);
+  await page.keyboard.press("Home");
+  await expect(markers.first()).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(markers.first()).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(markers.last()).toBeFocused();
+});
+
 test("@responsive repeated performance values are labelled once without a normal range", async ({ page }) => {
   const points = Array.from({ length: 30 }, (_, index) => ({ date: `2026-09-${String(index + 1).padStart(2, "0")}`, value: index % 2 ? 210 : 200 }));
   await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-30", load: { points: [] }, metrics: {

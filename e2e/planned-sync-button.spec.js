@@ -16,7 +16,7 @@ test("@responsive a pending planned unit offers a sync button that queues its pu
   await page.waitForFunction(() => state.initialStateLoaded);
   const button = page.locator(".planned-entry .planned-sync-button").first();
   await button.evaluate((element) => {
-    for (let node = element.parentElement; node; node = node.parentElement) if (node.tagName === "DETAILS" && !node.classList.contains("planned-entry")) node.open = true;
+    for (let node = element.parentElement; node; node = node.parentElement) if (node.tagName === "DETAILS") node.open = true;
   });
   await button.scrollIntoViewIfNeeded();
   await expect(button).toBeVisible();
@@ -24,8 +24,8 @@ test("@responsive a pending planned unit offers a sync button that queues its pu
   const card = button.locator("xpath=ancestor::details[contains(@class,'planned-entry')]");
   await button.click();
   await expect.poll(() => posted.length).toBeGreaterThan(0);
-  // The click queues the push and leaves the card closed.
-  expect(await card.evaluate((element) => element.open)).toBe(false);
+  // The click queues the push; the open card stays as it was.
+  expect(await card.evaluate((element) => element.open)).toBe(true);
   for (const body of posted) {
     expect(body.type).toBe("plan_push");
     expect(body.payload.entries).toHaveLength(1);

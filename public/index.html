@@ -62,7 +62,7 @@
         <section id="coachReceipts" class="coach-receipts" aria-label="Aktionsstatus" aria-live="polite" hidden></section>
         <p id="voiceStatus" class="voice-status" aria-live="polite" hidden></p>
         <form id="chatForm" class="composer">
-          <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
+          <div id="quickMessageTemplates" class="quick-message-templates" role="group" hidden aria-label="Schnelle Nachrichten">
             <button id="quickMorningCheckinButton" type="button" data-request-kind="morning_checkin" data-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin- und Wahoo-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
             <button id="quickAnalysisButton" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="quickAnalysisMenu" popovertarget="quickAnalysisMenu">Analyse &amp; Plan</button>
             <div id="quickAnalysisMenu" class="quick-action-menu" popover="auto" role="menu" aria-label="Analyse und Plan">
@@ -133,14 +133,14 @@
           <a href="#analysis/sessions" data-analysis-segment="sessions">Einheiten</a>
         </nav>
         <div id="analysisLoadPeriod" hidden></div>
-        <section id="sessionPerformance"class="analysis-chart-card" aria-label="Trainingsfokus"></section>
+        <section id="sessionPerformance" class="analysis-chart-card" aria-label="Trainingsfokus"></section>
         <section id="activityAnalysis" class="activity-analysis" aria-label="Einzelne Einheiten" hidden></section>
         <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
-        <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Belastung und Trainingszeit" hidden></div>
+        <div id="analysisLoadCharts" class="analysis-history-charts" role="group" aria-label="Belastung und Trainingszeit" hidden></div>
         <section id="currentPerformance" class="analysis-chart-card" aria-label="Aktuelle Leistungswerte" hidden></section>
         <section id="performanceEnduranceCharts" class="analysis-history-charts" aria-label="Ausdauer-Score" hidden></section>
-        <div id="trainingZoneCharts" class="analysis-history-charts" aria-label="Trainingszonen" hidden></div>
-        <div id="analysisHistoryCharts" class="analysis-history-charts" aria-label="Leistungsentwicklung der letzten 12 Wochen"></div>
+        <div id="trainingZoneCharts" class="analysis-history-charts" role="group" aria-label="Trainingszonen" hidden></div>
+        <div id="analysisHistoryCharts" class="analysis-history-charts" role="group" aria-label="Leistungsentwicklung der letzten 12 Wochen"></div>
         <section id="performancePredictions" class="analysis-chart-card" aria-label="Laufprognosen" hidden></section>
         <section id="cyclingPowerProfile" class="analysis-subchart" aria-label="Leistungsprofil Rad"></section>
         <section id="analysisEmptyState" aria-label="Keine Daten" hidden></section>
@@ -157,7 +157,7 @@
         <section id="bodyAnalysisCharts" class="analysis-history-charts" aria-label="Körper-Analyse" hidden></section>
         <output id="nutritionStatus" class="tab-sync-detail"></output>
         <section id="nutritionProductsPanel" aria-label="Produktbibliothek" hidden>
-        <div class="nutrition-tools" aria-label="Produkte erfassen">
+        <div class="nutrition-tools" role="group" aria-label="Produkte erfassen">
           <h3>Produkte</h3>
           <div class="nutrition-actions">
             <button type="button" class="push-button" id="nutritionBarcodeButton">Barcode scannen</button>
