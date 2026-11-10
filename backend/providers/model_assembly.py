@@ -114,6 +114,7 @@ class ModelTransportAssembly:
             openai_transcription_model=self._transcription_model,
             response_timeout_seconds=self._audio_timeout_seconds,
             http_client=self._provider_http_client(),
+            provider_state=self._provider_state_service(),
         )
 
     def openai_responses_client(self) -> openai_provider.OpenAIResponsesClient:

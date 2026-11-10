@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from backend.errors import OPENAI_API_KEY_ERROR, AppError
 from backend.providers import http as provider_http
 from backend.providers.openai_requests import endpoint
+
+if TYPE_CHECKING:
+    from backend.providers.state import ProviderStateService
 
 VOICE_AUDIO_TYPES = {
     "audio/webm": ".webm",
@@ -39,6 +44,7 @@ class AudioTranscriptionClient:
         openai_transcription_model: str,
         response_timeout_seconds: int,
         http_client: provider_http.JsonHttpClient,
+        provider_state: ProviderStateService | None = None,
     ) -> None:
         self.max_audio_bytes = max_audio_bytes
         self.openai_api_key = openai_api_key
@@ -47,6 +53,7 @@ class AudioTranscriptionClient:
         self.openai_transcription_model = openai_transcription_model
         self.response_timeout_seconds = response_timeout_seconds
         self.http_client = http_client
+        self.provider_state = provider_state
 
     def transcribe(self, audio: bytes, content_type: str) -> dict[str, str]:
         """Transcribe audio without retaining the uploaded bytes or provider payload."""
@@ -91,6 +98,9 @@ class AudioTranscriptionClient:
             raw_body=body,
             content_type=multipart_type,
         )
+        if self.provider_state is not None:
+            # Only counters are kept; neither the audio nor the transcript is stored.
+            self.provider_state.record_usage("openai", result, "transcription")
         text = result.get("text") if isinstance(result, dict) else None
         if not isinstance(text, str) or not text.strip():
             raise AppError(502, "OpenAI hat kein Transkript zurückgegeben.")

@@ -251,7 +251,7 @@ class CoachChatTurnService:
         existing_conversation_id = str(
             (existing_command or {}).get("conversation_id") or ""
         )
-        conversation_id = existing_conversation_id or self._conversations().ensure()
+        conversation_id = existing_conversation_id or self._conversations().binding()
         if allow_mutations is None:
             allow_mutations = not background_owned or self._background_may_write(
                 client_turn_id, existing_command or {}, background_receipt

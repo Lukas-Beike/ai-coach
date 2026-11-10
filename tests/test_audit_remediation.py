@@ -475,7 +475,7 @@ with patch.object(Path, 'read_text', deny):
             patch.object(
                 server.COACH_CONVERSATION,
                 "provision_service",
-                return_value=Mock(ensure=Mock(return_value="synthetic")),
+                return_value=Mock(binding=Mock(return_value="synthetic")),
             ),
             patch(
                 "backend.coach.context.CoachTrainingContextService.build",

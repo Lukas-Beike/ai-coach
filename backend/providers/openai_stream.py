@@ -466,11 +466,17 @@ class OpenAIStreamClient:
         stream_state: StreamReadState | None = None,
     ) -> NoReturn:
         reason = safe_log_reason(exc.reason or "request_failed")
-        if (
-            cancel_event is not None
-            and cancel_event.is_set()
-            and final_response is None
-        ):
+        cancelled = cancel_event is not None and cancel_event.is_set()
+        if final_response is not None:
+            # A terminal body carries the real usage even when it failed or the
+            # athlete cancelled before it was accepted.
+            self.telemetry.record_usage(
+                final_response,
+                "responses_stream_cancelled"
+                if cancelled
+                else "responses_stream_failed",
+            )
+        elif cancelled:
             self.telemetry.record_usage({"usage": {}}, "responses_stream_cancelled")
         self.telemetry.record_app_error(
             context,
@@ -491,8 +497,10 @@ class OpenAIStreamClient:
         started: float,
         stream_bytes: int,
     ) -> NoReturn:
-        if final_response is None:
-            self.telemetry.record_usage({"usage": {}}, "responses_stream_cancelled")
+        self.telemetry.record_usage(
+            final_response if final_response is not None else {"usage": {}},
+            "responses_stream_cancelled",
+        )
         self.telemetry.record_disconnect(context, started, stream_bytes)
         raise ClientDisconnected()
 

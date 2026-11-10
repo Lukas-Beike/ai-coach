@@ -176,7 +176,8 @@ class DialogueHarness:
                 server.COACH_CONVERSATION,
                 "provision_service",
                 return_value=Mock(
-                    ensure=Mock(return_value="synthetic-conversation"),
+                    binding=Mock(return_value="synthetic-conversation"),
+                    bind_remote=Mock(return_value="synthetic-conversation"),
                     rotate=Mock(return_value="synthetic-conversation"),
                 ),
             ),

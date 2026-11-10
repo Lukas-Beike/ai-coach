@@ -25,7 +25,7 @@ class CoachChatTurnTests(unittest.TestCase):
         self.settings.selected_model.return_value = "synthetic-model"
         self.settings.selected_thinking_level.return_value = "medium"
         self.conversations = Mock()
-        self.conversations.ensure.return_value = "synthetic-conversation"
+        self.conversations.binding.return_value = "synthetic-conversation"
         self.conversations_factory = Mock(return_value=self.conversations)
         self.structured = Mock()
         self.structured.run.return_value = {"status": "completed"}
@@ -119,7 +119,7 @@ class CoachChatTurnTests(unittest.TestCase):
         self.assertEqual(caught.exception.status, 403)
         self.conversations_factory.assert_not_called()
         self.structured_factory.assert_not_called()
-        self.conversations.ensure.assert_not_called()
+        self.conversations.binding.assert_not_called()
         self.structured.run.assert_not_called()
 
     def test_background_resume_preserves_openai_model_and_conversation(self) -> None:
@@ -153,7 +153,7 @@ class CoachChatTurnTests(unittest.TestCase):
             self.structured.run.call_args.kwargs["conversation_id"],
             "persisted-conversation",
         )
-        self.conversations.ensure.assert_not_called()
+        self.conversations.binding.assert_not_called()
         self.conversations_factory.assert_not_called()
         self.assertTrue(
             any(
