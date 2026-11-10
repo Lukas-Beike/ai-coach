@@ -673,12 +673,13 @@ CURRENT_DATABASE_INDEXES = {
     "idx_sleep_periods_source",
     "idx_sleep_periods_wake_date",
     "idx_sync_job_items_status",
+    "idx_sync_jobs_backfill_end",
     "idx_sync_jobs_status_available",
     "idx_workout_library_external_id",
 }
 
 
-CURRENT_SCHEMA_VERSION = 25
+CURRENT_SCHEMA_VERSION = 26
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -1263,6 +1264,14 @@ STREAM_DFA_DDL = """
     ALTER TABLE activity_detail_sets ADD COLUMN dfa_alpha1 TEXT CHECK (dfa_alpha1 IS NULL OR (json_valid(dfa_alpha1) AND json_type(dfa_alpha1) = 'object'))"""
 
 
+# Schema version 26: the lookup that asks whether a backfill chain already continued
+# to an end day. A partial expression index over backfill jobs only; no row changes.
+SYNC_JOBS_BACKFILL_INDEX_DDL = """
+    CREATE INDEX idx_sync_jobs_backfill_end
+        ON sync_jobs(provider, type, json_extract(payload, '$.end_date'), created_at)
+        WHERE requested_by = 'backfill'"""
+
+
 # Schema version 21: the lifecycle of an observation. A sync that maps its owning
 # raw record again (``owner_record_id``, the provider's source record id) and no
 # longer emits it retires the row instead of deleting it; readers serve active
@@ -1618,6 +1627,7 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, FEEDBACK_PURPOSE_DDL)
     execute_ddl(db, STREAM_SENSORS_DDL)
     execute_ddl(db, STREAM_DFA_DDL)
+    execute_ddl(db, SYNC_JOBS_BACKFILL_INDEX_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

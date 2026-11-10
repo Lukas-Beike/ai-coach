@@ -18,6 +18,7 @@ from backend.db.schema import (
     FEEDBACK_PURPOSE_DDL,
     STREAM_DFA_DDL,
     STREAM_SENSORS_DDL,
+    SYNC_JOBS_BACKFILL_INDEX_DDL,
     database_schema_is_current,
     database_schema_signature,
     execute_ddl,
@@ -30,6 +31,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V22,
     SHAPE_SCHEMA_V23,
     SHAPE_SCHEMA_V24,
+    SHAPE_SCHEMA_V25,
     released_shape,
 )
 from backend.db.strength_sets_migration import add_strength_sets
@@ -127,9 +129,16 @@ def _upgrade_v24_to_v25(db: Any) -> None:
     execute_ddl(db, STREAM_DFA_DDL)
 
 
+def _upgrade_v25_to_v26(db: Any) -> None:
+    # Adds the backfill-continuation index of sync jobs; it is built over the
+    # existing rows and changes none of them.
+    execute_ddl(db, SYNC_JOBS_BACKFILL_INDEX_DDL)
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V21: (SHAPE_SCHEMA_V22, _upgrade_v21_to_v22),
     SHAPE_SCHEMA_V22: (SHAPE_SCHEMA_V23, _upgrade_v22_to_v23),
     SHAPE_SCHEMA_V23: (SHAPE_SCHEMA_V24, _upgrade_v23_to_v24),
-    SHAPE_SCHEMA_V24: (SHAPE_CURRENT, _upgrade_v24_to_v25),
+    SHAPE_SCHEMA_V24: (SHAPE_SCHEMA_V25, _upgrade_v24_to_v25),
+    SHAPE_SCHEMA_V25: (SHAPE_CURRENT, _upgrade_v25_to_v26),
 }
