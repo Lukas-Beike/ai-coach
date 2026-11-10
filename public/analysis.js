@@ -1584,7 +1584,7 @@ function maintenanceButton(item) {
       await renderTrainingRecords();
     } catch (error) {
       button.disabled = false;
-      button.textContent = error.message || "Wartung fehlgeschlagen";
+      if (!isSessionEndedError(error)) button.textContent = error.message || "Wartung fehlgeschlagen";
     }
   });
   return button;

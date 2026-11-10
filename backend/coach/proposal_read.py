@@ -63,14 +63,22 @@ class CoachProposalConfirmationService:
                 (normalized_id, str(session_csrf_hash)),
             ).fetchone()
             if not row:
-                raise AppError(404, "Aktionsvorschau nicht gefunden.")
-            if (
-                row["status"] not in {"preview", "ready"}
-                or float(row["expires_at"]) <= now
-            ):
+                raise AppError(
+                    404,
+                    "Aktionsvorschau nicht gefunden.",
+                    reason="proposal_unavailable",
+                )
+            if row["status"] not in {"preview", "ready"}:
                 raise AppError(
                     409,
-                    "Die Aktionsvorschau ist abgelaufen oder wurde bereits bestätigt.",
+                    "Die Aktionsvorschau wurde bereits verwendet.",
+                    reason="proposal_used",
+                )
+            if float(row["expires_at"]) <= now:
+                raise AppError(
+                    409,
+                    "Die Aktionsvorschau ist abgelaufen.",
+                    reason="proposal_expired",
                 )
             token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
             confirmed = db.execute(
@@ -79,7 +87,11 @@ class CoachProposalConfirmationService:
                 (token_hash, normalized_id),
             ).rowcount
             if confirmed != 1:
-                raise AppError(409, "Die Aktionsvorschau wurde bereits bestätigt.")
+                raise AppError(
+                    409,
+                    "Die Aktionsvorschau wurde bereits bestätigt.",
+                    reason="proposal_used",
+                )
             updated = db.execute(
                 "SELECT * FROM coach_action_proposals WHERE id=?", (normalized_id,)
             ).fetchone()

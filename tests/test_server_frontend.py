@@ -403,10 +403,8 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('aria-describedby="steerButtonHint"', index)
         self.assertIn('id="steerButtonHint" class="sr-only"', index)
         self.assertIn('$("#steerButtonHint")', coach)
-        self.assertIn(
-            ".message.pending .pending-actions button { min-width: 44px; min-height: 44px; }",
-            styles,
-        )
+        self.assertIn(".message.pending .pending-action {", styles)
+        self.assertIn("min-height: 44px; margin: 0; padding: 0 12px;", styles)
         # Queued text stays in memory only and is protected by the leave-page guard.
         self.assertNotIn("coachQueuedMessages", coach + shared)
         self.assertNotIn("localStorage", coach)

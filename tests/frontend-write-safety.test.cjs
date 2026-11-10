@@ -228,6 +228,7 @@ function coachContext(apiImpl) {
     renderCoachActionReview: () => { renders += 1; },
     toast: (message, isError) => toasts.push({ message, isError: Boolean(isError) }),
     AppRouter: { navigate: async () => {} },
+    isSessionEndedError: () => false,
     load: async (path, areas) => { loads.push({ path, areas }); },
   });
   vm.runInContext(slice(coachSource, "function isHttpClientRejection", "\nfunction createPendingMessage"), context);

@@ -193,12 +193,23 @@ function updatePwaActivity() {
 const checkPwaReturn = updatePwaActivity;
 const handlePwaInteraction = updatePwaActivity;
 
+const SESSION_ENDED_MESSAGE = "Die Sitzung ist abgelaufen. Bitte erneut anmelden.";
+
+// Marks the abort raised when the session ended mid-request; the login dialog already says so.
+function sessionEndedError() {
+  return Object.assign(new DOMException(SESSION_ENDED_MESSAGE, "AbortError"), { sessionEnded: true });
+}
+
+function isSessionEndedError(error) {
+  return error?.sessionEnded === true;
+}
+
 async function apiAudio(path, blob) {
   const generation = state.sessionGeneration;
   const result = await globalThis.AppApi.audio(path, blob, () => {
     if (generation === state.sessionGeneration) showLogin();
   });
-  if (generation !== state.sessionGeneration) throw new DOMException("Session ended", "AbortError");
+  if (generation !== state.sessionGeneration) throw sessionEndedError();
   return result;
 }
 
@@ -212,6 +223,7 @@ function hideToast() {
 }
 
 function toast(message, error = false) {
+  if (message === SESSION_ENDED_MESSAGE) return;
   const node = $("#toast");
   const text = document.createElement("span");
   text.textContent = message;
@@ -352,7 +364,7 @@ async function api(path, options = {}) {
   const result = await globalThis.AppApi.request(path, options, () => {
     if (generation === state.sessionGeneration) showLogin();
   });
-  if (generation !== state.sessionGeneration) throw new DOMException("Session ended", "AbortError");
+  if (generation !== state.sessionGeneration) throw sessionEndedError();
   // A response clears a server-unreachable notice; while the browser reports offline the notice stays.
   renderConnectivityStatus();
   return result;
