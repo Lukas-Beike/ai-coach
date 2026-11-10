@@ -132,16 +132,20 @@ _FIT_FIELD_SCALES: Final[Mapping[tuple[int, int], tuple[str, int, int]]] = {
     (18, 124): ("enhanced_avg_speed_m_s", 1000, 0),
     (18, 125): ("enhanced_max_speed_m_s", 1000, 0),
 }
+
+
 # Message number -> its listed fields, so a message can be projected to named
 # values without visiting the whole table.
-_FIT_NAMED_FIELDS: Final[Mapping[int, tuple[tuple[int, str, int, int], ...]]] = {
-    message: tuple(
-        (field, name, scale, offset)
-        for (number, field), (name, scale, offset) in _FIT_FIELD_SCALES.items()
-        if number == message
-    )
-    for message in {number for number, _ in _FIT_FIELD_SCALES}
-}
+def _named_fields_by_message() -> dict[int, tuple[tuple[int, str, int, int], ...]]:
+    grouped: dict[int, list[tuple[int, str, int, int]]] = {}
+    for (message, field), (name, scale, offset) in _FIT_FIELD_SCALES.items():
+        grouped.setdefault(message, []).append((field, name, scale, offset))
+    return {message: tuple(fields) for message, fields in grouped.items()}
+
+
+_FIT_NAMED_FIELDS: Final[Mapping[int, tuple[tuple[int, str, int, int], ...]]] = (
+    _named_fields_by_message()
+)
 # Ordered candidates per base field: the FIT enhanced field is preferred per
 # message; invalid sentinels decode to None and fall through to the base field.
 _FIT_FIELD_PREFERENCES: Final[Mapping[tuple[int, int], tuple[int, ...]]] = {

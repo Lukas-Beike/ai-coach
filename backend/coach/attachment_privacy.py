@@ -81,6 +81,30 @@ def _columns(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _fit_row(values: dict[str, Any], origin: float | None) -> dict[str, Any]:
+    row: dict[str, Any] = {}
+    for key, value in values.items():
+        if key in _FIT_POSITION_FIELDS:
+            row[_FIT_POSITION_FIELDS[key]] = round(value * _SEMICIRCLES_TO_DEGREES, 6)
+        elif key not in _FIT_TIME_FIELDS:
+            row[key] = _number(value, 4)
+        elif origin is not None:
+            row["time_s"] = round(value - origin, 3)
+    return row
+
+
+def _hide_record_positions(records: list[dict[str, Any]]) -> None:
+    positions = [
+        (row["latitude_deg"], row["longitude_deg"])
+        if "latitude_deg" in row and "longitude_deg" in row
+        else None
+        for row in records
+    ]
+    for index in hidden_position_indexes(positions):
+        records[index].pop("latitude_deg", None)
+        records[index].pop("longitude_deg", None)
+
+
 def fit_document(name: str, summary: Any, data: bytes) -> dict[str, Any]:
     """The measurements of a FIT file without device, user or file records."""
     parsed = fit_messages(data)
@@ -99,28 +123,8 @@ def fit_document(name: str, summary: Any, data: bytes) -> dict[str, Any]:
         label: [] for label in _FIT_EXPORT_MESSAGES.values()
     }
     for number, values in messages:
-        row: dict[str, Any] = {}
-        for key, value in values.items():
-            if key in _FIT_TIME_FIELDS:
-                if origin is not None:
-                    row["time_s"] = round(value - origin, 3)
-            elif key in _FIT_POSITION_FIELDS:
-                row[_FIT_POSITION_FIELDS[key]] = round(
-                    value * _SEMICIRCLES_TO_DEGREES, 6
-                )
-            else:
-                row[key] = _number(value, 4)
-        tables[_FIT_EXPORT_MESSAGES[number]].append(row)
-    records = tables["records"]
-    positions = [
-        (row["latitude_deg"], row["longitude_deg"])
-        if "latitude_deg" in row and "longitude_deg" in row
-        else None
-        for row in records
-    ]
-    for index in hidden_position_indexes(positions):
-        records[index].pop("latitude_deg", None)
-        records[index].pop("longitude_deg", None)
+        tables[_FIT_EXPORT_MESSAGES[number]].append(_fit_row(values, origin))
+    _hide_record_positions(tables["records"])
     return {
         "format": "FIT",
         "filename": name,
@@ -129,7 +133,7 @@ def fit_document(name: str, summary: Any, data: bytes) -> dict[str, Any]:
             "Measurements only. Positions within 500 m of the start and end of "
             "the track, device and user records and file metadata are left out."
         ),
-        "records": _columns(records),
+        "records": _columns(tables["records"]),
         "laps": tables["laps"],
         "sessions": tables["sessions"],
         "sets": tables["sets"],
@@ -147,29 +151,34 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
+def _gpx_value(name: str, text: str) -> int | float | str | None:
+    """The kept value of one point child, or None when it is not a measurement."""
+    if name == "time":
+        return text if _GPX_TIME.fullmatch(text) else None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(number) if number.is_integer() else round(number, 4)
+
+
 def _gpx_point_values(node: ET.Element) -> dict[str, Any]:
     values: dict[str, Any] = {}
     for child in node.iter():
-        if child is node:
-            continue
         name = _local_name(child.tag).lower()
         text = (child.text or "").strip()
         if (
-            not text
+            child is node
+            or not text
             or name in _GPX_SKIPPED_FIELDS
             or not _GPX_METRIC_NAME.fullmatch(name)
         ):
             continue
-        if name == "time":
-            if _GPX_TIME.fullmatch(text):
-                values["time"] = text
-            continue
-        try:
-            number = float(text)
-        except ValueError:
-            continue
-        if math.isfinite(number):
-            values[name] = int(number) if number.is_integer() else round(number, 4)
+        value = _gpx_value(name, text)
+        if value is not None:
+            values[name] = value
     return values
 
 

@@ -112,6 +112,8 @@ class CoachConversationRecoveryTests(unittest.TestCase):
                 "response_input": payload["input"],
             },
         )
+        # Later stateless tool rounds seed their chain from the request's input.
+        self.assertEqual(request_payload["input"], payload["input"])
         self.logger.warning.assert_called_once()
 
     def test_no_remote_conversation_does_not_clear_stored_conversation(self) -> None:
