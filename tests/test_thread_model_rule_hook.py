@@ -95,6 +95,14 @@ class ThreadModelRuleHookTests(unittest.TestCase):
         rule = json.dumps({"allowed": {"sonnet": "high"}})
         self.assertEqual(run_hook(payload, rule).returncode, 0)
 
+    def test_effort_without_a_model_must_fit_the_strictest_limit(self):
+        rule = json.dumps({"allowed": {"opus": "low", "sonnet": "high"}})
+        self.assertEqual(run_hook(launch(effort="high"), rule).returncode, 2)
+        self.assertEqual(run_hook(launch(effort="low"), rule).returncode, 0)
+        self.assertEqual(
+            run_hook(launch("claude-sonnet-5-5", "high"), rule).returncode, 0
+        )
+
     def test_effort_above_high_stays_blocked_whatever_the_rule(self):
         rule = json.dumps({"allowed": {"opus": "max"}})
         result = run_hook(launch("claude-opus-5-5", "xhigh"), rule)
