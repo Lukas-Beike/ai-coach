@@ -193,6 +193,19 @@ def _daily_metrics_due(state: dict[str, Any], today: date) -> bool:
         return True
 
 
+def _body_battery_reconciliation_due(state: dict[str, Any], today: date) -> bool:
+    provider_sync = state.get("provider_sync")
+    marker = (
+        provider_sync.get("body_battery_reconciled_on")
+        if isinstance(provider_sync, dict)
+        else None
+    )
+    try:
+        return date.fromisoformat(str(marker)) < today
+    except TypeError, ValueError:
+        return True
+
+
 def _wide_run_today(run: Any, today: date) -> bool:
     """Return whether a run read at least the reconciliation span ending today."""
     try:
@@ -303,6 +316,10 @@ class GarminPayloadService:
     def daily_metrics_due(self) -> bool:
         """Return whether no refresh has read the daily metrics on this local day."""
         return _daily_metrics_due(self.state(), self._local_today())
+
+    def body_battery_reconciliation_due(self) -> bool:
+        """Return whether no sync has reconciled Body Battery on this local day."""
+        return _body_battery_reconciliation_due(self.state(), self._local_today())
 
     def daily_metrics_retry_due(self) -> bool:
         """Return whether a daily metric source failed on its last read."""
@@ -437,6 +454,15 @@ class GarminPayloadService:
             for key in ("daily_metrics_on", "daily_metrics_retry"):
                 if previous_sync.get(key):
                     provider_sync[key] = previous_sync[key]
+        # A run without the Body Battery reconciliation keeps the day it last ran.
+        if (
+            "body_battery_reconciled_on" not in provider_sync
+            and isinstance(previous_sync, dict)
+            and previous_sync.get("body_battery_reconciled_on")
+        ):
+            provider_sync["body_battery_reconciled_on"] = previous_sync[
+                "body_battery_reconciled_on"
+            ]
         _keep_daily_read_window(
             provider_sync,
             previous_sync if isinstance(previous_sync, dict) else {},

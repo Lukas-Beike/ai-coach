@@ -60,7 +60,9 @@ class GarminMorningBodyBatteryTests(unittest.TestCase):
             ),
         )
 
-    def test_sleep_local_date_bounds_the_body_battery_request(self):
+    def test_sleep_after_midnight_still_reads_the_previous_day(self):
+        # 01:30 on the check-in day in Berlin: the sleep date alone would start
+        # the range on the check-in day and skip the evening before.
         sleep_start = datetime(2026, 9, 3, 23, 30, tzinfo=UTC)
 
         sleep, records = self.fetch(sleep_start)
@@ -72,16 +74,34 @@ class GarminMorningBodyBatteryTests(unittest.TestCase):
             [
                 ("login", "synthetic-tokens"),
                 ("sleep", "2026-09-04"),
-                ("body_battery", "2026-09-04", "2026-09-04"),
+                ("body_battery", "2026-09-03", "2026-09-04"),
             ],
         )
         self.assertEqual(
             self.external_calls[-1][2],
             {
-                "window_start": "2026-09-04",
+                "window_start": "2026-09-03",
                 "window_end": "2026-09-04",
                 "purpose": "morning_recovery",
             },
+        )
+
+    def test_sleep_before_midnight_starts_the_range_on_the_sleep_date(self):
+        sleep_start = datetime(2026, 9, 3, 20, 0, tzinfo=UTC)
+
+        self.fetch(sleep_start)
+
+        self.assertEqual(
+            self.client.calls[-1], ("body_battery", "2026-09-03", "2026-09-04")
+        )
+
+    def test_a_sleep_start_two_days_back_keeps_its_own_date(self):
+        sleep_start = datetime(2026, 9, 2, 20, 0, tzinfo=UTC)
+
+        self.fetch(sleep_start)
+
+        self.assertEqual(
+            self.client.calls[-1], ("body_battery", "2026-09-02", "2026-09-04")
         )
 
     def test_missing_sleep_or_non_list_records_are_bounded(self):
