@@ -136,6 +136,9 @@ class _Manager:
         yield self.db
         self.db.commit()
 
+    def reclaim_space(self):
+        return True
+
 
 class _KeyValues:
     def __init__(self):
@@ -382,7 +385,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
     def test_format_version_lists_provider_detail_domain_and_link_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 16)
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 17)
         expected = {
             *PROVIDER_FILES,
             *DETAIL_FILES,
@@ -392,7 +395,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 16)
+            self.assertEqual(manifest["format_version"], 17)
             self.assertLessEqual(expected, set(manifest["jsonl_files"]))
             self.assertLessEqual(expected, set(archive.namelist()))
 

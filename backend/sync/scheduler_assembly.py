@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 from collections.abc import Callable, Mapping
@@ -11,6 +12,7 @@ from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.config import Config
+from backend.db.manager import DatabaseManager, background_writer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import scheduler
 from backend.sync.backfill_resume import BackfillChainResumer
@@ -59,6 +61,8 @@ class SyncSchedulePolicy:
 class DailySyncLoopSettings:
     morning_body_battery_service: Callable[[], Any]
     logger: logging.Logger
+    # Enables the idle WAL checkpoint of the loop when given.
+    database_manager: Callable[[], DatabaseManager] | None = None
 
 
 class SyncSchedulerAssembly:
@@ -102,6 +106,7 @@ class SyncSchedulerAssembly:
         self._sync_earliest_date = policy.sync_earliest_date
         self._morning_body_battery_service = daily_loop.morning_body_battery_service
         self._logger = daily_loop.logger
+        self._database_manager = daily_loop.database_manager
         self._provider_runtime = provider_runtime
 
     def daily_scheduler(self) -> scheduler.DailySyncScheduler:
@@ -218,4 +223,14 @@ class SyncSchedulerAssembly:
             logger=self._logger,
             stop_event=threading.Event(),
             housekeeping=self._queue_service().prune_finished,
+            wal_checkpoint=(
+                None
+                if self._database_manager is None
+                else functools.partial(self._checkpoint_wal, self._database_manager)
+            ),
         )
+
+    def _checkpoint_wal(self, database_manager: Callable[[], DatabaseManager]) -> None:
+        """Truncate the WAL as deferrable work behind foreground writers."""
+        with self._maintenance_gate.operation(), background_writer():
+            database_manager().checkpoint_wal()

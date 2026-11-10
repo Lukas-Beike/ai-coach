@@ -120,6 +120,7 @@ EXPORTED_TABLE_MEMBERS: dict[str, tuple[str, ...]] = {
     "messages": ("messages.jsonl",),
     "coach_plan_artifacts": ("coach_plan_artifacts.jsonl",),
     "coach_commands": ("coach_commands.jsonl",),
+    "coach_action_proposals": ("coach_action_proposals.jsonl",),
     "snapshots": ("snapshots.jsonl",),
     "workout_library": ("workout_library.jsonl",),
     "planned_units": ("planned_units.jsonl",),
@@ -145,43 +146,28 @@ EXPORTED_TABLE_MEMBERS: dict[str, tuple[str, ...]] = {
 }
 EXPORT_EXCLUDED_TABLES: dict[str, str] = {
     "sessions": "login sessions hold credential hashes; restore scrubs them too",
-    "coach_action_proposals": (
-        "short-lived approval proposals bound to a session CSRF hash and a one-use "
-        "token hash; expired rows are deleted"
-    ),
     "planning_state": "a revision counter; planning.json carries the planning data",
 }
 # Export columns left out of an explicit SELECT, with the reason. A new column of
 # an explicitly selected table fails the guard until it is exported or listed.
 EXPORT_COLUMNS_NOT_EXPORTED: dict[str, dict[str, str]] = {
-    "competitions": {"created_at": "bookkeeping", "updated_at": "bookkeeping"},
     "competition_sync_tombstones": {"id": "surrogate key"},
     "messages": {"id": "surrogate key", "client_turn_id": "idempotency key"},
-    "snapshots": {
-        "id": "surrogate key",
-        "created_at": "copy of the payload",
-        "synced_at": "copy of the payload",
-        "recent_activity_count": "derived count of the payload",
+    "activity_stream_channels": {
+        "detail_kind": "constant for stream channels",
+        "data": "exported decoded as values",
+    },
+    "coach_action_proposals": {
+        "session_csrf_hash": "credential hash binding the proposal to a session",
+        "action_token_hash": "credential hash of the one-use action token",
     },
     "provider_records": {"observed_on": "index copy of a day inside the payload"},
-    "workout_library": {
-        name: "the exported payload holds it; sync bookkeeping is not athlete data"
-        for name in (
-            "id",
-            "local_id",
-            "external_id",
-            "sync_dirty",
-            "sync_state",
-            "sync_error",
-            "last_synced_at",
-            "updated_at",
-        )
-    },
     "kv": {"updated_at": "bookkeeping"},
 }
 # Schema version -> export format version that documents it. Bump both together.
-# Format 14 adds provider_settings.json without a schema change.
-EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 14, 24: 15, 25: 16}
+# Format 14 adds provider_settings.json without a schema change; format 17
+# adds table bookkeeping and coach_action_proposals.jsonl, also without one.
+EXPORT_FORMAT_FOR_SCHEMA = {22: 12, 23: 14, 24: 15, 25: 17}
 
 # Key/value families (exact key or prefix ending in ":") and what the privacy
 # export does with them. "exported": application_state.json; "excluded": never
@@ -240,6 +226,9 @@ class _Manager:
     def unit_of_work(self):
         yield self.db
         self.db.commit()
+
+    def reclaim_space(self):
+        return True
 
 
 class _Competitions:
@@ -442,6 +431,35 @@ class DataKindFixture(unittest.TestCase):
             now=STAMP,
         )
 
+    def seed_bookkeeping_rows(self) -> None:
+        self.db.execute(
+            "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
+            "VALUES ('{\"marker\": 1}', ?, ?, 3)",
+            (STAMP, STAMP),
+        )
+        self.db.execute(
+            "INSERT INTO workout_library(id, local_id, external_id, payload, sync_state, "
+            "sync_error, last_synced_at, updated_at) VALUES "
+            "('lib-1', 'local-1', 'ext-1', '{\"name\": \"Easy\", \"sport\": \"run\"}', "
+            "'synced', 'none', ?, ?)",
+            (STAMP, STAMP),
+        )
+        self.db.execute(
+            "INSERT INTO competitions(id, name, event_date, sport, priority, distance, "
+            "target, course_profile, notes, created_at, updated_at) VALUES "
+            "('race-1', 'Synthetic Race', '2026-10-10', 'run', 'A', '10 km', '', '', '', ?, ?)",
+            (STAMP, STAMP),
+        )
+        self.db.execute(
+            "INSERT INTO coach_action_proposals(id, session_csrf_hash, action_type, "
+            "target_system, object_ids, diff, payload, payload_hash, action_token_hash, "
+            "status, expires_at, created_at) VALUES ('prop-1', 'synthetic-session-hash', "
+            "'local_coach_write', 'local', '[]', '{}', '{}', 'payload-hash', "
+            "'synthetic-token-hash', 'ready', 1.0, ?)",
+            (STAMP,),
+        )
+        self.db.commit()
+
     def _seed_everything(self) -> None:
         self.seed_session()
         self.seed_derived_observations()
@@ -592,6 +610,35 @@ class CoverageGuardTests(DataKindFixture):
             PRIVACY_EXPORT_FORMAT_VERSION,
             "a schema change needs an export format decision: add the new pair here",
         )
+
+    def test_exported_rows_carry_every_live_column_but_the_listed_ones(self):
+        self._seed_everything()
+        self.seed_bookkeeping_rows()
+        archive = self._export_archive()
+        checked = set()
+        for table, members in EXPORTED_TABLE_MEMBERS.items():
+            if len(members) != 1 or not members[0].endswith(".jsonl"):
+                continue
+            lines = archive.read(members[0]).splitlines()
+            if not lines:
+                continue
+            keys = set(json.loads(lines[0]))
+            allowed = set(EXPORT_COLUMNS_NOT_EXPORTED.get(table, {}))
+            with self.subTest(table=table):
+                self.assertEqual(
+                    CURRENT_DATABASE_SCHEMA[table] - keys - allowed,
+                    set(),
+                    "an exported row lacks a live column that is not listed",
+                )
+                self.assertEqual(keys & allowed, set(), "a listed column is exported")
+            checked.add(table)
+        self.assertLessEqual(
+            {"snapshots", "workout_library", "competitions", "coach_action_proposals"},
+            checked,
+        )
+        exported = b"".join(archive.read(name) for name in archive.namelist())
+        self.assertNotIn(b"synthetic-session-hash", exported)
+        self.assertNotIn(b"synthetic-token-hash", exported)
 
     def test_explicit_export_columns_cover_every_column_but_the_listed_ones(self):
         source = Path(export_module.__file__).read_text(encoding="utf-8")

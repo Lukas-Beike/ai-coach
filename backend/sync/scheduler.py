@@ -142,8 +142,10 @@ class DailySyncLoop:
         logger: logging.Logger,
         stop_event: threading.Event | None = None,
         housekeeping: Callable[[], object] | None = None,
+        wal_checkpoint: Callable[[], object] | None = None,
     ) -> None:
         self._housekeeping = housekeeping
+        self._wal_checkpoint = wal_checkpoint
         self._daily_scheduler = daily_scheduler
         self._morning_battery = morning_battery
         self._sleep = sleep
@@ -162,6 +164,7 @@ class DailySyncLoop:
             else:
                 self._sleep(300)
             self._run_housekeeping()
+            self._run_wal_checkpoint()
             try:
                 self._daily_scheduler.schedule()
                 self._morning_battery.refresh()
@@ -200,6 +203,27 @@ class DailySyncLoop:
                     },
                 },
             )
+
+    def _run_wal_checkpoint(self) -> None:
+        """Truncate the idle WAL; a failure never stops the loop."""
+        if self._wal_checkpoint is None:
+            return
+        try:
+            self._wal_checkpoint()
+        except AppError as exc:
+            if exc.reason != "maintenance":
+                self._log_checkpoint_failure(exc)
+        except Exception as exc:  # noqa: BLE001 - keep the daily loop alive
+            self._log_checkpoint_failure(exc)
+
+    def _log_checkpoint_failure(self, exc: Exception) -> None:
+        self._logger.error(
+            "Database WAL checkpoint failed",
+            extra={
+                "event": "wal_checkpoint_failed",
+                "context": {"error_class": type(exc).__name__},
+            },
+        )
 
 
 @dataclass(frozen=True)

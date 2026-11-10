@@ -20,7 +20,7 @@ from backend.backup.export import (
 from backend.backup.recovery_copies import RecoveryCopies
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import activity_detail_store
-from backend.db.manager import DatabaseManager
+from backend.db.manager import DatabaseManager, secure_deletion
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
@@ -261,10 +261,38 @@ class PrivacyDeleteService:
             dependencies.maintenance_gate.restore(),
             dependencies.database_lock,
             dependencies.database_manager.unit_of_work() as db,
+            secure_deletion(db),
         ):
             deleted = activity_detail_store.delete_stored_tracks(db)
             clear_routes(dependencies.key_value_repository, db)
+        self._reclaim_after_commit()
         return {"status": "ok", "deleted_tracks": deleted, **self.gps_state()}
+
+    def _reclaim_after_commit(self) -> None:
+        """Drop the deleted pages from the database file and the WAL.
+
+        Runs after the commit under the held maintenance gate. The delete is
+        already durable, so a failure is logged and never fails the request;
+        both statements are atomic and leave the data unchanged on error.
+        """
+        dependencies = self._dependencies
+        try:
+            with dependencies.database_lock:
+                complete = dependencies.database_manager.reclaim_space()
+        except Exception as exc:  # noqa: BLE001 - the committed delete stands
+            dependencies.logger.warning(
+                "Deleted database pages could not be reclaimed",
+                extra={
+                    "event": "privacy_space_reclaim_failed",
+                    "context": {"error_class": type(exc).__name__},
+                },
+            )
+            return
+        if complete is False:
+            dependencies.logger.warning(
+                "Deleted database pages stay in the write-ahead log",
+                extra={"event": "privacy_space_reclaim_incomplete"},
+            )
 
     def delete(self, confirm: Any) -> dict[str, Any]:
         if confirm != PRIVACY_DELETE_CONFIRMATION_TEXT:
@@ -321,6 +349,7 @@ class PrivacyDeleteService:
                 dependencies.diagnostics_suspended(),
                 dependencies.database_lock,
                 dependencies.database_manager.unit_of_work() as db,
+                secure_deletion(db),
             ):
                 deleted_counts = self._counts(db)
                 deleted_tables = dict.fromkeys(
@@ -339,6 +368,7 @@ class PrivacyDeleteService:
                     db, "profile", json.dumps(DEFAULT_PROFILE)
                 )
                 dependencies.planning_revision_service.mark_reset_pending()
+            self._reclaim_after_commit()
             if dependencies.recovery_copies is not None:
                 # After the commit: a failed erase never leaves a half-wiped database.
                 erased = dependencies.recovery_copies.erase()

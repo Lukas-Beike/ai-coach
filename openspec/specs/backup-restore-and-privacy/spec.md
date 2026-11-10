@@ -46,7 +46,7 @@ Evidence: `backend/backup/database.py::DatabaseBackupService._check_source_capac
 
 ### Requirement: Complete secret-filtered privacy exports
 
-The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions, approval proposals and the planning-state revision counter, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are exported in `provider_settings.json`. The format version is currently 16.
+The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines members that holds every durable table except login sessions and the planning-state revision counter; approval proposals are exported without their session and action-token hashes, and every key/value row except the credential, token and OAuth-state keys and the transient running/status flags. The stored non-secret provider fields (Personal API key expiry date, Intervals.icu athlete id, Wahoo client id, OpenAI base URL) are exported in `provider_settings.json`. The format version is currently 17.
 
 #### Scenario: Privacy archive requested
 - **WHEN** the authenticated athlete requests the archive export

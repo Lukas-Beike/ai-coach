@@ -1708,6 +1708,7 @@ SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
         daily_loop=DailySyncLoopSettings(
             morning_body_battery_service=morning_body_battery_service,
             logger=LOGGER,
+            database_manager=database_manager,
         ),
     ),
     provider_runtime=provider_runtime,
