@@ -354,6 +354,8 @@ class NutritionMealLibraryService:
             self._templates.delete(db, entity_id)
             return None
         template = {
+            # A field recorded as None before a delete is absent from the diff.
+            **dict.fromkeys(change_history.NUTRITION_TEMPLATE_FIELDS),
             **(current or {}),
             **target,
             "id": entity_id,

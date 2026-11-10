@@ -263,6 +263,14 @@ class NutritionTemplateHistoryTests(NutritionHistoryCase):
         # The restored meal can be logged again.
         self.assertEqual(self.diary.log_template(saved["id"], 2)["kcal"], 800)
 
+    def test_undo_of_a_delete_keeps_a_missing_macro(self) -> None:
+        saved = self.library.save_template({**TEMPLATE, "fat_g": None})
+        _, changes = self.collected(lambda: self.library.delete_template(saved["id"]))
+        self.undo(changes)
+        restored = self.library.get_template(saved["id"])
+        self.assertIsNone(restored["fat_g"])
+        self.assertEqual(self.diary.log_template(saved["id"], 1)["kcal"], 400)
+
     def test_undo_of_a_delete_is_refused_when_the_name_was_taken(self) -> None:
         saved = self.library.save_template(TEMPLATE)
         _, changes = self.collected(lambda: self.library.delete_template(saved["id"]))
