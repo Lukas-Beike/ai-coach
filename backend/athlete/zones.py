@@ -9,6 +9,7 @@ records a change-history row whose undo restores the previous local state.
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Callable, Mapping
 from datetime import date
@@ -137,6 +138,35 @@ def _optional_day(value: Any) -> date | None:
         raise AppError(400, _INVALID.format("valid_from")) from exc
 
 
+def _check_heart_rate_limits(
+    threshold: float | None,
+    maximum: float | None,
+    limits: tuple[float, ...] | None,
+    percent_limits: tuple[float, ...] | None,
+) -> None:
+    """Reject a maximum below the threshold and limits above the maximum."""
+    if threshold is not None and maximum is not None and maximum < threshold:
+        raise AppError(
+            400, "Die maximale Herzfrequenz darf nicht unter dem Schwellenpuls liegen."
+        )
+    if maximum is None:
+        return
+    if limits is not None and limits[-1] > maximum:
+        raise AppError(
+            400,
+            "Die Zonenobergrenzen dürfen nicht über der maximalen Herzfrequenz liegen.",
+        )
+    if (
+        percent_limits is not None
+        and threshold
+        and percent_limits[-1] > maximum / threshold * 100
+    ):
+        raise AppError(
+            400,
+            "Die Zonenobergrenzen dürfen nicht über der maximalen Herzfrequenz liegen.",
+        )
+
+
 def local_configuration(payload: Mapping[str, Any]) -> ZoneConfiguration:
     """Validate one local configuration from the API or a restored history row.
 
@@ -160,6 +190,13 @@ def local_configuration(payload: Mapping[str, Any]) -> ZoneConfiguration:
         # Without it the local zones would win but replace the provider's
         # threshold with none and could not place bpm or watt targets.
         raise AppError(400, _INVALID.format(_THRESHOLD_REQUIRED[metric]))
+    maximum = (
+        _optional_number(payload.get("maximum"), "maximum")
+        if metric is ZoneConfigurationMetric.HEART_RATE
+        else None
+    )
+    if metric is ZoneConfigurationMetric.HEART_RATE:
+        _check_heart_rate_limits(threshold, maximum, limits, percent_limits)
     try:
         return ZoneConfiguration(
             metric=metric,
@@ -168,11 +205,7 @@ def local_configuration(payload: Mapping[str, Any]) -> ZoneConfiguration:
             valid_from=_optional_day(payload.get("valid_from")),
             valid_until=None,
             threshold=threshold,
-            maximum=(
-                _optional_number(payload.get("maximum"), "maximum")
-                if metric is ZoneConfigurationMetric.HEART_RATE
-                else None
-            ),
+            maximum=maximum,
             resting=None,
             limits=limits,
             percent_limits=percent_limits,
@@ -185,6 +218,36 @@ def local_configuration(payload: Mapping[str, Any]) -> ZoneConfiguration:
         raise AppError(400, _INVALID.format(exc)) from exc
 
 
+EffectiveZone = Callable[..., ZoneConfiguration | None]
+
+
+def _effective(
+    configurations: tuple[ZoneConfiguration, ...],
+    today: date,
+    effective_zone_configuration: EffectiveZone,
+) -> list[dict[str, Any]]:
+    """Per sport, metric and environment the configuration in effect today."""
+    result = []
+    for sport, metric, indoor in itertools.product(
+        EDITABLE_SPORTS, ZoneConfigurationMetric, (False, True)
+    ):
+        chosen = effective_zone_configuration(
+            configurations, metric, sport, indoor=indoor, day=today
+        )
+        # The indoor view lists only a configuration of its own.
+        if chosen is None or (indoor and chosen.environment is None):
+            continue
+        result.append(
+            {
+                "sport": sport.value,
+                "metric": metric.value,
+                "environment": "indoor" if indoor else None,
+                "key": canonical_domain_store.zone_configuration_key(chosen),
+            }
+        )
+    return result
+
+
 class ZoneConfigurationService:
     """Own local zone edits and the zone configurations other reads choose from."""
 
@@ -194,6 +257,8 @@ class ZoneConfigurationService:
         reader: ZoneConfigurationReader,
         now: Callable[[], str],
         *,
+        today: Callable[[], date],
+        effective_zone: EffectiveZone,
         on_change: Callable[[], None] = lambda: None,
         threshold_warnings: Callable[[], dict[str, Any] | None] = lambda: None,
     ) -> None:
@@ -202,6 +267,10 @@ class ZoneConfigurationService:
         self._threshold_warnings = threshold_warnings
         self._reader = reader
         self._now = now
+        # Athlete-local today: dates a save and picks the zones in effect.
+        self._today = today
+        # ``effective_zone_configuration`` of the activities owner.
+        self._effective_zone = effective_zone
         # Runs after a save, a removal or an undo: the local load follows it.
         self._on_change = on_change
 
@@ -216,13 +285,17 @@ class ZoneConfigurationService:
 
     def read(self) -> dict[str, Any]:
         configurations = self.configurations()
+        today = self._today()
         payload: dict[str, Any] = {
             "sports": [sport.value for sport in EDITABLE_SPORTS],
+            "today": today.isoformat(),
             "configurations": [
                 public_configuration(configuration)
                 for configuration in configurations
                 if configuration.sport in EDITABLE_SPORTS
+                or (configuration.sport is None and configuration.provenance.provider)
             ],
+            "effective": _effective(configurations, today, self._effective_zone),
         }
         warnings = self._threshold_warnings()
         if warnings:
@@ -230,7 +303,19 @@ class ZoneConfigurationService:
         return payload
 
     def save(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        configuration = local_configuration(payload)
+        """Save one local configuration; without a date it starts today.
+
+        ``from_beginning`` is the explicit undated base value for the first
+        configuration; any other save keeps earlier days on their old value.
+        """
+        dated = dict(payload)
+        if payload.get("from_beginning") is True:
+            dated["valid_from"] = None
+        elif payload.get("valid_from") in (None, ""):
+            dated["valid_from"] = self._today().isoformat()
+        configuration = local_configuration(dated)
+        if configuration.valid_from and configuration.valid_from > self._today():
+            raise AppError(400, "Das Datum „Gilt ab“ darf nicht in der Zukunft liegen.")
         key = canonical_domain_store.zone_configuration_key(configuration)
         with self._database_manager.unit_of_work() as db:
             current, _ = self.current(db, key)

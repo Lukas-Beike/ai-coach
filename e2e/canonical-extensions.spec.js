@@ -47,6 +47,8 @@ test("@responsive local zones save with provider alternatives and undo", async (
   await expect(section.getByRole("button", { name: "Lokale Zonen entfernen" })).toBeVisible();
   let zones = await (await request.get("/api/zones")).json();
   expect(zones.configurations.filter((item) => item.source === "local").map((item) => item.threshold)).toEqual([280]);
+  expect(zones.configurations.filter((item) => item.source === "local").map((item) => item.valid_from)).toEqual([zones.today]);
+  await expect(page.locator("#zoneSources li")).toHaveCount(1);
 
   await receipt.getByRole("button", { name: "Rückgängig" }).click();
   await expect(receipt).toHaveText("Zurückgenommen.");

@@ -427,11 +427,15 @@ const ZONE_METRIC_LABELS = {
   pace: { threshold: "", limits: "Zonenobergrenzen (% der Schwellenpace)", key: "percent_limits" },
 };
 let zoneConfigurations = [];
+let zoneEffective = [];
+let zoneToday = "";
 
 async function loadZones() {
   try {
     const result = await api("/api/zones");
     zoneConfigurations = result.configurations || [];
+    zoneEffective = result.effective || [];
+    zoneToday = result.today || "";
     renderZoneEditor();
     renderZoneWarnings(result.threshold_warnings);
     // The strip follows a save or removal at once, not only the next bootstrap.
@@ -496,7 +500,9 @@ function selectedZoneConfigurations() {
   const sport = $("#zoneSport").value;
   const metric = $("#zoneMetric").value;
   const environment = $("#zoneEnvironment").value || null;
-  return zoneConfigurations.filter((item) => item.sport === sport && item.metric === metric && item.environment === environment && !item.valid_from);
+  // The server picks the configuration in effect today, Garmin defaults included.
+  const effective = zoneEffective.find((item) => item.sport === sport && item.metric === metric && item.environment === environment);
+  return zoneConfigurations.filter((item) => item.key === effective?.key);
 }
 
 function zoneLimitsText(item) {
@@ -518,6 +524,11 @@ function renderZoneEditor() {
   $("#zoneMaximum").value = shown?.maximum ?? "";
   $("#zoneLimits").value = shown ? zoneLimitsText(shown) : "";
   $("#zoneRemoveButton").hidden = !local;
+  $("#zoneFromBeginningField").hidden = selected.length > 0;
+  $("#zoneFromBeginning").checked = false;
+  $("#zoneValidFrom").disabled = false;
+  $("#zoneValidFrom").max = zoneToday;
+  $("#zoneValidFrom").value = zoneToday;
   $("#zoneRemoveButton").dataset.key = local?.key || "";
   const sources = $("#zoneSources");
   sources.replaceChildren(...selected.map((item) => {
@@ -526,6 +537,12 @@ function renderZoneEditor() {
     line.textContent = `${item.source === "local" ? "Lokal (gilt)" : item.label || item.source}${threshold} · ${zoneLimitsText(item)}`;
     return line;
   }));
+}
+
+function toggleZoneFromBeginning() {
+  const beginning = $("#zoneFromBeginning").checked;
+  $("#zoneValidFrom").disabled = beginning;
+  $("#zoneValidFrom").required = !beginning;
 }
 
 function zoneNumber(value) {
@@ -545,6 +562,7 @@ async function saveZones(event) {
         sport: $("#zoneSport").value,
         metric,
         environment: $("#zoneEnvironment").value || null,
+        ...($("#zoneFromBeginning").checked ? { from_beginning: true } : { valid_from: $("#zoneValidFrom").value }),
         threshold: ZONE_METRIC_LABELS[metric].threshold ? zoneNumber($("#zoneThreshold").value) : null,
         maximum: metric === "heart_rate" ? zoneNumber($("#zoneMaximum").value) : null,
         [ZONE_METRIC_LABELS[metric].key]: limits,

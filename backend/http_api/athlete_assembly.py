@@ -10,6 +10,7 @@ from typing import Any
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.session_corrections import SessionCorrectionService
+from backend.activities.zone_settings import effective_zone_configuration
 from backend.athlete.checkins import CheckinService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
@@ -107,6 +108,8 @@ class AthleteDataAssembly:
             self._database_manager(),
             CanonicalTableReader(),
             self._utc_now,
+            today=self._local_date,
+            effective_zone=effective_zone_configuration,
             on_change=self._zones_changed,
             threshold_warnings=self._threshold_warnings,
         )

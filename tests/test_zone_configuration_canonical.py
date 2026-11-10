@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from canonical_domain_support import provenance, zone_configuration
 from intervals_compaction import compact_sport_settings
 from intervals_zone_stub import map_intervals_zone_configurations
 from zone_settings_reference import (
@@ -28,9 +29,14 @@ from zone_settings_reference import (
 )
 
 from backend import change_history
-from backend.activities.zone_settings import ZoneSettings
+from backend.activities.zone_settings import ZoneSettings, effective_zone_configuration
 from backend.athlete.zones import ZoneConfigurationService, local_configuration
-from backend.canonical.vocabulary import Environment, ProviderId, Sport
+from backend.canonical.vocabulary import (
+    Environment,
+    ProviderId,
+    Sport,
+    ZoneConfigurationMetric,
+)
 from backend.coach.context import CoachStructuredContextService, coach_training_zones
 from backend.db import DatabaseManager, canonical_domain_store, row_factory
 from backend.db.schema import initialize_schema
@@ -42,6 +48,7 @@ from backend.sync.canonical_table_reader import CanonicalTableReader
 
 RETRIEVED_AT = datetime(2026, 10, 11, 6, tzinfo=UTC)
 NOW = "2026-10-11T06:00:00+00:00"
+SAVE_DAY = date(2026, 10, 11)
 RIDE = {
     "types": ["Ride", "VirtualRide"],
     "ftp": 260,
@@ -66,6 +73,14 @@ LOCAL_POWER = {
     "metric": "power",
     "threshold": 280,
     "percent_limits": [50, 70, 85, 100, 115, 140, 999],
+}
+
+RUN_HR = {
+    "sport": "run",
+    "metric": "heart_rate",
+    "threshold": 165,
+    "maximum": 195,
+    "limits": [120, 140, 152, 165, 180, 195],
 }
 
 
@@ -284,6 +299,8 @@ class LocalZoneEditTests(unittest.TestCase):
             self.manager,
             CanonicalTableReader(),
             lambda: NOW,
+            today=lambda: SAVE_DAY,
+            effective_zone=effective_zone_configuration,
             on_change=lambda: self.zone_changes.append(True),
         )
         unused: Any = None
@@ -366,6 +383,8 @@ class LocalZoneEditTests(unittest.TestCase):
             self.manager,
             CanonicalTableReader(),
             lambda: NOW,
+            today=lambda: SAVE_DAY,
+            effective_zone=effective_zone_configuration,
             threshold_warnings=lambda: warning,
         )
         self.assertEqual(service.read()["threshold_warnings"], warning)
@@ -379,6 +398,8 @@ class LocalZoneEditTests(unittest.TestCase):
             self.manager,
             CanonicalTableReader(),
             lambda: NOW,
+            today=lambda: SAVE_DAY,
+            effective_zone=effective_zone_configuration,
             on_change=lambda: calls.append(True),
         )
         key = service.save(LOCAL_POWER)["configuration"]["key"]
@@ -400,7 +421,11 @@ class LocalZoneEditTests(unittest.TestCase):
     def _clocked(self) -> tuple[ZoneConfigurationService, list[str]]:
         clock = ["2026-08-01T06:00:00+00:00"]
         service = ZoneConfigurationService(
-            self.manager, CanonicalTableReader(), lambda: clock[0]
+            self.manager,
+            CanonicalTableReader(),
+            lambda: clock[0],
+            today=lambda: SAVE_DAY,
+            effective_zone=effective_zone_configuration,
         )
         unused: Any = None
         self.undo = HistoryUndoService(
@@ -473,6 +498,91 @@ class LocalZoneEditTests(unittest.TestCase):
         )
         (local,) = self.local()
         self.assertEqual(local["percent_limits"], LOCAL_POWER["percent_limits"])
+
+    def _effective_lthr(self, day: date) -> float | None:
+        with self.manager.reader() as db:
+            chosen = effective_zone_configuration(
+                CanonicalTableReader().zone_configurations(db),
+                ZoneConfigurationMetric.HEART_RATE,
+                Sport.RUN,
+                day=day,
+            )
+        return None if chosen is None else chosen.threshold
+
+    def test_a_save_without_a_date_starts_today_and_keeps_earlier_days(self) -> None:
+        self.service.save({**RUN_HR, "valid_from": "2026-01-01"})
+        receipt = self.service.save({**RUN_HR, "threshold": 172})
+        self.assertEqual(receipt["configuration"]["valid_from"], "2026-10-11")
+        self.assertEqual(len(self.local()), 2)
+        self.assertEqual(self._effective_lthr(date(2026, 10, 10)), 165)
+        self.assertEqual(self._effective_lthr(date(2026, 10, 11)), 172)
+
+    def test_a_future_start_is_rejected(self) -> None:
+        with self.assertRaises(AppError) as raised:
+            self.service.save({**RUN_HR, "valid_from": "2026-10-12"})
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(self.local(), [])
+
+    def test_an_earlier_date_can_be_chosen(self) -> None:
+        receipt = self.service.save({**RUN_HR, "valid_from": "2026-09-01"})
+        self.assertEqual(receipt["configuration"]["valid_from"], "2026-09-01")
+
+    def test_the_first_configuration_can_apply_from_the_beginning(self) -> None:
+        receipt = self.service.save({**RUN_HR, "from_beginning": True})
+        self.assertIsNone(receipt["configuration"]["valid_from"])
+        self.assertEqual(self._effective_lthr(date(2020, 1, 1)), 165)
+
+    def test_the_editor_reads_the_zones_in_effect_including_garmin_defaults(
+        self,
+    ) -> None:
+        garmin = canonical_domain_store.replace_zone_configurations
+        default_set = zone_configuration(
+            sport=None,
+            valid_from=date(2026, 9, 1),
+            provenance=provenance("zones", provider=ProviderId.GARMIN),
+        )
+        with self.manager.unit_of_work() as db:
+            garmin(
+                db,
+                provider=ProviderId.GARMIN,
+                source_record_id="zones",
+                configurations=(default_set,),
+                mapper_version=1,
+                now=NOW,
+            )
+        read = self.service.read()
+        self.assertEqual(read["today"], "2026-10-11")
+        by_key = {row["key"]: row for row in read["configurations"]}
+        effective = [
+            item
+            for item in read["effective"]
+            if item["sport"] == "run" and item["metric"] == "heart_rate"
+        ]
+        self.assertEqual(len(effective), 1)
+        self.assertEqual(by_key[effective[0]["key"]]["source"], "garmin")
+        self.assertIsNone(by_key[effective[0]["key"]]["sport"])
+        # A local save then takes over the effective entry.
+        self.service.save(RUN_HR)
+        read = self.service.read()
+        (item,) = [
+            i
+            for i in read["effective"]
+            if i["sport"] == "run" and i["metric"] == "heart_rate"
+        ]
+        self.assertTrue(item["key"].startswith("|heart_rate|run||"))
+
+    def test_contradictory_heart_rate_limits_are_rejected(self) -> None:
+        base = {k: v for k, v in RUN_HR.items() if k != "limits"}
+        for change, text in (
+            ({"maximum": 150, "limits": [120, 140, 150]}, "maximale Herzfrequenz"),
+            ({"limits": [120, 140, 200]}, "Zonenobergrenzen"),
+            ({"percent_limits": [70, 90, 100, 110, 130]}, "Zonenobergrenzen"),
+        ):
+            with self.subTest(change=change), self.assertRaises(AppError) as raised:
+                self.service.save({**base, **change})
+            self.assertEqual(raised.exception.status, 400)
+            self.assertIn(text, str(raised.exception))
+        self.assertEqual(self.local(), [])
 
     def test_an_invalid_edit_changes_nothing(self) -> None:
         self.service.save(LOCAL_POWER)
