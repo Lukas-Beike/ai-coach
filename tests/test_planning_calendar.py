@@ -192,10 +192,9 @@ class PlanningCalendarTests(unittest.TestCase):
                 {**run, "session_focus": "easy"}, event
             )
         )
-        self.assertEqual(
-            planning_calendar.calendar_constraint_decision(run, event)["reason"],
-            "no_intensity",
-        )
+        decision = planning_calendar.calendar_constraint_decision(run, event)
+        assert decision is not None
+        self.assertEqual(decision["reason"], "no_intensity")
 
     def test_light_or_mobility_strength_is_explicitly_easy(self) -> None:
         strength = {
