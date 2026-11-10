@@ -1578,16 +1578,39 @@ function maintenanceButton(item) {
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await api("/api/equipment/maintenance", { method: "POST", body: JSON.stringify({ equipment_id: item.id, date: timezoneDateKey(state.data?.profile?.timezone, new Date()) }) });
+      const result = await api("/api/equipment/maintenance", { method: "POST", body: JSON.stringify({ equipment_id: item.id, date: timezoneDateKey(state.data?.profile?.timezone, new Date()) }) });
       // Maintenance does not advance state_versions, so drop the cached response even if the athlete has left the route.
       invalidateAnalysisReport("/api/analysis/training-records");
       await renderTrainingRecords();
+      showMaintenanceReceipt(result?.change);
     } catch (error) {
       button.disabled = false;
       if (!isSessionEndedError(error)) button.textContent = error.message || "Wartung fehlgeschlagen";
     }
   });
   return button;
+}
+
+function showMaintenanceReceipt(change, message = "Wartung erfasst. ") {
+  const status = reportNode("p", message);
+  status.setAttribute("role", "status");
+  document.getElementById("equipmentItems")?.querySelector("h3")?.after(status);
+  if (!change?.id) return;
+  const undo = reportNode("button", "Rückgängig", "message-undo");
+  undo.type = "button";
+  undo.addEventListener("click", async () => {
+    undo.disabled = true;
+    try {
+      await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
+      invalidateAnalysisReport("/api/analysis/training-records");
+      await renderTrainingRecords();
+      showMaintenanceReceipt(null, "Zurückgenommen.");
+    } catch (error) {
+      undo.disabled = false;
+      status.firstChild.textContent = `${error.message} `;
+    }
+  });
+  status.append(undo);
 }
 
 function garminEquipmentCard(item) {

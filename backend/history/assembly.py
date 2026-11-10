@@ -27,6 +27,8 @@ class HistoryAthleteServices:
     checkin_service: Callable[[], Any] | None = None
     meal_library: Callable[[], Any] | None = None
     product_catalog: Callable[[], Any] | None = None
+    # The record services of the equipment entity types, keyed by entity type.
+    equipment_history: Callable[[], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ class HistoryAssembly:
         self._checkin_service = dependencies.athlete.checkin_service
         self._meal_library = dependencies.athlete.meal_library
         self._product_catalog = dependencies.athlete.product_catalog
+        self._equipment_history = dependencies.athlete.equipment_history
         self._workout_library_service = dependencies.planning.workout_library_service
         self._planned_unit_service = dependencies.planning.planned_unit_service
         self._training_plan_service = dependencies.planning.training_plan_service
@@ -89,6 +92,8 @@ class HistoryAssembly:
             services["nutrition_template"] = self._meal_library()
         if self._product_catalog is not None:
             services["nutrition_product"] = self._product_catalog()
+        if self._equipment_history is not None:
+            services.update(self._equipment_history())
         return services
 
     def _corrections(self) -> Any | None:

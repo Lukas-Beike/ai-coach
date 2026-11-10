@@ -30,6 +30,9 @@ ENTITY_TYPES = {
     "nutrition_template",
     "nutrition_product",
     "checkin",
+    "equipment",
+    "equipment_assignment",
+    "equipment_maintenance",
     "metric_export",
 }
 # A metric export to a provider; its entity id is "<provider>:<remote record>".
@@ -241,6 +244,31 @@ CHECKIN_FIELDS = (
     "day_status",
     "tag_answers",
 )
+# One equipment item, with the fields the athlete or Coach edits; the revision, the
+# update time and the Garmin-owned mileage are left out so a provider sync keeps undo.
+EQUIPMENT_FIELDS = (
+    "id",
+    "name",
+    "sport",
+    "environment",
+    "sport_pending",
+    "kind",
+    "status",
+    "parent_id",
+    "parent_pending",
+    "start_date",
+    "initial_distance_km",
+    "initial_hours",
+    "maintenance_km",
+    "maintenance_hours",
+    "lifetime_target_km",
+    "lifetime_target_source",
+)
+# The explicit gear of one activity; its entity id is the assignment key, and
+# an unassignment keeps the row with ``equipment_id`` None.
+EQUIPMENT_ASSIGNMENT_FIELDS = ("activity_id", "equipment_id")
+# One maintenance entry; the observation time is left out.
+EQUIPMENT_MAINTENANCE_FIELDS = ("id", "equipment_id", "date", "notes", "distance_km")
 # A composite meal keeps its ingredient snapshots in nutrition_basis.
 _FIELD_LIMITS = {
     "activity_feedback": 400_000,
@@ -249,6 +277,7 @@ _FIELD_LIMITS = {
     "nutrition_template": 100_000,
     # Free-text notes reach 4000 characters, more once JSON-escaped.
     "checkin": 20_000,
+    "equipment_maintenance": 20_000,
 }
 _DEFAULT_FIELD_LIMIT = 4000
 # A local zone configuration; its entity id is the configuration key.
@@ -290,6 +319,9 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "nutrition_template": set(NUTRITION_TEMPLATE_FIELDS),
         "nutrition_product": set(NUTRITION_PRODUCT_FIELDS),
         "checkin": set(CHECKIN_FIELDS),
+        "equipment": set(EQUIPMENT_FIELDS),
+        "equipment_assignment": set(EQUIPMENT_ASSIGNMENT_FIELDS),
+        "equipment_maintenance": set(EQUIPMENT_MAINTENANCE_FIELDS),
         METRIC_EXPORT_ENTITY: set(METRIC_EXPORT_FIELDS),
     }
     try:
