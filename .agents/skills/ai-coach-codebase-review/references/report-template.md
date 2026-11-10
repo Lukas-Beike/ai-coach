@@ -29,8 +29,11 @@ Trigger: Minimal realistic condition or reproduction.
 Impact: Concrete effect and affected invariant/data/boundary.
 Remediation: Smallest sound fix for the current release-compatibility contract; preserve supported migration paths and their tests.
 Regression test: Observable test that fails before and passes after.
+UI evidence: browser (screenshot path, viewport, theme or measured value) | simulated (state forced by request interception) | not visible in UI | code-only
 Confidence: high | medium | low
 ```
+
+`UI evidence` is required for a finding with a user-visible effect and omitted otherwise. A `code-only` finding is never called confirmed or observed in the UI.
 
 Reference the narrowest useful line span in prose, but do not omit relevant callers in the explanation. Merge related symptoms under one root-cause finding.
 
