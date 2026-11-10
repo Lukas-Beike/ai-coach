@@ -57,14 +57,9 @@ class RecentLogEntriesService:
             if failure is not None and len(other) < non_info_limit:
                 other.append((position, failure))
                 position += 1
-            for line in reversed(lines):
-                is_info = _INFO_LINE_RE.match(line) is not None
-                group, limit = (
-                    (info, info_limit) if is_info else (other, non_info_limit)
-                )
-                if len(group) < limit:
-                    group.append((position, _parse_line(line)))
-                    position += 1
+            position = _collect_lines(
+                lines, position, (info, info_limit), (other, non_info_limit)
+            )
         kept = sorted([*info, *other], key=lambda item: item[0], reverse=True)
         return self._redactor.sanitize_log_value([entry for _, entry in kept])
 
@@ -133,3 +128,18 @@ def _parse_line(line: str) -> dict[str, Any]:
         return json.loads(line)
     except json.JSONDecodeError:
         return {"level": "UNKNOWN", "event": "unparsed_log", "message": line}
+
+
+def _collect_lines(
+    lines: Sequence[str],
+    position: int,
+    info: tuple[list[tuple[int, dict[str, Any]]], int],
+    other: tuple[list[tuple[int, dict[str, Any]]], int],
+) -> int:
+    """Add lines newest first to their bounded group; return the next position."""
+    for line in reversed(lines):
+        group, limit = info if _INFO_LINE_RE.match(line) is not None else other
+        if len(group) < limit:
+            group.append((position, _parse_line(line)))
+            position += 1
+    return position
