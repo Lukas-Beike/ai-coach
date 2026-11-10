@@ -138,6 +138,8 @@ function settleFullResync(source) {
   state.localSync[`${source}Full`] = false;
   const resync = state.data?.provider_resync?.[source];
   if (resync) resync.running = false;
+  // The regular sync buttons are disabled while the flag is set; redraw them too.
+  renderSettings(state.data || {});
   renderFullResyncControls(source);
 }
 

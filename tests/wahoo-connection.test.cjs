@@ -258,6 +258,14 @@ for (const provider of ["garmin", "wahoo"]) {
     assert.deepEqual(harness.toasts.at(-1), { message: `${idle.label} vollständig neu geladen`, isError: false });
   });
 
+  test(`${provider}: settling redraws the regular sync controls with the full-resync flag cleared`, async () => {
+    const harness = loadSyncActions(fullResyncRoute({ provider }));
+    const flags = [];
+    harness.context.renderSettings = () => flags.push(harness.context.state.localSync[`${provider}Full`]);
+    await vm.runInContext(`fullResync('${provider}')`, harness.context);
+    assert.equal(flags.at(-1), false);
+  });
+
   test(`${provider}: the button pulses and shows the running label while the resync runs`, async () => {
     const harness = loadSyncActions(fullResyncRoute({ provider, polls: 1 }));
     const button = harness.buttons[idle.button];
