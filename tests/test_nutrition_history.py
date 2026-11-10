@@ -33,7 +33,7 @@ MEAL: dict[str, Any] = {
 }
 
 
-class NutritionHistoryTests(unittest.TestCase):
+class NutritionHistoryCase(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.manager = DatabaseManager(
@@ -59,6 +59,8 @@ class NutritionHistoryTests(unittest.TestCase):
             result = write()
         return result, changes
 
+
+class NutritionHistoryTests(NutritionHistoryCase):
     def undo(self, changes: list[dict[str, str]]) -> None:
         unused: Any = None
         undo = HistoryUndoService(
@@ -165,6 +167,121 @@ class NutritionHistoryTests(unittest.TestCase):
             "delete_nutrition_entry",
             "log_nutrition_template",
         ):
+            summary = change_summary(
+                [
+                    {
+                        "tool": tool,
+                        "result": {"ok": True},
+                        "changes": [{"id": "x", "action": "create"}],
+                    }
+                ]
+            )
+            assert summary is not None
+            self.assertTrue(summary["undoable"], tool)
+
+
+TEMPLATE: dict[str, Any] = {
+    "name": "Porridge",
+    "description": "Oats with milk",
+    "meal_type": "breakfast",
+    "kcal": 400,
+    "carbs_g": 60,
+    "protein_g": 15,
+    "fat_g": 8,
+}
+
+
+class NutritionTemplateHistoryTests(NutritionHistoryCase):
+    """Saved meals record change history, so a Coach turn can undo them."""
+
+    def undo(self, changes: list[dict[str, str]]) -> None:
+        unused: Any = None
+        services = {"nutrition_template": self.library}
+        undo = HistoryUndoService(
+            self.manager,
+            ChangeHistoryService(self.manager, unused, record_services=services),
+            *(unused,) * 6,
+            record_services=services,
+            profile_mutation_coordinator=threading.RLock(),
+        )
+        with self.manager.unit_of_work() as db:
+            undo.apply_many(db, changes)
+
+    def history_rows(self) -> list[tuple[str, str]]:
+        with self.manager.reader() as db:
+            return [
+                (row["entity_type"], row["action"])
+                for row in db.execute(
+                    "SELECT entity_type, action FROM change_history ORDER BY created_at, rowid"
+                ).fetchall()
+            ]
+
+    def test_create_update_and_delete_each_record_one_change(self) -> None:
+        saved = self.library.save_template(TEMPLATE)
+        self.library.save_template({"id": saved["id"], "kcal": 450})
+        self.library.save_template({"id": saved["id"], "kcal": 450})
+        deleted = self.library.delete_template(saved["id"])
+        self.assertEqual(deleted["change"]["action"], "delete")
+        self.assertEqual(
+            self.history_rows(),
+            [
+                ("nutrition_template", "create"),
+                ("nutrition_template", "update"),
+                ("nutrition_template", "delete"),
+            ],
+        )
+
+    def test_undo_of_a_created_meal_removes_it(self) -> None:
+        saved, changes = self.collected(lambda: self.library.save_template(TEMPLATE))
+        self.undo(changes)
+        self.assertEqual(self.library.list_templates(), [])
+        with self.assertRaises(AppError):
+            self.library.get_template(saved["id"])
+
+    def test_undo_of_an_overwrite_restores_the_previous_values(self) -> None:
+        saved = self.library.save_template(TEMPLATE)
+        _, changes = self.collected(
+            lambda: self.library.save_template(
+                {"id": saved["id"], "name": "Haferbrei", "kcal": 500, "fat_g": 12}
+            )
+        )
+        self.assertEqual(self.library.get_template(saved["id"])["kcal"], 500)
+        self.undo(changes)
+        restored = self.library.get_template(saved["id"])
+        for key in ("name", "description", "kcal", "carbs_g", "fat_g", "meal_type"):
+            self.assertEqual(restored[key], saved[key], key)
+        self.assertEqual(restored["nutrition_basis"], saved["nutrition_basis"])
+
+    def test_undo_of_a_delete_brings_the_meal_back(self) -> None:
+        saved = self.library.save_template(TEMPLATE)
+        _, changes = self.collected(lambda: self.library.delete_template(saved["id"]))
+        self.assertEqual(self.library.list_templates(), [])
+        self.undo(changes)
+        restored = self.library.get_template(saved["id"])
+        self.assertEqual(restored["name"], "Porridge")
+        self.assertEqual(restored["nutrition_basis"], saved["nutrition_basis"])
+        # The restored meal can be logged again.
+        self.assertEqual(self.diary.log_template(saved["id"], 2)["kcal"], 800)
+
+    def test_undo_of_a_delete_is_refused_when_the_name_was_taken(self) -> None:
+        saved = self.library.save_template(TEMPLATE)
+        _, changes = self.collected(lambda: self.library.delete_template(saved["id"]))
+        self.library.save_template({**TEMPLATE, "name": "porridge"})
+        with self.assertRaises(AppError) as raised:
+            self.undo(changes)
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(len(self.library.list_templates()), 1)
+
+    def test_undo_is_refused_after_a_later_edit(self) -> None:
+        saved, changes = self.collected(lambda: self.library.save_template(TEMPLATE))
+        self.library.save_template({"id": saved["id"], "kcal": 410})
+        with self.assertRaises(AppError) as raised:
+            self.undo(changes)
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(self.library.get_template(saved["id"])["kcal"], 410)
+
+    def test_a_coach_turn_that_saves_or_deletes_meals_is_undoable(self) -> None:
+        for tool in ("save_nutrition_template", "delete_nutrition_template"):
             summary = change_summary(
                 [
                     {
