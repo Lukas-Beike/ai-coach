@@ -988,6 +988,34 @@ def resting_rows(summaries: list[Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _collect_resting_hr_day(
+    fetch: Any,
+    current: date,
+    payload: dict[str, Any],
+    stats: dict[str, Any],
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None,
+) -> None:
+    try:
+        value = external_call(
+            "garmin",
+            "resting_hr",
+            partial(fetch, current.isoformat()),
+            {"date": current.isoformat()},
+        )
+        if not isinstance(value, dict):
+            raise TypeError("Invalid Garmin resting_hr response")
+        if not any(key in value for key in ("calendarDate", "date", "summaryDate")):
+            value = {"calendarDate": current.isoformat(), **value}
+        payload.setdefault("resting_hr", []).append(value)
+        stats["records"] = int(stats["records"]) + 1
+    except Exception as exc:  # noqa: BLE001 - SDK errors vary; retain other sources and redact.
+        stats["complete"] = False
+        stats["error"] = redact(str(exc))[:500]
+        _add_error(payload, "resting_hr", exc, redact, warn)
+
+
 def _collect_resting_hr(
     client: Any,
     windows: list[tuple[date, date]],
@@ -1013,30 +1041,13 @@ def _collect_resting_hr(
         current = window_start
         while current <= window_end:
             known = covered.get(current.isoformat())
-            if known is not None:
+            if known is None:
+                _collect_resting_hr_day(
+                    fetch, current, payload, stats, external_call, redact, warn
+                )
+            else:
                 payload.setdefault("resting_hr", []).append(dict(known))
                 stats["records"] = int(stats["records"]) + 1
-                current += timedelta(days=1)
-                continue
-            try:
-                value = external_call(
-                    "garmin",
-                    "resting_hr",
-                    partial(fetch, current.isoformat()),
-                    {"date": current.isoformat()},
-                )
-                if not isinstance(value, dict):
-                    raise TypeError("Invalid Garmin resting_hr response")
-                if not any(
-                    key in value for key in ("calendarDate", "date", "summaryDate")
-                ):
-                    value = {"calendarDate": current.isoformat(), **value}
-                payload.setdefault("resting_hr", []).append(value)
-                stats["records"] = int(stats["records"]) + 1
-            except Exception as exc:  # noqa: BLE001 - SDK errors vary; retain other sources and redact.
-                stats["complete"] = False
-                stats["error"] = redact(str(exc))[:500]
-                _add_error(payload, "resting_hr", exc, redact, warn)
             current += timedelta(days=1)
 
 
