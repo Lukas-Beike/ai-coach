@@ -77,8 +77,9 @@ RULE_PROVIDER_NAMES = {
     "garmin": "Garmin",
     "wahoo": "Wahoo",
     "calendar": "external calendar",
+    "intervals": "Intervals.icu",
 }
-NO_UNTRUSTED_TEXT_TARGETS = {"local", "intervals", "weather"}
+NO_UNTRUSTED_TEXT_TARGETS = {"local", "weather"}
 
 
 class CoachInstructionConsistencyTests(unittest.TestCase):
