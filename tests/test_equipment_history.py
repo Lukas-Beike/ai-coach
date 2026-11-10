@@ -17,6 +17,7 @@ from typing import Any
 from backend import change_history
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.equipment_history import equipment_history_records
+from backend.canonical.activity_summary import ActivitySummary
 from backend.coach.change_receipts import change_summary
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
@@ -36,7 +37,7 @@ BIKE = {
 }
 
 
-def ride(identifier: str) -> dict[str, Any]:
+def ride(identifier: str) -> ActivitySummary:
     return {
         "id": "act_" + identifier,
         "started_at": "2026-09-10T07:00:00+00:00",
@@ -101,6 +102,11 @@ class EquipmentHistoryTests(unittest.TestCase):
         with self.manager.reader() as db:
             row = db.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
         return json.loads(row["value"]) if row else None
+
+    def record(self, key: str) -> dict[str, Any]:
+        stored = self.stored(key)
+        assert stored is not None
+        return stored
 
     def bike(self, **extra: Any) -> dict[str, Any]:
         return self.service.save({**BIKE, **extra})["equipment"]
@@ -174,7 +180,7 @@ class EquipmentHistoryTests(unittest.TestCase):
         item = self.bike()
         _, changes = self.collected(lambda: self.edit(item, status="archived"))
         self.undo(changes)
-        self.assertEqual(self.stored("equipment:" + item["id"])["status"], "active")
+        self.assertEqual(self.record("equipment:" + item["id"])["status"], "active")
 
     def test_undo_keeps_garmin_owned_mileage(self) -> None:
         item = self.bike()
@@ -200,7 +206,7 @@ class EquipmentHistoryTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             self.undo(changes)
         self.assertEqual(raised.exception.status, 409)
-        self.assertEqual(self.stored("equipment:" + item["id"])["name"], "Third name")
+        self.assertEqual(self.record("equipment:" + item["id"])["name"], "Third name")
 
     def test_undo_is_refused_when_the_parent_no_longer_fits(self) -> None:
         first = self.bike(name="First")
@@ -229,7 +235,7 @@ class EquipmentHistoryTests(unittest.TestCase):
             self.undo(changes)
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(
-            self.stored("equipment:" + part["id"])["parent_id"], second["id"]
+            self.record("equipment:" + part["id"])["parent_id"], second["id"]
         )
 
     # Assignments
@@ -244,16 +250,16 @@ class EquipmentHistoryTests(unittest.TestCase):
         )
         self.undo(moved)
         self.assertEqual(
-            self.stored("equipment_assignment:act_w1")["equipment_id"], first["id"]
+            self.record("equipment_assignment:act_w1")["equipment_id"], first["id"]
         )
         result, unassigned = self.collected(
             lambda: self.service.assign({"activity_id": "act_w1", "equipment_id": None})
         )
         self.assertEqual(result["change"]["entity_type"], "equipment_assignment")
-        self.assertIsNone(self.stored("equipment_assignment:act_w1")["equipment_id"])
+        self.assertIsNone(self.record("equipment_assignment:act_w1")["equipment_id"])
         self.undo(unassigned)
         self.assertEqual(
-            self.stored("equipment_assignment:act_w1")["equipment_id"], first["id"]
+            self.record("equipment_assignment:act_w1")["equipment_id"], first["id"]
         )
         self.assertEqual(
             self.actions("equipment_assignment"),
@@ -310,7 +316,7 @@ class EquipmentHistoryTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             self.undo(changes)
         self.assertEqual(raised.exception.status, 409)
-        self.assertIsNone(self.stored("equipment_assignment:act_w1")["equipment_id"])
+        self.assertIsNone(self.record("equipment_assignment:act_w1")["equipment_id"])
 
     # Maintenance
 
