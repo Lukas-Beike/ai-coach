@@ -53,6 +53,20 @@ class StateEventTransport:
                 return True
         return False
 
+    def _stream(
+        self,
+        since: int,
+        send_event: Callable[..., None],
+        client_is_connected: Callable[[], bool],
+        session_is_active: Callable[[], bool],
+    ) -> None:
+        """Send events and heartbeats until the client or its session is gone."""
+        while self._wait_for_activity(client_is_connected) and session_is_active():
+            pending = self.event_buffer.since(since)
+            since, gap = self.send_batch(pending, since, send_event)
+            if not gap and not pending["events"]:
+                send_event("heartbeat", {"latest_event_id": pending["latest_event_id"]})
+
     def handle(
         self,
         request_target: str,
@@ -87,19 +101,7 @@ class StateEventTransport:
                 self.event_buffer.since(since), since, send_event
             )
             send_event("ready", {"latest_event_id": since}, since or None)
-            while True:
-                if not self._wait_for_activity(client_is_connected):
-                    return
-                if not session_is_active():
-                    return
-                pending = self.event_buffer.since(since)
-                since, gap = self.send_batch(pending, since, send_event)
-                if gap:
-                    continue
-                if not pending["events"]:
-                    send_event(
-                        "heartbeat", {"latest_event_id": pending["latest_event_id"]}
-                    )
+            self._stream(since, send_event, client_is_connected, session_is_active)
         except ClientDisconnected:
             return
         except Exception as exc:
