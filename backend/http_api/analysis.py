@@ -46,7 +46,6 @@ class AnalysisRoutes:
 
     def handle_post(self, handler: Any, path: str) -> bool:
         if path == "/api/analysis/refresh":
-            self._auth().require_auth(handler)
             payload = handler.read_json()
             area = payload.get("area") if isinstance(payload, dict) else None
             if not isinstance(area, str) or area not in {

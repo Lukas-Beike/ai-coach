@@ -68,14 +68,30 @@ class ChatPostRoutesTests(unittest.TestCase):
                 self.submission_factory.assert_not_called()
                 self.handler.send_json.assert_not_called()
 
-    def test_chat_reset_has_no_body_and_returns_service_result(self) -> None:
+    def test_chat_reset_requires_confirmation_before_the_service_runs(self) -> None:
+        for body in ({}, {"confirmed": False}, {"confirmed": "true"}, {"confirmed": 1}):
+            with self.subTest(body=body):
+                self.handler.reset_mock()
+                self.reset_factory.reset_mock()
+                self.handler.read_json.return_value = body
+
+                with self.assertRaises(AppError) as caught:
+                    self.routes.handle(self.handler, "/api/chat/reset", self.session)
+
+                self.assertEqual(caught.exception.status, 400)
+                self.assertEqual(caught.exception.reason, "confirmation_required")
+                self.reset_factory.assert_not_called()
+                self.handler.send_json.assert_not_called()
+
+    def test_confirmed_chat_reset_returns_service_result(self) -> None:
         result = {"status": "reset"}
         self.reset_service.reset.return_value = result
+        self.handler.read_json.return_value = {"confirmed": True}
 
         handled = self.routes.handle(self.handler, "/api/chat/reset", self.session)
 
         self.assertTrue(handled)
-        self.handler.read_json.assert_not_called()
+        self.handler.read_json.assert_called_once_with(12345)
         self.submission_factory.assert_not_called()
         self.reset_factory.assert_called_once_with()
         self.reset_service.reset.assert_called_once_with()
@@ -102,15 +118,15 @@ class ChatPostRoutesTests(unittest.TestCase):
         self.submission_factory.assert_called_once_with()
         self.handler.send_json.assert_not_called()
 
-    def test_reset_error_propagates_without_body_or_response(self) -> None:
+    def test_reset_error_propagates_without_response(self) -> None:
         error = RuntimeError("synthetic reset failure")
+        self.handler.read_json.return_value = {"confirmed": True}
         self.reset_service.reset.side_effect = error
 
         with self.assertRaises(RuntimeError) as caught:
             self.routes.handle(self.handler, "/api/chat/reset", self.session)
 
         self.assertIs(caught.exception, error)
-        self.handler.read_json.assert_not_called()
         self.handler.send_json.assert_not_called()
         self.submission_factory.assert_not_called()
         self.reset_factory.assert_called_once_with()
@@ -124,6 +140,8 @@ class ChatPostRoutesTests(unittest.TestCase):
         self.handler.read_json.side_effect = [
             {"client_turn_id": "first-turn"},
             {"client_turn_id": "second-turn"},
+            {"confirmed": True},
+            {"confirmed": True},
         ]
 
         self.routes.handle(self.handler, "/api/chat", self.session)

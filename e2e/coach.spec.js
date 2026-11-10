@@ -596,7 +596,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
   test("coach streaming, tab changes, long markdown and scrolling stay stable", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
     await openAuthenticatedApp(page);
-    await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
+    await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: JSON.stringify({ confirmed: true }) }));
     await page.reload();
     await expect(page.locator("#appShell")).toBeVisible();
     await page.getByRole("link", { name: "Coach", exact: true }).click();
@@ -829,7 +829,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
 test("natural Coach clarification survives reload and saves the follow-up", async ({ page }) => {
   await page.goto("/#coach");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
+  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: JSON.stringify({ confirmed: true }) }));
   await page.reload();
   await page.locator("#messageInput").fill("Heute fühle ich mich nicht fit.");
   await page.locator("#messageInput").press("Enter");
@@ -845,5 +845,5 @@ test("natural Coach clarification survives reload and saves the follow-up", asyn
   expect(history.messages.filter((item) => item.role === "user")).toHaveLength(2);
   const data = await page.evaluate(() => api("/api/feedback"));
   expect(JSON.stringify(data)).toContain("Schwere Beine");
-  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
+  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: JSON.stringify({ confirmed: true }) }));
 });

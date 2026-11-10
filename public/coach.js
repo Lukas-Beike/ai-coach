@@ -730,7 +730,7 @@ async function resetCoachChat() {
   button.disabled = true;
   button.textContent = "Wird zurückgesetzt…";
   try {
-    const reset = await api("/api/chat/reset", { method: "POST", body: "{}" });
+    const reset = await api("/api/chat/reset", { method: "POST", body: JSON.stringify({ confirmed: true }) });
     state.chatAttachments = [];
     renderChatAttachments();
     if (state.data) state.data.messages_generation = reset.generation;
