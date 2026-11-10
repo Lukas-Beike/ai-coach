@@ -205,6 +205,22 @@ class SeasonPreparationTests(unittest.TestCase):
         )
         self.assertNotEqual(result["input_sha256"], changed["input_sha256"])
 
+    def test_completed_today_without_load_runs_with_a_note(self):
+        loaded = {
+            "id": "ride",
+            "started_at_local": "2026-10-02T08:00:00",
+            "training_load": 60,
+        }
+        yoga = {"id": "yoga", "started_at_local": "2026-10-02T18:00:00"}
+        values = {"end": "2026-10-03"}
+        result = _scenarios({}, values, _inputs(completed=[loaded, yoga]))
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["completed_today_without_load"], 1)
+        self.assertIn("ohne bekannte Belastung", result["note"])
+        self.assertEqual(result["curves"][0]["points"][0]["load"], 60)
+        clean = _scenarios({}, values, _inputs(completed=[loaded]))
+        self.assertNotIn("completed_today_without_load", clean)
+
     def test_race_context_requires_confirmed_units_and_reports_known_dimensions(self):
         event = {
             "id": "race",

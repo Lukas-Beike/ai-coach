@@ -83,6 +83,12 @@ of M5, and the common CTL/ATL convention, not individually fitted.
   (`ctl` first and last of the window), the daily planning context and the
   load scenarios (yesterday's values as the start state) read the same curve
   (#1726). The stored Intervals.icu values are not shown.
+- A load scenario adds the known loads of today's sessions and reports the
+  count of today's sessions without a load; it does not withhold the scenario.
+- The Coach comparison of the last 7 days' load with the 7 days before is
+  neutral (no good or bad colour) and carries the counts of sessions without a
+  load for both weeks; with any such session it has no delta, direction or
+  colour.
 
 ## Measurement error and uncertainty
 
