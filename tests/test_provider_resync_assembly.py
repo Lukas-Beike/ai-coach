@@ -11,6 +11,7 @@ from backend.sync.full_resync import resync_field_keys
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_resync_assembly import (
     CompetitionSyncOwners,
+    GarminFullResync,
     ProviderResyncAssembly,
     ProviderResyncPersistence,
     ProviderResyncRuntime,
@@ -53,7 +54,6 @@ def _build_assembly(
 
 
 class FullResyncHandlerWiringTests(unittest.TestCase):
-
     def test_garmin_handler_runs_full_window_with_resync_label(self):
         garmin = Mock()
         garmin.configured.return_value = True
@@ -67,8 +67,6 @@ class FullResyncHandlerWiringTests(unittest.TestCase):
         garmin.sync.assert_called_once_with(
             days=-1, operation_id="op-1", reason="Vollständiger Resync"
         )
-
-
 
     def test_factory_rejects_handler_without_registered_state_keys(self):
         intervals_gate = ProviderResyncGate("Intervals.icu")
@@ -152,6 +150,52 @@ class ProviderResyncAssemblyTests(unittest.TestCase):
 
         self.assertIsNotNone(service)
         transport["client_factory"].assert_called_once_with()
+
+
+class GarminFullResyncTests(unittest.TestCase):
+    def _resync(self, status: str) -> GarminFullResync:
+        service = Mock()
+        service.sync.return_value = {"status": status, "records": 3}
+        return GarminFullResync(garmin_service=service, all_sync_days=-1)
+
+    def test_a_complete_run_returns_the_sync_result(self):
+        self.assertEqual(
+            self._resync("ok").run("op-1", Mock()), {"status": "ok", "records": 3}
+        )
+
+    def test_a_partial_run_is_returned_so_the_service_does_not_record_it_complete(
+        self,
+    ):
+        self.assertEqual(
+            self._resync("partial").run("op-1", Mock())["status"], "partial"
+        )
+
+    def test_a_contended_run_is_a_409_failure(self):
+        with self.assertRaises(AppError) as caught:
+            self._resync("already_running").run("op-1", Mock())
+
+        self.assertEqual(409, caught.exception.status)
+        self.assertEqual("already_running", caught.exception.reason)
+
+    def test_a_run_without_configuration_is_a_503_failure(self):
+        with self.assertRaises(AppError) as caught:
+            self._resync("not_configured").run("op-1", Mock())
+
+        self.assertEqual(503, caught.exception.status)
+        self.assertEqual("not_configured", caught.exception.reason)
+
+
+class ResyncRunsSharingTests(unittest.TestCase):
+    def test_every_service_of_one_assembly_shares_one_run_registry(self):
+        assembly = _build_assembly(
+            ProviderResyncGate("Intervals.icu"), ProviderResyncGate("Garmin")
+        )
+
+        first = assembly.full_resync_service()
+        second = assembly.full_resync_service()
+
+        self.assertIsNot(first, second)
+        self.assertIs(first._runs, second._runs)
 
 
 class WahooFullResyncTests(unittest.TestCase):

@@ -604,10 +604,10 @@ function renderGarminSyncControl(data) {
   const button = $("#garminSyncButton");
   if (!button) return;
   const running = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-  button.disabled = running || !garminConfigured;
+  const fullRunning = Boolean(data.provider_resync?.garmin?.running || state.localSync.garminFull);
+  button.disabled = running || fullRunning || !garminConfigured;
   button.textContent = running ? "Synchronisierung läuft…" : "Garmin synchronisieren";
-  const fullButton = $("#garminFullResyncButton");
-  if (fullButton && !garminConfigured) fullButton.disabled = true;
+  renderGarminFullResync(data);
 }
 
 function setProviderSetupHint(selector, configured) {

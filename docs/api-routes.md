@@ -54,6 +54,7 @@ activity IDs no longer resolve.
 | GET | `/api/zones` | Local and provider zone configurations | Auth |
 | GET | `/api/activities`, `/api/activities/{id}` | Activity list and detail | Auth |
 | GET | `/api/sync/status`, `/api/sync/jobs/{id}` | Synchronization status and job result | Auth |
+| GET | `/api/garmin/full-resync`, `/api/wahoo/full-resync` | State and outcome of the full resync that was started in the background | Auth |
 | GET | `/api/chat/history`, `/api/chat/receipt`, `/api/chat/status` | Coach history, receipts and status | Auth |
 | GET | `/api/change-history` | Local change history | Auth |
 | GET | `/api/state/events` | Authenticated state event stream | Auth |
@@ -75,7 +76,8 @@ activity IDs no longer resolve.
 | POST | `/api/planned-units/{id}/focus` | Set or clear `session_focus` and `strength_intensity` of a planned unit; returns the unit | CSRF |
 | POST | `/api/planned-units/{id}/garmin-exercise` | Assign the Garmin exercise of one strength exercise (`exercise_index`, `garmin_exercise`, `expected_payload_hash`) | CSRF |
 | POST | `/api/sync/jobs`, `/api/sync/jobs/{id}/resolve` | Queue or resolve a sync job | CSRF |
-| POST | `/api/garmin/sync`, `/api/wahoo/sync`, `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Queue provider synchronization | CSRF |
+| POST | `/api/garmin/sync`, `/api/wahoo/sync` | Queue provider synchronization | CSRF |
+| POST | `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Start the confirmed full resync in the background (`202` with `operation_id`; `200` `already_running` while one runs) | CSRF |
 | POST | `/api/external-calendar/sync`, `/api/weather/sync`, `/api/analysis/refresh`, `/api/nutrition/refresh` | Queue or run a targeted refresh | CSRF |
 | POST | `/api/analysis/scenarios` | Project a training scenario without saving it | CSRF |
 | POST | `/api/change-history/undo/preview`, `/api/change-history/undo`, `/api/change-history/undo-turn` | Preview or apply an undo, or undo one Coach turn | CSRF |

@@ -10,8 +10,17 @@ const publicDir = path.join(__dirname, "../public");
 const apiSource = fs.readFileSync(path.join(publicDir, "api.js"), "utf8");
 const actionsSource = fs.readFileSync(path.join(publicDir, "sync-actions.js"), "utf8");
 
-function fakeButton() {
-  return { disabled: false, textContent: "", classList: { add() {}, remove() {}, toggle() {} } };
+const renderSources = ["connection-status.js", "performance-view.js", "wahoo-connection.js"].map((name) => fs.readFileSync(path.join(publicDir, name), "utf8"));
+
+function fakeButton(text = "") {
+  const classes = new Set();
+  const classList = {
+    add: (name) => classes.add(name),
+    remove: (name) => classes.delete(name),
+    toggle: (name, force) => (force ? classes.add(name) : classes.delete(name)),
+    contains: (name) => classes.has(name),
+  };
+  return { disabled: false, textContent: text, classList };
 }
 
 // Loads the real api.js request helper and sync-actions.js in one vm context. Only
@@ -23,9 +32,11 @@ function loadSyncActions(route) {
   const selectors = [];
   const toasts = [];
   const buttons = {
-    "#garminFullResyncButton": fakeButton(),
-    "#wahooSyncButton": fakeButton(),
-    "#wahooFullResyncButton": fakeButton(),
+    "#garminFullResyncButton": fakeButton("Lokale Daten neu laden"),
+    "#garminFullResyncStatus": fakeButton(),
+    "#wahooSyncButton": fakeButton("Jetzt synchronisieren"),
+    "#wahooFullResyncButton": fakeButton("Vollständig neu synchronisieren"),
+    "#wahooFullResyncStatus": fakeButton(),
   };
   const context = {
     Headers, Response, AbortController, URL, setTimeout, clearTimeout,
@@ -39,7 +50,15 @@ function loadSyncActions(route) {
       selectors.push(selector);
       return buttons[selector] ?? null;
     },
-    state: { localSync: {}, data: {} },
+    state: {
+      localSync: {},
+      data: {
+        garmin: { available: true, configured: true },
+        wahoo: { configured: true, connected: true },
+        provider_resync: { garmin: { running: false }, wahoo: { running: false } },
+      },
+    },
+    formatTime: (value) => value,
     providerIds: () => ({ intervals: "intervals", garmin: "garmin", wahoo: "wahoo" }),
     coachProviderLabel: (provider) => ({ intervals: "Intervals.icu", garmin: "Garmin", wahoo: "Wahoo" })[provider] || "Provider",
     requestConfirmation: async (message, options) => {
@@ -54,9 +73,10 @@ function loadSyncActions(route) {
   };
   vm.createContext(context);
   vm.runInContext(apiSource, context);
+  renderSources.forEach((source) => vm.runInContext(source, context));
   vm.runInContext("async function api(path, options = {}) { return globalThis.AppApi.request(path, options, () => {}); }", context);
   vm.runInContext(actionsSource, context);
-  return { context, calls, confirmations, selectors, toasts };
+  return { context, calls, confirmations, selectors, toasts, buttons };
 }
 
 const wahooJobRoute = (job) => (url) => {
@@ -182,27 +202,127 @@ test("a failed Wahoo sync job shows its redacted item detail", async () => {
   assert.deepEqual(harness.toasts.at(-1), { message: "Wahoo-Anmeldung abgelaufen.", isError: true });
 });
 
+// A full-resync route: the POST starts the run, each GET reports `running` until `polls` have passed.
+const fullResyncRoute = ({ provider, polls = 0, outcome = { status: "ok" }, started = { status: 202, body: { status: "started", operation_id: "op-1" } }, lastError = null }) => {
+  let reads = 0;
+  return (url, method) => {
+    if (url !== `/api/${provider}/full-resync`) return { status: 404, body: { error: "unexpected" } };
+    if (method === "POST") return started;
+    reads += 1;
+    const running = reads <= polls;
+    return { body: { running, status: running ? "läuft" : null, last_resync_at: null, last_error: lastError, outcome: running ? null : { operation_id: "op-1", ...outcome } } };
+  };
+};
+
+const idleState = {
+  garmin: { text: "Lokale Daten neu laden", button: "#garminFullResyncButton", label: "Garmin" },
+  wahoo: { text: "Vollständig neu synchronisieren", button: "#wahooFullResyncButton", label: "Wahoo" },
+};
+
 test("Wahoo full resync posts the confirmed request with CSRF and a confirmation that deletes nothing", async () => {
-  const harness = loadSyncActions(() => ({ body: { status: "ok", source: "wahoo" } }));
+  const harness = loadSyncActions(fullResyncRoute({ provider: "wahoo" }));
   await vm.runInContext("fullResync('wahoo')", harness.context);
   assert.equal(harness.selectors[0], "#wahooFullResyncButton");
   assert.equal(harness.confirmations.length, 1);
   assert.match(harness.confirmations[0].message, /90 Tage/);
   assert.doesNotMatch(harness.confirmations[0].message, /löschen/);
   assert.match(harness.confirmations[0].title, /Wahoo/);
-  assert.deepEqual(harness.calls, [{
+  assert.deepEqual(harness.calls[0], {
     path: "/api/wahoo/full-resync",
     method: "POST",
     csrf: "csrf-token-1",
     body: JSON.stringify({ confirm: "FULL_RESYNC" }),
-  }]);
+  });
   assert.equal(harness.context.state.localSync.wahooFull, false);
 });
 
 test("Garmin full resync keeps its route, control and deletion wording", async () => {
-  const harness = loadSyncActions(() => ({ body: { status: "ok" } }));
+  const harness = loadSyncActions(fullResyncRoute({ provider: "garmin" }));
   await vm.runInContext("fullResync('garmin')", harness.context);
-  assert.deepEqual(harness.calls.map((call) => call.path), ["/api/garmin/full-resync"]);
+  assert.deepEqual(harness.calls.map((call) => call.path), ["/api/garmin/full-resync", "/api/garmin/full-resync"]);
+  assert.deepEqual(harness.calls.map((call) => call.method), ["POST", "GET"]);
   assert.ok(harness.selectors.includes("#garminFullResyncButton"));
   assert.match(harness.confirmations[0].message, /löschen/);
+});
+
+for (const provider of ["garmin", "wahoo"]) {
+  const idle = idleState[provider];
+
+  test(`${provider}: after a completed full resync the button is idle again, without busy, disabled or pulse`, async () => {
+    const harness = loadSyncActions(fullResyncRoute({ provider }));
+    const button = harness.buttons[idle.button];
+    await vm.runInContext(`fullResync('${provider}')`, harness.context);
+    assert.equal(button.classList.contains("busy"), false);
+    assert.equal(button.disabled, false);
+    assert.equal(button.textContent, idle.text);
+    assert.deepEqual(harness.toasts.at(-1), { message: `${idle.label} vollständig neu geladen`, isError: false });
+  });
+
+  test(`${provider}: settling redraws the regular sync controls with the full-resync flag cleared`, async () => {
+    const harness = loadSyncActions(fullResyncRoute({ provider }));
+    const flags = [];
+    harness.context.renderSettings = () => flags.push(harness.context.state.localSync[`${provider}Full`]);
+    await vm.runInContext(`fullResync('${provider}')`, harness.context);
+    assert.equal(flags.at(-1), false);
+  });
+
+  test(`${provider}: the button pulses and shows the running label while the resync runs`, async () => {
+    const harness = loadSyncActions(fullResyncRoute({ provider, polls: 1 }));
+    const button = harness.buttons[idle.button];
+    const run = vm.runInContext(`fullResync('${provider}')`, harness.context);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(button.classList.contains("busy"), true);
+    assert.equal(button.disabled, true);
+    assert.equal(button.textContent, "Vollständiger Resync läuft…");
+    await run;
+    assert.equal(button.classList.contains("busy"), false);
+    assert.equal(button.textContent, idle.text);
+  });
+
+  test(`${provider}: a partial result says "teilweise geladen" and a failed one shows the stored error`, async () => {
+    const partial = loadSyncActions(fullResyncRoute({ provider, outcome: { status: "partial" } }));
+    await vm.runInContext(`fullResync('${provider}')`, partial.context);
+    assert.deepEqual(partial.toasts.at(-1), { message: `${idle.label} teilweise geladen`, isError: false });
+    assert.equal(partial.buttons[idle.button].classList.contains("busy"), false);
+
+    const failed = loadSyncActions(fullResyncRoute({ provider, outcome: { status: "failed" }, lastError: "Anbieter nicht erreichbar." }));
+    await vm.runInContext(`fullResync('${provider}')`, failed.context);
+    assert.deepEqual(failed.toasts.at(-1), { message: "Anbieter nicht erreichbar.", isError: true });
+    assert.equal(failed.buttons[idle.button].disabled, false);
+  });
+
+  test(`${provider}: a repeated start reports "läuft bereits" and ends with the finished run, not an error`, async () => {
+    const harness = loadSyncActions(fullResyncRoute({ provider, started: { status: 200, body: { status: "already_running", operation_id: "op-1" } } }));
+    await vm.runInContext(`fullResync('${provider}')`, harness.context);
+    assert.deepEqual(harness.toasts[0], { message: `${idle.label} läuft bereits`, isError: false });
+    assert.equal(harness.toasts.some((toast) => toast.isError), false);
+    assert.equal(harness.buttons[idle.button].classList.contains("busy"), false);
+  });
+}
+
+test("a slow resync is polled, not reported as a failure, even when a single poll fails", async () => {
+  let reads = 0;
+  const route = (_url, method) => {
+    if (method === "POST") return { status: 202, body: { status: "started", operation_id: "op-1" } };
+    reads += 1;
+    if (reads === 1) return { status: 502, body: { error: "gateway" } };
+    const running = reads < 3;
+    return { body: { running, outcome: running ? null : { operation_id: "op-1", status: "ok" }, last_error: null } };
+  };
+  const harness = loadSyncActions(route);
+  await vm.runInContext("fullResync('garmin')", harness.context);
+  assert.equal(harness.toasts.some((toast) => toast.isError), false);
+  assert.deepEqual(harness.toasts.at(-1), { message: "Garmin vollständig neu geladen", isError: false });
+});
+
+test("a page opened during a running resync follows it and ends idle", async () => {
+  const harness = loadSyncActions(fullResyncRoute({ provider: "garmin" }));
+  harness.context.state.data.provider_resync.garmin.running = true;
+  vm.runInContext("renderGarminFullResync(state.data)", harness.context);
+  const button = harness.buttons["#garminFullResyncButton"];
+  assert.equal(button.classList.contains("busy"), true);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(harness.context.state.localSync.garminFull, false);
+  assert.equal(button.classList.contains("busy"), false);
+  assert.equal(harness.calls.filter((call) => call.method === "POST").length, 0);
 });

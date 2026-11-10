@@ -99,8 +99,9 @@ test("@responsive connected Wahoo runs manual and full resync with the CSRF toke
   });
   await page.route("**/api/sync/jobs/job-wahoo-fixture", (route) => route.fulfill({ json: { id: "job-wahoo-fixture", status: "completed", items: [] } }));
   await page.route("**/api/wahoo/full-resync", (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: { running: false, status: null, last_resync_at: null, last_error: null, outcome: { operation_id: "op-wahoo", status: "ok" } } });
     requests.push({ path: "/api/wahoo/full-resync", method: route.request().method(), csrf: route.request().headers()["x-csrf-token"] });
-    return route.fulfill({ json: { status: "ok", source: "wahoo" } });
+    return route.fulfill({ status: 202, json: { status: "started", source: "wahoo", operation_id: "op-wahoo" } });
   });
   const card = await openConnections(page);
   await expect(page.locator("#wahooSyncButton")).toBeVisible();
@@ -120,6 +121,10 @@ test("@responsive connected Wahoo runs manual and full resync with the CSRF toke
     { path: "/api/wahoo/sync", method: "POST", csrf },
     { path: "/api/wahoo/full-resync", method: "POST", csrf },
   ]);
+  await expect(page.locator("#toast")).toContainText("Wahoo vollständig neu geladen");
+  await expect(page.locator("#wahooFullResyncButton")).not.toHaveClass(/busy/);
+  await expect(page.locator("#wahooFullResyncButton")).toBeEnabled();
+  await expect(page.locator("#wahooFullResyncButton")).toHaveText("Vollständig neu synchronisieren");
   await page.waitForLoadState("networkidle");
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });

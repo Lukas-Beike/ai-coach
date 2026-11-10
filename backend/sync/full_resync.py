@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -18,6 +19,7 @@ from backend.sync.provider_runtime import FullResyncHandler
 
 FULL_RESYNC_LABEL = "Vollständiger Resync"
 GARMIN_NOT_CONFIGURED_ERROR = "Garmin ist nicht konfiguriert oder nicht verfügbar."
+PARTIAL_RESYNC_ERROR = "Teilweise geladen. Bitte erneut starten."
 
 RESYNC_FIELDS = ("running", "status", "last_at", "error")
 
@@ -186,6 +188,58 @@ class FullResyncOperationJournal:
             )
 
 
+def _start_thread(provider: str, target: Callable[[], None]) -> None:
+    threading.Thread(target=target, name=f"full-resync-{provider}", daemon=True).start()
+
+
+class FullResyncRuns:
+    """Track the background full resyncs of one process.
+
+    A run is claimed before its thread starts, so a repeated request can never
+    start a second one, and it counts as running from the request on, also while
+    it waits for the provider gate and while the derived passes run. The outcome
+    of the latest run per provider is kept in memory for the browser to poll.
+    """
+
+    def __init__(
+        self, spawn: Callable[[str, Callable[[], None]], None] = _start_thread
+    ) -> None:
+        self._spawn = spawn
+        self._lock = threading.Lock()
+        self._active: dict[str, str] = {}
+        self._outcomes: dict[str, dict[str, Any]] = {}
+
+    def claim(self, provider: str, operation_id: str) -> bool:
+        with self._lock:
+            if provider in self._active:
+                return False
+            self._active[provider] = operation_id
+            return True
+
+    def spawn(self, provider: str, target: Callable[[], None]) -> None:
+        try:
+            self._spawn(provider, target)
+        except BaseException:
+            with self._lock:
+                self._active.pop(provider, None)
+            raise
+
+    def active(self, provider: str) -> str | None:
+        with self._lock:
+            return self._active.get(provider)
+
+    def finish(self, provider: str, outcome: dict[str, Any]) -> None:
+        # One step: the outcome is visible no later than the run stops running.
+        with self._lock:
+            self._outcomes[provider] = outcome
+            self._active.pop(provider, None)
+
+    def outcome(self, provider: str) -> dict[str, Any] | None:
+        with self._lock:
+            outcome = self._outcomes.get(provider)
+            return None if outcome is None else dict(outcome)
+
+
 class FullProviderResyncService:
     """Run a provider's full refresh while retaining its last good local data.
 
@@ -203,7 +257,9 @@ class FullProviderResyncService:
         gates: Mapping[str, ProviderResyncGate] | None = None,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
         after_resync: Callable[[Mapping[str, Any]], None] = lambda _job: None,
+        runs: FullResyncRuns | None = None,
     ) -> None:
+        self._runs = runs if runs is not None else FullResyncRuns()
         self._after_resync = after_resync
         self._handlers = handlers
         self._state_store = state_store
@@ -213,14 +269,60 @@ class FullProviderResyncService:
 
     def state(self, provider: str, db: Any | None = None) -> dict[str, Any]:
         self._handler(provider)
-        return self._state_store.state(provider, self._gate(provider), db)
+        state = self._state_store.state(provider, self._gate(provider), db)
+        if self._runs.active(provider) is not None and not state["running"]:
+            # Queued behind the gate or running the derived passes.
+            state["running"] = True
+            state["status"] = (
+                f"{self._registry.get(provider).label}: vollständiger Resync läuft…"
+            )
+        return state
+
+    def progress(self, provider: str) -> dict[str, Any]:
+        """The state plus the outcome of the latest run of this process."""
+        return {**self.state(provider), "outcome": self._runs.outcome(provider)}
+
+    def start(self, provider: str, operation_id: str) -> dict[str, Any]:
+        """Start the resync in the background; a second start is refused."""
+        handler = self._handler(provider)
+        if not handler.configured():
+            raise handler.not_configured_error()
+        if self._gate(provider).is_resetting() or not self._runs.claim(
+            provider, operation_id
+        ):
+            return {
+                "status": "already_running",
+                "source": provider,
+                "operation_id": self._runs.active(provider),
+            }
+        self._runs.spawn(
+            provider, lambda: self._run_in_background(provider, operation_id)
+        )
+        return {"status": "started", "source": provider, "operation_id": operation_id}
+
+    def _run_in_background(self, provider: str, operation_id: str) -> None:
+        outcome: dict[str, Any] = {"operation_id": operation_id, "status": "failed"}
+        try:
+            result = self._resync(provider, operation_id)
+            outcome["status"] = result["status"]
+            try:
+                self._request_derived_passes(provider, result)
+            except Exception:  # noqa: BLE001 - the records are resynced; log only
+                self._operation_journal.record_failure(provider)
+        except Exception as exc:  # noqa: BLE001 - the state holds the redacted error
+            outcome["reason"] = getattr(exc, "reason", None)
+        finally:
+            self._runs.finish(provider, outcome)
 
     def resync(self, provider: str, operation_id: str | None = None) -> dict[str, Any]:
         result = self._resync(provider, operation_id)
+        self._request_derived_passes(provider, result)
+        return result
+
+    def _request_derived_passes(self, provider: str, result: Mapping[str, Any]) -> None:
         if result.get("status") in {"ok", "partial"}:
             # After the gate is released: the passes read the resynced records.
             self._after_resync({"provider": provider, "type": "refresh"})
-        return result
 
     def _resync(self, provider: str, operation_id: str | None) -> dict[str, Any]:
         handler = self._handler(provider)
@@ -249,10 +351,14 @@ class FullProviderResyncService:
             result = handler.run(
                 resolved_operation_id, self._operation_journal.observer
             )
-            finished_at = self._operation_journal.utc_now()
-            self._state_store.complete(provider, finished_at)
             operation_result = result
             operation_succeeded = True
+            if result.get("status") == "partial":
+                # Only a complete read counts as a resync: no completion time.
+                self._state_store.record_failure(provider, PARTIAL_RESYNC_ERROR)
+                return {**result, "status": "partial", "source": provider}
+            finished_at = self._operation_journal.utc_now()
+            self._state_store.complete(provider, finished_at)
             return {
                 "status": "ok",
                 "source": provider,

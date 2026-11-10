@@ -49,27 +49,35 @@ function garminDetailText(garmin) {
   return [sourceDetail, performance.length ? `${performance.join("/")} aus Garmin` : "", garminBodyBatteryDetail(garmin), garminPaginationDetail(garmin)].filter(Boolean).join(" · ");
 }
 
-function renderGarminFullResync(fullButton, fullStatus, fullResync, fullRunning) {
+function renderGarminFullResync(data, garmin = data?.garmin || {}) {
+  const fullResync = data?.provider_resync?.garmin || {};
+  const fullRunning = Boolean(fullResync.running || state.localSync.garminFull);
+  const usable = Boolean(garmin.available && garmin.configured);
+  const fullButton = $("#garminFullResyncButton");
   if (fullButton) {
-    fullButton.disabled = fullRunning || Boolean(state.data?.garmin_sync?.running || state.localSync.garmin);
-    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Lokale Daten neu laden";
+    renderFullResyncButton(fullButton, {
+      running: fullRunning,
+      blocked: !usable || Boolean(data?.garmin_sync?.running || state.localSync.garmin),
+      idleLabel: "Lokale Daten neu laden",
+    });
   }
-  if (!fullStatus) return;
+  const fullStatus = $("#garminFullResyncStatus");
+  if (!fullStatus || !usable) return;
   fullStatus.classList.toggle("error", Boolean(fullResync.last_error));
   let statusText = "";
   if (fullRunning && fullResync.status) statusText = fullResync.status;
   else if (fullResync.last_error) statusText = fullResync.last_error;
   else if (fullResync.last_resync_at) statusText = `Letzter vollständiger Resync: ${formatTime(fullResync.last_resync_at)}`;
   fullStatus.textContent = statusText;
+  resumeFullResync(providerIds().garmin);
 }
 
-function renderUnavailableGarmin(garmin, status, detail, button, fullButton) {
+function renderUnavailableGarmin(garmin, status, detail, button) {
   const unavailable = !garmin?.available;
   if (!unavailable && garmin.configured) return false;
   status.textContent = unavailable ? "Garmin nicht verfügbar" : "Garmin nicht eingerichtet";
   detail.textContent = "";
   button.disabled = true;
-  if (fullButton) fullButton.disabled = true;
   return true;
 }
 
@@ -86,19 +94,18 @@ function renderGarmin(garmin) {
   const status = $("#garminStatus");
   const detail = $("#garminDetail");
   const button = $("#garminSyncButton");
-  const fullButton = $("#garminFullResyncButton");
-  const fullStatus = $("#garminFullResyncStatus");
   if (!status || !detail || !button) return;
   renderGarminKeyHint(garmin);
   const fullResync = state.data?.provider_resync?.garmin || {};
   const fullRunning = Boolean(fullResync.running || state.localSync.garminFull);
   button.disabled = Boolean(state.data?.garmin_sync?.running || fullRunning);
-  if (renderUnavailableGarmin(garmin, status, detail, button, fullButton)) return;
+  const unavailable = renderUnavailableGarmin(garmin, status, detail, button);
+  renderGarminFullResync(state.data, garmin);
+  if (unavailable) return;
   if (garmin.source === "fixture") status.textContent = "Lokale Garmin-Testdaten aktiv";
   else if (garmin.last_error) status.textContent = "Mit Fehlern synchronisiert";
   else status.textContent = "Optionaler Direktabruf aktiv";
   detail.textContent = garminDetailText(garmin);
-  renderGarminFullResync(fullButton, fullStatus, fullResync, fullRunning);
 }
 
 
