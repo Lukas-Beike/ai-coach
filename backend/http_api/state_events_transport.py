@@ -1,6 +1,7 @@
 """Transport orchestration for the authenticated public state-event stream."""
 
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -10,6 +11,10 @@ from backend.errors import AppError, ClientDisconnected, DatabaseBusyError
 _LOGGER = logging.getLogger("intervals_coach")
 # Event ids are positive integers that fit a signed 64-bit value.
 _MAX_CURSOR_DIGITS = 19
+_HEARTBEAT_SECONDS = 15
+# A stream holds one request slot; a closed browser tab must free it within this
+# time, not at the next heartbeat write.
+_DISCONNECT_CHECK_SECONDS = 1
 
 
 class StateEventTransport:
@@ -35,6 +40,19 @@ class StateEventTransport:
             send_event(item["event"], item["data"], since)
         return since, False
 
+    def _wait_for_activity(self, client_is_connected: Callable[[], bool]) -> bool:
+        """Wait for an event or the heartbeat time; False once the client left."""
+        deadline = time.monotonic() + _HEARTBEAT_SECONDS
+        while client_is_connected():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return True
+            if self.event_buffer.wait(
+                timeout=min(_DISCONNECT_CHECK_SECONDS, remaining)
+            ):
+                return True
+        return False
+
     def handle(
         self,
         request_target: str,
@@ -42,6 +60,7 @@ class StateEventTransport:
         send_headers: Callable[[], None],
         send_event: Callable[..., None],
         set_connection_timeout: Callable[[float | None], None],
+        client_is_connected: Callable[[], bool],
         session_is_active: Callable[[], bool],
     ) -> None:
         query = parse_qs(urlparse(request_target).query)
@@ -69,7 +88,8 @@ class StateEventTransport:
             )
             send_event("ready", {"latest_event_id": since}, since or None)
             while True:
-                self.event_buffer.wait(timeout=15)
+                if not self._wait_for_activity(client_is_connected):
+                    return
                 if not session_is_active():
                     return
                 pending = self.event_buffer.since(since)
