@@ -95,7 +95,7 @@ function syncHarness(jobs) {
   const start = statusSource.indexOf("const NON_RETRYABLE_PROVIDER_ERRORS");
   const end = statusSource.indexOf("function providerRequiresManualAttention");
   vm.runInContext(statusSource.slice(start, end), context);
-  const retryStart = statusSource.indexOf("// The local sync flag each retryable provider's");
+  const retryStart = statusSource.indexOf("// Garmin and Wahoo set the local sync flag");
   const retryEnd = statusSource.length;
   assert.ok(retryStart >= 0 && retryEnd > retryStart);
   vm.runInContext(statusSource.slice(retryStart, retryEnd), context);

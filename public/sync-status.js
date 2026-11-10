@@ -535,11 +535,9 @@ function renderProviderFreshness(data) {
 }
 
 
-// The local sync flag each retryable provider's manual sync sets while it runs.
+// Garmin and Wahoo set the local sync flag named by their provider id; the others have their own.
 function providerSyncKey(provider) {
-  if (provider === providerIds().garmin) return "garmin";
-  if (provider === providerIds().wahoo) return "wahoo";
-  return { weather: "weather", calendar: "externalCalendar" }[provider] || "";
+  return { weather: "weather", calendar: "externalCalendar" }[provider] || provider;
 }
 
 function providerSyncRunning(provider) {
