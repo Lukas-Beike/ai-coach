@@ -257,15 +257,15 @@ class PrivacyDeleteService:
         if confirm != GPS_TRACKS_DELETE_CONFIRMATION_TEXT:
             raise AppError(400, "Zum Löschen muss GPS-SPUREN LÖSCHEN bestätigt werden.")
         dependencies = self._dependencies
-        with (
-            dependencies.maintenance_gate.restore(),
-            dependencies.database_lock,
-            dependencies.database_manager.unit_of_work() as db,
-            secure_deletion(db),
-        ):
-            deleted = activity_detail_store.delete_stored_tracks(db)
-            clear_routes(dependencies.key_value_repository, db)
-        self._reclaim_after_commit()
+        with dependencies.maintenance_gate.restore():
+            with (
+                dependencies.database_lock,
+                dependencies.database_manager.unit_of_work() as db,
+                secure_deletion(db),
+            ):
+                deleted = activity_detail_store.delete_stored_tracks(db)
+                clear_routes(dependencies.key_value_repository, db)
+            self._reclaim_after_commit()
         return {"status": "ok", "deleted_tracks": deleted, **self.gps_state()}
 
     def _reclaim_after_commit(self) -> None:

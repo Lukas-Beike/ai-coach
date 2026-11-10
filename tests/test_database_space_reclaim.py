@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import nullcontext
 from pathlib import Path
@@ -158,6 +159,28 @@ class JournalSizeLimitTests(unittest.TestCase):
         with manager.reader() as db:
             count = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         self.assertEqual(count, 40)
+
+    def test_checkpoint_does_not_wait_on_an_open_reader(self) -> None:
+        root, manager = _open(self)
+        _seed_sentinel(manager)
+        reader = sqlite3.connect(Path(root) / "athlete.db", timeout=20)
+        self.addCleanup(reader.close)
+        reader.execute("BEGIN")
+        reader.execute("SELECT COUNT(*) FROM messages").fetchone()
+        with manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES ('later', '1', ?)",
+                (STAMP,),
+            )
+
+        started = time.monotonic()
+        complete = manager.checkpoint_wal()
+
+        self.assertFalse(complete)
+        self.assertLess(time.monotonic() - started, 2)
+        with manager.unit_of_work() as db:
+            timeout = db.execute("PRAGMA busy_timeout").fetchone()[0]
+        self.assertGreater(timeout, 0)
 
 
 class SecureDeleteTests(unittest.TestCase):

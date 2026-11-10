@@ -431,7 +431,7 @@ class DataKindFixture(unittest.TestCase):
             now=STAMP,
         )
 
-    def seed_bookkeeping_rows(self) -> None:
+    def _seed_bookkeeping_rows(self) -> None:
         self.db.execute(
             "INSERT INTO snapshots(payload, created_at, synced_at, recent_activity_count) "
             "VALUES ('{\"marker\": 1}', ?, ?, 3)",
@@ -613,7 +613,7 @@ class CoverageGuardTests(DataKindFixture):
 
     def test_exported_rows_carry_every_live_column_but_the_listed_ones(self):
         self._seed_everything()
-        self.seed_bookkeeping_rows()
+        self._seed_bookkeeping_rows()
         archive = self._export_archive()
         checked = set()
         for table, members in EXPORTED_TABLE_MEMBERS.items():

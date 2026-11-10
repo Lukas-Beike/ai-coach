@@ -430,9 +430,18 @@ class DatabaseManager:
                 self._reader_slots.release()
 
     def checkpoint_wal(self, *, timeout: float | None = None) -> bool:
-        """Truncate the WAL under the writer; False when readers kept it open."""
+        """Truncate the WAL under the writer; False when readers kept it open.
+
+        The checkpoint never waits on readers (busy_timeout 0), so idle
+        housekeeping cannot hold the writer while a pinned snapshot is open.
+        """
         with self.unit_of_work(timeout=timeout) as db:
-            return _truncate_wal(db)
+            previous = _row_values(db.execute("PRAGMA busy_timeout").fetchone())[0]
+            db.execute("PRAGMA busy_timeout = 0")
+            try:
+                return _truncate_wal(db)
+            finally:
+                db.execute(f"PRAGMA busy_timeout = {int(previous or 0)}")
 
     def reclaim_space(self) -> bool:
         """Checkpoint, VACUUM and checkpoint again under the writer.
