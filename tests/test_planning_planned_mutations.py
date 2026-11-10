@@ -1,8 +1,8 @@
 """Boundary tests for pure local planned-unit mutation preparation."""
 
 import copy
-from datetime import date
 import unittest
+from datetime import date
 
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
