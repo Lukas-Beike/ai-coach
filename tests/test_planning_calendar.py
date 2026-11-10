@@ -171,6 +171,54 @@ class PlanningCalendarTests(unittest.TestCase):
 
         self.assertEqual((candidate, items), originals)
 
+    def test_set_easy_focus_is_explicitly_easy_despite_zone_two_text(self) -> None:
+        run = {"name": "Lauf", "description": "- 45m Z2 HR", "type": "Run"}
+        self.assertFalse(planning_calendar.workout_is_explicitly_easy(run))
+        for focus in ("recovery", "easy", "endurance", "long"):
+            with self.subTest(focus=focus):
+                self.assertTrue(
+                    planning_calendar.workout_is_explicitly_easy(
+                        {**run, "session_focus": focus}
+                    )
+                )
+        self.assertFalse(
+            planning_calendar.workout_is_explicitly_easy(
+                {**run, "session_focus": "tempo"}
+            )
+        )
+        event = {"id": "e", "name": "x [NO_INTENSITY]", "no_intensity": True}
+        self.assertIsNone(
+            planning_calendar.calendar_constraint_decision(
+                {**run, "session_focus": "easy"}, event
+            )
+        )
+        self.assertEqual(
+            planning_calendar.calendar_constraint_decision(run, event)["reason"],
+            "no_intensity",
+        )
+
+    def test_light_or_mobility_strength_is_explicitly_easy(self) -> None:
+        strength = {
+            "name": "Kraft",
+            "description": "- 30m Z2",
+            "type": "WeightTraining",
+        }
+        self.assertTrue(
+            planning_calendar.workout_is_explicitly_easy(
+                {**strength, "session_focus": "mobility"}
+            )
+        )
+        self.assertTrue(
+            planning_calendar.workout_is_explicitly_easy(
+                {**strength, "session_focus": "legs", "strength_intensity": "light"}
+            )
+        )
+        self.assertFalse(
+            planning_calendar.workout_is_explicitly_easy(
+                {**strength, "session_focus": "legs", "strength_intensity": "heavy"}
+            )
+        )
+
 
 class AdaptiveChangeCalendarBlockedTests(unittest.TestCase):
     @staticmethod

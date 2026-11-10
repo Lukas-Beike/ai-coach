@@ -367,6 +367,48 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         self.assertEqual(self.weather.calls, [{"refresh": False}])
         self.assertEqual(self.id_count, 1)
 
+    def _run(self, unit_id: str, day: str, minutes: int = 60) -> dict:
+        return {
+            "id": unit_id,
+            "date": day,
+            "name": "Long run",
+            "type": "Run",
+            "duration_minutes": minutes,
+            "description": f"- {minutes}m Z2 HR",
+        }
+
+    def test_available_minutes_apply_only_to_the_checkin_day(self):
+        self.feedback.update(checkin_date="2026-09-20", available_minutes=30)
+        self.drafts[:] = [
+            self._run("today", "2026-09-20"),
+            self._run("tomorrow", "2026-09-21"),
+            self._run("later", "2026-10-18"),
+        ]
+
+        result = self.service.preview()
+
+        self.assertEqual(
+            [change["library_workout_id"] for change in result["changes"]], ["today"]
+        )
+        self.assertIn("1 zukünftige lokale Einheit(en)", result["message"])
+        self.assertIn("nur am Check-in-Tag", result["scope"])
+
+    def test_pain_and_stress_apply_only_to_the_checkin_day(self):
+        self.feedback.update(
+            checkin_date="2026-09-20", pain="Knie zwickt", soreness=8, stress=9
+        )
+        self.drafts[:] = [
+            self._run("today", "2026-09-20"),
+            self._run("tomorrow", "2026-09-21"),
+            self._run("four-weeks", "2026-10-18"),
+        ]
+
+        result = self.service.preview()
+
+        self.assertEqual(
+            [change["library_workout_id"] for change in result["changes"]], ["today"]
+        )
+
     def test_preview_refuses_instead_of_silently_truncating_future_units(self):
         def drafts(count):
             return [
@@ -400,7 +442,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
     def test_combined_illness_calendar_weather_preview_keeps_triggers_and_fingerprint(
         self,
     ):
-        target = "2026-09-21"
+        target = self.today.isoformat()
         draft = {
             "id": "ride-1",
             "date": target,

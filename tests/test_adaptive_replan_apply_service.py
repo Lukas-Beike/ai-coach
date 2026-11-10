@@ -534,7 +534,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         run_id, strength_id = str(uuid.uuid4()), str(uuid.uuid4())
         run = self.workout(
             run_id,
-            "2026-09-22",
+            TODAY.isoformat(),
             type="Run",
             name="Schwelle 3x10",
             description="- 50m Z4 HR",
@@ -553,7 +553,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         ]
         strength = self.workout(
             strength_id,
-            "2026-09-23",
+            TODAY.isoformat(),
             type="WeightTraining",
             name="Kraft schwer",
             description="Kniebeuge 5x5",
@@ -583,7 +583,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
     def test_no_complaint_answers_propose_nothing(self):
         for answer in ("keine", "Nein.", "gesund", " - "):
             with self.subTest(answer=answer):
-                draft = self.workout(str(uuid.uuid4()), "2026-09-22")
+                draft = self.workout(str(uuid.uuid4()), TODAY.isoformat())
                 preview, _result = self.preview_and_apply(
                     [draft], [], feedback={"pain": answer, "illness": answer}
                 )
