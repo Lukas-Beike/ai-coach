@@ -95,6 +95,8 @@ verified merge.
 
 ## 5. Report
 
+Run `python scripts/issue_status.py <issue>` first: open checkboxes or open
+linked PRs mean the issue is not done, whatever was merged.
 Report delivered behavior, acceptance evidence and limits, spec changes, and the
 PR URL with merge state. If blocked, give the exact phase, state, and smallest
 next action. Then run the [retro](../ai-coach-retro/SKILL.md) briefly.
