@@ -5,8 +5,13 @@ from collections.abc import Callable
 
 from backend.canonical.labels import PROVIDER_ERROR_LABELS
 
-INTERVALS_API_KEY_ERROR = "INTERVALS_API_KEY ist nicht konfiguriert."
-OPENAI_API_KEY_ERROR = "OPENAI_API_KEY ist nicht konfiguriert."
+INTERVALS_API_KEY_ERROR = (
+    "Intervals.icu ist nicht eingerichtet. "
+    "Zugangsdaten unter Mehr → Anbindungen hinterlegen."
+)
+OPENAI_API_KEY_ERROR = (
+    "OpenAI ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen hinterlegen."
+)
 NOT_FOUND_ERROR = "Nicht gefunden."
 INTERNAL_SERVER_ERROR = "Interner Serverfehler."
 COMPETITION_NOT_FOUND_ERROR = "Wettkampf nicht gefunden."

@@ -601,6 +601,28 @@ class CalendarWeatherJobAdapter:
         return self._jobs.execute(self._provider_id, job, payload, reason)
 
 
+class PerJobOwner:
+    """Resolve a provider owner for each job, so it reads the live configuration.
+
+    Owners copy the runtime configuration when they are built; a registry caches
+    them for the worker's lifetime. Building per job lets credentials saved or
+    removed in the app apply to the next job without a restart.
+    """
+
+    def __init__(self, build: Callable[[], ProviderJobOwner]) -> None:
+        self._build = build
+
+    def execute(
+        self,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
+        *,
+        job_type: str,
+    ) -> dict[str, Any]:
+        return self._build().execute(job, payload, reason, job_type=job_type)
+
+
 def dispatch_provider_job(
     job_owners: Mapping[str, ProviderJobOwner],
     job: Mapping[str, Any],

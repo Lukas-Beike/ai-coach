@@ -97,7 +97,11 @@ class AudioProviderTests(unittest.TestCase):
     def test_key_errors_are_checked_after_local_validation(self):
         openai = self.client(openai_api_key="")
         for client, provider, message in (
-            (openai, "openai", "OPENAI_API_KEY ist nicht konfiguriert."),
+            (
+                openai,
+                "openai",
+                "OpenAI ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen hinterlegen.",
+            ),
         ):
             with self.subTest(provider=provider):
                 with self.assertRaises(AppError) as raised:
