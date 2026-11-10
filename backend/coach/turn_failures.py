@@ -26,7 +26,9 @@ from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
 
 BACKEND_SOURCE_ROOT = Path(__file__).resolve().parents[1]
-OPENAI_NOT_CONFIGURED_MESSAGE = "OpenAI ist nicht konfiguriert. Bitte hinterlege einen OPENAI_API_KEY in der Serverkonfiguration."
+OPENAI_NOT_CONFIGURED_MESSAGE = (
+    "OpenAI ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen hinterlegen."
+)
 OPENAI_TIMEOUT_MESSAGE = (
     "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut."
 )
