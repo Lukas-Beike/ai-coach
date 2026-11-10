@@ -25,7 +25,7 @@ from backend.sync.garmin_service import (
     refresh_morning_battery_after_sync,
 )
 from backend.sync.gates import ProviderResyncGate
-from backend.sync.job_outcomes import SyncJobOutcomeService
+from backend.sync.job_outcomes import CONTENDED_STATUS, SyncJobOutcomeService
 from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
     BACKFILL_JOB_TYPES,
@@ -706,7 +706,10 @@ class SyncJobExecutor:
                 )
                 return
             result = self.execute(job)
-            fallback_status = self._outcome_service.complete(job["id"], result)
+            fallback_status = self._outcome_service.complete(job["id"], result, job=job)
+            if fallback_status == CONTENDED_STATUS:
+                # The provider was busy: the job is requeued, not finished.
+                return
             self._historical_sync.queue_next(job, result, fallback_status)
             chain_continues = backfill_continues(job, result, fallback_status)
         except Exception as exc:  # noqa: BLE001 - runner persists every execution failure

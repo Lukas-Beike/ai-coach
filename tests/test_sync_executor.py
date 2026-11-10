@@ -138,7 +138,9 @@ class RecordingOutcomes:
     def update(self, job_id: str, status: str, **_: Any) -> None:
         self.update_calls.append((job_id, status))
 
-    def complete(self, job_id: str, result: Any) -> str:
+    def complete(
+        self, job_id: str, result: Any, *, job: dict[str, Any] | None = None
+    ) -> str:
         self.complete_calls.append((job_id, result))
         if self.complete_error:
             raise self.complete_error
@@ -545,6 +547,16 @@ class SyncJobExecutorTests(unittest.TestCase):
     def test_completed_job_runs_the_after_job_hook(self) -> None:
         self.executor.run(self.job("garmin"))
         self.assertEqual(self.after_job_calls, [True])
+
+    def test_a_contended_job_is_requeued_not_completed_or_failed(self) -> None:
+        self.outcomes.fallback_status = "queued"
+        job = self.job("garmin")
+
+        self.executor.run(job)
+
+        self.assertEqual(len(self.outcomes.complete_calls), 1)
+        self.assertEqual(self.outcomes.failure_calls, [])
+        self.assertEqual(self.after_job_calls, [])
 
     def test_failed_job_skips_the_after_job_hook(self) -> None:
         self.garmin.error = RuntimeError("provider failure")

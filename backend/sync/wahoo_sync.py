@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, replace
@@ -169,7 +170,16 @@ class WahooSyncService:
         days: object = None,
         reason: str = "manual",
         operation_id: str | None = None,
+        *,
+        wait_seconds: float = 0.0,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
+        """Run one Wahoo read; ``wait_seconds`` waits for a running one to end.
+
+        The wait acquires the lock itself, so a read that ends is followed by this
+        one without a gap another worker could take. A cancelled wait or one that
+        runs out returns ``already_running``.
+        """
         with self._observer().observe(
             WAHOO_ID, FRESHNESS_AREA, reason, operation_id
         ) as scope:
@@ -178,14 +188,36 @@ class WahooSyncService:
                 self._gate.operation() if self._gate is not None else nullcontext()
             )
             with operation:
-                result = self._sync(days, reason)
+                result = self._sync(days, reason, wait_seconds, cancel_event)
             scope.result = result
             return result
 
-    def _sync(self, days: object, reason: str) -> dict[str, Any]:
+    def _acquire(
+        self, wait_seconds: float, cancel_event: threading.Event | None
+    ) -> bool:
+        if not self._lock.acquire(blocking=False):
+            deadline = time.monotonic() + wait_seconds
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or (
+                    cancel_event is not None and cancel_event.is_set()
+                ):
+                    return False
+                # Short slices keep a cancelled request from waiting out the bound.
+                if self._lock.acquire(timeout=min(0.5, remaining)):
+                    break
+        return True
+
+    def _sync(
+        self,
+        days: object,
+        reason: str,
+        wait_seconds: float,
+        cancel_event: threading.Event | None,
+    ) -> dict[str, Any]:
         if not self.configured():
             return {"status": "not_configured", "message": WAHOO_NOT_CONFIGURED_MESSAGE}
-        if not self._lock.acquire(blocking=False):
+        if not self._acquire(wait_seconds, cancel_event):
             return {"status": "already_running"}
         try:
             try:

@@ -8,7 +8,6 @@ registered for its provider; a provider without one cannot wait.
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Callable, Mapping
 from datetime import date
 from typing import Any
@@ -204,7 +203,6 @@ class WahooSynchronousRefresh:
         *,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
         wait_seconds: float = 120.0,
-        poll_seconds: float = 0.5,
         stored_days: Callable[[], int] | None = None,
     ) -> None:
         self._stored_days = stored_days
@@ -212,7 +210,6 @@ class WahooSynchronousRefresh:
         self._all_sync_days = all_sync_days
         self._registry = registry
         self._wait_seconds = wait_seconds
-        self._poll_seconds = poll_seconds
 
     def refresh(
         self,
@@ -229,10 +226,21 @@ class WahooSynchronousRefresh:
             )
         )
         label = self._registry.get(provider).label
-        self._wait_for_running_sync(cancel_event)
         if cancel_event is not None and cancel_event.is_set():
             raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
-        result = self._wahoo_sync_service.sync(self._window(days), "Chat-Anfrage")
+        # The sync acquires the lock itself, waiting for a running read to end.
+        result = self._wahoo_sync_service.sync(
+            self._window(days),
+            "Chat-Anfrage",
+            wait_seconds=self._wait_seconds,
+            cancel_event=cancel_event,
+        )
+        if (
+            result.get("status") == "already_running"
+            and cancel_event is not None
+            and cancel_event.is_set()
+        ):
+            raise AppError(499, COACH_ABORTED_ERROR, reason="chat_cancelled")
         _raise_if_busy(result, label)
         status = result.get("status")
         if status == "not_configured":
@@ -265,14 +273,6 @@ class WahooSynchronousRefresh:
             return window
         stored = self._stored_days()
         return window if stored == self._all_sync_days else max(1, min(window, stored))
-
-    def _wait_for_running_sync(self, cancel_event: threading.Event | None) -> None:
-        deadline = time.monotonic() + self._wait_seconds
-        while self._wahoo_sync_service.running() and time.monotonic() < deadline:
-            if cancel_event is not None and cancel_event.wait(self._poll_seconds):
-                return
-            if cancel_event is None:
-                time.sleep(self._poll_seconds)
 
 
 class ProviderRefreshCommandService:

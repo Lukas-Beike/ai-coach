@@ -59,7 +59,11 @@ def retry_at(
         return None
     failures = 1 if current_error_code else 0
     for row in rows:
-        if row["status"] in {"success", "partial", "skipped"}:
+        if row["status"] == "skipped":
+            # A hold or lock contention is no outcome: it neither ends nor adds
+            # to the failure streak of the runs around it.
+            continue
+        if row["status"] in {"success", "partial"}:
             break
         if row["status"] != "error":
             continue

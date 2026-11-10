@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import unittest
 from typing import Any
 from unittest.mock import Mock, patch
@@ -13,6 +14,7 @@ from backend.errors import AppError
 from backend.providers.descriptors import WAHOO_ID
 from backend.providers.wahoo_client import WahooWorkoutFetch
 from backend.sync.canonical_coverage_store import coverage_key
+from backend.sync.commands import WahooSynchronousRefresh
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 from backend.sync.schedule_policies import WahooSchedulePolicy
@@ -358,6 +360,95 @@ class SkipTests(WahooSyncCase):
             result = self.service.sync()
 
         self.assertEqual({"status": "already_running"}, result)
+        self.assertEqual([], self.source.windows)
+
+
+class LockContentionTests(WahooSyncCase):
+    def hold_lock_for(self, seconds: float) -> threading.Thread:
+        acquired = threading.Event()
+
+        def hold() -> None:
+            with self.lock:
+                acquired.set()
+                time.sleep(seconds)
+
+        thread = threading.Thread(target=hold, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.assertTrue(acquired.wait(5))
+        return thread
+
+    def history_statuses(self) -> list[str]:
+        return [
+            row["status"]
+            for row in self.rows(
+                "SELECT status FROM provider_refresh_history ORDER BY started_at"
+            )
+        ]
+
+    def test_contention_records_a_skipped_row_never_a_success(self) -> None:
+        with self.lock:
+            result = self.service.sync()
+
+        self.assertEqual("already_running", result["status"])
+        self.assertEqual(["skipped"], self.history_statuses())
+
+    def test_a_wait_takes_the_lock_when_the_running_read_ends(self) -> None:
+        self.hold_lock_for(0.2)
+
+        result = self.service.sync(wait_seconds=5)
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(1, len(self.source.windows))
+        self.assertEqual(["success"], self.history_statuses())
+
+    def test_a_wait_that_runs_out_reports_already_running(self) -> None:
+        with self.lock:
+            result = self.service.sync(wait_seconds=0.05)
+
+        self.assertEqual({"status": "already_running"}, result)
+        self.assertEqual([], self.source.windows)
+
+    def test_a_cancelled_wait_gives_up_at_once(self) -> None:
+        cancel = threading.Event()
+        cancel.set()
+        with self.lock:
+            started = time.monotonic()
+            result = self.service.sync(wait_seconds=30, cancel_event=cancel)
+
+        self.assertEqual({"status": "already_running"}, result)
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_the_coach_refresh_waits_for_a_claimed_worker_read(self) -> None:
+        # The worker holds the lock the moment the Coach refresh starts: the
+        # refresh waits on the lock itself and returns fresh data, not a 503.
+        self.hold_lock_for(0.2)
+        refresh = WahooSynchronousRefresh(self.service, 3650, wait_seconds=5)
+
+        result = refresh.refresh("wahoo", {}, None)
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(1, len(self.source.windows))
+        self.assertEqual(["success"], self.history_statuses())
+
+    def test_the_coach_refresh_fails_busy_when_the_wait_runs_out(self) -> None:
+        refresh = WahooSynchronousRefresh(self.service, 3650, wait_seconds=0.05)
+
+        with self.lock, self.assertRaises(AppError) as raised:
+            refresh.refresh("wahoo", {}, None)
+
+        self.assertEqual("provider_busy", raised.exception.reason)
+        self.assertEqual(["skipped"], self.history_statuses())
+
+    def test_a_cancelled_coach_refresh_is_aborted_not_busy(self) -> None:
+        cancel = threading.Event()
+        cancel.set()
+        refresh = WahooSynchronousRefresh(self.service, 3650, wait_seconds=30)
+
+        with self.lock, self.assertRaises(AppError) as raised:
+            refresh.refresh("wahoo", {}, cancel)
+
+        self.assertEqual("chat_cancelled", raised.exception.reason)
         self.assertEqual([], self.source.windows)
 
 

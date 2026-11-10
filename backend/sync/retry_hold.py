@@ -71,7 +71,7 @@ class ProviderRetryHold:
                 row = db.execute(
                     "SELECT status, error_code, finished_at, next_retry_at "
                     "FROM provider_refresh_history WHERE provider=? AND area=? "
-                    "ORDER BY started_at DESC LIMIT 1",
+                    "AND status != 'skipped' ORDER BY started_at DESC LIMIT 1",
                     (provider, area),
                 ).fetchone()
                 if row is not None and self._row_holds(db, provider, row, current):

@@ -1162,6 +1162,43 @@ class SyncJobStore:
             )
             return True
 
+    def defer(self, job: Mapping[str, Any], available_at: str) -> bool:
+        """Requeue a claimed job without charging the attempt its claim counted.
+
+        For a job that met a busy provider lock: it did no work, so it retries at
+        ``available_at`` with the attempt budget it had before the claim.
+        """
+        now = self._now()
+        try:
+            attempts = max(0, int(job.get("attempts") or 1) - 1)
+            job_id = str(job["id"])
+            scheduled_at = self._scheduled_at(available_at, now)
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise SyncJobInvalidOperationError(
+                "Claimed sync job or retry time is invalid."
+            ) from exc
+        with self._database_manager.unit_of_work() as db:
+            self._transition(
+                db,
+                job_id,
+                "running",
+                "queued",
+                {
+                    "attempts": attempts,
+                    "available_at": scheduled_at,
+                    "finished_at": None,
+                    "error_class": None,
+                    "updated_at": now,
+                },
+            )
+            db.execute(
+                "UPDATE sync_job_items SET status='queued', "
+                "attempts=MAX(attempts-1, 0), updated_at=? "
+                f"WHERE job_id=? AND {_SETTLED_ITEMS}",
+                (now, job_id),
+            )
+            return True
+
     def resolve(self, job_id: str) -> dict[str, Any]:
         now = self._now()
         with self._database_manager.unit_of_work() as db:
