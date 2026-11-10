@@ -24,6 +24,7 @@ from backend.nutrition.models import (
     NutritionDaySummary,
     NutritionEntry,
     normalize_nutrition_entry,
+    nutrition_number,
     validate_iso_date,
 )
 from backend.nutrition.sync_status import NutritionSyncStatusService
@@ -132,7 +133,7 @@ class NutritionDiaryService:
         meal_time: str | None = None,
     ) -> dict[str, Any]:
         try:
-            amount = float(portions)
+            amount = nutrition_number(portions)
         except (TypeError, ValueError) as exc:
             raise AppError(400, "Ungültige Portionsanzahl.") from exc
         if not math.isfinite(amount) or not 0 < amount <= 20:
