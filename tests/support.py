@@ -16,6 +16,7 @@ from backend.coach import streams as coach_streams
 from backend.config import Config
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.runtime import clock as runtime_clock
+from backend.sync.metric_export_runner import MetricExportRunner
 
 PROVIDER_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
 PROVIDER_SYNCED_TEXT = "2026-10-10T06:00:00+00:00"
@@ -188,6 +189,27 @@ def canonical_backfill_stopped(server, timeout: float = 10.0):
     finally:
         server.CANONICAL_BACKFILL.worker.stop()
         server.CANONICAL_BACKFILL.worker.join(timeout)
+
+
+@contextmanager
+def metric_export_stopped(server, timeout: float = 10.0):
+    """Give the test its own metric-export runner and join it before cleanup.
+
+    A provider refresh requests a delayed automatic export on a background
+    thread. Left on the shared runner it would run after the test, in whatever
+    data directory is current, and race the temporary directory's removal.
+    """
+    runner = MetricExportRunner(
+        lambda: server.METRIC_EXPORT,
+        enabled=server._intervals_export_configured,
+        maintenance_gate=lambda: server.runtime_maintenance.MAINTENANCE_GATE,
+    )
+    try:
+        with patch.object(server, "METRIC_EXPORT_RUNNER", runner):
+            yield runner
+    finally:
+        runner.stop()
+        runner.join(timeout)
 
 
 def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -> None:

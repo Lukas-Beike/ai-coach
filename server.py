@@ -2553,6 +2553,7 @@ def main() -> None:
             sync_worker.join(timeout=5)
         COACH_JOB_WORKER.join(timeout=5)
         CANONICAL_BACKFILL.worker.join(timeout=5)
+        METRIC_EXPORT_RUNNER.join(timeout=5)
         DIAGNOSTIC_CAPTURE.flush()
 
 

@@ -116,6 +116,21 @@ class MetricExportRunnerTests(unittest.TestCase):
         runner.request()
         self.assertEqual((self.threads, service.runs), ([], 0))
 
+    def test_stop_cancels_a_pending_run_and_join_waits_for_the_thread(self) -> None:
+        service = _Service({"exported": 0, "failed": 0, "conflicts": 0})
+        runner = MetricExportRunner(
+            lambda: service,
+            enabled=lambda: True,
+            maintenance_gate=lambda: self.gate,
+            delay_seconds=60,
+            thread_factory=self._thread,
+        )
+        runner.request()
+        runner.stop()
+        runner.join(5)
+        self.assertFalse(self.threads[0].is_alive())
+        self.assertEqual(service.runs, 0)
+
     def test_only_a_wahoo_sync_requests_a_run(self) -> None:
         runner = self._runner(_Service())
         with patch.object(runner, "request") as request:
