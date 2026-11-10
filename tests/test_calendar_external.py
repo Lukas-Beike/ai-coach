@@ -256,6 +256,7 @@ class ExternalCalendarTests(unittest.TestCase):
                 "running",
                 "last_sync_at",
                 "last_error",
+                "skipped_events",
                 "events",
                 "window_days",
             },
@@ -269,6 +270,7 @@ class ExternalCalendarTests(unittest.TestCase):
                 "running": False,
                 "last_sync_at": None,
                 "last_error": None,
+                "skipped_events": 0,
                 "events": list_events(self.db, today=self.today),
                 "window_days": 56,
             },
@@ -291,6 +293,23 @@ class ExternalCalendarTests(unittest.TestCase):
         self.assertIsNone(result["last_error"])
         self.assertFalse(result["configured"])
         self.assertTrue(result["running"])
+
+    def test_state_reports_the_skipped_component_count(self):
+        kwargs = {
+            "configured": True,
+            "running": False,
+            "today": self.today,
+            "window_days": 56,
+        }
+        self.add_kv(
+            "last_external_calendar_sync_skipped", '{"component": 1, "recurrence": 2}'
+        )
+        self.assertEqual(state(self.db, **kwargs)["skipped_events"], 3)
+        self.db.execute(
+            "UPDATE kv SET value = 'not-json' WHERE key = ?",
+            ("last_external_calendar_sync_skipped",),
+        )
+        self.assertEqual(state(self.db, **kwargs)["skipped_events"], 0)
 
     def test_state_uses_default_event_limit(self):
         for index in range(301):

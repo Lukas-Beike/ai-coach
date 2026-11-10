@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from collections.abc import Callable
@@ -125,6 +126,7 @@ class ExternalCalendarSyncService:
         )
         current_local = self._local_now()
         today = current_local.date()
+        skips: dict[str, int] = {}
         events = calendar_provider.parse_ical_calendar(
             payload,
             local_zone=current_local.tzinfo or UTC,
@@ -132,6 +134,7 @@ class ExternalCalendarSyncService:
             window_start=today,
             window_end=today
             + timedelta(days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS),
+            skips=skips,
         )
         events = [calendar_event_constraints(event) for event in events]
         synced_at = self._utc_now()
@@ -180,6 +183,11 @@ class ExternalCalendarSyncService:
             self._daily_sync_marker_service.mark_in_transaction(db, "calendar")
             self._key_value_repository.set(db, "last_external_calendar_sync_error", "")
             self._key_value_repository.set(
+                db,
+                "last_external_calendar_sync_skipped",
+                json.dumps(skips, sort_keys=True) if skips else "",
+            )
+            self._key_value_repository.set(
                 db, "external_calendar_constraints_refresh_required", ""
             )
         self._state_event_buffer.publish("coach", {"status": "changed"})
@@ -188,6 +196,7 @@ class ExternalCalendarSyncService:
             "status": "ok",
             "synced_at": synced_at,
             "events": len(events),
+            "skipped": {"count": sum(skips.values()), "reasons": dict(skips)},
             "window_days": calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
             **replan,
         }

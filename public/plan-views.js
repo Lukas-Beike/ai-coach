@@ -702,12 +702,18 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     }
   }
 
+  function externalCalendarDetail(calendar) {
+    if (calendar.last_error) return "Fehler bei letzter Aktualisierung";
+    const skipped = Number(calendar.skipped_events) || 0;
+    return skipped ? `${skipped} Termine übersprungen` : "";
+  }
+
   function renderExternalCalendar(data) {
     const calendar = data.external_calendar || {};
     const syncButton = $("#externalCalendarSyncButton");
     setConnectionChip("#externalCalendarConnectionStatus", connectionKind({ configured: calendar.configured, error: Boolean(calendar.last_error) }));
     const detail = $("#externalCalendarConnectionDetail");
-    if (detail) detail.textContent = calendar.last_error ? "Fehler bei letzter Aktualisierung" : "";
+    if (detail) detail.textContent = externalCalendarDetail(calendar);
     if (syncButton) {
       syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
       syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";

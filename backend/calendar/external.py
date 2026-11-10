@@ -1,5 +1,6 @@
 """Read-only queries and state projection for an external iCalendar feed."""
 
+import json
 from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
@@ -83,6 +84,15 @@ def list_events_in_window(
     return [dict(row) for row in rows]
 
 
+def _skipped_count(raw: Any) -> int:
+    """Count the components the last sync skipped; the kv value is a reason map."""
+    try:
+        reasons = json.loads(raw) if raw else {}
+        return sum(int(count) for count in reasons.values())
+    except TypeError, ValueError, AttributeError:
+        return 0
+
+
 def state(
     db: Any,
     *,
@@ -98,6 +108,9 @@ def state(
         "SELECT value FROM kv WHERE key = ?", ("last_external_calendar_sync_error",)
     ).fetchone()
     last_error = last_error_row["value"] if last_error_row else None
+    skipped_row = db.execute(
+        "SELECT value FROM kv WHERE key = ?", ("last_external_calendar_sync_skipped",)
+    ).fetchone()
     return {
         "configured": configured,
         "provider": "iCalendar",
@@ -105,6 +118,7 @@ def state(
         "running": running,
         "last_sync_at": last_sync_row["value"] if last_sync_row else None,
         "last_error": last_error or None,
+        "skipped_events": _skipped_count(skipped_row["value"] if skipped_row else ""),
         "events": list_events(db, today=today),
         "window_days": window_days,
     }
