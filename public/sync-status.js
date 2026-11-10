@@ -526,6 +526,7 @@ function renderProviderFreshness(data) {
       button.type = "button";
       button.className = "secondary-button";
       button.textContent = "Erneut versuchen";
+      button.disabled = providerSyncRunning(entry.provider);
       button.addEventListener("click", () => retryProvider(entry.provider, button));
       item.append(button);
     }
@@ -534,10 +535,24 @@ function renderProviderFreshness(data) {
 }
 
 
+// The local sync flag each retryable provider's manual sync sets while it runs.
+function providerSyncKey(provider) {
+  if (provider === providerIds().garmin) return "garmin";
+  if (provider === providerIds().wahoo) return "wahoo";
+  return { weather: "weather", calendar: "externalCalendar" }[provider] || "";
+}
+
+function providerSyncRunning(provider) {
+  const key = providerSyncKey(provider);
+  return Boolean(key && state.localSync[key]);
+}
+
 async function retryProvider(provider, button) {
+  if (providerSyncRunning(provider)) return;
   if (button) button.disabled = true;
   try {
     if (provider === providerIds().garmin) await syncGarmin();
+    else if (provider === providerIds().wahoo) await syncWahoo();
     else if (provider === "weather") await syncWeather();
     else if (provider === "calendar") await syncExternalCalendar();
   } finally {
