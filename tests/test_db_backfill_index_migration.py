@@ -173,24 +173,30 @@ class BackfillIndexMigrationTests(unittest.TestCase):
                 )
 
     def test_a_restart_with_the_same_build_changes_nothing(self) -> None:
-        for release in RELEASES:
-            with self.subTest(release=release), tempfile.TemporaryDirectory() as root:
-                path = Path(root) / "upgrade.db"
-                source = self.populated(release)
-                target = connect(path)
-                source.backup(target)
-                try:
-                    migrate_schema(target)
-                    target.commit()
-                    upgraded = list(target.iterdump())
-                finally:
-                    target.close()
-                reopened = connect(path)
-                try:
-                    migrate_schema(reopened)
-                    self.assertEqual(list(reopened.iterdump()), upgraded)
-                finally:
-                    reopened.close()
+        with tempfile.TemporaryDirectory() as root:
+            for release in RELEASES:
+                path = Path(root) / f"restart-{release}.db"
+                self.copy_to_file(self.populated(release), path)
+                dumps = [self.migrate_file(path) for _ in range(2)]
+                self.assertEqual(dumps[0], dumps[1], release)
+
+    @staticmethod
+    def copy_to_file(source: sqlite3.Connection, path: Path) -> None:
+        target = connect(path)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+
+    @staticmethod
+    def migrate_file(path: Path) -> list[str]:
+        db = connect(path)
+        try:
+            migrate_schema(db)
+            db.commit()
+            return list(db.iterdump())
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":
