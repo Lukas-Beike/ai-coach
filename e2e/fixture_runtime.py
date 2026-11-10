@@ -90,6 +90,15 @@ class FixtureConversationProvisionService:
     def ensure(self, *args, **kwargs):
         return "fixture-conversation"
 
+    def binding(self, *args, **kwargs):
+        return "fixture-conversation"
+
+    def bind_remote(self, *args, **kwargs):
+        return "fixture-conversation"
+
+    def rotate(self, *args, **kwargs):
+        return "fixture-conversation"
+
 
 server.COACH_CONVERSATION.provision_service = FixtureConversationProvisionService
 # Browser scenarios deliberately poll and reload the single disposable fixture
