@@ -535,10 +535,13 @@ class BackfillBatchTests(_Base):
         paused.pop("splits")
         paused["skipped"] = ["activity_splits"]
 
-        self.service(_Details({"1001": paused})).backfill()
+        # More runs than the retry limit while the part stays paused: a paused
+        # part is no attempt, so the activity keeps its retries.
+        for _ in range(4):
+            self.service(_Details({"1001": paused})).backfill()
 
         self.assertEqual(
-            _stored_state(self.key_values)["retry"], {"1001": [summary, 1]}
+            _stored_state(self.key_values)["retry"], {"1001": [summary, 0]}
         )
         reader = _Details({"1001": _payload("1001")})
         self.service(reader).backfill()

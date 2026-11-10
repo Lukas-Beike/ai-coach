@@ -328,14 +328,19 @@ class GarminActivityDetailService:
             now=observed,
         )
         # Malformed parts are dropped by the mapper, so they count like failures.
-        incomplete = _incomplete(collected) or bool(mapped.issues)
+        failed = _failed(collected) or bool(mapped.issues)
         retry = dict(outcome.retry)
-        _note_attempt(
-            retry,
-            provider_activity_id,
-            candidate["summary_sha256"],
-            incomplete=incomplete,
-        )
+        if collected.get("skipped") and not failed:
+            # Paused parts are no attempt: keep the activity a candidate without
+            # spending its retries, so it is fetched again once the pause ends.
+            _keep_candidate(retry, provider_activity_id, candidate["summary_sha256"])
+        else:
+            _note_attempt(
+                retry,
+                provider_activity_id,
+                candidate["summary_sha256"],
+                incomplete=failed,
+            )
         # The retry entry is committed with the detail rows, so a stop before the
         # final state write cannot leave a partial fetch looking complete.
         stored = bool(mapped.records) and self._store_records(
@@ -357,7 +362,7 @@ class GarminActivityDetailService:
         if mapped.records:
             if not stored:
                 outcome.skipped += 1
-        elif incomplete:
+        elif failed or collected.get("skipped"):
             # Nothing is marked, so a later sync retries this activity.
             outcome.status = "failed"
             return False
@@ -597,7 +602,7 @@ def _parse_retry(value: object) -> dict[str, tuple[str, int]]:
             and len(entry) == 2
             and isinstance(entry[0], str)
             and type(entry[1]) is int
-            and entry[1] > 0
+            and entry[1] >= 0
         ):
             retry[str(key)] = (entry[0], entry[1])
     return retry
@@ -610,6 +615,22 @@ def _incomplete(collected: Mapping[str, Any]) -> bool:
         or collected.get("rate_limited")
         or collected.get("skipped")
     )
+
+
+def _failed(collected: Mapping[str, Any]) -> bool:
+    """True when a part failed or was rate limited; a paused part is not a failure."""
+    return bool(collected.get("errors") or collected.get("rate_limited"))
+
+
+def _keep_candidate(
+    retry: dict[str, tuple[str, int]], provider_activity_id: str, summary_sha256: str
+) -> None:
+    """Keep a retry entry for the summary without counting another attempt."""
+    previous = retry.get(provider_activity_id)
+    attempts = (
+        previous[1] if previous is not None and previous[0] == summary_sha256 else 0
+    )
+    retry[provider_activity_id] = (summary_sha256, attempts)
 
 
 def _retries_exhausted(entry: tuple[str, int] | None, summary_sha256: str) -> bool:
