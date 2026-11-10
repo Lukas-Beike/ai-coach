@@ -28,9 +28,8 @@ _RIDE_WORDS = re.compile(
     r"gravel\w*|mtb|mountain.?bik\w*)\b"
 )
 # German compounds end in -lauf ("Tempolauf", "Waldlauf"); indoor words win first.
-_RUN_WORDS = re.compile(
-    r"\b(?:runs?|running|jog\w*)\b|\b(?!ab|ver)\w*lauf(?:e|en|s)?\b"
-)
+_RUN_WORDS = re.compile(r"\b(?:runs?|running|jog\w*)\b")
+_LAUF_WORDS = re.compile(r"\b(?!ab|ver)\w*lauf(?:e|en|s)?\b")
 
 
 def _indoor_by_name(environment: Environment, text: str) -> Environment:
@@ -61,7 +60,7 @@ def _event_sport(event: dict[str, Any]) -> tuple[Sport | None, Environment]:
     )
     if _RIDE_WORDS.search(text):
         return Sport.RIDE, environment
-    if _RUN_WORDS.search(text):
+    if _RUN_WORDS.search(text) or _LAUF_WORDS.search(text):
         return Sport.RUN, environment
     return None, environment
 
