@@ -159,6 +159,57 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.coach_jobs.resume_interrupted.assert_called_once_with(self.coach_failures)
         self.assertFalse(self.gate.state()["active"])
 
+    def test_restore_cancels_a_running_coach_turn_before_draining(self) -> None:
+        cancel = threading.Event()
+        entered = threading.Event()
+
+        def coach_turn() -> None:
+            with self.gate.operation():
+                entered.set()
+                cancel.wait(5)
+
+        thread = threading.Thread(target=coach_turn)
+        thread.start()
+        self.assertTrue(entered.wait(1))
+        service = DatabaseRestoreService(
+            replace(self.service._dependencies, cancel_coach_turns=cancel.set)
+        )
+
+        result = service.restore(b"replacement database")
+
+        thread.join(1)
+        self.assertTrue(cancel.is_set())
+        self.assertTrue(result["restored"])
+        self.assertEqual(self.database_path.read_bytes(), b"replacement database")
+
+    def test_restore_returns_409_within_the_bound_and_keeps_the_database(
+        self,
+    ) -> None:
+        release = threading.Event()
+        entered = threading.Event()
+
+        def stuck_turn() -> None:
+            with self.gate.operation():
+                entered.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=stuck_turn)
+        thread.start()
+        self.assertTrue(entered.wait(1))
+        self.addCleanup(thread.join, 1)
+        self.addCleanup(release.set)
+        with (
+            patch("backend.runtime.maintenance.RESTORE_DRAIN_TIMEOUT_SECONDS", 0.05),
+            self.assertRaises(AppError) as raised,
+        ):
+            self.service.restore(b"replacement database")
+
+        self.assertEqual(raised.exception.status, 409)
+        self.assertEqual(self.database_path.read_bytes(), b"previous database")
+        self.assertFalse(self.gate.state()["active"])
+        self.assertFalse((self.data_dir / "staged.db").exists())
+        self.validation.validate.assert_not_called()
+
     def test_restore_restarts_the_canonical_backfill_worker_once_after_the_swap(
         self,
     ) -> None:

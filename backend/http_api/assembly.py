@@ -594,6 +594,7 @@ class HttpApiAssembly:
             logger,
             max_request_bytes=max_chat_request_bytes,
             response_timeout_seconds=timeout,
+            maintenance_pending=lambda: bool(maintenance_gate.state()["active"]),
         )
         self.transcribe_post_routes = TranscribePostRoutes(
             audio_transcription_client,

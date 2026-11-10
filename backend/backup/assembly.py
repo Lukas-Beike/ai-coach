@@ -61,6 +61,7 @@ class RestoreLifecycleDependencies:
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
     canonical_backfill_start: Callable[[], None]
     refresh_credentials: Callable[[], Any] | None = None
+    cancel_coach_turns: Callable[[], None] | None = None
 
 
 class BackupAssembly:
@@ -102,6 +103,7 @@ class BackupAssembly:
         self._diagnostics_suspended = lifecycle.diagnostics_suspended
         self._canonical_backfill_start = lifecycle.canonical_backfill_start
         self._refresh_credentials = lifecycle.refresh_credentials
+        self._cancel_coach_turns = lifecycle.cancel_coach_turns
 
     def backup_service(self) -> DatabaseBackupService:
         return DatabaseBackupService(
@@ -151,5 +153,6 @@ class BackupAssembly:
             canonical_backfill_start=self._canonical_backfill_start,
             logger=self._logger,
             refresh_credentials=self._refresh_credentials,
+            cancel_coach_turns=self._cancel_coach_turns,
         )
         return DatabaseRestoreService(dependencies)

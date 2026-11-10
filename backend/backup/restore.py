@@ -50,6 +50,8 @@ class RestoreDependencies:
     logger: logging.Logger
     # Re-derives the runtime configuration from the restored stored credentials.
     refresh_credentials: Callable[[], Any] | None = None
+    # Stops a running Coach turn so the maintenance drain does not wait for it.
+    cancel_coach_turns: Callable[[], None] | None = None
 
 
 class DatabaseRestoreService:
@@ -204,7 +206,9 @@ class DatabaseRestoreService:
         temporary_path = self._stage(payload)
         try:
             with (
-                self._dependencies.maintenance_gate.restore(),
+                self._dependencies.maintenance_gate.restore(
+                    self._dependencies.cancel_coach_turns
+                ),
                 self._dependencies.profile_mutation_coordinator,
             ):
                 # Flushes stay blocked from before the swap until the cache is dropped,

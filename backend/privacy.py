@@ -173,6 +173,8 @@ class PrivacyDeleteDependencies:
     # Copies saved by a restore or by the Intervals.icu purge of an earlier
     # release; erased with the data.
     recovery_copies: RecoveryCopies | None = None
+    # Stops a running Coach turn so the maintenance drain does not wait for it.
+    cancel_coach_turns: Callable[[], None] | None = None
     utc_now: Callable[[], str] = lambda: datetime.now(UTC).isoformat()
 
 
@@ -257,7 +259,7 @@ class PrivacyDeleteService:
         if confirm != GPS_TRACKS_DELETE_CONFIRMATION_TEXT:
             raise AppError(400, "Zum Löschen muss GPS-SPUREN LÖSCHEN bestätigt werden.")
         dependencies = self._dependencies
-        with dependencies.maintenance_gate.restore():
+        with dependencies.maintenance_gate.restore(dependencies.cancel_coach_turns):
             with (
                 dependencies.database_lock,
                 dependencies.database_manager.unit_of_work() as db,
@@ -302,7 +304,7 @@ class PrivacyDeleteService:
             )
         dependencies = self._dependencies
         with (
-            dependencies.maintenance_gate.restore(),
+            dependencies.maintenance_gate.restore(dependencies.cancel_coach_turns),
             dependencies.profile_mutation_coordinator,
         ):
             with dependencies.database_manager.reader() as db:
@@ -431,6 +433,7 @@ class PrivacyStateDependencies:
     refresh_credentials: Callable[[], Any] | None = None
     cancel_garmin_login: Callable[[], None] | None = None
     disconnect_wahoo: Callable[[], dict[str, Any]] | None = None
+    cancel_coach_turns: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -477,6 +480,7 @@ class PrivacyAssembly:
         self._refresh_credentials = state.refresh_credentials
         self._cancel_garmin_login = state.cancel_garmin_login
         self._disconnect_wahoo = state.disconnect_wahoo
+        self._cancel_coach_turns = state.cancel_coach_turns
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -498,6 +502,7 @@ class PrivacyAssembly:
                 refresh_credentials=self._refresh_credentials,
                 cancel_garmin_login=self._cancel_garmin_login,
                 disconnect_wahoo=self._disconnect_wahoo,
+                cancel_coach_turns=self._cancel_coach_turns,
                 recovery_copies=RecoveryCopies(
                     self._data_dir(), self._database_path().name
                 ),
