@@ -818,7 +818,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"Trainingsload"', plan_views)
         self.assertIn("Plan/Ist:", plan_views)
         self.assertIn("daily_planning_context", plan_views)
-        self.assertIn("card.open = false", plan_views)
+        self.assertIn("card.open = openPlannedEntries.has(entryKey)", plan_views)
         self.assertIn("section.open = false", plan_views)
         self.assertIn("planned-day-${kind}", plan_views)
         self.assertIn('kind: "calendar"', plan_views)
