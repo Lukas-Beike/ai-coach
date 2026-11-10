@@ -101,8 +101,8 @@ function showNutritionReceipt(status, message, change, afterUndo) {
     undo.disabled = true;
     try {
       await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
-      status.textContent = "Zurückgenommen.";
       await afterUndo?.();
+      status.textContent = "Zurückgenommen.";
     } catch (error) {
       undo.disabled = false;
       text.textContent = `${error.message} `;
