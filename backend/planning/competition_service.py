@@ -166,11 +166,10 @@ class CompetitionService:
             if competition_id:
                 normalized["id"] = competition_id
             today = self._local_today().isoformat()
-            was_upcoming = bool(existing) and (
-                str(existing.get("event_date") or "")[:10] >= today
-            )
+            previous_day = str((existing or {}).get("event_date") or "")[:10]
+            was_upcoming = bool(existing) and previous_day >= today
             if (
-                normalized["event_date"] >= today
+                str(normalized["event_date"]) >= today
                 and not was_upcoming
                 and self._repository.count_upcoming(db, today)
                 >= _MAX_UPCOMING_COMPETITIONS
