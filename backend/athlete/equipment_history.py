@@ -7,7 +7,7 @@ key-value table; each kind is one history entity type with its own restore.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from backend import change_history
@@ -16,10 +16,13 @@ from backend.athlete.equipment import (
     EQUIPMENT_PREFIX,
     MAINTENANCE_PREFIX,
     UPSERT_KV,
+    activity_row,
+    assignable_equipment,
     equipment_in_use,
     stored_value,
     validate_restored_equipment,
 )
+from backend.canonical.activity_summary import ActivitySummary
 from backend.errors import AppError
 
 # Stored only once set; a restore of an unset value removes the key again.
@@ -100,6 +103,14 @@ class EquipmentAssignmentHistory(_EquipmentRecordHistory):
     entity_type = "equipment_assignment"
     prefix = ASSIGNMENT_PREFIX
 
+    def __init__(
+        self,
+        utc_now: Callable[[], str],
+        read_summaries: Callable[[], Sequence[ActivitySummary]],
+    ) -> None:
+        super().__init__(utc_now)
+        self._read_summaries = read_summaries
+
     def restore_in_transaction(
         self,
         db: Any,
@@ -121,9 +132,12 @@ class EquipmentAssignmentHistory(_EquipmentRecordHistory):
         equipment_id = restored["equipment_id"]
         if equipment_id is not None:
             item = stored_value(db, EQUIPMENT_PREFIX + str(equipment_id))
-            if item is None or item.get("parent_id"):
+            row = activity_row(self._read_summaries(), entity_id)
+            if not assignable_equipment(item, row):
                 raise AppError(
-                    409, "Die frühere Ausrüstung dieser Aktivität ist nicht mehr da."
+                    409,
+                    "Die frühere Ausrüstung passt nicht mehr zu dieser Aktivität "
+                    "(archiviert, unvollständig oder andere Sportart).",
                 )
         restored["observed_at"] = self._utc_now()
         self._write(db, entity_id, restored)
@@ -160,13 +174,16 @@ class EquipmentMaintenanceHistory(_EquipmentRecordHistory):
         return restored
 
 
-def equipment_history_records(utc_now: Callable[[], str]) -> dict[str, Any]:
+def equipment_history_records(
+    utc_now: Callable[[], str],
+    read_summaries: Callable[[], Sequence[ActivitySummary]],
+) -> dict[str, Any]:
     """The change-history record services of the three equipment entity types."""
     return {
         history.entity_type: history
         for history in (
             EquipmentItemHistory(utc_now),
-            EquipmentAssignmentHistory(utc_now),
+            EquipmentAssignmentHistory(utc_now, read_summaries),
             EquipmentMaintenanceHistory(utc_now),
         )
     }

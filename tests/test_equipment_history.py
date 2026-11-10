@@ -62,9 +62,10 @@ class EquipmentHistoryTests(unittest.TestCase):
         self.addCleanup(self.manager.close)
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
+        self.summaries = lambda: [ride("w1"), ride("w2")]
         self.service = EquipmentService(
             self.manager,
-            lambda: [ride("w1"), ride("w2")],
+            self.summaries,
             lambda: date(2026, 10, 2),
             lambda: NOW,
         )
@@ -76,7 +77,7 @@ class EquipmentHistoryTests(unittest.TestCase):
 
     def undo(self, changes: list[dict[str, str]]) -> None:
         unused: Any = None
-        services = equipment_history_records(lambda: NOW)
+        services = equipment_history_records(lambda: NOW, self.summaries)
         undo = HistoryUndoService(
             self.manager,
             ChangeHistoryService(self.manager, unused, record_services=services),
@@ -317,6 +318,50 @@ class EquipmentHistoryTests(unittest.TestCase):
             self.undo(changes)
         self.assertEqual(raised.exception.status, 409)
         self.assertIsNone(self.record("equipment_assignment:act_w1")["equipment_id"])
+
+    def moved_assignment(self) -> tuple[dict[str, Any], list[dict[str, str]]]:
+        """Gear A on the activity, then moved to B; returns A and the move."""
+        first, second = self.bike(), self.bike(name="Second")
+        self.service.assign({"activity_id": "act_w1", "equipment_id": first["id"]})
+        _, moved = self.collected(
+            lambda: self.service.assign(
+                {"activity_id": "act_w1", "equipment_id": second["id"]}
+            )
+        )
+        return first, moved
+
+    def assert_undo_refused(self, changes: list[dict[str, str]], gear_id: str) -> None:
+        with self.assertRaises(AppError) as raised:
+            self.undo(changes)
+        self.assertEqual(raised.exception.status, 409)
+        self.assertNotEqual(
+            self.record("equipment_assignment:act_w1")["equipment_id"], gear_id
+        )
+
+    def test_undo_of_a_reassignment_is_refused_when_the_old_gear_is_archived(
+        self,
+    ) -> None:
+        first, moved = self.moved_assignment()
+        self.edit(first, status="archived")
+        self.assert_undo_refused(moved, first["id"])
+
+    def test_undo_of_a_reassignment_is_refused_when_the_sport_changed(self) -> None:
+        first, moved = self.moved_assignment()
+        self.edit(first, sport="run", kind="shoes")
+        self.assert_undo_refused(moved, first["id"])
+
+    def test_undo_of_a_reassignment_is_refused_when_the_old_gear_is_pending(
+        self,
+    ) -> None:
+        first, moved = self.moved_assignment()
+        with self.manager.unit_of_work() as db:
+            stored = self.record("equipment:" + first["id"])
+            stored["sport_pending"] = True
+            db.execute(
+                "UPDATE kv SET value=? WHERE key=?",
+                (json.dumps(stored), "equipment:" + first["id"]),
+            )
+        self.assert_undo_refused(moved, first["id"])
 
     # Maintenance
 

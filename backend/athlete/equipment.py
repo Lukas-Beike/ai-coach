@@ -361,13 +361,8 @@ class EquipmentService:
                 (EQUIPMENT_PREFIX + str(payload["equipment_id"]),),
             ).fetchone()
             equipment = json.loads(item["value"]) if item else None
-            if payload["equipment_id"] is not None and (
-                not equipment
-                or equipment["status"] != "active"
-                or equipment.get("parent_id")
-                or equipment.get("parent_pending")
-                or equipment.get("sport_pending")
-                or _item_pair(equipment) != _stored_pair(_row_sport(row))
+            if payload["equipment_id"] is not None and not assignable_equipment(
+                equipment, row
             ):
                 raise AppError(400, "Aktive passende Hauptausrüstung erforderlich.")
             # The assignment belongs to the session it was made for, so it stays
@@ -546,6 +541,37 @@ def _record_change(
     if record is None:
         return None
     return {field: record[field] for field in change_history.UNDO_REFERENCE_FIELDS}
+
+
+def assignable_equipment(
+    equipment: dict[str, Any] | None, row: dict[str, Any] | None
+) -> bool:
+    """Whether an item may be assigned: an active, resolved main item of the sport.
+
+    Without the activity row (``row`` None) the sport pair is not compared.
+    """
+    return bool(
+        equipment
+        and equipment["status"] == "active"
+        and not equipment.get("parent_id")
+        and not equipment.get("parent_pending")
+        and not equipment.get("sport_pending")
+        and (row is None or _item_pair(equipment) == _stored_pair(_row_sport(row)))
+    )
+
+
+def activity_row(
+    summaries: Sequence[ActivitySummary], key: str
+) -> dict[str, Any] | None:
+    """The session row an assignment key names, or None when it is unknown."""
+    return next(
+        (
+            row
+            for row in _session_rows(summaries)
+            if key in {str(row["id"]), *row["references"]}
+        ),
+        None,
+    )
 
 
 def equipment_in_use(db: Any, item_id: str) -> bool:

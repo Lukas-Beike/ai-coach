@@ -105,7 +105,7 @@ class AthleteDataAssembly:
         )
 
     def equipment_history(self) -> dict[str, Any]:
-        return equipment_history_records(self._utc_now)
+        return equipment_history_records(self._utc_now, self.activity_summaries)
 
     def zones(self) -> ZoneConfigurationService:
         return ZoneConfigurationService(
