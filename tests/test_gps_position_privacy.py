@@ -259,6 +259,9 @@ class _Manager:
     def unit_of_work(self):
         return _Context(self.db)
 
+    def reclaim_space(self):
+        return True
+
 
 class _Null:
     def __enter__(self):

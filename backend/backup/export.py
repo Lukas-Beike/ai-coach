@@ -71,7 +71,13 @@ TimeoutErrorFactory = Callable[[], Exception]
 # (schema v24).
 # Version 16 adds activity_detail_sets.dfa_alpha1, the stored first threshold
 # estimate of a chest-strap stream set (schema v25).
-PRIVACY_EXPORT_FORMAT_VERSION = 16
+# Version 17 exports the bookkeeping of snapshots (id, created_at, synced_at,
+# recent_activity_count), workout_library (id, local_id, external_id, sync_*,
+# last_synced_at, updated_at) and competitions (created_at, updated_at); both
+# files now hold one object per row with the stored document under payload. It
+# adds coach_action_proposals.jsonl without the session and action-token hashes
+# (no schema change).
+PRIVACY_EXPORT_FORMAT_VERSION = 17
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -101,6 +107,7 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "messages.jsonl",
     "coach_plan_artifacts.jsonl",
     "coach_commands.jsonl",
+    "coach_action_proposals.jsonl",
     "snapshots.jsonl",
     "workout_library.jsonl",
     "planned_units.jsonl",
@@ -143,6 +150,14 @@ class PrivacyArchiveExportService:
         for row in db.execute(
             "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, sync_conflict, baseline_hash, last_synced_at, plan_id, revision, tombstone, command_id, created_at, updated_at "
             "FROM planned_units ORDER BY updated_at"
+        ):
+            yield {**dict(row), "payload": decode_payload(row["payload"])}
+
+    @staticmethod
+    def _snapshots(db: Any) -> Iterable[dict[str, Any]]:
+        for row in db.execute(
+            "SELECT id, payload, created_at, synced_at, recent_activity_count "
+            "FROM snapshots ORDER BY id"
         ):
             yield {**dict(row), "payload": decode_payload(row["payload"])}
 
@@ -246,7 +261,7 @@ class PrivacyArchiveExportService:
                         for row in db.execute(
                             "SELECT id, name, event_date, starts_at_local, sport, environment, sport_detail, priority, category, distance, target, "
                             "course_profile, notes, description, planned_duration_s, external_id, intervals_event_id, sync_dirty, "
-                            "sync_state, sync_conflict, last_synced_at FROM competitions ORDER BY event_date, priority, name"
+                            "sync_state, sync_conflict, last_synced_at, created_at, updated_at FROM competitions ORDER BY event_date, priority, name"
                         )
                     ),
                     deadline,
@@ -309,14 +324,18 @@ class PrivacyArchiveExportService:
                 )
                 self._write_jsonl(
                     archive,
-                    "snapshots.jsonl",
+                    "coach_action_proposals.jsonl",
                     (
-                        decode_payload(row["payload"])
+                        dict(row)
                         for row in db.execute(
-                            "SELECT payload FROM snapshots ORDER BY id"
+                            "SELECT id, action_type, target_system, object_ids, diff, payload, payload_hash, status, expires_at, created_at, used_at "
+                            "FROM coach_action_proposals ORDER BY created_at"
                         )
                     ),
                     deadline,
+                )
+                self._write_jsonl(
+                    archive, "snapshots.jsonl", self._snapshots(db), deadline
                 )
                 self._write_jsonl(
                     archive, "workout_library.jsonl", iter_workout_library(db), deadline
@@ -656,14 +675,13 @@ def sanitized_provider_row(
 def iter_workout_library(
     db: Any, *, decode: PayloadDecoder = decode_payload
 ) -> Iterable[dict[str, Any]]:
-    """Yield all workout-library payloads in the established order."""
+    """Yield every workout-library row with its sync bookkeeping in the established order."""
     for row in db.execute(
-        "SELECT payload FROM workout_library "
+        "SELECT id, local_id, external_id, payload, sync_dirty, sync_state, sync_error, last_synced_at, updated_at "
+        "FROM workout_library "
         "ORDER BY lower(json_extract(payload, '$.sport')), lower(json_extract(payload, '$.name'))"
     ):
-        payload = decode(row["payload"])
-        if isinstance(payload, dict):
-            yield payload
+        yield {**dict(row), "payload": decode(row["payload"])}
 
 
 def application_state(
