@@ -100,9 +100,13 @@ function renderWahooSyncControls(data, view) {
   }
   const fullButton = $("#wahooFullResyncButton");
   if (fullButton) {
-    fullButton.disabled = busy || !view.canSync;
-    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Vollständig neu synchronisieren";
+    renderFullResyncButton(fullButton, {
+      running: fullRunning,
+      blocked: syncRunning || !view.canSync,
+      idleLabel: "Vollständig neu synchronisieren",
+    });
   }
+  resumeFullResync(providerIds().wahoo);
   const status = $("#wahooFullResyncStatus");
   if (status) {
     const line = wahooFullResyncView(fullResync, fullRunning);

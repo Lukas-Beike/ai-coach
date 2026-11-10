@@ -93,6 +93,10 @@ function fullResyncConfirmation(source, providerLabel) {
   };
 }
 
+// The server answers the start at once and reads in the background; the browser asks for the state.
+const FULL_RESYNC_POLL_MS = 1000;
+const FULL_RESYNC_POLL_FAILURES = 5;
+
 async function fullResync(source) {
   if (!source) return;
   const button = $(fullResyncButtonSelector(source));
@@ -106,21 +110,70 @@ async function fullResync(source) {
   })) return;
   const stateKey = `${source}Full`;
   state.localSync[stateKey] = true;
-  button.disabled = true;
-  button.classList.add("busy");
-  button.textContent = "Vollständiger Resync läuft…";
+  renderFullResyncControls(source);
   try {
-    const result = await api(`/api/${source}/full-resync`, { method: "POST", body: JSON.stringify({ confirm: "FULL_RESYNC" }) });
-    toast(result.status === "already_running" ? `${providerLabel} wird bereits vollständig neu geladen` : `${providerLabel} lokal vollständig neu geladen`);
-    invalidateContextPreview();
-    await load();
+    const started = await api(`/api/${source}/full-resync`, { method: "POST", body: JSON.stringify({ confirm: "FULL_RESYNC" }) });
+    if (started.status === "already_running") toast(`${providerLabel} läuft bereits`);
+    await trackFullResync(source, started.operation_id);
   } catch (error) {
     toast(error.message, true);
     await load();
   } finally {
-    state.localSync[stateKey] = false;
-    renderSettings(state.data || {});
+    settleFullResync(source);
   }
+}
+
+// A page that opens while a resync runs follows it too, so its button ends in the idle state.
+function resumeFullResync(source) {
+  const stateKey = `${source}Full`;
+  if (!source || state.localSync[stateKey] || !state.data?.provider_resync?.[source]?.running) return;
+  state.localSync[stateKey] = true;
+  trackFullResync(source, null)
+    .catch((error) => toast(error.message, true))
+    .finally(() => settleFullResync(source));
+}
+
+// The run ended or is no longer followed: the controls follow the server's answer, not an older load.
+function settleFullResync(source) {
+  state.localSync[`${source}Full`] = false;
+  const resync = state.data?.provider_resync?.[source];
+  if (resync) resync.running = false;
+  renderFullResyncControls(source);
+}
+
+async function trackFullResync(source, operationId) {
+  const providerLabel = coachProviderLabel(source);
+  const resync = await waitForFullResync(source);
+  const outcome = resync.outcome && (!operationId || resync.outcome.operation_id === operationId) ? resync.outcome : null;
+  if (outcome?.status === "ok") toast(`${providerLabel} vollständig neu geladen`);
+  else if (outcome?.status === "partial") toast(`${providerLabel} teilweise geladen`);
+  else if (["already_running", "provider_resync_running"].includes(outcome?.reason) || outcome?.status === "already_running") toast(`${providerLabel} läuft bereits`);
+  else if (resync.last_error) toast(resync.last_error, true);
+  else toast(`${providerLabel}: Resync nicht mehr aktiv`, true);
+  invalidateContextPreview();
+  await load();
+}
+
+async function waitForFullResync(source) {
+  let failures = 0;
+  for (;;) {
+    try {
+      const resync = await api(`/api/${source}/full-resync`);
+      failures = 0;
+      if (!resync.running) return resync;
+    } catch {
+      failures += 1;
+      if (failures >= FULL_RESYNC_POLL_FAILURES) throw new Error("Der Resync-Status ist nicht erreichbar. Er läuft auf dem Server weiter.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, FULL_RESYNC_POLL_MS));
+  }
+}
+
+// One path for both providers: label, disabled state and pulse follow the running state.
+function renderFullResyncControls(source) {
+  const data = state.data || {};
+  if (source === providerIds().wahoo) renderWahooSyncControls(data, wahooConnectionView(data));
+  else renderGarminFullResync(data);
 }
 
 // The job DTO exposes the redacted explanation on its items; the job itself has no error_detail.

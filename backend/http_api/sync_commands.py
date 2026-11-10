@@ -294,6 +294,7 @@ class SyncCommandEndpoint:
             raise AppError(
                 400, "Zum vollständigen Resync muss FULL_RESYNC bestätigt werden."
             )
-        return 200, self._full_resync.resync(
-            provider, operation_id=self._operation_id_factory()
-        )
+        # The read can outlast any request: it runs in the background and the
+        # browser polls its state.
+        result = self._full_resync.start(provider, self._operation_id_factory())
+        return (202 if result["status"] == "started" else 200), result

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -30,6 +30,8 @@ class SyncGetRoutes:
         local_today: Callable[[], date],
         all_sync_days: int,
         session_corrections: Callable[[], Any] | None = None,
+        full_resync: Callable[[], Any] | None = None,
+        full_resync_providers: Mapping[str, str] | None = None,
     ) -> None:
         self._session_auth_service = session_auth_service
         self._sync_job_queue_service = sync_job_queue_service
@@ -38,18 +40,26 @@ class SyncGetRoutes:
         self._local_today = local_today
         self._all_sync_days = all_sync_days
         self._session_corrections = session_corrections
+        self._full_resync = full_resync
+        # Full-resync path to provider id; the browser polls a started resync here.
+        self._full_resync_providers = dict(full_resync_providers or {})
 
     def handle(self, handler: Any, path: str) -> bool:
         job_match = SYNC_JOB_RE.match(path)
         activity_match = ACTIVITY_DETAIL_RE.match(path)
+        resync_provider = self._full_resync_providers.get(path)
         if (
             not job_match
             and not activity_match
+            and resync_provider is None
             and path not in {"/api/sync/status", "/api/activities"}
         ):
             return False
 
         self._session_auth_service().require_auth(handler)
+        if resync_provider is not None and self._full_resync is not None:
+            handler.send_json(200, self._full_resync().progress(resync_provider))
+            return True
         if activity_match:
             payload = self._activity_read_service().detail(
                 unquote(activity_match.group(1)),

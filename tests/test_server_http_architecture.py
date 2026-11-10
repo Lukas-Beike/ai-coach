@@ -296,6 +296,8 @@ class ServerHttpArchitectureTests(unittest.TestCase):
                 "lambda: ATHLETE_CLOCK.now().date()",
                 "ALL_SYNC_DAYS",
                 "ATHLETE_DATA.session_corrections",
+                "PROVIDER_RESYNC.full_resync_service",
+                "dict(DEFAULT_PROVIDER_REGISTRY.full_resync_routes())",
             ],
         )
         self.assertNotIn(

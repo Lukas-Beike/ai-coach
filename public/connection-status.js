@@ -24,6 +24,13 @@ function connectionsSummaryText(counts) {
     .join(" · ");
 }
 
+// The full-resync button of every provider: label, disabled state and pulse all follow the running state.
+function renderFullResyncButton(button, { running, blocked = false, idleLabel }) {
+  button.classList.toggle("busy", running);
+  button.disabled = running || blocked;
+  button.textContent = running ? "Vollständiger Resync läuft…" : idleLabel;
+}
+
 // Pure: chip kind of a provider that is either set up or not, with an optional error.
 function connectionKind({ configured, error = false, unchecked = false }) {
   if (!configured) return "off";

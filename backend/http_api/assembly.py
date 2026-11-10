@@ -83,6 +83,7 @@ from backend.planning.race_results import with_race_results
 from backend.planning.season_preparation import load_scenarios, season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 
 @dataclass(frozen=True)
@@ -472,6 +473,8 @@ class HttpApiAssembly:
             local_today,
             all_sync_days,
             athlete.session_corrections,
+            full_provider_resync_service,
+            dict(DEFAULT_PROVIDER_REGISTRY.full_resync_routes()),
         )
         self.history_get_routes = HistoryGetRoutes(
             session_auth_service, change_history_service
