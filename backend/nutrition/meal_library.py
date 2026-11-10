@@ -73,6 +73,10 @@ class NutritionMealLibraryService:
         )
         self._photo_service = PhotoExtractionService(photo_extractor)
 
+    @property
+    def product_catalog(self) -> ProductCatalogService:
+        return self._product_catalog
+
     def list_products(
         self,
         *,

@@ -12,6 +12,7 @@ from backend.db.repositories import (
     NutritionRepository,
     NutritionTemplateRepository,
 )
+from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.food_mirror import FoodDatabaseMirror
@@ -109,6 +110,9 @@ class NutritionAssembly:
             product_repository=self._product_repository,
             template_repository=self._template_repository,
         )
+
+    def product_catalog_service(self) -> ProductCatalogService:
+        return self.meal_library_service().product_catalog
 
     def diary_service(self) -> NutritionDiaryService:
         return NutritionDiaryService(
