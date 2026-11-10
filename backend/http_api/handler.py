@@ -36,6 +36,15 @@ from backend.http_api.static_assets import StaticAssetService
 from backend.observability import http_access_log_level, redact_request_query
 from backend.runtime.socket_deadline import SocketDeadline
 
+# A request body is read in pieces of this size; each piece gets its own
+# deadline, so a slow but steady upload is not cut off by one absolute window.
+BODY_CHUNK_BYTES = 1024 * 1024
+
+
+class ClientInputTimeout(TimeoutError):
+    """The client stopped sending the request body in time."""
+
+
 # A busy writer or reader pool clears once the current unit of work commits.
 DATABASE_BUSY_RETRY_AFTER_SECONDS = 5
 
@@ -70,6 +79,7 @@ class HttpRequestHandlerDependencies:
 
 class RequestHandler(BaseHTTPRequestHandler):
     input_timeout_seconds = 20
+    body_chunk_bytes = BODY_CHUNK_BYTES
     dependencies: HttpRequestHandlerDependencies
     server_version: str
     client_disconnect_errors = (
@@ -134,8 +144,34 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._header_deadline.cancel()
 
     def _read_input(self, size: int) -> bytes:
-        with SocketDeadline(self.connection, self.input_timeout_seconds):
-            return self.rfile.read(size)
+        """Read up to ``size`` body bytes, with one deadline per chunk."""
+        body = bytearray()
+        try:
+            while len(body) < size:
+                wanted = min(self.body_chunk_bytes, size - len(body))
+                with SocketDeadline(self.connection, self.input_timeout_seconds):
+                    chunk = self.rfile.read(wanted)
+                body += chunk
+                if len(chunk) < wanted:
+                    break
+        except TimeoutError as exc:
+            raise ClientInputTimeout from exc
+        return bytes(body)
+
+    def _end_after_input_timeout(self, method: str) -> None:
+        # The deadline already shut the socket down, so no response can follow.
+        self.close_connection = True
+        self.dependencies.logger.info(
+            "HTTP client timed out sending the request body",
+            extra={
+                "event": "http_client_timeout",
+                "context": {
+                    "method": method,
+                    "path": redact_request_query(self.path),
+                    "request_id": self.request_id,
+                },
+            },
+        )
 
     def log_client_disconnect(self) -> None:
         context = {
@@ -215,6 +251,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_app_error(exc, "POST")
         except DatabaseBusyError:
             self._send_app_error(database_busy_error(), "POST")
+        except ClientInputTimeout:
+            self._end_after_input_timeout("POST")
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled POST error",
@@ -259,6 +297,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_app_error(exc, "PUT")
         except DatabaseBusyError:
             self._send_app_error(database_busy_error(), "PUT")
+        except ClientInputTimeout:
+            self._end_after_input_timeout("PUT")
         except Exception:
             self.dependencies.logger.exception(
                 "Unhandled PUT error",

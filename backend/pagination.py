@@ -8,6 +8,10 @@ from typing import Any
 
 API_PAGE_DEFAULT = 100
 API_PAGE_MAX = 250
+# Planning and library cursors carry the last workout name (at most 200
+# characters, up to 4 UTF-8 bytes each) plus keys, so about 1,400 base64
+# characters at most; the bound leaves headroom and only stops crafted input.
+PAGE_CURSOR_MAX_CHARS = 4096
 
 
 def api_page_limit(
@@ -25,10 +29,10 @@ def encode_page_cursor(value: Any) -> str:
 
 
 def decode_page_cursor(value: Any) -> Any | None:
-    if not value:
+    if not value or len(str(value)) > PAGE_CURSOR_MAX_CHARS:
         return None
     try:
         padding = "=" * (-len(str(value)) % 4)
         return json.loads(base64.urlsafe_b64decode(f"{value}{padding}"))
-    except TypeError, ValueError:
+    except TypeError, ValueError, RecursionError:
         return None
