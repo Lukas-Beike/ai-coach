@@ -518,12 +518,21 @@ CONFIG_GENERATION = 0
 LOGGER = logging.getLogger("intervals_coach")
 GARMIN_SECRET_REGISTRY = GarminSecretRegistry()
 WAHOO_SECRET_REGISTRY = WahooSecretRegistry()
+
+
+def _nutrition_secret_values() -> tuple[str, ...]:
+    # Logging starts before NUTRITION_ASSEMBLY exists.
+    assembly = globals().get("NUTRITION_ASSEMBLY")
+    return () if assembly is None else assembly.secret_values()
+
+
 # Environment secrets stay redacted while a stored credential overrides them.
 REDACTOR = observability.Redactor(
     lambda: CONFIG,
     extra_secrets=lambda: (
         *GARMIN_SECRET_REGISTRY.values(),
         *WAHOO_SECRET_REGISTRY.values(),
+        *_nutrition_secret_values(),
         *observability.config_secret_values(ENV_CONFIG),
     ),
 )

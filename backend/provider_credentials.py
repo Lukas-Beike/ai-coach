@@ -28,7 +28,7 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 PROVIDER_CREDENTIALS_KEY = "provider_credentials"
 GARMIN_TOKENS_KEY = "garmin_oauth_tokens"
@@ -141,7 +141,10 @@ def effective_config(env_config: Config, stored: Mapping[str, str]) -> Config:
             except AppError:
                 _LOGGER.warning(
                     "Ignoring stored OPENAI_BASE_URL that failed validation",
-                    extra={"event": "provider_credential_invalid", "setting": field},
+                    extra={
+                        "event": "provider_credential_invalid",
+                        "context": {"setting": field},
+                    },
                 )
                 continue
         overrides[field] = value

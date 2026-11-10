@@ -31,7 +31,7 @@ from backend.errors import AppError, DatabaseBusyError
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_backfill import BatchReport, CanonicalBackfill
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 DEFAULT_POLL_SECONDS: Final = 5.0
 DEFAULT_RETRY_SECONDS: Final = 60.0
 
@@ -169,8 +169,7 @@ class CanonicalBackfillWorker:
             "Canonical backfill batch failed",
             extra={
                 "event": "canonical_backfill_failed",
-                "stage": name,
-                "error_class": type(exc).__name__,
+                "context": {"stage": name, "error_class": type(exc).__name__},
             },
         )
         try:
@@ -184,7 +183,9 @@ class CanonicalBackfillWorker:
                 "Canonical backfill failure could not be recorded",
                 extra={
                     "event": "canonical_backfill_status_failed",
-                    "stage": name,
-                    "error_class": type(status_exc).__name__,
+                    "context": {
+                        "stage": name,
+                        "error_class": type(status_exc).__name__,
+                    },
                 },
             )

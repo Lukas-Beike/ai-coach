@@ -494,7 +494,7 @@ class MetricExportServiceTests(unittest.TestCase):
             {},
             RuntimeError(RAW),
         ]
-        with self.assertLogs("backend.sync.metric_export", "WARNING"):
+        with self.assertLogs("intervals_coach", "WARNING"):
             self.assertEqual(
                 self.service.sync_automatic(),
                 {"exported": 1, "failed": 1, "conflicts": 0},
@@ -578,7 +578,7 @@ class MetricExportServiceTests(unittest.TestCase):
     def test_automatic_write_failure_retries_without_persisting_baseline(self):
         self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
         self.client.update_sport_settings.side_effect = RuntimeError(RAW)
-        with self.assertLogs("backend.sync.metric_export", "WARNING") as logs:
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
             self.assertEqual(self.service.sync_automatic()["failed"], 1)
         self.assertNotIn(RAW, str(logs.output))
         self.client.update_sport_settings.side_effect = None
@@ -846,7 +846,7 @@ class MetricExportServiceTests(unittest.TestCase):
             ),
         ):
             with (
-                self.assertLogs("backend.sync.metric_export", "WARNING") as logs,
+                self.assertLogs("intervals_coach", "WARNING") as logs,
                 self.assertRaises(AppError) as caught,
             ):
                 call()
@@ -1048,7 +1048,7 @@ class MetricExportServiceTests(unittest.TestCase):
             502, RAW, reason="upstream_rejected", upstream_status=500
         )
         self.client.update_sport_settings.side_effect = RuntimeError(RAW)
-        with self.assertLogs("backend.sync.metric_export", "WARNING") as logs:
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
             receipt = self.confirm(self.items().values())
 
         self.assertFalse(receipt["ok"])
@@ -1071,7 +1071,7 @@ class MetricExportServiceTests(unittest.TestCase):
     def test_unconfirmed_reply_counts_as_failure(self) -> None:
         self.add(obs(MetricKind.WEIGHT, 70.4, date(2026, 10, 10), ProviderId.GARMIN))
         self.client.update_wellness.return_value = None
-        with self.assertLogs("backend.sync.metric_export", "WARNING"):
+        with self.assertLogs("intervals_coach", "WARNING"):
             receipt = self.confirm(self.items().values())
         self.assertEqual(receipt["items"][0]["reason"], "upstream_invalid_response")
         self.assertIsNone(self.link(self.reader.items[0]))

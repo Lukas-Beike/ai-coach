@@ -17,7 +17,7 @@ from backend.providers.intervals import IntervalsApiClient
 if TYPE_CHECKING:
     from backend.nutrition.diary import NutritionDiaryService
 
-logger = logging.getLogger("ai_coach.nutrition.sync")
+logger = logging.getLogger("intervals_coach")
 
 # Intervals.icu clears a numeric wellness field when it receives -1.
 UNSET_REMOTE_NUMBER = -1

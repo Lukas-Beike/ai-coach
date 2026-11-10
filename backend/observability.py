@@ -473,20 +473,8 @@ class Redactor:
         return redact
 
     def sanitize_log_value(self, value: Any) -> Any:
-        redact = self._text_redactor()
-
-        def clean(item: Any) -> Any:
-            if isinstance(item, str):
-                return redact(item)
-            if isinstance(item, dict):
-                return {str(key): clean(child) for key, child in item.items()}
-            if isinstance(item, (list, tuple)):
-                return [clean(child) for child in item]
-            if item is None or isinstance(item, (bool, int, float)):
-                return item
-            return redact(str(item))
-
-        return clean(value)
+        """Apply the diagnostic key, label and authorization rules to a log value."""
+        return self.sanitize_diagnostic_value(value)
 
     def sanitize_diagnostic_value(self, value: Any) -> Any:
         """Retain diagnostic content while removing credentials before storage."""
@@ -654,6 +642,11 @@ class JsonLogFormatter(logging.Formatter):
         )
 
 
+LOG_MAX_BYTES = 5_000_000
+# The active file plus this many rotations: ten files of 5 MB in all.
+LOG_BACKUP_COUNT = 9
+
+
 def configure_logging(
     logger: logging.Logger,
     data_dir: Path,
@@ -672,7 +665,10 @@ def configure_logging(
     formatter = JsonLogFormatter(redactor)
 
     file_handler = RotatingFileHandler(
-        log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+        log_path,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
@@ -684,19 +680,29 @@ def configure_logging(
     logger.addHandler(stream_handler)
 
 
-_ROUTINE_POLL_GET_PATHS = frozenset({"/api/chat/status", "/api/state/events"})
+_ROUTINE_POLL_GET_PATHS = frozenset(
+    {
+        "/api/chat/status",
+        "/api/state/events",
+        "/api/sync/status",
+        "/api/health",
+        "/api/auth/status",
+    }
+)
+_SYNC_JOB_POLL_RE = re.compile(r"/api/sync/jobs/[0-9a-f-]+")
 
 
 def http_access_log_level(method: str | None, path: str, status: object) -> int:
     """Return the access-log level for a request.
 
-    Successful GET requests to the chat status poll and the state event stream
-    are routine client traffic and are logged at DEBUG. Every other request,
+    Successful GET requests to the chat status, sync status, sync job, health
+    and auth status polls and the state event stream are routine client
+    traffic and are logged at DEBUG. Every other request,
     and every non-2xx or unknown status, keeps the INFO access-log level.
     """
     if (
         method == "GET"
-        and path in _ROUTINE_POLL_GET_PATHS
+        and (path in _ROUTINE_POLL_GET_PATHS or _SYNC_JOB_POLL_RE.fullmatch(path))
         and str(status).startswith("2")
     ):
         return logging.DEBUG
@@ -790,29 +796,37 @@ def diagnostic_capture_response(value: Any) -> dict[str, Any]:
     return {"shape": diagnostic_response_shape(value)}
 
 
+_SAFE_CODE_RE = re.compile(r"[a-z_]{1,80}")
+_SAFE_TYPE_RE = re.compile(r"[a-z0-9_.\[\]-]{1,160}")
+_SAFE_TYPE_FIELDS = (
+    "provider_error_type",
+    "provider_response_status",
+    "provider_incomplete_reason",
+)
+
+
+def _safe_code_attribute(exc: BaseException, name: str) -> str | None:
+    text = str(getattr(exc, name, "") or "").strip()
+    return text if text and _SAFE_CODE_RE.fullmatch(text) else None
+
+
 def safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     """Expose only classified technical exception metadata during user debugging."""
     status = getattr(exc, "status", None) or getattr(exc, "code", None)
     result: dict[str, Any] = {"type": type(exc).__name__}
     if isinstance(status, int) and not isinstance(status, bool):
         result["status"] = status
-    reason = str(getattr(exc, "reason", "") or "").strip()
-    if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
-        result["reason"] = reason
-    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
-    if validation_reason and re.fullmatch(r"[a-z_]{1,80}", validation_reason):
-        result["validation_reason"] = validation_reason
+    for name in ("reason", "category", "validation_reason"):
+        code = _safe_code_attribute(exc, name)
+        if code:
+            result[name] = code
     provider_code = getattr(exc, "provider_error_code", None)
     if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
         result["provider_error_code"] = provider_code
-    for attribute, key in (
-        ("provider_error_type", "provider_error_type"),
-        ("provider_response_status", "provider_response_status"),
-        ("provider_incomplete_reason", "provider_incomplete_reason"),
-    ):
-        value = getattr(exc, attribute, None)
-        if isinstance(value, str) and re.fullmatch(r"[a-z0-9_.\[\]-]{1,160}", value):
-            result[key] = value
+    for name in _SAFE_TYPE_FIELDS:
+        value = getattr(exc, name, None)
+        if isinstance(value, str) and _SAFE_TYPE_RE.fullmatch(value):
+            result[name] = value
     return result
 
 

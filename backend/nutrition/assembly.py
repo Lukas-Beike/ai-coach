@@ -74,6 +74,10 @@ class NutritionAssembly:
         self._template_repository = NutritionTemplateRepository()
         self._runtime_photo_extractor = dependencies.runtime.photo_extractor
 
+    def secret_values(self) -> tuple[str, ...]:
+        """Runtime-only provider tokens for the log redactor."""
+        return self._food_database.yazio_secret_values()
+
     def food_database(self) -> FoodDatabaseService:
         return self._food_database
 

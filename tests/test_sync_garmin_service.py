@@ -252,7 +252,7 @@ class GarminSyncServiceTests(unittest.TestCase):
 
     def test_export_failure_preserves_import_and_does_not_expose_error(self):
         export = Mock(side_effect=RuntimeError("PRIVATE-PROVIDER-PAYLOAD"))
-        with self.assertLogs("backend.sync.garmin_service", "WARNING") as logs:
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
             result = self.make_service(metric_export=export).sync()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["metric_export"]["failed"], 1)
@@ -447,7 +447,7 @@ class GarminSyncServiceTests(unittest.TestCase):
     def test_backfill_failure_keeps_the_sync_successful_and_hides_the_error(self):
         backfill = Mock(side_effect=RuntimeError("PRIVATE-PROVIDER-PAYLOAD"))
 
-        with self.assertLogs("backend.sync.garmin_service", "WARNING") as logs:
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
             result = self.make_service(activity_detail_backfill=backfill).sync()
 
         self.assertEqual(result["status"], "ok")

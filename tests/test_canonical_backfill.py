@@ -71,8 +71,9 @@ HEALTH_KIND = canonical_plans.HEALTH_RECORD_KIND
 
 
 def log_extra(record: logging.LogRecord, name: str) -> object:
-    """Read a structured field that the worker passes through ``extra=``."""
-    return getattr(record, name)
+    """Read a structured field that the worker passes under ``context``."""
+    fields = vars(record)
+    return fields["event"] if name == "event" else fields["context"][name]
 
 
 def load_fixture(*parts: str) -> Any:
@@ -2048,7 +2049,7 @@ class WorkerTests(BackfillFixture):
         ]
         worker = self.make_worker(backfill)
         worker._retry_seconds = 0
-        with self.assertLogs("backend.sync.canonical_backfill_worker", level="ERROR"):
+        with self.assertLogs("intervals_coach", level="ERROR"):
             worker.run_loop()
         self.assertEqual(backfill.run_batch.call_count, 2)
         backfill.mark_failed.assert_called_once()
@@ -2059,7 +2060,7 @@ class WorkerTests(BackfillFixture):
         backfill.run_batch.side_effect = RuntimeError("synthetic failure")
         backfill.mark_failed.side_effect = lambda db: failed.set()
         worker = self.make_worker(backfill)
-        with self.assertLogs("backend.sync.canonical_backfill_worker", level="ERROR"):
+        with self.assertLogs("intervals_coach", level="ERROR"):
             worker.start()
             self.assertTrue(failed.wait(5))
             worker.stop()
@@ -2103,9 +2104,7 @@ class WorkerTests(BackfillFixture):
 
         with patch.object(stage, "run_batch", side_effect=fail_once):
             assembly.worker._retry_seconds = 0
-            with self.assertLogs(
-                "backend.sync.canonical_backfill_worker", level="ERROR"
-            ):
+            with self.assertLogs("intervals_coach", level="ERROR"):
                 assembly.worker.run_loop()
         self.assertEqual(cursors[1]["status"], "failed")
         self.assertEqual(
@@ -2143,9 +2142,7 @@ class WorkerTests(BackfillFixture):
         backfill = Mock()
         backfill.run_batch.side_effect = AppError(500, SECRET_ID, reason="internal")
         worker = self.make_worker(backfill)
-        with self.assertLogs(
-            "backend.sync.canonical_backfill_worker", level="ERROR"
-        ) as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             worker._run_stage(backfill, "canonical")
 
         self.assertEqual(backfill.run_batch.call_count, 1)
@@ -2157,9 +2154,7 @@ class WorkerTests(BackfillFixture):
         backfill = Mock()
         backfill.run_batch.side_effect = RuntimeError(f"{SECRET_ID} Ride")
         worker = self.make_worker(backfill)
-        with self.assertLogs(
-            "backend.sync.canonical_backfill_worker", level="ERROR"
-        ) as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             worker._run_stage(backfill, "canonical")
 
         self.assertEqual(backfill.run_batch.call_count, 1)
@@ -2175,9 +2170,7 @@ class WorkerTests(BackfillFixture):
         backfill.run_batch.side_effect = RuntimeError("first failure")
         backfill.mark_failed.side_effect = OSError(SECRET_ID)
         worker = self.make_worker(backfill)
-        with self.assertLogs(
-            "backend.sync.canonical_backfill_worker", level="ERROR"
-        ) as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             worker._run_stage(backfill, "canonical")
 
         self.assertEqual(
@@ -2309,9 +2302,7 @@ class FollowupStageTests(unittest.TestCase):
         self.addCleanup(followup.release.set)
         self.assertTrue(followup.running.wait(5))
 
-        with self.assertLogs(
-            "backend.sync.canonical_backfill_worker", level="ERROR"
-        ) as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             worker.start()
             followup.release.set()
             worker.join(5)

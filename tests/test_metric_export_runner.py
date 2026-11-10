@@ -139,7 +139,7 @@ class MetricExportRunnerTests(unittest.TestCase):
             raise RuntimeError("boom")
 
         seen.clear()
-        with self.assertLogs("backend.sync.executor", "ERROR"):
+        with self.assertLogs("intervals_coach", "ERROR"):
             chained_after_job(fail, lambda job: seen.append(("export", "x")))({})
         self.assertEqual(seen, [("export", "x")])
 

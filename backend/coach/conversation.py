@@ -228,7 +228,7 @@ class CoachConversationProvisionService:
         self._key_values = key_value_repository
         self._client = openai_responses_client
         self._db_lock = db_lock
-        self._logger = logger or logging.getLogger(__name__)
+        self._logger = logger or logging.getLogger("intervals_coach")
         self.remote_delete_thread: threading.Thread | None = None
 
     def _create_remote(self) -> str:

@@ -45,7 +45,7 @@ from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
 
 UNKNOWN_PROVIDER_JOB: Final = "Unbekannter Providerjob."
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 # Consecutive chunks without any fetched record (2 x 90 days) end a backfill.
 EMPTY_BACKFILL_CHUNK_LIMIT = 2
@@ -717,8 +717,10 @@ class SyncJobExecutor:
                     "sync job failure could not be recorded",
                     extra={
                         "event": "sync_job_failure_record_failed",
-                        "job_id": job.get("id"),
-                        "error_class": type(secondary).__name__,
+                        "context": {
+                            "job_id": job.get("id"),
+                            "error_class": type(secondary).__name__,
+                        },
                     },
                 )
                 try:
@@ -743,7 +745,7 @@ class SyncJobExecutor:
                 "sync job completion hook failed",
                 extra={
                     "event": "sync_job_after_job_failed",
-                    "error_class": type(exc).__name__,
+                    "context": {"error_class": type(exc).__name__},
                 },
             )
 
@@ -804,7 +806,7 @@ def chained_after_job(
                     "sync job completion hook failed",
                     extra={
                         "event": "sync_job_after_job_failed",
-                        "error_class": type(exc).__name__,
+                        "context": {"error_class": type(exc).__name__},
                     },
                 )
 

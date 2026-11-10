@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 
 def with_session_load(
@@ -28,7 +28,7 @@ def with_session_load(
             "Session load could not be read after a feedback change",
             extra={
                 "event": "session_load_read_failed",
-                "error_class": type(exc).__name__,
+                "context": {"error_class": type(exc).__name__},
             },
         )
         return result

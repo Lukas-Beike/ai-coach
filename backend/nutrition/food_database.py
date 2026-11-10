@@ -384,6 +384,9 @@ class FoodDatabaseService:
     ) -> tuple[list[dict[str, Any]], str]:
         return self._search_source("off:", self._off.search, query, live=live)
 
+    def yazio_secret_values(self) -> tuple[str, ...]:
+        return () if self._yazio is None else self._yazio.secret_values()
+
     def yazio_connection_status(self) -> dict[str, Any]:
         if self._yazio is None:
             return {"status": "not_configured", "checked_at": None}

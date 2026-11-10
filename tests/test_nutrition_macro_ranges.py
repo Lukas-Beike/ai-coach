@@ -111,7 +111,7 @@ class MacroRangeTests(unittest.TestCase):
         plan.read_public.side_effect = RuntimeError("unavailable")
         profile = Mock()
         profile.get.return_value = {"weight_kg": "90"}
-        with self.assertLogs("backend.nutrition.macro_context", level="WARNING"):
+        with self.assertLogs("intervals_coach", level="WARNING"):
             self.assertEqual(
                 (90, None),
                 macro_context(lambda: performance, lambda: plan, lambda: profile),

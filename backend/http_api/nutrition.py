@@ -46,7 +46,9 @@ class NutritionGetRoutes:
         try:
             weight, calendar = self._macro_context()
         except AppError, OSError, RuntimeError, ValueError:
-            logging.getLogger(__name__).warning("Nutrition reference data unavailable")
+            logging.getLogger("intervals_coach").warning(
+                "Nutrition reference data unavailable"
+            )
             weight, calendar = None, None
         summary["macro_ranges"] = macro_ranges(
             weight, calendar, date_param, summary.get("total_kcal")

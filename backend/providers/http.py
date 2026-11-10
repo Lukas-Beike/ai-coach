@@ -793,13 +793,21 @@ def error_detail(
     return redact(detail, limit=limit)
 
 
+def _snake_code(value: object, fallback: str) -> str:
+    return (
+        re.sub(r"[^a-z0-9_]+", "_", str(value).casefold()).strip("_")[:80] or fallback
+    )
+
+
 def _external_call_error_code(error: BaseException) -> str:
     """Return a bounded technical code without retaining exception text."""
     if isinstance(error, AppError) and error.reason:
-        return (
-            re.sub(r"[^a-z0-9_]+", "_", str(error.reason).casefold()).strip("_")[:80]
-            or "application_error"
-        )
+        return _snake_code(error.reason, "application_error")
+    if isinstance(error, ProviderHTTPError):
+        category = _snake_code(error.category, "http")
+        if category == "http" and error.status:
+            return f"http_{error.status}"
+        return category
     if isinstance(error, TimeoutError):
         return "timeout"
     return "internal_error"
@@ -825,10 +833,20 @@ def external_call(
                 context[key] = operation_context[key]
         context["phase"] = operation
 
+    # One call per activity (a detail or FIT backfill) is routine volume; only
+    # its failures belong at INFO or above.
+    routine = "activity_id" in (details or {})
+
+    def log_success(message: str, **kwargs: Any) -> None:
+        (logger.debug if routine else logger.info)(message, **kwargs)
+
     started = time.perf_counter()
-    logger.info(
+    log_success(
         "External call started",
-        extra={"event": "external_call_started", "context": context},
+        extra={
+            "event": "external_call_started",
+            "context": {**context, "diagnostic_id": diagnostic_id},
+        },
     )
     diagnostic_capture.capture(
         "external_call_started",
@@ -843,26 +861,16 @@ def external_call(
         result = call()
     except AppError as exc:
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
-        diagnostic_capture.capture(
-            "external_call_failed",
-            {
-                "diagnostic_id": diagnostic_id,
-                "service": service,
-                "operation": operation,
-                "duration_ms": duration_ms,
-                "error": observability.safe_diagnostic_error(exc),
-            },
-        )
-        raise
-    except Exception as exc:
-        duration_ms = round((time.perf_counter() - started) * 1000, 1)
-        logger.exception(
-            "External call failed",
+        logger.warning(
+            "External call rejected",
             extra={
                 "event": "external_call_failed",
                 "context": {
                     **context,
+                    "diagnostic_id": diagnostic_id,
                     "duration_ms": duration_ms,
+                    "status": exc.status,
+                    "reason": exc.reason,
                     "error_code": _external_call_error_code(exc),
                 },
             },
@@ -877,15 +885,54 @@ def external_call(
                 "error": observability.safe_diagnostic_error(exc),
             },
         )
+        raise
+    except Exception as exc:
+        duration_ms = round((time.perf_counter() - started) * 1000, 1)
+        failure_context = {
+            **context,
+            "diagnostic_id": diagnostic_id,
+            "duration_ms": duration_ms,
+            "error_code": _external_call_error_code(exc),
+        }
+        if isinstance(exc, ProviderHTTPError):
+            # A classified provider response (for example HTTP 429) is an
+            # expected outcome, not an internal fault: no traceback.
+            logger.warning(
+                "External call failed",
+                extra={
+                    "event": "external_call_failed",
+                    "context": {
+                        **failure_context,
+                        "category": exc.category,
+                        "status": exc.status,
+                    },
+                },
+            )
+        else:
+            logger.exception(
+                "External call failed",
+                extra={"event": "external_call_failed", "context": failure_context},
+            )
+        diagnostic_capture.capture(
+            "external_call_failed",
+            {
+                "diagnostic_id": diagnostic_id,
+                "service": service,
+                "operation": operation,
+                "duration_ms": duration_ms,
+                "error": observability.safe_diagnostic_error(exc),
+            },
+        )
         raise provider_error(service, "client") from exc
 
     duration_ms = round((time.perf_counter() - started) * 1000, 1)
-    logger.info(
+    log_success(
         "External call completed",
         extra={
             "event": "external_call_completed",
             "context": {
                 **context,
+                "diagnostic_id": diagnostic_id,
                 "duration_ms": duration_ms,
                 **observability.external_result_context(result),
             },

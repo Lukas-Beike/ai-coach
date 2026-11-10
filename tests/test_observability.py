@@ -383,8 +383,9 @@ class ObservabilityTests(unittest.TestCase):
                     for handler in logger.handlers
                     if hasattr(handler, "maxBytes")
                 )
-                self.assertEqual(file_handler.maxBytes, 1_000_000)
-                self.assertEqual(file_handler.backupCount, 3)
+                # Ten files of 5 MB: the active file plus nine rotations.
+                self.assertEqual(file_handler.maxBytes, 5_000_000)
+                self.assertEqual(file_handler.backupCount, 9)
 
                 logger.info("synthetic-openai-value", extra={"event": "test_event"})
                 for handler in logger.handlers:
@@ -1054,6 +1055,76 @@ class DiagnosticCaptureDiscardTests(unittest.TestCase):
         )
         capture.flush()
         self.assertIn("kept_marker", store.get("diagnostic_capture_entries"))
+
+
+class LogSanitizerParityTests(unittest.TestCase):
+    def test_log_values_get_the_diagnostic_key_label_and_auth_rules(self) -> None:
+        redactor = Redactor(_config)
+
+        clean = redactor.sanitize_log_value(
+            {
+                "Authorization": "Bearer abcdefghijkl",
+                "m": "password=hunter2 api_key: xyz",
+                "note": "sent Bearer abcdefghijkl upstream",
+                "nested": [{"refresh_token": "plain-token-value"}],
+                "count": 3,
+            }
+        )
+
+        self.assertEqual(clean["Authorization"], "[REDACTED]")
+        self.assertNotIn("hunter2", clean["m"])
+        self.assertNotIn("xyz", clean["m"])
+        self.assertNotIn("abcdefghijkl", clean["note"])
+        self.assertEqual(clean["nested"], [{"refresh_token": "[REDACTED]"}])
+        self.assertEqual(clean["count"], 3)
+
+    def test_registered_runtime_tokens_are_redacted_from_log_lines(self) -> None:
+        tokens: list[str] = []
+        redactor = Redactor(_config, extra_secrets=lambda: tuple(tokens))
+        formatter = JsonLogFormatter(redactor)
+        tokens.append("runtime-session-token")
+        record = logging.LogRecord(
+            "intervals_coach",
+            logging.INFO,
+            __file__,
+            1,
+            "token runtime-session-token rejected",
+            (),
+            None,
+        )
+        record.context = {"detail": "runtime-session-token"}
+
+        line = formatter.format(record)
+
+        self.assertNotIn("runtime-session-token", line)
+
+
+class RoutineAccessLogLevelTests(unittest.TestCase):
+    def test_sync_health_and_auth_polls_log_at_debug_when_successful(self) -> None:
+        for path in (
+            "/api/sync/status",
+            "/api/sync/jobs/0a1b2c3d-4e5f-6789-abcd-ef0123456789",
+            "/api/health",
+            "/api/auth/status",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(http_access_log_level("GET", path, 200), logging.DEBUG)
+
+    def test_failures_and_writes_on_those_paths_keep_info(self) -> None:
+        cases = [
+            ("GET", "/api/sync/status", 500),
+            ("GET", "/api/sync/jobs/0a1b2c3d-4e5f-6789-abcd-ef0123456789", 404),
+            ("GET", "/api/health", 503),
+            ("GET", "/api/auth/status", 401),
+            ("POST", "/api/sync/jobs", 200),
+            ("POST", "/api/sync/jobs/0a1b2c3d-4e5f-6789-abcd-ef0123456789", 200),
+            ("GET", "/api/sync/jobs/not-a-job-id", 200),
+        ]
+        for method, path, status in cases:
+            with self.subTest(method=method, path=path, status=status):
+                self.assertEqual(
+                    http_access_log_level(method, path, status), logging.INFO
+                )
 
 
 if __name__ == "__main__":

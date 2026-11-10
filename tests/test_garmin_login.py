@@ -348,7 +348,7 @@ class GarminLoginTests(unittest.TestCase):
             def client(self):
                 raise RuntimeError(f"leaked {BLOB}")
 
-        with self.assertLogs("backend.sync.garmin_login", "WARNING") as logs:
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
             self.tokens.write_back(BrokenClient(), BLOB)
         self.assertEqual(self._stored(GARMIN_TOKENS_KEY), BLOB)
         self.assertNotIn("tok-aaaaaaaaaaaa", "\n".join(logs.output))
