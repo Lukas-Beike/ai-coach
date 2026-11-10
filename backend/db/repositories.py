@@ -484,9 +484,14 @@ class CompetitionRepository:
         ).fetchone()
         return dict(row) if row else None
 
-    def count(self, db: Any) -> int:
+    def count_upcoming(self, db: Any, today: str) -> int:
+        """Count competitions on or after ``today`` (an ISO date)."""
         return int(
-            db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
+            db.execute(
+                "SELECT COUNT(*) AS count FROM competitions "
+                "WHERE substr(event_date, 1, 10) >= ?",
+                (today,),
+            ).fetchone()["count"]
         )
 
     def create_local(self, db: Any, competition: dict[str, Any], now: str) -> None:

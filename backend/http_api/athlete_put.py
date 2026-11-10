@@ -7,7 +7,6 @@ from contextlib import nullcontext
 from time import monotonic
 from typing import Any
 
-from backend.athlete.context import AthleteContextService
 from backend.athlete.profile import ProfileService
 
 
@@ -16,13 +15,11 @@ class AthletePutRoutes:
 
     def __init__(
         self,
-        athlete_context_service: Callable[[], AthleteContextService],
         profile_service: Callable[[], ProfileService],
         database_lock: Any | None = None,
         zone_service: Callable[[], Any] | None = None,
         body_export: Callable[[dict[str, str], str | None, float], str] | None = None,
     ) -> None:
-        self._athlete_context_service = athlete_context_service
         self._profile_service = profile_service
         self._database_lock = database_lock
         self._zone_service = zone_service
@@ -31,22 +28,9 @@ class AthletePutRoutes:
     def handle(self, handler: Any, path: str) -> bool:
         if path in {"/api/zones", "/api/zones/remove"}:
             return self._handle_zones(handler, path)
-        if path == "/api/athlete-context":
-            return self._handle_athlete_context(handler)
         if path == "/api/profile":
             return self._handle_profile(handler)
         return False
-
-    def _handle_athlete_context(self, handler: Any) -> bool:
-        payload = handler.read_json()
-        context = self._athlete_context_service()
-        with (
-            context.profile_service.mutation_coordinator,
-            self._database_lock or nullcontext(),
-        ):
-            result = context.save(payload.get("profile"), payload.get("competitions"))
-        handler.send_json(200, result)
-        return True
 
     def _handle_profile(self, handler: Any) -> bool:
         deadline = monotonic() + 10.0

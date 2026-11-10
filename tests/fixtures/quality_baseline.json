@@ -980,18 +980,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_http_athlete_put_routes.py",
-      "code": "index",
-      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_http_athlete_put_routes.py",
-      "code": "index",
-      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_public_state_calendar_projection.py",
       "code": "index",
       "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"

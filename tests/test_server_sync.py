@@ -64,35 +64,28 @@ class ServerSyncTests(ServerTestCase):
             }
         )
         if include_competition:
-            server.ATHLETE_DATA.context().save(
-                {},
-                [
-                    {
-                        "name": "Contract race",
-                        "event_date": (
-                            _local_datetime.now().astimezone().date()
-                            + timedelta(days=30)
-                        ).isoformat(),
-                        "sport": "Cycling",
-                    }
-                ],
+            server.PLANNING_DATA.competition().save(
+                {
+                    "name": "Contract race",
+                    "event_date": (
+                        _local_datetime.now().astimezone().date() + timedelta(days=30)
+                    ).isoformat(),
+                    "sport": "Cycling",
+                }
             )
         return recorder, client
 
     def _prepare_competition_contract_fixture(self):
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
-        server.ATHLETE_DATA.context().save(
-            {},
-            [
-                {
-                    "name": "Competition contract",
-                    "event_date": (
-                        _local_datetime.now().astimezone().date() + timedelta(days=30)
-                    ).isoformat(),
-                    "sport": "Cycling",
-                }
-            ],
+        server.PLANNING_DATA.competition().save(
+            {
+                "name": "Competition contract",
+                "event_date": (
+                    _local_datetime.now().astimezone().date() + timedelta(days=30)
+                ).isoformat(),
+                "sport": "Cycling",
+            }
         )
         return recorder, client
 
@@ -1323,17 +1316,14 @@ class ServerSyncTests(ServerTestCase):
         event_date = (
             _local_datetime.now().astimezone().date() + timedelta(days=30)
         ).isoformat()
-        saved = server.ATHLETE_DATA.context().save(
-            {},
-            [
-                {
-                    "name": "Explicit race",
-                    "event_date": event_date,
-                    "sport": "Cycling",
-                }
-            ],
+        saved = server.PLANNING_DATA.competition().save(
+            {
+                "name": "Explicit race",
+                "event_date": event_date,
+                "sport": "Cycling",
+            }
         )
-        competition_id = saved["competitions"][0]["id"]
+        competition_id = saved["competition"]["id"]
         recorder = IntervalsRequestRecorder()
         client = RecordedIntervalsClient(recorder)
         with (
@@ -1355,7 +1345,7 @@ class ServerSyncTests(ServerTestCase):
                     "sport": "Cycling",
                 }
             )
-            server.ATHLETE_DATA.context().save({}, [])
+            server.PLANNING_DATA.competition().delete(competition_id)
             deleted = server.PROVIDER_RESYNC.competition_sync_service().sync(
                 "explicit approval",
             )
@@ -1439,18 +1429,15 @@ class ServerSyncTests(ServerTestCase):
         event_date = (
             _local_datetime.now().astimezone().date() + timedelta(days=60)
         ).isoformat()
-        saved = server.ATHLETE_DATA.context().save(
-            {},
-            [
-                {
-                    "name": "Test Race",
-                    "event_date": event_date,
-                    "priority": "A",
-                    "sport": "Cycling",
-                }
-            ],
+        saved = server.PLANNING_DATA.competition().save(
+            {
+                "name": "Test Race",
+                "event_date": event_date,
+                "priority": "A",
+                "sport": "Cycling",
+            }
         )
-        local_id = saved["competitions"][0]["id"]
+        local_id = saved["competition"]["id"]
         calls = {}
         remote = []
 
@@ -1499,8 +1486,8 @@ class ServerSyncTests(ServerTestCase):
         event_date = (
             _local_datetime.now().astimezone().date() + timedelta(days=30)
         ).isoformat()
-        server.ATHLETE_DATA.context().save(
-            {}, [{"name": "Swim Race", "event_date": event_date, "sport": "Swim"}]
+        server.PLANNING_DATA.competition().save(
+            {"name": "Swim Race", "event_date": event_date, "sport": "Swim"}
         )
         pushed = []
 

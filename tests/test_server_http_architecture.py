@@ -572,8 +572,8 @@ class ServerHttpArchitectureTests(unittest.TestCase):
         self._assert_write_route_owned(
             "_do_PUT",
             "ATHLETE_PUT_ROUTES",
-            ("/api/athlete-context", "/api/profile"),
-            "AthletePutRoutes(athlete_context_service, ATHLETE_DATA.profile, DB_LOCK)",
+            ("/api/profile",),
+            "AthletePutRoutes(ATHLETE_DATA.profile, DB_LOCK)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "athlete_put.py").read_text(
             encoding="utf-8"

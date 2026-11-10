@@ -191,7 +191,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         server.ATHLETE_DATA.profile().save({"weather_location": "Koeln"})
         self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
 
-    def test_athlete_context_location_change_clears_weather_caches(self):
+    def test_profile_patch_location_change_clears_weather_caches(self):
         server.ATHLETE_DATA.profile().save({"weather_location": "Berlin"})
         server.key_value_service().set(
             weather_cache.CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}})
@@ -200,7 +200,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             weather_cache.FAILURE_KEY,
             json.dumps({"count": 2, "retry_at": "2099-01-01T00:00:00+00:00"}),
         )
-        server.ATHLETE_DATA.context().save({"weather_location": "Koeln"}, [])
+        server.ATHLETE_DATA.profile().patch({"weather_location": "Koeln"})
         self.assertEqual(server.key_value_service().get(weather_cache.CACHE_KEY), "")
         self.assertEqual(server.key_value_service().get(weather_cache.FAILURE_KEY), "")
 
@@ -877,17 +877,14 @@ class ServerWeatherCalendarTests(ServerTestCase):
         day = (
             _local_datetime.now().astimezone().date() + timedelta(days=3)
         ).isoformat()
-        server.ATHLETE_DATA.context().save(
-            {},
-            [
-                {
-                    "name": "Local Race",
-                    "event_date": day,
-                    "sport": "Cycling",
-                    "starts_at_local": day + "T10:00:00",
-                    "planned_duration_s": 7200,
-                }
-            ],
+        server.PLANNING_DATA.competition().save(
+            {
+                "name": "Local Race",
+                "event_date": day,
+                "sport": "Cycling",
+                "starts_at_local": day + "T10:00:00",
+                "planned_duration_s": 7200,
+            }
         )
         conflict = server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts(
             {"date": day}

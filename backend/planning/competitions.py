@@ -574,9 +574,12 @@ def competition_normalized_text_fields(value: dict[str, Any]) -> dict[str, str]:
             else str(value.get(field) or default).strip()[:limit]
         )
     result["distance"] = competition_distance(value.get("distance"))
-    result["description"] = str(
-        value.get("description") or value.get("notes") or ""
-    ).strip()[: COMPETITION_TEXT_LIMITS["description"]]
+    description = (
+        value.get("description") if "description" in value else value.get("notes")
+    )
+    result["description"] = str(description or "").strip()[
+        : COMPETITION_TEXT_LIMITS["description"]
+    ]
     result["external_id"] = str(value.get("external_id") or "").strip()[
         : COMPETITION_TEXT_LIMITS["external_id"]
     ]

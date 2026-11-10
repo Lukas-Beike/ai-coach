@@ -105,7 +105,6 @@ activity IDs no longer resolve.
 | PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile; with `sync_body_to_garmin: true` a changed weight or body fat is also exported to Garmin and the result carries `garmin_body_export` | CSRF |
 | PUT | `/api/zones` | Save one local zone configuration; returns a receipt with an undo reference | CSRF |
 | PUT | `/api/zones/remove` | Remove one local zone configuration; needs `confirmed: true` | CSRF |
-| PUT | `/api/athlete-context` | Replace profile and competitions | CSRF |
 | PUT | `/api/nutrition/entry` | Update a nutrition entry | CSRF |
 | PUT | `/api/nutrition/products` | Update a confirmed saved product | CSRF |
 | PUT | `/api/settings/credentials` | Save or clear provider credentials stored in the encrypted database (see below) | CSRF |
