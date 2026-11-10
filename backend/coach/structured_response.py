@@ -156,11 +156,12 @@ class CoachStructuredResponseService:
             exc,
             attempt=attempt,
             request_delta_emitted=state.request_delta_emitted,
+            response_id_exists=bool(state.resume_id),
         )
         if delay is None:
             raise exc
         state.resume_id = ""
-        self._retry_policy.wait(delay, cancel_event, attempt)
+        self._retry_policy.wait(delay, cancel_event, attempt, exc.reason)
 
     def _spent_on_reasoning(
         self, response: dict[str, Any], payload: dict[str, Any], state: _ResponseState

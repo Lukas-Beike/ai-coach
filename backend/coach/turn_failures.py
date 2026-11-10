@@ -27,6 +27,9 @@ from backend.runtime.events import StateEventBuffer
 
 BACKEND_SOURCE_ROOT = Path(__file__).resolve().parents[1]
 OPENAI_NOT_CONFIGURED_MESSAGE = "OpenAI ist nicht konfiguriert. Bitte hinterlege einen OPENAI_API_KEY in der Serverkonfiguration."
+OPENAI_TIMEOUT_MESSAGE = (
+    "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut."
+)
 OPENAI_USAGE_LIMIT_MESSAGE = (
     "Das OpenAI-Ausgaben- oder Nutzungslimit ist erreicht. "
     "Bitte das Limit im OpenAI-Konto prüfen."
@@ -221,7 +224,8 @@ class CoachTurnFailureService:
             "project_spend_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
             "organization_usage_limit_exceeded": OPENAI_USAGE_LIMIT_MESSAGE,
             "database_busy": "Die lokale Datenbank war kurz ausgelastet. Bitte versuche es erneut.",
-            "provider_timeout": "Der KI-Dienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.",
+            "provider_timeout": OPENAI_TIMEOUT_MESSAGE,
+            "background_budget_exceeded": OPENAI_TIMEOUT_MESSAGE,
             "not_found": "Das konfigurierte KI-Modell oder der angeforderte Dienst wurde nicht gefunden. Bitte die Modellkonfiguration prüfen.",
             "provider_unavailable": "Der KI-Dienst ist vorübergehend nicht verfügbar. Bitte versuche es in Kürze erneut.",
             "response_error": "Der KI-Dienst konnte die Antwort nicht fertigstellen. Bitte versuche es erneut.",

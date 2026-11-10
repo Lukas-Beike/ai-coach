@@ -34,6 +34,7 @@ _SAFE_LOG_REASONS = {
     "credit_balance_exhausted": "credit_balance_exhausted",
     "invalid_response": "invalid_response",
     "provider_timeout": "provider_timeout",
+    "background_budget_exceeded": "background_budget_exceeded",
     "request_failed": "request_failed",
     "response_error": "response_error",
     "response_failed": "response_failed",

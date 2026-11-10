@@ -11,9 +11,15 @@ from backend.errors import AppError
 
 
 class CoachResponseRetryPolicy:
-    """Decide whether to retry a rate-limited response and perform its wait."""
+    """Decide whether to retry a transient provider failure and perform its wait."""
 
     MAX_RETRY_DELAY_SECONDS = 60
+    # Failures that leave nothing durable behind. Tools run locally and the
+    # request is unchanged, so a repeat is idempotent while no output was shown.
+    TRANSIENT_REASONS = frozenset(
+        {"provider_unavailable", "network_error", "provider_timeout"}
+    )
+    TRANSIENT_BACKOFF_SECONDS = (2, 5)
 
     def __init__(self, logger: logging.Logger) -> None:
         self._logger = logger
@@ -24,7 +30,14 @@ class CoachResponseRetryPolicy:
         *,
         attempt: int,
         request_delta_emitted: bool,
+        response_id_exists: bool = False,
     ) -> float | None:
+        if self._transient(exc, response_id_exists=response_id_exists):
+            if attempt >= len(self.TRANSIENT_BACKOFF_SECONDS) or request_delta_emitted:
+                return None
+            return (
+                self.TRANSIENT_BACKOFF_SECONDS[attempt] + secrets.randbelow(1000) / 1000
+            )
         rate_limited = (
             exc.reason == "rate_limit_exceeded"
             or getattr(exc, "provider_error_code", None) == "rate_limit_exceeded"
@@ -40,15 +53,34 @@ class CoachResponseRetryPolicy:
             base_delay = 5 * (attempt + 1)
         return base_delay + secrets.randbelow(1000) / 1000
 
+    def _transient(self, exc: AppError, *, response_id_exists: bool) -> bool:
+        reason = exc.reason
+        if reason == "provider_timeout":
+            # A timeout after the response exists belongs to the resume path.
+            return not response_id_exists
+        return reason in self.TRANSIENT_REASONS or (
+            reason == "response_failed"
+            and getattr(exc, "provider_error_code", None) == "server_error"
+        )
+
     def wait(
-        self, delay: float, cancel_event: threading.Event | None, attempt: int
+        self,
+        delay: float,
+        cancel_event: threading.Event | None,
+        attempt: int,
+        reason: str | None = None,
     ) -> None:
+        context: dict[str, object] = {
+            "attempt": attempt + 1,
+            "retry_in_seconds": delay,
+        }
+        if reason in self.TRANSIENT_REASONS | {"response_failed"}:
+            context["reason"] = reason
         self._logger.warning(
-            "Coach response rate limited; retrying",
-            extra={
-                "event": "coach_response_retry",
-                "context": {"attempt": attempt + 1, "retry_in_seconds": delay},
-            },
+            "Coach response rate limited; retrying"
+            if "reason" not in context
+            else "Coach provider failure; retrying",
+            extra={"event": "coach_response_retry", "context": context},
         )
         if cancel_event is not None:
             cancel_event.wait(delay)
