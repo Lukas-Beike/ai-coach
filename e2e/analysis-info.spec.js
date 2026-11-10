@@ -398,11 +398,11 @@ test("@responsive pace ticks stay distinct and faster pace is higher", async ({ 
   expect(Math.min(...labelSizes)).toBeGreaterThanOrEqual(11);
 });
 
-test("@responsive a history chart is one tab stop with arrow-key navigation inside a named group", async ({ page }) => {
+test("@responsive a history chart is one tab stop with arrow-key navigation inside a named region", async ({ page }) => {
   await performanceFixture(page, { history: { start: "2026-09-01", end: "2026-09-15", load: { points: [] }, metrics: {
     run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 300 }, { date: "2026-09-08", value: 295 }, { date: "2026-09-15", value: 290 }] }],
   } } });
-  await expect(page.getByRole("group", { name: "Leistungsentwicklung der letzten 12 Wochen" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Leistungsentwicklung der letzten 12 Wochen" })).toBeVisible();
   const chart = page.locator("#analysisHistoryCharts svg");
   const markers = chart.locator(".analysis-day-marker");
   await expect(markers).toHaveCount(3);

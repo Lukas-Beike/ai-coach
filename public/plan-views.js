@@ -1165,6 +1165,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return row;
   }
 
+  function plannedActivityButton(actual) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button";
+    button.textContent = "Aktivität analysieren";
+    button.addEventListener("click", () => globalThis.ActivityDetails.open(actual, { api, showDialog: showAccessibleDialog }));
+    return button;
+  }
+
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
     const actual = calendarActualActivity(entry);
     const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -1205,17 +1214,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const metrics = plannedSessionMetrics(entry, actual);
     if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
-    if (actual && (actual.id || actual.activity_id)) {
-      const activityButton = document.createElement("button");
-      activityButton.type = "button";
-      activityButton.className = "secondary-button";
-      activityButton.textContent = "Aktivität analysieren";
-      activityButton.addEventListener("click", () => globalThis.ActivityDetails.open(actual, {
-        api,
-        showDialog: showAccessibleDialog,
-      }));
-      details.append(activityButton);
-    }
+    if (actual && (actual.id || actual.activity_id)) details.append(plannedActivityButton(actual));
     appendPlannedCalendarComparison(details, entry, actual);
     const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);
@@ -1376,6 +1375,23 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   let plannedRenderSnapshot = null;
 
+  // Before a rebuild: remember which cards are open and which control has focus.
+  function rememberPlannedEntryState(root) {
+    openPlannedEntries = new Set([...root.querySelectorAll(".planned-entry[data-entry-key]")].filter((card) => card.open).map((card) => card.dataset.entryKey));
+    for (const key of plannedFocusStatuses.keys()) if (!openPlannedEntries.has(key)) plannedFocusStatuses.delete(key);
+    const active = document.activeElement;
+    const card = active?.closest?.(".planned-entry[data-entry-key]");
+    if (!card || !root.contains(card)) return null;
+    return { key: card.dataset.entryKey, name: active.matches("select") ? active.name : "" };
+  }
+
+  function restorePlannedEntryFocus(root, focused) {
+    if (!focused) return;
+    const card = [...root.querySelectorAll(".planned-entry[data-entry-key]")].find((node) => node.dataset.entryKey === focused.key);
+    const target = focused.name ? card?.querySelector(`select[name="${focused.name}"]`) : null;
+    (target || card?.querySelector("summary"))?.focus({ preventScroll: true });
+  }
+
   function renderPlanned(trainingCalendar) {
     const root = $("#plannedCalendar");
     const summary = $("#plannedSummary");
@@ -1399,12 +1415,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const previousDayOpenState = new Map(
       [...root.querySelectorAll(".planned-day[data-date] > .planned-day-toggle")].map((toggle) => [toggle.parentElement.dataset.date, toggle.open]),
     );
-    const cardAnchor = document.activeElement?.closest?.(".planned-entry[data-entry-key]");
-    const focusedEntry = cardAnchor && root.contains(cardAnchor)
-      ? { key: cardAnchor.dataset.entryKey, name: document.activeElement.matches("select") ? document.activeElement.name : "" }
-      : null;
-    openPlannedEntries = new Set([...root.querySelectorAll(".planned-entry[data-entry-key]")].filter((card) => card.open).map((card) => card.dataset.entryKey));
-    for (const key of plannedFocusStatuses.keys()) if (!openPlannedEntries.has(key)) plannedFocusStatuses.delete(key);
+    const focusedEntry = rememberPlannedEntryState(root);
     root.replaceChildren();
     const weeklyCompliance = new Map(
       (Array.isArray(state.data?.planning_compliance) ? state.data.planning_compliance : [])
@@ -1444,10 +1455,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       weeklyCompliance,
     };
     for (let weekIndex = 0; weekIndex < pastWeeks + futureWeeks + 1; weekIndex += 1) root.append(renderPlannedWeek(view, weekIndex));
-    if (focusedEntry) {
-      const restored = [...root.querySelectorAll(".planned-entry[data-entry-key]")].find((card) => card.dataset.entryKey === focusedEntry.key);
-      (focusedEntry.name && restored?.querySelector(`select[name="${focusedEntry.name}"]`) || restored?.querySelector("summary"))?.focus({ preventScroll: true });
-    }
+    restorePlannedEntryFocus(root, focusedEntry);
     if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
   }
 
