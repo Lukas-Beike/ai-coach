@@ -158,6 +158,7 @@ class PlanCheckRuleTests(unittest.TestCase):
             illness_text_limit=1000,
             default_days=adaptive.DEFAULT_ILLNESS_PAUSE_DAYS,
         )
+        assert forecast is not None
         self.assertEqual(last, forecast["end_date"])
 
     def test_taper_finding_keeps_its_identity_when_units_change(self) -> None:
