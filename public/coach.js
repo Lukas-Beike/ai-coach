@@ -1325,6 +1325,10 @@ function coachActionDescription(proposal) {
   return "Diese Garmin-Aufzeichnung ist nahezu identisch mit der Wahoo-Einheit. Nur das Garmin-Duplikat aus Intervals.icu löschen?";
 }
 
+function coachActionExpired(proposal) {
+  return Number(proposal.expires_at) <= Date.now() / 1000;
+}
+
 function coachActionStatus(proposal) {
   return proposal.status === "used"
     ? "Freigabe bereits verwendet. Bitte den Ausführungsbeleg prüfen."
@@ -1419,7 +1423,7 @@ function coachActionCard(proposal) {
     card.append(status, actions);
     return card;
   }
-  if (!["preview", "ready"].includes(proposal.status)) {
+  if (!["preview", "ready"].includes(proposal.status) || coachActionExpired(proposal)) {
     const status = document.createElement("p");
     status.textContent = coachActionStatus(proposal);
     card.append(status);
@@ -1521,7 +1525,7 @@ async function executeCoachActionProposal(proposal, button) {
     await load("/api/bootstrap?local=1", ["plan", "library", "profile", "feedback"]);
   } catch (error) {
     if (executeSent && !executeResponded && !isHttpClientRejection(error)) lockUnknownCoachActionOutcome(proposal, error);
-    else rejectCoachActionProposal(proposal, button, error);
+    else rejectCoachActionProposal(proposal, button, error, !executeSent);
   }
 }
 
@@ -1539,12 +1543,13 @@ function lockUnknownCoachActionOutcome(proposal, error) {
   toast(error.message, true);
 }
 
-function rejectCoachActionProposal(proposal, button, error) {
-  addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
-  if (error.reason === "proposal_expired") {
+function rejectCoachActionProposal(proposal, button, error, confirmStage = false) {
+  if (!isSessionEndedError(error)) addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
+  // The server refused the proposal for good; keeping the button would only repeat the refusal.
+  if (error.reason === "proposal_expired" || error.reason === "proposal_payload_changed") {
     proposal.status = "expired";
     renderCoachActionReview();
-  } else if (["proposal_invalid", "proposal_used", "proposal_unavailable"].includes(error.reason)) {
+  } else if (["proposal_invalid", "proposal_used", "proposal_unavailable"].includes(error.reason) || (confirmStage && error.status === 409)) {
     proposal.status = "used";
     renderCoachActionReview();
   }
@@ -1574,7 +1579,7 @@ function createPendingMessage(entry, index = 0) {
 function pendingQueueButton(text, name, onClick) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "message-action";
+  button.className = "pending-action";
   button.textContent = text;
   button.setAttribute("aria-label", name);
   button.title = name;

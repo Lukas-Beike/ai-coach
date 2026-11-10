@@ -96,6 +96,8 @@ class CoachProposalConfirmationTests(unittest.TestCase):
             (error.exception.status, error.exception.message),
             (404, "Aktionsvorschau nicht gefunden."),
         )
+        self.assertEqual(error.exception.reason, "proposal_unavailable")
+        self.assertEqual(error.exception.reason, "proposal_unavailable")
         self.assertEqual(self.proposal_row()["status"], "preview")
         self.assertIsNone(self.proposal_row()["action_token_hash"])
 
@@ -103,6 +105,7 @@ class CoachProposalConfirmationTests(unittest.TestCase):
         with self.assertRaises(AppError) as error:
             self.service("unused", now=200).confirm(PROPOSAL_ID, "csrf-a")
         self.assertEqual(error.exception.status, 409)
+        self.assertEqual(error.exception.reason, "proposal_expired")
         self.assertEqual(self.proposal_row()["status"], "preview")
         self.assertIsNone(self.proposal_row()["action_token_hash"])
 
@@ -116,6 +119,7 @@ class CoachProposalConfirmationTests(unittest.TestCase):
         with self.assertRaises(AppError) as error:
             self.service("unused").confirm(PROPOSAL_ID, "csrf-a")
         self.assertEqual(error.exception.status, 409)
+        self.assertEqual(error.exception.reason, "proposal_used")
         self.assertEqual(self.proposal_row()["status"], "used")
 
     def test_invalid_uuid_format_fails_before_token_creation(self):

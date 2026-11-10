@@ -29,6 +29,15 @@ test("queued coach follow-ups keep order, can be edited or removed without brows
   await expect(queued.nth(1)).toContainText("Zweite Folgefrage");
   await expect(queued.nth(1).locator(".pending-label")).toHaveText("Wird nach der aktuellen Antwort gesendet");
 
+  // The text controls stay 44px tall and neither overlap each other nor the label.
+  const label = await queued.nth(0).locator(".pending-label").boundingBox();
+  const edit = await queued.nth(0).getByRole("button", { name: "Bearbeiten: wartende Nachricht 1" }).boundingBox();
+  const remove = await queued.nth(0).getByRole("button", { name: "Entfernen: wartende Nachricht 1" }).boundingBox();
+  expect(edit.height).toBeGreaterThanOrEqual(44);
+  expect(remove.height).toBeGreaterThanOrEqual(44);
+  expect(edit.y).toBeGreaterThanOrEqual(label.y + label.height - 1);
+  expect(edit.x + edit.width).toBeLessThanOrEqual(remove.x + 1);
+
   await page.getByRole("button", { name: "Entfernen: wartende Nachricht 1" }).click();
   await expect(queued).toHaveCount(1);
   await expect(queued.first()).toContainText("Zweite Folgefrage");

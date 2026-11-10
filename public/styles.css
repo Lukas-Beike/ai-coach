@@ -515,7 +515,7 @@ h2 {
 .message.pending { border: 1px dashed var(--accent-border-strong); box-shadow: none; }
 .message.pending .pending-label { display: block; margin-top: 5px; color: var(--muted); font-size: .72rem; font-weight: 650; }
 .message.pending .pending-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-.message.pending .pending-actions button { min-width: 44px; min-height: 44px; }
+.message.pending .pending-action { box-sizing: border-box; width: auto; min-height: 44px; margin: 0; padding: 0 12px; border: 1px solid var(--accent-border-strong); border-radius: 999px; color: var(--ink); background: var(--transparent); white-space: nowrap; }
 /* Icon-only actions: each button has a 44px hit area, a 28px visible disc
    (content-box background clip) and -8px vertical margins so the row stays 28px tall. */
 .message-actions { display: flex; align-items: center; justify-content: flex-end; margin: 4px -8px 0 0; }
