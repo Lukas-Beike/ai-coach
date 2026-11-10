@@ -22,6 +22,8 @@ from backend.sync.authority import competition_push_manifest
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 
 NOW = "2026-09-20T12:00:00+00:00"
+TODAY = date(2026, 9, 20)
+APP_PREFIX = planning_competitions.COMPETITION_EXTERNAL_PREFIX
 IMPORT_ID = "00000000-0000-0000-0000-000000000099"
 
 
@@ -63,11 +65,19 @@ class FakeCompetitionClient:
         self.fetch_error = fetch_error
         self.delete_calls = []
         self.upsert_calls = []
+        self.read_calls = []
+        self.readable = {}
 
     def fetch_competition_events(self):
         if self.fetch_error:
             raise self.fetch_error
         return self.events
+
+    def get_event(self, event_id):
+        self.read_calls.append(event_id)
+        if event_id not in self.readable:
+            raise AppError(404, "Event nicht gefunden.")
+        return copy.deepcopy(self.readable[event_id])
 
     def bulk_delete_events(self, identifiers):
         self.delete_calls.append(copy.deepcopy(identifiers))
@@ -126,7 +136,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             db.execute(
                 "CREATE TABLE competition_sync_tombstones ("
                 "id TEXT PRIMARY KEY, intervals_event_id TEXT, external_id TEXT, "
-                "created_at TEXT NOT NULL)"
+                "created_at TEXT NOT NULL, provider TEXT)"
             )
             create_remote_links_table(db)
             db.execute(
@@ -199,6 +209,17 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             "description": description,
         }
 
+    def own_future_event(self, remote_id, **changes):
+        return {
+            **self.remote_event(
+                remote_id,
+                APP_PREFIX + remote_id,
+                name="Deleted race",
+                event_date="2026-10-05",
+            ),
+            **changes,
+        }
+
     def insert_competition(self, row):
         with self.database_manager.unit_of_work() as db:
             db.execute(
@@ -219,6 +240,19 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
                 "INSERT INTO competition_sync_tombstones(id, intervals_event_id, external_id, created_at) "
                 "VALUES (?, ?, ?, ?)",
                 (tombstone_id, intervals_event_id, external_id, created_at),
+            )
+
+    def add_labelled_tombstone(self, row):
+        """Store the tombstone a deleted competition leaves, with its name and date."""
+        with self.database_manager.unit_of_work() as db:
+            CompetitionRepository().add_tombstone(
+                db,
+                row["id"],
+                row["intervals_event_id"],
+                row["external_id"],
+                NOW,
+                name=row["name"],
+                event_date=row["event_date"],
             )
 
     def stored_competition(self, local_id):
@@ -251,7 +285,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
                 self.database_manager,
                 CompetitionRepository(),
                 lambda: NOW,
-                date.today,
+                lambda: TODAY,
             ),
             self.database_manager,
             key_value_repository or self.key_value_repository,
@@ -373,9 +407,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
                 planning_competitions.competition_external_id("local-push"),
             )
         )
-        second = self.reconciler.reconcile(
-            plan, [pushed], [row], now=NOW
-        )
+        second = self.reconciler.reconcile(plan, [pushed], [row], now=NOW)
 
         stored = self.stored_competition("local-push")
         self.assertEqual(stored["sync_dirty"], 0)
@@ -383,7 +415,6 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(stored["intervals_event_id"], "remote-created")
         self.assertEqual(stored["external_id"], pushed["external_id"])
         self.assertEqual(second["remote_events"], [pushed])
-
 
     def test_clean_row_keeps_local_indoor_environment_for_the_same_remote_type(self):
         row = self.local_competition(
@@ -425,7 +456,6 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             self.stored_competition("local-outdoor")["environment"], "outdoor"
         )
 
-
     def test_optimistic_check_skips_competition_edited_after_capture(self):
         captured = self.local_competition(
             "local-edit",
@@ -442,15 +472,12 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
                 (captured["id"],),
             )
 
-        result = self.reconciler.reconcile(
-            plan, [], [captured], now=NOW
-        )
+        result = self.reconciler.reconcile(plan, [], [captured], now=NOW)
 
         stored = self.stored_competition("local-edit")
         self.assertEqual(result["conflicts"], 0)
         self.assertEqual(stored["name"], "New local name")
         self.assertEqual(stored["sync_dirty"], 1)
-
 
     def test_sync_requires_configured_intervals_key_before_lock_or_client(self):
         lock = FakeLock()
@@ -486,7 +513,6 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         finally:
             shared_lock.release()
 
-
     def test_authorized_sync_deletes_tombstones_and_upserts_outbound(self):
         row = self.local_competition("local-push")
         self.insert_competition(row)
@@ -495,7 +521,9 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             "remote-created",
             planning_competitions.competition_external_id("local-push"),
         )
-        client = FakeCompetitionClient(pushed=[remote])
+        client = FakeCompetitionClient(
+            events=[self.own_future_event("remote-delete")], pushed=[remote]
+        )
         service = self.make_sync_service(client)
 
         result = service.sync()
@@ -589,7 +617,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
     def test_failed_remote_delete_does_not_clear_tombstones_or_upsert(self):
         self.insert_tombstone("tombstone", "remote-delete", None, "created")
         error = RuntimeError("delete failed")
-        client = FakeCompetitionClient()
+        client = FakeCompetitionClient(events=[self.own_future_event("remote-delete")])
 
         def fail_delete(identifiers):
             client.delete_calls.append(copy.deepcopy(identifiers))
@@ -604,6 +632,111 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertIs(raised.exception, error)
         self.assertEqual(self.reconciler.records()[0][0]["id"], "tombstone")
         self.assertEqual(client.upsert_calls, [])
+
+    def test_adopted_past_paired_race_is_reported_and_not_deleted(self):
+        self.add_labelled_tombstone(
+            self.local_competition(
+                "00000000-0000-0000-0000-0000000000a1",
+                name="Frühjahrsklassiker",
+                event_date="2026-04-12",
+                intervals_event_id="race-1",
+                external_id="athlete-made",
+                sync_dirty=0,
+                sync_state="synced",
+            )
+        )
+        paired = self.remote_event(
+            "race-1", "athlete-made", name="Frühjahrsklassiker", event_date="2026-04-12"
+        )
+        paired["paired_activity_id"] = "i123"
+        client = FakeCompetitionClient(events=[paired])
+
+        result = self.make_sync_service(client).sync()
+
+        self.assertEqual(client.delete_calls, [])
+        self.assertEqual(result["deleted_remote"], 0)
+        self.assertEqual(
+            result["skipped_deletions"],
+            [
+                {
+                    "name": "Frühjahrsklassiker",
+                    "event_date": "2026-04-12",
+                    "reason": "not_app_owned",
+                }
+            ],
+        )
+        self.assertEqual(self.reconciler.records()[0], [])
+
+    def test_app_owned_past_or_paired_event_is_skipped_with_its_reason(self):
+        for event_id, changes, reason in (
+            ("past", {"start_date_local": "2026-08-01T08:00:00"}, "past"),
+            ("paired", {"paired_activity_id": "i9"}, "paired"),
+        ):
+            with self.subTest(reason=reason):
+                self.insert_tombstone(f"t-{event_id}", event_id, None, "created")
+                client = FakeCompetitionClient(
+                    events=[self.own_future_event(event_id, **changes)]
+                )
+
+                result = self.make_sync_service(client).sync()
+
+                self.assertEqual(client.delete_calls, [])
+                self.assertEqual(
+                    [item["reason"] for item in result["skipped_deletions"]], [reason]
+                )
+
+    def test_foreign_future_event_is_skipped_and_app_owned_event_is_deleted(self):
+        self.insert_tombstone("foreign", "foreign-id", None, "a")
+        self.insert_tombstone("own", None, APP_PREFIX + "own", "b")
+        client = FakeCompetitionClient(
+            events=[
+                self.remote_event(
+                    "foreign-id", "someone-else", event_date="2026-10-05"
+                ),
+                self.remote_event(
+                    "own-id", APP_PREFIX + "own", event_date="2026-10-05"
+                ),
+            ]
+        )
+
+        result = self.make_sync_service(client).sync()
+
+        self.assertEqual(client.delete_calls, [[{"external_id": APP_PREFIX + "own"}]])
+        self.assertEqual(client.read_calls, [])
+        self.assertEqual(
+            [item["reason"] for item in result["skipped_deletions"]], ["not_app_owned"]
+        )
+
+    def test_event_outside_the_fetched_window_is_read_before_deletion(self):
+        self.insert_tombstone("far", "far-id", None, "a")
+        self.insert_tombstone("gone", "gone-id", None, "b")
+        client = FakeCompetitionClient()
+        client.readable["far-id"] = self.own_future_event("far-id")
+
+        result = self.make_sync_service(client).sync()
+
+        self.assertEqual(client.read_calls, ["far-id", "gone-id"])
+        self.assertEqual(client.delete_calls, [[{"id": "far-id"}]])
+        self.assertEqual(
+            [item["reason"] for item in result["skipped_deletions"]], ["not_found"]
+        )
+        self.assertEqual(self.reconciler.records()[0], [])
+
+    def test_clearing_a_tombstone_removes_its_label(self):
+        self.add_labelled_tombstone(
+            self.local_competition(
+                "00000000-0000-0000-0000-0000000000a2",
+                intervals_event_id="race-9",
+                external_id=APP_PREFIX + "x",
+            )
+        )
+        tombstones, _ = self.reconciler.records()
+        self.assertIsNotNone(self.reconciler.tombstone_labels(tombstones))
+        self.assertEqual(len(self.reconciler.tombstone_labels(tombstones)), 1)
+
+        self.reconciler.clear_tombstones(tombstones)
+
+        self.assertEqual(self.reconciler.tombstone_labels(tombstones), {})
 
     def test_remote_filter_keeps_linked_ids_and_rejects_other_events(self):
         row = self.local_competition(
@@ -667,6 +800,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
                 "conflicts": 0,
                 "removed": 0,
                 "deleted_remote": 0,
+                "skipped_deletions": [],
                 "total": 1,
             },
         )

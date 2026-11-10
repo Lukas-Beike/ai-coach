@@ -15,6 +15,7 @@ from intervals_compaction import compact_snapshot
 from backend.coach import streams as coach_streams
 from backend.config import Config
 from backend.db.manager import DATABASE_MANAGER_CACHE
+from backend.errors import AppError
 from backend.runtime import clock as runtime_clock
 from backend.sync.metric_export_runner import MetricExportRunner
 
@@ -101,6 +102,7 @@ class RecordedIntervalsClient:
         }
         self.competitions = list(competitions or [])
         self.library = list(library or [])
+        self.saved_events: dict[str, dict[str, Any]] = {}
 
     def fetch_snapshot(self, activity_days):
         self.recorder.record(
@@ -119,9 +121,17 @@ class RecordedIntervalsClient:
     def upsert_competition_events(self, events):
         if events:
             self.recorder.record("POST", "/athlete/0/events", events)
-        return [
+        saved = [
             {**event, "id": event.get("id") or "remote-event-1"} for event in events
         ]
+        self.saved_events.update({str(event["id"]): event for event in saved})
+        return saved
+
+    def get_event(self, event_id):
+        self.recorder.record("GET", f"/athlete/0/events/{event_id}")
+        if event_id not in self.saved_events:
+            raise AppError(404, "Event nicht gefunden.")
+        return self.saved_events[event_id]
 
     def bulk_delete_events(self, identifiers):
         if identifiers:

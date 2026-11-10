@@ -384,6 +384,27 @@ class CompetitionServiceTests(unittest.TestCase):
         self.assertEqual(tombstone["provider"], "intervals")
         self.assertIsNone(candidate["imported_competition_id"])
 
+    def test_delete_keeps_the_competition_name_and_date_on_the_tombstone(self):
+        created = self.service.save(self.competition())
+        competition = created["competition"]
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE competitions SET intervals_event_id='42' WHERE id=?",
+                (competition["id"],),
+            )
+
+        self.service.delete(competition["id"])
+
+        with self.manager.reader() as db:
+            tombstone_id = db.execute(
+                "SELECT id FROM competition_sync_tombstones"
+            ).fetchone()["id"]
+            label = CompetitionRepository.tombstone_label(db, tombstone_id)
+        self.assertEqual(
+            label,
+            {"name": competition["name"], "event_date": competition["event_date"]},
+        )
+
     def test_conflict_resolution_preserves_both_strategies(self):
         created = self.service.save(self.competition())
         competition_id = created["competition"]["id"]

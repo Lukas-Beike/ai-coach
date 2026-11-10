@@ -18,6 +18,8 @@ from backend.canonical.vocabulary import Environment, Sport
 from backend.errors import AppError
 from backend.providers.intervals_workouts import (
     intervals_competition_type,
+    intervals_event_is_paired,
+    intervals_event_start_date,
     intervals_fields_from_planning,
 )
 
@@ -35,6 +37,11 @@ COMPETITION_TEXT_LIMITS = {
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
 # Sync skip reason for a dirty row whose sport has no provider race type.
 COMPETITION_SKIP_UNSUPPORTED_SPORT = "unsupported_sport"
+# Reasons an approved sync leaves a deleted competition's remote event alone.
+COMPETITION_DELETE_SKIP_NOT_APP_OWNED = "not_app_owned"
+COMPETITION_DELETE_SKIP_PAIRED = "paired"
+COMPETITION_DELETE_SKIP_PAST = "past"
+COMPETITION_DELETE_SKIP_NOT_FOUND = "not_found"
 # Free-text competition spellings and the provider race type they stand for.
 COMPETITION_SPORTS = dict(LEGACY_COMPETITION_ALIASES)
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"
@@ -383,6 +390,21 @@ def competition_delete_identifiers(
         for row in tombstones
         if row.get("intervals_event_id") or row.get("external_id")
     ]
+
+
+def competition_delete_skip_reason(event: dict[str, Any], *, today: date) -> str | None:
+    """Return why a remote race event must not be deleted, or None if it may be.
+
+    Mirrors the planned-unit rule (unpaired and not past) and adds ownership:
+    only an event this app created, marked by its external id prefix, is deleted.
+    """
+    if not str(event.get("external_id") or "").startswith(COMPETITION_EXTERNAL_PREFIX):
+        return COMPETITION_DELETE_SKIP_NOT_APP_OWNED
+    if intervals_event_is_paired(event):
+        return COMPETITION_DELETE_SKIP_PAIRED
+    if iso_date_prefix(intervals_event_start_date(event)) < today.isoformat():
+        return COMPETITION_DELETE_SKIP_PAST
+    return None
 
 
 def competition_remote_signature(
