@@ -66,8 +66,12 @@ def fit_records_fixture():
         + bytes([150, 90])
         + struct.pack("<I", 100_000)
     )
+    # Compressed-timestamp records use a definition without field 253 (FIT SDK).
+    compressed = [field for field in fields if field[0] != 253]
+    definition += bytes([0x43, 0, 0]) + struct.pack("<H", 20)
+    definition += bytes([len(compressed)]) + b"".join(bytes(f) for f in compressed)
     second = (
-        bytes([0xC2])
+        bytes([0xE2])
         + struct.pack("<H", 2_550)
         + bytes([152, 92])
         + struct.pack("<I", 200_000)
@@ -299,7 +303,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             struct.pack("<I", 1_000_100), 0, 0, definition, 4, None
         )
         _, compressed_timestamp, message = _fit_data_record(
-            b"", 0, 0x85, definition, 0, last_timestamp
+            b"", 0, 0x85, (0, 21, [], []), 0, last_timestamp
         )
         self.assertGreater(compressed_timestamp, last_timestamp)
         self.assertEqual(message[1][253], compressed_timestamp)
