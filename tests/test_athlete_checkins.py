@@ -410,9 +410,9 @@ def _undo(manager, service, changes):
     unused = None
     undo = HistoryUndoService(
         manager,
-        ChangeHistoryService(manager, unused, checkin_service=service),
+        ChangeHistoryService(manager, unused, record_services={"checkin": service}),
         *(unused,) * 6,
-        checkin_service=service,
+        record_services={"checkin": service},
         profile_mutation_coordinator=threading.RLock(),
     )
     with manager.unit_of_work() as db:
