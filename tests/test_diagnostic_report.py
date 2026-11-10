@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import unittest
 from contextlib import closing, contextmanager
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -357,6 +358,22 @@ class DiagnosticReportServiceTests(unittest.TestCase):
 
         self.service.report()
 
+        self.assertEqual(self.manager.transactions, 1)
+
+    def test_log_files_are_read_before_the_read_snapshot(self):
+        self.service._deps = replace(
+            self.service._deps,
+            recent_logs=SimpleNamespace(
+                report_entries=lambda: (
+                    self.assertEqual(self.manager.transactions, 0)
+                    or [{"event": "safe"}]
+                )
+            ),
+        )
+
+        report = self.service.report()
+
+        self.assertEqual(report["logs"], [{"event": "safe"}])
         self.assertEqual(self.manager.transactions, 1)
 
 

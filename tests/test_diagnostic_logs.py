@@ -184,6 +184,38 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
         self.assertEqual(entries[0]["event"], "warn_50")
         self.assertEqual(entries[-1]["event"], "info")
 
+    def test_report_skips_surplus_info_lines_without_parsing_them(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "app.log"
+            old = log_path.with_name("app.log.1")
+            old.write_text(
+                "".join(
+                    '{"timestamp":"t","level":"INFO","event":"old"}\n'
+                    for _ in range(1000)
+                )
+                + '{"timestamp":"t","level":"ERROR","event":"kept"}\n',
+                encoding="utf-8",
+            )
+            log_path.write_text(
+                "".join(
+                    '{"timestamp":"t","level":"INFO","event":"new"}\n'
+                    for _ in range(300)
+                ),
+                encoding="utf-8",
+            )
+            service = RecentLogEntriesService(
+                log_path, _redactor(), lambda: "fixed-time"
+            )
+
+            with patch(
+                "backend.diagnostics.logs.json.loads", wraps=json.loads
+            ) as loads:
+                entries = service.report_entries()
+
+        self.assertEqual(loads.call_count, 101)
+        self.assertEqual([entry["event"] for entry in entries].count("new"), 100)
+        self.assertEqual(entries[0]["event"], "kept")
+
     def test_download_reads_all_ten_rotation_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             log_path = Path(directory) / "app.log"

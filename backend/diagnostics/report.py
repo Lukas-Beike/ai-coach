@@ -135,6 +135,8 @@ class DiagnosticReportService:
         deps = self._deps
         diagnostic_capture_entries = deps.diagnostic_capture.entries()
         diagnostic_capture_status = deps.diagnostic_capture.status()
+        # Reading the rotated log files must not hold the WAL snapshot open.
+        log_entries = deps.recent_logs.report_entries()
         # The report only reads, so it takes one WAL snapshot instead of the writer.
         with deps.database_manager.read_snapshot() as db:
             snapshot = deps.sync_state.latest_snapshot()
@@ -241,7 +243,7 @@ class DiagnosticReportService:
                 "profile_weekly_plan_removal": summarize_profile_weekly_plan_removal(
                     deps.key_values, db
                 ),
-                "logs": deps.recent_logs.report_entries(),
+                "logs": log_entries,
                 "debug_capture": {
                     **diagnostic_capture_status,
                     "entries": diagnostic_capture_entries,

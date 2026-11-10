@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -41,13 +42,31 @@ class RecentLogEntriesService:
 
         Routine INFO traffic must not push an overnight failure out of the
         report, so the two groups are limited separately across all rotated
-        files and returned in log order.
+        files and returned in log order. Files are read newest first, one at a
+        time, and INFO lines past the limit are skipped without parsing.
         """
-        entries = self._read_entries(self._paths())
-        info = [i for i, entry in enumerate(entries) if _level(entry) == "INFO"]
-        other = [i for i, entry in enumerate(entries) if _level(entry) != "INFO"]
-        keep = sorted({*other[-non_info_limit:], *info[-info_limit:]})
-        return self._redactor.sanitize_log_value([entries[i] for i in keep])
+        info: builtins.list[tuple[int, dict[str, Any]]] = []
+        other: builtins.list[tuple[int, dict[str, Any]]] = []
+        position = 0
+        for path in reversed(self._paths()):
+            if len(info) >= info_limit and len(other) >= non_info_limit:
+                break
+            if not path.is_file():
+                continue
+            lines, failure = self._read_lines(path)
+            if failure is not None and len(other) < non_info_limit:
+                other.append((position, failure))
+                position += 1
+            for line in reversed(lines):
+                is_info = _INFO_LINE_RE.match(line) is not None
+                group, limit = (
+                    (info, info_limit) if is_info else (other, non_info_limit)
+                )
+                if len(group) < limit:
+                    group.append((position, _parse_line(line)))
+                    position += 1
+        kept = sorted([*info, *other], key=lambda item: item[0], reverse=True)
+        return self._redactor.sanitize_log_value([entry for _, entry in kept])
 
     def download(self) -> bytes:
         """Return all current and rotated logs as sanitized JSON Lines."""
@@ -79,35 +98,38 @@ class RecentLogEntriesService:
             cleared = True
         return {"ok": True, "cleared": cleared}
 
+    def _read_lines(
+        self, path: Path
+    ) -> tuple[builtins.list[str], dict[str, Any] | None]:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            failure = {
+                "timestamp": self._utc_now(),
+                "level": "ERROR",
+                "event": "log_read_failed",
+                "message": str(exc),
+            }
+            return [], failure
+        return text.splitlines(), None
+
     def _read_entries(self, paths: Sequence[Path]) -> builtins.list[dict[str, Any]]:
         entries: builtins.list[dict[str, Any]] = []
         for path in paths:
             if not path.is_file():
                 continue
-            try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            except OSError as exc:
-                entries.append(
-                    {
-                        "timestamp": self._utc_now(),
-                        "level": "ERROR",
-                        "event": "log_read_failed",
-                        "message": str(exc),
-                    }
-                )
-                continue
-            for line in lines:
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    entry = {
-                        "level": "UNKNOWN",
-                        "event": "unparsed_log",
-                        "message": line,
-                    }
-                entries.append(entry)
+            lines, failure = self._read_lines(path)
+            if failure is not None:
+                entries.append(failure)
+            entries.extend(_parse_line(line) for line in lines)
         return entries
 
 
-def _level(entry: Any) -> str:
-    return str(entry.get("level", "")) if isinstance(entry, dict) else ""
+_INFO_LINE_RE = re.compile(r'\{(?:"timestamp":\s*"[^"]*",\s*)?"level":\s*"INFO"')
+
+
+def _parse_line(line: str) -> dict[str, Any]:
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return {"level": "UNKNOWN", "event": "unparsed_log", "message": line}

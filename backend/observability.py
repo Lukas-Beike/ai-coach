@@ -796,32 +796,37 @@ def diagnostic_capture_response(value: Any) -> dict[str, Any]:
     return {"shape": diagnostic_response_shape(value)}
 
 
+_SAFE_CODE_RE = re.compile(r"[a-z_]{1,80}")
+_SAFE_TYPE_RE = re.compile(r"[a-z0-9_.\[\]-]{1,160}")
+_SAFE_TYPE_FIELDS = (
+    "provider_error_type",
+    "provider_response_status",
+    "provider_incomplete_reason",
+)
+
+
+def _safe_code_attribute(exc: BaseException, name: str) -> str | None:
+    text = str(getattr(exc, name, "") or "").strip()
+    return text if text and _SAFE_CODE_RE.fullmatch(text) else None
+
+
 def safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     """Expose only classified technical exception metadata during user debugging."""
     status = getattr(exc, "status", None) or getattr(exc, "code", None)
     result: dict[str, Any] = {"type": type(exc).__name__}
     if isinstance(status, int) and not isinstance(status, bool):
         result["status"] = status
-    reason = str(getattr(exc, "reason", "") or "").strip()
-    if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
-        result["reason"] = reason
-    category = str(getattr(exc, "category", "") or "").strip()
-    if category and re.fullmatch(r"[a-z_]{1,80}", category):
-        result["category"] = category
-    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
-    if validation_reason and re.fullmatch(r"[a-z_]{1,80}", validation_reason):
-        result["validation_reason"] = validation_reason
+    for name in ("reason", "category", "validation_reason"):
+        code = _safe_code_attribute(exc, name)
+        if code:
+            result[name] = code
     provider_code = getattr(exc, "provider_error_code", None)
     if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
         result["provider_error_code"] = provider_code
-    for attribute, key in (
-        ("provider_error_type", "provider_error_type"),
-        ("provider_response_status", "provider_response_status"),
-        ("provider_incomplete_reason", "provider_incomplete_reason"),
-    ):
-        value = getattr(exc, attribute, None)
-        if isinstance(value, str) and re.fullmatch(r"[a-z0-9_.\[\]-]{1,160}", value):
-            result[key] = value
+    for name in _SAFE_TYPE_FIELDS:
+        value = getattr(exc, name, None)
+        if isinstance(value, str) and _SAFE_TYPE_RE.fullmatch(value):
+            result[name] = value
     return result
 
 
