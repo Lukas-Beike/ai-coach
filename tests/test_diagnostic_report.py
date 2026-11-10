@@ -208,6 +208,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "session_analysis",
                 "session_focus_backfill",
                 "profile_weekly_plan_removal",
+                "session_rebundle",
                 "logs",
                 "debug_capture",
                 "note",
@@ -331,7 +332,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # The stream backfill reads its state once (the read stops at the fake db).
         # The session focus backfill state and the weekly plan removal state are one more read each.
         # The Wahoo block reads the token record and the last sync time and error.
-        self.assertEqual(self.key_values.get.call_count, 18)
+        # The session rebundle state is one more read.
+        self.assertEqual(self.key_values.get.call_count, 19)
 
     def test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:

@@ -59,6 +59,7 @@ from backend.sync.profile_weekly_plan_removal import (
 from backend.sync.session_analysis_stage import summarize_session_analysis
 from backend.sync.session_focus_backfill import summarize_session_focus_backfill
 from backend.sync.session_metrics import summarize_session_metrics
+from backend.sync.session_rebundle import summarize_session_rebundle
 from backend.sync.state import SyncStateRepository
 
 LOGGER = logging.getLogger("intervals_coach")
@@ -331,6 +332,7 @@ class DiagnosticReportService:
                     "profile_weekly_plan_removal",
                     lambda: summarize_profile_weekly_plan_removal(key_values, db),
                 ),
+                "session_rebundle": summarize_session_rebundle(deps.key_values, db),
                 "logs": log_entries,
                 "debug_capture": {
                     **diagnostic_capture_status,

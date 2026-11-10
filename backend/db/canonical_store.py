@@ -12,7 +12,7 @@ import json
 import math
 import uuid
 from collections.abc import Collection, Mapping, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Final, NamedTuple
 
@@ -1966,6 +1966,47 @@ def linkable_activity_rows(db: Any, *, start: str, end: str) -> list[dict[str, A
             end,
         ),
     )
+
+
+def linkable_dates_with_providers(db: Any, providers: Sequence[str]) -> list[str]:
+    """Return the ISO local dates where every given provider has an active record
+    within the one-day link margin.
+
+    A device and a relayed copy can fall on neighbouring local dates (zone
+    fallback), so a date counts when each other provider has a record on it or a
+    neighbouring day. Only records session linking may bundle count: their
+    session is active or an alias and not athlete-confirmed.
+    """
+    wanted = set(providers)
+    rows = _fetch_all(
+        db,
+        "SELECT DISTINCT r.local_date AS local_date, r.provider AS provider "
+        "FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.state = ? AND s.state IN (?, ?) AND s.athlete_confirmed = 0 "
+        f"AND r.provider IN ({_placeholders(list(wanted))})",
+        (
+            ActivityRecordState.ACTIVE.value,
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.DUPLICATE.value,
+            *wanted,
+        ),
+    )
+    by_date: dict[date, set[str]] = {}
+    for row in rows:
+        try:
+            day = date.fromisoformat(str(row["local_date"])[:10])
+        except ValueError:
+            continue
+        by_date.setdefault(day, set()).add(str(row["provider"]))
+    margin = timedelta(days=1)
+    result = []
+    for day in sorted(by_date):
+        nearby = by_date[day] | by_date.get(day - margin, set())
+        nearby |= by_date.get(day + margin, set())
+        if wanted <= nearby:
+            result.append(day.isoformat())
+    return result
 
 
 def provider_activity_record_rows(
