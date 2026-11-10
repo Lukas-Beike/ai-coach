@@ -9,6 +9,7 @@ import dataclasses
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
@@ -21,7 +22,9 @@ from backend.config import load_config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
+from backend.http_api.auth import SessionAuthService
 from backend.http_api.credentials_put import CredentialsPutRoutes
+from backend.http_api.rate_limit import RateLimiter
 from backend.observability import Redactor, config_secret_values
 from backend.provider_credentials import (
     CREDENTIAL_KV_KEYS,
@@ -134,6 +137,35 @@ class ProviderCredentialTests(unittest.TestCase):
         self.service.update({"openai_api_key": None})
         self.assertEqual(self.holder["config"].openai_api_key, "env-openai-key")
         self.assertEqual(self.holder["config"].app_password, "runtime-password")
+
+    def _seed_capability_pauses(self) -> None:
+        for key in (
+            "garmin_capability_activities",
+            "garmin_capability_wellness_backfill_sleep",
+        ):
+            self.connection.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES (?, '{}', 't')", (key,)
+            )
+
+    def test_garmin_access_change_clears_every_capability_pause(self):
+        for values in (
+            {"garmin_personal_api_key": "synthetic-new-key-1"},
+            {"garmin_email": "new@example.test"},
+            {"garmin_personal_api_key": None},
+        ):
+            with self.subTest(values=values):
+                self._seed_capability_pauses()
+                self.service.update(values)
+                for key in (
+                    "garmin_capability_activities",
+                    "garmin_capability_wellness_backfill_sleep",
+                ):
+                    self.assertIsNone(self._stored_row(key))
+
+    def test_unrelated_credential_change_keeps_capability_pauses(self):
+        self._seed_capability_pauses()
+        self.service.update({"openai_api_key": "db-openai-key"})
+        self.assertIsNotNone(self._stored_row("garmin_capability_activities"))
 
     def test_empty_string_clears_like_null(self):
         self.service.update({"intervals_api_key": "db-intervals"})
@@ -333,23 +365,109 @@ class ProviderCredentialTests(unittest.TestCase):
         self.assertIs(export.CREDENTIAL_KV_KEYS, CREDENTIAL_KV_KEYS)
         self.assertIs(credentials_module.CREDENTIAL_KV_KEYS, CREDENTIAL_KV_KEYS)
 
-    def test_route_returns_status_only_and_delegates_to_service(self):
-        seen = {}
+    def route(self, body, *, auth=None):
+        seen: dict[str, object] = {}
 
         class FakeHandler:
+            client_address = ("127.0.0.1", 1)
+
             def read_json(self):
-                return {"openai_api_key": "route-secret-value"}
+                return body
 
             def send_json(self, status, payload):
                 seen["status"] = status
                 seen["payload"] = payload
 
-        route = CredentialsPutRoutes(self.service)
-        self.assertFalse(route.handle(FakeHandler(), "/api/settings/model"))
-        self.assertTrue(route.handle(FakeHandler(), "/api/settings/credentials"))
+        auth = auth or SessionAuthService(
+            object(),
+            threading.RLock(),
+            self.env_config,
+            True,
+            RateLimiter(),
+        )
+        route = CredentialsPutRoutes(self.service, lambda: auth)
+        return route, FakeHandler(), seen
+
+    def test_route_returns_status_only_and_delegates_to_service(self):
+        route, handler, seen = self.route({"openai_api_key": "route-secret-value"})
+        self.assertFalse(route.handle(handler, "/api/settings/model"))
+        self.assertTrue(route.handle(handler, "/api/settings/credentials"))
         self.assertEqual(seen["status"], 200)
         self.assertNotIn("route-secret-value", json.dumps(seen["payload"]))
         self.assertEqual(self.holder["config"].openai_api_key, "route-secret-value")
+
+    def test_protected_fields_need_the_app_password_and_change_nothing_without_it(self):
+        protected = (
+            {"openai_base_url": "https://attacker.example.test/v1"},
+            {"wahoo_client_id": "other-client"},
+            {"wahoo_client_secret": "other-secret"},
+            # Another field in the same submission does not change the rule.
+            {"openai_api_key": "mixed-key", "openai_base_url": "https://x.example/v1"},
+        )
+        for body in protected:
+            for password in (None, "", "wrong-password-123", 7):
+                with self.subTest(fields=sorted(body), password=password):
+                    submitted = dict(body)
+                    if password is not None:
+                        submitted["app_password"] = password
+                    route, handler, seen = self.route(submitted)
+                    with self.assertRaises(AppError) as caught:
+                        route.handle(handler, "/api/settings/credentials")
+                    self.assertEqual(caught.exception.status, 403)
+                    self.assertIn("App-Passwort", caught.exception.message)
+                    self.assertNotIn("payload", seen)
+                    self.assertIsNone(self._stored_row(PROVIDER_CREDENTIALS_KEY))
+                    self.assertEqual(self.holder["config"], self.env_config)
+
+    def test_protected_fields_apply_with_the_correct_app_password(self):
+        route, handler, seen = self.route(
+            {
+                "openai_base_url": "https://proxy.example.test/v1",
+                "wahoo_client_id": "client-1",
+                "app_password": ENV["APP_PASSWORD"],
+            }
+        )
+        self.assertTrue(route.handle(handler, "/api/settings/credentials"))
+        self.assertEqual(seen["status"], 200)
+        config = self.holder["config"]
+        self.assertEqual(config.openai_base_url, "https://proxy.example.test/v1")
+        self.assertEqual(config.wahoo_client_id, "client-1")
+        # The password is never stored with the credentials or echoed back.
+        self.assertNotIn(
+            ENV["APP_PASSWORD"], self._stored_row(PROVIDER_CREDENTIALS_KEY)
+        )
+        self.assertNotIn(ENV["APP_PASSWORD"], json.dumps(seen["payload"]))
+
+    def test_other_fields_and_clearing_need_no_password(self):
+        for body in (
+            {"openai_api_key": "plain-key", "intervals_athlete_id": "i7"},
+            {"intervals_api_key": "another-key"},
+            {"openai_base_url": None},
+            {"openai_base_url": "  "},
+            {"wahoo_client_secret": None},
+        ):
+            with self.subTest(body=body):
+                route, handler, seen = self.route(body)
+                self.assertTrue(route.handle(handler, "/api/settings/credentials"))
+                self.assertEqual(seen["status"], 200)
+        self.assertEqual(self.holder["config"].openai_api_key, "plain-key")
+        self.assertEqual(self.holder["config"].intervals_athlete_id, "i7")
+
+    def test_repeated_wrong_passwords_are_rate_limited(self):
+        auth = SessionAuthService(
+            object(), threading.RLock(), self.env_config, True, RateLimiter()
+        )
+        statuses = []
+        for _attempt in range(11):
+            route, handler, _seen = self.route(
+                {"openai_base_url": "https://x.example/v1", "app_password": "nope"},
+                auth=auth,
+            )
+            with self.assertRaises(AppError) as caught:
+                route.handle(handler, "/api/settings/credentials")
+            statuses.append(caught.exception.status)
+        self.assertEqual(statuses[:10], [403] * 10)
+        self.assertEqual(statuses[10], 429)
 
 
 if __name__ == "__main__":

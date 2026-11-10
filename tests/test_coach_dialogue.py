@@ -11,7 +11,12 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
-from support import isolated_server, reset_application_state
+from support import (
+    canonical_backfill_stopped,
+    isolated_server,
+    latest_tool_outputs,
+    reset_application_state,
+)
 
 from backend.activities.hr_cap import effective_caps
 from backend.coach import service as coach_service
@@ -20,6 +25,7 @@ from backend.coach import structured_tool_round
 from backend.coach.chat_turn import CoachChatTurnService
 from backend.coach.dialogue import validate_request
 from backend.coach.outcomes import unresolved_coach_steps
+from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.errors import AppError
 from backend.sync import queue as sync_queue
@@ -34,6 +40,9 @@ class DialogueHarness:
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         self.enterContext(isolated_server(server, root))
+        # A provider refresh starts the derived passes in a background thread;
+        # join it before the temporary data directory is removed.
+        self.enterContext(canonical_backfill_stopped(server))
         reset_application_state(server)
         fixed = patch.object(
             server.ATHLETE_CLOCK,
@@ -400,10 +409,42 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 "summary": summary,
                 "question": question,
                 "source_message_ids": list(range(1, 25)),
+                "origin_message_ids": [24],
                 "status": "needs_clarification",
                 "domain": None,
             },
         )
+
+    def test_clarification_chain_joins_a_retained_request_but_not_cited_old_ids(self):
+        prior = {
+            "summary": "Sync meinen Plan",
+            "question": "Welche Woche?",
+            "source_message_ids": [15],
+            "origin_message_ids": [15],
+            "status": "needs_clarification",
+            "domain": None,
+        }
+        context = {
+            "messages": [
+                {"id": 3, "role": "user", "content": "Altes Thema"},
+                {"id": 15, "role": "user", "content": "Sync meinen Plan"},
+                {"id": 16, "role": "assistant", "content": "Welche Woche?"},
+                {"id": 17, "role": "user", "content": "die nächste"},
+            ],
+            "current_user_message_id": 17,
+            "pending_request": prior,
+        }
+        server.COACH_LOCAL.clarification_service().save_question(
+            {
+                "source_message_ids": [3, 15, 17],
+                "summary": "Sync der nächsten Woche",
+                "question": "Alle Einheiten?",
+            },
+            context,
+        )
+        stored = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(stored["origin_message_ids"], [15, 17])
+        self.assertEqual(stored["source_message_ids"], [3, 15, 17])
 
     def test_clarification_service_rejects_unbound_message_ids_without_writing(self):
         context = {
@@ -629,7 +670,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             turn="profile-acceptance",
         )
         model.assert_not_called()
-        self.assertEqual(replay, result)
+        self.assertEqual(replay, compact_receipt(result))
         self.assertEqual(result["sync_job_ids"], [])
 
     def test_profile_patch_conflict_is_atomic_and_can_be_repaired(self):
@@ -889,7 +930,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 "SELECT payload FROM sync_jobs WHERE id=?", (result["sync_job_ids"][0],)
             ).fetchone()
         queued = json.loads(job["payload"])["entries"][0]["expected_payload_hash"]
-        self.assertNotEqual(queued, before["expected_payload_hash"])
+        # Resolving rewrites only the sync status, so the content hash stays.
+        self.assertEqual(queued, before["expected_payload_hash"])
         self.assertEqual(
             queued, self.state()["planned_units"][0]["expected_payload_hash"]
         )
@@ -978,6 +1020,85 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 server.SYNC_JOB_QUEUE.service().state(job["id"])["status"], "queued"
             )
             self.assertEqual(result["sync_job_ids"], [job["id"]])
+
+    def retry_failed_job(self, provider, kind, message):
+        """One Coach turn retrying a failed job; returns the gate output or None."""
+        push = kind == "plan_push"
+        payload = {"reason": "Synthetic retry", "days": 7}
+        if push:
+            server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+                [self.workout()]
+            )
+            payload = {
+                "reason": "Synthetic retry",
+                "entries": server.SYNC_COMMANDS.authority().pending_plan_push_entries(),
+            }
+        job = server.SYNC_JOB_QUEUE.service().enqueue(
+            provider, kind, payload, requested_by="coach"
+        )
+        with server.database_manager().unit_of_work() as db:
+            db.execute("UPDATE sync_jobs SET status='failed' WHERE id=?", (job["id"],))
+        seen = []
+
+        def retry(_):
+            return self.call(
+                "resolve_training_sync_conflict",
+                {"job_id": job["id"]},
+                [
+                    f"sync_job:{job['id']}",
+                    f"{provider}_{'sync' if push else 'refresh'}",
+                ],
+                target=provider,
+                remote_write=push,
+            )
+
+        def answer(payload):
+            seen.append(json.loads(latest_tool_outputs(payload)[0]["output"]))
+            return {"output_text": "Fertig."}
+
+        result, _ = self.turn(message, [retry, answer])
+        status = server.SYNC_JOB_QUEUE.service().state(job["id"])["status"]
+        return result, seen[0], status
+
+    def test_a_garmin_or_wahoo_read_retry_needs_no_sync_wording(self):
+        for provider in ("garmin", "wahoo"):
+            with self.subTest(provider=provider):
+                result, output, status = self.retry_failed_job(
+                    provider,
+                    "refresh",
+                    "Der letzte Abruf ist fehlgeschlagen, nochmal bitte.",
+                )
+                self.assertNotEqual("not_performed", output.get("status"), output)
+                self.assertEqual("queued", status)
+                self.assertEqual(1, len(result["sync_job_ids"]))
+
+    def test_a_garmin_or_wahoo_plan_push_retry_needs_that_provider_named(self):
+        for provider, name, other in (
+            ("garmin", "Garmin", "Wahoo"),
+            ("wahoo", "Wahoo", "Garmin"),
+        ):
+            with self.subTest(provider=provider):
+                _, output, status = self.retry_failed_job(
+                    provider,
+                    "plan_push",
+                    "Der Versand ist fehlgeschlagen, nochmal bitte.",
+                )
+                self.assertEqual("not_performed", output["status"])
+                self.assertEqual(
+                    f"remote_{provider}_not_requested", output["gate_reason"]
+                )
+                self.assertIn(name, output["message"])
+                self.assertNotIn("Intervals", output["message"])
+                self.assertNotIn(other, output["message"])
+                self.assertEqual("failed", status)
+                result, output, status = self.retry_failed_job(
+                    provider,
+                    "plan_push",
+                    f"Sende die Einheiten nochmal an {name}.",
+                )
+                self.assertNotEqual("not_performed", output.get("status"), output)
+                self.assertEqual("queued", status)
+                self.assertEqual(1, len(result["sync_job_ids"]))
 
     def test_every_tool_exposes_nested_object_fields_and_rejects_advice_writes(self):
         def inspect(schema, name):
@@ -1440,7 +1561,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         ]
         result, _ = self.turn("Die Beine sind heute schwer", steps, turn="same-turn")
         replay, model = self.turn("Die Beine sind heute schwer", [], turn="same-turn")
-        self.assertEqual(result, replay)
+        self.assertEqual(compact_receipt(result), replay)
         model.assert_not_called()
 
     def test_automatic_advice_cannot_write(self):
@@ -1524,7 +1645,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             "Samstag 100 km flach, Montag Recoverylauf", [], turn="scope-repaired"
         )
         model.assert_not_called()
-        self.assertEqual(replay, result)
+        self.assertEqual(replay, compact_receipt(result))
         self.assertEqual(len(self.state()["planned_units"]), 2)
 
     def test_successful_plan_replacement_resolves_invalid_patch_for_same_request(self):
@@ -1548,7 +1669,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             return call
 
         def replace_plan(model_payload):
-            repair_output = json.loads(model_payload["input"][0]["output"])
+            repair_output = json.loads(latest_tool_outputs(model_payload)[0]["output"])
             self.assertEqual(repair_output["validation_reason"], "request_provenance")
             return self.call(
                 "replace_training_plan",
@@ -1834,7 +1955,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         seen = []
 
         def answer(payload):
-            seen.append(json.loads(payload["input"][0]["output"]))
+            seen.append(json.loads(latest_tool_outputs(payload)[0]["output"]))
             return {"output_text": "Soll ich den Giro wirklich löschen?"}
 
         result, _ = self.turn(
@@ -1933,11 +2054,17 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 503, "Synthetic model unavailable", reason="provider_unavailable"
             )
 
-        with patch.object(
-            sync_queue.SyncJobQueueService,
-            "enqueue",
-            wraps=server.SYNC_JOB_QUEUE.service().enqueue,
-        ) as enqueue:
+        # The outage outlasts the transient retries (three attempts in all).
+        with (
+            patch.object(
+                sync_queue.SyncJobQueueService,
+                "enqueue",
+                wraps=server.SYNC_JOB_QUEUE.service().enqueue,
+            ) as enqueue,
+            patch(
+                "backend.coach.response_retry.CoachResponseRetryPolicy.wait"
+            ) as retry_wait,
+        ):
             result, _ = self.turn(
                 "Sync zu intervals.icu durchführen",
                 [
@@ -1950,6 +2077,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                         sync_scope="all_pending",
                     ),
                     broken,
+                    broken,
+                    broken,
                 ],
                 turn="sync-followup-failure",
             )
@@ -1957,6 +2086,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 "Sync zu intervals.icu durchführen", [], turn="sync-followup-failure"
             )
         enqueue.assert_called_once()
+        self.assertEqual(retry_wait.call_count, 2)
         model.assert_not_called()
         self.assertEqual(
             replay["command_receipts"][0]["result"]["status"], "approval_required"
@@ -2270,7 +2400,8 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         # is forced to a final answer without them.
         self.assertEqual(model.call_args_list[1].args[0]["tool_choice"], "auto")
         self.assertEqual(
-            model.call_args_list[1].args[0]["input"][0]["type"], "function_call_output"
+            latest_tool_outputs(model.call_args_list[1].args[0])[0]["type"],
+            "function_call_output",
         )
         self.assertEqual(
             model.call_args_list[0].args[0]["model"],
@@ -2299,8 +2430,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         followup = model.call_args_list[2].args[0]
         self.assertEqual(followup["tool_choice"], "none")
         self.assertIn("Tool step limit reached", followup["instructions"])
-        self.assertEqual(followup["input"][0]["call_id"], "call-after-limit")
-        self.assertIn("tool_step_limit_reached", followup["input"][0]["output"])
+        refused = latest_tool_outputs(followup)[0]
+        self.assertEqual(refused["call_id"], "call-after-limit")
+        self.assertIn("tool_step_limit_reached", refused["output"])
         self.assertEqual(self.meal_count(), 0)
         self.assertTrue(result["tool_budget_exhausted"])
         self.assertIn("Schrittlimit", result["message"]["content"])
@@ -2387,7 +2519,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(result["command_receipts"][0]["result"]["ok"])
         replay, model = self.turn("Heute müde", [], turn="summary-failure")
         model.assert_not_called()
-        self.assertEqual(replay, result)
+        self.assertEqual(replay, compact_receipt(result))
 
     def test_cancel_before_tools_has_no_local_effect(self):
         import threading

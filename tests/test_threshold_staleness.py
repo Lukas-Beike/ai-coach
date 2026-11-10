@@ -95,7 +95,7 @@ class AssessTests(unittest.TestCase):
         assert warning is not None
         self.assertEqual(
             [(item["label"], item["reason"]) for item in warning["items"]],
-            [("LTHR Laufen", "expired")],
+            [("Schwellenpuls (LSHF) Laufen", "expired")],
         )
 
     def test_sdk_failure_lists_fresh_garmin_values(self) -> None:
@@ -181,7 +181,7 @@ class ServiceTests(unittest.TestCase):
         assert warning is not None
         self.assertEqual(
             [(item["label"], item["reason"]) for item in warning["items"]],
-            [("FTP Rad", "stale"), ("LTHR Laufen", "expired")],
+            [("FTP Rad", "stale"), ("Schwellenpuls (LSHF) Laufen", "expired")],
         )
 
     def test_sdk_failure_marks_garmin_values(self) -> None:

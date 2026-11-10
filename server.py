@@ -26,10 +26,7 @@ from backend.athlete.checkins import (
     CHECKIN_TEXT_LIMITS,
 )
 from backend.athlete.clock import AthleteLocalClock
-from backend.athlete.profile import (
-    DEFAULT_PROFILE,
-    normalize_profile,
-)
+from backend.athlete.profile import DEFAULT_PROFILE
 from backend.athlete.sessions import AthleteSessionService
 from backend.backup.assembly import (
     BackupAssembly,
@@ -247,7 +244,6 @@ from backend.performance.morning_battery_service import (
 from backend.performance.source_policy import preferences_from_profile
 from backend.performance.threshold_staleness import ThresholdStalenessService
 from backend.planning import adaptive as planning_adaptive
-from backend.planning import competitions as planning_competitions
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning import training_plans as planning_training_plans
@@ -275,6 +271,7 @@ from backend.planning.plan_guard_service import (
 )
 from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.revision import PlanningRevisionService
+from backend.planning.run_hr_cap import profile_run_caps
 from backend.planning.run_lthr import RunLthr
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -293,7 +290,14 @@ from backend.privacy import (
     PrivacyPlanningSources,
     PrivacyStateDependencies,
 )
-from backend.provider_credentials import GARMIN_SOURCE_DB, ProviderCredentialService
+from backend.provider_credentials import (
+    GARMIN_SOURCE_DB,
+    GARMIN_TOKENS_KEY,
+    GARMIN_TOKENSTORE_STATE_KEY,
+    PROVIDER_CREDENTIALS_KEY,
+    WAHOO_TOKENS_KEY,
+    ProviderCredentialService,
+)
 from backend.providers import activity_weather as activity_weather_provider
 from backend.providers import air_quality as air_quality_provider
 from backend.providers import audio as audio_provider
@@ -306,6 +310,7 @@ from backend.providers.connection_check_probes import (
     build_probes as build_connection_probes,
 )
 from backend.providers.connection_checks import ProviderConnectionChecks
+from backend.providers.descriptors import GARMIN_ID, WAHOO_ID
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
     ModelBackgroundPolicy,
@@ -315,6 +320,7 @@ from backend.providers.model_assembly import (
     ModelTransportAssembly,
     ModelTransportClock,
 )
+from backend.providers.observed_opener import Opener, observed_opener
 from backend.providers.openai_error_classifier import OpenAIErrorClassifier
 from backend.providers.transport_assembly import (
     IntervalsTransportSettings,
@@ -386,6 +392,7 @@ from backend.sync.gates import (
     GARMIN_RESYNC_GATE,
     INTERVALS_RESYNC_GATE,
     WAHOO_RESYNC_GATE,
+    resetting_providers,
 )
 from backend.sync.library import workout_library_sync_running
 from backend.sync.library_assembly import (
@@ -433,6 +440,7 @@ from backend.sync.queue_assembly import (
     SyncQueuePolicy,
     SyncQueueWorker,
 )
+from backend.sync.retry_hold import ProviderRetryHold
 from backend.sync.scheduler_assembly import (
     DailySyncLoopSettings,
     SyncScheduleControls,
@@ -447,6 +455,7 @@ from backend.sync.selected_assembly import (
     SelectedWorkoutSyncAssembly,
 )
 from backend.sync.session_focus_backfill import SessionFocusBackfill
+from backend.sync.session_rebundle import SessionRebundle
 from backend.sync.state import SyncStateRepository
 from backend.sync.wahoo_connection import WahooSecretRegistry
 from backend.sync.wahoo_connection_assembly import (
@@ -484,7 +493,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -511,12 +520,21 @@ CONFIG_GENERATION = 0
 LOGGER = logging.getLogger("intervals_coach")
 GARMIN_SECRET_REGISTRY = GarminSecretRegistry()
 WAHOO_SECRET_REGISTRY = WahooSecretRegistry()
+
+
+def _nutrition_secret_values() -> tuple[str, ...]:
+    # Logging starts before NUTRITION_ASSEMBLY exists.
+    assembly = globals().get("NUTRITION_ASSEMBLY")
+    return () if assembly is None else assembly.secret_values()
+
+
 # Environment secrets stay redacted while a stored credential overrides them.
 REDACTOR = observability.Redactor(
     lambda: CONFIG,
     extra_secrets=lambda: (
         *GARMIN_SECRET_REGISTRY.values(),
         *WAHOO_SECRET_REGISTRY.values(),
+        *_nutrition_secret_values(),
         *observability.config_secret_values(ENV_CONFIG),
     ),
 )
@@ -709,15 +727,11 @@ ATHLETE_DATA = AthleteDataAssembly(
             key_values=KEY_VALUE_REPOSITORY,
             activity_rows=lambda: CANONICAL_READ,
             table_serving=lambda: CANONICAL_READ,
-            competition=COMPETITION_REPOSITORY,
         ),
         runtime=AthleteRuntime(
             utc_now=runtime_clock.utc_now,
             local_date=lambda: ATHLETE_CLOCK.now().date(),
             event_buffer=runtime_events.STATE_EVENT_BUFFER,
-            normalize_profile=normalize_profile,
-            normalize_competition=planning_competitions.normalize_competition,
-            uuid_factory=uuid.uuid4,
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
             load_inputs_changed=lambda: start_canonical_backfill(),
             thresholds_changed=lambda: METRIC_EXPORT_RUNNER.request(),
@@ -813,6 +827,7 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
                 ATHLETE_DATA.profile().get_from_db(db)
             ),
             timezone=lambda: str(ATHLETE_DATA.profile().get().get("timezone") or "UTC"),
+            run_caps=lambda: profile_run_caps(ATHLETE_DATA.profile().get()),
         ),
         runtime=PlanningRuntime(
             sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
@@ -843,6 +858,7 @@ HISTORY = HistoryAssembly(
             session_corrections=ATHLETE_DATA.session_corrections,
             # Defined further down; resolved only when a history service is built.
             nutrition_diary=lambda: NUTRITION_ASSEMBLY.diary_service(),
+            checkin_service=ATHLETE_DATA.checkin,
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,
@@ -860,6 +876,10 @@ def suspend_diagnostic_flushes() -> AbstractContextManager[None]:
 
 def start_canonical_backfill() -> None:
     return CANONICAL_BACKFILL.worker.start()
+
+
+def cancel_running_coach_turns() -> None:
+    return COACH_CONVERSATION.reset_service().cancel_running_turns()
 
 
 PRIVACY_ASSEMBLY = PrivacyAssembly(
@@ -890,6 +910,8 @@ PRIVACY_ASSEMBLY = PrivacyAssembly(
             diagnostics_suspended=suspend_diagnostic_flushes,
             refresh_credentials=lambda: refresh_runtime_config(),
             cancel_garmin_login=lambda: GARMIN_LOGIN.cancel(),
+            disconnect_wahoo=lambda: disconnect_wahoo_grant(),
+            cancel_coach_turns=cancel_running_coach_turns,
         ),
         archive=PrivacyArchiveSettings(
             data_dir=lambda: DATA_DIR,
@@ -939,6 +961,7 @@ BACKUP_ASSEMBLY = BackupAssembly(
             diagnostics_suspended=suspend_diagnostic_flushes,
             canonical_backfill_start=start_canonical_backfill,
             refresh_credentials=lambda: refresh_runtime_config(),
+            cancel_coach_turns=cancel_running_coach_turns,
         ),
     )
 )
@@ -1010,8 +1033,8 @@ def refresh_runtime_config() -> app_config.Config:
     return PROVIDER_CREDENTIAL_SERVICE.refresh()
 
 
-# Each flush rewrites the whole capture, so captures are merged on a timer and
-# written as background work that yields to Coach and athlete writes.
+# Each flush rewrites the whole capture (at most 2 MiB), so captures are merged
+# on a timer and written as background work that yields to Coach and athlete writes.
 DIAGNOSTIC_CAPTURE_FLUSH_DELAY_SECONDS = 30.0
 DIAGNOSTIC_CAPTURE = observability.DiagnosticCapture(
     lambda key: key_value_service().get(key),
@@ -1055,6 +1078,9 @@ GARMIN_LOGIN: GarminLoginService = GarminLoginService(
     ),
     tokens=GARMIN_TOKENS,
     registry=GARMIN_SECRET_REGISTRY,
+    on_connected=lambda: SYNC_SCHEDULERS.backfill_resumer().resume_provider(
+        GARMIN_ID, requested_by="connection"
+    ),
 )
 GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
     dependencies=GarminAssembly.Inputs(
@@ -1129,6 +1155,7 @@ SYNC_JOB_QUEUE = SyncJobQueueAssembly(
             retry_max_seconds=SYNC_JOB_RETRY_MAX_SECONDS,
             registry=DEFAULT_PROVIDER_REGISTRY,
             foreground_busy=_coach_foreground_busy,
+            held_providers=resetting_providers,
         ),
     )
 )
@@ -1196,8 +1223,29 @@ WAHOO_CONNECTION = WahooConnectionAssembly(
         key_values=KEY_VALUE_REPOSITORY,
         utc_now=runtime_clock.utc_now,
         secret_registry=WAHOO_SECRET_REGISTRY,
+        on_connected=lambda: SYNC_SCHEDULERS.backfill_resumer().resume_provider(
+            WAHOO_ID, requested_by="connection"
+        ),
     )
 )
+
+
+def observed_provider_opener(service: str, *, include_path: bool = True) -> Opener:
+    """Observe a raw provider request in the log and the diagnostic capture."""
+    return observed_opener(
+        service,
+        logger=LOGGER,
+        diagnostic_capture=DIAGNOSTIC_CAPTURE,
+        operation_context=sync_observation.operation_context,
+        include_path=include_path,
+    )
+
+
+def disconnect_wahoo_grant() -> dict[str, object]:
+    """Revoke the Wahoo grant best effort and drop its tokens (privacy purge)."""
+    return WAHOO_CONNECTION.service().disconnect()
+
+
 # The thresholds every outbound export sends (Intervals.icu metrics, Wahoo plan
 # headers): local zones, then Garmin, then Wahoo, current on the athlete's today.
 EXPORT_THRESHOLDS = export_thresholds_reader(
@@ -1225,6 +1273,7 @@ WAHOO_SYNC = WahooSyncAssembly(
         resync_gate=WAHOO_RESYNC_GATE,
         export_thresholds=EXPORT_THRESHOLDS,
         history_earliest_date=SYNC_EARLIEST_DATE,
+        fit_opener=lambda: observed_provider_opener(WAHOO_ID, include_path=False),
     )
 )
 NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
@@ -1245,6 +1294,7 @@ NUTRITION_ASSEMBLY: NutritionAssembly = NutritionAssembly(
                 openai_path=OPENAI_RESPONSES_PATH,
             ),
             athlete_sex=lambda: ATHLETE_PROFILE_SERVICE.get().get("sex", ""),
+            observed_opener=observed_provider_opener,
         ),
     )
 )
@@ -1548,6 +1598,13 @@ COACH_PROPOSALS = CoachProposalAssembly(
     )
 )
 
+# Derived passes (local load, canonical backfill, Wahoo metric export) after any
+# provider read: a queued job, a Coach request that waits and a full resync.
+DERIVED_PASS_HOOK = chained_after_job(
+    refresh_after_job(lambda: start_canonical_backfill()),
+    lambda job: METRIC_EXPORT_RUNNER.after_job(job),
+)
+
 PROVIDER_RESYNC = ProviderResyncAssembly(
     dependencies=ProviderResyncAssembly.Inputs(
         competition=CompetitionSyncOwners(
@@ -1572,6 +1629,7 @@ PROVIDER_RESYNC = ProviderResyncAssembly(
             uuid_factory=lambda: uuid.uuid4().hex,
             monotonic=time.perf_counter,
             operation_observer=PROVIDER_SYNC.operation_observer,
+            after_resync=DERIVED_PASS_HOOK,
         ),
     ),
     provider_runtime=provider_runtime,
@@ -1618,10 +1676,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     dependencies=SYNC_JOB_DEPENDENCIES,
     provider_runtime=provider_runtime,
-    after_job=chained_after_job(
-        refresh_after_job(lambda: start_canonical_backfill()),
-        lambda job: METRIC_EXPORT_RUNNER.after_job(job),
-    ),
+    after_job=DERIVED_PASS_HOOK,
 )
 
 
@@ -1634,7 +1689,22 @@ SYNC_JOB_WORKER_ASSEMBLY = SyncJobWorkerAssembly(
 )
 
 
-SYNC_SCHEDULERS = SyncSchedulerAssembly(
+# The daily schedule follows the history's next_retry_at; an auth failure waits
+# for the athlete (manual refresh, restart or changed credentials).
+PROVIDER_RETRY_HOLD = ProviderRetryHold(
+    lambda: database_manager(),
+    lambda: datetime.now(UTC),
+    credential_keys={
+        GARMIN_ID: (
+            PROVIDER_CREDENTIALS_KEY,
+            GARMIN_TOKENS_KEY,
+            GARMIN_TOKENSTORE_STATE_KEY,
+        ),
+        WAHOO_ID: (PROVIDER_CREDENTIALS_KEY, WAHOO_TOKENS_KEY),
+    },
+)
+
+SYNC_SCHEDULERS: SyncSchedulerAssembly = SyncSchedulerAssembly(
     dependencies=SyncSchedulerAssembly.Inputs(
         owners=SyncScheduleOwners(
             profile_service=ATHLETE_DATA.profile,
@@ -1644,6 +1714,7 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
         ),
         persistence=SyncSchedulePersistence(
             sync_state_repository=sync_state_repository,
+            retry_held=PROVIDER_RETRY_HOLD.held,
         ),
         controls=SyncScheduleControls(
             maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
@@ -1659,6 +1730,7 @@ SYNC_SCHEDULERS = SyncSchedulerAssembly(
         daily_loop=DailySyncLoopSettings(
             morning_body_battery_service=morning_body_battery_service,
             logger=LOGGER,
+            database_manager=database_manager,
         ),
     ),
     provider_runtime=provider_runtime,
@@ -1674,6 +1746,7 @@ SYNC_COMMANDS = SyncCommandAssembly(
         planning_revision=PLANNING_REVISION_SERVICE,
         utc_now=runtime_clock.utc_now,
         training_change_limit=coach_limits.COACH_TRAINING_CHANGE_LIMIT,
+        after_refresh=DERIVED_PASS_HOOK,
     ),
     illness_pause=IllnessPauseDependencies(
         config=lambda: CONFIG,
@@ -2131,6 +2204,13 @@ PROFILE_WEEKLY_PLAN_REMOVAL = ProfileWeeklyPlanRemoval(
     key_values=KEY_VALUE_REPOSITORY, clock=runtime_clock.utc_now
 )
 
+SESSION_REBUNDLE = SessionRebundle(
+    key_values=KEY_VALUE_REPOSITORY,
+    clock=runtime_clock.utc_now,
+    zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
+    database_manager=database_manager,
+)
+
 CANONICAL_BACKFILL = build_canonical_backfill(
     database=database_manager,
     key_values=KEY_VALUE_REPOSITORY,
@@ -2149,7 +2229,11 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     # The heart-rate branch's TRIMP constants follow the profile sex (M6 v3).
     athlete_sex=lambda db: ATHLETE_DATA.profile().get_from_db(db).get("sex"),
     # The one-time focus backfill of future units (#1849) runs after all stages.
-    extra_followups=(PROFILE_WEEKLY_PLAN_REMOVAL, SESSION_FOCUS_BACKFILL),
+    extra_followups=(
+        PROFILE_WEEKLY_PLAN_REMOVAL,
+        SESSION_REBUNDLE,
+        SESSION_FOCUS_BACKFILL,
+    ),
     # Weather during outdoor sessions (#1868); only 2-decimal coordinates leave.
     activity_weather_fetch=lambda *position: (
         activity_weather_provider.ActivityWeatherClient(
@@ -2283,8 +2367,6 @@ HTTP_API = HttpApiAssembly(
                     proposal_confirmation_service=COACH_PROPOSALS.confirmation_service,
                     proposal_execution_service=COACH_PROPOSALS.execution_service,
                     reset_service=COACH_CONVERSATION.reset_service,
-                    provision_service=lambda: COACH_CONVERSATION.provision_service(),
-                    planning_command_service=COACH_TURNS.planning_command_service,
                 ),
                 stream=HttpCoachStreamSettings(
                     max_chat_request_bytes=coach_attachments.MAX_REQUEST_BYTES,
@@ -2319,7 +2401,6 @@ HTTP_API = HttpApiAssembly(
                     )
                 ),
                 checkin=ATHLETE_DATA.checkin,
-                context_service=ATHLETE_DATA.context,
                 clock=ATHLETE_CLOCK,
                 local_today=lambda: ATHLETE_CLOCK.now().date(),
                 state_event_buffer=runtime_events.STATE_EVENT_BUFFER,
@@ -2430,6 +2511,7 @@ def main() -> None:
     if sys.platform != "win32":
         faulthandler.register(signal.SIGUSR1, all_threads=True)
     try:
+        WORKOUT_LIBRARY_SYNC.sync_state_service().reset_interrupted()
         SYNC_JOB_QUEUE.service().resume_interrupted()
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
             COACH_BACKGROUND_JOBS.turn_failure_service()

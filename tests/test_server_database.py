@@ -636,7 +636,7 @@ class ServerDatabaseTests(ServerTestCase):
             adjustments = self.archive_lines(archive, "plan_adjustments.jsonl")
             export_text = b"".join(archive.read(name) for name in names).decode("utf-8")
         self.assertTrue(
-            any(item.get("name") == "Archived template" for item in library)
+            any(item["payload"].get("name") == "Archived template" for item in library)
         )
         self.assertEqual(garmin["source"], "Garmin")
         self.assertEqual(weather["query"], "Berlin")
@@ -718,7 +718,7 @@ class ServerDatabaseTests(ServerTestCase):
                 names = set(archive.namelist())
                 manifest = json.loads(archive.read("manifest.json"))
                 self.assertEqual(manifest["format"], "intervals-coach-privacy-export")
-                self.assertEqual(manifest["format_version"], 16)
+                self.assertEqual(manifest["format_version"], 17)
                 self.assertEqual(manifest["status"], "complete")
                 self.assertIn("snapshots.jsonl", names)
                 self.assertIn("remote_links.jsonl", names)
@@ -760,7 +760,9 @@ class ServerDatabaseTests(ServerTestCase):
                     json.loads(line)
                     for line in archive.read("snapshots.jsonl").splitlines()
                 ]
-                self.assertTrue(any(item.get("export-test") for item in snapshots))
+                self.assertTrue(
+                    any(item["payload"].get("export-test") for item in snapshots)
+                )
         finally:
             temporary.unlink(missing_ok=True)
 

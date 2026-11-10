@@ -24,7 +24,7 @@ Only the athlete's typed text, the directly preceding assistant text and the
 original request of a retried pending request are ever read here. Tool output,
 attachments, provider data and model summaries must not be passed in. Inputs
 are plain values and dependencies are injected; the module imports nothing
-from ``server.py`` or other backend packages.
+from ``server.py`` or other backend packages except the stdlib-only vocabulary.
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId
+
 PLANNING = "planning"
 PROFILE = "profile"
 COMPETITION = "competition"
@@ -44,13 +46,27 @@ NUTRITION = "nutrition"
 UNDO = "undo"
 REMOTE_INTERVALS = "remote_intervals"
 REMOTE_GARMIN = "remote_garmin"
-REMOTE_DOMAINS = frozenset({REMOTE_INTERVALS, REMOTE_GARMIN})
+REMOTE_WAHOO = "remote_wahoo"
+REMOTE_DOMAINS = frozenset({REMOTE_INTERVALS, REMOTE_GARMIN, REMOTE_WAHOO})
 
 DOMAINS = frozenset(
     {PLANNING, PROFILE, COMPETITION, CHECKIN, NUTRITION, UNDO, *REMOTE_DOMAINS}
 )
 # The model classifier may never grant a remote write.
 CLASSIFIER_DOMAINS = DOMAINS - REMOTE_DOMAINS
+
+# Each remote domain denies with its own reason, so logs and receipts name the
+# provider the call targeted.
+REMOTE_INTERVALS_DENIAL = "remote_not_requested"
+REMOTE_GARMIN_DENIAL = "remote_garmin_not_requested"
+REMOTE_WAHOO_DENIAL = "remote_wahoo_not_requested"
+# The providers whose job retry is judged by the job, not as an Intervals.icu write.
+_RETRY_PROVIDERS = frozenset(
+    provider.value for provider in ProviderId if provider is not ProviderId.INTERVALS
+)
+REMOTE_DENIALS = frozenset(
+    {REMOTE_INTERVALS_DENIAL, REMOTE_GARMIN_DENIAL, REMOTE_WAHOO_DENIAL}
+)
 
 DELETE = "delete"
 BULK = "bulk"
@@ -97,7 +113,8 @@ TOOL_DOMAIN: dict[str, str] = {
     "log_nutrition_template": NUTRITION,
     "save_nutrition_product": NUTRITION,
     "undo_training_change": UNDO,
-    # Every tool that writes to Intervals.icu (or resolves a sync conflict).
+    # Every tool that writes to Intervals.icu (or resolves a sync conflict). A
+    # retry of a Garmin or Wahoo job is classified by that job (_check_job_retry).
     "start_intervals_plan_sync": REMOTE_INTERVALS,
     "sync_competitions": REMOTE_INTERVALS,
     "sync_nutrition": REMOTE_INTERVALS,
@@ -172,11 +189,12 @@ def _words(text: str) -> list[str]:
 
 
 # Remote sync wording in normalized form; defense in depth for remote writes
-# only. A leading "^" anchors the stem at a word start.
-_REMOTE_STEMS = _words(
-    "intervals,kalender,sync,synchronisier,abgleich,konflikt,hochlad,upload,"
-    "duplikat,dublette,doppelt,calendar,resync,reparier"
-)
+# only. A sync verb or the provider name asks for the sync on its own; planning
+# words such as "Kalender", "doppelt" or "Konflikt" never do ("Trag den Lauf in
+# den Kalender ein" asks for no write to Intervals.icu). A leading "^" anchors a
+# stem at a word start.
+_SYNC_STEMS = _words("intervals,sync,synchronisier,abgleich,hochlad,upload,resync")
+_REMOTE_STEMS = [*_SYNC_STEMS, "reparier"]
 
 
 def _loose(normalized: str) -> str:
@@ -201,11 +219,9 @@ def _mentions_remote(text: str) -> bool:
     return bool(_REMOTE_PATTERN.search(_loose(normalize(text))))
 
 
-# What a repair sync leaves out ("..., ohne doppelte Einträge") is no sync target.
-_REPAIR_TOPICS = frozenset(_words("doppelt,duplikat,dublette,konflikt,reparier"))
-_SYNC_TARGET_PATTERN = _compile(
-    stem for stem in _REMOTE_STEMS if stem not in _REPAIR_TOPICS
-)
+# What a repair leaves out ("..., ohne doppelte Einträge") is no sync target, but
+# the calendar a sync writes to is.
+_SYNC_TARGET_PATTERN = _compile([*_SYNC_STEMS, "kalender", "calendar"])
 # An "ohne"/"without" phrase runs to the next comma, semicolon or colon.
 _WITHOUT = re.compile(r"(?<![a-z])(?:ohne|without)(?![a-z])([^,;:]*)")
 
@@ -272,31 +288,32 @@ def remote_requested(text: str) -> bool:
         if any(
             _mentions_remote(part)
             and not _negates(part)
-            and not _names_garmin_only(part)
+            and not _names_other_provider_only(part)
             for part in _CONTRAST.split(sentence)
         ):
             return True
     return False
 
 
-# Garmin is named as the provider or as the athlete's watch ("auf meine Uhr");
-# a bare "Uhr" ("um 7 Uhr") names no target.
-_GARMIN_TARGET = re.compile(
-    r"(?<![a-z])(?:garmin|watch|(?:meine|die|der|auf|an|zur)\s+uhr)(?![a-z])"
+# One group per provider, named by its id. Garmin is named as the provider or
+# as the athlete's watch ("auf meine Uhr"); a bare "Uhr" ("um 7 Uhr") names no
+# target.
+_PROVIDER_TARGETS = re.compile(
+    r"(?<![a-z])(?:"
+    r"(?P<garmin>garmin|watch|(?:meine|die|der|auf|an|zur)\s+uhr)|"
+    r"(?P<wahoo>wahoo))(?![a-z])"
 )
 # Verbs anchored at a word start, so "Beispiel" or "Entfernung" never count;
 # "lade ... hoch" and "pack ... drauf" are matched by their first part.
-_GARMIN_PUSH_VERBS = _compile(
+_PUSH_VERBS = _compile(
     "^" + stem
     for stem in _words(
         "sync,synchronisier,schick,send,übertrag,spiel,push,lad,hochlad,upload,pack"
     )
 )
-_GARMIN_REMOVE_VERBS = _compile(
-    "^" + stem for stem in _words("entfern,lösch,remove,delete")
-)
+_REMOVE_VERBS = _compile("^" + stem for stem in _words("entfern,lösch,remove,delete"))
 # The part must name what is sent, so "Sync meine Garmin-Daten" asks nothing.
-_GARMIN_OBJECT = _compile(
+_PROVIDER_OBJECT = _compile(
     "^" + stem
     for stem in _words(
         "kraft,einheit,workout,training,übung,session,sie,diese,beide,alle"
@@ -305,12 +322,13 @@ _GARMIN_OBJECT = _compile(
 _INTERVALS_NAME = re.compile(r"(?<![a-z])intervals(?![a-z])")
 
 
-def _garmin_parts(text: str, verbs: re.Pattern[str]) -> bool:
-    """Whether one unnegated part names Garmin, a workout and one of ``verbs``.
+def _provider_parts(text: str, verbs: re.Pattern[str]) -> frozenset[str]:
+    """The providers one unnegated part names with a workout and one of ``verbs``.
 
-    A part that also names Intervals.icu asks for that provider, never Garmin;
+    A part that also names Intervals.icu asks for that provider, never these;
     information questions ask nothing, as for ``remote_requested``.
     """
+    found: set[str] = set()
     for sentence in _SENTENCE.findall(normalize(text)):
         if (
             sentence.rstrip().endswith(("?", "？"))
@@ -321,30 +339,32 @@ def _garmin_parts(text: str, verbs: re.Pattern[str]) -> bool:
         for part in _CONTRAST.split(sentence):
             loose = _loose(part)
             if (
-                _GARMIN_TARGET.search(part)
-                and verbs.search(loose)
-                and _GARMIN_OBJECT.search(loose)
+                verbs.search(loose)
+                and _PROVIDER_OBJECT.search(loose)
                 and not _INTERVALS_NAME.search(part)
                 and not _negates(part)
             ):
-                return True
-    return False
+                found.update(
+                    str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(part)
+                )
+    return frozenset(found)
 
 
-def garmin_requested(text: str) -> bool:
-    """Whether the athlete's own text asks to send workouts to Garmin."""
-    return _garmin_parts(text, _GARMIN_PUSH_VERBS)
+def requested_providers(text: str) -> frozenset[str]:
+    """The providers the athlete's own text asks to send workouts to."""
+    return _provider_parts(text, _PUSH_VERBS)
 
 
 def garmin_removal_requested(text: str) -> bool:
     """Whether the athlete's own text asks to remove workouts from Garmin."""
-    return _garmin_parts(text, _GARMIN_REMOVE_VERBS)
+    return ProviderId.GARMIN in _provider_parts(text, _REMOVE_VERBS)
 
 
-def _garmin_offer(previous_assistant_text: str) -> bool:
-    """Whether the assistant's last question offers to send workouts to Garmin.
+def _last_question(previous_assistant_text: str) -> str:
+    """The assistant's last question in the reply tail, normalized, or ``""``.
 
-    A Garmin source label elsewhere in the reply is no offer.
+    A sync offer is the reply's closing question; a stem elsewhere in the reply
+    (a source label, a status line) is no offer.
     """
     questions = [
         sentence
@@ -353,28 +373,28 @@ def _garmin_offer(previous_assistant_text: str) -> bool:
         )
         if sentence.rstrip().endswith(("?", "？"))
     ]
-    if not questions:
-        return False
-    last = questions[-1]
-    loose = _loose(last)
-    return bool(
-        _GARMIN_TARGET.search(last)
-        and _GARMIN_PUSH_VERBS.search(loose)
-        and not _INTERVALS_NAME.search(last)
-    )
+    return questions[-1] if questions else ""
 
 
-def _names_garmin_only(part: str) -> bool:
-    """Whether a part is a Garmin push or removal request, so not for Intervals.icu.
+def _offered_providers(previous_assistant_text: str) -> frozenset[str]:
+    """The providers the assistant's last question offers to send workouts to."""
+    last = _last_question(previous_assistant_text)
+    if not _PUSH_VERBS.search(_loose(last)) or _INTERVALS_NAME.search(last):
+        return frozenset()
+    return frozenset(str(match.lastgroup) for match in _PROVIDER_TARGETS.finditer(last))
+
+
+def _names_other_provider_only(part: str) -> bool:
+    """Whether a part is a Garmin or Wahoo push or removal request, not Intervals.icu.
 
     Other mentions of Garmin ("Lösch das Garmin-Duplikat") keep their meaning.
     """
     loose = _loose(part)
     return (
-        bool(_GARMIN_TARGET.search(part))
+        bool(_PROVIDER_TARGETS.search(part))
         and not _INTERVALS_NAME.search(part)
-        and bool(_GARMIN_OBJECT.search(loose))
-        and bool(_GARMIN_PUSH_VERBS.search(loose) or _GARMIN_REMOVE_VERBS.search(loose))
+        and bool(_PROVIDER_OBJECT.search(loose))
+        and bool(_PUSH_VERBS.search(loose) or _REMOVE_VERBS.search(loose))
     )
 
 
@@ -458,9 +478,10 @@ class TurnAuthority:
     remote_requested: bool
     # The pending request's original athlete text, for the classifier only.
     origin_text: str = ""
-    # The athlete's own text asks to send workouts to Garmin; never granted by
-    # Intervals.icu wording and never by a removal request.
-    garmin_requested: bool = False
+    # The providers the athlete's own text asks to send workouts to; Intervals.icu
+    # wording never grants one, a removal request never grants an upload, and
+    # one provider's wording never grants another.
+    provider_requests: frozenset[str] = frozenset()
     # The athlete's own text asks to remove workouts from Garmin; a yes never does.
     garmin_removal_requested: bool = False
 
@@ -472,24 +493,22 @@ def build_turn_authority(
     pending_origin: PendingOrigin | None = None,
 ) -> TurnAuthority:
     """Derive the turn's footing from the athlete's typed text only."""
+    accepts_offer = is_bare_affirmation(current_text) or is_contextual_affirmation(
+        current_text
+    )
+    # A yes grants the sync only when the assistant's last question offers it.
     remote = remote_requested(current_text) or (
-        _mentions_remote(previous_assistant_text[-_HISTORY_TAIL:])
-        and (
-            is_bare_affirmation(current_text) or is_contextual_affirmation(current_text)
-        )
+        accepts_offer and remote_requested(_last_question(previous_assistant_text))
     )
-    garmin = garmin_requested(current_text) or (
-        _garmin_offer(previous_assistant_text)
-        and (
-            is_bare_affirmation(current_text) or is_contextual_affirmation(current_text)
-        )
-    )
+    providers = requested_providers(current_text)
+    if accepts_offer:
+        providers |= _offered_providers(previous_assistant_text)
     garmin_removal = garmin_removal_requested(current_text)
     message_ids = {current_message_id}
     origin_text = ""
     if pending_origin is not None:
         remote = remote or remote_requested(pending_origin.origin_text)
-        garmin = garmin or garmin_requested(pending_origin.origin_text)
+        providers |= requested_providers(pending_origin.origin_text)
         garmin_removal = garmin_removal or garmin_removal_requested(
             pending_origin.origin_text
         )
@@ -500,7 +519,7 @@ def build_turn_authority(
         athlete_started=current_message_id > 0,
         remote_requested=remote,
         origin_text=origin_text,
-        garmin_requested=garmin,
+        provider_requests=providers,
         garmin_removal_requested=garmin_removal,
     )
 
@@ -713,24 +732,58 @@ def _check_garmin_write(
     confirmed as a side effect.
     """
     removes, uploads = _garmin_effects(arguments)
-    if uploads and not authority.garmin_requested:
+    if uploads and not ProviderId.GARMIN in authority.provider_requests:
         return GateDecision(
-            False, REMOTE_GARMIN, "remote_not_requested", state.classifier_used
+            False, REMOTE_GARMIN, REMOTE_GARMIN_DENIAL, state.classifier_used
         )
     if removes and not authority.garmin_removal_requested:
         reason = (
             "impact_not_confirmed"
-            if authority.garmin_requested
-            else "remote_not_requested"
+            if ProviderId.GARMIN in authority.provider_requests
+            else REMOTE_GARMIN_DENIAL
         )
         return GateDecision(False, REMOTE_GARMIN, reason, state.classifier_used)
     if not (removes or uploads):
         return GateDecision(
-            False, REMOTE_GARMIN, "remote_not_requested", state.classifier_used
+            False, REMOTE_GARMIN, REMOTE_GARMIN_DENIAL, state.classifier_used
         )
     state.writes_count += 1
     state.records_count += record_count(tool_name, arguments)
     return GateDecision(True, REMOTE_GARMIN, "ok", state.classifier_used)
+
+
+def _check_job_retry(
+    authority: TurnAuthority,
+    state: TurnGateState,
+    arguments: Mapping[str, Any] | None,
+) -> GateDecision | None:
+    """Judge a Garmin or Wahoo job retry by the retried job; None means Intervals.icu.
+
+    The validated ``_request`` carries the target and write flag the dialogue
+    layer already matched to the job's provider and type. A read refresh changes
+    no athlete record and needs no sync wording, like ``start_provider_refresh``;
+    a plan push needs the athlete to name that provider.
+    """
+    request = arguments.get("_request") if isinstance(arguments, Mapping) else None
+    if not (
+        isinstance(arguments, Mapping)
+        and arguments.get("job_id")
+        and isinstance(request, Mapping)
+    ):
+        return None
+    provider = request.get("target")
+    if not isinstance(provider, str) or provider not in _RETRY_PROVIDERS:
+        return None
+    if request.get("remote_write") is not True:
+        return GateDecision(True, None, "ok", state.classifier_used)
+    domain = f"remote_{provider}"
+    if provider not in authority.provider_requests:
+        return GateDecision(
+            False, domain, f"{domain}_not_requested", state.classifier_used
+        )
+    state.writes_count += 1
+    state.records_count += 1
+    return GateDecision(True, domain, "ok", state.classifier_used)
 
 
 def check_write(
@@ -763,10 +816,14 @@ def check_write(
         return GateDecision(False, domain, "no_athlete_message", state.classifier_used)
     if domain == REMOTE_GARMIN:
         return _check_garmin_write(tool_name, authority, state, arguments)
+    if tool_name == "resolve_training_sync_conflict":
+        retry = _check_job_retry(authority, state, arguments)
+        if retry is not None:
+            return retry
     remote = domain == REMOTE_INTERVALS or _remote_effect(arguments)
     if remote and not authority.remote_requested:
         return GateDecision(
-            False, domain, "remote_not_requested", state.classifier_used
+            False, domain, REMOTE_INTERVALS_DENIAL, state.classifier_used
         )
     records = record_count(tool_name, arguments)
     impact = (

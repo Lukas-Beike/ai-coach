@@ -12,6 +12,7 @@ from canonical_detail_support import seed_intervals_activity
 from canonical_recovery_support import RecordingReader, recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
 from performance_day_support import (
+    SYNCED_AT,
     canonical_from_snapshot,
     garmin_metrics_from_payload,
     snapshot_metrics,
@@ -37,8 +38,8 @@ from backend.sync import garmin_payload_metrics
 from backend.weather import history as weather_history
 
 
-def _mapped_performance_context(snapshot):
-    today = server.ATHLETE_CLOCK.now().date()
+def _mapped_performance_context(snapshot, today=None):
+    today = today or server.ATHLETE_CLOCK.now().date()
     canonical = canonical_from_snapshot(snapshot, today)
     garmin = read_garmin()
     return performance_context.current_performance_context(
@@ -385,7 +386,10 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(recovery["hrv_ms_source"], "Garmin Connect")
 
     def test_performance_exposes_thirty_day_trends_for_api_and_garmin_values(self):
-        today = server.ATHLETE_CLOCK.now().date()
+        # The fixture maps the undated Garmin prediction to its fixed sync day,
+        # so "today" is that day, not the wall clock: otherwise the dated
+        # history point drifts onto the prediction's day or out of the window.
+        today = SYNCED_AT.date()
         snapshot = {
             "synced_at": "now",
             "athlete": {},
@@ -422,7 +426,7 @@ class ServerPerformanceTests(ServerTestCase):
                 ],
             }
         )
-        performance = _mapped_performance_context(snapshot)
+        performance = _mapped_performance_context(snapshot, today)
         comparisons = performance["comparisons"]
         self.assertIsNone(comparisons["cycling_ftp_watts_30d"])
         self.assertIsNone(comparisons["bike_threshold_hr_bpm_30d"])

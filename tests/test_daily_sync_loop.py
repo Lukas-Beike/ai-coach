@@ -120,8 +120,7 @@ class DailySyncLoopTests(unittest.TestCase):
             "Automatic synchronization scheduling failed",
             extra={
                 "event": "daily_sync_failed",
-                "error_class": "RuntimeError",
-                "reason": None,
+                "context": {"error_class": "RuntimeError", "reason": None},
             },
         )
 

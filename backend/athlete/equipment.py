@@ -37,6 +37,11 @@ GARMIN_INITIAL_SOURCE = "garmin-initial-sync"
 SPORT_DERIVATION_SHARE = 0.75
 SPORT_DERIVATION_MIN_ROWS = 3
 
+_UPSERT_KV = (
+    "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE "
+    "SET value=excluded.value,updated_at=excluded.updated_at"
+)
+
 
 class GearReader(Protocol):
     """Reads the canonical gear and gear-to-activity links."""
@@ -125,7 +130,7 @@ class EquipmentService:
     ) -> dict[str, Any]:
         """Read items with usage; ``activity_id`` lists only its full assignments."""
         rows = _session_rows(self._read_summaries())
-        with self._manager.unit_of_work() as db:
+        with self._manager.read_snapshot() as db:
             # The Garmin state carries only sync status: source, time and freshness.
             status = garmin_store.read_state(db)
             gear, listed = canonical_garmin_gear(self._gear_reader, db)
@@ -301,7 +306,7 @@ class EquipmentService:
             }
             _preserve_equipment_metadata(saved, previous, payload)
             db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                _UPSERT_KV,
                 (
                     EQUIPMENT_PREFIX + item_id,
                     json.dumps(saved, allow_nan=False),
@@ -371,7 +376,7 @@ class EquipmentService:
                 "observed_at": self._utc_now(),
             }
             db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                _UPSERT_KV,
                 (
                     "equipment_assignment:" + key,
                     json.dumps(saved),
@@ -416,7 +421,7 @@ class EquipmentService:
                 raise AppError(400, "Aktive Hauptausrüstung erforderlich.")
             now = self._utc_now()
             db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                _UPSERT_KV,
                 (
                     SENSOR_EQUIPMENT_PREFIX + key,
                     json.dumps({"equipment_id": equipment["id"], "observed_at": now}),
@@ -1244,6 +1249,23 @@ def _dominant_pair(counter: Counter[tuple[str, str] | None]) -> tuple[str, str] 
     return top if counter[top] / counter.total() >= SPORT_DERIVATION_SHARE else None
 
 
+def _update_garmin_lifetime_target(linked: dict[str, Any], maximum_meters: Any) -> bool:
+    """Follow Garmin's maximum while the target is Garmin's or unset; report a change."""
+    if linked.get(
+        "lifetime_target_source"
+    ) != ProviderId.GARMIN and _valid_positive_number(linked.get("lifetime_target_km")):
+        return False
+    target = round(maximum_meters / 1000, 2)
+    if (
+        linked.get("lifetime_target_km") == target
+        and linked.get("lifetime_target_source") == ProviderId.GARMIN
+    ):
+        return False
+    linked["lifetime_target_km"] = target
+    linked["lifetime_target_source"] = ProviderId.GARMIN.value
+    return True
+
+
 def _update_garmin_gear(linked: dict[str, Any], gear: GearItem) -> bool:
     changed = False
     distance = _garmin_distance_km(gear)
@@ -1259,12 +1281,5 @@ def _update_garmin_gear(linked: dict[str, Any], gear: GearItem) -> bool:
         if linked.get("garmin_maximum_meters") != maximum_meters:
             linked["garmin_maximum_meters"] = maximum_meters
             changed = True
-        if linked.get(
-            "lifetime_target_source"
-        ) == ProviderId.GARMIN or not _valid_positive_number(
-            linked.get("lifetime_target_km")
-        ):
-            linked["lifetime_target_km"] = round(maximum_meters / 1000, 2)
-            linked["lifetime_target_source"] = ProviderId.GARMIN.value
-            changed = True
+        changed = _update_garmin_lifetime_target(linked, maximum_meters) or changed
     return changed

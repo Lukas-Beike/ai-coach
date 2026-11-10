@@ -8,6 +8,7 @@ from typing import Any
 from backend.db.repositories import NutritionProductRepository
 from backend.errors import AppError
 from backend.nutrition.food_database import NUTRIENTS, FoodDatabaseService
+from backend.nutrition.models import nutrition_number
 
 PRODUCT_NOT_FOUND = "Produkt nicht gefunden."
 
@@ -99,7 +100,7 @@ class MealComponentCalculator:
         if isinstance(amount, bool) or not isinstance(amount, (int, float, str)):
             raise AppError(400, "Ung\u00fcltige Komponentenmenge.")
         try:
-            quantity = float(amount)
+            quantity = nutrition_number(amount)
         except TypeError, ValueError:
             raise AppError(400, "Ung\u00fcltige Komponentenmenge.") from None
         if not math.isfinite(quantity) or not 0 < quantity <= 10000:
@@ -226,7 +227,7 @@ class MealComponentCalculator:
         if isinstance(value, bool):
             raise AppError(400, "Ung\u00fcltiger N\u00e4hrwert.")
         try:
-            number = float(value)
+            number = nutrition_number(value)
         except TypeError, ValueError:
             raise AppError(400, "Ung\u00fcltiger N\u00e4hrwert.") from None
         if not math.isfinite(number) or number < 0:

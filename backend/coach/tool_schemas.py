@@ -12,7 +12,7 @@ from backend.activities.hr_cap import (
     cap_table_text,
 )
 from backend.athlete.profile import COACH_READ_ONLY_FIELDS
-from backend.planning.plan_checks import BLOCKING_CODES
+from backend.planning.plan_checks import BLOCKING_CODES, REQUIRED_CODES
 from backend.planning.session_focus import (
     ALL_FOCI,
     ENDURANCE_FOCI,
@@ -25,7 +25,13 @@ ACCEPT_PLAN_FINDINGS: dict[str, Any] = {
     "type": "array",
     "maxItems": len(BLOCKING_CODES),
     "items": {"type": "string", "enum": list(BLOCKING_CODES)},
-    "description": "The server checks the resulting plan. A blocking finding (illness_hard) saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. Other findings save the plan and come back as plan_check_notes, which are shown in the change receipt. Justify them without repeating or contradicting the receipt. Otherwise send an empty list.",
+    "description": (
+        "The server checks the resulting plan. The blocking finding "
+        + ", ".join(BLOCKING_CODES)
+        + " saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. "
+        + ", ".join(REQUIRED_CODES)
+        + " also save nothing but can never be accepted: write the missing fields. Other findings save the plan and come back as plan_check_notes, which are shown in the change receipt. Justify them without repeating or contradicting the receipt. Otherwise send an empty list."
+    ),
 }
 
 
@@ -535,7 +541,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "replace_training_plan",
-            "Atomically replace local plan units, including locally stored Intervals units, within the requested period. Use the planning revision returned by read_training_state. "
+            "Atomically replace local plan units within the requested period. Use the planning revision returned by read_training_state. "
             "This operation may create, update, and archive a different number of sessions and never writes remotely.",
             {
                 "payload": {
@@ -844,7 +850,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "save_competition",
-            "Create or update one local target competition. Creation needs name, event_date and sport; for edits use competition_id from list_competitions and only changed fields. This does not push to Intervals.icu.",
+            "Create or update one local target competition. Creation needs name, event_date and sport; for edits use competition_id from list_competitions and only changed fields. A field left out keeps its value; send an empty string for starts_at_local, distance, target, course_profile, notes or description to clear it. A new starts_at_local alone moves the event_date to its day; an event_date on another day is rejected. Only the 20 upcoming competitions count against the limit. This does not push to Intervals.icu.",
             {
                 "payload": {
                     "type": "object",
@@ -966,7 +972,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "resolve_training_sync_conflict",
-            "Resolve a local conflict using local_id and strategy (keep_local or adopt_remote), with local target. Or retry a failed/partial job using only job_id: read get_sync_job first, use its provider target, and include sync_job:<id> plus intervals_sync for pushes (remote_write=true) or <provider>_refresh for reads.",
+            "Resolve a local conflict using local_id and strategy (keep_local or adopt_remote), with local target. Or retry a failed/partial job using only job_id: read get_sync_job first, use its provider target, and include sync_job:<id> plus <provider>_sync (intervals_sync, garmin_sync or wahoo_sync) for pushes (remote_write=true) or <provider>_refresh for reads.",
             {
                 "local_id": {"type": "string"},
                 "job_id": {"type": "string"},

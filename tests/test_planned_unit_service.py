@@ -396,6 +396,26 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(len(bounded), 1)
         self.assertEqual(len(bounded_with_archived), 2)
 
+    def test_list_between_reads_only_unarchived_units_of_the_day_range(self):
+        for index, (day, name, archived) in enumerate(
+            (
+                ("2026-09-18", "Before", False),
+                ("2026-09-19", "Edge start", False),
+                ("2026-09-20", "Archived", True),
+                ("2026-09-20", "Middle", False),
+                ("2026-09-21", "Edge end", False),
+                ("2026-09-22", "After", False),
+            )
+        ):
+            self.id = uuid.UUID(f"{index + 1}2345678-1234-5678-1234-567812345678")
+            self.service.create(self.workout(date=day, name=name, archived=archived))
+
+        listed = self.service.list_between(date(2026, 9, 19), date(2026, 9, 21))
+
+        self.assertEqual(
+            ["Edge start", "Middle", "Edge end"], [item["name"] for item in listed]
+        )
+
     def test_limited_list_is_anchored_on_today_while_future_list_keeps_earliest(self):
         rows = (
             ("2026-09-18", "Past 1"),

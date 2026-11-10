@@ -2,12 +2,16 @@
 
 The ``wellness_backfill`` chain walks back from the automatic refresh window to
 the history floor, like the activity backfill, but reads only sleep, HRV, daily
-summaries (with their resting heart rate) and weigh-ins. It is insert-only:
+summaries (with their resting heart rate), Body Battery reports and weigh-ins.
+It adds what is not stored and never deletes:
 
 * an element whose day is already stored stays as it is, except a stored sleep
   night without night values, which the full night element of the same night
   replaces (athlete decision 2026-11-06), so it gains SpO2, respiration and
   sleeping heart rate;
+* a Body Battery report of a past day replaces a stored one that differs: the
+  morning read stores the partial report of the check-in day, and the backfill
+  window holds only completed days, so an identical rerun writes nothing;
 * the weigh-ins merge into the stored weight envelope, the stored readings win;
 * nothing is pruned in a window, so no element or observation is retired.
 
@@ -33,7 +37,7 @@ from backend.providers.garmin_wellness_history import (
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.jobs import WELLNESS_HISTORY_CURSOR
 
-ITEM_SOURCES: Final = ("sleep", "hrv", "daily_stats", "resting_hr")
+ITEM_SOURCES: Final = ("sleep", "hrv", "daily_stats", "resting_hr", "body_battery")
 WELLNESS_SOURCES: Final = frozenset((*ITEM_SOURCES, "weight"))
 # A backfill chunk waits this long for a running Garmin sync before it fails.
 LOCK_WAIT_SECONDS: Final = 120.0
@@ -189,10 +193,13 @@ def _merged_weight(db: Any, weigh_ins: Any) -> list[Any] | None:
 
 
 def _insertable(db: Any, source: str, item: SectionItem) -> bool:
-    """Return whether an element is new, or a full night for a stored bare night."""
+    """Return whether an element is new, a full night for a stored bare night, or a
+    completed Body Battery report for a stored partial one."""
     stored = garmin_store.read_item(db, source, item.key)
     if stored is None:
         return True
+    if source == "body_battery":
+        return stored != item.value
     return (
         source == "sleep"
         and has_night_values(item.value)

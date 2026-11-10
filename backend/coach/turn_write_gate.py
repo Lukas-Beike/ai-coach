@@ -6,8 +6,12 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from backend.coach.context_selection import select_coach_context
+from backend.coach.context_selection import request_chain_ids, select_coach_context
 from backend.coach.write_gate import (
+    REMOTE_DENIALS,
+    REMOTE_GARMIN,
+    REMOTE_INTERVALS,
+    REMOTE_WAHOO,
     TOOL_DOMAIN,
     UNGATED_TOOLS,
     GateDecision,
@@ -38,19 +42,47 @@ _DENIAL_GUIDANCE = {
         "can approve it, so create a fresh preview with preview_adaptive_replan "
         "now and ask once, in your answer, whether to apply it."
     ),
-    "remote_not_requested": (
-        "The athlete's message does not ask to write to Intervals.icu. Keep the "
-        "change local and offer the sync instead."
-    ),
     "cap_exceeded": (
         "This turn already made the maximum number of changes. Tell the athlete "
         "what was saved so far and offer to continue in a new message."
+    ),
+}
+# A remote denial names only the provider the call targeted (decision.domain).
+_REMOTE_GUIDANCE = {
+    REMOTE_INTERVALS: (
+        "The athlete's message does not ask to write to Intervals.icu. Keep the "
+        "change local and offer the sync instead."
+    ),
+    REMOTE_GARMIN: (
+        "The athlete's message does not ask to send workouts to Garmin. Keep the "
+        "change local and offer the Garmin send instead."
+    ),
+    REMOTE_WAHOO: (
+        "The athlete's message does not ask to send workouts to Wahoo. Keep the "
+        "change local and offer the Wahoo send instead."
     ),
 }
 _DEFAULT_GUIDANCE = (
     "This change is not available in this turn. Answer without saving and say "
     "that nothing was changed."
 )
+
+
+def _guidance(decision: GateDecision) -> str:
+    if decision.reason in REMOTE_DENIALS:
+        return _REMOTE_GUIDANCE.get(
+            decision.domain or "", _REMOTE_GUIDANCE[REMOTE_INTERVALS]
+        )
+    return _DENIAL_GUIDANCE.get(decision.reason, _DEFAULT_GUIDANCE)
+
+
+def _entry_records(entry: Mapping[str, Any]) -> int:
+    """Records one earlier call counted; receipts without a count use history rows."""
+    count = entry.get("record_count")
+    if type(count) is int and count >= 0:
+        return count
+    changes = entry.get("changes")
+    return len(changes) if isinstance(changes, list) else 0
 
 
 def _previous_assistant_text(context: Mapping[str, Any]) -> str:
@@ -82,12 +114,9 @@ def _pending_origin(
         or not select_coach_context(message, dict(context)).retain_pending_request
     ):
         return None
-    source_ids = pending.get("source_message_ids")
-    wanted = {
-        value
-        for value in (source_ids if isinstance(source_ids, list) else [])
-        if isinstance(value, int)
-    } - {current_id}
+    # Only the server-recorded chain (the request and its clarification answers);
+    # older ids the model cited never widen the authority.
+    wanted = set(request_chain_ids(pending)) - {current_id}
     origins = [
         item
         for item in context.get("messages") or []
@@ -134,11 +163,7 @@ class CoachTurnWriteGate:
         ]
         self._state = TurnGateState(
             writes_count=len(writes),
-            records_count=sum(
-                len(changes)
-                for entry in writes
-                if isinstance(changes := entry.get("changes"), list)
-            ),
+            records_count=sum(_entry_records(entry) for entry in writes),
         )
         self._model = model
         self._read_only_tools = read_only_tools
@@ -190,8 +215,7 @@ class CoachTurnWriteGate:
             if decision.reason == "cap_exceeded"
             else "write_not_authorized",
             "gate_reason": decision.reason,
-            "message": f"{_NOT_PERFORMED} "
-            + _DENIAL_GUIDANCE.get(decision.reason, _DEFAULT_GUIDANCE),
+            "message": f"{_NOT_PERFORMED} " + _guidance(decision),
         }
 
     def _log(self, tool_name: str, decision: GateDecision) -> None:

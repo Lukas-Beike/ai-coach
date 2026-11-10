@@ -1,11 +1,11 @@
 """The athlete's recording sensors and the power meter change marker (#1869).
 
 Every stream set names the external heart rate, power meter and trainer
-sensors of its recording, each as a hash of manufacturer, product and serial
-number (``ActivitySensor.key``). This module folds those lists, one per session,
-into a registry of distinct sensors and finds the day a sport's power meter
-changed. A serial number is never read, stored or shown; the registry shows a
-short prefix of the hash as the sensor's id. Stdlib only and without I/O;
+sensors of its recording, each as a pseudonymous hash of manufacturer, product
+and serial number (``ActivitySensor.key``). This module folds those lists, one
+per session, into a registry of distinct sensors and finds the day a sport's
+power meter changed. A serial number is neither stored nor shown; the registry
+shows a short prefix of the hash as the sensor's id. Stdlib only and without I/O;
 ``activity_detail_store.sensor_uses`` reads the inputs.
 """
 
@@ -106,7 +106,7 @@ def power_meter_changes(uses: Iterable[SensorUse]) -> list[dict[str, Any]]:
     for sport, sessions in by_sport.items():
         sessions.sort(key=lambda item: item[0])
         seen = set(sessions[0][1])
-        for started_at, after in (item for item in sessions[1:]):
+        for started_at, after in sessions[1:]:
             new = after.isdisjoint(seen)
             seen |= after
             if new:

@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 from backend.db import DatabaseManager, row_factory
 from backend.errors import AppError
-from backend.planning.library import library_payload_hash
+from backend.planning.planned_units import plan_push_payload_hash
 from backend.sync.plan_selection import StructuredPlanSyncService
 
 UNIT_A = "00000000-0000-0000-0000-000000000001"
@@ -60,7 +60,7 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
             )
         item = {
             "library_workout_id": local_id,
-            "expected_payload_hash": library_payload_hash(raw),
+            "expected_payload_hash": plan_push_payload_hash(raw),
         }
         self.pending.append(item)
         return item
@@ -88,7 +88,7 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
                 )
                 for item in self.pending:
                     if item["library_workout_id"] == local_id:
-                        item["expected_payload_hash"] = library_payload_hash(raw)
+                        item["expected_payload_hash"] = plan_push_payload_hash(raw)
 
     def _enqueue(self, entries, sync_job_ids, *, reason):
         self.events.append(("enqueue", [dict(item) for item in entries]))
@@ -135,7 +135,8 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
             if entry["library_workout_id"] == UNIT_B
         )
         self.assertEqual(queued_hash, first_hash)
-        self.assertNotEqual(self.pending[0]["expected_payload_hash"], first_hash)
+        # The mark rewrites only the sync status, so the content hash stays.
+        self.assertEqual(self.pending[0]["expected_payload_hash"], first_hash)
 
     def test_selected_scope_and_all_pending_validation(self) -> None:
         item = self.add_entry(UNIT_A, {"name": "A"})
@@ -234,7 +235,7 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
             )
         entry = {
             "library_workout_id": UNIT_A,
-            "expected_payload_hash": library_payload_hash(raw),
+            "expected_payload_hash": plan_push_payload_hash(raw),
             "entity": "workout_library",
         }
         self.pending = [dict(entry)]
@@ -261,7 +262,8 @@ class StructuredPlanSyncServiceTests(unittest.TestCase):
         self.service.execute(prepared, [], reason="selected")
         queued_hash = self.events[-1][1][0]["expected_payload_hash"]
         self.assertEqual(queued_hash, self.pending[0]["expected_payload_hash"])
-        self.assertNotEqual(queued_hash, original_hash)
+        # The mark rewrites only the sync status, so the content hash stays.
+        self.assertEqual(queued_hash, original_hash)
         self.assertEqual([event[0] for event in self.events[-2:]], ["mark", "enqueue"])
 
     def test_selected_authority_failure_rolls_back_database_mutation(self) -> None:

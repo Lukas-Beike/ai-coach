@@ -21,8 +21,7 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.remote_links import RemoteLinkRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.planning import library as planning_library
-from backend.planning import session_focus, strength_structure
+from backend.planning import planned_units, session_focus, strength_structure
 from backend.planning.garmin_orphans import find_orphans, removal_entries
 from backend.planning.push_state import attach_push_state, garmin_fingerprint
 from backend.providers import garmin_strength_workout as mapping
@@ -481,7 +480,7 @@ class PushTests(unittest.TestCase):
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (local_id, local_id, raw, tombstone, "2026-11-01", "2026-11-01"),
             )
-        return planning_library.library_payload_hash(raw)
+        return planned_units.plan_push_payload_hash(raw)
 
     def update(self, local_id: str, payload: dict) -> str:
         raw = json.dumps(payload)
@@ -489,7 +488,7 @@ class PushTests(unittest.TestCase):
             db.execute(
                 "UPDATE planned_units SET payload=? WHERE local_id=?", (raw, local_id)
             )
-        return planning_library.library_payload_hash(raw)
+        return planned_units.plan_push_payload_hash(raw)
 
     def push(self, *entries: tuple[str, str]) -> dict:
         return self.service.sync(

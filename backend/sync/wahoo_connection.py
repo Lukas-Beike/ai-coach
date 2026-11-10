@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import threading
 from collections.abc import Callable
@@ -31,6 +32,7 @@ from backend.provider_credentials import (  # noqa: F401 - keys re-exported for 
 )
 from backend.providers.wahoo_oauth import WahooOAuthClient, WahooTokenGrant
 
+_LOGGER = logging.getLogger("intervals_coach")
 STATE_TTL = timedelta(minutes=10)
 REFRESH_MARGIN = timedelta(minutes=5)
 MAX_CALLBACK_VALUE_LENGTH = 2048
@@ -87,6 +89,21 @@ def connection_status(config: Config, raw_tokens: str | None) -> dict[str, Any]:
     }
 
 
+def access_token_state(raw_tokens: str | None, now: datetime) -> str | None:
+    """Classify the stored access token without exposing it or its expiry time.
+
+    ``valid``, ``expired`` (it is refreshed on the next use) or ``unknown`` when
+    the record carries no readable expiry; None without a stored connection.
+    """
+    tokens = _decode_object(raw_tokens)
+    if not (tokens and tokens.get("access_token") and tokens.get("refresh_token")):
+        return None
+    expires_at = _parse_time(tokens.get("expires_at"))
+    if expires_at is None:
+        return "unknown"
+    return "valid" if expires_at > now else "expired"
+
+
 class WahooSecretRegistry:
     """Runtime-only Wahoo secret values for the log redactor.
 
@@ -135,7 +152,9 @@ class WahooConnectionService:
         utc_now: Callable[[], str],
         token_factory: Callable[[], str] = lambda: secrets.token_urlsafe(32),
         secret_registry: WahooSecretRegistry | None = None,
+        on_connected: Callable[[], None] | None = None,
     ) -> None:
+        self._on_connected = on_connected
         self._config = config
         self._oauth = oauth
         self._database_manager = database_manager
@@ -254,6 +273,17 @@ class WahooConnectionService:
                 return CALLBACK_ERROR
             now = self._now()
             self._store_grant(grant, now, connected_at=now)
+        if self._on_connected is not None:
+            try:
+                self._on_connected()
+            except Exception as exc:  # noqa: BLE001 - the connection is already stored
+                _LOGGER.warning(
+                    "Wahoo connected hook failed",
+                    extra={
+                        "event": "wahoo_connected_hook_failed",
+                        "context": {"error_class": type(exc).__name__},
+                    },
+                )
         return CALLBACK_CONNECTED
 
     # Tokens --------------------------------------------------------------
@@ -350,11 +380,13 @@ class WahooConnectionService:
     def disconnect(self) -> dict[str, Any]:
         """Revoke access at Wahoo on a best-effort basis and drop local tokens."""
         remote_revoked = False
+        revoke_attempted = False
         # Holding the refresh lock keeps an in-flight refresh from writing
         # fresh tokens back after the athlete disconnected.
         with self._refresh_lock:
             self._generation += 1
             if self._stored_tokens() is not None:
+                revoke_attempted = True
                 try:
                     self._oauth().deauthorize(self._access_token_locked())
                     remote_revoked = True
@@ -364,5 +396,6 @@ class WahooConnectionService:
         return {
             "status": "ok",
             "connected": False,
+            "remote_revoke_attempted": revoke_attempted,
             "remote_revoked": remote_revoked,
         }

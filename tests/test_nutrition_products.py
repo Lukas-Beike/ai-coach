@@ -115,6 +115,35 @@ class NutritionProductContractTests(unittest.TestCase):
             "archived",
         )
 
+    def test_product_edit_keeps_extraction_confidence(self):
+        saved = self.library.save_product(self.product_payload(confidence=0.8))
+        self.assertEqual(saved["extraction_confidence"], 0.8)
+
+        updated = self.library.update_product(saved["id"], {"protein_g": 80.0})
+
+        self.assertEqual(updated["extraction_confidence"], 0.8)
+        self.assertEqual(
+            self.library.get_product(saved["id"])["extraction_confidence"], 0.8
+        )
+
+    def test_product_amount_accepts_a_comma_decimal(self):
+        saved = self.library.save_product(self.product_payload())
+
+        result = self.library.calculate_product(saved["id"], "12,5", "g")
+
+        self.assertEqual(result["amount"], 12.5)
+        with self.assertRaises(AppError):
+            self.library.calculate_product(saved["id"], "1,200", "g")
+
+    def test_product_for_a_past_day_has_no_invented_time(self):
+        saved = self.library.save_product(self.product_payload())
+
+        entry = self.diary.log_product(saved["id"], 50, "g", meal_date="2026-10-01")
+
+        self.assertIs(entry["logged_time_known"], False)
+        self.assertEqual(entry["meal_type"], "snack")
+        self.assertEqual(entry["logged_at"], "2026-10-01T12:00:00")
+
     def test_barcode_lookup_prefers_local_product_and_never_calls_remote(self):
         saved = self.library.save_product(self.product_payload())
 

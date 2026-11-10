@@ -221,6 +221,13 @@ CLARIFICATION_ANSWER_PATTERN = (
 )
 
 
+def _needs_full_context(matched: list[str], planning: bool, normalized: str) -> bool:
+    # A plan sync names the plan; only a provider-data refresh needs every section.
+    if "provider_refresh_or_sync" in matched and not planning:
+        return True
+    return _requires_full_time_context(planning, normalized)
+
+
 def _domain_of_profiles(profiles: set[str]) -> str | None:
     profiles = profiles - {"today_training"} if len(profiles) > 1 else profiles
     if not profiles:
@@ -306,17 +313,7 @@ class CoachContextSelection:
                 result[key] = self.dated_items(result[key], today)
         activities = result.get("activities")
         if isinstance(activities, dict):
-            activities = dict(activities)
-            activities.pop("planned_workouts", None)
-            recent = activities.get("recent_activities_by_sport")
-            if isinstance(recent, dict):
-                activities["recent_activities_by_sport"] = {
-                    sport: rows[: self.activity_limit]
-                    if isinstance(rows, list)
-                    else rows
-                    for sport, rows in recent.items()
-                }
-            result["activities"] = activities
+            result["activities"] = self._projected_activities(activities)
         performance = result.get("current_performance")
         if isinstance(performance, dict) and self.name not in {
             "activity_analysis",
@@ -331,6 +328,19 @@ class CoachContextSelection:
                 if key not in {"comparisons", "activity_validation"}
             }
         return result
+
+    def _projected_activities(self, activities: dict[str, Any]) -> dict[str, Any]:
+        activities = dict(activities)
+        activities.pop("planned_workouts", None)
+        recent = activities.get("recent_activities_by_sport")
+        if isinstance(recent, dict):
+            activities["recent_activities_by_sport"] = {
+                sport: rows[: self.activity_limit] if isinstance(rows, list) else rows
+                for sport, rows in recent.items()
+            }
+        if "scope" in activities:
+            activities["scope"] = _activities_scope(self.activity_limit)
+        return activities
 
     def dated_items(self, items: Any, today: date) -> Any:
         if not isinstance(items, list) or self.horizon_days is None:
@@ -648,9 +658,7 @@ def _message_selection(
     if planning:
         sections.update({"planning", "training_plans"})
     sections |= _daily_sections(normalized, matched, planning)
-    if "provider_refresh_or_sync" in matched or _requires_full_time_context(
-        planning, normalized
-    ):
+    if _needs_full_context(matched, planning, normalized):
         return CoachContextSelection(
             name, FULL_SECTIONS | food, retain_pending_request=is_pending_active
         )
@@ -672,6 +680,18 @@ def _message_selection(
         planning,
         retain_dialogue=bool(continuation or pronoun or has_receipts),
         retain_pending_request=is_pending_active,
+    )
+
+
+def _activities_scope(limit: int) -> str:
+    """Describe the activity rows a projection sends: no planned units, ``limit`` per sport."""
+    recent = (
+        "Letzte abgeschlossene Einheit"
+        if limit == 1
+        else f"Letzte {limit} abgeschlossene Einheiten"
+    )
+    return (
+        f"{recent} je Sportart und Sportartensummen; kein vollständiger Roh-Snapshot."
     )
 
 
@@ -718,6 +738,28 @@ def _pending_request_is_active(
 def _source_message_ids(pending: dict[str, Any]) -> list[int]:
     ids = pending.get("source_message_ids")
     return [item for item in ids if type(item) is int] if isinstance(ids, list) else []
+
+
+def request_chain_ids(pending: Mapping[str, Any] | None) -> list[int]:
+    """Athlete message ids the server recorded for a pending request's chain.
+
+    The chain is the original request plus the athlete's clarification answers.
+    Unlike ``source_message_ids``, the model never chooses these; a request
+    stored before the field existed falls back to its newest source id only.
+    """
+    if not isinstance(pending, Mapping):
+        return []
+    ids = pending.get("origin_message_ids")
+    if isinstance(ids, list):
+        return [item for item in ids if type(item) is int]
+    return sorted(_source_message_ids(dict(pending)))[-1:]
+
+
+def extend_request_chain(
+    pending: Mapping[str, Any] | None, current_id: int
+) -> list[int]:
+    """The chain of a retained pending request plus the athlete's current message."""
+    return sorted({*request_chain_ids(pending), current_id})
 
 
 def pending_origin_messages(

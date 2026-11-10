@@ -15,7 +15,7 @@ import sys
 import threading
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -92,8 +92,11 @@ OPENAI_RESPONSE_ERROR_CODES = frozenset(
 )
 
 DIAGNOSTIC_CAPTURE_MAX_ENTRIES = 10000
-DIAGNOSTIC_CAPTURE_MAX_BYTES = 16 * 1024 * 1024
-DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES = 1024 * 1024
+# Each flush writes the whole list, so the total bounds the write size. Request
+# bodies of non-OpenAI services are stored as shapes, which keeps entries small.
+DIAGNOSTIC_CAPTURE_MAX_BYTES = 2 * 1024 * 1024
+DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES = 512 * 1024
+DIAGNOSTIC_CAPTURE_MAX_AGE_DAYS = 7
 DIAGNOSTIC_CAPTURE_ENTRIES_KEY = "diagnostic_capture_entries"
 _REDACTED = "[REDACTED]"
 _DIAGNOSTIC_SECRET_FIELDS = frozenset(
@@ -473,20 +476,8 @@ class Redactor:
         return redact
 
     def sanitize_log_value(self, value: Any) -> Any:
-        redact = self._text_redactor()
-
-        def clean(item: Any) -> Any:
-            if isinstance(item, str):
-                return redact(item)
-            if isinstance(item, dict):
-                return {str(key): clean(child) for key, child in item.items()}
-            if isinstance(item, (list, tuple)):
-                return [clean(child) for child in item]
-            if item is None or isinstance(item, (bool, int, float)):
-                return item
-            return redact(str(item))
-
-        return clean(value)
+        """Apply the diagnostic key, label and authorization rules to a log value."""
+        return self.sanitize_diagnostic_value(value)
 
     def sanitize_diagnostic_value(self, value: Any) -> Any:
         """Retain diagnostic content while removing credentials before storage."""
@@ -654,6 +645,11 @@ class JsonLogFormatter(logging.Formatter):
         )
 
 
+LOG_MAX_BYTES = 5_000_000
+# The active file plus this many rotations: ten files of 5 MB in all.
+LOG_BACKUP_COUNT = 9
+
+
 def configure_logging(
     logger: logging.Logger,
     data_dir: Path,
@@ -672,7 +668,10 @@ def configure_logging(
     formatter = JsonLogFormatter(redactor)
 
     file_handler = RotatingFileHandler(
-        log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+        log_path,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
@@ -684,19 +683,29 @@ def configure_logging(
     logger.addHandler(stream_handler)
 
 
-_ROUTINE_POLL_GET_PATHS = frozenset({"/api/chat/status", "/api/state/events"})
+_ROUTINE_POLL_GET_PATHS = frozenset(
+    {
+        "/api/chat/status",
+        "/api/state/events",
+        "/api/sync/status",
+        "/api/health",
+        "/api/auth/status",
+    }
+)
+_SYNC_JOB_POLL_RE = re.compile(r"/api/sync/jobs/[0-9a-f-]+")
 
 
 def http_access_log_level(method: str | None, path: str, status: object) -> int:
     """Return the access-log level for a request.
 
-    Successful GET requests to the chat status poll and the state event stream
-    are routine client traffic and are logged at DEBUG. Every other request,
+    Successful GET requests to the chat status, sync status, sync job, health
+    and auth status polls and the state event stream are routine client
+    traffic and are logged at DEBUG. Every other request,
     and every non-2xx or unknown status, keeps the INFO access-log level.
     """
     if (
         method == "GET"
-        and path in _ROUTINE_POLL_GET_PATHS
+        and (path in _ROUTINE_POLL_GET_PATHS or _SYNC_JOB_POLL_RE.fullmatch(path))
         and str(status).startswith("2")
     ):
         return logging.DEBUG
@@ -790,29 +799,37 @@ def diagnostic_capture_response(value: Any) -> dict[str, Any]:
     return {"shape": diagnostic_response_shape(value)}
 
 
+_SAFE_CODE_RE = re.compile(r"[a-z_]{1,80}")
+_SAFE_TYPE_RE = re.compile(r"[a-z0-9_.\[\]-]{1,160}")
+_SAFE_TYPE_FIELDS = (
+    "provider_error_type",
+    "provider_response_status",
+    "provider_incomplete_reason",
+)
+
+
+def _safe_code_attribute(exc: BaseException, name: str) -> str | None:
+    text = str(getattr(exc, name, "") or "").strip()
+    return text if text and _SAFE_CODE_RE.fullmatch(text) else None
+
+
 def safe_diagnostic_error(exc: BaseException) -> dict[str, Any]:
     """Expose only classified technical exception metadata during user debugging."""
     status = getattr(exc, "status", None) or getattr(exc, "code", None)
     result: dict[str, Any] = {"type": type(exc).__name__}
     if isinstance(status, int) and not isinstance(status, bool):
         result["status"] = status
-    reason = str(getattr(exc, "reason", "") or "").strip()
-    if reason and re.fullmatch(r"[a-z_]{1,80}", reason):
-        result["reason"] = reason
-    validation_reason = str(getattr(exc, "validation_reason", "") or "").strip()
-    if validation_reason and re.fullmatch(r"[a-z_]{1,80}", validation_reason):
-        result["validation_reason"] = validation_reason
+    for name in ("reason", "category", "validation_reason"):
+        code = _safe_code_attribute(exc, name)
+        if code:
+            result[name] = code
     provider_code = getattr(exc, "provider_error_code", None)
     if isinstance(provider_code, str) and provider_code in OPENAI_RESPONSE_ERROR_CODES:
         result["provider_error_code"] = provider_code
-    for attribute, key in (
-        ("provider_error_type", "provider_error_type"),
-        ("provider_response_status", "provider_response_status"),
-        ("provider_incomplete_reason", "provider_incomplete_reason"),
-    ):
-        value = getattr(exc, attribute, None)
-        if isinstance(value, str) and re.fullmatch(r"[a-z0-9_.\[\]-]{1,160}", value):
-            result[key] = value
+    for name in _SAFE_TYPE_FIELDS:
+        value = getattr(exc, name, None)
+        if isinstance(value, str) and _SAFE_TYPE_RE.fullmatch(value):
+            result[name] = value
     return result
 
 
@@ -830,6 +847,8 @@ class DiagnosticCapture:
         batch_size: int = 10,
         max_bytes: int = DIAGNOSTIC_CAPTURE_MAX_BYTES,
         max_entry_bytes: int = DIAGNOSTIC_CAPTURE_MAX_ENTRY_BYTES,
+        max_age_days: int = DIAGNOSTIC_CAPTURE_MAX_AGE_DAYS,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         flush_delay_seconds: float | None = None,
         timer_context: Callable[[], AbstractContextManager[Any]] = nullcontext,
     ) -> None:
@@ -848,6 +867,8 @@ class DiagnosticCapture:
         self._batch_size = max(1, batch_size)
         self._max_bytes = max(2048, max_bytes)
         self._max_entry_bytes = min(self._max_bytes - 2, max(1024, max_entry_bytes))
+        self._max_age = timedelta(days=max(1, max_age_days))
+        self._clock = clock
         self._entry_sizes: list[int] = []
         self._total_bytes = 2
         self._entries_cache: list[dict[str, Any]] | None = None
@@ -885,7 +906,9 @@ class DiagnosticCapture:
                         self._entry_bytes(entry) for entry in loaded_entries
                     ]
                     self._total_bytes = 2 + sum(self._entry_sizes)
-                    self._trim()
+                    if self._trim():
+                        # Expired entries leave the stored list with the next write.
+                        self._dirty_count += 1
                 return self._entries_cache
 
     @staticmethod
@@ -964,13 +987,29 @@ class DiagnosticCapture:
             return value[: min(4000, self._max_entry_bytes // 64)]
         return value
 
-    def _trim(self) -> None:
-        while self._entries_cache and (
-            len(self._entries_cache) > self._max_entries
+    def _expired(self, entry: dict[str, Any], cutoff: datetime) -> bool:
+        try:
+            moment = datetime.fromisoformat(str(entry.get("timestamp")))
+        except ValueError:
+            return False
+        return moment.tzinfo is not None and moment < cutoff
+
+    def _trim(self) -> bool:
+        """Drop the oldest entries beyond the limits; report whether any left."""
+        entries = self._entries_cache
+        if not entries:
+            return False
+        cutoff = self._clock() - self._max_age
+        dropped = 0
+        while entries and (
+            len(entries) > self._max_entries
             or self._total_bytes > self._max_bytes
+            or self._expired(entries[0], cutoff)
         ):
-            self._entries_cache.pop(0)
+            entries.pop(0)
             self._total_bytes -= self._entry_sizes.pop(0)
+            dropped += 1
+        return dropped > 0
 
     def flush(self) -> None:
         with self._flush_lock:
@@ -991,6 +1030,8 @@ class DiagnosticCapture:
     def status(self) -> dict[str, Any]:
         self._load_entries()
         with self._lock:
+            if self._trim():
+                self._dirty_count += 1
             entries = self._entries_cache
             return {
                 "active": True,
@@ -999,11 +1040,14 @@ class DiagnosticCapture:
                 "bytes": self._total_bytes,
                 "maximum_bytes": self._max_bytes,
                 "maximum_entry_bytes": self._max_entry_bytes,
+                "maximum_age_days": self._max_age.days,
             }
 
     def entries(self) -> list[dict[str, Any]]:
         self._load_entries()
         with self._lock:
+            if self._trim():
+                self._dirty_count += 1
             entries = list(self._entries_cache or [])
         return self._redactor.sanitize_diagnostic_value(entries)
 
@@ -1051,7 +1095,7 @@ class DiagnosticCapture:
         """Redact content before it reaches the in-memory cache or database."""
         entry = self._bounded_entry(
             {
-                "timestamp": datetime.now(UTC).isoformat(),
+                "timestamp": self._clock().isoformat(),
                 "event": str(event)[:80],
                 "details": details,
             }

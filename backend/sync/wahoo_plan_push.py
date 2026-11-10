@@ -27,6 +27,7 @@ from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.errors import AppError
 from backend.planning import library as planning_library
+from backend.planning import planned_units
 from backend.providers.descriptors import WAHOO_ID, WAHOO_NOT_CONFIGURED_MESSAGE
 from backend.providers.wahoo_client import WahooReconnectRequiredError
 from backend.providers.wahoo_plan_mapping import comparable_plan
@@ -134,9 +135,8 @@ class WahooPlanPushService:
                 "status": "conflict",
                 "error": "Einheit nicht gefunden",
             }
-        if (
-            planning_library.library_payload_hash(row["payload"])
-            != item["expected_payload_hash"]
+        if not planned_units.plan_push_hash_matches(
+            row["payload"], item["expected_payload_hash"]
         ):
             return {
                 "library_workout_id": local_id,

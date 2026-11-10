@@ -18,7 +18,7 @@ Functions return drafts ``(code, units, message, evidence)`` that
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -207,7 +207,7 @@ def _run_intensity(
     row: Mapping[str, Any], thresholds: AthleteThresholds
 ) -> tuple[float, str, bool] | None:
     reference = thresholds.threshold_speed_mps
-    weighted = number(row.get("weighted_avg_speed_mps"))
+    weighted = number(row.get("grade_adjusted_speed_mps"))
     speed = weighted or number(row.get("avg_speed_mps"))
     if not (reference and speed):
         return None
@@ -338,21 +338,25 @@ def _weekly_totals(
     """Load per sport and ISO week, and the weeks missing a session's load.
 
     Completed sessions count up to today, planned ones from today. For a sport
-    already done today, today's planned units are the same work and are left out.
+    already done today, each of today's completed sessions replaces one planned unit.
     """
     totals: dict[tuple[Sport, str], float] = defaultdict(float)
     partial: set[tuple[Sport, str]] = set()
     now = today.isoformat()
-    done_today = {sport for sport, day, _load in completed if day == now}
+    # One completed session of today replaces one planned unit of its sport,
+    # so a second planned session of the day stays (as ``without_done_today``).
+    done_today = Counter(sport for sport, day, _load in completed if day == now)
+    planned = []
+    for item in sessions:
+        if item.day == now and done_today[item.sport] > 0:
+            done_today[item.sport] -= 1
+        elif item.day >= now:
+            planned.append((item.sport, item.day, item.estimate.load))
     entries = [
         (sport, day, None if load is None else load.load)
         for sport, day, load in completed
         if day <= now
-    ] + [
-        (item.sport, item.day, item.estimate.load)
-        for item in sessions
-        if item.day > now or (item.day == now and item.sport not in done_today)
-    ]
+    ] + planned
     for sport, day, load in entries:
         key = (sport, _monday(day))
         if load is None:

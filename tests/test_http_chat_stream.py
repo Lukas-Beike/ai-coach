@@ -89,6 +89,53 @@ class CoachChatStreamTransportTests(unittest.TestCase):
         self.registry.unregister.assert_called_once()
         self.assertTrue(self.handler.close_connection)
 
+    def test_disconnect_stops_relaying_so_the_request_releases_its_operation(
+        self,
+    ) -> None:
+        def drop_after_first_delta(event: str, _data: object) -> None:
+            if event == "delta":
+                raise ClientDisconnected()
+
+        self.handler.send_sse_event.side_effect = drop_after_first_delta
+        self.events = Mock()
+        self.events.get.side_effect = [
+            ("delta", {"text": "hello"}),
+            AssertionError("relay kept waiting after the client left"),
+        ]
+        self.registry.events.return_value = self.events
+
+        self.transport.handle(self.handler, self.session)
+
+        self.assertEqual(self.events.get.call_count, 1)
+        self.registry.unregister.assert_called_once_with(
+            "synthetic-session", "new-operation"
+        )
+        self.assertFalse(self.cancel_event.is_set())
+
+    def test_pending_maintenance_detaches_a_queued_turn_relay(self) -> None:
+        self.transport = CoachChatStreamTransport(
+            self.registry,
+            self.submission_factory,
+            self.receipt_factory,
+            self.redact,
+            self.logger,
+            max_request_bytes=12345,
+            response_timeout_seconds=180,
+            maintenance_pending=lambda: True,
+        )
+        self.events = Mock()
+        self.events.get.side_effect = [queue.Empty()]
+        self.registry.events.return_value = self.events
+        self.submission.active.return_value = True
+
+        self.transport.handle(self.handler, self.session)
+
+        self.handler.send_sse_event.assert_called_with(
+            "background", {"operation_id": "new-operation"}
+        )
+        self.assertFalse(self.cancel_event.is_set())
+        self.registry.unregister.assert_called_once()
+
     def test_header_disconnect_still_submits_without_further_events(self) -> None:
         self.handler.send_sse_headers.side_effect = ClientDisconnected()
         self.events.put(("completed", {"status": "done"}))

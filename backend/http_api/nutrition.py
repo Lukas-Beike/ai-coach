@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from backend import change_history
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.http_api.auth import SessionAuthService
@@ -31,7 +32,7 @@ class NutritionGetRoutes:
         diary_service: Callable[[], NutritionDiaryService],
         meal_library_service: Callable[[], NutritionMealLibraryService],
         local_now: Callable[[], datetime],
-        macro_context: Callable[[], tuple[Any, Any]] | None = None,
+        macro_context: Callable[[str], tuple[Any, Any]] | None = None,
     ) -> None:
         self._session_auth_service = session_auth_service
         self._diary_service = diary_service
@@ -44,9 +45,11 @@ class NutritionGetRoutes:
         if self._macro_context is None:
             return summary
         try:
-            weight, calendar = self._macro_context()
+            weight, calendar = self._macro_context(date_param)
         except AppError, OSError, RuntimeError, ValueError:
-            logging.getLogger(__name__).warning("Nutrition reference data unavailable")
+            logging.getLogger("intervals_coach").warning(
+                "Nutrition reference data unavailable"
+            )
             weight, calendar = None, None
         summary["macro_ranges"] = macro_ranges(
             weight, calendar, date_param, summary.get("total_kcal")
@@ -168,26 +171,29 @@ class NutritionPostRoutes:
         )
 
     def _create(self, handler: Any) -> None:
-        entry = self._diary_service().log_meal(handler.read_json())
-        handler.send_json(200, {"ok": True, "entry": entry})
+        with change_history.collect_changes() as changes:
+            entry = self._diary_service().log_meal(handler.read_json())
+        handler.send_json(200, {"ok": True, "entry": entry, **_change(changes)})
 
     def _add_product(self, handler: Any) -> None:
         payload = _read_object(handler)
-        entry = self._diary_service().add_product_to_meal(
-            str(payload.get("id") or ""),
-            str(payload.get("product_id") or ""),
-            payload.get("amount"),
-            str(payload.get("unit") or ""),
-        )
-        handler.send_json(200, {"ok": True, "entry": entry})
+        with change_history.collect_changes() as changes:
+            entry = self._diary_service().add_product_to_meal(
+                str(payload.get("id") or ""),
+                str(payload.get("product_id") or ""),
+                payload.get("amount"),
+                str(payload.get("unit") or ""),
+            )
+        handler.send_json(200, {"ok": True, "entry": entry, **_change(changes)})
 
     def _delete(self, handler: Any) -> None:
         payload = _read_object(handler)
         entry_id = payload.get("id") or payload.get("entry_id")
         if not entry_id:
             raise AppError(400, "id ist erforderlich zum Löschen.")
-        result = self._diary_service().delete_meal(str(entry_id))
-        handler.send_json(200, {"ok": True, **result})
+        with change_history.collect_changes() as changes:
+            result = self._diary_service().delete_meal(str(entry_id))
+        handler.send_json(200, {"ok": True, **result, **_change(changes)})
 
     def _sync(self, handler: Any) -> None:
         payload = _read_object(handler) if handler.headers.get("Content-Length") else {}
@@ -388,6 +394,14 @@ class NutritionPutRoutes:
         updated = svc.update_meal(str(entry_id), payload)
         handler.send_json(200, {"ok": True, "entry": updated})
         return True
+
+
+def _change(changes: list[dict[str, str]]) -> dict[str, Any]:
+    """The undo reference of the diary entry change, as ``{"change": ...}``."""
+    entry_changes = [
+        item for item in changes if item["entity_type"] == "nutrition_entry"
+    ]
+    return {"change": entry_changes[-1]} if entry_changes else {}
 
 
 def _read_object(handler: Any, max_bytes: int | None = None) -> dict[str, Any]:

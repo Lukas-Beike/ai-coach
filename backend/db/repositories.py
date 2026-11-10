@@ -329,6 +329,10 @@ class KeyValueRepository:
     def delete(self, db: Any, key: str) -> None:
         db.execute("DELETE FROM kv WHERE key = ?", (key,))
 
+    def delete_prefix(self, db: Any, prefix: str) -> None:
+        # substr, not LIKE: "_" in a prefix would match any character.
+        db.execute("DELETE FROM kv WHERE substr(key, 1, ?) = ?", (len(prefix), prefix))
+
 
 class SessionRepository:
     """Persist authentication sessions without owning their transaction."""
@@ -484,9 +488,14 @@ class CompetitionRepository:
         ).fetchone()
         return dict(row) if row else None
 
-    def count(self, db: Any) -> int:
+    def count_upcoming(self, db: Any, today: str) -> int:
+        """Count competitions on or after ``today`` (an ISO date)."""
         return int(
-            db.execute("SELECT COUNT(*) AS count FROM competitions").fetchone()["count"]
+            db.execute(
+                "SELECT COUNT(*) AS count FROM competitions "
+                "WHERE substr(event_date, 1, 10) >= ?",
+                (today,),
+            ).fetchone()["count"]
         )
 
     def create_local(self, db: Any, competition: dict[str, Any], now: str) -> None:
@@ -878,6 +887,11 @@ class CheckinRepository:
                 now,
                 now,
             ),
+        )
+
+    def delete(self, db: Any, checkin_date: str) -> None:
+        db.execute(
+            "DELETE FROM athlete_checkins WHERE checkin_date = ?", (checkin_date,)
         )
 
 

@@ -234,6 +234,27 @@ class StoreTests(StoreCase):
         self.assertIsNone(by_role["heart_rate"]["equipment_id"])
         self.assertEqual(power["id"], meter.key[:16])
 
+    def test_a_merged_session_counts_once_for_a_shared_sensor(self):
+        meter = sensor(SensorRole.POWER_METER, "a")
+        for index, day in enumerate(("2026-10-01", "2026-10-02", "2026-10-03")):
+            survivor, alias = f"act_s{index}", f"act_a{index}"
+            self.add(survivor, f"g{index}", f"{day}T07:00:00+00:00")
+            self.add(alias, f"w{index}", f"{day}T07:01:00+00:00")
+            self.db.execute(
+                "UPDATE activity_sessions SET state = 'duplicate', merged_into = ? "
+                "WHERE activity_id = ?",
+                (survivor, alias),
+            )
+            self.store(stream_set(f"g{index}", sensors=[meter]))
+            self.store(stream_set(f"w{index}", sensors=[meter]))
+        uses = activity_detail_store.sensor_uses(self.db)
+        self.assertEqual(len(uses), 6)
+        self.assertEqual(
+            {use.session_id for use in uses}, {"act_s0", "act_s1", "act_s2"}
+        )
+        (power,) = sensor_registry.registry(uses)
+        self.assertEqual(power["sessions"], 3)
+
     def test_an_unreadable_sensor_list_does_not_hide_the_streams(self):
         self.add("act_s1", "g1", "2026-11-01T07:00:00+00:00")
         self.store(stream_set(sensors=[sensor(SensorRole.HEART_RATE, "a")]))

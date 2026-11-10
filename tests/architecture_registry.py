@@ -50,7 +50,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.coach.dialogue_action", ("CoachDialogueActionService",)),
     ("backend.coach.clarification", ("CoachClarificationService",)),
     ("backend.coach.training_patch", ("CoachTrainingPatchService",)),
-    ("backend.coach.planning_commands", ("CoachPlanningCommandService",)),
     ("backend.coach.cancellation", ("CoachCancellationService",)),
     ("backend.coach.morning_completion", ("MorningCoachJobCompletionService",)),
     ("backend.coach.background_job", ("CoachBackgroundJobRunner",)),
@@ -77,7 +76,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.chat_post", ("ChatPostRoutes",)),
     ("backend.http_api.chat_stream", ("CoachChatStreamTransport",)),
     ("backend.http_api.transcribe_post", ("TranscribePostRoutes",)),
-    ("backend.http_api.planning_commands_post", ("PlanningCommandsPostRoutes",)),
     ("backend.http_api.feedback_post", ("FeedbackPostRoutes",)),
     ("backend.http_api.planned_unit_focus_post", ("PlannedUnitFocusPostRoutes",)),
     ("backend.http_api.chat_cancel_post", ("ChatCancelPostRoutes",)),
@@ -299,17 +297,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "timezone_name",
             "normalize_profile",
             "ProfileService",
-        ),
-    ),
-    (
-        "backend.athlete.context",
-        (
-            "AthleteContextService",
-            "_validated_athlete_context",
-            "_record_removed_competition_tombstones",
-            "_save_athlete_competition",
-            "_delete_removed_athlete_competitions",
-            "save_athlete_context",
         ),
     ),
     (

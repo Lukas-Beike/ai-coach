@@ -9,6 +9,14 @@ function markdownEmphasis(value) {
     .replace(/_([^_\n]+)_/g, "<em>$1</em>");
 }
 
+// The host after a link whose label does not name it, so a label cannot hide the destination.
+function linkHostNote(label, url) {
+  let host = "";
+  try { host = new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
+  if (!host || label.toLowerCase().includes(host.toLowerCase())) return "";
+  return `<span class="link-host"> (${escapeHtml(host)})</span>`;
+}
+
 function replaceMarkdownLinks(value, linkSpans) {
   let html = "";
   let cursor = 0;
@@ -30,7 +38,7 @@ function replaceMarkdownLinks(value, linkSpans) {
     }
     html += value.slice(cursor, labelStart);
     const token = `\uE000COACHLINKSPAN${linkSpans.length}\uE001`;
-    linkSpans.push(`<a href="${url}" target="_blank" rel="noopener noreferrer">${markdownEmphasis(label)}</a>`);
+    linkSpans.push(`<a href="${url}" target="_blank" rel="noopener noreferrer">${markdownEmphasis(label)}</a>${linkHostNote(label, url)}`);
     html += token;
     cursor = urlEnd + 1;
   }
@@ -438,7 +446,7 @@ function renderFirstThresholdEstimate(estimate, profile = {}) {
   if (stored) stored.textContent = profile?.first_threshold_pct && profile.first_threshold_origin === "estimated" ? "Gespeichert (% LSHF, geschätzt)" : "Gespeichert (% LSHF)";
 }
 
-function renderModelChoice(model, selectId, descriptionId) {
+function renderModelChoice(model, selectId) {
   if (!model) return;
   const select = $(selectId);
   const currentIds = [...select.options].map((option) => option.value).join(",");
@@ -454,12 +462,10 @@ function renderModelChoice(model, selectId, descriptionId) {
     }
   }
   select.value = model.selected;
-  const selected = (model.options || []).find((option) => option.id === model.selected);
-  $(descriptionId).textContent = selected?.description || "Wähle die Balance aus Qualität, Tempo und Kosten.";
 }
 
 function renderModel(model) {
-  renderModelChoice(model, "#modelSelect", "#modelDescription");
+  renderModelChoice(model, "#modelSelect");
 }
 
 function renderThinkingLevel(thinkingLevel) {
@@ -479,7 +485,6 @@ function renderThinkingLevel(thinkingLevel) {
   }
   select.value = thinkingLevel.selected;
   const selected = (thinkingLevel.options || []).find((option) => option.id === thinkingLevel.selected);
-  $("#thinkingLevelDescription").textContent = selected?.description || "Steuert die Gründlichkeit der Antwort.";
   const modelSelect = $("#modelSelect");
   const modelSummary = $("#modelSettingsSummary");
   if (modelSummary) modelSummary.textContent = [modelSelect?.selectedOptions?.[0]?.textContent, selected?.label || select.selectedOptions?.[0]?.textContent].filter(Boolean).join(" · ");
@@ -574,12 +579,6 @@ function renderSettingsSyncDayInputs(data) {
   updateUnfocusedInput("#garminSyncDays", data.sync_settings?.garmin_days || 84);
 }
 
-function calendarHorizonText(data) {
-  const window = data.planning_view?.provider_window || {};
-  if (window.start && window.end) return "Die Ansicht bleibt auf das lokal geladene Providerfenster " + window.start + " bis " + window.end + " begrenzt.";
-  return "Die Ansicht wird auf das lokal geladene Providerfenster begrenzt.";
-}
-
 function renderCalendarDisplayInputs(data) {
   const display = data.calendar_display || CALENDAR_DISPLAY_DEFAULTS;
   const pastWeeks = calendarDisplayValue(display.past_weeks, CALENDAR_DISPLAY_DEFAULTS.past_weeks);
@@ -588,8 +587,6 @@ function renderCalendarDisplayInputs(data) {
   updateUnfocusedInput("#calendarDisplayFutureWeeks", futureWeeks);
   const summary = $("#calendarDisplaySummary");
   if (summary) summary.textContent = pastWeeks + " zurück · " + futureWeeks + " voraus";
-  const hint = $("#calendarHorizonHint");
-  if (hint) hint.textContent = calendarHorizonText(data);
 }
 
 function renderSettingsInputs(data) {
@@ -597,7 +594,7 @@ function renderSettingsInputs(data) {
   renderCalendarDisplayInputs(data);
 }
 
-function renderIntervalsSyncControls(_data, configured) {
+function renderIntervalsSyncControls(configured) {
   setProviderSetupHint("#intervalsSetupHint", Boolean(configured.intervals));
 }
 
@@ -607,10 +604,10 @@ function renderGarminSyncControl(data) {
   const button = $("#garminSyncButton");
   if (!button) return;
   const running = Boolean(data.garmin_sync?.running || state.localSync.garmin);
-  button.disabled = running || !garminConfigured;
+  const fullRunning = Boolean(data.provider_resync?.garmin?.running || state.localSync.garminFull);
+  button.disabled = running || fullRunning || !garminConfigured;
   button.textContent = running ? "Synchronisierung läuft…" : "Garmin synchronisieren";
-  const fullButton = $("#garminFullResyncButton");
-  if (fullButton && !garminConfigured) fullButton.disabled = true;
+  renderGarminFullResync(data);
 }
 
 function setProviderSetupHint(selector, configured) {
@@ -619,7 +616,7 @@ function setProviderSetupHint(selector, configured) {
 }
 
 function renderSettingsSyncControls(data, configured) {
-  renderIntervalsSyncControls(data, configured);
+  renderIntervalsSyncControls(configured);
   renderGarminSyncControl(data);
 }
 
@@ -680,5 +677,5 @@ function renderSettings(data) {
 }
 
 function renderServiceTier(model) {
-  renderModelChoice(model, "#serviceTierSelect", "#serviceTierDescription");
+  renderModelChoice(model, "#serviceTierSelect");
 }

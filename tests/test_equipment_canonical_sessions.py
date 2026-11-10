@@ -15,6 +15,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import intervals_compaction as intervals_fixture
@@ -25,6 +26,7 @@ from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.http_api.athlete_assembly import AthleteDataAssembly
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
@@ -138,6 +140,92 @@ class EquipmentSessionTests(unittest.TestCase):
         with self.manager.reader() as db:
             (gear,) = CanonicalTableReader().gear_items(db)
         self.assertIs(gear.activity_list_partial, True)
+
+    def equipment_rows(self) -> list[tuple[str, str, str]]:
+        with self.manager.reader() as db:
+            return [
+                (row["key"], row["value"], row["updated_at"])
+                for row in db.execute(
+                    "SELECT key, value, updated_at FROM kv "
+                    "WHERE key LIKE 'equipment:%' ORDER BY key"
+                ).fetchall()
+            ]
+
+    def synced_later(self, clock: str) -> None:
+        service = EquipmentService(
+            self.manager,
+            lambda: stored_summaries(self.manager),
+            lambda: date(2026, 10, 2),
+            lambda: clock,
+            gear_reader=CanonicalTableReader(),
+        )
+        with self.manager.reader() as db:
+            from backend.db import garmin_store
+
+            service.sync_garmin_snapshot(garmin_store.read_state(db))
+
+    def test_equipment_read_takes_no_writer(self) -> None:
+        with patch.object(
+            self.manager, "unit_of_work", side_effect=AssertionError("writer taken")
+        ):
+            (item,) = self.service.read()["items"]
+            self.service.read(item["id"])
+        self.assertEqual(item["garmin_uuid"], "g1")
+
+    def test_assembled_activity_summaries_take_no_writer(self) -> None:
+        # The production read_summaries callback, not the test's stand-in.
+        assembly = object.__new__(AthleteDataAssembly)
+        assembly._database_manager = lambda: self.manager
+        rows = Mock()
+        rows.activity_summaries.return_value = ()
+        assembly._activity_rows = lambda: rows
+        with patch.object(
+            self.manager, "unit_of_work", side_effect=AssertionError("writer taken")
+        ):
+            self.assertEqual(assembly.activity_summaries(), ())
+        rows.activity_summaries.assert_called_once()
+
+    def test_repeated_gear_syncs_with_unchanged_values_rewrite_nothing(self) -> None:
+        before = self.equipment_rows()
+        self.assertEqual(len(before), 1)
+        self.assertEqual(json.loads(before[0][1])["lifetime_target_km"], 10000.0)
+
+        self.synced_later("2026-10-03T12:00:00Z")
+        self.synced_later("2026-10-04T12:00:00Z")
+
+        self.assertEqual(self.equipment_rows(), before)
+
+    def test_a_changed_garmin_maximum_still_updates_the_row(self) -> None:
+        before = self.equipment_rows()
+        with self.manager.unit_of_work() as db:
+            GarminSnapshotWriter(
+                KeyValueRepository(lambda: SYNCED), lambda: ZONE
+            ).write(
+                db,
+                {
+                    "synced_at": "2026-09-21T08:00:00+00:00",
+                    "activities": [garmin_activity(910)],
+                    "source_freshness": {"gear": {"freshness": "current"}},
+                    "gear": [
+                        {
+                            "gearUUID": "g1",
+                            "gearName": "Road bike",
+                            "gearTypeName": "Bike",
+                            "stats": {"totalDistance": 50000},
+                            "activity_ids": ["910"],
+                            "activity_ids_truncated": True,
+                            "maximumMeters": 12_000_000,
+                        }
+                    ],
+                },
+            )
+
+        self.synced_later("2026-10-05T12:00:00Z")
+
+        (key, value, updated_at) = self.equipment_rows()[0]
+        self.assertEqual(key, before[0][0])
+        self.assertEqual(json.loads(value)["lifetime_target_km"], 12000.0)
+        self.assertEqual(updated_at, "2026-10-05T12:00:00Z")
 
     def test_gear_removed_in_garmin_leaves_the_canonical_reads(self) -> None:
         with self.manager.unit_of_work() as db:

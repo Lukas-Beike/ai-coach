@@ -11,6 +11,10 @@ const CREDENTIAL_FORMS = Object.freeze({
   yazio: Object.freeze(["yazio_email", "yazio_password"]),
 });
 
+// Setting one of these needs the APP_PASSWORD again; the password is sent once with the
+// request and never stored. Only the OpenAI and Wahoo forms have the password input.
+const CREDENTIAL_REAUTH_FIELDS = new Set(["openai_base_url", "wahoo_client_id", "wahoo_client_secret"]);
+
 const CREDENTIAL_FIELD_LABELS = Object.freeze({
   openai_api_key: "OpenAI-API-Schlüssel",
   openai_base_url: "OpenAI-Basis-URL",
@@ -21,7 +25,7 @@ const CREDENTIAL_FIELD_LABELS = Object.freeze({
   wahoo_client_id: "Wahoo-Client-ID",
   wahoo_client_secret: "Wahoo-Client-Secret",
   yazio_email: "Yazio-E-Mail",
-  yazio_password: ["Yazio", "Kennwort"].join("-"),
+  yazio_password: ["Yazio", "Passwort"].join("-"),
 });
 
 // Non-secret values the server echoes back; they are shown as the current value.
@@ -79,6 +83,28 @@ function credentialSavePayload(values, fields) {
     if (text) payload[field] = text;
   }
   return payload;
+}
+
+// Pure: whether a save payload sets a field that needs the APP_PASSWORD.
+function credentialNeedsPassword(payload) {
+  return Object.keys(payload || {}).some((field) => CREDENTIAL_REAUTH_FIELDS.has(field));
+}
+
+function credentialPasswordIds(provider) {
+  return { row: `cred-password-row-${provider}`, input: `cred-app_password-${provider}` };
+}
+
+// Shows the password input only while a field that needs it is filled in.
+function syncCredentialPasswordRow(provider) {
+  const ids = credentialPasswordIds(provider);
+  const row = $("#" + ids.row);
+  if (!row) return;
+  const values = {};
+  for (const field of CREDENTIAL_FORMS[provider]) values[field] = $("#" + credentialFieldIds(field).input)?.value;
+  const needed = credentialNeedsPassword(credentialSavePayload(values, CREDENTIAL_FORMS[provider]));
+  row.hidden = !needed;
+  const input = $("#" + ids.input);
+  if (!needed && input) input.value = "";
 }
 
 // Pure: Garmin card mode from garmin_connection, falling back to the legacy connected flag.
@@ -259,7 +285,7 @@ function toggleMetricExport(button) {
 
 async function configureAutomaticMetricExport(enabled, button) {
   const message = enabled
-    ? "Schwellen-HF, maximale HF und Lauf-Schwellenpace künftig automatisch an Intervals.icu senden (lokale Zonen, sonst Garmin, sonst Wahoo)? Abweichende Werte dort werden überschrieben, die HF-Zonen neu berechnet."
+    ? "Schwellenpuls (LSHF), maximale HF und Lauf-Schwellenpace künftig automatisch an Intervals.icu senden (lokale Zonen, sonst Garmin, sonst Wahoo)? Abweichende Werte dort werden überschrieben, die HF-Zonen neu berechnet."
     : "Den automatischen Abgleich mit Intervals.icu deaktivieren?";
   if (!await requestConfirmation(message, { title: enabled ? "Automatischen Abgleich aktivieren?" : "Automatischen Abgleich deaktivieren?" })) return;
   button.disabled = true;
@@ -305,15 +331,29 @@ async function saveProviderCredentials(event, provider) {
   event.preventDefault();
   const fields = CREDENTIAL_FORMS[provider];
   const values = {};
+  const errorId = credentialFormIds(provider).error;
+  const passwordInput = $("#" + credentialPasswordIds(provider).input);
+  const clearInputs = () => {
+    for (const field of fields) {
+      const input = $("#" + credentialFieldIds(field).input);
+      if (input) input.value = "";
+    }
+    if (passwordInput) passwordInput.value = "";
+    syncCredentialPasswordRow(provider);
+  };
   for (const field of fields) {
     const input = $("#" + credentialFieldIds(field).input);
-    if (!input) continue;
-    values[field] = input.value;
-    // Cleared even when the save fails, so secrets never linger in the DOM.
-    input.value = "";
+    if (input) values[field] = input.value;
   }
-  const errorId = credentialFormIds(provider).error;
   const payload = credentialSavePayload(values, fields);
+  if (credentialNeedsPassword(payload) && !passwordInput?.value) {
+    // Nothing is sent, so the entries stay for the next try.
+    setCredentialError(errorId, "Bitte das App-Passwort eingeben.");
+    return;
+  }
+  if (credentialNeedsPassword(payload)) payload.app_password = passwordInput.value;
+  // Cleared even when the save fails, so secrets never linger in the DOM.
+  clearInputs();
   if (Object.keys(payload).length === 0) {
     setCredentialError(errorId, "Bitte mindestens einen Wert eingeben.");
     return;
@@ -469,6 +509,8 @@ if (typeof module !== "undefined") {
     CREDENTIAL_FORMS,
     credentialFieldIds,
     credentialFormIds,
+    credentialNeedsPassword,
+    credentialPasswordIds,
     credentialSavePayload,
     credentialSourceView,
     garminCardView,

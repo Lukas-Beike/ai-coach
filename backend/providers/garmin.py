@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -17,6 +17,7 @@ from functools import partial
 from typing import Any
 
 from backend.canonical.garmin_payload import ACTIVITY_RATINGS_SECTION
+from backend.canonical.section_items import record_day
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import (
     GARMIN_DATE_ALIASES,
@@ -56,7 +57,13 @@ class GarminCollectionOptions:
     known_activity_ids: frozenset[str] | None = None
     # Activities whose watch rating is already stored (``activity_ratings``).
     rated_activity_ids: frozenset[str] = frozenset()
+    # Days of Body Battery reports to read again, ending today; ``0`` reads none.
+    # Needs ``include_recovery`` and ``include_current_metrics``.
+    body_battery_reconcile_days: int = 0
 
+
+# Garmin serves at most this many days of Body Battery reports per request.
+BODY_BATTERY_RANGE_DAYS = 31
 
 # Metrics that change at most daily or after an activity: they are read once per
 # local day and after a new activity instead of on every refresh.
@@ -742,6 +749,67 @@ def _collect_ranges(
                 future.result()
 
 
+def _collect_body_battery(
+    client: Any,
+    today: date,
+    days: int,
+    payload: dict[str, Any],
+    pagination: dict[str, dict[str, Any]],
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None,
+    capability_allowed: CapabilityAllowed | None,
+    capability_failure: CapabilityFailure | None,
+    capability_success: CapabilitySuccess | None,
+) -> None:
+    """Read the last ``days`` days of Body Battery reports, ending today.
+
+    A report is the whole day's levels with its charged and drained totals, so a
+    later read replaces the partial report an earlier morning read stored. Body
+    Battery stays optional like the morning read: a failure or a paused source
+    adds no payload error and no incomplete range, so it does not mark the
+    Garmin sync partial. It counts toward the shared ``body_battery`` pause, and
+    the sync tries again until a read succeeds.
+    """
+    fetch = getattr(client, "get_body_battery", None)
+    if not callable(fetch):
+        return
+    if capability_allowed is not None and not capability_allowed("body_battery"):
+        return
+    first = today - timedelta(days=max(1, days) - 1)
+    records: list[dict[str, Any]] = []
+    try:
+        while first <= today:
+            last = min(first + timedelta(days=BODY_BATTERY_RANGE_DAYS - 1), today)
+            value = external_call(
+                "garmin",
+                "body_battery",
+                partial(fetch, first.isoformat(), last.isoformat()),
+                {
+                    "window_start": first.isoformat(),
+                    "window_end": last.isoformat(),
+                    "purpose": "reconciliation",
+                },
+            )
+            if value is not None:
+                records.extend(normalize_range_records("body_battery", value))
+            first = last + timedelta(days=1)
+    except Exception as exc:  # noqa: BLE001 - SDK errors vary; the other sources stay.
+        if capability_failure:
+            capability_failure("body_battery", exc)
+        if warn:
+            warn("body_battery", redact(str(exc))[:500], exc)
+        return
+    if capability_success:
+        capability_success("body_battery")
+    payload["body_battery"] = records
+    pagination["body_battery"] = {
+        "windows": 1,
+        "records": len(records),
+        "complete": True,
+    }
+
+
 def _daily_stats_records(value: Any, current: date) -> list[dict[str, Any]]:
     records = value if isinstance(value, list) else [value]
     if any(not isinstance(record, dict) for record in records):
@@ -892,6 +960,62 @@ def _collect_daily_summaries_window(
     return covered
 
 
+def _resting_value(row: Mapping[str, Any]) -> float | None:
+    heart_rate = row.get("heartRate")
+    for value in (
+        row.get("restingHeartRate"),
+        heart_rate.get("restingValue") if isinstance(heart_rate, Mapping) else None,
+    ):
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > 0
+        ):
+            return float(value)
+    return None
+
+
+def resting_rows(summaries: list[Any]) -> list[dict[str, Any]]:
+    """Return one resting-heart-rate row per daily summary that carries one."""
+    rows: list[dict[str, Any]] = []
+    for row in summaries:
+        if not isinstance(row, Mapping):
+            continue
+        day = record_day(row)
+        value = _resting_value(row)
+        if day is not None and value is not None:
+            rows.append({"calendarDate": day, "restingHeartRate": value})
+    return rows
+
+
+def _collect_resting_hr_day(
+    fetch: Any,
+    current: date,
+    payload: dict[str, Any],
+    stats: dict[str, Any],
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None,
+) -> None:
+    try:
+        value = external_call(
+            "garmin",
+            "resting_hr",
+            partial(fetch, current.isoformat()),
+            {"date": current.isoformat()},
+        )
+        if not isinstance(value, dict):
+            raise TypeError("Invalid Garmin resting_hr response")
+        if not any(key in value for key in ("calendarDate", "date", "summaryDate")):
+            value = {"calendarDate": current.isoformat(), **value}
+        payload.setdefault("resting_hr", []).append(value)
+        stats["records"] = int(stats["records"]) + 1
+    except Exception as exc:  # noqa: BLE001 - SDK errors vary; retain other sources and redact.
+        stats["complete"] = False
+        stats["error"] = redact(str(exc))[:500]
+        _add_error(payload, "resting_hr", exc, redact, warn)
+
+
 def _collect_resting_hr(
     client: Any,
     windows: list[tuple[date, date]],
@@ -907,28 +1031,23 @@ def _collect_resting_hr(
     stats = pagination.setdefault(
         "resting_hr", {"windows": len(windows), "records": 0, "complete": True}
     )
+    # Days whose daily summary already carries the resting value need no
+    # intraday heart-rate download.
+    covered: dict[str, dict[str, Any]] = {
+        row["calendarDate"]: row
+        for row in resting_rows(payload.get("daily_stats") or [])
+    }
     for window_start, window_end in windows:
         current = window_start
         while current <= window_end:
-            try:
-                value = external_call(
-                    "garmin",
-                    "resting_hr",
-                    partial(fetch, current.isoformat()),
-                    {"date": current.isoformat()},
+            known = covered.get(current.isoformat())
+            if known is None:
+                _collect_resting_hr_day(
+                    fetch, current, payload, stats, external_call, redact, warn
                 )
-                if not isinstance(value, dict):
-                    raise TypeError("Invalid Garmin resting_hr response")
-                if not any(
-                    key in value for key in ("calendarDate", "date", "summaryDate")
-                ):
-                    value = {"calendarDate": current.isoformat(), **value}
-                payload.setdefault("resting_hr", []).append(value)
+            else:
+                payload.setdefault("resting_hr", []).append(dict(known))
                 stats["records"] = int(stats["records"]) + 1
-            except Exception as exc:  # noqa: BLE001 - SDK errors vary; retain other sources and redact.
-                stats["complete"] = False
-                stats["error"] = redact(str(exc))[:500]
-                _add_error(payload, "resting_hr", exc, redact, warn)
             current += timedelta(days=1)
 
 
@@ -1556,6 +1675,15 @@ def rating_row(value: Any, activity_id: str, started: str) -> dict[str, Any] | N
     }
 
 
+def _reconciles_body_battery(options: GarminCollectionOptions) -> bool:
+    """Body Battery is reconciled only by a current run that reads recovery."""
+    return (
+        options.body_battery_reconcile_days > 0
+        and options.include_recovery
+        and options.include_current_metrics
+    )
+
+
 def collect_garmin_data(
     client: Any,
     windows: Iterable[tuple[date, date]],
@@ -1604,9 +1732,12 @@ def collect_garmin_data(
         _collect_resting_hr(
             client, windows, payload, pagination, external_call, redact, warn
         )
+        # Training status is a current-state read: one day, not one call per
+        # window day.
+        latest = max(window_end for _, window_end in windows)
         _collect_daily_stats(
             client,
-            windows,
+            [(latest, latest)],
             payload,
             pagination,
             external_call,
@@ -1614,6 +1745,20 @@ def collect_garmin_data(
             warn,
             source="training_status",
             method="get_training_status",
+        )
+    if _reconciles_body_battery(collection_options):
+        _collect_body_battery(
+            client,
+            today,
+            collection_options.body_battery_reconcile_days,
+            payload,
+            pagination,
+            external_call,
+            redact,
+            warn,
+            capability_allowed,
+            capability_failure,
+            capability_success,
         )
     if (
         collection_options.include_recovery
@@ -1663,10 +1808,21 @@ def collect_garmin_data(
             capability_success,
         )
     provider_sync: dict[str, Any] = {"pagination": pagination}
+    if _reconciles_body_battery(collection_options) and "body_battery" in pagination:
+        provider_sync["body_battery_reconciled_on"] = today.isoformat()
     payload["provider_sync"] = provider_sync
     _validate_current_metrics(payload, redact, warn)
     if collection_options.include_current_metrics:
-        _record_daily_metrics(payload, provider_sync, today, read_daily)
+        _record_daily_metrics(
+            payload,
+            provider_sync,
+            today,
+            read_daily,
+            body_battery_idle=(
+                collection_options.include_recovery
+                and collection_options.body_battery_reconcile_days <= 0
+            ),
+        )
     return payload
 
 
@@ -1675,15 +1831,28 @@ def _record_daily_metrics(
     provider_sync: dict[str, Any],
     today: date,
     read_daily: bool,
+    body_battery_idle: bool = False,
 ) -> None:
-    """Record the daily metric read; failed sources are read again next run."""
-    if not read_daily:
-        # Skipped, not failed: the stored values and their freshness stay.
-        provider_sync["skipped_sources"] = [
+    """Record the daily metric read; failed sources are read again next run.
+
+    ``body_battery_idle`` marks a run that had no Body Battery reconciliation due:
+    the stored reports and their freshness stay.
+    """
+    skipped = (
+        [
             source
             for source in GARMIN_DAILY_METRIC_SOURCES
             if source not in provider_sync["pagination"]
         ]
+        if not read_daily
+        else []
+    )
+    if body_battery_idle and "body_battery" not in provider_sync["pagination"]:
+        skipped.append("body_battery")
+    if skipped:
+        # Skipped, not failed: the stored values and their freshness stay.
+        provider_sync["skipped_sources"] = skipped
+    if not read_daily:
         return
     provider_sync["daily_metrics_on"] = today.isoformat()
     failed = {

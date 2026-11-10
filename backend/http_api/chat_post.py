@@ -42,6 +42,13 @@ class ChatPostRoutes:
             )
             handler.send_json(202, result)
         elif path == "/api/chat/reset":
+            payload = handler.read_json(self._max_request_bytes)
+            if payload.get("confirmed") is not True:
+                raise AppError(
+                    400,
+                    "Das Zurücksetzen muss bestätigt werden.",
+                    reason="confirmation_required",
+                )
             handler.send_json(200, self._coach_conversation_reset_service().reset())
         else:
             return False

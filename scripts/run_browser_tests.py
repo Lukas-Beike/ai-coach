@@ -564,7 +564,6 @@ def image_identity(processes, image):
 APPLICATION_SOURCES = (
     "requirements.txt",
     "server.py",
-    "garmin-login.py",
     "backend",
     "public",
 )
@@ -785,6 +784,8 @@ class Execution:
         self.image, self.browser, self.node, self.cli = image, browser, node, cli
         self.slots = []
         self.fixture_starts = {}
+        # Test failures collected under --keep-going; reported after all children.
+        self.kept_failures = []
 
     def prepare_slots(self, count):
         reservations = reserve_ports(count * 2)
@@ -1016,7 +1017,10 @@ class Execution:
                     )
                 failures = failed_tests(output)
                 evidence.child(child, failures=failures)
-                raise RunnerError(failure_message(child, code, failures))
+                message = failure_message(child, code, failures)
+                if not self.args.keep_going:
+                    raise RunnerError(message)
+                self.kept_failures.append(message)
             self.containers.remove(fixture)
         except BaseException as error:
             evidence.child(
@@ -1089,6 +1093,11 @@ class Execution:
                 raise first_error
             for future in futures:
                 future.result()
+            if self.kept_failures:
+                raise RunnerError(
+                    f"{len(self.kept_failures)} browser children failed: "
+                    + "; ".join(self.kept_failures)
+                )
         except BaseException:
             self.processes.stop_all()
             raise
@@ -1096,12 +1105,18 @@ class Execution:
             pool.shutdown(wait=True, cancel_futures=True)
 
 
+def worktree_image_tag(root):
+    """App image tag of one checkout, so parallel worktrees keep their own build."""
+    digest = hashlib.sha256(str(Path(root).resolve()).encode()).hexdigest()
+    return f"pacecraft:e2e-{digest[:8]}"
+
+
 def parser():
     result = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     result.add_argument(
-        "--project", required=True, help="exact configured project name, or all"
+        "--project", help="exact configured project name, or all (required)"
     )
     result.add_argument(
         "--spec",
@@ -1113,7 +1128,18 @@ def parser():
     result.add_argument("--total", type=int, default=1)
     result.add_argument("--jobs", type=int, choices=range(1, MAX_JOBS + 1), default=1)
     result.add_argument(
-        "--image", default="pacecraft:e2e", help="already-built current-source app image"
+        "--keep-going",
+        action="store_true",
+        help="run every child after a test failure and report all failures "
+        "(exit stays non-zero); infrastructure errors still stop the run",
+    )
+    result.add_argument(
+        "--image",
+        default=worktree_image_tag(ROOT),
+        help="already-built current-source app image (default: one tag per checkout)",
+    )
+    result.add_argument(
+        "--print-image", action="store_true", help="print the image tag and exit"
     )
     result.add_argument(
         "--browser-image",
@@ -1165,6 +1191,11 @@ def source_hashes(root, durations):
 
 def main(argv=None):
     args = parser().parse_args(argv)
+    if args.print_image:
+        print(args.image)
+        return 0
+    if not args.project:
+        parser().error("--project is required")
     run_id = uuid.uuid4().hex
     args.results_dir = args.results_dir.resolve()
     directory = args.results_dir / run_id

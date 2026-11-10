@@ -14,7 +14,7 @@ from backend.pagination import (
     decode_page_cursor,
     encode_page_cursor,
 )
-from backend.planning import library as planning_library
+from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers.intervals_workouts import intervals_record_type
 
 
@@ -96,9 +96,7 @@ class StructuredTrainingStateService:
             "sync_status": str(
                 row.get("sync_state") or payload.get("sync_status") or "local"
             ),
-            "expected_payload_hash": planning_library.library_payload_hash(
-                row.get("payload")
-            ),
+            "expected_payload_hash": plan_push_payload_hash(row.get("payload")),
         }
 
     @staticmethod

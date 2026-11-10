@@ -19,7 +19,9 @@
       "Edit(//**/.env.*.local)",
       "Edit(./data/**)",
       "Edit(//**/ai-coach/data/**)",
-      "Edit(//**/pacecraft/data/**)"
+      "Edit(//**/pacecraft/data/**)",
+      "Bash(git reset --soft origin/*)",
+      "PowerShell(git reset --soft origin/*)"
     ]
   },
   "hooks": {
@@ -42,6 +44,18 @@
           {
             "type": "command",
             "command": "python \"$env:CLAUDE_PROJECT_DIR/scripts/hooks/guard_private_paths.py\"",
+            "shell": "powershell",
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__t3-code__t3_thread_launch|mcp__t3-code__create_threads",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$env:CLAUDE_PROJECT_DIR/scripts/hooks/thread_model_rule.py\"",
             "shell": "powershell",
             "timeout": 10,
             "onFailure": "block"

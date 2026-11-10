@@ -86,8 +86,10 @@ class _PayloadService:
         daily_metrics_due: bool = True,
         daily_metrics_retry_due: bool = False,
         known_activity_ids: frozenset[str] = frozenset(),
+        body_battery_due: bool = False,
     ) -> None:
         self.payload = payload or {}
+        self._body_battery_due = body_battery_due
         self._daily_metrics_due = daily_metrics_due
         self._daily_metrics_retry_due = daily_metrics_retry_due
         self._known_activity_ids = known_activity_ids
@@ -100,6 +102,9 @@ class _PayloadService:
 
     def daily_metrics_retry_due(self) -> bool:
         return self._daily_metrics_retry_due
+
+    def body_battery_reconciliation_due(self) -> bool:
+        return self._body_battery_due
 
     def known_activity_ids(self, days: int) -> frozenset[str]:
         return self._known_activity_ids
@@ -158,9 +163,11 @@ class _RemoteReader:
         include_daily_metrics=True,
         known_activity_ids=None,
         rated_activity_ids=frozenset(),
+        body_battery_reconcile_days=0,
     ):
         self.arguments = (days, end_date, cancel_event, include_recovery)
         self.daily_metrics = (include_daily_metrics, known_activity_ids)
+        self.body_battery_days = body_battery_reconcile_days
         status("Garmin: Zeitraum 1/1 wird synchronisiert…")
         return (
             {"synced_at": "2026-09-20T10:00:00+00:00", "activities": []},
@@ -245,7 +252,7 @@ class GarminSyncServiceTests(unittest.TestCase):
 
     def test_export_failure_preserves_import_and_does_not_expose_error(self):
         export = Mock(side_effect=RuntimeError("PRIVATE-PROVIDER-PAYLOAD"))
-        with self.assertLogs("backend.sync.garmin_service", "WARNING") as logs:
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
             result = self.make_service(metric_export=export).sync()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["metric_export"]["failed"], 1)
@@ -341,6 +348,20 @@ class GarminSyncServiceTests(unittest.TestCase):
         )
         self.assertEqual(self.remote.daily_metrics, (True, None))
 
+    def test_body_battery_reconciles_the_recent_week_once_per_local_day(self):
+        self.make_service(payload=_PayloadService(body_battery_due=True)).sync(days=2)
+        self.assertEqual(self.remote.body_battery_days, 7)
+
+        # Already reconciled on this local day.
+        self.make_service(payload=_PayloadService(body_battery_due=False)).sync(days=2)
+        self.assertEqual(self.remote.body_battery_days, 0)
+
+        # A historical window is no current day to reconcile.
+        self.make_service(payload=_PayloadService(body_battery_due=True)).sync(
+            days=20, end_date=date(2026, 9, 1)
+        )
+        self.assertEqual(self.remote.body_battery_days, 0)
+
     def test_backfill_runs_after_a_successful_remote_sync_and_reports_counts(self):
         counts = {"status": "completed", "fetched": 2, "empty": 0, "remaining": 0}
         backfill = Mock(return_value=counts)
@@ -426,7 +447,7 @@ class GarminSyncServiceTests(unittest.TestCase):
     def test_backfill_failure_keeps_the_sync_successful_and_hides_the_error(self):
         backfill = Mock(side_effect=RuntimeError("PRIVATE-PROVIDER-PAYLOAD"))
 
-        with self.assertLogs("backend.sync.garmin_service", "WARNING") as logs:
+        with self.assertLogs("intervals_coach", "WARNING") as logs:
             result = self.make_service(activity_detail_backfill=backfill).sync()
 
         self.assertEqual(result["status"], "ok")

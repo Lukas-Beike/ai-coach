@@ -317,6 +317,36 @@ class CoachContextSelectionTests(unittest.TestCase):
         self.assertNotIn("recovery", projected)
         self.assertIn("planned_workouts", context["activities"])
 
+    def test_activities_scope_text_matches_the_sent_rows(self):
+        rows = [{"id": str(index)} for index in range(7)]
+        original = "Letzte 5 abgeschlossene Einheiten je Sportart sowie zukünftige geplante Einheiten"
+        context = {
+            "activities": {
+                "scope": original,
+                "recent_activities_by_sport": {"Run": rows},
+                "planned_workouts": [{"id": "planned"}],
+            }
+        }
+        for message, limit, expected in (
+            (
+                "Bin ich zu viel gelaufen?",
+                1,
+                "Letzte abgeschlossene Einheit je Sportart",
+            ),
+            ("Plane meine Woche", 5, "Letzte 5 abgeschlossene Einheiten je Sportart"),
+        ):
+            with self.subTest(message=message):
+                selection = select_coach_context(message, {})
+                self.assertEqual(limit, selection.activity_limit)
+                activities = selection.project(context, "2026-09-30")["activities"]
+                self.assertEqual(
+                    limit, len(activities["recent_activities_by_sport"]["Run"])
+                )
+                self.assertIn(expected, activities["scope"])
+                self.assertNotIn("zukünftige", activities["scope"])
+                self.assertNotIn("planned_workouts", activities)
+        self.assertEqual(original, context["activities"]["scope"])
+
     def test_dialogue_compaction_does_not_mutate_authorization_context(self):
         context = {
             "current_user_message_id": 24,
@@ -928,7 +958,17 @@ class CoachContextRuleTests(unittest.TestCase):
                 False,
             ),
             (
+                # A plan sync keeps the planning sections, not the full set.
                 "Synchronisiere den Plan",
+                "provider_refresh_or_sync",
+                planning,
+                14,
+                5,
+                True,
+                False,
+            ),
+            (
+                "Aktualisiere meine Garmin-Daten",
                 "provider_refresh_or_sync",
                 FULL_SECTIONS,
                 None,

@@ -60,7 +60,38 @@ class SyncCommandEndpointTests(unittest.TestCase):
             "garmin", "refresh", {"days": 7, "reason": "manual"}, requested_by="user"
         )
 
+    def test_full_resync_is_accepted_with_its_operation_id_and_runs_in_the_background(
+        self,
+    ):
+        self.full_resync.start.return_value = {
+            "status": "started",
+            "source": "garmin",
+            "operation_id": "operation-1",
+        }
+        status, body = self.endpoint.execute(
+            "/api/garmin/full-resync", {"confirm": "FULL_RESYNC"}
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(body["operation_id"], "operation-1")
+        self.full_resync.start.assert_called_once_with("garmin", "operation-1")
+        self.full_resync.resync.assert_not_called()
 
+    def test_a_repeated_full_resync_request_is_not_accepted_as_a_new_run(self):
+        self.full_resync.start.return_value = {
+            "status": "already_running",
+            "source": "wahoo",
+            "operation_id": "operation-0",
+        }
+        status, body = self.endpoint.execute(
+            "/api/wahoo/full-resync", {"confirm": "FULL_RESYNC"}
+        )
+        self.assertEqual((status, body["status"]), (200, "already_running"))
+
+    def test_full_resync_needs_its_confirmation_before_anything_starts(self):
+        with self.assertRaises(AppError) as raised:
+            self.endpoint.execute("/api/garmin/full-resync", {})
+        self.assertEqual(raised.exception.status, 400)
+        self.full_resync.start.assert_not_called()
 
     def test_job_request_and_conflict_resolution_keep_requested_by_and_status(self):
         self.queue.enqueue.return_value = {"id": "job-2"}
@@ -71,7 +102,11 @@ class SyncCommandEndpointTests(unittest.TestCase):
             (202, {"id": "job-2"}),
         )
         self.queue.enqueue.assert_called_once_with(
-            "weather", "refresh", {"force": True}, requested_by="user"
+            "weather",
+            "refresh",
+            {"force": True},
+            requested_by="user",
+            item_operations=None,
         )
         self.queue.resolve.return_value = {"status": "resolved"}
         self.assertEqual(
@@ -82,6 +117,27 @@ class SyncCommandEndpointTests(unittest.TestCase):
         )
         self.queue.resolve.assert_called_once_with(
             "abc-123", {"strategy": "keep_local"}
+        )
+
+    def test_a_ui_plan_push_stores_one_job_item_per_entry(self):
+        first, second = "a" * 8 + "-" + "0" * 27, "b" * 8 + "-" + "0" * 27
+        entries = [
+            {"library_workout_id": first, "expected_payload_hash": "1" * 64},
+            {"library_workout_id": second, "expected_payload_hash": "2" * 64},
+            {"library_workout_id": first, "expected_payload_hash": "1" * 64},
+        ]
+        self.queue.enqueue.return_value = {"id": "job-3"}
+        self.endpoint.execute(
+            "/api/sync/jobs",
+            {"provider": "wahoo", "type": "plan_push", "payload": {"entries": entries}},
+        )
+        operations = self.queue.enqueue.call_args.kwargs["item_operations"]
+        self.assertEqual(
+            operations,
+            [
+                {"item_key": first, "operation": "plan_push", "payload_hash": "1" * 64},
+                {"item_key": second, "operation": "plan_push", "payload_hash": "2" * 64},
+            ],
         )
 
     def test_route_table_is_derived_once_per_registry_not_per_request(self):

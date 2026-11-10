@@ -1121,6 +1121,23 @@ class HeartRateZoneMaxHrTests(unittest.TestCase):
         )
         self.assertEqual(_issues(result), [])
 
+    def test_a_swim_set_is_not_a_generic_max_hr(self) -> None:
+        result = _map(
+            {
+                "heart_rate_zones": [
+                    {
+                        "calendarDate": DAY,
+                        "sport": "LAP_SWIMMING",
+                        "maxHeartRateUsed": 170,
+                    },
+                    {"calendarDate": DAY, "sport": "DEFAULT", "maxHeartRateUsed": 190},
+                ]
+            }
+        )
+
+        (only,) = [item for item in result.records if item.kind is MetricKind.MAX_HR]
+        self.assertEqual((only.sport, only.value.value), (None, 190.0))
+
     def test_max_hr_alias_order_prefers_max_heart_rate_used(self) -> None:
         result = _map(
             {
@@ -1882,7 +1899,7 @@ class PersonalApiShapeTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 21)
+        self.assertEqual(MAPPER_VERSION, 22)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):

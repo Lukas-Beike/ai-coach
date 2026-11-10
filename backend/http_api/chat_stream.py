@@ -25,8 +25,10 @@ class CoachChatStreamTransport:
         *,
         max_request_bytes: int,
         response_timeout_seconds: int,
+        maintenance_pending: Callable[[], bool] = lambda: False,
     ) -> None:
         self._registry = registry
+        self._maintenance_pending = maintenance_pending
         self._submission_service = submission_service
         self._receipt_service = receipt_service
         self._redact_text = redact_text
@@ -74,6 +76,7 @@ class CoachChatStreamTransport:
                 cancel_event,
                 send_event,
                 disconnect,
+                lambda: client_connected,
             )
         except AppError as exc:
             send_event("error", self._app_error(exc))
@@ -104,6 +107,7 @@ class CoachChatStreamTransport:
         cancel_event: Any,
         send_event: Callable[[str, Any], None],
         disconnect: Callable[[], None],
+        connected: Callable[[], bool],
     ) -> None:
         handler.connection.settimeout(self._response_timeout_seconds + 30)
         try:
@@ -130,7 +134,7 @@ class CoachChatStreamTransport:
             send_event("background", job)
             return
         self._relay_events(
-            events, client_turn_id, session_hash, operation_id, send_event
+            events, client_turn_id, session_hash, operation_id, send_event, connected
         )
 
     def _relay_events(
@@ -140,12 +144,20 @@ class CoachChatStreamTransport:
         session_hash: str,
         operation_id: str,
         send_event: Callable[[str, Any], None],
+        connected: Callable[[], bool],
     ) -> None:
-        while True:
+        # A detached client leaves the durable job running; the relay stops so this
+        # request no longer holds a maintenance operation for the whole turn.
+        while connected():
             try:
                 event, data = events.get(timeout=15)
             except queue.Empty:
                 active = self._submission_service().active(session_hash, operation_id)
+                if active and self._maintenance_pending():
+                    # A pending restore or delete drains open requests; detach so
+                    # a queued turn's relay does not hold its operation.
+                    send_event("background", {"operation_id": operation_id})
+                    break
                 if active:
                     send_event("heartbeat", {"operation_id": operation_id})
                     continue

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 import threading
 import unittest
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+from backend.coach.response_retry import CoachResponseRetryPolicy
 from backend.coach.structured_response import CoachStructuredResponseService
 from backend.errors import AppError
 
@@ -122,7 +124,7 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.assertEqual(
             self.retry.retry_delay.call_args.kwargs["request_delta_emitted"], False
         )
-        self.retry.wait.assert_called_once_with(0.01, None, 0)
+        self.retry.wait.assert_called_once_with(0.01, None, 0, "rate_limit_exceeded")
 
     def test_stream_delta_disables_response_retry(self) -> None:
         deltas: list[str] = []
@@ -325,6 +327,121 @@ class CoachStructuredResponseTests(unittest.TestCase):
         self.assertIs(self.service.respond(self.payload, **self.options), response)
 
         self.transport.request.assert_called_once()
+
+
+class _ServerErrorFailure(AppError):
+    provider_error_code = "server_error"
+
+
+class CoachTransientRetryTests(unittest.TestCase):
+    """The real retry policy with mocked transports and no real sleeping."""
+
+    def setUp(self) -> None:
+        self.transport = Mock()
+        self.recovery = Mock()
+        self.recovery.recover_if_invalid.return_value = False
+        self.service = CoachStructuredResponseService(
+            self.transport,
+            self.recovery,
+            CoachResponseRetryPolicy(Mock(spec=logging.Logger)),
+            Mock(),
+        )
+        self.payload: dict[str, Any] = {"input": [{"role": "user"}], "model": "m"}
+        self.options: dict[str, Any] = {
+            "request_payload": self.payload,
+            "context": {},
+            "message": "Synthetic question",
+            "command_receipts": [],
+            "attachments": [],
+            "client_turn_id": "turn-synthetic",
+            "background_owned": False,
+            "on_text_delta": None,
+            "cancel_event": None,
+            "recovery_state": {"conversation_recovered": False},
+        }
+        sleep = patch("backend.coach.response_retry.time.sleep")
+        jitter = patch("backend.coach.response_retry.secrets.randbelow", return_value=0)
+        self.sleep = sleep.start()
+        jitter.start()
+        self.addCleanup(sleep.stop)
+        self.addCleanup(jitter.stop)
+
+    @staticmethod
+    def failure(status: int, reason: str) -> AppError:
+        return AppError(status, "Synthetic provider failure", reason=reason)
+
+    def test_gateway_and_network_failures_before_output_are_retried(self) -> None:
+        expected = {"id": "completed"}
+        for status, reason in (
+            (502, "provider_unavailable"),
+            (503, "provider_unavailable"),
+            (502, "network_error"),
+        ):
+            with self.subTest(reason=reason, status=status):
+                self.sleep.reset_mock()
+                self.transport.request.reset_mock()
+                self.transport.request.side_effect = [
+                    self.failure(status, reason),
+                    self.failure(status, reason),
+                    expected,
+                ]
+                self.assertIs(
+                    self.service.respond(self.payload, **self.options), expected
+                )
+                self.assertEqual(self.transport.request.call_count, 3)
+                self.assertEqual(
+                    [call.args[0] for call in self.sleep.call_args_list], [2, 5]
+                )
+
+    def test_provider_server_error_response_before_output_is_retried(self) -> None:
+        failed = _ServerErrorFailure(
+            502, "Synthetic provider failure", reason="response_failed"
+        )
+        expected = {"id": "completed"}
+        self.transport.request.side_effect = [failed, expected]
+
+        self.assertIs(self.service.respond(self.payload, **self.options), expected)
+        self.sleep.assert_called_once_with(2)
+
+    def test_stream_failure_after_output_is_not_retried(self) -> None:
+        def stream(_payload, on_delta, *_args, **_kwargs):
+            on_delta("partial")
+            raise self.failure(503, "provider_unavailable")
+
+        self.transport.stream_request.side_effect = stream
+        self.options["on_text_delta"] = lambda _delta: None
+
+        with self.assertRaises(AppError) as raised:
+            self.service.respond(self.payload, **self.options)
+
+        self.assertEqual(raised.exception.reason, "provider_unavailable")
+        self.transport.stream_request.assert_called_once()
+        self.sleep.assert_not_called()
+
+    def test_retries_stay_within_three_attempts(self) -> None:
+        self.transport.request.side_effect = self.failure(503, "provider_unavailable")
+
+        with self.assertRaises(AppError) as raised:
+            self.service.respond(self.payload, **self.options)
+
+        self.assertEqual(raised.exception.reason, "provider_unavailable")
+        self.assertEqual(self.transport.request.call_count, 3)
+        self.assertEqual(self.sleep.call_count, 2)
+
+    def test_budget_exhaustion_is_neither_resumed_nor_retried(self) -> None:
+        def run(_payload, **kwargs):
+            kwargs["on_response_id"]("resp-budget")
+            raise self.failure(504, "background_budget_exceeded")
+
+        self.transport.background_request.side_effect = run
+        self.options["background_owned"] = True
+
+        with self.assertRaises(AppError) as raised:
+            self.service.respond(self.payload, **self.options)
+
+        self.assertEqual(raised.exception.reason, "background_budget_exceeded")
+        self.transport.background_request.assert_called_once()
+        self.sleep.assert_not_called()
 
 
 if __name__ == "__main__":

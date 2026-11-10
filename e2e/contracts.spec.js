@@ -1,10 +1,6 @@
 const { test, expect } = require("@playwright/test");
-const { readFileSync } = require("node:fs");
-const path = require("node:path");
 const { captureReadFixture, installReadFixture } = require("./read-fixture");
 const { contrastRatio } = require("./helpers/ui");
-
-const SERVICE_WORKER_CACHE = readFileSync(path.join(__dirname, "..", "public", "service-worker.js"), "utf8").match(/const CACHE = "([^"]+)";/)[1];
 
 let fixture;
 test.beforeAll(async ({ request }) => { fixture = await captureReadFixture(request); });
@@ -92,6 +88,37 @@ test("Markdown links preserve URLs and format labels without interpreting markup
   await expect(message.getByRole("link")).toHaveCount(3);
   await expect(page.locator("#markdown-injection")).toHaveCount(0);
   expect(await page.evaluate(() => window.markdownInjection)).toBeUndefined();
+});
+
+test("@responsive Coach links are underlined, keep their contrast in both themes and show a differing host", async ({ page }) => {
+  await ready(page);
+  await page.evaluate(() => renderMessages([{
+    id: 900002,
+    role: "assistant",
+    content: "Siehe [die Quelle](https://www.example.invalid/a) oder [example.invalid/b](https://example.invalid/b) für Details.",
+  }]));
+  const message = page.locator('[data-message-id="900002"]');
+  const link = message.getByRole("link", { name: "die Quelle", exact: true });
+  await expect(message.locator(".link-host")).toHaveCount(1);
+  await expect(message.locator(".link-host")).toHaveText("(example.invalid)");
+  await expect(message.getByRole("link", { name: "example.invalid/b", exact: true })).toBeVisible();
+  for (const theme of ["dark", "light"]) {
+    await page.evaluate((selected) => { document.documentElement.dataset.theme = selected; }, theme);
+    const colors = await link.evaluate((anchor) => {
+      const paragraph = anchor.closest("p");
+      return {
+        decoration: getComputedStyle(anchor).textDecorationLine,
+        link: getComputedStyle(anchor).color,
+        text: getComputedStyle(paragraph).color,
+        host: getComputedStyle(paragraph.querySelector(".link-host")).color,
+        background: getComputedStyle(document.body).backgroundColor,
+      };
+    });
+    expect(colors.decoration, theme).toContain("underline");
+    expect(contrastRatio(colors.link, colors.text), `${theme} link against text`).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(colors.link, colors.background), `${theme} link against background`).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(colors.host, colors.background), `${theme} host against background`).toBeGreaterThanOrEqual(4.5);
+  }
 });
 
 test("appearance choice updates the theme and survives reload on this device", { tag: "@responsive" }, async ({ page }) => {
@@ -459,7 +486,17 @@ test("provider source retains visible stale and partial measurement context", as
 test("fresh service worker keeps the current shell available offline", async ({ page }) => {
   await ready(page);
   await page.evaluate(() => navigator.serviceWorker.ready);
-  expect(await page.evaluate(() => caches.keys())).toEqual([SERVICE_WORKER_CACHE]);
+  // The cache name is stamped by the server, so the served worker names it.
+  const worker = await (await page.request.get("/service-worker.js")).text();
+  const cacheName = worker.match(/const CACHE = "(pacecraft-[0-9a-f]{10})";/)[1];
+  expect(await page.evaluate(() => caches.keys())).toEqual([cacheName]);
+  // Every stamped asset reference of the shell is in the fresh cache.
+  expect(await page.evaluate(async (name) => {
+    const cached = new Set((await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname + new URL(request.url).search));
+    const refs = [...document.querySelectorAll("script[src], link[rel~=stylesheet][href], link[rel~=icon][href], link[rel=apple-touch-icon][href]")]
+      .map((element) => new URL(element.src || element.href).pathname + new URL(element.src || element.href).search);
+    return { refs: refs.length, missing: refs.filter((ref) => !cached.has(ref)) };
+  }, cacheName)).toEqual({ refs: expect.any(Number), missing: [] });
   await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem("coach-state-snapshot")))).toBe(true);
   await page.context().setOffline(true);
   try {
@@ -474,7 +511,7 @@ test("fresh service worker keeps the current shell available offline", async ({ 
     await expect(page.locator("#loginPassword")).toBeEditable();
     expect(await page.evaluate(async () => {
       const names = await caches.keys();
-      const cacheName = names.find((name) => /^pacecraft-v/.test(name));
+      const cacheName = names.find((name) => /^pacecraft-[0-9a-f]{10}$/.test(name));
       const cache = await caches.open(cacheName);
       return (await cache.keys()).some((request) => new URL(request.url).pathname.startsWith("/api/"));
     })).toBe(false);

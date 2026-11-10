@@ -6,7 +6,30 @@ from typing import Any
 
 from backend.coach.conversation import CoachConversationHistoryService
 from backend.coach.proposal_read import CoachProposalReadService
+from backend.errors import AppError
 from backend.http_api import pagination
+
+# SQLite integers are signed 64-bit, so a message id has at most 19 digits.
+_SQLITE_MAX_INTEGER = 2**63 - 1
+_MAX_CURSOR_DIGITS = 19
+
+
+def _before_message_id(cursor: Any, decoded: Any) -> int | None:
+    if not cursor:
+        return None
+    value: int | None = None
+    if type(decoded) is int:
+        value = decoded
+    elif (
+        isinstance(decoded, str)
+        and len(decoded) <= _MAX_CURSOR_DIGITS
+        and decoded.isascii()
+        and decoded.isdigit()
+    ):
+        value = int(decoded)
+    if value is None or not 0 <= value <= _SQLITE_MAX_INTEGER:
+        raise AppError(400, "Ungültiger Cursor.", reason="invalid_page_cursor")
+    return value
 
 
 class ChatHistoryPageService:
@@ -34,9 +57,7 @@ class ChatHistoryPageService:
         )
         term = str(search or "").strip()[:200]
         decoded = pagination.decode_page_cursor(cursor)
-        before_message_id = None
-        if isinstance(decoded, int) or (isinstance(decoded, str) and decoded.isdigit()):
-            before_message_id = int(decoded)
+        before_message_id = _before_message_id(cursor, decoded)
 
         generation, rows = self._conversation_history.page(
             before_message_id=before_message_id,

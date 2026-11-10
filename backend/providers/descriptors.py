@@ -38,8 +38,8 @@ _GARMIN_DEFAULT_SYNC_DAYS = 84
 _WAHOO_DEFAULT_SYNC_DAYS = 84
 
 _INTERVALS_NOT_CONFIGURED_MESSAGE = (
-    "Intervals.icu ist nicht konfiguriert. Bitte INTERVALS_API_KEY in der "
-    "Serverkonfiguration hinterlegen."
+    "Intervals.icu ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen "
+    "hinterlegen."
 )
 _GARMIN_NOT_CONFIGURED_MESSAGE = (
     "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "

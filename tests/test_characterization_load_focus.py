@@ -238,6 +238,7 @@ class CharacterizationLoadContextTests(unittest.TestCase):
                 "previous_7",
                 "last_30",
                 "previous_30",
+                "base_30_before_7",
             },
         )
 

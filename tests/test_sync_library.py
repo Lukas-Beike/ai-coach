@@ -23,6 +23,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, INVALID_LIBRARY_ID_ERROR, AppError
 from backend.planning import workouts as planning_workouts
 from backend.planning.library_service import UPDATE_LIBRARY_SQL
+from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers.http import ProviderHTTPError
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import (
@@ -453,9 +454,9 @@ class WorkoutLibrarySyncStateServiceTests(unittest.TestCase):
         self.assertEqual(planned["planned_date"], "2026-11-12")
         self.assertEqual(
             planned["payload_hash"],
-            hashlib.sha256(
-                b'{"date": " 2026-11-12T06:00:00", "name": "Planned"}'
-            ).hexdigest(),
+            plan_push_payload_hash(
+                '{"date": " 2026-11-12T06:00:00", "name": "Planned"}'
+            ),
         )
         lib_new = next(entry for entry in entries if entry["local_id"] == "lib-new")
         self.assertEqual(lib_new["entity"], "workout_library")
@@ -1215,11 +1216,6 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
             second.result(timeout=2)
         self.assertEqual(max_active, 1)
         self.assertFalse(workout_library_sync_running())
-
-
-
-
-
 
 
 if __name__ == "__main__":

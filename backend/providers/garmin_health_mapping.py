@@ -230,7 +230,7 @@ from backend.providers.garmin_weight_walk import (
 # Version 21: one readiness alias order (``score`` first), gear
 # ``maximumMeter`` beside ``maximumMeters``, and an endurance ``groupMap`` that
 # is a mapping keyed by day or a list of dated entries.
-MAPPER_VERSION: Final = 21
+MAPPER_VERSION: Final = 22
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -267,6 +267,9 @@ _HEART_RATE_ZONES: Final = "heart_rate_zones"
 _MAX_HR_KEYS: Final = ("maxHeartRateUsed", "maxHeartRate", "maxHR")
 _MAX_HR_FLOOR: Final = 80.0
 _HEART_RATE_SPORT_KEYS: Final = ("sport", "sportType", "activityType")
+# Zone-set categories whose max HR holds for every sport; any other category
+# that is not cycling or running (a swim set) is not a generic value.
+_GENERIC_HEART_RATE_CATEGORIES: Final = frozenset({"default", "generic", "all"})
 _HEART_RATE_LIST_LIMIT: Final = 100
 # The legacy daily-stats reader's walk limits.
 _DAILY_STATS_VISIT_LIMIT: Final = 2000
@@ -1455,7 +1458,15 @@ class _HealthMapping:
             self.issue(ref, _MAX_HR_KEYS[0], IssueReason.OUT_OF_RANGE)
             return
         entry = _entry(_HEART_RATE_ZONES, ref, day, str(ordinal), index=index)
-        sport = _heart_rate_sport(_first_value(node, _HEART_RATE_SPORT_KEYS))
+        category = _first_value(node, _HEART_RATE_SPORT_KEYS)
+        sport = _heart_rate_sport(category)
+        if (
+            sport is None
+            and isinstance(category, str)
+            and alnum_key(category) not in _GENERIC_HEART_RATE_CATEGORIES
+            and alnum_key(category)
+        ):
+            return
         self.emit(
             entry,
             MetricKind.MAX_HR,

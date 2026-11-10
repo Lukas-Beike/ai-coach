@@ -20,7 +20,7 @@ from backend.backup.export import (
 from backend.backup.recovery_copies import RecoveryCopies
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import activity_detail_store
-from backend.db.manager import DatabaseManager
+from backend.db.manager import DatabaseManager, secure_deletion
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
@@ -144,6 +144,10 @@ PRIVACY_REMOTE_SCOPE = (
         "Garmin-Token-Datei im Datenverzeichnis bleibt erhalten, wird aber nicht "
         "mehr verwendet."
     ),
+    (
+        "Wahoo-Konto und Wahoo-Daten bleiben unverändert; der Zugriff dieser "
+        "App wird bei Wahoo widerrufen."
+    ),
     "Externe Kalenderquelle und deren Anbieter bleiben unverändert.",
 )
 
@@ -163,9 +167,14 @@ class PrivacyDeleteDependencies:
     refresh_credentials: Callable[[], Any] | None = None
     # Discards a pending Garmin MFA login so it cannot store tokens afterwards.
     cancel_garmin_login: Callable[[], None] | None = None
+    # Best-effort Wahoo disconnect: bumps the connection generation and revokes
+    # the grant at Wahoo before the stored tokens are wiped.
+    disconnect_wahoo: Callable[[], dict[str, Any]] | None = None
     # Copies saved by a restore or by the Intervals.icu purge of an earlier
     # release; erased with the data.
     recovery_copies: RecoveryCopies | None = None
+    # Stops a running Coach turn so the maintenance drain does not wait for it.
+    cancel_coach_turns: Callable[[], None] | None = None
     utc_now: Callable[[], str] = lambda: datetime.now(UTC).isoformat()
 
 
@@ -219,7 +228,13 @@ class PrivacyDeleteService:
             "confirmation_text": PRIVACY_DELETE_CONFIRMATION_TEXT,
             "categories": categories,
             "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
-            "openai_conversation": "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; ein Fehlschlag wird separat ausgewiesen.",
+            "openai_conversation": (
+                "Eine vorhandene OpenAI-Konversation wird vor dem Löschen zum Löschen angefragt; "
+                "ein Fehlschlag wird separat ausgewiesen. Gewöhnliche Coach-Antworten speichert "
+                "OpenAI nicht (store: false). Antworten des Anhang-Dialogs und von "
+                "Hintergrundläufen liegen dort bis zur Aufbewahrungsfrist von OpenAI; diese App "
+                "löscht sie nicht einzeln."
+            ),
         }
 
     def gps_state(self) -> dict[str, Any]:
@@ -250,14 +265,42 @@ class PrivacyDeleteService:
         if confirm != GPS_TRACKS_DELETE_CONFIRMATION_TEXT:
             raise AppError(400, "Zum Löschen muss GPS-SPUREN LÖSCHEN bestätigt werden.")
         dependencies = self._dependencies
-        with (
-            dependencies.maintenance_gate.restore(),
-            dependencies.database_lock,
-            dependencies.database_manager.unit_of_work() as db,
-        ):
-            deleted = activity_detail_store.delete_stored_tracks(db)
-            clear_routes(dependencies.key_value_repository, db)
+        with dependencies.maintenance_gate.restore(dependencies.cancel_coach_turns):
+            with (
+                dependencies.database_lock,
+                dependencies.database_manager.unit_of_work() as db,
+                secure_deletion(db),
+            ):
+                deleted = activity_detail_store.delete_stored_tracks(db)
+                clear_routes(dependencies.key_value_repository, db)
+            self._reclaim_after_commit()
         return {"status": "ok", "deleted_tracks": deleted, **self.gps_state()}
+
+    def _reclaim_after_commit(self) -> None:
+        """Drop the deleted pages from the database file and the WAL.
+
+        Runs after the commit under the held maintenance gate. The delete is
+        already durable, so a failure is logged and never fails the request;
+        both statements are atomic and leave the data unchanged on error.
+        """
+        dependencies = self._dependencies
+        try:
+            with dependencies.database_lock:
+                complete = dependencies.database_manager.reclaim_space()
+        except Exception as exc:  # noqa: BLE001 - the committed delete stands
+            dependencies.logger.warning(
+                "Deleted database pages could not be reclaimed",
+                extra={
+                    "event": "privacy_space_reclaim_failed",
+                    "context": {"error_class": type(exc).__name__},
+                },
+            )
+            return
+        if complete is False:
+            dependencies.logger.warning(
+                "Deleted database pages stay in the write-ahead log",
+                extra={"event": "privacy_space_reclaim_incomplete"},
+            )
 
     def delete(self, confirm: Any) -> dict[str, Any]:
         if confirm != PRIVACY_DELETE_CONFIRMATION_TEXT:
@@ -267,7 +310,7 @@ class PrivacyDeleteService:
             )
         dependencies = self._dependencies
         with (
-            dependencies.maintenance_gate.restore(),
+            dependencies.maintenance_gate.restore(dependencies.cancel_coach_turns),
             dependencies.profile_mutation_coordinator,
         ):
             with dependencies.database_manager.reader() as db:
@@ -291,12 +334,30 @@ class PrivacyDeleteService:
                     )
             if dependencies.cancel_garmin_login is not None:
                 dependencies.cancel_garmin_login()
+            wahoo_revoke_attempted = False
+            wahoo_revoked = False
+            if dependencies.disconnect_wahoo is not None:
+                try:
+                    outcome = dependencies.disconnect_wahoo()
+                    wahoo_revoke_attempted = bool(
+                        outcome.get("remote_revoke_attempted")
+                    )
+                    wahoo_revoked = bool(outcome.get("remote_revoked"))
+                except Exception:
+                    # The purge completes; the kv wipe below drops the tokens anyway.
+                    wahoo_revoke_attempted = True
+                    dependencies.logger.warning(
+                        "Wahoo grant could not be revoked",
+                        extra={"event": "privacy_wahoo_revoke_failed"},
+                        exc_info=True,
+                    )
             # Flushes stay blocked from before the delete until the cache is dropped,
             # so deleted diagnostics are neither served nor written back.
             with (
                 dependencies.diagnostics_suspended(),
                 dependencies.database_lock,
                 dependencies.database_manager.unit_of_work() as db,
+                secure_deletion(db),
             ):
                 deleted_counts = self._counts(db)
                 deleted_tables = dict.fromkeys(
@@ -315,6 +376,7 @@ class PrivacyDeleteService:
                     db, "profile", json.dumps(DEFAULT_PROFILE)
                 )
                 dependencies.planning_revision_service.mark_reset_pending()
+            self._reclaim_after_commit()
             if dependencies.recovery_copies is not None:
                 # After the commit: a failed erase never leaves a half-wiped database.
                 erased = dependencies.recovery_copies.erase()
@@ -337,6 +399,8 @@ class PrivacyDeleteService:
                 "recovery_copies_failed": recovery_copies_failed,
                 "remote_delete_attempted": remote_delete_attempted,
                 "remote_conversation_deleted": remote_deleted,
+                "wahoo_revoke_attempted": wahoo_revoke_attempted,
+                "wahoo_revoked": wahoo_revoked,
                 "remote_untouched": list(PRIVACY_REMOTE_SCOPE),
             }
 
@@ -374,6 +438,8 @@ class PrivacyStateDependencies:
     diagnostics_suspended: Callable[[], AbstractContextManager[None]]
     refresh_credentials: Callable[[], Any] | None = None
     cancel_garmin_login: Callable[[], None] | None = None
+    disconnect_wahoo: Callable[[], dict[str, Any]] | None = None
+    cancel_coach_turns: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -419,6 +485,8 @@ class PrivacyAssembly:
         self._diagnostics_suspended = state.diagnostics_suspended
         self._refresh_credentials = state.refresh_credentials
         self._cancel_garmin_login = state.cancel_garmin_login
+        self._disconnect_wahoo = state.disconnect_wahoo
+        self._cancel_coach_turns = state.cancel_coach_turns
         self._data_dir = archive.data_dir
         self._database_path = archive.database_path
         self._maximum_export_bytes = archive.maximum_export_bytes
@@ -439,6 +507,8 @@ class PrivacyAssembly:
                 diagnostics_suspended=self._diagnostics_suspended,
                 refresh_credentials=self._refresh_credentials,
                 cancel_garmin_login=self._cancel_garmin_login,
+                disconnect_wahoo=self._disconnect_wahoo,
+                cancel_coach_turns=self._cancel_coach_turns,
                 recovery_copies=RecoveryCopies(
                     self._data_dir(), self._database_path().name
                 ),

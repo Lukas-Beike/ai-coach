@@ -45,12 +45,6 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
         self.assertEqual(arguments["_wait_for_completion"], False)
         self.intervals.sync.assert_not_called()
 
-
-
-
-
-
-
     def test_rejects_invalid_or_oversized_sync_windows_before_provider_call(self):
         for arguments in (
             {"days": "bad", "_wait_for_completion": True},
@@ -63,7 +57,6 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
                 self.assertEqual(error.exception.reason, "invalid_refresh_request")
         self.intervals.sync.assert_not_called()
 
-
     def test_sync_refresh_for_other_provider_is_rejected(self):
         with self.assertRaises(AppError) as error:
             self.service.start("garmin", {"_wait_for_completion": True})
@@ -71,7 +64,6 @@ class ProviderRefreshCommandServiceTests(unittest.TestCase):
         self.assertEqual(error.exception.status, 400)
         self.assertEqual(error.exception.reason, "invalid_refresh_request")
         self.intervals.sync.assert_not_called()
-
 
 
 class GarminSynchronousRefreshTests(unittest.TestCase):
@@ -273,6 +265,44 @@ class GarminSynchronousRefreshTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         queue.enqueue.assert_not_called()
+
+    def test_a_waiting_refresh_requests_the_derived_passes_when_it_finished(self):
+        requested = []
+        service = ProviderRefreshCommandService(
+            Mock(),
+            synchronous_refreshes={"garmin": self.refresh},
+            after_refresh=requested.append,
+        )
+
+        service.start("garmin", {"_wait_for_completion": True})
+
+        self.assertEqual(requested, [{"provider": "garmin", "type": "refresh"}])
+
+    def test_a_failed_waiting_refresh_requests_no_derived_pass(self):
+        requested = []
+        self.garmin.sync.side_effect = AppError(503, "Garmin down")
+        service = ProviderRefreshCommandService(
+            Mock(),
+            synchronous_refreshes={"garmin": self.refresh},
+            after_refresh=requested.append,
+        )
+
+        with self.assertRaises(AppError):
+            service.start("garmin", {"_wait_for_completion": True})
+
+        self.assertEqual(requested, [])
+
+    def test_a_queued_refresh_leaves_the_derived_passes_to_its_job(self):
+        requested = []
+        queue = Mock()
+        queue.enqueue.return_value = {"id": "job-1"}
+        service = ProviderRefreshCommandService(
+            queue, {}, after_refresh=requested.append
+        )
+
+        service.start("garmin", {})
+
+        self.assertEqual(requested, [])
 
 
 if __name__ == "__main__":

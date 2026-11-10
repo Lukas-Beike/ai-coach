@@ -53,16 +53,14 @@ function plannedGarminBlockedText(entry) {
   return "";
 }
 
-// Providers this planned unit still needs an explicit push to, in push order:
-// Intervals.icu last, because its sync rewrites the unit and so its payload
-// hash, which every other job of the same click still carries. Past, done,
+// Providers this planned unit still needs an explicit push to. Past, done,
 // in-flight and unconfigured targets get none.
-function plannedPushTargets(entry, dateKey, todayKey, { configured = {}, completed = false, intervals } = {}) {
+function plannedPushTargets(entry, dateKey, todayKey, { configured = {}, completed = false } = {}) {
   const pending = entry?.push_pending;
   if (!entry?.local_id || !entry.payload_hash || entry.is_completed_activity || completed) return [];
   if (!pending || typeof pending !== "object" || !dateKey || dateKey < todayKey) return [];
   const targets = Object.keys(pending).filter((provider) => pending[provider] === true && configured[provider] === true);
-  return [...targets.filter((provider) => provider !== intervals).sort((a, b) => a.localeCompare(b)), ...targets.filter((provider) => provider === intervals)];
+  return targets.sort((a, b) => a.localeCompare(b));
 }
 
 const CALENDAR_MARKERS = [
@@ -451,17 +449,17 @@ function appendPlannedCalendarComparison(details, entry, actual) {
   planLine.textContent = `Plan: ${[
     entry.name,
     AppFormat.duration(plannedDuration),
-    entry.training_load != null ? `Load ${calendarMetricNumber(entry.training_load)}` : null,
+    entry.training_load != null ? `Belastung ${calendarMetricNumber(entry.training_load)}` : null,
   ].filter(Boolean).join(" · ")}`;
   const actualLine = document.createElement("p");
   actualLine.textContent = `Ist: ${[
     AppFormat.duration(actual.moving_duration_s ?? actual.elapsed_duration_s),
-    actual.training_load != null ? `Load ${calendarMetricNumber(actual.training_load)}` : null,
+    actual.training_load != null ? `Belastung ${calendarMetricNumber(actual.training_load)}` : null,
   ].filter(Boolean).join(" · ")}`;
   comparison.append(planLine, actualLine);
   if (entry.compliance?.percentage != null) {
     const ratio = document.createElement("p");
-    const ratioLabel = { training_load: "Load", strength_sets: "Sätze" }[entry.compliance.basis] || "Umfang";
+    const ratioLabel = { training_load: "Belastung", strength_sets: "Sätze" }[entry.compliance.basis] || "Umfang";
     ratio.textContent = `${ratioLabel} Plan/Ist: ${entry.compliance.percentage} %`;
     comparison.append(ratio);
   }
@@ -488,15 +486,6 @@ function appendPlannedTarget(cardSummary, entry) {
   if (entry.training_load != null) targetParts.push(`Belastung ${calendarMetricNumber(entry.training_load)}`);
   target.textContent = `Plan: ${targetParts.join(" · ")}`;
   cardSummary.append(target);
-}
-
-const SEASON_PHASE_LABELS = { base: "Basis", build: "Aufbau", peak: "Spezifische Vorbereitung", taper: "Taper", completed: "Vergangen" };
-
-function nextCompetitionSummary(next, dateLabel, todayKey) {
-  if (!next) return "Noch kein zukünftiger Wettkampf gespeichert.";
-  const when = AppFormat.relativeDay(next.event_date, todayKey) ?? `${next.days_until} Tage`;
-  const phase = SEASON_PHASE_LABELS[next.phase] || next.phase;
-  return `Nächster Wettkampf: ${next.name} am ${dateLabel(next.event_date)} · Phase: ${phase} · ${when}`;
 }
 
 function adaptiveForecastNote(forecast, formatTime) {
@@ -690,11 +679,14 @@ function plannedWeekMetrics(planned, actual) {
 }
 
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
+  // The lists are re-rendered as a whole; only the outcome of a user action is announced.
+  function announcePlanChange(message) {
+    const region = $("#planListStatus");
+    if (region) region.textContent = message;
+  }
+
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
-    const next = planning.season?.next_event;
-    const summary = $("#planningSummary");
-    if (summary) summary.textContent = nextCompetitionSummary(next, dateLabel, todayIso());
     const preview = planning.latest_replan;
     const changes = Array.isArray(preview?.changes) ? preview.changes : [];
     const illnessPending = adaptiveIllnessPending(data, preview);
@@ -715,64 +707,13 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const syncButton = $("#externalCalendarSyncButton");
     setConnectionChip("#externalCalendarConnectionStatus", connectionKind({ configured: calendar.configured, error: Boolean(calendar.last_error) }));
     const detail = $("#externalCalendarConnectionDetail");
-    if (detail) detail.textContent = calendar.last_error ? "Fehler bei letzter Aktualisierung · nur lesend" : "Nur lesen · Termine erscheinen im Tab „Kalender“ als Zeit- und Erholungssignal";
+    if (detail) detail.textContent = calendar.last_error ? "Fehler bei letzter Aktualisierung" : "";
     if (syncButton) {
       syncButton.disabled = Boolean(calendar.running || state.localSync.externalCalendar);
       syncButton.textContent = calendar.running || state.localSync.externalCalendar ? "Synchronisierung läuft…" : "Synchronisieren";
     }
   }
 
-
-  function trainingPlanEntry(item) {
-    const entry = document.createElement("div");
-    entry.className = "training-plan-entry";
-    entry.textContent = `${item.date ? dateLabel(item.date) : "Ohne Datum"} · ${item.name || "Einheit"} · ${item.duration_minutes || Math.round(Number(item.planned_duration_s || 0) / 60) || "?"} Min.`;
-    return entry;
-  }
-
-  function trainingPlanCard(plan, planEntries) {
-      const details = document.createElement("details");
-      details.className = "training-plan";
-      const summary = document.createElement("summary");
-      const title = document.createElement("strong");
-      title.textContent = plan.name || "Mehrwochenplan";
-      const meta = document.createElement("span");
-      meta.textContent = [plan.start_date && plan.end_date ? `${dateLabel(plan.start_date)} – ${dateLabel(plan.end_date)}` : null, `${planEntries.length} Einheiten`, plan.status].filter(Boolean).join(" · ");
-      summary.append(title, meta);
-      details.append(summary);
-      const body = document.createElement("div");
-      body.className = "training-plan-body";
-      if (plan.goal) {
-        const goal = document.createElement("p");
-        goal.textContent = plan.goal;
-        body.append(goal);
-      }
-      planEntries.sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))).forEach((entry) => body.append(trainingPlanEntry(entry)));
-      if (!planEntries.length) {
-        const empty = document.createElement("p");
-        empty.className = "fine-print";
-        empty.textContent = "Keine aktiven Einheiten zu diesem Plan vorhanden.";
-        body.append(empty);
-      }
-      details.append(body);
-      return details;
-  }
-
-  function renderTrainingPlans(plans, workouts) {
-    const root = $("#trainingPlans");
-    if (!root) return;
-    root.replaceChildren();
-    const entries = (workouts || []).filter((item) => item?.plan_id && !item?.archived);
-    if (!Array.isArray(plans) || !plans.length) return;
-    const heading = document.createElement("h3");
-    heading.className = "subsection-title";
-    heading.textContent = "Mehrwochenpläne";
-    root.append(heading);
-    plans.forEach((plan) => {
-      const planEntries = entries.filter((item) => String(item.plan_id) === String(plan.id));
-      root.append(trainingPlanCard(plan, planEntries));
-    });
-  }
 
   function planWeekStart(dateKey) {
     const value = dateFromKey(dateKey);
@@ -844,7 +785,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       ? `${plannedUnits} geplant · ${completedUnits} absolviert`
       : `${plannedUnits} geplant`;
     if (compliance?.basis !== "training_load" || compliance.planned_value == null) return units;
-    const load = [`Load geplant ${formatWhole(compliance.planned_value)}`];
+    const load = [`Belastung geplant ${formatWhole(compliance.planned_value)}`];
     if (isPast || completedUnits > 0) load.push(`absolviert ${formatWhole(compliance.actual_value || 0)}`);
     return `${units} · ${load.join(" · ")}`;
   }
@@ -892,7 +833,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     primaryMetrics.className = "planned-actual-summary";
     const load = calendarMetricNumber(actual.training_load);
     const rpe = calendarRpeLabel(actual.rpe);
-    primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
+    primaryMetrics.textContent = [load != null ? `Belastung ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
     const facts = document.createElement("div");
     facts.className = "planned-actual-facts";
     appendCalendarFact(facts, "Dauer", AppFormat.duration(actual.moving_duration_s ?? actual.elapsed_duration_s));
@@ -949,7 +890,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     if (!total || !values.length) return null;
     const top = Math.max(...values, 1) * 1.1;
     const baseLabel = profile.source === "recorded" ? "Aufgezeichnetes Belastungsprofil" : "Geplantes Intervallprofil";
-    const label = profile.estimated ? `${baseLabel} (Zonen geschätzt aus FTP/LTHR)` : baseLabel;
+    const label = profile.estimated ? `${baseLabel} (Zonen geschätzt aus FTP oder Schwellenpuls (LSHF))` : baseLabel;
     const svg = analysisSvg("svg", { viewBox: "0 0 300 56", role: "img", "aria-label": label, class: "calendar-workout-profile", preserveAspectRatio: "none" });
     svg.append(analysisSvg("title", {}, `${label} · ${axis === "distance" ? "Distanzachse" : "Zeitachse"} · ${profile.unit || ""}`));
     svg.append(analysisSvg("line", { x1: 0, x2: 300, y1: 54, y2: 54, class: "calendar-profile-baseline" }));
@@ -1032,7 +973,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   function plannedTargets(entry, dateKey, todayKey, actual) {
     const ids = providerIds();
     const configured = { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured) };
-    return plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual), intervals: ids.intervals });
+    return plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual) });
   }
 
   // Every pending unit carries the leftovers its provider's sync removes, but only the first card
@@ -1185,6 +1126,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
         try {
           await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/garmin-exercise`, { method: "POST", body: JSON.stringify({ exercise_index: exercise.index, garmin_exercise: suggestion, expected_payload_hash: entry.payload_hash }) });
           await globalThis.load?.();
+          announcePlanChange(`Garmin-Übung „${suggestion}“ zugeordnet`);
         } catch (error) {
           chip.disabled = false;
           globalThis.toast?.(error.message, true);
@@ -1686,5 +1628,5 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   function bindExternalCalendar(syncExternalCalendar) {
     $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar);
   }
-  return Object.freeze({ renderAdaptivePlanning, renderExternalCalendar, renderTrainingPlans, renderPlanned, renderLibrary, renderCompetitions, renderCompetitionReadStatus, focusPlannedToday, bindPlanNavigation, bindExternalCalendar });
+  return Object.freeze({ renderAdaptivePlanning, renderExternalCalendar, renderPlanned, renderLibrary, renderCompetitions, renderCompetitionReadStatus, focusPlannedToday, bindPlanNavigation, bindExternalCalendar });
 }

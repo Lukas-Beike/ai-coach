@@ -65,7 +65,7 @@ from backend.sync.metric_export_port import (
 )
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 # The current resolved thresholds per (metric, sport), read inside a unit of work.
 type ThresholdSource = Callable[[Any], Mapping[tuple[MetricKind, Sport], Observation]]

@@ -1,8 +1,8 @@
 # M6 — Local TSS-scale session load and intensity
 
 - **Card:** M6
-- **Card version:** 5
-- **Method ID:** local-tss-load v5 (#1725, v2 #1726, v3 #1774, v4 #1771, v5 #1773)
+- **Card version:** 6
+- **Method ID:** local-tss-load v6 (#1725, v2 #1726, v3 #1774, v4 #1771, v5 #1773, v6 #1892)
 - **Status:** implemented (`backend/performance/local_tss.py`, `backend/sync/local_load.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-08
@@ -83,6 +83,28 @@ Athlete decisions for v5 (2026-11-08, #1773, after the science review of
   distribution.
 - A threshold observed more than 90 days after the session no longer stands in
   for it; the session is treated as having no threshold.
+
+Athlete decisions for v6 (2026-11-09, #1892):
+
+- One dated precedence reads every threshold, so the load, the zones, the
+  Coach, the plan and the exports use the same value on a day: (1) the locally
+  confirmed zone configuration in effect that day, (2) the dated Garmin watch
+  zone set in effect that day (its lactate threshold heart rate,
+  `lactateThresholdHeartRateUsed`), (3) the stored source-policy observations.
+- The watch zone set's threshold HR now feeds the heart-rate branch. Before v6
+  that branch read the local configuration and the stored observation only, so a
+  watch value of 172 against an observation of 168 scored the TRIMP of 168
+  (about 9 % apart) while the zones and the Garmin export used 172. The values
+  of the heart-rate branch are recomputed; the power and pace branches are
+  unchanged.
+- Garmin's max HR of the default zone set carries no sport. It now applies to
+  all sports; a sport-specific max HR of the same day wins. Before v6 the
+  heart-rate branch found no max HR for walks, hikes, rows and other sports and
+  for runs without one of their own, so those sessions had no value.
+- A threshold HR from a Garmin zone set that starts only after the session day
+  never overrides a value dated for the day; sessions without any measured
+  threshold HR stay without a value (unknown, not zero), and the threshold HR is
+  not estimated from the max HR.
 
 ## Formula and units
 
@@ -186,7 +208,7 @@ General rules:
   - `observed_on`: the session's local day.
   - `sport`: the session's sport.
   - `source_kind`: `derived`.
-  - `method`: `local-tss-load`, `method_version`: 5.
+  - `method`: `local-tss-load`, `method_version`: 6.
   - The owner is the canonical session.
   - `details` hold the branch, the pace basis, and the thresholds used with
     their sources and dates; a heart-rate value also holds the sex the
@@ -263,10 +285,15 @@ hour, or a mix of branches on one scale.
 - Thresholds are resolved per session day by the source policy of the
   current thresholds (`backend/performance/current_thresholds.py`):
   1. the locally confirmed zone configuration in effect that day;
-  2. otherwise each provider's latest value observed on or before that day,
+  2. for the threshold heart rate, the Garmin watch zone set in effect that
+     day (v6);
+  3. otherwise each provider's latest value observed on or before that day,
      within the policy's age limits counted from that day: Garmin, then Wahoo
      for FTP. Intervals.icu values are not a source (athlete decision
      2026-11-07).
+  Each value keeps its source (local or Garmin) in the stored thresholds.
+  The max HR of Garmin's default zone set (no sport) stands for every sport
+  unless a sport-specific value of the same day exists (v6).
 - Resting HR comes from the recovery family on the session day or up to 7
   days earlier, else the earliest later value, flagged.
 - Each value covers one session; no history window is needed.
@@ -375,6 +402,8 @@ hour, or a mix of branches on one scale.
 | Calibration ratings | local feedback and Garmin device only | product assumption | Ratings relayed by Intervals.icu are left out; athlete decision 2026-11-06. |
 | HR thresholds of other sports | run values | product assumption | The resolver keeps HR thresholds for ride and run only. |
 | Indoor ride FTP | local indoor power zone of the day, else the ride FTP | product assumption | Athlete decision 2026-11-06 after review; plans also apply local indoor zones. |
+| Max HR without a sport | Garmin default zone set applies to all sports; a sport-specific value of the same day wins | product assumption | Walks, hikes, rows and runs without own max HR otherwise get no value; athlete decision 2026-11-09 (v6). |
+| Threshold precedence | local zones in effect, Garmin watch zone set (heart rate), then the source policy | product assumption | One accessor for load, zones, Coach, plan and exports; athlete decision 2026-11-09 (v6). |
 | Threshold after the session | earliest later threshold, flagged | product assumption | Athlete decision 2026-11-06; fills history before the first stored threshold. |
 | Later threshold cap | observed at most 90 days after the session day, else missing | product assumption | A threshold from much later may not describe the athlete at the session; athlete decision 2026-11-08 (v5). |
 | Duration | moving, else elapsed | product assumption | `summary_duration_s` in `backend/canonical/activity_summary.py`. |

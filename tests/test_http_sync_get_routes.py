@@ -74,6 +74,31 @@ class SyncGetRoutesTests(unittest.TestCase):
                     factory.assert_not_called()
                 self.assertEqual(handler.responses, [])
 
+    def test_full_resync_progress_is_read_for_the_registered_provider_only(
+        self,
+    ) -> None:
+        resync = Mock()
+        resync.progress.return_value = {"running": True, "outcome": None}
+        routes = SyncGetRoutes(
+            self.auth_factory,
+            self.queue_factory,
+            self.sync_state_factory,
+            self.activity_factory,
+            self.today,
+            -1,
+            full_resync=lambda: resync,
+            full_resync_providers={"/api/garmin/full-resync": "garmin"},
+        )
+        self.assertTrue(routes.handle(self.handler, "/api/garmin/full-resync"))
+        self.assertEqual(
+            self.handler.responses, [(200, {"running": True, "outcome": None})]
+        )
+        resync.progress.assert_called_once_with("garmin")
+        self.auth.require_auth.assert_called_once_with(self.handler)
+
+        self.assertFalse(routes.handle(FakeHandler(), "/api/wahoo/full-resync"))
+        self.assertFalse(self.routes.handle(FakeHandler(), "/api/garmin/full-resync"))
+
     def test_sync_status_payload_is_forwarded_unchanged(self) -> None:
         payload = {"status": "idle", "jobs": [{"id": "fake"}]}
         self.sync_state.state.return_value = payload

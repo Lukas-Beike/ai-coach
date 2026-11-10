@@ -183,7 +183,6 @@ class ServerHttpArchitectureTests(unittest.TestCase):
                 "COACH_ACTIONS_POST_ROUTES",
                 "CHAT_POST_ROUTES",
                 "TRANSCRIBE_POST_ROUTES",
-                "PLANNING_COMMANDS_POST_ROUTES",
                 "FEEDBACK_POST_ROUTES",
                 "CHAT_STREAM_TRANSPORT",
                 "SYNC_COMMAND_POST_ROUTE",
@@ -297,6 +296,8 @@ class ServerHttpArchitectureTests(unittest.TestCase):
                 "lambda: ATHLETE_CLOCK.now().date()",
                 "ALL_SYNC_DAYS",
                 "ATHLETE_DATA.session_corrections",
+                "PROVIDER_RESYNC.full_resync_service",
+                "dict(DEFAULT_PROVIDER_REGISTRY.full_resync_routes())",
             ],
         )
         self.assertNotIn(
@@ -481,18 +482,6 @@ class ServerHttpArchitectureTests(unittest.TestCase):
             )
         )
 
-    def test_planning_commands_post_route_is_owned_by_http_api_module(self) -> None:
-        self._assert_write_route_owned(
-            "_handle_coach_post",
-            "PLANNING_COMMANDS_POST_ROUTES",
-            ("/api/planning/commands",),
-            "PlanningCommandsPostRoutes(coach_planning_command_service, lambda: COACH_CONVERSATION.provision_service())",
-        )
-        route_source = (
-            BACKEND_ROOT / "http_api" / "planning_commands_post.py"
-        ).read_text(encoding="utf-8")
-        self.assertNotIn("server", route_source.casefold())
-
     def test_feedback_post_route_is_owned_by_http_api_module(self) -> None:
         self._assert_write_route_owned(
             "_handle_coach_post",
@@ -585,8 +574,8 @@ class ServerHttpArchitectureTests(unittest.TestCase):
         self._assert_write_route_owned(
             "_do_PUT",
             "ATHLETE_PUT_ROUTES",
-            ("/api/athlete-context", "/api/profile"),
-            "AthletePutRoutes(athlete_context_service, ATHLETE_DATA.profile, DB_LOCK)",
+            ("/api/profile",),
+            "AthletePutRoutes(ATHLETE_DATA.profile, DB_LOCK)",
         )
         route_source = (BACKEND_ROOT / "http_api" / "athlete_put.py").read_text(
             encoding="utf-8"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+from backend.canonical.labels import provider_name
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.authorization import authorized_operations, require_coach_scope
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
@@ -268,14 +269,16 @@ class CoachSyncToolService:
         previous_job = self._conflicts.job_state(job_id)
         provider = previous_job["provider"]
         push = self._conflicts.is_push_job(previous_job)
-        require_coach_scope(intent, "intervals_sync" if push else f"{provider}_refresh")
+        require_coach_scope(
+            intent, f"{provider}_sync" if push else f"{provider}_refresh"
+        )
         if (
             intent.get("target_system") != provider
             or bool((intent.get("request") or {}).get("remote_write")) != push
         ):
             raise AppError(
                 403,
-                "Die Wiederholung benötigt den passenden Anbieterauftrag.",
+                f"Die Wiederholung benötigt den {provider_name(provider)}-Auftrag des ursprünglichen Jobs.",
                 reason="request_target",
             )
         result = self._conflicts.retry_job(job_id)

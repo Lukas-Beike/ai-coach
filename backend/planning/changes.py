@@ -19,6 +19,7 @@ from backend.errors import (
 )
 from backend.planning import library as planning_library
 from backend.planning.conflicts import calendar_item_window, calendar_items_conflict
+from backend.planning.planned_units import plan_push_hash_matches
 from backend.planning.workouts import normalize_workout
 
 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
@@ -440,11 +441,7 @@ class StructuredTrainingChangeValidator:
                 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL,
                 (str(change["local_id"]),),
             ).fetchone()
-            if (
-                not row
-                or planning_library.library_payload_hash(row["payload"])
-                != expected_hash
-            ):
+            if not row or not plan_push_hash_matches(row["payload"], expected_hash):
                 raise AppError(
                     409,
                     "Eine Planänderung ist inzwischen veraltet.",

@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend import change_history
+from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.first_threshold import (
     FIRST_THRESHOLD_BOUNDS,
     FIRST_THRESHOLD_DATE_FIELD,
@@ -151,14 +152,59 @@ def _normalize_first_threshold(result: dict[str, str], *, strict: bool) -> None:
     result[FIRST_THRESHOLD_FIELD] = ""
 
 
+# Number fields with their inclusive bounds and the error shown for a bad entry.
+_NUMBER_FIELDS = {
+    "weight_kg": (20, 300, "Das Gewicht muss zwischen 20 und 300 kg liegen."),
+    "height_cm": (50, 250, "Die Größe muss zwischen 50 und 250 cm liegen."),
+    "body_fat_pct": (1, 70, "Der Körperfettanteil muss zwischen 1 und 70 % liegen."),
+    "sleep_target_hours": (
+        4,
+        12,
+        "Das Schlafziel muss zwischen 4 und 12 Stunden liegen.",
+    ),
+}
+
+
+def _normalize_numbers(
+    result: dict[str, str], previous: Mapping[str, str] | None, *, strict: bool
+) -> None:
+    """Parse the number fields (comma decimals allowed) and store normalized text.
+
+    The sleep target is always checked. The body fields are checked only in strict
+    mode, and then a value equal to the stored one is kept as is, so a legacy
+    spelling never blocks an unrelated edit.
+    """
+    for field_name, (low, high, message) in _NUMBER_FIELDS.items():
+        text = result[field_name]
+        if not text or (not strict and field_name != "sleep_target_hours"):
+            continue
+        if previous is not None and text == previous.get(field_name):
+            continue
+        try:
+            number = comma_decimal_float(text)
+        except ValueError as exc:
+            raise AppError(400, message) from exc
+        if not math.isfinite(number) or not low <= number <= high:
+            raise AppError(400, message)
+        result[field_name] = f"{number:g}"
+
+
 def normalize_profile(
-    value: dict[str, Any], *, validate_timezone: bool = False
+    value: dict[str, Any],
+    *,
+    validate_timezone: bool = False,
+    previous: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """Copy and normalize known profile fields without mutating the input."""
+    """Copy and normalize known profile fields without mutating the input.
+
+    ``validate_timezone`` selects strict mode, which rejects bad input; otherwise
+    stored legacy values are tolerated. ``previous`` is the stored profile: a
+    number field that equals it is not re-validated.
+    """
     result = dict(DEFAULT_PROFILE)
     for key in result:
         if key in value:
-            result[key] = str(value[key]).strip()[:4000]
+            result[key] = "" if value[key] is None else str(value[key]).strip()[:4000]
     result["timezone"] = timezone_name(result.get("timezone"), strict=validate_timezone)
     if result["training_model"] not in TRAINING_MODELS:
         if validate_timezone and result["training_model"]:
@@ -170,15 +216,7 @@ def normalize_profile(
     _normalize_preferred_sources(result, strict=validate_timezone)
     _normalize_sex(result, strict=validate_timezone)
     _normalize_first_threshold(result, strict=validate_timezone)
-    if result["sleep_target_hours"]:
-        try:
-            target = float(result["sleep_target_hours"])
-        except ValueError as exc:
-            raise AppError(
-                400, "Das Schlafziel muss zwischen 4 und 12 Stunden liegen."
-            ) from exc
-        if not math.isfinite(target) or not 4 <= target <= 12:
-            raise AppError(400, "Das Schlafziel muss zwischen 4 und 12 Stunden liegen.")
+    _normalize_numbers(result, previous, strict=validate_timezone)
     return result
 
 
@@ -251,14 +289,16 @@ class ProfileService:
         *,
         already_normalized: bool = False,
     ) -> dict[str, str]:
+        previous = self.get_from_db(db)
         normalized = (
             dict(profile)
             if already_normalized
             else normalize_profile(
-                self._with_first_threshold(profile), validate_timezone=True
+                self._with_first_threshold(profile),
+                validate_timezone=True,
+                previous=previous,
             )
         )
-        previous = self.get_from_db(db)
         self._profile_repository.set(db, json.dumps(normalized, ensure_ascii=False))
         self._on_location_changed(
             previous,
@@ -331,7 +371,9 @@ class ProfileService:
     def save(self, profile: dict[str, Any]) -> dict[str, str]:
         """Replace the whole profile; callers must send every field they keep."""
         submitted = self._with_first_threshold(profile)
-        normalize_profile(submitted, validate_timezone=True)
+        # Reject bad input before waiting for the coordinator; the check inside the
+        # transaction below is the authoritative one.
+        normalize_profile(submitted, validate_timezone=True, previous=self.get())
         with self.mutation_coordinator, self._manager.unit_of_work() as db:
             previous = self.get_from_db(db)
             if FIRST_THRESHOLD_ORIGIN_FIELD not in submitted:
@@ -343,7 +385,9 @@ class ProfileService:
                     ],
                 }
             normalized = normalize_profile(
-                _origin_after_edit(submitted, previous), validate_timezone=True
+                _origin_after_edit(submitted, previous),
+                validate_timezone=True,
+                previous=previous,
             )
             return self.save_in_transaction(normalized, db, already_normalized=True)
 

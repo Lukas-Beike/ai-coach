@@ -9,10 +9,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="Privater, datenbasierter Ausdauercoach.">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script src="/appearance.js?v=218"></script>
-  <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=379">
+  <script src="/appearance.js"></script>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+  <link rel="stylesheet" href="/styles.css">
   <title>Pacecraft · AI Coach</title>
   <meta name="apple-mobile-web-app-title" content="Pacecraft">
 </head>
@@ -47,14 +47,14 @@
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
         <div id="coachAdaptivePlanningNotice" class="adaptive-planning-notice coach-adaptive-planning-notice" hidden aria-live="polite">
-          <div><strong>Deine Planung braucht eine Anpassung</strong><small>Bitte den Coach, die nächsten Einheiten zu prüfen.</small></div>
+          <div><strong>Deine Planung braucht eine Anpassung</strong><small></small></div>
           <button type="button" id="coachAdaptivePlanningButton" class="secondary-button">Coach fragen</button>
         </div>
         <output id="chatOperationStatus" class="sr-only" aria-live="polite" aria-atomic="true"></output>
         <div id="messages" class="messages"></div>
         <section id="coachActionReview" class="coach-action-review" aria-labelledby="coachActionReviewTitle" hidden>
           <div class="coach-action-review-heading">
-            <div><span class="eyebrow">VORSCHLAG PRÜFEN</span><h2 id="coachActionReviewTitle">Lokale Planung</h2></div>
+            <div><h2 id="coachActionReviewTitle">Lokale Planung</h2></div>
             <span class="coach-action-review-status">Noch nicht gespeichert</span>
           </div>
           <div id="coachActionReviewContent"></div>
@@ -105,6 +105,7 @@
           <a href="#plan/library" data-plan-segment="library">Bibliothek</a>
           <a href="#plan/season" data-plan-segment="season">Wettkämpfe</a>
         </nav>
+        <output id="planListStatus" class="sr-only"></output>
         <section id="seasonPreparation" class="plan-segment" data-plan-segment-panel="season" aria-labelledby="competitionsTitle" hidden>
           <h3 id="competitionsTitle">Wettkämpfe</h3>
           <div class="competition-read-state"><output id="competitionReadStatus">Wettkämpfe werden geladen …</output><button id="competitionRetry" type="button" class="secondary-button" hidden>Erneut laden</button></div>
@@ -112,11 +113,11 @@
         </section>
         <section id="planOverviewSegment" class="plan-segment" data-plan-segment-panel="overview" aria-labelledby="planOverviewTitle">
           <div class="plan-segment-heading"><div><h3 id="planOverviewTitle">Trainingskalender</h3><span id="plannedSummary" class="tab-sync-detail"></span></div></div>
-          <div id="plannedCalendar" class="planned-calendar" aria-live="polite"></div>
+          <div id="plannedCalendar" class="planned-calendar"></div>
         </section>
         <section id="planLibrarySegment" class="plan-segment" data-plan-segment-panel="library" aria-labelledby="planLibraryTitle" hidden>
           <div class="plan-segment-heading"><div><h3 id="planLibraryTitle">Bibliothek</h3><span id="librarySummary" class="tab-sync-detail"></span></div></div>
-          <div id="library" class="library" aria-live="polite"></div>
+          <div id="library" class="library"></div>
         </section>
       </section>
 
@@ -150,15 +151,14 @@
         <nav class="plan-segment-nav" aria-label="Ernährungsbereiche">
           <a href="#nutrition/diary" data-nutrition-segment="diary">Tagebuch</a>
           <a href="#nutrition/week" data-nutrition-segment="week">Verlauf</a>
-          <a href="#nutrition/body" data-nutrition-segment="body">Body</a>
+          <a href="#nutrition/body" data-nutrition-segment="body">Körper</a>
           <a href="#nutrition/products" data-nutrition-segment="products">Produkte</a>
         </nav>
-        <section id="bodyAnalysisCharts" class="analysis-history-charts" aria-label="Body-Analyse" hidden></section>
+        <section id="bodyAnalysisCharts" class="analysis-history-charts" aria-label="Körper-Analyse" hidden></section>
         <output id="nutritionStatus" class="tab-sync-detail"></output>
         <section id="nutritionProductsPanel" aria-label="Produktbibliothek" hidden>
         <div class="nutrition-tools" aria-label="Produkte erfassen">
           <h3>Produkte</h3>
-          <p class="fine-print">Scanne den Barcode oder fotografiere die Nährwerttabelle. Prüfe die Werte und speichere das Produkt anschließend lokal.</p>
           <div class="nutrition-actions">
             <button type="button" class="push-button" id="nutritionBarcodeButton">Barcode scannen</button>
             <button type="button" class="secondary-button" id="nutritionLabelButton">Nährwerttabelle fotografieren</button>
@@ -174,7 +174,6 @@
           <div id="nutritionExtraction" class="nutrition-product-editor" hidden></div>
           <div id="nutritionProducts" class="nutrition-list"></div>
           <h3>Datenbank</h3>
-          <p class="tab-sync-detail">Online abgerufene Produkte werden hier dauerhaft gespeichert und zuerst genutzt.</p>
           <div id="nutritionDatabase" class="nutrition-list"></div>
         </div>
         </section>
@@ -190,7 +189,6 @@
               <div id="nutritionWeekChart" class="nutrition-week-chart-days"></div>
             </div>
             <details id="nutritionWeekDetails" hidden><summary>Tageswerte anzeigen</summary><div class="nutrition-week-table"><table aria-label="Ernährung im gewählten Zeitraum"><thead><tr><th scope="col">Tag</th><th scope="col">Aufnahme<br>kcal</th><th scope="col">Verbrauch<br>kcal</th><th scope="col">Bilanz<br>kcal</th></tr></thead><tbody id="nutritionWeekDays"></tbody></table></div></details>
-            <p class="fine-print">Abgeschlossene Tage bis gestern. Die 12-Wochen-Ansicht zeigt im Diagramm Wochendurchschnitte aus den jeweils vorhandenen Tageswerten. Aufnahme aus deinem Tagebuch, Verbrauch aus Garmin Connect. Die Bilanz gilt nur für Tage mit erfasster Aufnahme und Verbrauch. Ohne Tracking bleibt die Aufnahme unbekannt; der Verbrauch wird trotzdem angezeigt. Auch an erfassten Tagen setzt die Bilanz vollständig erfasste Mahlzeiten voraus. Wochendurchschnitte können auf unterschiedlichen Tagen beruhen und ergeben deshalb keine Kalorienbilanz. Fehlende Werte zählen nicht als null; Makro-Durchschnitte berücksichtigen nur Tage mit vollständigen Angaben für das jeweilige Makro.</p>
           </section>
         </div>
         <section id="nutritionDiary" aria-label="Ernährungstagebuch">
@@ -257,9 +255,9 @@
               <label>Schlaf<select name="preferred_source_sleep"><option value="">Standard</option><option value="garmin">Garmin Connect</option></select></label>
             </fieldset>
             <fieldset class="profile-subsection"><legend>Erste Schwelle</legend>
-              <label>Messwert (bpm)<input name="first_threshold_hr" type="number" min="60" max="220" step="1" inputmode="numeric" placeholder="Optional, aus Labortest"></label>
+              <label>Messwert (bpm)<input name="first_threshold_hr" type="number" min="60" max="220" step="1" inputmode="numeric"></label>
               <label>Messdatum<input name="first_threshold_on" type="date"></label>
-              <label><span id="firstThresholdStoredLabel">Gespeichert (% LSHF)</span><input name="first_threshold_pct" type="number" min="40" max="100" step="0.1" inputmode="decimal" placeholder="Leer = Standard-Obergrenzen"></label>
+              <label><span id="firstThresholdStoredLabel">Gespeichert (% LSHF)</span><input name="first_threshold_pct" type="number" min="40" max="100" step="0.1" inputmode="decimal"></label>
               <div id="firstThresholdEstimate" class="profile-estimate" hidden><output id="firstThresholdEstimateText"></output><button id="firstThresholdAdopt" type="button" class="secondary-button">Übernehmen</button></div>
               <p class="fine-print profile-help">Garmin schreibt RR-Intervalle nur, wenn die HRV-Aufzeichnung für den Brustgurt aktiviert ist.</p>
             </fieldset>
@@ -269,7 +267,6 @@
             <label>Zeitzone<select name="timezone" autocomplete="off"><option value="Europe/Berlin">Europe/Berlin</option><option value="Europe/London">Europe/London</option><option value="Europe/Paris">Europe/Paris</option><option value="Europe/Zurich">Europe/Zurich</option><option value="America/New_York">America/New_York</option><option value="America/Chicago">America/Chicago</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="Asia/Tokyo">Asia/Tokyo</option><option value="Australia/Sydney">Australia/Sydney</option><option value="UTC">UTC</option></select></label>
             </div>
             <label>Wetter-/Urlaubsstandort<input name="weather_location" placeholder="Stadt oder PLZ, z. B. Münster"></label>
-            <p class="fine-print profile-help">Diesen Standort kannst du jederzeit ändern, zum Beispiel für einen Urlaub. Eine Stadt oder PLZ reicht; konkrete Zeitvorschläge gibt es nur für die nächsten 5 Tage.</p>
           </details>
           <button id="retryBodyGarmin" type="button" class="secondary-button" hidden>Körperwerte erneut an Garmin senden</button>
           <div class="save-bar"><span id="profileDirtyIndicator" class="dirty-indicator" hidden>Ungespeichert</span><span class="save-clean">Gespeichert</span><button type="submit">Athletenkontext speichern</button></div>
@@ -289,16 +286,16 @@
               <label id="zoneMaximumField" hidden>Maximale Herzfrequenz (bpm)<input id="zoneMaximum" type="number" min="1" step="any"></label>
             </div>
             <label><span id="zoneLimitsLabel">Zonenobergrenzen (% der FTP)</span><input id="zoneLimits" inputmode="decimal" autocomplete="off" required></label>
+            <div class="form-grid"><label>Gilt ab<input id="zoneValidFrom" type="date" required></label><label id="zoneFromBeginningField" class="chip" hidden><input id="zoneFromBeginning" type="checkbox"><span>Gilt von Anfang an</span></label></div>
             <div class="settings-inline-action"><button id="zoneSaveButton" type="submit" class="secondary-button">Lokal speichern</button><button id="zoneRemoveButton" type="button" class="secondary-button danger-button" hidden>Lokale Zonen entfernen</button></div>
             <p id="zoneReceipt" class="fine-print settings-message" aria-live="polite" hidden></p>
           </form>
         </details>
         <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
-            <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
+            <div><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
             <button type="button" id="contextPreviewButton" class="secondary-button">Kontext laden</button>
           </div>
-          <p class="fine-print context-preview-intro">Hier siehst du die gespeicherten Profil- und Wettkampfdaten, den aktuellen Trainingssnapshot und die daraus zusammengesetzte Nachricht an den Coach. Aktualisiert nach dem Speichern oder einer Synchronisierung.</p>
           <div id="contextPreviewStatus" class="context-preview-status">Noch nicht geladen.</div>
           <div id="contextPreviewContent" class="context-preview-content" hidden></div>
         </section>
@@ -320,7 +317,7 @@
           <section id="equipmentItems" class="analysis-chart-card" aria-label="Ausrüstung und Wartung"></section>
         </section>
         <section class="settings-section appearance-settings" data-more-segment-panel="appearance" aria-labelledby="appearanceTitle">
-          <div><h3 id="appearanceTitle">Darstellung</h3><p>Wähle, wie Pacecraft auf diesem Gerät angezeigt wird.</p></div>
+          <div><h3 id="appearanceTitle">Darstellung</h3></div>
           <label for="appearanceSelect">Farbschema
             <select id="appearanceSelect">
               <option value="system">System</option>
@@ -333,16 +330,16 @@
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Anbindungen</span><span id="connectionsSummary" class="collapsible-summary-meta">Status wird geprüft…</span></summary>
           <output id="connectionsSyncProgress" class="connections-sync-progress" aria-label="Laufende Synchronisierungen" aria-live="polite" hidden></output>
           <div class="connection-cards">
-            <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="weatherConnectionDetail">Kein API-Schlüssel erforderlich · Standort aus dem Profil</small><small data-check-result="weather"></small></div><div class="connection-actions"><button data-check-button="weather" class="secondary-button" type="button">Verbindung prüfen</button><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></div></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Open-Meteo</strong><span id="weatherConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="weatherConnectionDetail"></small><small data-check-result="weather"></small></div><div class="connection-actions"><button data-check-button="weather" class="secondary-button" type="button">Verbindung prüfen</button><button id="weatherSyncButton" class="secondary-button" type="button" title="Wettervorhersage jetzt von Open-Meteo laden">Wetter aktualisieren</button></div></article>
             <article class="connection-card"><div class="connection-card-info"><strong>OpenAI</strong><span id="openaiConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="openaiConnectionDetail"></small><small data-check-result="openai"></small></div><div class="connection-actions"><button data-check-button="openai" class="secondary-button" type="button">Verbindung prüfen</button><button id="openaiChatResetButton" class="secondary-button" type="button">Chat zurücksetzen</button></div></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Intervals.icu</strong><span id="intervalsConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="intervalsConnectionDetail"></small><small data-check-result="intervals"></small></div><div class="connection-actions"><button data-check-button="intervals" class="secondary-button" type="button">Verbindung prüfen</button></div><p id="intervalsSetupHint" class="provider-setup-hint" hidden>Intervals.icu ist nicht konfiguriert. Hinterlege API-Schlüssel und Athlete ID im Bereich „Zugangsdaten“ oder als <code>INTERVALS_API_KEY</code> und <code>INTERVALS_ATHLETE_ID</code> in der Serverkonfiguration.</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus" class="connection-chip">Status wird geprüft…</span><ul id="garminSourceLines" class="connection-lines"></ul><small id="garminStatus"></small><small id="garminKeyHint" class="provider-key-hint" hidden></small><small data-check-result="garmin"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"><small>-1 lädt alle verfügbaren Daten</small></label><div class="connection-actions"><button data-check-button="garmin" data-check-group="garmin-login" class="secondary-button" type="button">Verbindung prüfen</button><button id="garminSyncButton" class="secondary-button" type="button">Synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status">Löscht nur lokale Garmin-Daten; Zugangsdaten und Cloud bleiben unverändert.</small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht verbunden. Melde dich im Bereich „Zugangsdaten“ an oder hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration (siehe README).</p></article>
-            <article class="connection-card"><div class="connection-card-info"><strong id="wahooConnectionTitle">Wahoo</strong><span id="wahooConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="wahooConnectionDetail">Importiert Einheiten · schreibt nur bei ausdrücklichem Plan-Export</small><small data-check-result="wahoo"></small></div><div id="wahooConnectionActions" class="connection-actions" hidden><button id="wahooConnectButton" class="secondary-button" type="button" hidden>Wahoo verbinden</button><button id="wahooDisconnectButton" class="secondary-button danger-button" type="button" hidden>Wahoo trennen</button></div><div id="wahooSyncActions" class="connection-actions connection-sync-actions" hidden><button data-check-button="wahoo" data-check-group="wahoo wahoo-connection" class="secondary-button" type="button">Verbindung prüfen</button><button id="wahooSyncButton" class="secondary-button" type="button">Jetzt synchronisieren</button><button id="wahooFullResyncButton" class="secondary-button" type="button">Vollständig neu synchronisieren</button></div><small id="wahooFullResyncStatus" class="connection-resync-status" hidden></small><p id="wahooSetupHint" class="provider-setup-hint" hidden>Wahoo ist optional und nicht konfiguriert. Hinterlege Client-ID und Client-Secret im Bereich „Zugangsdaten“ oder als <code>WAHOO_CLIENT_ID</code> und <code>WAHOO_CLIENT_SECRET</code> in der Serverkonfiguration. <code>WAHOO_REDIRECT_URI</code> bleibt eine Serverkonfiguration (siehe README).</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Garmin</strong><span id="garminConnectionStatus" class="connection-chip">Status wird geprüft…</span><ul id="garminSourceLines" class="connection-lines"></ul><small id="garminStatus"></small><small id="garminKeyHint" class="provider-key-hint" hidden></small><small data-check-result="garmin"></small></div><label class="sync-period">Zeitraum (Tage)<input id="garminSyncDays" type="number" min="-1" max="90" step="1" value="84"></label><div class="connection-actions"><button data-check-button="garmin" data-check-group="garmin-login" class="secondary-button" type="button">Verbindung prüfen</button><button id="garminSyncButton" class="secondary-button" type="button">Garmin synchronisieren</button><button id="garminFullResyncButton" class="secondary-button danger-button" type="button">Lokale Daten neu laden</button></div><small id="garminFullResyncStatus" class="connection-resync-status"></small><p id="garminSetupHint" class="provider-setup-hint" hidden>Garmin ist optional und nicht verbunden. Melde dich im Bereich „Zugangsdaten“ an oder hinterlege <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> in der Serverkonfiguration (siehe README).</p></article>
+            <article class="connection-card"><div class="connection-card-info"><strong id="wahooConnectionTitle">Wahoo</strong><span id="wahooConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="wahooConnectionDetail"></small><small data-check-result="wahoo"></small></div><div id="wahooConnectionActions" class="connection-actions" hidden><button id="wahooConnectButton" class="secondary-button" type="button" hidden>Wahoo verbinden</button><button id="wahooDisconnectButton" class="secondary-button danger-button" type="button" hidden>Wahoo trennen</button></div><div id="wahooSyncActions" class="connection-actions connection-sync-actions" hidden><button data-check-button="wahoo" data-check-group="wahoo wahoo-connection" class="secondary-button" type="button">Verbindung prüfen</button><button id="wahooSyncButton" class="secondary-button" type="button">Jetzt synchronisieren</button><button id="wahooFullResyncButton" class="secondary-button" type="button">Vollständig neu synchronisieren</button></div><small id="wahooFullResyncStatus" class="connection-resync-status" hidden></small><p id="wahooSetupHint" class="provider-setup-hint" hidden>Wahoo ist optional und nicht konfiguriert. Hinterlege Client-ID und Client-Secret im Bereich „Zugangsdaten“ oder als <code>WAHOO_CLIENT_ID</code> und <code>WAHOO_CLIENT_SECRET</code> in der Serverkonfiguration. <code>WAHOO_REDIRECT_URI</code> bleibt eine Serverkonfiguration (siehe README).</p></article>
             <article class="connection-card"><div class="connection-card-info"><strong>Yazio</strong><span id="yazioConnectionStatus" class="connection-chip">Status wird geladen…</span><small id="yazioConnectionDetail"></small></div><button id="yazioCheckButton" class="secondary-button" type="button">Verbindung prüfen</button></article>
-            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="externalCalendarConnectionDetail">Nur lesen · Termine erscheinen im Tab „Kalender“ als Zeit- und Erholungssignal</small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
+            <article class="connection-card"><div class="connection-card-info"><strong>Gemeinsamer Kalender</strong><span id="externalCalendarConnectionStatus" class="connection-chip">Status wird geprüft…</span><small id="externalCalendarConnectionDetail"></small></div><button id="externalCalendarSyncButton" class="secondary-button" type="button">Synchronisieren</button></article>
           </div>
           <section id="providerCredentials" class="provider-credentials" aria-labelledby="providerCredentialsTitle">
-            <div class="settings-section-heading"><div><h3 id="providerCredentialsTitle">Zugangsdaten</h3><p>Werte aus diesem Bereich werden verschlüsselt in der Datenbank gespeichert und wirken sofort, ohne Neustart. Ohne gespeicherten Wert gilt der Wert aus der Serverumgebung.</p></div></div>
+            <div class="settings-section-heading"><div><h3 id="providerCredentialsTitle">Zugangsdaten</h3></div></div>
             <form id="cred-form-openai" class="credential-form" autocomplete="off" aria-labelledby="credOpenaiTitle">
               <h4 id="credOpenaiTitle">OpenAI</h4>
               <div class="credential-row">
@@ -355,6 +352,10 @@
                 <input id="cred-openai_base_url" type="url" autocomplete="off" spellcheck="false" inputmode="url" placeholder="https://api.openai.com/v1">
                 <small id="cred-current-openai_base_url" class="credential-current"></small>
                 <button id="cred-clear-openai_base_url" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+              </div>
+              <div id="cred-password-row-openai" class="credential-row" hidden>
+                <div class="credential-row-head"><label for="cred-app_password-openai">App-Passwort</label></div>
+                <input id="cred-app_password-openai" type="password" autocomplete="current-password" spellcheck="false">
               </div>
               <p id="cred-error-openai" class="credential-error" role="alert" hidden></p>
               <button id="cred-submit-openai" class="secondary-button" type="submit">Speichern</button>
@@ -388,6 +389,10 @@
                 <input id="cred-wahoo_client_secret" type="password" autocomplete="off" spellcheck="false" placeholder="Neues Secret eingeben">
                 <button id="cred-clear-wahoo_client_secret" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
               </div>
+              <div id="cred-password-row-wahoo" class="credential-row" hidden>
+                <div class="credential-row-head"><label for="cred-app_password-wahoo">App-Passwort</label></div>
+                <input id="cred-app_password-wahoo" type="password" autocomplete="current-password" spellcheck="false">
+              </div>
               <p id="cred-error-wahoo" class="credential-error" role="alert" hidden></p>
               <button id="cred-submit-wahoo" class="secondary-button" type="submit">Speichern</button>
             </form>
@@ -399,7 +404,7 @@
                 <button id="cred-clear-yazio_email" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
               </div>
               <div class="credential-row">
-                <div class="credential-row-head"><label for="cred-yazio_password">Yazio-Kennwort</label><span id="cred-source-yazio_password" class="credential-source">Status wird geprüft…</span></div>
+                <div class="credential-row-head"><label for="cred-yazio_password">Yazio-Passwort</label><span id="cred-source-yazio_password" class="credential-source">Status wird geprüft…</span></div>
                 <input id="cred-yazio_password" type="password" autocomplete="off" spellcheck="false" placeholder="Neues Passwort eingeben">
                 <button id="cred-clear-yazio_password" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
               </div>
@@ -456,45 +461,38 @@
             </section>
           </section>
           <section class="provider-freshness" aria-labelledby="providerFreshnessTitle">
-            <div class="settings-section-heading"><div><h3 id="providerFreshnessTitle">Datenfrische &amp; Retry-Verlauf</h3><p>Nur technische Zeitpunkte, Phasen und sichere Fehlerklassen; Providerantworten und private URLs werden nicht gespeichert.</p></div></div>
+            <div class="settings-section-heading"><div><h3 id="providerFreshnessTitle">Datenfrische &amp; Wiederholungsverlauf</h3></div></div>
             <div id="providerFreshnessTimeline" class="provider-freshness-list" aria-live="polite">Status wird geladen…</div>
           </section>
-          <p class="fine-print settings-message">Zugangsdaten lassen sich oben im Bereich „Zugangsdaten“ setzen. Ohne gespeicherten Wert gilt die Serverumgebung als Fallback: <code>OPENAI_API_KEY</code>, <code>OPENAI_BASE_URL</code> (optional, Responses-kompatible API), <code>INTERVALS_API_KEY</code>, <code>INTERVALS_ATHLETE_ID</code>, <code>WAHOO_CLIENT_ID</code>, <code>WAHOO_CLIENT_SECRET</code> sowie <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code>. Unraid: Docker-Template &rarr; Environment variables; nach Änderungen dort den Container neu erstellen.</p>
           <p id="garminDetail" class="fine-print settings-message"></p>
           <p class="fine-print settings-message">Wetterdaten: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a> · Lizenz: CC BY 4.0.</p>
-          <p class="fine-print settings-message">Der gemeinsame Kalender wird über <code>CALENDAR_ICAL_URL</code> angebunden (private iCal-Adresse). Die URL bleibt serverseitig und der Zugriff ist ausschließlich lesend. Termine werden im Tab „Kalender“ angezeigt.</p>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="appearance">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Kalenderansicht</span><span id="calendarDisplaySummary" class="collapsible-summary-meta">Einstellungen werden geladen...</span></summary>
           <form id="calendarDisplayForm" class="calendar-display-form">
             <div class="calendar-display-fields">
-              <label for="calendarDisplayPastWeeks">Wochen zurück<input id="calendarDisplayPastWeeks" type="number" min="0" max="52" step="1" value="1"><small>0 = keine vergangene Woche</small></label>
-              <label for="calendarDisplayFutureWeeks">Wochen voraus<input id="calendarDisplayFutureWeeks" type="number" min="0" max="52" step="1" value="4"><small>0 = nur die aktuelle Woche</small></label>
+              <label for="calendarDisplayPastWeeks">Wochen zurück<input id="calendarDisplayPastWeeks" type="number" min="0" max="52" step="1" value="1"></label>
+              <label for="calendarDisplayFutureWeeks">Wochen voraus<input id="calendarDisplayFutureWeeks" type="number" min="0" max="52" step="1" value="4"></label>
             </div>
             <button id="calendarDisplaySaveButton" class="secondary-button" type="submit">Kalenderansicht speichern</button>
-            <p class="fine-print settings-message">Steuert nur, wie viele Kalenderwochen in der Oberfläche angezeigt werden. Synchronisations- und Trainingsdaten bleiben unverändert.</p>
           </form>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="coach">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Coach-Modell &amp; Thinking</span><span id="modelSettingsSummary" class="collapsible-summary-meta">Auswahl wird geladen…</span></summary>
           <div id="modelSettingsTarget">
             <div class="model-selector">
-              <label for="modelSelect">Coach-Modell<select id="modelSelect" aria-describedby="modelDescription"></select></label>
-              <p id="modelDescription" class="fine-print">Wähle die Balance aus Qualität, Tempo und Kosten.</p>
+              <label for="modelSelect">Coach-Modell<select id="modelSelect"></select></label>
             </div>
             <div class="model-selector">
-              <label for="serviceTierSelect">Geschwindigkeit<select id="serviceTierSelect" aria-describedby="serviceTierDescription"></select></label>
-              <p id="serviceTierDescription" class="fine-print">Fast und Ultrafast kosten mehr als Standard.</p>
+              <label for="serviceTierSelect">Geschwindigkeit<select id="serviceTierSelect"></select></label>
             </div>
             <div class="model-selector">
-              <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect" aria-describedby="thinkingLevelDescription"></select></label>
-              <p id="thinkingLevelDescription" class="fine-print">Thinking Level steuert, wie gründlich der Coach vor der Antwort überlegt.</p>
+              <label for="thinkingLevelSelect">Thinking Level<select id="thinkingLevelSelect"></select></label>
             </div>
           </div>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="coach">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Verbrauch</span><span id="usageSummary" class="collapsible-summary-meta">Verbrauch wird geladen…</span></summary>
-          <p class="fine-print">Anfragen und Tokens des Coach-Anbieters für den heutigen Tag.</p>
           <dl class="usage-stats">
             <div><dt>Anfragen</dt><dd id="usageRequests">–</dd></div>
             <div><dt>Eingabe-Tokens</dt><dd id="usageInputTokens">–</dd></div>
@@ -507,25 +505,23 @@
             <div><dt>Letzte Anfrage</dt><dd id="usageLastRequest">–</dd></div>
             <div><dt>Status</dt><dd id="usageStatus">–</dd></div>
           </dl>
-          <p class="fine-print">Das Restkontingent stammt aus dem aktuellen Anbieterfenster und erscheint nach dem ersten API-Aufruf.</p>
         </details>
         <details class="settings-section context-preview collapsible-section" data-more-segment-panel="coach" aria-label="Chat-Kontext und Prompt">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Chat-Kontext und Prompt</span><span class="collapsible-summary-meta">Transparenz</span></summary>
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Chat-Kontext und Prompt</span></summary>
           <div class="context-preview-heading">
-            <div><span class="eyebrow">TRANSPARENZ</span><h3 id="systemContextPreviewTitle">Chat-Kontext und Prompt</h3></div>
+            <div><h3 id="systemContextPreviewTitle">Chat-Kontext und Prompt</h3></div>
             <button type="button" id="systemContextPreviewButton" class="secondary-button">Kontext laden</button>
           </div>
-          <p class="fine-print context-preview-intro">Hier siehst du den Kontext und die letzte Chat-Eingabe, die an den ausgewählten KI-Anbieter übergeben wurden.</p>
           <div id="systemContextPreviewStatus" class="context-preview-status">Noch nicht geladen.</div>
           <div id="systemContextPreviewContent" class="context-preview-content" hidden></div>
         </details>
         <details class="settings-section logs-section collapsible-section" data-more-segment-panel="operations">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Server-Logs</span><span class="collapsible-summary-meta">Bereinigte Laufzeitdaten</span></summary>
-          <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die bereinigten Einträge aus Fehler- und Laufzeitprotokoll.</p></div><div class="settings-inline-action"><button id="logsDownloadButton" type="button" class="secondary-button">Logs herunterladen</button><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button><button id="logsDeleteButton" type="button" class="secondary-button danger-button">Logs löschen</button></div></div>
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Server-Logs</span></summary>
+          <div class="settings-section-heading"><div><h3>Server-Logs</h3></div><div class="settings-inline-action"><button id="logsDownloadButton" type="button" class="secondary-button">Logs herunterladen</button><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button><button id="logsDeleteButton" type="button" class="secondary-button danger-button">Logs löschen</button></div></div>
           <pre id="logsOutput" class="logs-output">Logs werden beim Öffnen geladen…</pre>
         </details>
         <details id="privacySection" class="settings-section collapsible-section" data-more-segment-panel="operations">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Datenschutz &amp; Backup</span><span class="collapsible-summary-meta">Export, Löschung, Wiederherstellung</span></summary>
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Datenschutz &amp; Backup</span></summary>
           <div class="settings-inline-action notification-actions">
             <div><strong>PWA-Benachrichtigungen</strong><span id="notificationStatus">Noch nicht aktiviert</span></div>
             <button id="notificationEnableButton" type="button" class="secondary-button">Benachrichtigungen aktivieren</button>
@@ -550,19 +546,18 @@
           </div>
         </details>
         <details class="settings-section collapsible-section" data-more-segment-panel="operations">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span><span class="collapsible-summary-meta">Bereinigten Status herunterladen</span></summary>
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Diagnose</span></summary>
           <div class="diagnostic-actions">
             <div class="settings-inline-action">
               <button type="button" id="diagnosticsButton" class="secondary-button">Diagnose herunterladen</button>
               <button type="button" id="diagnosticsDeleteButton" class="secondary-button danger-button">Diagnose löschen</button>
             </div>
-            <p id="diagnosticCaptureStatus" class="fine-print">Erweiterte technische Diagnose ist immer aktiv.</p>
-            <p class="fine-print">Die Diagnose enthält technische Anfrageformen, Provider-Metadaten und Fehlerdetails. Athleteninhalte, Zugangsdaten, Schlüssel, Tokens und Sitzungsdaten werden nicht gespeichert; Binärdaten werden ausgelassen.</p>
+            <p id="diagnosticCaptureStatus" class="fine-print"></p>
           </div>
         </details>
         <section class="settings-section session-settings" data-more-segment-panel="operations" aria-label="Sitzung">
           <div class="settings-inline-action">
-            <div><strong>Sitzung</strong><span>Meldet dich auf diesem Gerät ab und entfernt die lokal zwischengespeicherten Ansichten.</span></div>
+            <div><strong>Sitzung</strong></div>
             <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
           </div>
           <p class="settings-app-version">Version <span id="settingsAppVersion">wird geladen…</span></p>
@@ -601,7 +596,7 @@
   </dialog>
   <dialog id="nutritionBarcodeDialog" aria-labelledby="nutritionBarcodeTitle">
     <form method="dialog" class="confirmation-dialog" id="nutritionBarcodeForm">
-      <span class="eyebrow">PRODUKT</span><h2 id="nutritionBarcodeTitle">Barcode scannen</h2>
+      <h2 id="nutritionBarcodeTitle">Barcode scannen</h2>
       <video id="nutritionBarcodeVideo" playsinline muted aria-label="Kamerabild für Barcode-Scan"></video>
       <p id="nutritionBarcodeStatus" class="tab-sync-detail" aria-live="polite">Kamera wird vorbereitet …</p>
       <label for="nutritionBarcodeManual">EAN manuell eingeben<input id="nutritionBarcodeManual" inputmode="numeric" pattern="[0-9]{8,14}" maxlength="14" autocomplete="off"></label>
@@ -610,7 +605,7 @@
   </dialog>
   <dialog id="nutritionProductUseDialog" aria-labelledby="nutritionProductUseTitle">
     <form id="nutritionProductUseForm" class="confirmation-dialog">
-      <span class="eyebrow">PRODUKT</span><h2 id="nutritionProductUseTitle">Produkt verwenden</h2>
+      <h2 id="nutritionProductUseTitle">Produkt verwenden</h2>
       <p id="nutritionProductUseName"></p>
       <label for="nutritionProductUseAmount">Menge <span id="nutritionProductUseUnit"></span><input id="nutritionProductUseAmount" type="number" min="0.1" step="0.1" required></label>
       <label for="nutritionProductUseMeal">Mahlzeit<select id="nutritionProductUseMeal"></select></label>
@@ -620,7 +615,6 @@
   </dialog>
   <dialog id="confirmationDialog" aria-labelledby="confirmationDialogTitle" aria-describedby="confirmationDialogMessage">
     <form id="confirmationDialogForm" method="dialog" class="confirmation-dialog">
-      <span class="eyebrow">BESTÄTIGUNG</span>
       <h2 id="confirmationDialogTitle">Aktion bestätigen</h2>
       <p id="confirmationDialogMessage"></p>
       <p id="confirmationDialogExpected" class="fine-print" hidden></p>
@@ -635,34 +629,33 @@
       </div>
     </form>
   </dialog>
-  <script src="/format.js?v=2" defer></script>
-  <script src="/api.js?v=224" defer></script>
-  <script src="/navigation.js?v=236" defer></script>
-  <script src="/state.js?v=228" defer></script>
-  <script src="/views.js?v=241" defer></script>
-  <script src="/plan-views.js?v=37" defer></script>
-  <script src="/forms.js?v=217" defer></script>
-  <script src="/components.js?v=219" defer></script>
-  <script src="/connection-status.js?v=1" defer></script>
-  <script src="/status-strip.js?v=1" defer></script>
-  <script src="/coach.js?v=55" defer></script>
-  <script src="/shared.js?v=25" defer></script>
-  <script src="/auth.js?v=15" defer></script>
-  <script src="/sync-status.js?v=21" defer></script>
-  <script src="/view-refresh.js?v=3" defer></script>
-  <script src="/notifications.js?v=7" defer></script>
-  <script src="/nutrition.js?v=52" defer></script>
-  <script src="/analysis.js?v=158" defer></script>
-  <script src="/activity-details.js?v=37" defer></script>
-  <script src="/activity-analysis.js?v=15" defer></script>
-  <script src="/performance-view.js?v=35" defer></script>
-  <script src="/diagnostics.js?v=5" defer></script>
-  <script src="/state-loader.js?v=29" defer></script>
-  <script src="/sync-actions.js?v=8" defer></script>
-  <script src="/wahoo-connection.js?v=6" defer></script>
-  <script src="/provider-connections.js?v=13" defer></script>
-  <script src="/provider-checks.js?v=4" defer></script>
-  <script src="/settings.js?v=25" defer></script>
-  <script src="/app.js?v=306" defer></script>
+  <script src="/format.js" defer></script>
+  <script src="/api.js" defer></script>
+  <script src="/navigation.js" defer></script>
+  <script src="/state.js" defer></script>
+  <script src="/views.js" defer></script>
+  <script src="/plan-views.js" defer></script>
+  <script src="/components.js" defer></script>
+  <script src="/connection-status.js" defer></script>
+  <script src="/status-strip.js" defer></script>
+  <script src="/coach.js" defer></script>
+  <script src="/shared.js" defer></script>
+  <script src="/auth.js" defer></script>
+  <script src="/sync-status.js" defer></script>
+  <script src="/view-refresh.js" defer></script>
+  <script src="/notifications.js" defer></script>
+  <script src="/nutrition.js" defer></script>
+  <script src="/analysis.js" defer></script>
+  <script src="/activity-details.js" defer></script>
+  <script src="/activity-analysis.js" defer></script>
+  <script src="/performance-view.js" defer></script>
+  <script src="/diagnostics.js" defer></script>
+  <script src="/state-loader.js" defer></script>
+  <script src="/sync-actions.js" defer></script>
+  <script src="/wahoo-connection.js" defer></script>
+  <script src="/provider-connections.js" defer></script>
+  <script src="/provider-checks.js" defer></script>
+  <script src="/settings.js" defer></script>
+  <script src="/app.js" defer></script>
 </body>
 </html>

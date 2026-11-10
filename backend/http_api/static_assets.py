@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -32,7 +34,6 @@ ASSET_APPEARANCE_JS = "appearance.js"
 ASSET_STATE_JS = "state.js"
 ASSET_VIEWS_JS = "views.js"
 ASSET_PLAN_VIEWS_JS = "plan-views.js"
-ASSET_FORMS_JS = "forms.js"
 ASSET_COMPONENTS_JS = "components.js"
 ASSET_CONNECTION_STATUS_JS = "connection-status.js"
 ASSET_STATUS_STRIP_JS = "status-strip.js"
@@ -70,7 +71,6 @@ STATIC_TARGETS = (
     ASSET_STATE_JS,
     ASSET_VIEWS_JS,
     ASSET_PLAN_VIEWS_JS,
-    ASSET_FORMS_JS,
     ASSET_COMPONENTS_JS,
     ASSET_CONNECTION_STATUS_JS,
     ASSET_STATUS_STRIP_JS,
@@ -95,7 +95,6 @@ VERSIONED_STATIC_ASSETS = frozenset(
         ASSET_STATE_JS,
         ASSET_VIEWS_JS,
         ASSET_PLAN_VIEWS_JS,
-        ASSET_FORMS_JS,
         ASSET_COMPONENTS_JS,
         ASSET_CONNECTION_STATUS_JS,
         ASSET_STATUS_STRIP_JS,
@@ -129,6 +128,16 @@ STATIC_REVALIDATE_ASSETS = frozenset(
 )
 STATIC_IMMUTABLE_MAX_AGE = 31536000
 OCTET_STREAM_MIME = "application/octet-stream"
+# Source files carry no version numbers: the server stamps them when serving.
+CACHE_NAME_TOKEN = "__ASSET_HASH__"
+ASSET_HASH_LENGTH = 10
+_MARKUP_REF = re.compile(r'((?:src|href)=")(/[^"?#\s]+)(")')
+_PRECACHE_LIST = re.compile(r"(const ASSETS = \[)(.*?)(\];)", re.DOTALL)
+_QUOTED_PATH = re.compile(r'"(/[^"?\s]*)"')
+
+
+def content_hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()[:ASSET_HASH_LENGTH]
 
 
 @dataclass(frozen=True)
@@ -141,6 +150,74 @@ class StaticAssetResponse:
 class StaticAssetService:
     def __init__(self, public_dir: Path):
         self._targets = {name: public_dir / name for name in STATIC_TARGETS}
+        self._stamp_lock = threading.Lock()
+        self._stamp_signature: tuple | None = None
+        self._stamped: dict[str, bytes] = {}
+
+    def stamped(self, name: str) -> bytes:
+        """index.html or service-worker.js with content-hash versions applied.
+
+        Recomputed only when a target file changes (mtime and size).
+        """
+        with self._stamp_lock:
+            signature = tuple(
+                (name, stat.st_mtime_ns, stat.st_size)
+                for name, path in self._targets.items()
+                if path.is_file()
+                for stat in (path.stat(),)
+            )
+            if signature != self._stamp_signature:
+                self._stamped = self._build_stamped()
+                self._stamp_signature = signature
+            return self._stamped[name]
+
+    def _build_stamped(self) -> dict[str, bytes]:
+        sources = {
+            name: path.read_bytes()
+            for name, path in self._targets.items()
+            if path.is_file()
+        }
+        hashes = {
+            name: content_hash(sources[name])
+            for name in VERSIONED_STATIC_ASSETS
+            if name in sources
+        }
+
+        def versioned(path: str) -> str:
+            name = path.lstrip("/")
+            return f"{path}?v={hashes[name]}" if name in hashes else path
+
+        def source_of(path: str) -> bytes:
+            name = ASSET_INDEX_HTML if path == "/" else path.lstrip("/")
+            if name not in sources:
+                raise ValueError(f"service worker caches unknown asset {path}")
+            return sources[name]
+
+        index = _MARKUP_REF.sub(
+            lambda m: m[1] + versioned(m[2]) + m[3],
+            sources[ASSET_INDEX_HTML].decode("utf-8"),
+        )
+        worker = sources[ASSET_SERVICE_WORKER_JS].decode("utf-8")
+        precache = _PRECACHE_LIST.search(worker)
+        if precache is None or CACHE_NAME_TOKEN not in worker:
+            raise ValueError("service worker lacks its asset list or cache name token")
+        cached = _QUOTED_PATH.findall(precache[2])
+        # The cache name changes with any cached asset or the worker itself.
+        cache_hash = content_hash(
+            "\n".join(
+                [content_hash(sources[ASSET_SERVICE_WORKER_JS])]
+                + [f"{path}:{content_hash(source_of(path))}" for path in cached]
+            ).encode()
+        )
+        worker = (
+            worker[: precache.start(2)]
+            + _QUOTED_PATH.sub(lambda m: f'"{versioned(m[1])}"', precache[2])
+            + worker[precache.end(2) :]
+        ).replace(CACHE_NAME_TOKEN, cache_hash)
+        return {
+            ASSET_INDEX_HTML: index.encode("utf-8"),
+            ASSET_SERVICE_WORKER_JS: worker.encode("utf-8"),
+        }
 
     def render(
         self, path: str, request_path: str, if_none_match: str | None
@@ -154,7 +231,10 @@ class StaticAssetService:
         target = self._targets.get(asset_name, self._targets[ASSET_INDEX_HTML])
         if not target.is_file():
             target = self._targets[ASSET_INDEX_HTML]
-        data = target.read_bytes()
+        if target.name in {ASSET_INDEX_HTML, ASSET_SERVICE_WORKER_JS}:
+            data = self.stamped(target.name)
+        else:
+            data = target.read_bytes()
         mime = mimetypes.guess_type(target.name)[0] or OCTET_STREAM_MIME
         etag = f'"{hashlib.sha256(data).hexdigest()[:24]}"'
         query = parse_qs(urlparse(request_path).query)

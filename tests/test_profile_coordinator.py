@@ -9,8 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from backend.athlete.context import AthleteContextService
-from backend.athlete.profile import ProfileService, normalize_profile
+from backend.athlete.profile import ProfileService
 from backend.coach.profile_update import CoachProfileUpdateService
 from backend.coach.structured_tool_round import CoachStructuredToolRoundService
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
@@ -129,23 +128,12 @@ class ProfileCoordinatorTests(unittest.TestCase):
         with self.manager.reader() as db:
             self.assertEqual(self.kv.get(db, "synthetic_unrelated"), "written")
 
-    def test_patch_context_and_direct_coach_wait_and_persist(self):
+    def test_patch_save_and_direct_coach_wait_and_persist(self):
         self.assert_waits_without_blocking_other_writes(
             lambda: self.profile.patch({"name": "First"})
         )
-        competition = Mock()
-        competition.list.return_value = []
-        context = AthleteContextService(
-            self.manager,
-            self.profile,
-            competition,
-            normalize_profile,
-            lambda value: value,
-            lambda: "2026-10-29",
-            lambda: "synthetic",
-        )
         self.assert_waits_without_blocking_other_writes(
-            lambda: context.save({"name": "Second"}, [])
+            lambda: self.profile.save({"name": "Second"})
         )
         coach = CoachProfileUpdateService(
             self.profile, self.manager, self.database_lock
@@ -167,18 +155,7 @@ class ProfileCoordinatorTests(unittest.TestCase):
         )
         self.assertEqual(self.profile.get()["name"], "Third")
 
-    def test_http_profile_and_context_wait_before_database_lock(self):
-        competition = Mock()
-        competition.list.return_value = []
-        context = AthleteContextService(
-            self.manager,
-            self.profile,
-            competition,
-            normalize_profile,
-            lambda value: value,
-            lambda: "2026-10-29",
-            lambda: "synthetic",
-        )
+    def test_http_profile_waits_before_database_lock(self):
         attempted = threading.Event()
         lock = self.coordinator
 
@@ -192,17 +169,8 @@ class ProfileCoordinatorTests(unittest.TestCase):
                 lock.release()
 
         self.profile.mutation_coordinator = ObservableCoordinator()
-        routes = AthletePutRoutes(
-            lambda: context, lambda: self.profile, self.database_lock
-        )
-        for path, payload, expected in (
-            ("/api/profile", {"name": "HTTP"}, "HTTP"),
-            (
-                "/api/athlete-context",
-                {"profile": {"name": "Context"}, "competitions": []},
-                "Context",
-            ),
-        ):
+        routes = AthletePutRoutes(lambda: self.profile, self.database_lock)
+        for path, payload, expected in (("/api/profile", {"name": "HTTP"}, "HTTP"),):
             with self.subTest(path=path):
                 attempted.clear()
                 handler = Mock()
@@ -324,7 +292,7 @@ class ProfileCoordinatorTests(unittest.TestCase):
         change = self.change()
         receipt = {
             "change_summary": {"undoable": True},
-            "command_receipts": [{"changes": [change]}],
+            "command_receipts": [{"tool": "update_profile", "changes": [change]}],
         }
         with self.manager.unit_of_work() as db:
             db.execute(

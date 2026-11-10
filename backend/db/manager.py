@@ -11,7 +11,7 @@ import logging
 import queue
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -30,7 +30,11 @@ DATABASE_LOCK = threading.RLock()
 # stream of short foreground writes can delay but never starve background work.
 BACKGROUND_WRITER_BYPASS_LIMIT = 8
 
-_LOGGER = logging.getLogger(__name__)
+# Upper bound the WAL file shrinks back to after a checkpoint restarts it, so a
+# burst of writes cannot leave a multi-gigabyte journal on a small volume.
+JOURNAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024
+
+_LOGGER = logging.getLogger("intervals_coach")
 _BACKGROUND_WRITER: ContextVar[bool] = ContextVar(
     "database_background_writer", default=False
 )
@@ -44,6 +48,33 @@ def background_writer() -> Iterator[None]:
         yield
     finally:
         _BACKGROUND_WRITER.reset(token)
+
+
+def _row_values(row: Any) -> tuple[Any, ...]:
+    """Return a pragma result row as a tuple for any configured row factory."""
+    return tuple(row.values()) if isinstance(row, Mapping) else tuple(row)
+
+
+@contextmanager
+def secure_deletion(db: Any) -> Iterator[None]:
+    """Overwrite deleted content with zeros on ``db`` while the block runs.
+
+    Use it inside the unit of work that deletes, then call ``reclaim_space``
+    after the commit. The previous setting is restored afterwards, so the cost
+    applies only to the deletion that asks for it and not to routine writes.
+    """
+    previous = int(_row_values(db.execute("PRAGMA secure_delete").fetchone())[0])
+    db.execute("PRAGMA secure_delete = ON")
+    try:
+        yield
+    finally:
+        db.execute(f"PRAGMA secure_delete = {previous}")
+
+
+def _truncate_wal(db: Any) -> bool:
+    """Fold the WAL into the database file and truncate it; True when complete."""
+    busy = _row_values(db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone())[0]
+    return not busy
 
 
 class WriterGate:
@@ -191,6 +222,9 @@ class DatabaseManager:
             # large enough for canonical reads on long athlete histories while
             # bounding the pool's resident cache.
             connection.execute("PRAGMA cache_size = -16384")
+            connection.execute(
+                f"PRAGMA journal_size_limit = {JOURNAL_SIZE_LIMIT_BYTES}"
+            )
             if self.row_factory is not None:
                 connection.row_factory = self.row_factory
             return connection
@@ -394,6 +428,35 @@ class DatabaseManager:
                         connection.close()
             finally:
                 self._reader_slots.release()
+
+    def checkpoint_wal(self, *, timeout: float | None = None) -> bool:
+        """Truncate the WAL under the writer; False when readers kept it open.
+
+        The checkpoint never waits on readers (busy_timeout 0), so idle
+        housekeeping cannot hold the writer while a pinned snapshot is open.
+        """
+        with self.unit_of_work(timeout=timeout) as db:
+            previous = _row_values(db.execute("PRAGMA busy_timeout").fetchone())[0]
+            db.execute("PRAGMA busy_timeout = 0")
+            try:
+                return _truncate_wal(db)
+            finally:
+                db.execute(f"PRAGMA busy_timeout = {int(previous or 0)}")
+
+    def reclaim_space(self) -> bool:
+        """Checkpoint, VACUUM and checkpoint again under the writer.
+
+        Drops deleted content from the main file and the WAL. VACUUM needs the
+        writer outside any transaction, so a call inside a unit of work raises.
+        An error leaves the committed data unchanged because both statements
+        are atomic; False reports a checkpoint that readers kept incomplete.
+        """
+        with self.unit_of_work() as db:
+            if db.in_transaction:
+                raise RuntimeError("space reclaim cannot run inside a transaction")
+            before = _truncate_wal(db)
+            db.execute("VACUUM")
+            return _truncate_wal(db) and before
 
     def _close_connections(self) -> None:
         if self._writer is not None:

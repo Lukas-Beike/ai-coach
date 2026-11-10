@@ -128,11 +128,18 @@ class CompletedLoadTests(unittest.TestCase):
         self.assertFalse(result.precise)
 
     def test_run_prefers_grade_adjusted_pace(self) -> None:
-        row = run_done("2026-10-30", weighted_avg_speed_mps=3.2, avg_speed_mps=2.0)
+        row = run_done("2026-10-30", grade_adjusted_speed_mps=3.2, avg_speed_mps=2.0)
         result = self.load(row, Sport.RUN)
         self.assertAlmostEqual(64.0, result.load)
         self.assertEqual("grade_adjusted_pace_over_threshold_pace", result.basis)
         self.assertTrue(result.precise)
+
+    def test_hilly_run_uses_grade_adjusted_not_average_speed(self) -> None:
+        hilly = run_done("2026-10-30", grade_adjusted_speed_mps=3.2, avg_speed_mps=3.0)
+        flat = run_done("2026-10-30", avg_speed_mps=3.0)
+        self.assertGreater(
+            self.load(hilly, Sport.RUN).load, self.load(flat, Sport.RUN).load
+        )
 
     def test_run_uses_average_pace_then_heart_rate(self) -> None:
         pace = self.load(run_done("2026-10-30", avg_speed_mps=3.2), Sport.RUN)
@@ -142,7 +149,7 @@ class CompletedLoadTests(unittest.TestCase):
         self.assertEqual("heart_rate_over_lthr_fallback", hr.basis)
 
     def test_missing_threshold_or_data_gives_no_load(self) -> None:
-        row = run_done("2026-10-30", weighted_avg_speed_mps=3.2)
+        row = run_done("2026-10-30", grade_adjusted_speed_mps=3.2)
         self.assertIsNone(self.load(row, Sport.RUN, thresholds(pace=False)))
         self.assertIsNone(self.load(ride_done("2026-10-30"), Sport.RIDE))
         self.assertIsNone(
@@ -252,7 +259,7 @@ class SessionSpikeTests(unittest.TestCase):
         self.assertIn("not directly validated", spike["evidence_strength"])
 
     def test_run_spike_by_load_with_same_duration(self) -> None:
-        done = [run_done("2026-10-28", weighted_avg_speed_mps=3.2)]
+        done = [run_done("2026-10-28", grade_adjusted_speed_mps=3.2)]
         easy = check([planned("a", "2026-11-04", "run", "- 60m 80% pace")], done)
         threshold = check([planned("a", "2026-11-04", "run", "- 60m 100% pace")], done)
         self.assertEqual([], only(easy, "load_spike"))
@@ -335,6 +342,19 @@ class WeeklyRiseTests(unittest.TestCase):
                 "planned_week_load"
             ],
         )
+
+    def test_second_planned_session_of_today_still_counts(self) -> None:
+        done = [*self.history, ride_done("2026-11-02", normalized_power=250)]
+        later = [planned("a", "2026-11-04", "ride", "- 60m 80%")]
+        one = only(check(later, done), "weekly_load_rise")[0]["evidence"]
+        two_today = [
+            planned("t", "2026-11-02", "ride", "- 60m 100%"),
+            planned("u", "2026-11-02", "ride", "- 60m 80%"),
+            *later,
+        ]
+        both = only(check(two_today, done), "weekly_load_rise")[0]["evidence"]
+        # One done session replaces one planned unit; the second one (64) stays.
+        self.assertEqual(one["planned_week_load"] + 64, both["planned_week_load"])
 
     def test_week_with_unknown_load_is_skipped(self) -> None:
         plan = [*self.plan, planned("x", "2026-11-11", "ride", "Easy Z2")]
@@ -434,7 +454,7 @@ class HardFromIntensityTests(unittest.TestCase):
 class MixedPlanTests(unittest.TestCase):
     def test_run_ride_and_strength_plan(self) -> None:
         done = [
-            run_done("2026-10-28", weighted_avg_speed_mps=3.2, distance_m=10000),
+            run_done("2026-10-28", grade_adjusted_speed_mps=3.2, distance_m=10000),
             ride_done("2026-10-29", normalized_power=200),
         ]
         plan = [

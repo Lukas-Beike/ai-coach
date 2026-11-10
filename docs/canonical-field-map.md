@@ -816,7 +816,8 @@ Purpose and competition link: `with_competitions` (`session_purpose.py`) links e
 |---|---|
 | exact link (`_assign_exact`) | an Intervals.icu record whose `external_ref` names a stored Garmin or Wahoo record joins it whatever the times say; one record per provider per session; link kind `exact` |
 | Garmin or Wahoo vs Intervals.icu | starts within 30 min, same sport family (or either `other`), every comparable measurement agrees: duration within max(120 s, 10 % of the Intervals value) against `duration_s` or the Garmin `moving_duration_s` (elapsed pass: elapsed against elapsed), distance within max(500 m, 10 % of the Intervals value) when both are non-zero; a Wahoo record only joins a Wahoo-recorded Intervals copy |
-| Garmin ride vs Wahoo ride (`_wahoo_copy_cost`) | both `ride`, starts within 30 min, `duration_s` and `distance_m` present and positive on both and within max(120 s, 10 % of the larger) and max(500 m, 10 % of the larger); link kind `heuristic` |
+| Intervals.icu Garmin-recorded ride vs Wahoo-recorded ride (`_wahoo_copy_cost`, legacy copies) | both `ride`, starts within 30 min, `duration_s` and `distance_m` present and positive on both and within max(120 s, 10 % of the larger) and max(500 m, 10 % of the larger); link kind `heuristic` |
+| Garmin vs Wahoo record, any sport (`_provider_copy_cost`) | the same `sport`, or either `other`; starts within 30 min, and within 10 min unless both `distance_m` are positive and agree within max(500 m, 10 % of the larger); some duration pair agrees within max(120 s, 10 % of the larger): `duration_s` or `moving_duration_s` on either side, or elapsed against elapsed; a missing or zero distance is not compared; a session takes one Garmin record per `recorded_by` (a watch recording and a relayed Wahoo copy both join); link kind `heuristic` |
 
 Each pass is a one-to-one minimum-cost assignment (cost = mean of the start gap as a share of the window and each compared gap as a share of its tolerance); the primary is the Wahoo record, else the Garmin record, else the Intervals.icu record. Athlete corrections (confirm, split, merge) override these rules.
 
@@ -965,7 +966,7 @@ The property `kind` is always `streams` (`ActivityDetailKind.STREAMS`), not a st
 
 ### `ActivitySensor`
 
-One external sensor a recording named. The serial number is only an input of the hash and is never stored or shown.
+One external sensor a recording named. The serial number is only an input of the hash and is not stored or shown; the unsalted hash is a pseudonym, not anonymous.
 
 | Field | Type & unit | Emitted by | Notes |
 |---|---|---|---|
@@ -1558,7 +1559,7 @@ Only `stream_zones.py` builds a canonical detail record outside the provider map
 
 `session_zones.py` emits no detail record. It resolves the `ZoneSettings` (thresholds at the session's local day, `DatedThresholds`: local, then Garmin, then Wahoo; indoor and virtual rides take the indoor FTP; limits from the effective zone configuration) that `stream_zones.py` counts with. Intervals.icu thresholds and configurations are never read.
 
-`canonical_session_analysis.py` emits no `ZoneDistribution`, lap or stream record. It reads the merged streams and laps of the non-Intervals records. Versions as the code states: `ANALYSIS_VERSION` 3 (stored `analysis_version`), `METHOD_VERSION` 3 (v3: grade-adjusted Pa:HR of outdoor runs, #1770); its input fingerprint includes `stream_zones.ZONE_TIMES_VERSION` and the heart-rate histogram version. `stream_resolution` reports `full` or `downsampled` for the streams it read (`downsampled` if the time axis or any read channel comes from a `downsampled` set).
+`canonical_session_analysis.py` emits no `ZoneDistribution`, lap or stream record. It reads the merged streams and laps of the non-Intervals records. Versions as the code states: `ANALYSIS_VERSION` 3 (stored `analysis_version`), `METHOD_VERSION` 6 (v3: grade-adjusted Pa:HR of outdoor runs, #1770; v4: heart rate and power source, optical heart rate warning, #1869; v5: running form drift of long runs, #1870; v6: calendar profile thresholds as the zone times', #1892); its input fingerprint includes `stream_zones.ZONE_TIMES_VERSION` and the heart-rate histogram version. `stream_resolution` reports `full` or `downsampled` for the streams it read (`downsampled` if the time axis or any read channel comes from a `downsampled` set).
 
 ### Canonical fields not produced by this scope
 
@@ -1588,7 +1589,7 @@ Conventions used in the tables of this part:
 
 Status: Live. `map_garmin_health` is called per stored element by `canonical_plans.py` (ingest and re-projection,
 one-element list per list section, the record itself for single-record sections) and by `snapshot_projection.py`.
-Mapper version: **21** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
+Mapper version: **22** (`MAPPER_VERSION`). Also carries the versions of `garmin_training_mapping.py` (the six
 training sections and the endurance `groupMap`, see "Training sections" below), which is replayed by this module.
 Inputs: the Garmin snapshot as a mapping section name → record or list of records (`GARMIN_HEALTH_SECTION_NAMES`);
 `zone` = athlete zone (`ZoneInfo`), `retrieved_at` = fetch time of that section (`garmin_section_retrieved_at`: the
@@ -1645,7 +1646,7 @@ weight epoch milliseconds are read as a UTC date (`_epoch_day`).
 | `heart_rate_zones` | `get_heart_rate_zones()` (Personal `/biometric-service/heartRateZones/v2`) | `_map_heart_rate_zones` | documented, fixtures `heart_rate_zones`, `personal/heart_rate_zones` |
 | `weight` / `weigh_ins` / `weighIns` | `get_weigh_ins(start, end)` (Personal `/weight-service/weight/range/{s}/{e}?includeAll=true`) | `_map_weight`, `_WeightWalk` | observed `garmin_personal_weight_range` |
 | `daily_stats` | `get_daily_summaries(start, end)` (Personal `/usersummary-service/v2/dailysummaries`), per-day `get_user_summary(day)` fallback and `_with_resting_energy` | `_GROUPED_SECTIONS["daily_stats"]` after `flatten_daily_summary` | observed `garmin_personal_dailysummaries` |
-| `body_battery` | `get_body_battery(start, end)` (Personal `/wellness-service/wellness/bodyBattery/reports/daily`), read only by the morning flow (`garmin_morning.py`) | `_GROUPED_SECTIONS["body_battery"]` + `_map_body_battery_levels` | documented, fixture `body_battery` |
+| `body_battery` | `get_body_battery(start, end)` (Personal `/wellness-service/wellness/bodyBattery/reports/daily`), read by the morning flow (`garmin_morning.py`), by the first refresh of each local day over the last 7 days (`_collect_body_battery`) and by the wellness history backfill in ranges of at most 31 days | `_GROUPED_SECTIONS["body_battery"]` + `_map_body_battery_levels` | documented, fixture `body_battery` |
 | `race_predictions` | SDK `get_race_predictions()` | `_map_race_predictions` | documented, fixture `race_predictions` |
 | `endurance_score` | SDK `get_endurance_score(start, end, aggregation="daily")` | `_GROUPED_SECTIONS["endurance_score"]` | documented, fixture `endurance_score` |
 | `performance_history` | none: written by `append_garmin_performance_history` (90 days of `{date, metrics}`) | `_map_performance_history` | documented |
@@ -1737,7 +1738,7 @@ mapping, list items capped at 100); every node yields at most one value.
 
 | Canonical field | Provider key(s) | Unit / conversion | Notes |
 |---|---|---|---|
-| `max_hr` | `maxHeartRateUsed` → `maxHeartRate` → `maxHR` of the node | bpm, rounded to 2 decimals; below 80 `OUT_OF_RANGE` (field reported = `maxHeartRateUsed`); canonical bound 250 drops 251 to 260 | Src `provider_reported`. Sport from `sport` → `sportType` → `activityType` of the node by `_heart_rate_sport`: text containing `cycling`/`cycl`/`bike`/`ride` is `ride`, containing `running`/`run` is `run`, else none. Id suffix = node ordinal. Documented, fixtures `heart_rate_zones` and `personal/heart_rate_zones`. |
+| `max_hr` | `maxHeartRateUsed` → `maxHeartRate` → `maxHR` of the node | bpm, rounded to 2 decimals; below 80 `OUT_OF_RANGE` (field reported = `maxHeartRateUsed`); canonical bound 250 drops 251 to 260 | Src `provider_reported`. Sport from `sport` → `sportType` → `activityType` of the node by `_heart_rate_sport`: text containing `cycling`/`cycl`/`bike`/`ride` is `ride`, containing `running`/`run` is `run`, else none. Since mapper version 22 a node that names another category than `default`/`generic`/`all` (a swim set) is not mapped, so a sport-less value is the default set's; the local load carries it to all sports (card M6 v6). Id suffix = node ordinal. Documented, fixtures `heart_rate_zones` and `personal/heart_rate_zones`. |
 
 #### Weight and body fat (`weight`, `weigh_ins`, `weighIns`)
 
@@ -1832,7 +1833,7 @@ without its source type, so it is not claimed as a scale value). Id `performance
 
 Other `metrics` keys (including the activity-derived max heart rate keys) are not mapped.
 
-#### Training sections (delegated to `garmin_training_mapping.py`, ride on `MAPPER_VERSION` 21)
+#### Training sections (delegated to `garmin_training_mapping.py`, ride on `MAPPER_VERSION` 22)
 
 `TRAINING_SECTIONS` are mapped through `training_values` / `endurance_group_values` (another writer documents the
 reader). The health mapper emits each value Src `provider_reported`, no agg or window, number via `coerce_number`, id
@@ -1924,8 +1925,8 @@ Not mapped: napping (`napTimeSeconds`), sleep stage times, `...Local` timestamps
 Status: Live (morning Body Battery refresh, `MorningBodyBatteryService`). Transport and record helpers, no
 mapper version and no canonical record constructed here.
 Inputs: `fetch_morning_body_battery` (login, `get_sleep_data(check-in date)`, then
-`get_body_battery(range_start, check-in date)` with `range_start` = local date of the sleep start in the profile
-timezone, else the athlete clock zone, else UTC); `morning_sleep_element`; `merge_garmin_records` (`merge_records`);
+`get_body_battery(range_start, check-in date)` with `range_start` = the earlier of the local date of the sleep start in the
+profile timezone (else the athlete clock zone, else UTC) and the day before the check-in date); `morning_sleep_element`; `merge_garmin_records` (`merge_records`);
 `latest_garmin_record` (fixture path). Callers: `garmin_service.py` and `morning_battery_service.py`.
 Evidence: documented only (fixture `body_battery`; the sleep night shape is observed in `garmin_sleep_daily_2026-11-03`).
 
@@ -2260,7 +2261,7 @@ Defined in `backend/canonical/domain_records.py`. Zone limits of one metric for 
 | `metric` | `ZoneConfigurationMetric`: `heart_rate`, `power`, `pace` | I, G, L | I emits all three; G `heart_rate` only; L accepts all three. |
 | `sport` | `Sport` or `None` | I, G, L | L accepts only `ride`, `run`, `swim` (`EDITABLE_SPORTS`). I: any sport a type text names except `other`. G: `RUNNING` is `run`, `CYCLING` is `ride`, `DEFAULT` is `None` (serves every sport without a set of its own); other sports are left out. |
 | `environment` | `Environment` or `None` | I, L | Only `indoor` is produced (I from `indoor_ftp`, L from the request); `None` applies to every session. |
-| `valid_from` | date or `None` | G, L | I leaves it `None`. G: `fetchedOn` of the set (the day it was first fetched), else the local day of its retrieval. L reads the optional ISO day `valid_from` of the request. |
+| `valid_from` | date or `None` | G, L | I leaves it `None`. G: `fetchedOn` of the set (the day it was first fetched), else the local day of its retrieval. L reads the optional ISO day `valid_from` of the request; `ZoneConfigurationService.save` fills the athlete-local today when it is omitted, and only `from_beginning: true` stores `None` (valid from the beginning). |
 | `valid_until` | date or `None`, not before `valid_from` | not produced | Always `None`. |
 | `threshold` | number or `None`: bpm 20 to 250, W 1 to 5,000, m/s 0.1 to 100 | I, G, L | I: `lthr`, `ftp` / `indoor_ftp`, `threshold_pace`. G: `lactateThresholdHeartRateUsed`. L: `threshold` of the request, required for `heart_rate` and `power`. |
 | `maximum` | number or `None`, same bounds | I, G, L | Heart rate only in practice: I `max_hr`, G `maxHeartRateUsed` (required), L `maximum` kept only for `heart_rate`. |
@@ -2271,7 +2272,7 @@ Defined in `backend/canonical/domain_records.py`. Zone limits of one metric for 
 | `provenance` | `Provenance`, not derived | I, G, L | G: provider `garmin`, `provider_reported`, `recorded_by` `garmin`, label "Garmin Connect", `source_record_id` = the raw `heart_rate_zones/<key>` record. I: provider `intervals`, `provider_reported`, `recorded_by` `unknown`, label "Intervals.icu". L: provider `None`, `source_kind` `athlete_entered`, `source_record_id` `None`, `recorded_by` `manual`, `retrieved_at` `None`, label "Lokal". |
 | `model` | lowercase identifier or `None` | G | Stored in the row's `details` under `model`; G: the watch's `trainingMethod` lower-cased (for example `lactate_threshold`, `hr_reserve`, `custom`), kept as information, not interpreted. |
 
-Local producer. `local_configuration(payload)` validates one API request or a restored history row: `sport` and `metric` enum values, `environment` null/absent or `indoor` (an empty string is rejected), exactly one of `limits` (3 to 7 numbers, absolute) and `percent_limits` (3 to 7 numbers), `threshold` (required for `heart_rate` and `power`), `maximum` (kept for `heart_rate`), optional `valid_from`. `valid_until` and `resting` are always `None`. `ZoneConfigurationService.save` writes it with `upsert_local_zone_configuration`: the same key replaces the active row, and saving unchanged values still re-dates the row so a re-confirmed threshold counts as current. It records a change-history entry (create or update) with a receipt and undo (`restore_in_transaction`, which keeps the replaced save date). `remove` needs `confirmed: true`, retires the row (`state` retired, the row stays) and records a delete entry. A provider refresh replaces only rows of its own source record and never touches local rows. Only active rows are read back.
+Local producer. `local_configuration(payload)` validates one API request or a restored history row: `sport` and `metric` enum values, `environment` null/absent or `indoor` (an empty string is rejected), exactly one of `limits` (3 to 7 numbers, absolute) and `percent_limits` (3 to 7 numbers), `threshold` (required for `heart_rate` and `power`), `maximum` (kept for `heart_rate`; it must not be below `threshold`, and the top limit must not exceed it, for `percent_limits` against `maximum / threshold * 100`), optional `valid_from`. `valid_until` and `resting` are always `None`. `ZoneConfigurationService.save` writes it with `upsert_local_zone_configuration`: the same key replaces the active row, and saving unchanged values still re-dates the row so a re-confirmed threshold counts as current. It records a change-history entry (create or update) with a receipt and undo (`restore_in_transaction`, which keeps the replaced save date). `remove` needs `confirmed: true`, retires the row (`state` retired, the row stays) and records a delete entry. A provider refresh replaces only rows of its own source record and never touches local rows. Only active rows are read back. `read()` also returns `today` and, per editable sport, metric and environment, the key of the configuration `effective_zone_configuration` picks for today (Garmin sport-free sets included); the editor lists and prefills that one.
 
 `effective_zone_configuration(configurations, metric, sport, indoor, day)` (`backend/activities/zone_settings.py`) picks the one configuration that applies: it keeps those with the same `metric` and `sport`, whose `environment` is `None` (or also `indoor`, when the session is indoor or virtual) and that are valid on `day` (`valid_from` <= `day` <= `valid_until`, an open end counts as valid; `day` `None` skips the test). Order of preference: local before providers (providers rank Garmin, Wahoo, Intervals.icu), then an `indoor` configuration before an environment-free one, then the latest `valid_from` (a missing one is the oldest). It returns `None` when nothing applies.
 
@@ -2329,12 +2330,12 @@ Stored extras: row column `mapper_version` = the module's method version, column
 ### `local_load.py`
 
 Status: Live. `LocalLoadStage` is a follow-up stage of the canonical backfill worker (`build_canonical_backfill` in `canonical_backfill_assembly.py`), run first after the backfill on every pass; `refresh_after_job` requests a pass after a completed sync job of provider `garmin` or `wahoo` (`LOAD_INPUT_PROVIDERS`), and a zone-configuration save, removal or undo requests one too.
-Method: `METHOD_ID` = `local-tss-load`, `METHOD_VERSION` = **5** (`local_tss.py`; `CARD` = `M6`; card `docs/performance-methods/m6-local-tss-load.md`). The numbers below are the code's.
+Method: `METHOD_ID` = `local-tss-load`, `METHOD_VERSION` = **6** (`local_tss.py`; `CARD` = `M6`; card `docs/performance-methods/m6-local-tss-load.md`). The numbers below are the code's.
 Inputs: per session the merged summary (`normalized_power`, `avg_hr`, `grade_adjusted_speed_mps`, `avg_speed_mps`, `moving_duration_s` else `elapsed_duration_s` via `summary_duration_s`, `sport`, `environment`, `id`, `started_at`, `recorded_by`); thresholds at the session day (`DatedThresholds`); resting heart rate observations; the profile sex (`athlete_sex`); the stored per-session heart-rate histogram (`stored_heart_rate_histogram`, analysis row `hr_histogram`, read only for sessions that reach the heart-rate branch); local session feedback and the Garmin RPE for strength (`feedback_by_session`, `session_load` of `session_rpe_load.py`). A provider load or intensity (Garmin `activityTrainingLoad`, Wahoo TSS, Intervals.icu) is never an input.
 
 | Canonical field | Derivation / formula | Unit | Notes |
 |---|---|---|---|
-| `session_load` | One value per session from the first branch that succeeds: power, pace, heart rate (not strength), or session RPE (strength only). Branch formulas below. Rounded to 4 decimals. | `load` (TSS scale; 60 min at threshold = 100); bounds 0..10,000 | `kind` = `session_load`, `method` = `local-tss-load`, `method_version` = 5, `aggregation` none, `period` none. |
+| `session_load` | One value per session from the first branch that succeeds: power, pace, heart rate (not strength), or session RPE (strength only). Branch formulas below. Rounded to 4 decimals. | `load` (TSS scale; 60 min at threshold = 100); bounds 0..10,000 | `kind` = `session_load`, `method` = `local-tss-load`, `method_version` = 6, `aggregation` none, `period` none. |
 | `intensity_factor` | Power branch only: `NP / FTP * 100`. | `%` of FTP; bounds 0..1,000; the branch rejects a factor above `MAX_INTENSITY_FACTOR` 2.0 (reason `implausible_intensity`), so a stored value is at most 200 % | Same envelope. No other branch writes it. |
 
 Branches (`session_local_load`):
@@ -2442,7 +2443,7 @@ Inputs: the athlete's save request (API/UI) or a restored change-history value; 
 | `metric` | request `metric` as `ZoneConfigurationMetric`: `heart_rate`, `power` or `pace` | Invalid value: HTTP 400. |
 | `sport` | request `sport`, one of `EDITABLE_SPORTS`: `ride`, `run`, `swim` | Other sports: HTTP 400. |
 | `environment` | none, or `indoor` (`Environment.INDOOR`) | Any other value: HTTP 400. An indoor row applies to indoor and virtual sessions. |
-| `valid_from` | request `valid_from` (ISO day) or none | Part of the key; none = valid from the beginning. |
+| `valid_from` | request `valid_from` (ISO day) or none | Part of the key; none = valid from the beginning (explicit `from_beginning`, or an older undated row). A save without a date starts today, so earlier days keep their value. |
 | `valid_until` | always none | The local producer never closes a validity; a newer `valid_from` supersedes. |
 | `threshold` | request `threshold` (number) | Required for `heart_rate` (LTHR, bpm) and `power` (FTP, W); optional for `pace` (m/s). Bounds: heart rate 20..250, power 1..5000, pace 0.1..100. |
 | `maximum` | request `maximum`, `heart_rate` only (else none) | Maximum heart rate, bpm. |

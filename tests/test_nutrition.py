@@ -210,6 +210,57 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
 
         self.assertEqual(calls, ["bls:C133000"])
 
+    def _foreign_writer_proceeds(self) -> bool:
+        """Whether another thread gets the database lock and the writer right now."""
+        outcome = []
+
+        def other_writer():
+            acquired = self.lock.acquire(blocking=False)
+            if acquired:
+                try:
+                    with self.manager.unit_of_work(timeout=0):
+                        outcome.append(True)
+                except Exception:  # noqa: BLE001 - a busy writer is the failure
+                    outcome.append(False)
+                finally:
+                    self.lock.release()
+            else:
+                outcome.append(False)
+
+        worker = threading.Thread(target=other_writer)
+        worker.start()
+        worker.join(timeout=10)
+        return outcome == [True]
+
+    def test_slow_food_lookup_holds_neither_lock_nor_writer_on_update_and_save(self):
+        ingredients = [{"food_id": "bls:C133000", "amount": 50, "unit": "g"}]
+        entry = self.service.log_meal({"description": "Oats", "kcal": 100})
+        original = self.library.food_database.calculate
+        during_lookup = []
+
+        def slow_provider_lookup(items):
+            during_lookup.append(self._foreign_writer_proceeds())
+            return original(items)
+
+        with patch.object(
+            self.library.food_database, "calculate", side_effect=slow_provider_lookup
+        ):
+            updated = self.service.update_meal(
+                entry["id"], {"food_ingredients": ingredients}
+            )
+            template = self.library.save_template(
+                {"name": "Oats", "description": "Oats", "food_ingredients": ingredients}
+            )
+
+        self.assertEqual(during_lookup, [True, True])
+        self.assertEqual(updated["kcal"], 174)
+        self.assertEqual(template["kcal"], 174)
+        self.assertEqual(updated["nutrition_basis"]["ingredients"][0]["amount"], 50)
+        self.assertEqual(
+            self.service.get_meal(entry["id"])["nutrition_basis"],
+            updated["nutrition_basis"],
+        )
+
     def test_database_values_override_model_values_and_provenance_survives_corrections(
         self,
     ):
@@ -246,6 +297,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         logged = self.service.log_template(template["id"], 0.5)
         self.assertEqual(logged["kcal"], 87)
         self.assertEqual(logged["nutrition_basis"]["ingredients"][0]["amount"], 25)
+        self.assertEqual(self.service.log_template(template["id"], "0,5")["kcal"], 87)
         renamed = self.library.save_template(
             {
                 "id": template["id"],
@@ -637,7 +689,7 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(corrected["id"], saved["id"])
         self.assertEqual(corrected["kcal"], 600)
         self.assertEqual(corrected["meal_date"], "2026-09-25")
-        self.assertEqual(corrected["logged_at"], "2026-09-24T12:15:00")
+        self.assertEqual(corrected["logged_at"], "2026-09-25T12:15:00")
         self.assertEqual(corrected["description"], "Bowl")
         self.assertEqual(
             (corrected["carbs_g"], corrected["protein_g"], corrected["fat_g"]),

@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 from backend.coach.context import (
     CoachTrainingContextService,
+    bounded_coach_context_sections_by_priority,
     bounded_coach_context_value,
     coach_context_json_size,
 )
@@ -77,6 +78,20 @@ class CoachContextReductionTests(unittest.TestCase):
             training_change_limit=366,
             context_service=lambda: context,
         )
+
+    def test_detail_read_reports_omitted_sections_by_priority(self):
+        context = Mock()
+        context.build.return_value = {
+            "external_calendar": {"events": [{"name": "x" * 45_000}]},
+            "recovery": {"source": "Garmin"},
+        }
+        service = self.read_service(context)
+        result = service.execute(
+            "read_coach_context", {"sections": ["external_calendar", "recovery"]}
+        )
+        self.assertEqual(result["context"]["recovery"], {"source": "Garmin"})
+        self.assertFalse(result["projection"]["complete"])
+        self.assertIn("omitted_sections", result["projection"])
 
     def test_detail_read_bounds_output_and_rejects_unknown_sections(self):
         context = Mock()
@@ -293,6 +308,29 @@ class CoachContextReductionTests(unittest.TestCase):
         )
         library.list.assert_not_called()
 
+    def test_priority_budget_skips_and_continues_past_large_sections(self):
+        context = {
+            "external_calendar": "a" * 30_000,
+            "calendar": "b" * 30_000,
+            "activities": "c" * 30_000,
+            "recovery": "r" * 100,
+            "source_policy": "s" * 50,
+        }
+        kept = bounded_coach_context_sections_by_priority(context, 70_000)
+        self.assertLessEqual(len(json.dumps(kept, separators=(",", ":"))), 70_000)
+        self.assertEqual(kept["recovery"], context["recovery"])
+        self.assertEqual(kept["source_policy"], context["source_policy"])
+        self.assertEqual(kept["activities"], context["activities"])
+        self.assertEqual(kept["calendar"], context["calendar"][: len(kept["calendar"])])
+        # The lowest-priority section only gets the remaining characters.
+        self.assertTrue(len(kept.get("external_calendar", "")) < 30_000)
+
+    def test_source_policy_survives_before_lower_priority_sections(self):
+        context = {"weather": "w" * 500, "source_policy": {"note": "n" * 100}}
+        kept = bounded_coach_context_sections_by_priority(context, 150)
+        self.assertEqual(kept["source_policy"], context["source_policy"])
+        self.assertTrue(len(kept.get("weather", "")) < 500)
+
     def test_total_budget_fallback_reports_omitted_sections_in_projection(self):
         structured = {
             "durable_profile": {"constraints": "synthetic constraint"},
@@ -316,7 +354,7 @@ class CoachContextReductionTests(unittest.TestCase):
             activity_limit_per_sport=5,
             planned_event_limit=50,
         )
-        with self.assertLogs("intervals_coach", level="WARNING") as captured:
+        with self.assertLogs("intervals_coach", level="INFO") as captured:
             result = service.build()
         self.assertLessEqual(len(result), total_limit)
         marker = "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
@@ -327,18 +365,25 @@ class CoachContextReductionTests(unittest.TestCase):
         self.assertEqual(next(iter(parsed)), "projection")
         projection = parsed["projection"]
         self.assertTrue(projection["total_budget_applied"])
+        # Priority budgeting keeps the untrusted-data notes and truncates
+        # recovery before lower-priority sections.
         self.assertEqual(
             projection["total_budget_omitted_sections"],
-            ["local_planned_workouts", "recovery", "source_policy", "weather"],
+            ["durable_profile", "local_planned_workouts", "weather"],
         )
-        self.assertIsInstance(projection["total_budget_truncated_sections"], list)
+        self.assertEqual(projection["total_budget_truncated_sections"], ["recovery"])
         for section in projection["total_budget_omitted_sections"]:
             self.assertNotIn(section, parsed)
-        self.assertEqual(parsed["durable_profile"], structured["durable_profile"])
+        self.assertEqual(parsed["source_policy"], structured["source_policy"])
         record = captured.records[-1]
         self.assertEqual(record.event, "coach_context_budget_applied")
+        self.assertEqual(record.levelname, "INFO")
         self.assertEqual(
-            record.omitted_section_count,
+            record.context["omitted_sections"],
+            projection["total_budget_omitted_sections"],
+        )
+        self.assertEqual(
+            record.context["omitted_section_count"],
             len(projection["total_budget_omitted_sections"]),
         )
         self.assertNotIn("synthetic constraint", str(record.__dict__))
@@ -363,7 +408,7 @@ class CoachContextReductionTests(unittest.TestCase):
             activity_limit_per_sport=5,
             planned_event_limit=50,
         )
-        with self.assertLogs("intervals_coach", level="WARNING"):
+        with self.assertLogs("intervals_coach", level="INFO"):
             result = service.build()
         self.assertLessEqual(len(result), 15_000)
         marker = "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"

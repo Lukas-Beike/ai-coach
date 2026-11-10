@@ -5,7 +5,6 @@ Each coverage claim must be observed as a successful tool receipt at runtime.
 """
 
 import functools
-import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -13,13 +12,15 @@ from unittest.mock import patch
 
 import snapshot_seed
 from canonical_detail_support import seed_intervals_activity
-from support import mark_tables_serving
+from support import latest_tool_outputs, mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.activities.hr_cap import effective_caps
+from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
 from backend.planning import library as planning_library
+from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers import http as provider_http
 from backend.providers import openai as openai_provider
 from backend.sync.adaptive import IllnessPauseSyncService
@@ -294,7 +295,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(self.athlete_state(), before)
 
         def save(payload):
-            profile = json.loads(payload["input"][0]["output"])["profile"]
+            profile = json.loads(latest_tool_outputs(payload)[0]["output"])["profile"]
             return self.call(
                 "update_profile",
                 {
@@ -882,7 +883,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             )
 
         def answer(payload):
-            seen.append(json.loads(payload["input"][0]["output"]))
+            seen.append(json.loads(latest_tool_outputs(payload)[0]["output"]))
             return {"output_text": "Soll ich die Anpassung übernehmen?"}
 
         self.turn(message, [apply, answer])
@@ -940,7 +941,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             seen = []
 
             def preview_again(payload):
-                seen.append(json.loads(payload["input"][0]["output"]))
+                seen.append(json.loads(latest_tool_outputs(payload)[0]["output"]))
                 return self.call("preview_adaptive_replan", {}, ["adaptive_replan"])
 
             self.turn(
@@ -1696,9 +1697,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             [
                 {
                     "library_workout_id": local_id,
-                    "expected_payload_hash": hashlib.sha256(
-                        payload.encode("utf-8")
-                    ).hexdigest(),
+                    "expected_payload_hash": plan_push_payload_hash(payload),
                 }
             ],
             push_entries,
@@ -1949,7 +1948,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
 
         def repair(payload):
             self.assertEqual(self.state()["planned_units"], initial["planned_units"])
-            current = json.loads(payload["input"][0]["output"])
+            current = json.loads(latest_tool_outputs(payload)[0]["output"])
             corrected.update(
                 changes=[change], expected_revision=current["planning_revision"]
             )
@@ -2015,10 +2014,10 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             turn="friday-repair",
         )
         model.assert_not_called()
-        self.assertEqual(replay, result)
+        self.assertEqual(replay, compact_receipt(result))
 
         def sync_read_selection(payload):
-            current = json.loads(payload["input"][0]["output"])
+            current = json.loads(latest_tool_outputs(payload)[0]["output"])
             entry = next(u for u in current["planned_units"] if u["local_id"] == friday)
             return self.call(
                 "start_intervals_plan_sync",
@@ -2132,7 +2131,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         before = self.state()["planned_units"]
 
         def premature(payload):
-            preview = json.loads(payload["input"][0]["output"])
+            preview = json.loads(latest_tool_outputs(payload)[0]["output"])
             return self.call(
                 "apply_adaptive_replan",
                 {"adjustment_id": preview["id"]},

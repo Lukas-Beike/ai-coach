@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 from collections.abc import Callable, Mapping
@@ -11,8 +12,10 @@ from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.config import Config
+from backend.db.manager import DatabaseManager, background_writer
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import scheduler
+from backend.sync.backfill_resume import BackfillChainResumer
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.provider_runtime import (
@@ -35,6 +38,8 @@ class SyncScheduleOwners:
 @dataclass(frozen=True)
 class SyncSchedulePersistence:
     sync_state_repository: Callable[[], SyncStateRepository]
+    # Whether a provider's failed refresh holds its next automatic attempt.
+    retry_held: Callable[[str], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +61,8 @@ class SyncSchedulePolicy:
 class DailySyncLoopSettings:
     morning_body_battery_service: Callable[[], Any]
     logger: logging.Logger
+    # Enables the idle WAL checkpoint of the loop when given.
+    database_manager: Callable[[], DatabaseManager] | None = None
 
 
 class SyncSchedulerAssembly:
@@ -89,6 +96,7 @@ class SyncSchedulerAssembly:
         self._daily_sync_marker_service = owners.daily_sync_marker_service
         self._garmin_sync_service = owners.garmin_sync_service
         self._sync_state_repository = persistence.sync_state_repository
+        self._retry_held = persistence.retry_held
         self._maintenance_gate = controls.maintenance_gate
         self._sleep = controls.sleep
         self._config = policy.config
@@ -98,6 +106,7 @@ class SyncSchedulerAssembly:
         self._sync_earliest_date = policy.sync_earliest_date
         self._morning_body_battery_service = daily_loop.morning_body_battery_service
         self._logger = daily_loop.logger
+        self._database_manager = daily_loop.database_manager
         self._provider_runtime = provider_runtime
 
     def daily_scheduler(self) -> scheduler.DailySyncScheduler:
@@ -129,6 +138,29 @@ class SyncSchedulerAssembly:
                 if runtime is None
                 else runtime.schedule_policies()["daily"]
             ),
+            registry=None if runtime is None else runtime.static,
+            retry_held=self._retry_held,
+            backfill_resumer=self.backfill_resumer().resume,
+        )
+
+    def backfill_resumer(self) -> BackfillChainResumer:
+        """Create the resumer of stopped backfill chains for the current providers."""
+        config = self._config()
+        profile = self._profile_service()
+        garmin = self._garmin_sync_service()
+        runtime = self._runtime()
+        return BackfillChainResumer(
+            self._queue_service(),
+            self._sync_state_repository(),
+            self._schedule_policies(
+                profile=profile,
+                garmin=garmin,
+                calendar_enabled=bool(config.calendar_ical_url),
+            )
+            if runtime is None
+            else runtime.schedule_policies()["daily"],
+            chunk_days=self._sync_chunk_days,
+            earliest_date=self._sync_earliest_date,
             registry=None if runtime is None else runtime.static,
         )
 
@@ -190,4 +222,15 @@ class SyncSchedulerAssembly:
             sleep=self._sleep,
             logger=self._logger,
             stop_event=threading.Event(),
+            housekeeping=self._queue_service().prune_finished,
+            wal_checkpoint=(
+                None
+                if self._database_manager is None
+                else functools.partial(self._checkpoint_wal, self._database_manager)
+            ),
         )
+
+    def _checkpoint_wal(self, database_manager: Callable[[], DatabaseManager]) -> None:
+        """Truncate the WAL as deferrable work behind foreground writers."""
+        with self._maintenance_gate.operation(), background_writer():
+            database_manager().checkpoint_wal()

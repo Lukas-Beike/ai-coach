@@ -24,7 +24,6 @@ class CoachProposalValidationTests(unittest.TestCase):
         self.assertEqual(raised.exception.message, expected_message)
         self.assertEqual(values, unchanged)
 
-
     def test_rejects_invalid_top_level_action_and_target_types(self):
         object_error = "Die Aktionsvorschau muss ein Objekt sein."
         self.assert_invalid(None, object_error)
@@ -64,6 +63,59 @@ class CoachProposalValidationTests(unittest.TestCase):
         self.assert_invalid(
             {**self.undo, "target_system": "local+intervals"}, action_error
         )
+
+
+class LocalNutritionWriteScopeTests(unittest.TestCase):
+    @staticmethod
+    def preview(tool, scope, values):
+        return {
+            "action_type": "local_coach_write",
+            "target_system": "local",
+            "object_ids": {},
+            "diff": [{"name": values["name"]}],
+            "payload": {
+                "tool": tool,
+                "arguments": {"payload": values},
+                "intent": {
+                    "operation": tool,
+                    "target_system": "local",
+                    "authorization_scope": scope,
+                    "request": {"source_message_ids": [7]},
+                },
+            },
+        }
+
+    def accepted(self, tool, scope, values):
+        try:
+            validated_coach_action_preview_input(self.preview(tool, scope, values))
+        except AppError:
+            return False
+        return True
+
+    def test_a_product_update_needs_only_its_object_token(self):
+        product = {"name": "Whey", "basis_unit": "g"}
+        edit = {**product, "id": "abc"}
+        tool = "save_nutrition_product"
+        self.assertTrue(self.accepted(tool, ["nutrition_product:abc"], edit))
+        self.assertTrue(
+            self.accepted(
+                tool, ["local_nutrition_product", "nutrition_product:abc"], edit
+            )
+        )
+        self.assertFalse(self.accepted(tool, ["local_nutrition_product"], edit))
+        self.assertFalse(self.accepted(tool, ["nutrition_product:other"], edit))
+        self.assertFalse(self.accepted(tool, ["nutrition_product:abc"], product))
+        self.assertTrue(self.accepted(tool, ["local_nutrition_product"], product))
+        self.assertTrue(self.accepted(tool, ["local_nutrition"], product))
+
+    def test_a_template_update_needs_only_its_object_token(self):
+        template = {"name": "Bowl", "description": "Oats"}
+        edit = {**template, "id": "t1"}
+        tool = "save_nutrition_template"
+        self.assertTrue(self.accepted(tool, ["nutrition_template:t1"], edit))
+        self.assertFalse(self.accepted(tool, ["local_nutrition"], edit))
+        self.assertFalse(self.accepted(tool, ["nutrition_template:t1"], template))
+        self.assertTrue(self.accepted(tool, ["local_nutrition"], template))
 
 
 if __name__ == "__main__":

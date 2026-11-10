@@ -178,12 +178,12 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
             total_char_limit=budget,
         )
 
-        with self.assertLogs("intervals_coach", level="WARNING") as captured:
+        with self.assertLogs("intervals_coach", level="INFO") as captured:
             result = service.build()
 
         self.assertLessEqual(len(result), budget)
         self.assertIn('"truncated_sections":[{"section":"planning"', result)
-        self.assertEqual(captured.records[0].event, "coach_context_budget_applied")
+        self.assertEqual(captured.records[-1].event, "coach_context_budget_applied")
 
         marker = "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
         structured_start = result.index(marker) + len(marker)

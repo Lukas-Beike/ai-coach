@@ -48,8 +48,9 @@ ANALYSIS_VERSION: Final = 3
 # v3: grade-adjusted Pa:HR of outdoor runs (#1770).
 # v4: the heart rate and power source, and the optical heart rate warning (#1869).
 # v5: the running form drift of long runs (#1870).
+# v6: the calendar profile uses the thresholds of the zone times (#1892).
 # The stored heart-rate histogram has its own version in the fingerprint.
-METHOD_VERSION: Final = 5
+METHOD_VERSION: Final = 6
 
 
 def analysis_records(records: Iterable[ActivityRecord]) -> tuple[ActivityRecord, ...]:

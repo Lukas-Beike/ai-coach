@@ -6,10 +6,12 @@ that stops updating silently changes the local session load (card M6) and the
 zones, so the athlete gets one hint naming the value, its source and age.
 
 The active value per threshold follows the export order: the local zone
-configuration in effect, then Garmin, then Wahoo (``read_export_thresholds``).
-A value is stale once it is older than ``STALE_AFTER_DAYS`` on the athlete-local
-day. A local value is dated by its ``valid_from``, else by its last save; a
-provider value by the day the provider reports for it. A provider value beyond
+configuration in effect, then the Garmin watch zone set (lactate threshold heart
+rate), then Garmin and Wahoo observations (``read_export_thresholds``). A value
+is stale once it is older than ``STALE_AFTER_DAYS`` on the athlete-local day. A
+local value is dated by its ``valid_from``, else by its last save; a watch zone
+set by its ``valid_from``; a provider observation by the day the provider
+reports for it. A provider value beyond
 its source-policy age limit is no longer used and is reported as expired. While
 the Garmin SDK fails, Garmin values stop updating, so each active Garmin value
 is listed even when it is still fresh. Indoor rides read the ride FTP unless the
@@ -26,7 +28,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final
 
-from backend.activities.zone_settings import effective_zone_configuration
+from backend.activities.zone_settings import (
+    configured_threshold,
+    effective_zone_configuration,
+)
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.labels import PROVIDER_SHORT_LABELS
 from backend.canonical.records import Observation
@@ -59,18 +64,13 @@ REASON_SDK_FAILED: Final = "sdk_failed"
 CHECKED_THRESHOLDS: Final[tuple[tuple[ThresholdKey, str], ...]] = (
     ((MetricKind.FTP, Sport.RIDE), "FTP Rad"),
     ((MetricKind.FTP, Sport.RUN), "FTP Laufen"),
-    ((MetricKind.THRESHOLD_HR, Sport.RIDE), "LTHR Rad"),
-    ((MetricKind.THRESHOLD_HR, Sport.RUN), "LTHR Laufen"),
+    ((MetricKind.THRESHOLD_HR, Sport.RIDE), "Schwellenpuls (LSHF) Rad"),
+    ((MetricKind.THRESHOLD_HR, Sport.RUN), "Schwellenpuls (LSHF) Laufen"),
     ((MetricKind.THRESHOLD_PACE, Sport.RUN), "Schwellenpace"),
 )
 INDOOR_LABEL: Final = "Indoor-FTP"
 # The item key of the local indoor FTP; no provider indoor FTP is read here.
 INDOOR_METRIC: Final = "indoor_ftp"
-_METRIC: Final = {
-    MetricKind.FTP: ZoneConfigurationMetric.POWER,
-    MetricKind.THRESHOLD_HR: ZoneConfigurationMetric.HEART_RATE,
-    MetricKind.THRESHOLD_PACE: ZoneConfigurationMetric.PACE,
-}
 _LOCAL_LABEL: Final = "Lokal"
 
 
@@ -225,6 +225,33 @@ def _local_dated(
     return DatedThreshold(float(value), None, dated_on)
 
 
+def _configured_dated(
+    configuration: ZoneConfiguration,
+    value: float,
+    saved_on: Mapping[str, date],
+    reported: DatedThreshold | None,
+) -> DatedThreshold | None:
+    """A configured threshold with its date.
+
+    A local one is dated by its start or save. A watch zone set is dated by its
+    start, or by the day Garmin last reported the same value when that is later,
+    so an unchanged threshold the watch keeps confirming is not stale.
+    """
+    provider = configuration.provenance.provider
+    if provider is None:
+        return _local_dated(configuration, saved_on)
+    days = [configuration.valid_from]
+    if (
+        reported is not None
+        and reported.provider is provider
+        and reported.value == value
+    ):
+        days.append(reported.dated_on)
+    return DatedThreshold(
+        value, provider, max((day for day in days if day), default=None)
+    )
+
+
 def _provider_dated(observation: Observation) -> DatedThreshold:
     return DatedThreshold(
         float(observation.value.value),
@@ -250,23 +277,28 @@ def _newest_by_key(
 
 def _active_thresholds(
     winners: Mapping[ThresholdKey, Observation],
-    local: list[ZoneConfiguration],
+    configurations: Iterable[ZoneConfiguration],
+    last_provider: Mapping[ThresholdKey, DatedThreshold],
     saved_on: Mapping[str, date],
     today: date,
 ) -> tuple[dict[ThresholdKey, DatedThreshold], frozenset[ThresholdKey]]:
-    """The dated value in effect per threshold, and the undated local ones."""
+    """The dated value in effect per threshold, and the undated configured ones."""
+    configurations = list(configurations)
     active: dict[ThresholdKey, DatedThreshold] = {}
     undated: set[ThresholdKey] = set()
     for key, _ in CHECKED_THRESHOLDS:
         winner = winners.get(key)
         if winner is None:
             continue
-        if winner.provenance.provider is not None:
+        kind, sport = key
+        # A configured value (local, or the watch zone set) leads the observations.
+        configured = configured_threshold(configurations, kind, sport, today)
+        if configured is None or configured[0] != float(winner.value.value):
             active[key] = _provider_dated(winner)
             continue
-        kind, sport = key
-        chosen = effective_zone_configuration(local, _METRIC[kind], sport, day=today)
-        dated = None if chosen is None else _local_dated(chosen, saved_on)
+        dated = _configured_dated(
+            configured[1], configured[0], saved_on, last_provider.get(key)
+        )
         if dated is None:
             undated.add(key)
         else:
@@ -327,11 +359,13 @@ class ThresholdStalenessService:
             )
             saved_on = canonical_domain_store.local_zone_saved_days(db)
         local = [item for item in configurations if item.provenance.provider is None]
-        active, local_undated = _active_thresholds(winners, local, saved_on, today)
         last_provider = {
             key: _provider_dated(observation)
             for key, observation in _newest_by_key(providers).items()
         }
+        active, local_undated = _active_thresholds(
+            winners, configurations, last_provider, saved_on, today
+        )
         indoor = effective_zone_configuration(
             local, ZoneConfigurationMetric.POWER, Sport.RIDE, indoor=True, day=today
         )

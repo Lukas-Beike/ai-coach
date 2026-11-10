@@ -21,6 +21,7 @@ from typing import Any
 
 from backend.errors import AppError
 from backend.nutrition.food_mirror import FoodDatabaseMirror
+from backend.nutrition.models import nutrition_number
 from backend.providers.open_food_facts import OpenFoodFactsClient
 from backend.providers.yazio import YazioClient
 
@@ -384,6 +385,9 @@ class FoodDatabaseService:
     ) -> tuple[list[dict[str, Any]], str]:
         return self._search_source("off:", self._off.search, query, live=live)
 
+    def yazio_secret_values(self) -> tuple[str, ...]:
+        return () if self._yazio is None else self._yazio.secret_values()
+
     def yazio_connection_status(self) -> dict[str, Any]:
         if self._yazio is None:
             return {"status": "not_configured", "checked_at": None}
@@ -631,7 +635,7 @@ class FoodDatabaseService:
         if not isinstance(item, dict) or set(item) != {"food_id", "amount", "unit"}:
             raise AppError(400, "Zutat muss food_id, amount und unit enthalten.")
         try:
-            amount = float(item["amount"])
+            amount = nutrition_number(item["amount"])
         except TypeError, ValueError:
             raise AppError(400, "Ungültige Zutatenmenge.") from None
         if (

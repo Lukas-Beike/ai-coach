@@ -64,6 +64,7 @@ between batches restarts from its first item.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, tzinfo
@@ -98,6 +99,7 @@ MIN_BATCH_SIZE: Final = 100
 MAX_BATCH_SIZE: Final = 250
 COUNTER_NAMES: Final = ("skipped_invalid", "duplicates", "reprojected", "retired")
 
+_LOGGER = logging.getLogger("intervals_coach")
 _REPROJECT: Final = "reproject"
 _GARMIN: Final = ProviderId.GARMIN.value
 
@@ -134,6 +136,8 @@ class _Work:
     domain_batches: tuple[DomainBatch, ...] = ()
     # The owning raw record ids and their days (see IngestPlan).
     observation_owners: Mapping[str, str] = field(default_factory=dict)
+    # The mapper raised for the record: nothing is written for it (see _complete_reprojection).
+    unmappable: bool = False
 
 
 def _empty_counters() -> dict[str, dict[str, int]]:
@@ -485,6 +489,16 @@ def _complete_reprojection(
     bucket = state["counters"].setdefault(
         row["provider"], dict.fromkeys(COUNTER_NAMES, 0)
     )
+    if work.unmappable:
+        # The mapper raised: nothing is written and the version stays behind, so
+        # a later mapper version retries the record. This pass moves on. Once it
+        # completes, the reader serves only observations of the current version,
+        # so the record's observations of an older version stay stored but are
+        # hidden until a later mapper version projects the record; its activity
+        # rows are not version-filtered and stay served.
+        bucket["skipped_invalid"] += work.skipped_invalid
+        _leave_reprojection(state, current)
+        return
     bucket["retired"] += _retire_unemitted(db, row, work, now=now)
     bucket["retired"] += _retire_unemitted_observations(db, row, work, now=now)
     bucket["retired"] += _replace_domain_rows(db, row, work, version=version, now=now)
@@ -606,10 +620,19 @@ def _training_load_text(row: Mapping[str, Any], loads: Callable[[str], Any]) -> 
 def _reprojection_work(
     row: Mapping[str, Any], zone: tzinfo, loads: Callable[[str], Any] | None = None
 ) -> _Work:
-    plan = reprojection_plan(row, zone=zone, training_loads=loads)
-    if plan is None:
-        return _Work()
-    return _work_from_plan(plan)
+    try:
+        plan = reprojection_plan(row, zone=zone, training_loads=loads)
+        return _Work() if plan is None else _work_from_plan(plan)
+    except Exception as exc:  # noqa: BLE001 - one bad record must not block the pass
+        # Content-free: neither the payload nor the exception text is logged.
+        _LOGGER.warning(
+            "canonical re-projection skipped a record the mapper rejected",
+            extra={
+                "event": "canonical_reprojection_record_skipped",
+                "context": {"error_class": type(exc).__name__},
+            },
+        )
+        return _Work(skipped_invalid=1, unmappable=True)
 
 
 def _work_from_plan(plan: IngestPlan) -> _Work:

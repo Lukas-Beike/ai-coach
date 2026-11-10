@@ -87,6 +87,82 @@ class AthleteProfileTests(unittest.TestCase):
         self.assertEqual(len(result["goals"]), 4000)
         self.assertEqual(result["goals"], (" x " * 5000).strip()[:4000])
 
+    def test_null_becomes_an_empty_field_not_the_text_none(self):
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                result = normalize_profile(
+                    {"weight_kg": None, "sex": None, "name": None},
+                    validate_timezone=strict,
+                )
+                self.assertEqual(
+                    (result["weight_kg"], result["sex"], result["name"]), ("", "", "")
+                )
+
+    def test_strict_number_fields_read_comma_decimals_and_store_normalized_text(self):
+        result = normalize_profile(
+            {
+                "weight_kg": " 72,5 ",
+                "height_cm": "180.0",
+                "body_fat_pct": 14,
+                "sleep_target_hours": "7,5",
+            },
+            validate_timezone=True,
+        )
+        self.assertEqual(
+            (
+                result["weight_kg"],
+                result["height_cm"],
+                result["body_fat_pct"],
+                result["sleep_target_hours"],
+            ),
+            ("72.5", "180", "14", "7.5"),
+        )
+
+    def test_strict_number_fields_reject_text_and_out_of_range_values(self):
+        cases = {
+            "weight_kg": ("72 kg", "19.9", "300.1", "nan", "1,234", "abc"),
+            "height_cm": ("1,80 m", "49", "251"),
+            "body_fat_pct": ("0.9", "70.1", "viel"),
+            "sleep_target_hours": ("3,9", "12.1", "inf", "acht"),
+        }
+        for field, values in cases.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    with self.assertRaises(AppError) as raised:
+                        normalize_profile({field: value}, validate_timezone=True)
+                    self.assertEqual(raised.exception.status, 400)
+        for field, edge in (
+            ("weight_kg", "20"),
+            ("weight_kg", "300"),
+            ("height_cm", "50"),
+            ("height_cm", "250"),
+            ("body_fat_pct", "1"),
+            ("body_fat_pct", "70"),
+            ("sleep_target_hours", "4"),
+            ("sleep_target_hours", "12"),
+        ):
+            with self.subTest(field=field, edge=edge):
+                self.assertEqual(
+                    normalize_profile({field: edge}, validate_timezone=True)[field],
+                    edge,
+                )
+
+    def test_reads_keep_legacy_number_text_and_strict_keeps_unchanged_values(self):
+        legacy = {"weight_kg": "72 kg", "height_cm": "tall"}
+        self.assertEqual(normalize_profile(legacy)["weight_kg"], "72 kg")
+        self.assertEqual(normalize_profile(legacy)["height_cm"], "tall")
+        stored = normalize_profile(legacy)
+        saved = normalize_profile(
+            {**stored, "name": "Ada"}, validate_timezone=True, previous=stored
+        )
+        self.assertEqual(saved["weight_kg"], "72 kg")
+        with self.assertRaises(AppError):
+            normalize_profile(
+                {**stored, "weight_kg": "73 kg"},
+                validate_timezone=True,
+                previous=stored,
+            )
+
     def test_timezone_name_accepts_valid_iana_timezone(self):
         self.assertEqual(timezone_name("  UTC  "), "UTC")
 

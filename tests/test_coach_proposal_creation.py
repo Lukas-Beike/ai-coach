@@ -18,6 +18,7 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
+from backend.planning.planned_units import plan_push_payload_hash
 
 _LOCAL_IDS = {"act_wahoo": "wahoo-1", "act_garmin": "garmin-1"}
 
@@ -152,7 +153,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         intent = {
             "operation": "save_nutrition_template",
             "target_system": "local",
-            "authorization_scope": ["local_nutrition"],
+            "authorization_scope": ["nutrition_template:template-1"],
             "request": {"source_message_ids": [7]},
         }
         result = self._service(
@@ -217,7 +218,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         intent = {
             "operation": "save_nutrition_template",
             "target_system": "local",
-            "authorization_scope": ["local_nutrition"],
+            "authorization_scope": ["nutrition_template:template-1"],
             "request": {"source_message_ids": [7]},
         }
         result = self._service(
@@ -540,7 +541,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         self,
     ) -> None:
         raw_payload = json.dumps(
-            {"name": "Recovery run", "date": "2026-10-03", "sport": "Run"}
+            {"name": "Recovery run", "date": "2999-10-03", "sport": "Run"}
         )
         with self.database_manager.unit_of_work() as db:
             db.execute(
@@ -574,9 +575,7 @@ class CoachProposalCreationTests(unittest.TestCase):
             [
                 {
                     "library_workout_id": "unit-2",
-                    "expected_payload_hash": hashlib.sha256(
-                        raw_payload.encode()
-                    ).hexdigest(),
+                    "expected_payload_hash": plan_push_payload_hash(raw_payload),
                 },
             ],
         )
@@ -585,7 +584,7 @@ class CoachProposalCreationTests(unittest.TestCase):
             [
                 {
                     "name": "Recovery run",
-                    "date": "2026-10-03",
+                    "date": "2999-10-03",
                     "sport": "Run",
                     "id": "unit-2",
                 },

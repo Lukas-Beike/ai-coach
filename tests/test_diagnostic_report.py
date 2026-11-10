@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import unittest
 from contextlib import closing, contextmanager
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.config import DEFAULT_OPENAI_BASE_URL
 from backend.diagnostics.report import (
     DiagnosticReportDependencies,
     DiagnosticReportService,
@@ -30,6 +33,8 @@ class _Database:
 
     def execute(self, query, parameters=()):
         self.queries.append((query, parameters))
+        if query == "PRAGMA user_version":
+            return SimpleNamespace(fetchone=lambda: {"user_version": 25})
         if any(
             table in query
             for table in (
@@ -124,6 +129,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 key_values=self.key_values,
                 config=SimpleNamespace(
                     openai_api_key="fake-openai-secret",
+                    openai_base_url="https://proxy.invalid/fake-base-secret/v1",
+                    wahoo_configured=False,
                     intervals_api_key="fake-intervals-secret",
                     calendar_ical_url="https://calendar.invalid/fake-token",
                     garmin_tokenstore="/does-not-exist/fake-token-store",
@@ -158,7 +165,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     summary=lambda: {"local": 2}
                 ),
                 canonical_coverage=self.coverage,
-                recent_logs=SimpleNamespace(list=lambda: [{"event": "safe"}]),
+                recent_logs=SimpleNamespace(report_entries=lambda: [{"event": "safe"}]),
                 diagnostic_capture=self.capture,
                 activity_rows=self.canonical_rows,
                 observations=self.canonical_rows,
@@ -185,6 +192,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "external_calendar",
                 "morning_checkin",
                 "database",
+                "wahoo",
                 "plan_sync",
                 "canonical_coverage",
                 "canonical_backfill",
@@ -200,6 +208,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "session_analysis",
                 "session_focus_backfill",
                 "profile_weekly_plan_removal",
+                "session_rebundle",
                 "logs",
                 "debug_capture",
                 "note",
@@ -230,6 +239,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.assertEqual(
             report["database"],
             {
+                "schema_version": 25,
                 "messages": 3,
                 "workout_library": 4,
                 "competitions": 5,
@@ -265,6 +275,16 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         ):
             self.assertNotIn(private, serialized)
 
+    def test_note_states_what_the_capture_keeps(self):
+        note = self.service.report()["note"]
+
+        # Non-OpenAI requests and all responses: shape only. OpenAI requests may
+        # carry Coach context. Entries expire after seven days.
+        self.assertIn("nur als Form gespeichert", note)
+        self.assertIn("Anfragen an OpenAI können", note)
+        self.assertIn("7 Tage", note)
+        self.assertNotIn("Athleteninhalte", note)
+
     def test_database_counts_and_kv_reads_share_one_read_snapshot(self):
         self.service.report()
 
@@ -272,7 +292,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         count_queries = [
             query
             for query, _parameters in self.db.queries
-            if not any(
+            if query != "PRAGMA user_version"
+            and not any(
                 table in query
                 for table in (
                     "sync_jobs",
@@ -291,7 +312,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # three domain tables) to the same snapshot; the rating backfill counts
         # add three more (Intervals.icu and Garmin records, live sessions); the
         # stream backfill counts add two (Garmin records, the stream cursor).
-        self.assertEqual(len(self.db.queries), 25)
+        self.assertEqual(len(self.db.queries), 26)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
@@ -310,7 +331,9 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # One more reads the local load state (card M6), one the rating backfill state.
         # The stream backfill reads its state once (the read stops at the fake db).
         # The session focus backfill state and the weekly plan removal state are one more read each.
-        self.assertEqual(self.key_values.get.call_count, 15)
+        # The Wahoo block reads the token record and the last sync time and error.
+        # The session rebundle state is one more read.
+        self.assertEqual(self.key_values.get.call_count, 19)
 
     def test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:
@@ -357,6 +380,101 @@ class DiagnosticReportServiceTests(unittest.TestCase):
 
         self.service.report()
 
+        self.assertEqual(self.manager.transactions, 1)
+
+    def test_schema_version_wahoo_state_and_base_url_flag_carry_no_secrets(self):
+        self.service._deps.config.wahoo_configured = True
+        self.values["wahoo_oauth_tokens"] = json.dumps(
+            {
+                "access_token": "fake-wahoo-access-secret",
+                "refresh_token": "fake-wahoo-refresh-secret",
+                "expires_at": "2026-09-23T09:00:00+00:00",
+                "scope": "workouts_read user_read",
+                "connected_at": "2026-09-01T09:00:00+00:00",
+            }
+        )
+        self.values["last_wahoo_sync_at"] = "2026-09-23T08:00:00+00:00"
+        self.values["last_wahoo_sync_error"] = "fake-api-key-secret rejected"
+
+        report = self.service.report()
+
+        self.assertEqual(report["database"]["schema_version"], 25)
+        self.assertEqual(
+            report["wahoo"],
+            {
+                "configured": True,
+                "connected": True,
+                "scope": "workouts_read user_read",
+                "access_token": "expired",
+                "last_wahoo_sync_at": "2026-09-23T08:00:00+00:00",
+                "last_wahoo_sync_error": "[REDACTED] rejected",
+            },
+        )
+        self.assertIs(report["configuration"]["openai_base_url_custom"], True)
+        serialized = json.dumps(report)
+        for private in (
+            "fake-wahoo-access-secret",
+            "fake-wahoo-refresh-secret",
+            "fake-base-secret",
+            "proxy.invalid",
+            "2026-09-23T09:00:00+00:00",
+        ):
+            self.assertNotIn(private, serialized)
+
+    def test_default_openai_endpoint_is_not_custom(self):
+        self.service._deps.config.openai_base_url = DEFAULT_OPENAI_BASE_URL
+
+        report = self.service.report()
+
+        self.assertIs(report["configuration"]["openai_base_url_custom"], False)
+        self.assertEqual(
+            report["wahoo"],
+            {
+                "configured": False,
+                "connected": False,
+                "scope": None,
+                "access_token": None,
+                "last_wahoo_sync_at": None,
+                "last_wahoo_sync_error": None,
+            },
+        )
+
+    def test_a_failing_section_is_unavailable_and_the_report_still_builds(self):
+        self.service._deps.morning_checkin.state = Mock(side_effect=RuntimeError("x"))
+        self.service._deps.workout_library_sync_state.summary = Mock(
+            side_effect=sqlite3.DatabaseError("malformed row")
+        )
+
+        report = self.service.report()
+
+        self.assertEqual(report["morning_checkin"], {"status": "unavailable"})
+        self.assertEqual(report["database"], {"status": "unavailable"})
+        self.assertEqual(report["app"]["version"], "1.2.3")
+        self.assertEqual(report["wahoo"]["connected"], False)
+
+    def test_a_failing_garmin_section_keeps_the_configuration(self):
+        self.garmin_projection.public_state.side_effect = RuntimeError("x")
+
+        report = self.service.report()
+
+        self.assertEqual(report["garmin"], {"status": "unavailable"})
+        self.assertIsNone(report["configuration"]["garmin_configured"])
+        self.assertIn("openai_base_url_custom", report["configuration"])
+
+    def test_log_files_are_read_before_the_read_snapshot(self):
+        self.service._deps = replace(
+            self.service._deps,
+            recent_logs=SimpleNamespace(
+                report_entries=lambda: (
+                    self.assertEqual(self.manager.transactions, 0)
+                    or [{"event": "safe"}]
+                )
+            ),
+        )
+
+        report = self.service.report()
+
+        self.assertEqual(report["logs"], [{"event": "safe"}])
         self.assertEqual(self.manager.transactions, 1)
 
 

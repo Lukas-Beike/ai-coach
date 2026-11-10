@@ -25,7 +25,7 @@ from typing import Any
 
 from backend.errors import AppError
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 NOT_CONFIGURED = "not_configured"
 UNCHECKED = "unchecked"

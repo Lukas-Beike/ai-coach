@@ -75,6 +75,6 @@ check-ins, model and calendar settings, backups, and privacy actions. The
 remaining modules own their named domains: `api.js`, `navigation.js`,
 `state.js`, `state-loader.js`, `views.js`, `plan-views.js`, `coach.js`,
 `analysis.js`, `activity-details.js`, `activity-analysis.js`, `nutrition.js`,
-`forms.js`, `components.js`, `connection-status.js` (provider status chips),
+`components.js`, `connection-status.js` (provider status chips),
 `status-strip.js` (the one status strip), and
 `appearance.js`. The service worker owns the offline asset cache.

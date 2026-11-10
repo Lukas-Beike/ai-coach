@@ -10,6 +10,8 @@ read them alike:
   SDK range returns only sleep statistics). Both transports serve both calls.
 * ``hrv``: the HRV range's last-night summaries.
 * ``daily_stats``: the daily summaries, read in ranges of at most 31 days.
+* ``body_battery``: the daily reports (charged, drained, levels), read in ranges
+  of at most 31 days.
 * ``resting_hr``: one ``{"calendarDate", "restingHeartRate"}`` row per summary day
   with a resting value, so the history needs no read per day.
 * ``weight``: the raw weigh-in range response.
@@ -33,10 +35,12 @@ from backend.providers.garmin import (
     ExternalCall,
     normalize_range_records,
     preserve_weight_response,
+    resting_rows,
 )
 from backend.providers.garmin_personal import wrap_daily_sleep
 
 DAILY_SUMMARY_RANGE_DAYS: Final = 31
+BODY_BATTERY_RANGE_DAYS: Final = 31
 # The sleep element fields that carry the night values (Garmin health mapper 18).
 SLEEP_NIGHT_FIELDS: Final = (
     "averageSpO2Value",
@@ -86,6 +90,11 @@ class WellnessHistoryHooks:
     capability_success: Callable[[str], None] = lambda _source: None
 
 
+# Body Battery is optional (as in the regular sync): its pause or failure skips
+# it for the chunk instead of stopping the backfill of the other sources.
+OPTIONAL_WELLNESS_SOURCES = frozenset({"body_battery"})
+
+
 def collect_wellness_history(
     client: Any,
     start: date,
@@ -105,6 +114,9 @@ def collect_wellness_history(
         "sleep": lambda: _sleep_nights(client, start, end, external_call, hooks),
         "hrv": lambda: _hrv_summaries(client, start, end, external_call),
         "daily_stats": lambda: _daily_summaries(client, start, end, external_call),
+        "body_battery": lambda: _body_battery_reports(
+            client, start, end, external_call
+        ),
         "weight": lambda: _weigh_ins(client, start, end, external_call),
     }
     payload: dict[str, Any] = {
@@ -114,26 +126,40 @@ def collect_wellness_history(
     }
     pagination: dict[str, dict[str, Any]] = {}
     for source, read in readers.items():
-        if not hooks.capability_allowed(source):
-            raise WellnessSourcePaused(source)
-        try:
-            records = read()
-        except Exception as exc:
-            if not hooks.skippable(exc):
-                # Only real provider failures count toward the shared pause; a
-                # skipped history window must not pause the hourly sync.
-                hooks.capability_failure(source, exc)
-                raise
+        records = _read_source(source, read, hooks)
+        if records is None:
             payload["skipped_sources"].append(source)
             pagination[source] = {"records": 0}
             continue
-        hooks.capability_success(source)
         payload[source] = records
         pagination[source] = {"records": len(records)}
     if "daily_stats" in payload:
-        payload["resting_hr"] = _resting_rows(payload["daily_stats"])
+        payload["resting_hr"] = resting_rows(payload["daily_stats"])
     payload["provider_sync"] = {"pagination": pagination}
     return payload
+
+
+def _read_source(
+    source: str, read: Callable[[], list[Any]], hooks: WellnessHistoryHooks
+) -> list[Any] | None:
+    """One source's records, or None when it is skipped for this chunk."""
+    optional = source in OPTIONAL_WELLNESS_SOURCES
+    if not hooks.capability_allowed(source):
+        if not optional:
+            raise WellnessSourcePaused(source)
+        return None
+    try:
+        records = read()
+    except Exception as exc:
+        if not hooks.skippable(exc):
+            # Only real provider failures count toward the shared pause; a
+            # skipped history window must not pause the hourly sync.
+            hooks.capability_failure(source, exc)
+            if not optional:
+                raise
+        return None
+    hooks.capability_success(source)
+    return records
 
 
 def _in_window(record: object, start: date, end: date) -> bool:
@@ -230,6 +256,29 @@ def _daily_summaries(
     return rows
 
 
+def _body_battery_reports(
+    client: Any, start: date, end: date, external_call: ExternalCall
+) -> list[Any]:
+    rows: list[Any] = []
+    first = start
+    while first <= end:
+        last = min(first + timedelta(days=BODY_BATTERY_RANGE_DAYS - 1), end)
+        value = external_call(
+            GARMIN_ID,
+            "body_battery",
+            partial(client.get_body_battery, first.isoformat(), last.isoformat()),
+            {"window_start": first.isoformat(), "window_end": last.isoformat()},
+        )
+        if value is not None:
+            rows.extend(
+                row
+                for row in normalize_range_records("body_battery", value)
+                if _in_window(row, start, end)
+            )
+        first = last + timedelta(days=1)
+    return rows
+
+
 def _weigh_ins(
     client: Any, start: date, end: date, external_call: ExternalCall
 ) -> list[Any]:
@@ -246,30 +295,3 @@ def _weigh_ins(
         # A range without weigh-ins is no record: an empty envelope is not stored.
         return []
     return preserve_weight_response(value)
-
-
-def _resting_value(row: Mapping[str, Any]) -> float | None:
-    heart_rate = row.get("heartRate")
-    for value in (
-        row.get("restingHeartRate"),
-        heart_rate.get("restingValue") if isinstance(heart_rate, Mapping) else None,
-    ):
-        if (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and value > 0
-        ):
-            return float(value)
-    return None
-
-
-def _resting_rows(summaries: list[Any]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for row in summaries:
-        if not isinstance(row, Mapping):
-            continue
-        day = record_day(row)
-        value = _resting_value(row)
-        if day is not None and value is not None:
-            rows.append({"calendarDate": day, "restingHeartRate": value})
-    return rows

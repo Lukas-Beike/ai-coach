@@ -35,9 +35,10 @@ from backend.provider_credentials import (
     GARMIN_TOKENSTORE_DISCONNECTED,
     GARMIN_TOKENSTORE_STATE_KEY,
 )
+from backend.providers.garmin_capability import clear_capability_state
 from backend.sync.garmin_personal_status import SDK_SKIPPED_KEY
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 MFA_TTL_SECONDS = 600
 MAX_FIELD_LENGTH = 512
@@ -208,6 +209,8 @@ class GarminTokenStore:
             self._key_values.delete(db, GARMIN_TOKENSTORE_STATE_KEY)
             # A fresh login replaces the one a sync skipped; drop its card hint.
             self._key_values.delete(db, SDK_SKIPPED_KEY)
+            # ...and a paused capability belongs to the old login.
+            clear_capability_state(db, self._key_values)
         self._registry.replace_tokens(blob)
 
     def write_back(self, client: Any, login_argument: str) -> None:
@@ -303,7 +306,9 @@ class GarminLoginService:
         tokens: GarminTokenStore,
         registry: GarminSecretRegistry,
         clock: Callable[[], float] = time.monotonic,
+        on_connected: Callable[[], None] | None = None,
     ) -> None:
+        self._on_connected = on_connected
         self._config = config
         self._client_factory = client_factory
         self._tokens = tokens
@@ -364,6 +369,7 @@ class GarminLoginService:
                         )
                     return {"status": "mfa_required", **self.status()}
                 self._store(client, generation)
+                self._notify_connected()
                 return {"status": "connected", **self.status()}
 
     def submit_mfa(self, body: object) -> dict[str, Any]:
@@ -396,6 +402,7 @@ class GarminLoginService:
                 if self._pending is pending:
                     self._pending = None
             self._store(pending.client, pending.generation)
+            self._notify_connected()
             return {"status": "connected", **self.status()}
 
     def cancel(self) -> None:
@@ -408,6 +415,20 @@ class GarminLoginService:
         self.cancel()
         self._tokens.clear()
         return {"status": "disconnected", **self.status()}
+
+    def _notify_connected(self) -> None:
+        if self._on_connected is None:
+            return
+        try:
+            self._on_connected()
+        except Exception as exc:  # noqa: BLE001 - the login is already stored
+            _LOGGER.warning(
+                "Garmin connected hook failed",
+                extra={
+                    "event": "garmin_connected_hook_failed",
+                    "context": {"error_class": type(exc).__name__},
+                },
+            )
 
     def _ensure_current(self, generation: int) -> None:
         """Callers must hold ``self._lock``."""

@@ -57,6 +57,20 @@ def planned_unit_rows(
     return [*reversed(past[:past_count]), *upcoming[:upcoming_count]]
 
 
+def planned_unit_rows_between(db: Any, start: date, end: date) -> list[Any]:
+    """Unarchived rows planned from ``start`` to ``end`` inclusive, in day order."""
+    return db.execute(
+        "SELECT local_id, payload, sync_state, sync_error, sync_conflict "
+        "FROM planned_units "
+        "WHERE COALESCE(json_extract(payload, '$.archived'), 0) = 0 "
+        "AND substr(COALESCE(json_extract(payload, '$.date'), ''), 1, 10) "
+        "BETWEEN ? AND ? "
+        "ORDER BY json_extract(payload, '$.date'), "
+        "lower(json_extract(payload, '$.name')), local_id",
+        (start.isoformat(), end.isoformat()),
+    ).fetchall()
+
+
 def planned_unit_payload(row: Any, include_archived: bool) -> dict[str, Any] | None:
     try:
         payload = json.loads(row["payload"] or "{}")

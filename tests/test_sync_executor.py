@@ -138,7 +138,9 @@ class RecordingOutcomes:
     def update(self, job_id: str, status: str, **_: Any) -> None:
         self.update_calls.append((job_id, status))
 
-    def complete(self, job_id: str, result: Any) -> str:
+    def complete(
+        self, job_id: str, result: Any, *, job: dict[str, Any] | None = None
+    ) -> str:
         self.complete_calls.append((job_id, result))
         if self.complete_error:
             raise self.complete_error
@@ -163,6 +165,7 @@ class RecordingQueue:
         end_date: str,
         created_since: str,
         job_type: str = "historical_backfill",
+        exclude_job_id: str = "",
     ) -> bool:
         return any(
             args[0] == provider
@@ -344,8 +347,6 @@ class SyncJobExecutorTests(unittest.TestCase):
         )
         self.assertEqual(self.nutrition.calls[-1], ("approved", approved))
 
-
-
     def test_calendar_and_weather_forward_reason_operation_and_force(self) -> None:
         self.executor.execute(self.job("calendar", payload={"reason": "morning"}))
         self.assertEqual(
@@ -432,7 +433,6 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.executor.execute(self.job("garmin", payload={"days": -1}))
         self.assertEqual(len(self.morning.calls), 1)
 
-
     def test_backfill_below_the_floor_ends_without_a_fetch(self) -> None:
         for provider, service in (
             ("garmin", self.garmin),
@@ -466,7 +466,6 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.assertEqual((days, end), (32, date(2020, 2, 1)))
 
-
     def test_historical_chain_stops_after_two_empty_chunks_and_parks_cursor(
         self,
     ) -> None:
@@ -492,7 +491,6 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(
             self.state.cursor_updates, [("garmin", "historical", "2000-01-01")]
         )
-
 
     def test_chunk_without_a_record_count_is_not_empty(self) -> None:
         self.garmin.result = {"status": "ok"}
@@ -535,21 +533,12 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.assertEqual(self.queue.calls, [])
 
-
-
-
-
-
-
-
-
-
     def test_run_survives_failure_while_recording_failure(self) -> None:
         self.garmin.error = RuntimeError("provider failure")
         self.outcomes.failure_error = RuntimeError("store failure")
         job = self.job("garmin")
 
-        with self.assertLogs("backend.sync.executor", level="ERROR") as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             self.executor.run(job)
 
         self.assertEqual(self.outcomes.update_calls, [("job-123", "failed")])
@@ -558,6 +547,16 @@ class SyncJobExecutorTests(unittest.TestCase):
     def test_completed_job_runs_the_after_job_hook(self) -> None:
         self.executor.run(self.job("garmin"))
         self.assertEqual(self.after_job_calls, [True])
+
+    def test_a_contended_job_is_requeued_not_completed_or_failed(self) -> None:
+        self.outcomes.fallback_status = "queued"
+        job = self.job("garmin")
+
+        self.executor.run(job)
+
+        self.assertEqual(len(self.outcomes.complete_calls), 1)
+        self.assertEqual(self.outcomes.failure_calls, [])
+        self.assertEqual(self.after_job_calls, [])
 
     def test_failed_job_skips_the_after_job_hook(self) -> None:
         self.garmin.error = RuntimeError("provider failure")
@@ -569,7 +568,7 @@ class SyncJobExecutorTests(unittest.TestCase):
             raise RuntimeError("hook failure")
 
         executor = self.make_executor(after_job=broken)
-        with self.assertLogs("backend.sync.executor", level="ERROR") as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             executor.run(self.job("garmin"))
         self.assertEqual(len(self.outcomes.complete_calls), 1)
         self.assertEqual(self.outcomes.failure_calls, [])
@@ -651,9 +650,6 @@ class ProviderJobAdapterTests(unittest.TestCase):
         self.assertEqual(nutrition.calls, [("day", "2026-09-24")])
         jobs.execute_specific.assert_not_called()
         jobs.execute_sync.assert_not_called()
-
-
-
 
     def test_garmin_plan_push_is_rejected_and_other_types_delegate(self) -> None:
         jobs = Mock()
@@ -858,6 +854,72 @@ class AcmeMockProviderJobTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(raised.exception.reason, "invalid_job_request")
         self.assertEqual(self.owner.calls, [])
+
+
+class BackfillChainHookTests(unittest.TestCase):
+    """The completion hook runs once when a backfill chain ends, not per chunk."""
+
+    def run_chunk(
+        self, job_type: str, result: dict[str, Any], fallback_status: str = "completed"
+    ) -> list[dict[str, Any]]:
+        hooked: list[dict[str, Any]] = []
+        executor = SyncJobExecutor(
+            job_owners={ACME_ID: FakeJobOwner(result)},
+            historical_sync=Mock(),
+            outcome_service=cast(Any, RecordingOutcomes(fallback_status)),
+            all_sync_days=-1,
+            after_job=lambda job: hooked.append(dict(job)),
+        )
+        job = {"id": "job-chain", "provider": ACME_ID, "type": job_type}
+        envelope = {"provider": ACME_ID, "type": job_type, "payload": {}}
+        with patch(
+            "backend.sync.executor.normalize_sync_job_request", return_value=envelope
+        ):
+            executor.run(job)
+        return hooked
+
+    def test_a_chunk_that_hands_over_to_a_next_chunk_skips_the_hook(self) -> None:
+        for job_type in (
+            "historical_backfill",
+            "wellness_backfill",
+            "rating_backfill",
+            "stream_backfill",
+        ):
+            with self.subTest(job_type=job_type):
+                hooked = self.run_chunk(
+                    job_type,
+                    {"status": "ok", "historical_next_end": "2026-01-01"},
+                )
+                self.assertEqual(hooked, [])
+
+    def test_the_chunk_that_ends_the_chain_runs_the_hook_once(self) -> None:
+        for job_type in (
+            "historical_backfill",
+            "wellness_backfill",
+            "rating_backfill",
+            "stream_backfill",
+        ):
+            with self.subTest(job_type=job_type):
+                hooked = self.run_chunk(
+                    job_type, {"status": "ok", "historical_next_end": None}
+                )
+                self.assertEqual([job["type"] for job in hooked], [job_type])
+
+    def test_a_partial_chunk_stops_the_chain_and_runs_the_hook(self) -> None:
+        hooked = self.run_chunk(
+            "historical_backfill",
+            {"status": "partial", "historical_next_end": "2026-01-01"},
+            fallback_status="partial",
+        )
+
+        self.assertEqual(len(hooked), 1)
+
+    def test_a_refresh_job_always_runs_the_hook(self) -> None:
+        hooked = self.run_chunk(
+            "refresh", {"status": "ok", "historical_next_end": "2026-01-01"}
+        )
+
+        self.assertEqual(len(hooked), 1)
 
 
 if __name__ == "__main__":

@@ -641,7 +641,6 @@ class RouteTests(unittest.TestCase):
             "coach_actions",
             "chat",
             "transcribe",
-            "planning_commands",
             "feedback",
             "history_undo",
             "privacy_delete",

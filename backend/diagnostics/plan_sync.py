@@ -25,7 +25,9 @@ def summarize_plan_sync(db: Any) -> dict[str, Any]:
     # Upcoming units first: past units must not hide the ones still to be pushed.
     units = db.execute(
         "SELECT local_id, sync_state, sync_error, "
-        f"json_extract(payload, '$.date') AS date {unsynced} "
+        # A payload that is not valid JSON has no date instead of failing the report.
+        "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.date') "
+        f"END AS date {unsynced} "
         "ORDER BY date < date('now'), date LIMIT ?",
         (_UNIT_LIMIT,),
     ).fetchall()

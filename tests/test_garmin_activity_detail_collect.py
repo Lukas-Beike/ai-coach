@@ -183,6 +183,21 @@ class GarminActivityDetailCollectTests(unittest.TestCase):
         )
         self.assertEqual(len(client.calls), 3)
 
+    def test_paused_sdk_parts_skip_only_themselves(self):
+        client = FakeClient()
+        sdk_parts = {"activity_splits", "activity_hr_zones", "activity_power_zones"}
+
+        payload = self._collect(
+            client, capability_allowed=lambda name: name not in sdk_parts
+        )
+
+        self.assertEqual(payload["details"], {"source": "get_activity_details"})
+        self.assertEqual(
+            payload["skipped"],
+            ["activity_splits", "activity_hr_zones", "activity_power_zones"],
+        )
+        self.assertEqual([call[0] for call in client.calls], ["get_activity_details"])
+
     def test_all_parts_paused_returns_only_the_skipped_parts(self):
         client = FakeClient()
 

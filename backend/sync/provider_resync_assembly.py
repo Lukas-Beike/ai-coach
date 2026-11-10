@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,6 +24,7 @@ from backend.sync.full_resync import (
     PROVIDER_RESYNC_KEYS,
     FullProviderResyncService,
     FullResyncOperationJournal,
+    FullResyncRuns,
     FullResyncStateStore,
     resync_field_keys,
 )
@@ -63,10 +64,15 @@ class ProviderResyncRuntime:
     uuid_factory: Callable[[], str]
     monotonic: Callable[[], float]
     operation_observer: Callable[[], SyncOperationObserver]
+    after_resync: Callable[[Mapping[str, Any]], None] = lambda _job: None
 
 
 class GarminFullResync:
-    """Full Garmin resync over the complete sync window."""
+    """Full Garmin resync over the complete sync window.
+
+    A contended run is a failed resync; a partial read is returned as such, so
+    the state does not record it as complete.
+    """
 
     def __init__(
         self, *, garmin_service: GarminSyncService, all_sync_days: int
@@ -83,11 +89,21 @@ class GarminFullResync:
     def run(
         self, operation_id: str, _observer: SyncOperationObserver
     ) -> dict[str, Any]:
-        return self._garmin_service.sync(
+        result = self._garmin_service.sync(
             days=self._all_sync_days,
             operation_id=operation_id,
             reason=FULL_RESYNC_LABEL,
         )
+        status = result.get("status")
+        if status == "not_configured":
+            raise self.not_configured_error()
+        if status == "already_running":
+            raise AppError(
+                409,
+                "Die Garmin-Synchronisierung läuft bereits. Bitte warten.",
+                reason="already_running",
+            )
+        return result
 
 
 class WahooFullResync:
@@ -184,7 +200,9 @@ class ProviderResyncAssembly:
         self._uuid_factory = runtime.uuid_factory
         self._monotonic = runtime.monotonic
         self._operation_observer = runtime.operation_observer
+        self._after_resync = runtime.after_resync
         self._provider_runtime = provider_runtime
+        self._resync_runs = FullResyncRuns()
 
     def competition_reconciler(self) -> CompetitionSyncReconciler:
         """Create local persistence for remote competition reconciliation."""
@@ -237,6 +255,8 @@ class ProviderResyncAssembly:
                 self._uuid_factory,
             ),
             gates=gates,
+            after_resync=self._after_resync,
+            runs=self._resync_runs,
         )
 
     def _runtime_full_resync_service(
@@ -267,4 +287,6 @@ class ProviderResyncAssembly:
             ),
             gates=gates,
             registry=runtime.static,
+            after_resync=self._after_resync,
+            runs=self._resync_runs,
         )

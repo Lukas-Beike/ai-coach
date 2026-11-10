@@ -1,7 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event
 from unittest.mock import Mock
@@ -9,12 +9,15 @@ from unittest.mock import Mock
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.runtime.events import StateEventBuffer
-from backend.sync.job_outcomes import SyncJobOutcomeService
+from backend.sync import job_outcomes
+from backend.sync.job_outcomes import CONTENTION_MAX_AGE, SyncJobOutcomeService
 from backend.sync.jobs import SyncJobStore
 
 
 class SyncJobOutcomeServiceTests(unittest.TestCase):
     def setUp(self):
+        job_outcomes._CONTENDED_SINCE.clear()
+        self.addCleanup(job_outcomes._CONTENDED_SINCE.clear)
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary_directory.cleanup)
         self.manager = DatabaseManager(
@@ -149,6 +152,82 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
         self.assertEqual(self.events(), [])
         self.assertEqual(self.store.state(job["id"])["status"], "queued")
 
+    def test_contended_claim_is_requeued_soon_without_consuming_an_attempt(self):
+        job = self.enqueue()
+        claimed = self.claim(job)
+        self.assertEqual(claimed["attempts"], 1)
+
+        status = self.service.complete(
+            job["id"], {"status": "already_running"}, job=claimed
+        )
+
+        self.assertEqual(status, "queued")
+        self.assertTrue(self.wake_event.is_set())
+        state = self.store.state(job["id"])
+        self.assertEqual(state["status"], "queued")
+        self.assertEqual(state["attempts"], 0)
+        self.assertEqual(state["available_at"], "2026-09-20T12:00:30+00:00")
+        self.assertEqual(self.events(), [])
+        # Not due yet, then claimable again once the short delay has passed.
+        self.assertIsNone(self.store.claim())
+        self.current_time = datetime(2026, 9, 20, 12, 0, 31, tzinfo=UTC)
+        self.assertEqual(self.claim(job)["attempts"], 1)
+
+    def test_three_collisions_do_not_fail_the_job(self):
+        job = self.enqueue()
+        for collision in range(1, 6):
+            claimed = self.claim(job)
+            self.service.complete(job["id"], {"status": "already_running"}, job=claimed)
+            self.current_time += timedelta(seconds=31)
+            with self.subTest(collision=collision):
+                state = self.store.state(job["id"])
+                self.assertEqual(state["status"], "queued")
+                self.assertEqual(state["attempts"], 0)
+        # The attempts are intact: the run that finally gets the lock completes.
+        self.claim(job)
+        self.assertEqual(
+            self.service.complete(job["id"], {"status": "ok"}), "completed"
+        )
+        self.assertEqual(self.store.state(job["id"])["status"], "completed")
+
+    def test_contention_past_the_age_limit_fails_over_to_the_retry_path(self):
+        job = self.enqueue()
+        claimed = self.claim(job)
+        self.service.complete(job["id"], {"status": "already_running"}, job=claimed)
+        self.current_time += CONTENTION_MAX_AGE + timedelta(seconds=1)
+        claimed = self.claim(job)
+
+        with self.assertRaises(AppError) as raised:
+            self.service.complete(job["id"], {"status": "already_running"}, job=claimed)
+
+        self.assertEqual(raised.exception.reason, "temporary_error")
+        self.assertEqual(self.store.state(job["id"])["status"], "running")
+
+    def test_the_age_limit_counts_from_the_first_collision_not_creation(self):
+        # A job that waited in the queue (or retried) for longer than the limit
+        # still gets the short defer on its first collision.
+        job = self.enqueue()
+        self.current_time += CONTENTION_MAX_AGE + timedelta(minutes=15)
+        claimed = self.claim(job)
+
+        status = self.service.complete(
+            job["id"], {"status": "already_running"}, job=claimed
+        )
+
+        self.assertEqual(status, "queued")
+        self.assertEqual(self.store.state(job["id"])["status"], "queued")
+
+    def test_a_failure_clears_the_contention_start(self):
+        job = self.enqueue()
+        claimed = self.claim(job)
+        self.service.complete(job["id"], {"status": "already_running"}, job=claimed)
+        self.assertIn(job["id"], job_outcomes._CONTENDED_SINCE)
+        self.current_time += timedelta(seconds=31)
+
+        self.service.record_failure(self.claim(job), AppError(502, "down"))
+
+        self.assertNotIn(job["id"], job_outcomes._CONTENDED_SINCE)
+
     def test_retryable_failure_requeues_wakes_and_publishes_no_event(self):
         job = self.enqueue()
         claimed = self.claim(job)
@@ -194,6 +273,42 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
                 "error_class": "auth_required",
             },
         )
+
+    def test_a_garmin_sdk_requirement_is_final_and_never_requeued(self):
+        job = self.enqueue()
+        claimed = self.claim(job)
+
+        self.service.record_failure(
+            claimed, AppError(409, "SDK needed", reason="garmin_sdk_required")
+        )
+
+        state = self.store.state(job["id"])
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["items"][0]["error_class"], "garmin_sdk_required")
+        self.assertFalse(self.wake_event.is_set())
+
+    def test_a_provider_named_wait_delays_the_retry_up_to_the_cap(self):
+        for retry_after, expected in (
+            (25, "12:00:25"),
+            (900, "12:00:30"),
+            (3, "12:00:10"),
+        ):
+            with self.subTest(retry_after=retry_after):
+                job = self.enqueue()
+                claimed = self.claim(job)
+
+                self.service.record_failure(
+                    claimed,
+                    AppError(
+                        429,
+                        "slow down",
+                        reason="provider_network_error",
+                        retry_after_seconds=retry_after,
+                    ),
+                )
+
+                available_at = self.store.state(job["id"])["available_at"]
+                self.assertEqual(available_at, f"2026-09-20T{expected}+00:00")
 
     def test_exhausted_retry_updates_and_publishes_final_failure(self):
         job = self.enqueue()

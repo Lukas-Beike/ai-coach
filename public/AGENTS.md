@@ -16,10 +16,12 @@
 - Workouts are stored directly in the local training library; the athlete can
   explicitly synchronize them to Intervals.icu later. Adaptive replan previews
   still require a separate explicit apply action.
-- The service worker is part of the release cache contract. Whenever
-  `index.html`, `app.js`, `styles.css`, or service-worker assets change, bump
-  the asset query version in `index.html` and the cache name/asset URLs in
-  `service-worker.js` so a fresh installation receives a consistent current asset set. Do not add
+- The service worker is part of the release cache contract. Source files carry
+  no versions: reference assets as `/app.js` in `index.html` and `ASSETS`, and
+  keep the `__ASSET_HASH__` cache-name placeholder. `StaticAssetService` stamps
+  `?v=<content hash>` and the cache name when serving, so a fresh installation
+  receives a consistent current asset set. Add a new file to `ASSETS` (if
+  cached) and `STATIC_TARGETS`; never bump versions by hand. Do not add
   interactive application update dialogs, cache conversion or earlier-client support.
 - The last loaded state and recent view reads are stored on the device, so a
   start or view shows them at once while fresh data loads. The latest 20 Coach

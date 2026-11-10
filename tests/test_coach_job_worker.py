@@ -90,7 +90,8 @@ class CoachJobWorkerTests(unittest.TestCase):
         self.assertEqual(self.jobs.claim.call_count, 2)
         self.runner.run.assert_called_once_with(job)
         self.assertEqual(
-            log_error.call_args.kwargs["extra"]["error_class"], "OperationalError"
+            log_error.call_args.kwargs["extra"]["context"]["error_class"],
+            "OperationalError",
         )
         self.assertNotIn("private detail", repr(log_error.call_args))
 
@@ -121,7 +122,8 @@ class CoachJobWorkerTests(unittest.TestCase):
         recovery.assert_called_once_with()
         self.assertEqual(self.worker.wake_event.wait.call_args_list[0].args, (5,))
         self.assertEqual(
-            log_error.call_args.kwargs["extra"]["error_class"], "RuntimeError"
+            log_error.call_args.kwargs["extra"]["context"]["error_class"],
+            "RuntimeError",
         )
         self.assertNotIn("private detail", repr(log_error.call_args))
 

@@ -41,6 +41,18 @@ class PerformanceLoadContextTests(unittest.TestCase):
         self.assertEqual(result["previous_7"]["sessions"], 1)
         self.assertEqual(result["last_30"]["sessions"], 4)
         self.assertEqual(result["previous_30"]["sessions"], 2)
+        # The 7-day volume base covers days -36..-7 exactly: 7, 29, 30 and 36.
+        self.assertEqual(result["base_30_before_7"]["sessions"], 4)
+
+    def test_volume_base_window_edges(self):
+        def at(offset):
+            return {
+                "started_at_local": (TODAY - timedelta(days=offset)).isoformat(),
+                "moving_duration_s": 3600,
+            }
+
+        result = _context([at(6), at(7), at(36), at(37)])
+        self.assertEqual(result["base_30_before_7"]["sessions"], 2)
 
     def test_load_is_the_latest_local_day(self):
         canonical = CanonicalPerformanceInputs(local_load_days=_loads(150))

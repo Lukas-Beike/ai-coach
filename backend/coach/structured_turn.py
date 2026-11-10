@@ -133,7 +133,6 @@ class CoachStructuredTurnService:
             context,
             command_receipts=command_receipts,
             attachments=attachments,
-            has_prior_openai_attachments=has_prior_openai_attachments,
             request_kind=request_kind,
         ).name
         model_instructions, request_payload = self._deps.payload.build(
@@ -149,6 +148,7 @@ class CoachStructuredTurnService:
             retain_openai_attachment_context=retain_openai_attachment_context,
             has_prior_openai_attachments=has_prior_openai_attachments,
             request_kind=request_kind,
+            background_owned=background_owned,
         )
         recovery_state = {"conversation_recovered": False}
         resume_id = self._resume_id(

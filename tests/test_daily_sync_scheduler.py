@@ -177,7 +177,100 @@ class DailySyncSchedulerTests(unittest.TestCase):
         self.assertEqual(self.queue.jobs, [])
         self.assertEqual(markers.checked, ["calendar", "garmin"])
 
+    def test_a_held_provider_gets_no_refresh_until_its_retry_is_due(self):
+        held = {"garmin"}
+        queue = _Queue()
+        scheduler = DailySyncScheduler(
+            _Profile(),
+            queue,
+            _Markers(),
+            _Garmin(),
+            MaintenanceGate(),
+            config=DailySyncSchedulerConfig(
+                calendar_url_enabled=True,
+                garmin_automatic_sync_days=2,
+                auto_update_label="automatic refresh",
+            ),
+            retry_held=lambda provider: provider in held,
+        )
 
+        scheduler.schedule()
+        self.assertNotIn("garmin", [job[0] for job in queue.jobs])
+        self.assertIn("calendar", [job[0] for job in queue.jobs])
+
+        held.clear()
+        scheduler.schedule()
+        self.assertIn("garmin", [job[0] for job in queue.jobs])
+
+    def test_a_failing_due_check_skips_neither_later_providers_nor_morning_refresh(
+        self,
+    ):
+        class Failing(_Markers):
+            def is_due(self, provider):
+                if provider == "calendar":
+                    raise RuntimeError("private provider detail")
+                return super().is_due(provider)
+
+        class Stop:
+            count = 0
+
+            def wait(self, _timeout):
+                self.count += 1
+                return self.count == 2
+
+        scheduler = self.make_scheduler(markers=Failing())
+        morning = Mock()
+
+        with self.assertLogs("intervals_coach", level="ERROR") as logged:
+            DailySyncLoop(
+                scheduler,
+                morning,
+                sleep=lambda _seconds: None,
+                logger=Mock(),
+                stop_event=Stop(),
+            ).run()
+
+        self.assertEqual([job[0] for job in self.queue.jobs], ["weather", "garmin"])
+        morning.refresh.assert_called_once_with()
+        record = logged.records[0]
+        self.assertEqual(record.event, "daily_sync_provider_failed")
+        self.assertEqual(record.context["error_class"], "RuntimeError")
+        self.assertNotIn("private provider detail", logged.output[0])
+
+    def test_a_maintenance_refusal_still_stops_the_scheduling_pass(self):
+        class Maintenance(_Queue):
+            def enqueue(self, *args, **kwargs):
+                raise AppError(503, "Wartung", reason="maintenance")
+
+        scheduler = self.make_scheduler(queue=Maintenance())
+
+        with self.assertRaises(AppError):
+            scheduler.schedule()
+
+    def test_housekeeping_failure_never_skips_the_scheduling(self):
+        class Stop:
+            count = 0
+
+            def wait(self, _timeout):
+                self.count += 1
+                return self.count == 2
+
+        scheduler = Mock()
+        logger = Mock()
+        DailySyncLoop(
+            scheduler,
+            Mock(),
+            sleep=lambda _seconds: None,
+            logger=logger,
+            stop_event=Stop(),
+            housekeeping=Mock(side_effect=RuntimeError("private detail")),
+        ).run()
+
+        scheduler.schedule.assert_called_once_with()
+        self.assertEqual(
+            logger.error.call_args.kwargs["extra"]["event"], "sync_housekeeping_failed"
+        )
+        self.assertNotIn("private detail", repr(logger.error.call_args))
 
     def test_maintenance_gate_prevents_scheduling(self):
         gate = MaintenanceGate()
@@ -219,7 +312,8 @@ class DailySyncSchedulerTests(unittest.TestCase):
         self.assertEqual(scheduler.calls, 2)
         morning.refresh.assert_called_once_with()
         self.assertEqual(
-            logger.error.call_args.kwargs["extra"]["error_class"], "RuntimeError"
+            logger.error.call_args.kwargs["extra"]["context"]["error_class"],
+            "RuntimeError",
         )
         self.assertNotIn("private detail", repr(logger.error.call_args))
 

@@ -980,18 +980,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_http_athlete_put_routes.py",
-      "code": "index",
-      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
-    },
-    {
-      "tool": "mypy",
-      "path": "tests/test_http_athlete_put_routes.py",
-      "code": "index",
-      "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_public_state_calendar_projection.py",
       "code": "index",
       "message_sha256": "8a59dd5d3be19f13661c274d27541a886a92902c0e8bab064cc7f677208401c6"
@@ -1355,12 +1343,6 @@
       "path": "tests/test_coach_background_job.py",
       "code": "union-attr",
       "message_sha256": "d1b08c77b27ebdb790d8eabdb06f2d2594c9455dd9b8c313769aa818b5b93e32"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/coach/planning_commands.py",
-      "code": "union-attr",
-      "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
     },
     {
       "tool": "mypy",

@@ -87,7 +87,7 @@ class ConfigTests(unittest.TestCase):
                 root, root, {"SYNC_HISTORY_EARLIEST_DATE": " 2015-06-01 "}
             )
             blank = load_config(root, root, {"SYNC_HISTORY_EARLIEST_DATE": "  "})
-            with self.assertLogs("backend.config", level="WARNING") as logs:
+            with self.assertLogs("intervals_coach", level="WARNING") as logs:
                 invalid = load_config(
                     root, root, {"SYNC_HISTORY_EARLIEST_DATE": "not-a-date"}
                 )

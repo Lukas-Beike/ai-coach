@@ -25,7 +25,7 @@ from backend.sync.garmin_service import (
     refresh_morning_battery_after_sync,
 )
 from backend.sync.gates import ProviderResyncGate
-from backend.sync.job_outcomes import SyncJobOutcomeService
+from backend.sync.job_outcomes import CONTENDED_STATUS, SyncJobOutcomeService
 from backend.sync.jobs import (
     BACKFILL_CURSOR_STREAMS,
     BACKFILL_JOB_TYPES,
@@ -45,7 +45,7 @@ from backend.sync.state import SyncStateRepository
 from backend.sync.weather import WeatherSyncService
 
 UNKNOWN_PROVIDER_JOB: Final = "Unbekannter Providerjob."
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 # Consecutive chunks without any fetched record (2 x 90 days) end a backfill.
 EMPTY_BACKFILL_CHUNK_LIMIT = 2
@@ -165,21 +165,18 @@ class HistoricalSyncJobOwner:
     def queue_next(
         self, job: dict[str, Any], result: Any, fallback_status: str
     ) -> None:
-        # A partial chunk stops the chain: providers advance their historical
-        # cursor only for complete windows, so continuing would skip the gap.
         job_type = str(job.get("type") or "")
-        if not (
-            job_type in BACKFILL_JOB_TYPES
-            and isinstance(result, dict)
-            and result.get("historical_next_end")
-            and fallback_status == "completed"
-        ):
+        if not backfill_continues(job, result, fallback_status):
             return
         next_end = result["historical_next_end"]
         # A chunk that ran again (a retry or a restart) may already have queued
         # its continuation; queuing again would start a second chain.
         if self._queue_service.backfill_continued(
-            job["provider"], next_end, str(job.get("created_at") or ""), job_type
+            job["provider"],
+            next_end,
+            str(job.get("created_at") or ""),
+            job_type,
+            str(job.get("id") or ""),
         ):
             return
         payload: dict[str, Any] = {
@@ -604,6 +601,28 @@ class CalendarWeatherJobAdapter:
         return self._jobs.execute(self._provider_id, job, payload, reason)
 
 
+class PerJobOwner:
+    """Resolve a provider owner for each job, so it reads the live configuration.
+
+    Owners copy the runtime configuration when they are built; a registry caches
+    them for the worker's lifetime. Building per job lets credentials saved or
+    removed in the app apply to the next job without a restart.
+    """
+
+    def __init__(self, build: Callable[[], ProviderJobOwner]) -> None:
+        self._build = build
+
+    def execute(
+        self,
+        job: Mapping[str, Any],
+        payload: dict[str, Any],
+        reason: str,
+        *,
+        job_type: str,
+    ) -> dict[str, Any]:
+        return self._build().execute(job, payload, reason, job_type=job_type)
+
+
 def dispatch_provider_job(
     job_owners: Mapping[str, ProviderJobOwner],
     job: Mapping[str, Any],
@@ -659,8 +678,28 @@ def is_retired_intervals_ingest_job(job: Mapping[str, Any]) -> bool:
     )
 
 
+def backfill_continues(
+    job: Mapping[str, Any], result: Any, fallback_status: str
+) -> bool:
+    """Return whether a finished backfill chunk hands over to a next chunk.
+
+    A partial chunk stops the chain: providers advance their historical cursor
+    only for complete windows, so continuing would skip the gap.
+    """
+    return bool(
+        str(job.get("type") or "") in BACKFILL_JOB_TYPES
+        and isinstance(result, dict)
+        and result.get("historical_next_end")
+        and fallback_status == "completed"
+    )
+
+
 class SyncJobExecutor:
-    """Run one claimed job and persist its outcome and any backfill follow-up."""
+    """Run one claimed job and persist its outcome and any backfill follow-up.
+
+    A backfill chunk that hands over to a next chunk skips the completion hook;
+    the chunk that ends the chain runs it once for the whole walk.
+    """
 
     def __init__(
         self,
@@ -689,8 +728,12 @@ class SyncJobExecutor:
                 )
                 return
             result = self.execute(job)
-            fallback_status = self._outcome_service.complete(job["id"], result)
+            fallback_status = self._outcome_service.complete(job["id"], result, job=job)
+            if fallback_status == CONTENDED_STATUS:
+                # The provider was busy: the job is requeued, not finished.
+                return
             self._historical_sync.queue_next(job, result, fallback_status)
+            chain_continues = backfill_continues(job, result, fallback_status)
         except Exception as exc:  # noqa: BLE001 - runner persists every execution failure
             try:
                 self._outcome_service.record_failure(job, exc)
@@ -699,8 +742,10 @@ class SyncJobExecutor:
                     "sync job failure could not be recorded",
                     extra={
                         "event": "sync_job_failure_record_failed",
-                        "job_id": job.get("id"),
-                        "error_class": type(secondary).__name__,
+                        "context": {
+                            "job_id": job.get("id"),
+                            "error_class": type(secondary).__name__,
+                        },
                     },
                 )
                 try:
@@ -713,7 +758,8 @@ class SyncJobExecutor:
                         extra={"event": "sync_job_last_resort_failed"},
                     )
         else:
-            self._run_after_job(job)
+            if not chain_continues:
+                self._run_after_job(job)
 
     def _run_after_job(self, job: Mapping[str, Any]) -> None:
         """Run the completion hook; its failure never changes the job outcome."""
@@ -724,7 +770,7 @@ class SyncJobExecutor:
                 "sync job completion hook failed",
                 extra={
                     "event": "sync_job_after_job_failed",
-                    "error_class": type(exc).__name__,
+                    "context": {"error_class": type(exc).__name__},
                 },
             )
 
@@ -732,18 +778,40 @@ class SyncJobExecutor:
         """Normalize and dispatch a persisted provider-job envelope."""
         stored_payload = job.get("payload")
         try:
+            payload = (
+                dict(stored_payload)
+                if isinstance(stored_payload, dict)
+                else decode_job_payload(stored_payload)
+            )
+            if str(job.get("type") or "") == "plan_push":
+                payload = _unsettled_plan_entries(payload, job.get("settled_item_keys"))
             envelope = normalize_sync_job_request(
                 str(job.get("provider") or ""),
                 str(job.get("type") or ""),
-                dict(stored_payload)
-                if isinstance(stored_payload, dict)
-                else decode_job_payload(stored_payload),
+                payload,
                 all_sync_days=self._all_sync_days,
                 registry=self._registry,
             )
         except JobValidationError as exc:
             raise AppError(400, str(exc), reason="invalid_job_request") from exc
         return dispatch_provider_job(self._job_owners, job, envelope)
+
+
+def _unsettled_plan_entries(payload: dict[str, Any], settled: Any) -> dict[str, Any]:
+    """Drop plan entries a previous run of the same job already completed."""
+    entries = payload.get("entries")
+    keys = {str(key) for key in settled or ()}
+    if not keys or not isinstance(entries, list):
+        return payload
+    remaining = [
+        entry
+        for entry in entries
+        if not (
+            isinstance(entry, dict)
+            and str(entry.get("library_workout_id") or "") in keys
+        )
+    ]
+    return {**payload, "entries": remaining} if remaining else payload
 
 
 def chained_after_job(
@@ -763,7 +831,7 @@ def chained_after_job(
                     "sync job completion hook failed",
                     extra={
                         "event": "sync_job_after_job_failed",
-                        "error_class": type(exc).__name__,
+                        "context": {"error_class": type(exc).__name__},
                     },
                 )
 

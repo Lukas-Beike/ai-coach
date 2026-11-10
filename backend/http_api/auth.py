@@ -10,7 +10,6 @@ import threading
 import time
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
-from http.cookies import CookieError, SimpleCookie
 from typing import Any
 
 from backend import config as app_config
@@ -192,12 +191,18 @@ class SessionAuthService:
 
     @staticmethod
     def cookie_value(handler: Any, name: str) -> str:
-        cookie = SimpleCookie()
-        try:
-            cookie.load(handler.headers.get("Cookie", ""))
-        except CookieError, TypeError, ValueError:
+        header = handler.headers.get("Cookie", "")
+        if not isinstance(header, str):
             return ""
-        return cookie[name].value if name in cookie else ""
+        # Tolerant parse: a foreign non-RFC cookie must not drop ours.
+        for part in header.split(";"):
+            cookie_name, separator, value = part.partition("=")
+            if separator and cookie_name.strip() == name:
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] == '"':
+                    value = value[1:-1]
+                return value
+        return ""
 
     @staticmethod
     def session_token_hash(token: str) -> str:
@@ -289,14 +294,36 @@ class SessionAuthService:
             )
         return {"csrf_hash": row["csrf_hash"], "expires_at": expires_at}
 
+    def password_matches(self, password: object) -> bool:
+        """Constant-time comparison with the APP_PASSWORD."""
+        return isinstance(password, str) and hmac.compare_digest(
+            password.encode("utf-8"), self._config.app_password.encode("utf-8")
+        )
+
+    def require_password(self, handler: Any, password: object) -> None:
+        """Ask the session holder to prove the APP_PASSWORD again for a risky change."""
+        allowed, retry_after = self._rate_limiter.allow(
+            f"reauth:{self.client_ip(handler)}", 10, 900
+        )
+        if not allowed:
+            raise AppError(
+                429,
+                f"Zu viele Versuche. Erneut versuchen in etwa {retry_after} Sekunden.",
+                reason="rate_limited",
+                retry_after_seconds=retry_after,
+            )
+        if not self.password_matches(password):
+            raise AppError(
+                403, "Das App-Passwort fehlt oder ist falsch. Es wurde nichts geändert."
+            )
+
     def login_user(self, handler: Any, password: str | None = None) -> dict[str, Any]:
         if app_config.security_configuration_error(
             self._config, sqlcipher_available=self._sqlcipher_available
         ):
             raise AppError(503, "Die sichere App-Konfiguration ist unvollständig.")
-        allowed, retry_after = self._rate_limiter.allow(
-            f"login:{self.client_ip(handler)}", 5, 900
-        )
+        login_key = f"login:{self.client_ip(handler)}"
+        allowed, retry_after = self._rate_limiter.allow(login_key, 5, 900)
         if not allowed:
             raise AppError(
                 429,
@@ -309,10 +336,10 @@ class SessionAuthService:
             password = (
                 str(payload.get("password") or "") if isinstance(payload, dict) else ""
             )
-        if not hmac.compare_digest(
-            str(password).encode("utf-8"), self._config.app_password.encode("utf-8")
-        ):
+        if not self.password_matches(password):
             raise AppError(401, "Ungültiges Passwort.")
+        # Only failed password checks count against the limit.
+        self._rate_limiter.refund(login_key)
         token = secrets.token_urlsafe(32)
         csrf = secrets.token_urlsafe(32)
         now = time.time()

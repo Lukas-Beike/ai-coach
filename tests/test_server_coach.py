@@ -1440,10 +1440,10 @@ class ServerCoachTests(ServerTestCase):
         event_date = (
             _local_datetime.now().astimezone().date() + timedelta(days=60)
         ).isoformat()
-        saved = server.ATHLETE_DATA.context().save(
-            {}, [{"name": "Old Race", "event_date": event_date, "sport": "Cycling"}]
+        saved = server.PLANNING_DATA.competition().save(
+            {"name": "Old Race", "event_date": event_date, "sport": "Cycling"}
         )
-        competition_id = saved["competitions"][0]["id"]
+        competition_id = saved["competition"]["id"]
         external_id = planning_competitions.competition_external_id(competition_id)
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(

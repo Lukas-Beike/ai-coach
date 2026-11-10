@@ -151,9 +151,10 @@ flow rather than demanding unrelated changes or a repository-wide redesign.
 - Preserve safe Markdown, editable voice transcripts, opt-in microphone and
   notifications, desktop Enter-to-send/Shift+Enter-newline, and touch-first
   Enter-newline with send-button or Ctrl/Cmd+Enter submission.
-- Changed frontend assets must keep `public/index.html` query versions and
-  `public/service-worker.js` cache name/asset URLs synchronized. Inspect fresh
-  installation and offline asset consistency. Do not demand update dialogs,
+- Frontend sources must carry no hand-written `?v=` versions or cache name
+  (`StaticAssetService` stamps them); new cached files belong in the
+  service-worker `ASSETS` list. Inspect fresh installation and offline asset
+  consistency. Do not demand update dialogs,
   cache conversion, or support for earlier clients contrary to scoped policy.
 
 ### Delivery and validation

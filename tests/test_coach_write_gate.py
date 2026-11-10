@@ -783,6 +783,41 @@ class RemoteTierTests(unittest.TestCase):
                 self.assertFalse(_authority(reply, previous).remote_requested)
         self.assertFalse(_authority("ja", "Soll ich den Lauf kürzen?").remote_requested)
 
+    def test_everyday_planning_words_grant_no_remote_write(self):
+        for text in (
+            "Ich habe heute doppelt so lange trainiert, pass bitte den Plan an.",
+            "Trag mir den Lauf in den Kalender ein.",
+            "Kannst du den Konflikt am Dienstag lösen?",
+            "Zeig mir das Duplikat im Kalender.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(gate.remote_requested(text))
+                decision = _check("start_intervals_plan_sync", text)
+                self.assertEqual(decision.reason, "remote_not_requested")
+        for text in (
+            "Synchronisiere mit Intervals",
+            "Lade den Kalender zu Intervals hoch.",
+            "Sync den Kalender.",
+            "Bitte den Konflikt im Kalender reparieren",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(gate.remote_requested(text))
+
+    def test_a_yes_grants_a_sync_only_after_a_closing_sync_question(self):
+        for previous in (
+            "Der Kalender ist aktuell. Soll ich die Woche kürzen?",
+            "Ich kann das mit Intervals synchronisieren. Soll ich den Lauf kürzen?",
+            "Am Dienstag gibt es einen Konflikt. Passt das so?",
+            "Dein Kalender ist eingetragen.",
+        ):
+            with self.subTest(previous=previous):
+                self.assertFalse(_authority("ja", previous).remote_requested)
+        self.assertTrue(
+            _authority(
+                "ja", "Die Woche ist angepasst. Soll ich sie zu Intervals hochladen?"
+            ).remote_requested
+        )
+
     def test_pending_origin_carries_a_sync_request(self):
         origin = gate.PendingOrigin(3, "Sync den Plan zu Intervals")
         self.assertTrue(_authority("nochmal", pending_origin=origin).remote_requested)
@@ -1164,7 +1199,7 @@ class GarminTierTests(unittest.TestCase):
                     "push_strength_to_garmin", text, arguments=GARMIN_PUSH
                 )
                 self.assertFalse(decision.allowed)
-                self.assertEqual("remote_not_requested", decision.reason)
+                self.assertEqual("remote_garmin_not_requested", decision.reason)
 
     def test_a_yes_grants_it_only_after_a_garmin_offer(self):
         offer = "Soll ich die Krafteinheit an deine Garmin-Uhr senden?"
@@ -1231,8 +1266,165 @@ class GarminTierTests(unittest.TestCase):
             arguments=GARMIN_PUSH,
         )
         self.assertFalse(decision.allowed)
-        self.assertEqual("remote_not_requested", decision.reason)
+        self.assertEqual("remote_garmin_not_requested", decision.reason)
 
+
+def _retry(provider, text, *, push, previous="", pending_origin=None):
+    """A job retry as the gate sees it: the validated request names the job."""
+    return _check(
+        "resolve_training_sync_conflict",
+        text,
+        previous,
+        authority=_authority(text, previous, pending_origin=pending_origin),
+        arguments={
+            "job_id": "job-1",
+            "_request": {"target": provider, "remote_write": push},
+        },
+    )
+
+
+class JobRetryTierTests(unittest.TestCase):
+    """A retry is judged by the retried job's provider and type."""
+
+    def test_a_read_retry_needs_no_sync_wording(self):
+        for provider in ("garmin", "wahoo"):
+            with self.subTest(provider=provider):
+                decision = _retry(
+                    provider,
+                    f"Wiederhole den fehlgeschlagenen {provider}-Abruf",
+                    push=False,
+                )
+                self.assertTrue(decision.allowed, decision)
+        for text in ("Nochmal bitte", "Ok"):
+            with self.subTest(text=text):
+                self.assertTrue(_retry("garmin", text, push=False).allowed)
+
+    def test_a_read_retry_still_needs_a_stored_athlete_message(self):
+        authority = gate.build_turn_authority(0, "Nochmal", "")
+        decision = gate.check_write(
+            "resolve_training_sync_conflict",
+            authority,
+            arguments={
+                "job_id": "job-1",
+                "_request": {"target": "garmin", "remote_write": False},
+            },
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual("no_athlete_message", decision.reason)
+
+    def test_a_garmin_plan_push_retry_needs_garmin_to_be_named(self):
+        allowed = _retry("garmin", "Sende die Einheiten erneut an Garmin", push=True)
+        self.assertTrue(allowed.allowed, allowed)
+        self.assertEqual("remote_garmin", allowed.domain)
+        for text in (
+            "Wiederhole den Job",
+            "Sync die Einheiten erneut mit Intervals",
+            "Sende die Einheiten erneut an Wahoo",
+            "Nicht an Garmin senden",
+        ):
+            with self.subTest(text=text):
+                denied = _retry("garmin", text, push=True)
+                self.assertFalse(denied.allowed)
+                self.assertEqual("remote_garmin", denied.domain)
+                self.assertEqual("remote_garmin_not_requested", denied.reason)
+
+    def test_a_wahoo_plan_push_retry_needs_wahoo_to_be_named(self):
+        allowed = _retry("wahoo", "Sende die Einheiten erneut an Wahoo", push=True)
+        self.assertTrue(allowed.allowed, allowed)
+        self.assertEqual("remote_wahoo", allowed.domain)
+        for text in (
+            "Wiederhole den Job",
+            "Sync die Einheiten erneut mit Intervals",
+            "Sende die Einheiten erneut an Garmin",
+            "Wie sende ich Einheiten an Wahoo?",
+        ):
+            with self.subTest(text=text):
+                denied = _retry("wahoo", text, push=True)
+                self.assertFalse(denied.allowed)
+                self.assertEqual("remote_wahoo", denied.domain)
+                self.assertEqual("remote_wahoo_not_requested", denied.reason)
+
+    def test_a_retry_inherits_the_provider_named_in_the_original_request(self):
+        origin = gate.PendingOrigin(3, "Schick die Krafteinheiten an Wahoo")
+        self.assertTrue(
+            _retry(
+                "wahoo", "Versuch es nochmal", push=True, pending_origin=origin
+            ).allowed
+        )
+        self.assertFalse(
+            _retry(
+                "garmin", "Versuch es nochmal", push=True, pending_origin=origin
+            ).allowed
+        )
+
+    def test_a_yes_grants_a_retry_only_after_that_providers_offer(self):
+        offer = "Soll ich die Einheiten erneut an Wahoo senden?"
+        self.assertTrue(_retry("wahoo", "Ja", push=True, previous=offer).allowed)
+        self.assertFalse(_retry("garmin", "Ja", push=True, previous=offer).allowed)
+
+    def test_an_intervals_retry_keeps_the_intervals_gate(self):
+        for push in (True, False):
+            with self.subTest(push=push):
+                allowed = _retry(
+                    "intervals", "Sync die Woche nochmal mit Intervals", push=push
+                )
+                self.assertTrue(allowed.allowed, allowed)
+                self.assertEqual("remote_intervals", allowed.domain)
+                denied = _retry("intervals", "Versuch es nochmal", push=push)
+                self.assertFalse(denied.allowed)
+                self.assertEqual("remote_not_requested", denied.reason)
+        self.assertFalse(
+            _retry("intervals", "Sende die Einheiten an Garmin", push=True).allowed
+        )
+
+    def test_a_retry_without_a_validated_request_stays_an_intervals_write(self):
+        for arguments in (
+            {"job_id": "job-1"},
+            {"job_id": "job-1", "_request": None},
+            {"job_id": "job-1", "_request": {"target": ["garmin"]}},
+            {"local_id": "unit-1", "_request": {"target": "garmin"}},
+        ):
+            with self.subTest(arguments=arguments):
+                decision = _check(
+                    "resolve_training_sync_conflict",
+                    "Nochmal bitte",
+                    arguments=arguments,
+                )
+                self.assertFalse(decision.allowed)
+                self.assertEqual("remote_intervals", decision.domain)
+                self.assertEqual("remote_not_requested", decision.reason)
+
+    def test_provider_wording_never_grants_another_provider(self):
+        for text in (
+            "Schick die Krafteinheit an Wahoo",
+            "Synchronisiere die Krafteinheit mit Wahoo",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(_check("start_intervals_plan_sync", text).allowed)
+                self.assertFalse(
+                    _check(
+                        "push_strength_to_garmin", text, arguments=GARMIN_PUSH
+                    ).allowed
+                )
+
+    def test_a_push_retry_counts_toward_the_turn_cap(self):
+        state = gate.TurnGateState()
+        text = "Sende die Einheiten erneut an Garmin"
+
+        def retry():
+            return _check(
+                "resolve_training_sync_conflict",
+                text,
+                state=state,
+                arguments={
+                    "job_id": "job-1",
+                    "_request": {"target": "garmin", "remote_write": True},
+                },
+            )
+
+        for _ in range(gate.WRITE_CAP):
+            self.assertTrue(retry().allowed)
+        self.assertEqual("cap_exceeded", retry().reason)
 
 
 if __name__ == "__main__":

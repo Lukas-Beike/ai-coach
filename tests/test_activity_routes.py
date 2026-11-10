@@ -537,7 +537,10 @@ class PrivacyDeleteTests(StageCase):
             SimpleNamespace(
                 database_manager=self.manager,
                 database_lock=nullcontext(),
-                maintenance_gate=SimpleNamespace(restore=lambda: nullcontext()),
+                maintenance_gate=SimpleNamespace(
+                    restore=lambda _hook=None: nullcontext()
+                ),
+                cancel_coach_turns=None,
                 key_value_repository=self.key_values,
             )  # type: ignore[arg-type]
         )

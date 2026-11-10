@@ -7,11 +7,26 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
+# Reasons that are their own job error class. The first three are invalid
+# requests; ``garmin_sdk_required`` is a state only the athlete can change
+# (connect the Garmin SDK), so it is final rather than retried.
+_PASSTHROUGH_JOB_REASONS = frozenset(
+    {
+        "unsupported_job",
+        "invalid_job_request",
+        "invalid_job_resolution",
+        "garmin_sdk_required",
+    }
+)
+# The status a full resync gate rejection records: the provider is deliberately
+# held, which is not a provider error.
+SKIPPED_OPERATION_REASONS = frozenset({"provider_resync_running"})
+
 
 def sync_job_error_class(error: BaseException) -> str:
     """Map provider exceptions to bounded, retry-safe job classes."""
     reason = str(getattr(error, "reason", "") or "").strip().casefold()
-    if reason in {"unsupported_job", "invalid_job_request", "invalid_job_resolution"}:
+    if reason in _PASSTHROUGH_JOB_REASONS:
         return reason
     code = ProviderRefreshTracker.error_code(error)
     return {
@@ -38,12 +53,17 @@ def retry_at(
     now: datetime,
     base_seconds: int,
     max_seconds: int,
+    retry_after_seconds: int | None = None,
 ) -> str | None:
     if current_error_code in {"auth_required", "invalid_configuration"}:
         return None
     failures = 1 if current_error_code else 0
     for row in rows:
-        if row["status"] in {"success", "partial", "skipped"}:
+        if row["status"] == "skipped":
+            # A hold or lock contention is no outcome: it neither ends nor adds
+            # to the failure streak of the runs around it.
+            continue
+        if row["status"] in {"success", "partial"}:
             break
         if row["status"] != "error":
             continue
@@ -53,6 +73,9 @@ def retry_at(
     if not failures:
         return None
     delay = min(base_seconds * (2 ** min(failures - 1, 5)), max_seconds)
+    if type(retry_after_seconds) is int and retry_after_seconds > 0:
+        # The provider named a wait: never retry earlier, never later than the cap.
+        delay = max(delay, min(retry_after_seconds, max_seconds))
     return (now + timedelta(seconds=delay)).isoformat()
 
 
@@ -84,6 +107,7 @@ def finish_refresh_record(
     now: datetime,
     base_seconds: int,
     max_seconds: int,
+    retry_after_seconds: int | None = None,
 ) -> tuple[str, str] | None:
     row = db.execute(
         "SELECT provider, area FROM provider_refresh_history WHERE id=?", (refresh_id,)
@@ -102,6 +126,7 @@ def finish_refresh_record(
             now=now,
             base_seconds=base_seconds,
             max_seconds=max_seconds,
+            retry_after_seconds=retry_after_seconds,
         )
         if status == "error"
         else None
@@ -175,6 +200,7 @@ class ProviderRefreshTracker:
         phase: str,
         *,
         error_code: str | None = None,
+        retry_after_seconds: int | None = None,
     ) -> None:
         current_time = self._now()
         with self._database_manager.unit_of_work() as db:
@@ -188,6 +214,7 @@ class ProviderRefreshTracker:
                 now=current_time,
                 base_seconds=self._retry_base_seconds,
                 max_seconds=self._retry_max_seconds,
+                retry_after_seconds=retry_after_seconds,
             )
             cleanup_refresh_history(
                 db,

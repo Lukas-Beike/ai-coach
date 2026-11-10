@@ -54,6 +54,7 @@ activity IDs no longer resolve.
 | GET | `/api/zones` | Local and provider zone configurations | Auth |
 | GET | `/api/activities`, `/api/activities/{id}` | Activity list and detail | Auth |
 | GET | `/api/sync/status`, `/api/sync/jobs/{id}` | Synchronization status and job result | Auth |
+| GET | `/api/garmin/full-resync`, `/api/wahoo/full-resync` | State and outcome of the full resync that was started in the background | Auth |
 | GET | `/api/chat/history`, `/api/chat/receipt`, `/api/chat/status` | Coach history, receipts and status | Auth |
 | GET | `/api/change-history` | Local change history | Auth |
 | GET | `/api/state/events` | Authenticated state event stream | Auth |
@@ -68,15 +69,15 @@ activity IDs no longer resolve.
 
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
-| POST | `/api/chat`, `/api/chat/stream`, `/api/chat/reset`, `/api/chat/cancel` | Submit, stream, reset or cancel Coach work | CSRF |
+| POST | `/api/chat`, `/api/chat/stream`, `/api/chat/reset`, `/api/chat/cancel` | Submit, stream, reset (body `{"confirmed": true}`, else 400 `confirmation_required`) or cancel Coach work | CSRF |
 | POST | `/api/coach/actions/confirm`, `/api/coach/actions/cancel`, `/api/coach/actions/execute` | Confirm, cancel or execute a Coach proposal | CSRF |
-| POST | `/api/planning/commands` | Apply an approved local planning command | CSRF |
 | POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback; activity feedback returns a `change` undo reference | CSRF |
 | POST | `/api/activities/{id}/session` | Confirm, split, merge or delete one session bundle | CSRF |
 | POST | `/api/planned-units/{id}/focus` | Set or clear `session_focus` and `strength_intensity` of a planned unit; returns the unit | CSRF |
 | POST | `/api/planned-units/{id}/garmin-exercise` | Assign the Garmin exercise of one strength exercise (`exercise_index`, `garmin_exercise`, `expected_payload_hash`) | CSRF |
 | POST | `/api/sync/jobs`, `/api/sync/jobs/{id}/resolve` | Queue or resolve a sync job | CSRF |
-| POST | `/api/garmin/sync`, `/api/wahoo/sync`, `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Queue provider synchronization | CSRF |
+| POST | `/api/garmin/sync`, `/api/wahoo/sync` | Queue provider synchronization | CSRF |
+| POST | `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Start the confirmed full resync in the background (`202` with `operation_id`; `200` `already_running` while one runs) | CSRF |
 | POST | `/api/external-calendar/sync`, `/api/weather/sync`, `/api/analysis/refresh`, `/api/nutrition/refresh` | Queue or run a targeted refresh | CSRF |
 | POST | `/api/analysis/scenarios` | Project a training scenario without saving it | CSRF |
 | POST | `/api/change-history/undo/preview`, `/api/change-history/undo`, `/api/change-history/undo-turn` | Preview or apply an undo, or undo one Coach turn | CSRF |
@@ -106,7 +107,6 @@ activity IDs no longer resolve.
 | PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile; with `sync_body_to_garmin: true` a changed weight or body fat is also exported to Garmin and the result carries `garmin_body_export` | CSRF |
 | PUT | `/api/zones` | Save one local zone configuration; returns a receipt with an undo reference | CSRF |
 | PUT | `/api/zones/remove` | Remove one local zone configuration; needs `confirmed: true` | CSRF |
-| PUT | `/api/athlete-context` | Replace profile and competitions | CSRF |
 | PUT | `/api/nutrition/entry` | Update a nutrition entry | CSRF |
 | PUT | `/api/nutrition/products` | Update a confirmed saved product | CSRF |
 | PUT | `/api/settings/credentials` | Save or clear provider credentials stored in the encrypted database (see below) | CSRF |
@@ -127,6 +127,10 @@ return a secret: the response is the credential status only.
   environment `GARMIN_PASSWORD` fallback. A string
   stores the value; `null` or a blank string clears the value stored in the app,
   so the environment value applies again. Each field is validated server-side.
+  Setting `openai_base_url`, `wahoo_client_id` or `wahoo_client_secret` (not
+  clearing them) also needs the `APP_PASSWORD` in the body field `app_password`;
+  a missing or wrong password answers 403 and changes nothing. The password is
+  compared in constant time, rate limited and never stored.
   The response is the credential status: `fields` with per field `source`
   (`db`, `env` or `none`), `configured`, and `value` only for non-secret
   fields, plus `garmin_connected`, `garmin_connection_source`,

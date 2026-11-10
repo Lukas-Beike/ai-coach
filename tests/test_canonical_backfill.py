@@ -51,6 +51,7 @@ from backend.sync.canonical_backfill import (
     _reprojection_work,
     _Work,
     _write_reprojection,
+    completed_observation_versions,
 )
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
@@ -70,8 +71,9 @@ HEALTH_KIND = canonical_plans.HEALTH_RECORD_KIND
 
 
 def log_extra(record: logging.LogRecord, name: str) -> object:
-    """Read a structured field that the worker passes through ``extra=``."""
-    return getattr(record, name)
+    """Read a structured field that the worker passes under ``context``."""
+    fields = vars(record)
+    return fields["event"] if name == "event" else fields["context"][name]
 
 
 def load_fixture(*parts: str) -> Any:
@@ -1631,6 +1633,176 @@ class ReprojectionTests(BackfillFixture):
         self.assertEqual(providers[INTERVALS]["skipped_invalid"], 1)
         self.assertEqual(providers[INTERVALS]["retired"], 1)
 
+    def bump_and_reproject_with_raising_record(
+        self, backfill: CanonicalBackfill, raising_id: str
+    ) -> None:
+        real = backfill_module.reprojection_plan
+
+        def plan(row: Mapping[str, Any], **kwargs: Any) -> Any:
+            if row["source_record_id"] == raising_id:
+                raise ValueError("synthetic payload text that must not be logged")
+            return real(row, **kwargs)
+
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        with (
+            patch.dict(
+                canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+            ),
+            patch.object(backfill_module, "reprojection_plan", plan),
+        ):
+            self.run_to_completion(backfill)
+
+    def test_a_raising_mapper_skips_only_that_record_and_the_pass_completes(
+        self,
+    ) -> None:
+        backfill = self.populate()
+        before = self.rows(
+            "SELECT state FROM activity_records WHERE provider = ? "
+            "AND provider_activity_id = '1'",
+            (INTERVALS,),
+        )
+
+        with self.assertLogs("intervals_coach", level="WARNING") as logs:
+            self.bump_and_reproject_with_raising_record(backfill, "1")
+
+        summary = self.summary(backfill)
+        self.assertEqual("complete", summary["status"])
+        counters = summary["providers"][INTERVALS]
+        self.assertEqual(1, counters["skipped_invalid"])
+        self.assertEqual(2, counters["reprojected"])
+        # The record keeps what it projected before and its old mapper version, so
+        # a later version retries it; the others moved on.
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        self.assertEqual(
+            {"1": old},
+            {
+                row["source_record_id"]: row["mapped_version"]
+                for row in self.rows(
+                    "SELECT source_record_id, mapped_version FROM provider_records "
+                    "WHERE provider = ? AND source_record_id IN ('0', '1', '2')",
+                    (INTERVALS,),
+                )
+                if row["mapped_version"] <= old
+            },
+        )
+        self.assertEqual(
+            before,
+            self.rows(
+                "SELECT state FROM activity_records WHERE provider = ? "
+                "AND provider_activity_id = '1'",
+                (INTERVALS,),
+            ),
+        )
+        self.assertEqual(
+            {"canonical_reprojection_record_skipped"},
+            {record.__dict__.get("event") for record in logs.records},
+        )
+        self.assertEqual(
+            ["ValueError"], [log_extra(r, "error_class") for r in logs.records]
+        )
+        self.assertNotIn("synthetic payload text", logs.output[0])
+
+    def test_a_raising_mapper_leaves_the_old_observations_stored_but_hidden(
+        self,
+    ) -> None:
+        backfill = self.make_backfill(batch_size=100)
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                resting_hr={"calendarDate": "2026-09-19", "restingHeartRate": 49}
+            ),
+        )
+        self.run_to_completion(backfill)
+        key = (GARMIN, HEALTH_KIND)
+        version = canonical_plans._MAPPER_VERSIONS[key]
+        stored = "SELECT mapper_version FROM observations WHERE provider = ?"
+        self.assertEqual(
+            {version}, {r["mapper_version"] for r in self.rows(stored, (GARMIN,))}
+        )
+
+        def raising(*_args: Any, **_kwargs: Any) -> Any:
+            raise ValueError("synthetic")
+
+        with (
+            patch.dict(canonical_plans._MAPPER_VERSIONS, {key: version + 1}),
+            patch.object(backfill_module, "reprojection_plan", raising),
+            self.assertLogs("intervals_coach", level="WARNING"),
+        ):
+            self.run_to_completion(backfill)
+            with self.manager.reader() as db:
+                reader = CanonicalTableReader(
+                    oldest_versions=lambda db: completed_observation_versions(
+                        self.key_values, db
+                    )
+                )
+                served = [
+                    item
+                    for kind in MetricKind
+                    for item in reader.observations(db, kind)
+                ]
+
+        # The pass completed and counted the record as skipped, not reprojected.
+        counters = self.summary(backfill)["providers"][GARMIN]
+        self.assertEqual("complete", self.summary(backfill)["status"])
+        self.assertEqual((1, 0), (counters["skipped_invalid"], counters["reprojected"]))
+        # Nothing was written: the record keeps its old mapper version ...
+        self.assertEqual(
+            0,
+            self.rows(
+                "SELECT COUNT(*) AS n FROM provider_records WHERE provider = ? "
+                "AND record_kind = ? AND mapped_version = ?",
+                (GARMIN, HEALTH_KIND, version + 1),
+            )[0]["n"],
+        )
+        self.assertEqual(
+            {version}, {r["mapper_version"] for r in self.rows(stored, (GARMIN,))}
+        )
+        # ... and, once the pass is complete, the reader serves only the current
+        # version, so the old observations stay stored but are hidden until a later
+        # mapper version projects the record.
+        self.assertEqual([], served)
+
+    def test_follow_up_stages_run_after_a_pass_with_a_raising_record(self) -> None:
+        backfill = self.populate()
+        ran: list[str] = []
+
+        class Followup:
+            stage = "followup"
+
+            def run_batch(self, db: Any) -> BatchReport:
+                ran.append("followup")
+                return BatchReport(items=0, done=True)
+
+            def mark_failed(self, db: Any) -> None:
+                ran.append("failed")
+
+        worker = CanonicalBackfillWorker(
+            backfill=backfill,
+            database=lambda: self.manager,
+            maintenance_gate=MaintenanceGate(),
+            poll_seconds=0,
+            followups=[Followup()],
+        )
+        old = canonical_plans._MAPPER_VERSIONS[(INTERVALS, ACTIVITY_KIND)]
+        real = backfill_module.reprojection_plan
+
+        def plan(row: Mapping[str, Any], **kwargs: Any) -> Any:
+            if row["source_record_id"] == "1":
+                raise ValueError("synthetic")
+            return real(row, **kwargs)
+
+        with (
+            patch.dict(
+                canonical_plans._MAPPER_VERSIONS, {(INTERVALS, ACTIVITY_KIND): old + 1}
+            ),
+            patch.object(backfill_module, "reprojection_plan", plan),
+            self.assertLogs("intervals_coach", level="WARNING"),
+        ):
+            worker.run_loop()
+
+        self.assertEqual(["followup"], ran)
+        self.assertEqual("complete", self.summary(backfill)["status"])
+
     def test_version_bump_during_a_partial_run_restarts_the_record_from_its_first_item(
         self,
     ) -> None:
@@ -1875,7 +2047,7 @@ class WorkerTests(BackfillFixture):
         ]
         worker = self.make_worker(backfill)
         worker._retry_seconds = 0
-        with self.assertLogs("backend.sync.canonical_backfill_worker", level="ERROR"):
+        with self.assertLogs("intervals_coach", level="ERROR"):
             worker.run_loop()
         self.assertEqual(backfill.run_batch.call_count, 2)
         backfill.mark_failed.assert_called_once()
@@ -1886,7 +2058,7 @@ class WorkerTests(BackfillFixture):
         backfill.run_batch.side_effect = RuntimeError("synthetic failure")
         backfill.mark_failed.side_effect = lambda db: failed.set()
         worker = self.make_worker(backfill)
-        with self.assertLogs("backend.sync.canonical_backfill_worker", level="ERROR"):
+        with self.assertLogs("intervals_coach", level="ERROR"):
             worker.start()
             self.assertTrue(failed.wait(5))
             worker.stop()
@@ -1930,9 +2102,7 @@ class WorkerTests(BackfillFixture):
 
         with patch.object(stage, "run_batch", side_effect=fail_once):
             assembly.worker._retry_seconds = 0
-            with self.assertLogs(
-                "backend.sync.canonical_backfill_worker", level="ERROR"
-            ):
+            with self.assertLogs("intervals_coach", level="ERROR"):
                 assembly.worker.run_loop()
         self.assertEqual(cursors[1]["status"], "failed")
         self.assertEqual(
@@ -1970,9 +2140,7 @@ class WorkerTests(BackfillFixture):
         backfill = Mock()
         backfill.run_batch.side_effect = AppError(500, SECRET_ID, reason="internal")
         worker = self.make_worker(backfill)
-        with self.assertLogs(
-            "backend.sync.canonical_backfill_worker", level="ERROR"
-        ) as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             worker._run_stage(backfill, "canonical")
 
         self.assertEqual(backfill.run_batch.call_count, 1)
@@ -1984,9 +2152,7 @@ class WorkerTests(BackfillFixture):
         backfill = Mock()
         backfill.run_batch.side_effect = RuntimeError(f"{SECRET_ID} Ride")
         worker = self.make_worker(backfill)
-        with self.assertLogs(
-            "backend.sync.canonical_backfill_worker", level="ERROR"
-        ) as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             worker._run_stage(backfill, "canonical")
 
         self.assertEqual(backfill.run_batch.call_count, 1)
@@ -2002,9 +2168,7 @@ class WorkerTests(BackfillFixture):
         backfill.run_batch.side_effect = RuntimeError("first failure")
         backfill.mark_failed.side_effect = OSError(SECRET_ID)
         worker = self.make_worker(backfill)
-        with self.assertLogs(
-            "backend.sync.canonical_backfill_worker", level="ERROR"
-        ) as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             worker._run_stage(backfill, "canonical")
 
         self.assertEqual(
@@ -2136,9 +2300,7 @@ class FollowupStageTests(unittest.TestCase):
         self.addCleanup(followup.release.set)
         self.assertTrue(followup.running.wait(5))
 
-        with self.assertLogs(
-            "backend.sync.canonical_backfill_worker", level="ERROR"
-        ) as logs:
+        with self.assertLogs("intervals_coach", level="ERROR") as logs:
             worker.start()
             followup.release.set()
             worker.join(5)

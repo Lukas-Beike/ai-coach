@@ -132,7 +132,8 @@ Intervals.icu, OpenAI and Wahoo credentials can be entered under **Mehr > Anbind
 - **Badges:** each field shows "In der App gespeichert", "Aus Umgebung" or "Nicht gesetzt". "Entfernen" deletes only the value stored in the app and asks for confirmation.
 - **Secrets:** API keys and client secrets are never shown again after saving, and the form is cleared on submit. Non-secret values (OpenAI base URL, Intervals.icu athlete ID, Wahoo client ID) are shown as the current value.
 - **Timing:** changes apply without a container restart.
-- **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. A legacy token file at `/data/garmin_tokens` stays on disk, as every token store is preserved, but it is no longer used; delete it on the host if it should go too. It does not change the external Garmin, Intervals.icu or Wahoo accounts.
+- **Password re-entry:** setting the OpenAI base URL or the Wahoo client ID or secret asks for the `APP_PASSWORD` again, on top of the session, because these values decide where the OpenAI key is sent and which Wahoo app is used. A wrong or missing password changes nothing. Removing a stored value needs no password.
+- **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. A legacy token file at `/data/garmin_tokens` stays on disk, as every token store is preserved, but it is no longer used; delete it on the host if it should go too. It does not change the external Garmin or Intervals.icu accounts or the Wahoo account itself, but it revokes this app's Wahoo grant at Wahoo first (best effort, like "Wahoo trennen"); a failed revoke is reported after the purge, which completes either way.
 
 ## Connection checks
 
@@ -160,17 +161,7 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). The primary way to co
 
 An existing token file at `/data/garmin_tokens` is imported once when the database has no Garmin tokens yet. The file is left in place and is not deleted by the import. Because it is plaintext JSON protected only by owner-only file permissions, keep `/data` and every backup of it on encrypted host storage, and treat the file like a password.
 
-The bundled `garmin-login.py` helper is still available as an alternative for headless setups. It runs inside a temporary container attached to your data directory, which on a Linux host must already belong to UID 100 / GID 101 (`chown -R 100:101`, see [Docker Run](#docker-run)):
-
-```sh
-docker run --rm -it \
-  --env-file /mnt/user/appdata/ai-coach/.env \
-  -v /mnt/user/appdata/ai-coach/data:/data \
-  ghcr.io/lukas-beike/pacecraft:latest \
-  python /app/garmin-login.py
-```
-
-`GARMIN_EMAIL` and `GARMIN_PASSWORD` from `.env` remain a read-only fallback for the app's own Garmin login and for this helper. If you connect through the UI, you can remove `GARMIN_PASSWORD` from `.env`; the stored tokens are then used.
+`GARMIN_EMAIL` and `GARMIN_PASSWORD` from `.env` remain a read-only fallback for the app's own Garmin login. If you connect through the UI, you can remove `GARMIN_PASSWORD` from `.env`; the stored tokens are then used.
 
 ## Wahoo connection
 

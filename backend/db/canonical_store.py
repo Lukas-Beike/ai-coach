@@ -12,7 +12,7 @@ import json
 import math
 import uuid
 from collections.abc import Collection, Mapping, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Final, NamedTuple
 
@@ -329,6 +329,27 @@ def upsert_activity_record(
         fetched_at=fetched_at,
         now=now,
     )
+    survivor = _revival_survivor(
+        db, existing["activity_id"], recorded_by=values["recorded_by"]
+    )
+    if survivor is not None:
+        # A provider-deleted alias of a live session returns as that session's
+        # alias, so an athlete-confirmed bundle that linking cannot repair stays
+        # one session. The survivor keeps its own confirmation.
+        db.execute(
+            "UPDATE activity_sessions SET started_at = ?, local_date = ?, "
+            "state = ?, merged_into = ?, merged_into_retained = NULL, "
+            "athlete_confirmed = 0, updated_at = ? WHERE activity_id = ?",
+            (
+                started_at,
+                day,
+                ActivitySessionState.DUPLICATE.value,
+                survivor,
+                now,
+                existing["activity_id"],
+            ),
+        )
+        return WriteOutcome.UPDATED
     db.execute(
         # A revived session is active again, so it no longer keeps the survivor
         # of a merge that its deletion cleared. A session the athlete deleted
@@ -350,6 +371,44 @@ def upsert_activity_record(
         ),
     )
     return WriteOutcome.UPDATED
+
+
+def _revival_survivor(db: Any, activity_id: str, *, recorded_by: str) -> str | None:
+    """Return the live session a revived provider-deleted alias goes back to, or None.
+
+    The session must be deleted by a provider (not the athlete) and have retained a
+    survivor that is active today, following later merges. A survivor that already
+    holds an active record of the revived record's provider and recording origin
+    keeps it: one session never takes two copies of one origin.
+    """
+    row = _fetch_row(
+        db,
+        "SELECT state, primary_provider, merged_into_retained, "
+        f"{ATHLETE_DELETED} AS athlete_deleted "
+        "FROM activity_sessions WHERE activity_id = ?",
+        (activity_id,),
+    )
+    if (
+        row is None
+        or row["state"] != ActivitySessionState.DELETED.value
+        or row["athlete_deleted"]
+        or not row["merged_into_retained"]
+    ):
+        return None
+    retained = str(row["merged_into_retained"])
+    survivor = effective_session_ids(db, [retained]).get(retained)
+    if survivor is None or survivor == activity_id:
+        return None
+    members = session_member_rows(db, survivor)
+    if not members:
+        return None
+    if any(
+        member["provider"] == row["primary_provider"]
+        and member["recorded_by"] == recorded_by
+        for member in members
+    ):
+        return None
+    return survivor
 
 
 def reproject_activity_record(
@@ -1907,6 +1966,47 @@ def linkable_activity_rows(db: Any, *, start: str, end: str) -> list[dict[str, A
             end,
         ),
     )
+
+
+def linkable_dates_with_providers(db: Any, providers: Sequence[str]) -> list[str]:
+    """Return the ISO local dates where every given provider has an active record
+    within the one-day link margin.
+
+    A device and a relayed copy can fall on neighbouring local dates (zone
+    fallback), so a date counts when each other provider has a record on it or a
+    neighbouring day. Only records session linking may bundle count: their
+    session is active or an alias and not athlete-confirmed.
+    """
+    wanted = set(providers)
+    rows = _fetch_all(
+        db,
+        "SELECT DISTINCT r.local_date AS local_date, r.provider AS provider "
+        "FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.state = ? AND s.state IN (?, ?) AND s.athlete_confirmed = 0 "
+        f"AND r.provider IN ({_placeholders(list(wanted))})",
+        (
+            ActivityRecordState.ACTIVE.value,
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.DUPLICATE.value,
+            *wanted,
+        ),
+    )
+    by_date: dict[date, set[str]] = {}
+    for row in rows:
+        try:
+            day = date.fromisoformat(str(row["local_date"])[:10])
+        except ValueError:
+            continue
+        by_date.setdefault(day, set()).add(str(row["provider"]))
+    margin = timedelta(days=1)
+    result = []
+    for day in sorted(by_date):
+        nearby = by_date[day] | by_date.get(day - margin, set())
+        nearby |= by_date.get(day + margin, set())
+        if wanted <= nearby:
+            result.append(day.isoformat())
+    return result
 
 
 def provider_activity_record_rows(

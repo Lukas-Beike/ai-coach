@@ -111,12 +111,13 @@ current application source before running locally:
 ```powershell
 npm ci --ignore-scripts
 node node_modules/@playwright/test/cli.js install chromium
-docker build -t pacecraft:e2e .
+docker build -t "$(python scripts/run_browser_tests.py --print-image)" .
 python scripts/run_browser_tests.py --project all --list
 python scripts/run_browser_tests.py --project mobile-small --spec e2e/css-cascade.spec.js
 python scripts/run_browser_tests.py --project all --jobs 1 --cache-state warm
 ```
 
+The image tag is per checkout, so parallel worktrees keep their own builds.
 `--list` starts no containers. A project/spec selection reports its focused scope;
 unknown projects, missing specs, invalid shards and empty selections fail. Desktop
 runs every functional contract, and the four smaller projects repeat only
@@ -138,11 +139,12 @@ private authentication files and a unique result directory under
 and final status. Pending or interrupted records are unverified. Keep private
 storage state and traces out of reports; the runner disables traces.
 The runner warns when the application image's copy of `requirements.txt`,
-`server.py`, `garmin-login.py`, `backend/` or `public/` differs from the working
+`server.py`, `backend/` or `public/` differs from the working
 tree; rebuild it before trusting results. A new `public/` file also needs an
 entry in `STATIC_TARGETS` (`backend/http_api/static_assets.py`), which a unit
 test enforces. A failed child prints a failing test's location and first error
-line; its manifest entry lists all of them under `failures`.
+line; its manifest entry lists all of them under `failures`. The run stops at the first failed child;
+`--keep-going` runs every child and reports all failures (exit stays non-zero).
 
 CI builds and shares the current application image once, then starts browser
 jobs beside the native suite. Its prepared browser image is pinned by exact

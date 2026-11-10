@@ -27,6 +27,7 @@ from backend.providers.garmin import (
     collect_garmin_activity_detail,
     collect_garmin_data,
 )
+from backend.providers.garmin_capability import WELLNESS_BACKFILL_PREFIX
 from backend.providers.garmin_fields import GARMIN_EXTENDED_DATE_ALIASES
 from backend.providers.garmin_fit_history import (
     FileSink,
@@ -162,6 +163,27 @@ def _skippable_history_error(error: BaseException) -> bool:
     )
 
 
+def _wellness_hooks(
+    state: Any, needs_night: Callable[[str], bool]
+) -> WellnessHistoryHooks:
+    """Hooks of the wellness backfill, with capability state under its own keys."""
+
+    def failure(source: str, error: BaseException) -> None:
+        state.record_capability_failure(WELLNESS_BACKFILL_PREFIX + source, error)
+
+    return WellnessHistoryHooks(
+        skippable=_skippable_history_error,
+        needs_night=needs_night,
+        capability_allowed=lambda source: state.capability_allowed(
+            WELLNESS_BACKFILL_PREFIX + source
+        ),
+        capability_failure=failure,
+        capability_success=lambda source: state.record_capability_success(
+            WELLNESS_BACKFILL_PREFIX + source
+        ),
+    )
+
+
 def _garmin_tokenstore_present(config: Config, garmin_tokens: Any | None) -> bool:
     if garmin_tokens is not None:
         return garmin_tokens.connected()
@@ -208,9 +230,27 @@ class GarminRemoteReader:
         self._chunk_days = chunk_days
         self._all_sync_days = all_sync_days
         self._garmin_tokens = garmin_tokens
+        # One Personal API client per configured key, so its token (valid 24 h)
+        # is exchanged once and reused by every run until it expires.
+        self._personal_lock = threading.Lock()
+        self._personal_cache: tuple[str, GarminPersonalClient] | None = None
 
     def available(self) -> bool:
         return self._client_factory.available() or self._personal_configured()
+
+    def _personal(self) -> GarminPersonalClient | None:
+        """The cached Personal API client; a changed key builds a new one."""
+        key = str(getattr(self._config, "garmin_personal_api_key", "") or "").strip()
+        with self._personal_lock:
+            cached = self._personal_cache
+            if not key:
+                self._personal_cache = None
+                return None
+            if cached is not None and cached[0] == key:
+                return cached[1]
+            client = _personal_client(self._config, self._record_key_result)
+            self._personal_cache = None if client is None else (key, client)
+            return client
 
     def configured(self) -> bool:
         return self._personal_configured() or self._sdk_configured()
@@ -240,6 +280,7 @@ class GarminRemoteReader:
         include_daily_metrics: bool = True,
         known_activity_ids: frozenset[str] | None = None,
         rated_activity_ids: frozenset[str] = frozenset(),
+        body_battery_reconcile_days: int = 0,
     ) -> tuple[dict[str, Any], list[tuple[date, date]]]:
         today = end_date or self._local_today()
         windows = split_date_windows(
@@ -278,6 +319,7 @@ class GarminRemoteReader:
                     include_daily_metrics=include_daily_metrics,
                     known_activity_ids=known_activity_ids,
                     rated_activity_ids=rated_activity_ids,
+                    body_battery_reconcile_days=body_battery_reconcile_days,
                 ),
             )
         finally:
@@ -393,26 +435,22 @@ class GarminRemoteReader:
     ) -> dict[str, Any]:
         """Read one wellness history window for the one-off backfill (#1730).
 
-        Paused sources and their failures share the regular sync's capability
-        state, so a rate limit pauses this walk as it pauses the hourly sync.
+        Paused sources and their failures use their own capability state
+        (``WELLNESS_BACKFILL_PREFIX``), so this walk cannot pause the hourly sync.
         """
         if not self.configured():
             raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
-        client, login_argument = self._authenticated_client(call_external)
+        client, login_argument = self._authenticated_client(
+            call_external, personal_only=True
+        )
         try:
             return collect_wellness_history(
                 client,
                 start,
                 end,
                 external_call=call_external,
-                hooks=WellnessHistoryHooks(
-                    skippable=_skippable_history_error,
-                    needs_night=needs_night,
-                    capability_allowed=self._state_service.capability_allowed,
-                    capability_failure=self._state_service.record_capability_failure,
-                    capability_success=self._state_service.record_capability_success,
-                ),
+                hooks=_wellness_hooks(self._state_service, needs_night),
             )
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
@@ -426,14 +464,16 @@ class GarminRemoteReader:
     ) -> None:
         """Read the watch ratings of past activities for the one-off backfill (#1728).
 
-        One authenticated client serves the whole batch, so the Personal API token
-        is exchanged once. Only a failed token exchange flags the Personal API key
-        (the client does that); the classification is the sync owner's.
+        With a Personal API key the batch reads through it alone: no SDK login and
+        no ``sdk_skipped`` record. Only a failed token exchange flags the key (the
+        client does that); the classification is the sync owner's.
         """
         if not self.configured():
             raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
         call_external = self._external_call(None)
-        client, login_argument = self._authenticated_client(call_external)
+        client, login_argument = self._authenticated_client(
+            call_external, personal_only=True
+        )
         try:
             collect_activity_ratings(
                 client,
@@ -460,8 +500,8 @@ class GarminRemoteReader:
     ) -> None:
         """Download the FIT files of past activities for the stream backfill (#1763).
 
-        One authenticated client serves the whole batch, so the Personal API token
-        is exchanged once. Raises ``FitTransportMissing`` without a Personal API key.
+        The batch reads through the Personal API alone, with no SDK login. Raises
+        ``FitTransportMissing`` without a Personal API key.
         """
         if not self.configured():
             raise AppError(503, GARMIN_NOT_CONFIGURED_MESSAGE, reason="not_configured")
@@ -469,7 +509,9 @@ class GarminRemoteReader:
             # The SDK has no file download: do not log in for nothing.
             raise FitTransportMissing
         call_external = self._external_call(None)
-        client, login_argument = self._authenticated_client(call_external)
+        client, login_argument = self._authenticated_client(
+            call_external, personal_only=True
+        )
         try:
             collect_activity_fit_files(
                 client,
@@ -523,9 +565,11 @@ class GarminRemoteReader:
         exact cause.
         """
         tokens = self._garmin_tokens
-        personal = _personal_client(self._config, self._record_key_result)
+        personal = self._personal()
         if personal is not None:
             self._check_personal_key(personal)
+            # The accepted key starts without a pause from the rejected one.
+            self._state_service.clear_capability_state()
             if tokens is None or not tokens.connected():
                 return
         if tokens is None or not tokens.connected():
@@ -556,6 +600,7 @@ class GarminRemoteReader:
                 401, GARMIN_MFA_REQUIRED_MESSAGE, reason="reconnect_required"
             )
         self._state_service.clear_sdk_skipped()
+        self._state_service.clear_capability_state()
 
     def _check_personal_key(self, personal: GarminPersonalClient) -> None:
         """Exchange the Personal API key once; a rejection names the key."""
@@ -591,17 +636,20 @@ class GarminRemoteReader:
         return call_external
 
     def _authenticated_client(
-        self, call_external: ExternalCall
+        self, call_external: ExternalCall, *, personal_only: bool = False
     ) -> tuple[GarminTransportClient, str]:
         """Route Garmin reads through the Personal API and, if connected, the SDK.
 
         Without a Personal API key the SDK login is required and MFA stops before
         any collection. With a key, a failed SDK login or pending MFA only drops
         the SDK-only families; the Personal API families still sync.
+        ``personal_only`` is for batches whose every family the Personal API
+        serves: with a key they never log the SDK in, so they cannot record a
+        skipped SDK either.
         """
-        personal = _personal_client(self._config, self._record_key_result)
+        personal = self._personal()
         login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
-        if personal is not None and not self._sdk_configured():
+        if personal is not None and (personal_only or not self._sdk_configured()):
             return GarminTransportClient(personal, None), login_argument
         try:
             sdk, mfa_status = garmin_adapter.authenticate_client(
@@ -1139,6 +1187,7 @@ class GarminSyncSource:
         include_daily_metrics: bool = True,
         known_activity_ids: frozenset[str] | None = None,
         rated_activity_ids: frozenset[str] = frozenset(),
+        body_battery_reconcile_days: int = 0,
     ) -> tuple[dict[str, Any], list[tuple[date, date]] | None, str | None, str]:
         if self.fixture_enabled():
             payload = self._fixture_loader.load(days)
@@ -1152,6 +1201,7 @@ class GarminSyncSource:
             include_daily_metrics=include_daily_metrics,
             known_activity_ids=known_activity_ids,
             rated_activity_ids=rated_activity_ids,
+            body_battery_reconcile_days=body_battery_reconcile_days,
         )
         return payload, windows, None, windows[0][0].isoformat()
 
@@ -1262,7 +1312,7 @@ class GarminSyncLifecycleState:
 
 
 def _log_backfill_failure(error: Exception) -> None:
-    logging.getLogger(__name__).warning(
+    logging.getLogger("intervals_coach").warning(
         "Automatic Garmin activity detail backfill failed (%s)",
         type(error).__name__,
     )
@@ -1403,6 +1453,12 @@ class GarminSyncService:
             finally:
                 self._coordination.release()
 
+    def _body_battery_reconcile_days(self, end_date: date | None) -> int:
+        """The Body Battery span of a current run: once per local day, else none."""
+        if end_date is None and self._payload_service.body_battery_reconciliation_due():
+            return GARMIN_RECONCILIATION_DAYS
+        return 0
+
     def _execute(
         self,
         days: int,
@@ -1437,6 +1493,9 @@ class GarminSyncService:
                 else self._payload_service.known_activity_ids(days)
             ),
             rated_activity_ids=self._payload_service.rated_activity_ids(days),
+            # Body Battery is read once per local day over the reconciliation span,
+            # so a missed morning or a partial day total is replaced by the full one.
+            body_battery_reconcile_days=self._body_battery_reconcile_days(end_date),
         )
         self._raise_if_cancelled(cancel_event)
         payload = (
@@ -1478,7 +1537,7 @@ class GarminSyncService:
                     self._lifecycle_state.record_metric_export_status(export_message)
                     message += f" {export_message}"
             except Exception as error:  # noqa: BLE001 - import remains successful; never expose provider errors
-                logging.getLogger(__name__).warning(
+                logging.getLogger("intervals_coach").warning(
                     "Automatic metric export failed (%s)", type(error).__name__
                 )
                 result["metric_export"] = {"exported": 0, "conflicts": 0, "failed": 1}

@@ -16,6 +16,7 @@ from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.http_api.nutrition import NutritionPostRoutes
 from backend.nutrition.contracts import nutrition_approval_item
 from backend.nutrition.sync import IntervalsNutritionSyncService
 
@@ -169,6 +170,84 @@ class NutritionMealTimeTests(unittest.TestCase):
         )
         self.assertIs(updated["logged_time_known"], True)
         self.assertEqual(updated["logged_at"], "2026-09-24T17:00:00")
+
+    def test_meal_for_another_day_without_a_time_has_no_known_time(self) -> None:
+        past = self.service.log_meal(
+            {"meal_date": "2026-09-20", "description": "Nachtrag", "kcal": 300}
+        )
+        today = self.service.log_meal(
+            {"meal_date": "2026-09-24", "description": "Heute", "kcal": 300}
+        )
+
+        self.assertIs(past["logged_time_known"], False)
+        self.assertEqual(past["logged_at"], "2026-09-20T12:00:00")
+        self.assertEqual(past["meal_type"], "snack")
+        self.assertIs(today["logged_time_known"], True)
+        self.assertEqual(today["logged_at"], "2026-09-24T12:00:00+00:00")
+        self.assertEqual(today["meal_type"], "lunch")
+
+    def test_dated_time_is_rebased_onto_the_meal_date(self) -> None:
+        entry = self.service.log_meal(
+            {
+                "meal_date": "2026-09-20",
+                "logged_at": "2026-09-24T08:15:00+02:00",
+                "description": "Frühstück",
+                "kcal": 300,
+            }
+        )
+
+        self.assertEqual(entry["logged_at"], "2026-09-20T08:15:00+02:00")
+        self.assertIs(entry["logged_time_known"], True)
+        self.assertEqual(entry["meal_type"], "breakfast")
+
+    def test_unparsable_time_is_rejected_instead_of_a_known_noon(self) -> None:
+        for field in ("logged_at", "meal_time"):
+            with self.subTest(field=field), self.assertRaises(AppError) as raised:
+                self.service.log_meal(
+                    {
+                        "meal_date": "2026-09-24",
+                        field: "gegen Mittag",
+                        "description": "Suppe",
+                        "kcal": 300,
+                    }
+                )
+            self.assertEqual(raised.exception.status, 400)
+            self.assertIn("Uhrzeit", raised.exception.message)
+
+    def test_moving_the_date_moves_the_logged_time(self) -> None:
+        entry = self.log_full_macros()
+
+        moved = self.service.update_meal(entry["id"], {"meal_date": "2026-09-23"})
+        self.assertEqual(moved["logged_at"], "2026-09-23T08:15:00")
+        corrected = self.service.correct_meal(entry["id"], {"meal_date": "2026-09-22"})
+        self.assertEqual(corrected["logged_at"], "2026-09-22T08:15:00")
+        self.assertIs(corrected["logged_time_known"], True)
+
+    def test_entry_route_returns_the_change_for_undo(self) -> None:
+        handler = Mock()
+        handler.read_json.return_value = {
+            "meal_date": "2026-09-20",
+            "description": "Nachtrag",
+            "kcal": 300,
+        }
+        routes = NutritionPostRoutes(
+            diary_service=lambda: self.service,
+            meal_library_service=lambda: Mock(),
+            sync_job_queue=lambda: Mock(),
+        )
+
+        self.assertTrue(routes.handle(handler, "/api/nutrition/entry"))
+
+        status, body = handler.send_json.call_args.args
+        self.assertEqual(status, 200)
+        self.assertEqual(body["change"]["entity_type"], "nutrition_entry")
+        self.assertEqual(body["change"]["action"], "create")
+        self.assertTrue(body["change"]["id"] and body["change"]["after_hash"])
+
+        handler.read_json.return_value = {"id": body["entry"]["id"]}
+        self.assertTrue(routes.handle(handler, "/api/nutrition/entry/delete"))
+        status, deleted = handler.send_json.call_args.args
+        self.assertEqual(deleted["change"]["action"], "delete")
 
     def test_partial_macros_keep_daily_totals_unknown_but_expose_known_sums(
         self,

@@ -11,8 +11,9 @@ directories. A module whose literals name a changed data file under backend/
 counts as changed. Imports reached only through ``server.py`` count only when
 ``server.py`` or a module under SERVER_WIRED_PATHS changed: app-wide tests then
 stay in CI unless they import the changed module another way. Changes under
-FULL_SUITE_PATHS, or a source that cannot be parsed, select the whole suite
-(returned as ``None``).
+FULL_SUITE_PATHS, a source that cannot be parsed, or a selection of at least
+FULL_SUITE_SHARE of the test modules select the whole suite (returned as
+``None``).
 """
 
 from __future__ import annotations
@@ -27,8 +28,10 @@ TESTS = ROOT / "tests"
 # Paths whose change affects most of the suite or its harness. A trailing slash
 # marks a directory prefix; anything else is an exact path or a file prefix.
 FULL_SUITE_PATHS = (
-    "backend/canonical/",
-    "backend/db/",
+    # Connection, bootstrap and migrations sit under every database test.
+    "backend/db/manager.py",
+    "backend/db/bootstrap.py",
+    "backend/db/migrations.py",
     "tests/run_tests.py",
     "tests/changed_tests.py",
     "tests/support.py",
@@ -38,6 +41,8 @@ FULL_SUITE_PATHS = (
     "Dockerfile",
     "pyproject.toml",
 )
+# A selection this large saves little time; run everything and say why.
+FULL_SUITE_SHARE = 0.8
 # Too generic to identify one file by name alone.
 GENERIC_NAMES = frozenset({"__init__.py", "AGENTS.md", "SKILL.md", "README.md"})
 SOURCE_GLOBS = (
@@ -253,4 +258,11 @@ def select_modules(
             if owner:
                 selected[module] = f"{owner.path} names {path}"
                 break
+    total = sum(
+        1
+        for module, source in sources.items()
+        if module == source.module and Path(source.path).name.startswith("test_")
+    )
+    if total and len(selected) >= FULL_SUITE_SHARE * total:
+        return None, f"{len(selected)} of {total} test modules affected; full suite"
     return selected, f"{len(selected)} modules affected by {len(paths)} paths"

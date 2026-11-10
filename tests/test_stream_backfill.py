@@ -526,19 +526,59 @@ class WahooBackfillTests(unittest.TestCase):
             env, [wahoo_row(1), wahoo_row(2)], files
         )
 
-        for _ in range(FAILURE_LIMIT):
+        for _ in range(FAILURE_LIMIT - 1):
             # Every retry of the first batch carries no end day: counts persist.
             with self.assertRaises(AppError) as raised:
                 service.backfill(None)
             self.assertEqual(503, raised.exception.status)
         self.assertFalse(full_streams(env, "2"))
+        self.assertEqual([], state_of(env, WAHOO)["skipped_ids"])
+
+        third = service.backfill(None)
+
+        # The third failure skips the file without failing the job: the chain
+        # continues at the same window and the failing file no longer blocks it.
         self.assertEqual(["1"], state_of(env, WAHOO)["skipped_ids"])
-
-        result = service.backfill(None)
-
-        # The failing file no longer blocks the rest.
+        self.assertEqual("ok", third["status"])
+        self.assertEqual("2026-11-03", third["historical_next_end"])
+        self.assertIsNone(cursor_of(env, WAHOO))
+        result = service.backfill(date(2026, 11, 3))
         self.assertEqual(1, result["stored"])
         self.assertTrue(full_streams(env, "2"))
+
+    def test_two_permanently_failing_files_in_one_window_both_continue_the_chain(
+        self,
+    ) -> None:
+        env = self.env
+        seed(env, WAHOO, 1, date(2026, 11, 3))
+        seed(env, WAHOO, 2, date(2026, 11, 3))
+        seed(env, WAHOO, 3, date(2026, 11, 2))
+        files: dict[int, Any] = {
+            1: WahooFitUnavailable("unavailable"),
+            2: WahooFitUnavailable("unavailable"),
+            3: fit_bytes(),
+        }
+        service, _lister, _downloads = wahoo_service(
+            env, [wahoo_row(1), wahoo_row(2), wahoo_row(3)], files
+        )
+        end: date | None = None
+        continuations = 0
+
+        for _ in range(3 * FAILURE_LIMIT):
+            try:
+                result = service.backfill(end)
+            except AppError:
+                continue
+            # The skip hands over to a job that re-reads the same window.
+            continuations += 1
+            if result["historical_next_end"] is None:
+                break
+            end = date.fromisoformat(result["historical_next_end"])
+
+        self.assertEqual(["1", "2"], sorted(state_of(env, WAHOO)["skipped_ids"]))
+        self.assertGreaterEqual(continuations, 3)
+        self.assertTrue(full_streams(env, "3"))
+        self.assertIsNone(result["historical_next_end"])
 
     def test_a_rejected_expired_link_skips_only_that_file(self) -> None:
         env = self.env
@@ -607,14 +647,20 @@ class WahooBackfillTests(unittest.TestCase):
 
         mapping.map = broken
 
-        for _ in range(FAILURE_LIMIT):
+        for _ in range(FAILURE_LIMIT - 1):
             with self.assertRaises(AppError):
                 service.backfill(None)
-        result = service.backfill(None)
+        third = service.backfill(None)
 
+        # The third failure skips the corrupt file; the job completes with a
+        # continuation instead of ending the chain.
         self.assertEqual(["1"], state_of(env, WAHOO)["skipped_ids"])
+        self.assertEqual("ok", third["status"])
+        self.assertEqual("2026-11-03", third["historical_next_end"])
+        result = service.backfill(date(2026, 11, 3))
         self.assertEqual(1, result["stored"])
         self.assertTrue(full_streams(env, "2"))
+        self.assertIsNone(result["historical_next_end"])
 
     def test_a_file_without_sensor_records_is_marked_and_replaces_nothing(
         self,

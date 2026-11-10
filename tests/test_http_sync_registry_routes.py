@@ -34,8 +34,8 @@ except ImportError:
 
 ACME_PATH = "/api/acme-mock/sync"
 INTERVALS_MESSAGE = (
-    "Intervals.icu ist nicht konfiguriert. Bitte INTERVALS_API_KEY in der "
-    "Serverkonfiguration hinterlegen."
+    "Intervals.icu ist nicht eingerichtet. Zugangsdaten unter Mehr → Anbindungen "
+    "hinterlegen."
 )
 GARMIN_MESSAGE = (
     "Garmin ist nicht konfiguriert. Bitte GARMIN_EMAIL oder einen vorhandenen "
@@ -177,7 +177,6 @@ class DefaultRegistryDispatchTests(unittest.TestCase):
         )
         state.set_sync_period.assert_not_called()
 
-
     def test_job_route_validates_payload_shape_and_accepts_non_string_provider(
         self,
     ) -> None:
@@ -196,7 +195,11 @@ class DefaultRegistryDispatchTests(unittest.TestCase):
             ),
         )
         queue.enqueue.assert_called_once_with(
-            5, "refresh", {"reason": "manual"}, requested_by="user"
+            5,
+            "refresh",
+            {"reason": "manual"},
+            requested_by="user",
+            item_operations=None,
         )
 
     def test_unknown_path_is_rejected_by_execute(self) -> None:

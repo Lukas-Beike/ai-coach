@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from backend import change_history
@@ -34,9 +35,9 @@ class HistoryUndoService:
         zone_service: Any | None = None,
         feedback_service: Any | None = None,
         session_corrections: Any | None = None,
-        nutrition_diary: Any | None = None,
         *,
         profile_mutation_coordinator: Any,
+        record_services: Mapping[str, Any] | None = None,
     ):
         self._profile_mutation_coordinator = profile_mutation_coordinator
         self._database_manager = database_manager
@@ -50,7 +51,8 @@ class HistoryUndoService:
         self._zone_service = zone_service
         self._feedback_service = feedback_service
         self._session_corrections = session_corrections
-        self._nutrition_diary = nutrition_diary
+        # Entity type -> service with restore_in_transaction(db, id, current, target).
+        self._record_services = dict(record_services or {})
 
     @property
     def profile_mutation_coordinator(self) -> Any:
@@ -227,8 +229,7 @@ class HistoryUndoService:
             return self._session_corrections.restore_in_transaction(
                 db, entity_id, current, target
             )
-        if entity_type == "nutrition_entry" and self._nutrition_diary is not None:
-            return self._nutrition_diary.restore_in_transaction(
-                db, entity_id, current, target
-            )
+        record_service = self._record_services.get(entity_type)
+        if record_service is not None:
+            return record_service.restore_in_transaction(db, entity_id, current, target)
         raise AppError(400, "Unbekannte lokale Änderung.")

@@ -27,8 +27,9 @@ from backend.config import Config, validated_openai_base_url
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
+from backend.providers.garmin_capability import clear_capability_state
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 PROVIDER_CREDENTIALS_KEY = "provider_credentials"
 GARMIN_TOKENS_KEY = "garmin_oauth_tokens"
@@ -47,6 +48,8 @@ CREDENTIAL_KV_KEYS = frozenset(
 ) | (WAHOO_SECRET_KEYS)
 
 PERSONAL_KEY_FIELD = "garmin_personal_api_key"
+# Saving one of these replaces how the app reaches Garmin.
+GARMIN_ACCESS_FIELDS = frozenset({PERSONAL_KEY_FIELD, "garmin_email"})
 # The athlete-entered expiry date of the Personal API key; it belongs to one key.
 PERSONAL_KEY_EXPIRES_FIELD = "garmin_personal_api_key_expires"
 # Secret values: never returned, only their source and presence.
@@ -71,6 +74,9 @@ VISIBLE_FIELDS = frozenset(
 # Reported as configured only; the address itself is not echoed back.
 MASKED_FIELDS = frozenset({"garmin_email", "yazio_email"})
 CREDENTIAL_FIELDS = SECRET_FIELDS | VISIBLE_FIELDS | MASKED_FIELDS
+# Setting one of these redirects the OpenAI key or replaces the Wahoo OAuth app,
+# so it needs the APP_PASSWORD again on top of the session.
+REAUTH_FIELDS = frozenset({"openai_base_url", "wahoo_client_id", "wahoo_client_secret"})
 
 MAX_VALUE_LENGTH = 4096
 SOURCE_DB = "db"
@@ -138,7 +144,10 @@ def effective_config(env_config: Config, stored: Mapping[str, str]) -> Config:
             except AppError:
                 _LOGGER.warning(
                     "Ignoring stored OPENAI_BASE_URL that failed validation",
-                    extra={"event": "provider_credential_invalid", "setting": field},
+                    extra={
+                        "event": "provider_credential_invalid",
+                        "context": {"setting": field},
+                    },
                 )
                 continue
         overrides[field] = value
@@ -228,6 +237,18 @@ def _validated_change(field: str, value: object) -> str | None:
         except ValueError as exc:
             raise AppError(400, "Ungültiges Ablaufdatum.") from exc
     return text
+
+
+def requires_password(values: object) -> bool:
+    """Whether a submission sets a value for a field that needs the APP_PASSWORD."""
+    if not isinstance(values, dict):
+        return False
+    return any(
+        field in REAUTH_FIELDS
+        and value is not None
+        and not (isinstance(value, str) and not value.strip())
+        for field, value in values.items()
+    )
 
 
 def validated_changes(values: object) -> dict[str, str | None]:
@@ -336,6 +357,9 @@ class ProviderCredentialService:
         self, db: Any, current: dict[str, str], changes: Mapping[str, str | None]
     ) -> None:
         """A new or removed key keeps neither the old expiry nor its rejection."""
+        if GARMIN_ACCESS_FIELDS & changes.keys():
+            # A paused Garmin capability belongs to the replaced access.
+            clear_capability_state(db, self._key_values)
         if PERSONAL_KEY_FIELD not in changes:
             return
         if PERSONAL_KEY_EXPIRES_FIELD not in changes:

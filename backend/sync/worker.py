@@ -13,7 +13,7 @@ from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.jobs import SyncJobStore
 
 _SYNC_JOB_WAKE_EVENT = threading.Event()
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 
 def shared_sync_job_wake_event() -> threading.Event:
@@ -39,8 +39,11 @@ class SyncJobWorker:
         *,
         thread_factory: Callable[..., threading.Thread] | None = None,
         wake_event: threading.Event | None = None,
+        requeue_unowned: Callable[[], int] | None = None,
     ) -> None:
         self._store = store
+        # Between claims this worker owns no job: a row still running lost its outcome.
+        self._requeue_unowned = requeue_unowned
         self._runner = runner
         self._maintenance_gate = maintenance_gate
         self._poll_seconds = poll_seconds
@@ -87,8 +90,10 @@ class SyncJobWorker:
             "Synchronization worker iteration failed",
             extra={
                 "event": "sync_worker_iteration_failed",
-                "error_class": type(exc).__name__,
-                "reason": getattr(exc, "reason", None),
+                "context": {
+                    "error_class": type(exc).__name__,
+                    "reason": getattr(exc, "reason", None),
+                },
             },
         )
 
@@ -98,6 +103,11 @@ class SyncJobWorker:
             try:
                 # Background sync never outranks a waiting Coach or athlete write.
                 with self._maintenance_gate.operation(), background_writer():
+                    if self._requeue_unowned is not None and self._requeue_unowned():
+                        _LOGGER.warning(
+                            "Synchronization job without a stored outcome settled",
+                            extra={"event": "sync_job_outcome_lost"},
+                        )
                     job = self._store.claim()
                     if job is not None:
                         job["_maintenance_generation"] = (

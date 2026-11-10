@@ -672,10 +672,30 @@ class RemoteReaderTransportTests(unittest.TestCase):
 
 
 class FitCapabilityTests(unittest.TestCase):
+    def test_a_personal_only_transport_asks_for_no_sdk_part(self) -> None:
+        asked: list[str] = []
+
+        def allowed(capability: str) -> bool:
+            asked.append(capability)
+            return True
+
+        detail = collect_garmin_activity_detail(
+            GarminTransportClient(_client(FakePersonalApi()), None),
+            "900001",
+            external_call=_external_call,
+            redact=str,
+            capability_allowed=allowed,
+        )
+
+        self.assertEqual(asked, ["activity_details", "activity_fit"])
+        self.assertIn("details", detail)
+        self.assertNotIn("skipped", detail)
+
     def test_a_paused_fit_part_does_not_gate_the_other_detail_parts(self) -> None:
         from backend.sync.garmin_activity_details import DETAIL_CAPABILITIES
 
         self.assertNotIn("activity_fit", DETAIL_CAPABILITIES)
+        self.assertEqual(DETAIL_CAPABILITIES, ("activity_details",))
         detail = collect_garmin_activity_detail(
             GarminTransportClient(_client(FakePersonalApi()), None),
             "900001",

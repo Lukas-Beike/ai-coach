@@ -83,7 +83,6 @@ jobs:
           PATCH: ${{ runner.temp }}/openspec-update/openspec-update.patch
         run: |
           set -euo pipefail
-          # Must match tools/bot_merge.py OPENSPEC_FILES.
           allowed='^\.agents/skills/(\.openspec-target|openspec-[a-z0-9-]+/SKILL\.md)$'
           outside="$(git apply --numstat -z "$PATCH" | tr '\0' '\n' | cut -f3 | grep -Ev "$allowed" | grep -v '^$' || true)"
           if [[ -n "$outside" ]]; then

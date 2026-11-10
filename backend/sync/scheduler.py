@@ -6,14 +6,14 @@ import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
-from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
 from backend.errors import AppError
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.runtime.maintenance import MaintenanceGate
+from backend.sync.backfill_resume import historical_backfill_payload
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.jobs import BACKFILL_CURSOR_STREAMS
@@ -23,6 +23,7 @@ from backend.sync.queue import SyncJobQueueService
 from backend.sync.schedule_policies import build_schedule_policies
 from backend.sync.state import SyncStateRepository
 
+LOGGER = logging.getLogger("intervals_coach")
 AUTO_UPDATE_LABEL = "stündliche automatische Aktualisierung"
 _HISTORICAL_BACKFILL = "historical_backfill"
 
@@ -48,9 +49,15 @@ class DailySyncScheduler:
         config: DailySyncSchedulerConfig,
         schedule_policies: Mapping[str, ProviderSchedulePolicy] | None = None,
         registry: ProviderRegistry | None = None,
+        retry_held: Callable[[str], bool] | None = None,
+        backfill_resumer: Callable[[], None] | None = None,
     ) -> None:
         self._queue = queue
         self._markers = markers
+        # Re-queues backfill chains that stopped before the history floor.
+        self._backfill_resumer = backfill_resumer
+        # True while a provider's failed refresh says its retry is not due yet.
+        self._retry_held = retry_held
         self._maintenance_gate = maintenance_gate
         self._config = config
         self._registry = DEFAULT_PROVIDER_REGISTRY if registry is None else registry
@@ -72,7 +79,35 @@ class DailySyncScheduler:
             for provider_id in self._registry.daily_order():
                 policy = self._policies.get(provider_id)
                 if policy is not None:
-                    self._schedule_provider(provider_id, policy)
+                    self._schedule_provider_safely(provider_id, policy)
+            if self._backfill_resumer is not None:
+                self._backfill_resumer()
+
+    def _schedule_provider_safely(
+        self, provider_id: str, policy: ProviderSchedulePolicy
+    ) -> None:
+        """Schedule one provider; its failure never skips the providers after it."""
+        try:
+            self._schedule_provider(provider_id, policy)
+        except AppError as exc:
+            if exc.reason == "maintenance":
+                raise
+            self._log_provider_failure(provider_id, exc)
+        except Exception as exc:  # noqa: BLE001 - one provider must not stop the pass
+            self._log_provider_failure(provider_id, exc)
+
+    @staticmethod
+    def _log_provider_failure(provider_id: str, exc: Exception) -> None:
+        LOGGER.error(
+            "Scheduling a provider refresh failed",
+            extra={
+                "event": "daily_sync_provider_failed",
+                "context": {
+                    "provider": provider_id,
+                    "error_class": type(exc).__name__,
+                },
+            },
+        )
 
     def _schedule_provider(
         self, provider_id: str, policy: ProviderSchedulePolicy
@@ -84,6 +119,8 @@ class DailySyncScheduler:
         ):
             return
         if policy.blocked() or self._queue.active(provider_id):
+            return
+        if self._retry_held is not None and self._retry_held(provider_id):
             return
         self._queue.enqueue(
             provider_id,
@@ -104,7 +141,11 @@ class DailySyncLoop:
         sleep: Callable[[float], None],
         logger: logging.Logger,
         stop_event: threading.Event | None = None,
+        housekeeping: Callable[[], object] | None = None,
+        wal_checkpoint: Callable[[], object] | None = None,
     ) -> None:
+        self._housekeeping = housekeeping
+        self._wal_checkpoint = wal_checkpoint
         self._daily_scheduler = daily_scheduler
         self._morning_battery = morning_battery
         self._sleep = sleep
@@ -122,6 +163,8 @@ class DailySyncLoop:
                     return
             else:
                 self._sleep(300)
+            self._run_housekeeping()
+            self._run_wal_checkpoint()
             try:
                 self._daily_scheduler.schedule()
                 self._morning_battery.refresh()
@@ -136,10 +179,51 @@ class DailySyncLoop:
                     "Automatic synchronization scheduling failed",
                     extra={
                         "event": "daily_sync_failed",
+                        "context": {
+                            "error_class": type(exc).__name__,
+                            "reason": getattr(exc, "reason", None),
+                        },
+                    },
+                )
+
+    def _run_housekeeping(self) -> None:
+        """Run the periodic upkeep; its failure never skips the scheduling."""
+        if self._housekeeping is None:
+            return
+        try:
+            self._housekeeping()
+        except Exception as exc:  # noqa: BLE001 - keep the daily loop alive
+            self._logger.error(
+                "Sync housekeeping failed",
+                extra={
+                    "event": "sync_housekeeping_failed",
+                    "context": {
                         "error_class": type(exc).__name__,
                         "reason": getattr(exc, "reason", None),
                     },
-                )
+                },
+            )
+
+    def _run_wal_checkpoint(self) -> None:
+        """Truncate the idle WAL; a failure never stops the loop."""
+        if self._wal_checkpoint is None:
+            return
+        try:
+            self._wal_checkpoint()
+        except AppError as exc:
+            if exc.reason != "maintenance":
+                self._log_checkpoint_failure(exc)
+        except Exception as exc:  # noqa: BLE001 - keep the daily loop alive
+            self._log_checkpoint_failure(exc)
+
+    def _log_checkpoint_failure(self, exc: Exception) -> None:
+        self._logger.error(
+            "Database WAL checkpoint failed",
+            extra={
+                "event": "wal_checkpoint_failed",
+                "context": {"error_class": type(exc).__name__},
+            },
+        )
 
 
 @dataclass(frozen=True)
@@ -221,22 +305,11 @@ class StartupSyncScheduler:
     def _historical_backfill_payload(
         self, provider: str, job_type: str = _HISTORICAL_BACKFILL
     ) -> dict[str, Any] | None:
-        stream = BACKFILL_CURSOR_STREAMS[job_type]
-        cursor = self._sync_state.cursor(provider, stream).get("cursor")
-        if cursor and str(cursor) <= self._config.sync_earliest_date.isoformat():
-            return None
-        try:
-            resume_end = (
-                date.fromisoformat(iso_date_prefix(str(cursor))) - timedelta(days=1)
-                if cursor
-                else None
-            )
-        except ValueError:
-            resume_end = None
-        payload: dict[str, Any] = {
-            "days": self._config.sync_chunk_days,
-            "reason": f"startup {job_type.replace('_', ' ')}",
-        }
-        if resume_end is not None:
-            payload["end_date"] = resume_end.isoformat()
-        return payload
+        return historical_backfill_payload(
+            self._sync_state,
+            provider,
+            job_type,
+            chunk_days=self._config.sync_chunk_days,
+            earliest_date=self._config.sync_earliest_date,
+            reason=f"startup {job_type.replace('_', ' ')}",
+        )

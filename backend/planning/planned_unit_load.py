@@ -9,17 +9,14 @@ from backend.activities.workout_load import (
     WorkoutEstimate,
     estimate_workout,
 )
-from backend.activities.zone_settings import ZoneSettings, effective_zone_configuration
+from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
     Environment,
-    MetricKind,
-    ProviderId,
     Sport,
-    ZoneConfigurationMetric,
 )
 from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_inputs import resolve_reader
@@ -46,20 +43,6 @@ def estimate_planned_unit(
     )
 
 
-def sport_threshold_speed(
-    observations: Sequence[Observation], sport: Sport
-) -> float | None:
-    """Threshold running speed (m/s) of ``sport`` from the current thresholds."""
-    return next(
-        (
-            float(item.value.value)
-            for item in observations
-            if item.kind is MetricKind.THRESHOLD_PACE and item.sport is sport
-        ),
-        None,
-    )
-
-
 def resolve_thresholds(
     sport_thresholds: Sequence[Observation],
     zone_configurations: Sequence[ZoneConfiguration],
@@ -67,41 +50,21 @@ def resolve_thresholds(
     environment: Environment,
     day: date | None,
 ) -> AthleteThresholds:
-    """Thresholds and zone limits of a sport, locally confirmed values first.
+    """Thresholds and zone limits of a sport on ``day``, as the zones read them.
 
-    Same precedence as the Coach context: a local zone configuration in effect on
-    ``day`` wins, then the source-policy provider winners (``sport_thresholds``),
-    then a provider zone configuration; zone limits come from the effective one.
+    ``ZoneSettings`` applies the one dated precedence (local configuration, Garmin
+    watch zone set, then the source-policy winners ``sport_thresholds``); the
+    threshold running speed is the zones' own, so absolute pace targets and the
+    pace limits share one threshold.
     """
-    pace = effective_zone_configuration(
-        zone_configurations, ZoneConfigurationMetric.PACE, sport, day=day
+    zones = ZoneSettings.from_configurations(
+        zone_configurations,
+        sport,
+        environment,
+        day,
+        fallback=ZoneSettings.from_thresholds(sport_thresholds, sport),
     )
-    # A local pace configuration first, then the source-policy winner, then a
-    # provider configuration, as for the other thresholds.
-    local = (
-        pace.threshold
-        if pace is not None and pace.provenance.provider is None
-        else None
-    )
-    provider = (
-        pace.threshold
-        if pace is not None
-        and local is None
-        and pace.provenance.provider is not ProviderId.INTERVALS
-        else None
-    )
-    return AthleteThresholds(
-        zones=ZoneSettings.from_configurations(
-            zone_configurations,
-            sport,
-            environment,
-            day,
-            fallback=ZoneSettings.from_thresholds(sport_thresholds, sport),
-        ),
-        threshold_speed_mps=local
-        or sport_threshold_speed(sport_thresholds, sport)
-        or provider,
-    )
+    return AthleteThresholds(zones=zones, threshold_speed_mps=zones.threshold_pace)
 
 
 def unit_thresholds(

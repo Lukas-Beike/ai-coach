@@ -8,11 +8,12 @@ from unittest.mock import patch
 from server_test_support import ServerTestCase, server
 
 from backend.athlete.checkins import normalize_checkin
+from backend.athlete.profile import normalize_profile
 
 
 class ServerAthleteTests(ServerTestCase):
     def test_profile_only_accepts_known_fields_and_trims(self):
-        profile = server.normalize_profile(
+        profile = normalize_profile(
             {"name": "  Ada  ", "goals": "Finish strong", "admin": True}
         )
         self.assertEqual(profile["name"], "Ada")
@@ -27,7 +28,7 @@ class ServerAthleteTests(ServerTestCase):
         self.assertEqual(getattr(server.ATHLETE_CLOCK.now().tzinfo, "key", None), "UTC")
 
     def test_structured_weekly_availability_is_not_part_of_profile(self):
-        profile = server.normalize_profile(
+        profile = normalize_profile(
             {
                 "availability": "Dienstag abends möglich",
                 "availability_schedule": [

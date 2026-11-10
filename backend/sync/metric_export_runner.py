@@ -93,7 +93,7 @@ class MetricExportRunner:
             "Automatic metric export failed",
             extra={
                 "event": "metric_export_automatic_failed",
-                "error_class": type(exc).__name__,
+                "context": {"error_class": type(exc).__name__},
             },
         )
 
@@ -139,6 +139,6 @@ class MetricExportRunner:
                 "Automatic metric export status could not be recorded",
                 extra={
                     "event": "metric_export_status_failed",
-                    "error_class": type(exc).__name__,
+                    "context": {"error_class": type(exc).__name__},
                 },
             )

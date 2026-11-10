@@ -1,6 +1,6 @@
 # Pacecraft · AI Coach
 
-Pace and power, planned and analysed by your AI coach. Pacecraft is a private, mobile-first PWA for a single athlete. It reads completed training and health data from Garmin and Wahoo, keeps plans, workouts and history in an encrypted local database, and coaches through an OpenAI Responses-compatible model. Intervals.icu is an output target only: the app writes workouts, competitions, nutrition and thresholds there when the athlete asks, and never reads from it.
+Pace and power, planned and analysed by your AI coach. Pacecraft is a private, mobile-first PWA for a single athlete. It reads completed training and health data from Garmin and Wahoo, keeps plans, workouts and history in an encrypted local database, and coaches through an OpenAI Responses-compatible model (requests use `store: false`; attachments are sent as parsed measurements without metadata and without the first and last 500 m of positions, details in [docs/operations.md](docs/operations.md)). Intervals.icu is an output target only: the app writes workouts, competitions, nutrition and thresholds there when the athlete asks, and never reads from it.
 
 It is standalone software for a trusted LAN or private VPN (WireGuard, Tailscale). Never expose it directly to the internet; use an authenticated TLS reverse proxy if it must be reachable from outside. Version 2.0.0.
 
@@ -56,7 +56,7 @@ Set variables in the container environment or a root `.env`. Full reference: [do
 | `CALENDAR_ICAL_URL` | none | Private read-only ICS feed. |
 | `COOKIE_SECURE` | `false` | `true` behind an HTTPS proxy. |
 | `TRUSTED_PROXY_IPS` | none | Proxy addresses whose `X-Forwarded-For` is trusted. |
-| `DATA_RETENTION_DAYS` | `-1` | `-1` keeps everything; positive values (30-3650) prune old chats and snapshots. |
+| `DATA_RETENTION_DAYS` | `-1` | `-1` keeps everything; positive values (30-3650) prune old chats, snapshots and Coach receipts. |
 | `SYNC_HISTORY_EARLIEST_DATE` | `2000-01-01` | Earliest date of the historical Garmin backfill. |
 | `PORT` | `8090` | Listening port. |
 | `DATA_DIR` | `/data` | Encrypted database and legacy token file. |
@@ -84,7 +84,7 @@ Load, fitness/fatigue/form, critical power and speed, session efficiency, HRV an
 
 ## Backup, restore and upgrades
 
-Releases keep the athlete's encrypted database. Release 1.13.44 (schema v21) is the oldest schema the code still opens; the current schema is v23. Supported schemas are upgraded in place in one transaction; older, unknown or newer schemas are rejected unchanged. Keep the `/data` mount and `APP_PASSWORD` when recreating the container, and never reset the data directory to fix a rejected schema. Backup download, validated restore with a pre-restore copy, privacy export and local data purge are under **Mehr**. GPS tracks from Garmin and Wahoo files are stored in the encrypted database, backup and export, never shown to the Coach or in diagnostics and logs, and deleted by the local data purge; the weather during an outdoor session is fetched from Open-Meteo with the start position rounded to two decimals (or the saved weather location) and stored without any coordinate; repeated outdoor routes are recognised from the stored tracks and shown only as a label and visit count ("Hausrunde, 5. Mal") that the athlete can rename in the activity view, and are deleted with the tracks; **Mehr** → privacy section has the "GPS-Spuren speichern" switch (default on) and, once it is off, a confirmed deletion of the stored tracks; details in [docs/operations.md](docs/operations.md) and [docs/schema-history.md](docs/schema-history.md).
+Releases keep the athlete's encrypted database. Release 1.13.44 (schema v21) is the oldest schema the code still opens; the current schema is v25. Supported schemas are upgraded in place in one transaction; older, unknown or newer schemas are rejected unchanged. Keep the `/data` mount and `APP_PASSWORD` when recreating the container, and never reset the data directory to fix a rejected schema. Backup download, validated restore with a pre-restore copy, privacy export and local data purge are under **Mehr**. GPS tracks from Garmin and Wahoo files are stored in the encrypted database, backup and export, never shown to the Coach or in diagnostics and logs, and deleted by the local data purge; the weather during an outdoor session is fetched from Open-Meteo with the start position rounded to two decimals (or the saved weather location) and stored without any coordinate; repeated outdoor routes are recognised from the stored tracks and shown only as a label and visit count ("Hausrunde, 5. Mal") that the athlete can rename in the activity view, and are deleted with the tracks; **Mehr** → privacy section has the "GPS-Spuren speichern" switch (default on) and, once it is off, a confirmed deletion of the stored tracks; details in [docs/operations.md](docs/operations.md) and [docs/schema-history.md](docs/schema-history.md).
 
 ## Further docs
 

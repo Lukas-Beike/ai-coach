@@ -34,9 +34,6 @@ function takeWahooReturnOutcome() {
 // re-enabling the button or resetting its label.
 let wahooRedirecting = false;
 
-// Plans reach Wahoo only through the explicit library export (README, Wahoo step 8).
-const WAHOO_SCOPE_DETAIL = "Importiert Einheiten · schreibt nur bei ausdrücklichem Plan-Export";
-
 function wahooProviderLabel(data) {
   return data?.provider_labels?.[data?.provider_ids?.wahoo] || "";
 }
@@ -57,9 +54,9 @@ function wahooConnectionView(data) {
   else if (!configured) status = "Nicht konfiguriert";
   else if (reconnect) status = "Erneute Verbindung erforderlich";
   const since = connected && wahoo.connected_at ? globalThis.AppFormat?.dateTime(wahoo.connected_at) : null;
-  let detail = WAHOO_SCOPE_DETAIL;
-  if (since) detail = `Verbunden seit ${since} · ${WAHOO_SCOPE_DETAIL}`;
-  else if (reconnect) detail = `${status} · ${WAHOO_SCOPE_DETAIL}`;
+  let detail = "";
+  if (since) detail = `Verbunden seit ${since}`;
+  else if (reconnect) detail = status;
   let kind = "off";
   if (connected) kind = "ok";
   else if (reconnect) kind = "error";
@@ -103,9 +100,13 @@ function renderWahooSyncControls(data, view) {
   }
   const fullButton = $("#wahooFullResyncButton");
   if (fullButton) {
-    fullButton.disabled = busy || !view.canSync;
-    fullButton.textContent = fullRunning ? "Vollständiger Resync läuft…" : "Vollständig neu synchronisieren";
+    renderFullResyncButton(fullButton, {
+      running: fullRunning,
+      blocked: syncRunning || !view.canSync,
+      idleLabel: "Vollständig neu synchronisieren",
+    });
   }
+  resumeFullResync(providerIds().wahoo);
   const status = $("#wahooFullResyncStatus");
   if (status) {
     const line = wahooFullResyncView(fullResync, fullRunning);

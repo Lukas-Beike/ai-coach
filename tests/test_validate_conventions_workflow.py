@@ -27,10 +27,10 @@ FAKE_GH = textwrap.dedent(
 )
 
 
-def validation_script():
-    """Return the run: script of the validation step, dedented."""
+def validation_script(step="Validate PR title and commit subjects"):
+    """Return the run: script of the named step, dedented."""
     lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
-    start = lines.index("      - name: Validate PR title and commit subjects")
+    start = lines.index(f"      - name: {step}")
     run_index = next(
         index for index in range(start, len(lines)) if lines[index] == "        run: |"
     )
@@ -51,7 +51,7 @@ def find_bash():
         probe = subprocess.run(
             [candidate, "-c", "exit 0"], capture_output=True, check=False, timeout=30
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         return None
     return candidate if probe.returncode == 0 else None
 
@@ -107,6 +107,45 @@ class ValidateConventionsWorkflowTests(unittest.TestCase):
         result = self.run_step(subjects="fix(sync): valid one\nUpdate branch")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Invalid commit subject: Update branch", result.stdout)
+
+
+@unittest.skipUnless(BASH, "a working bash is required to run the workflow step")
+class IssueLinkStepTests(unittest.TestCase):
+    def run_step(self, body):
+        with tempfile.TemporaryDirectory() as temp:
+            script = Path(temp) / "link.sh"
+            script.write_text(
+                validation_script("Require an issue link in the PR body"),
+                encoding="utf-8",
+            )
+            return subprocess.run(
+                [BASH, "--noprofile", "--norc", str(script)],
+                capture_output=True,
+                check=False,
+                text=True,
+                env={**os.environ, "PR_BODY": body},
+                timeout=60,
+            )
+
+    def test_closes_and_part_of_pass(self):
+        for body in ("Closes #1906", "Summary\n\nPart of #12 (slice 1)", "fixes #3"):
+            with self.subTest(body=body):
+                result = self.run_step(body)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_body_without_issue_link_fails(self):
+        for body in ("", "Refs #12", "See issue 12", "Closes#12", "PreCloses #12"):
+            with self.subTest(body=body):
+                result = self.run_step(body)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Closes #N", result.stdout)
+
+    def test_bot_pull_requests_are_exempt(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        step = workflow.split("      - name: Require an issue link in the PR body", 1)[
+            1
+        ]
+        self.assertIn("if: github.event.pull_request.user.type != 'Bot'", step)
 
 
 if __name__ == "__main__":

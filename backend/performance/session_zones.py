@@ -105,6 +105,7 @@ def zone_settings_part(settings: ZoneSettings | None) -> dict[str, Any] | None:
     return {
         "ftp": settings.ftp,
         "lthr": settings.lthr,
+        "hr_reference_bpm": settings.hr_reference_bpm,
         "threshold_pace": settings.threshold_pace,
         "power_limits": list(settings.power_limits),
         "hr_limits": list(settings.hr_limits),

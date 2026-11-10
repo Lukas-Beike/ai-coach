@@ -259,6 +259,39 @@ class CoachFinalReceiptTests(unittest.TestCase):
         )
         self.assertNotIn("coach_changes", result["message"])
 
+    def test_persist_writes_compact_steps_but_returns_the_full_receipt(self) -> None:
+        stored: list[str] = []
+
+        def execute(sql, values=()):
+            if sql.startswith("SELECT status, receipt"):
+                return Mock(fetchone=lambda: {"status": "running"})
+            if sql.startswith("UPDATE coach_commands"):
+                stored.append(values[0])
+            return Mock()
+
+        self.db.execute.side_effect = execute
+        bulk = "synthetic tool output " * 500
+        steps = [
+            {
+                "tool": "get_plan",
+                "call_id": "c1",
+                "result": {"ok": True, "days": [bulk]},
+                "changes": [{"id": "change-1"}],
+            }
+        ]
+        final = {"status": "completed", "text": "Fertig", "command_receipts": steps}
+
+        result = self.service.persist(
+            final, client_turn_id="turn-1", command_receipts=steps
+        )
+
+        (written,) = stored
+        step = json.loads(written)["command_receipts"][0]
+        self.assertEqual(step["result"], {"ok": True})
+        self.assertEqual(step["changes"], [{"id": "change-1"}])
+        self.assertNotIn("synthetic tool output", written)
+        self.assertEqual(result["command_receipts"][0]["result"]["days"], [bulk])
+
     def test_failed_command_update_rolls_back_without_event(self) -> None:
         def execute(sql, _values):
             if sql.startswith("SELECT status, receipt"):

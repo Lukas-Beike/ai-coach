@@ -278,6 +278,23 @@ class CoachConversationResetTests(unittest.TestCase):
         self.assertIsNone(self.service.remote_delete_thread)
         self.assertEqual(self.count_messages(), 0)
 
+    def test_cancel_running_turns_signals_and_closes_the_response_only(self) -> None:
+        response = Mock()
+        self.turn_cancel._provider_response = response  # type: ignore[attr-defined]
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO coach_commands(client_turn_id, receipt, status) "
+                "VALUES ('turn-2', '{\"operation_id\":\"op-2\"}', 'queued')"
+            )
+
+        self.service.cancel_running_turns()
+
+        self.assertTrue(self.turn_cancel.is_set())
+        response.close.assert_called_once_with()
+        self.assertIsNone(self.streams.get_background_event("op-2"))
+        self.assertEqual(self.command()[0], "running")
+        self.assertEqual(self.count_messages(), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

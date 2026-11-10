@@ -107,8 +107,9 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
   logs. Diagnostics may keep sanitized Coach request/response bodies but never
   credentials, keys, tokens, session data, or raw OpenAI error text. Voice is
   short-lived transcription; never persist audio.
-- Frontend changes update `public/index.html` query versions and
-  `public/service-worker.js` cache name/assets together.
+- Never hand-write asset `?v=` versions or the service-worker cache name; the
+  server stamps them from content hashes. A new public file goes into the
+  service-worker `ASSETS` list (if cached) and `STATIC_TARGETS`.
 - Cut taglines, helper texts and secondary labels. If the screen needs them to
   make sense, fix the layout.
 
@@ -118,7 +119,7 @@ Only non-discoverable facts and hard constraints belong in this file. Add a rule
 only for a failure that actually happened; prefer a hook, deny rule, or test
 for anything without exceptions. `.claude/settings.json` blocks agent access to
 `.env`, `data/`, and the Garmin token store, and `.githooks/pre-push` scans
-outgoing commits for secrets; never bypass either.
+outgoing commits for secrets and runs the quality ratchet; never bypass either.
 
 - Work in a dedicated task worktree; leave the primary checkout unchanged. Check
   the branch and existing diff before editing and preserve prior work; keep

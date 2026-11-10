@@ -47,6 +47,8 @@ test("@responsive local zones save with provider alternatives and undo", async (
   await expect(section.getByRole("button", { name: "Lokale Zonen entfernen" })).toBeVisible();
   let zones = await (await request.get("/api/zones")).json();
   expect(zones.configurations.filter((item) => item.source === "local").map((item) => item.threshold)).toEqual([280]);
+  expect(zones.configurations.filter((item) => item.source === "local").map((item) => item.valid_from)).toEqual([zones.today]);
+  await expect(page.locator("#zoneSources li")).toHaveCount(1);
 
   await receipt.getByRole("button", { name: "Rückgängig" }).click();
   await expect(receipt).toHaveText("Zurückgenommen.");
@@ -64,7 +66,7 @@ test("@responsive invalid local zones change nothing", async ({ page, request })
   expect((await initialZones).ok()).toBeTruthy();
   await page.evaluate(() => loadZones());
   await page.locator("#zoneMetric").selectOption("heart_rate");
-  await page.getByLabel("LTHR (bpm)").fill("170");
+  await page.getByLabel("Schwellenpuls (LSHF, bpm)").fill("170");
   await page.getByLabel("Zonenobergrenzen (bpm)").fill("150, 140, 160");
   await section.getByRole("button", { name: "Lokal speichern" }).click();
   await expect(page.locator(".toast").filter({ hasText: "Die Zonen sind ungültig" })).toBeVisible();

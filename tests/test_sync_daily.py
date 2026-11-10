@@ -40,8 +40,12 @@ class TrackingKeyValueRepository(KeyValueRepository):
 
     def get(self, db, key):
         self.connections.append(db)
-        if self.manager._unit_of_work.get() is not db:
-            raise AssertionError("key/value read did not use the active unit of work")
+        # A read leases a reader; inside a unit of work it reuses that connection.
+        if db not in (
+            self.manager._unit_of_work.get(),
+            self.manager._reader_context.get(),
+        ):
+            raise AssertionError("key/value read did not use an active lease")
         return super().get(db, key)
 
     def set(self, db, key, value):
@@ -117,6 +121,15 @@ class DailySyncMarkerServiceTests(unittest.TestCase):
             )
         self.assertFalse(self.service.is_due("calendar", local))
         self.assertFalse(self.service.is_due("calendar", same_instant_utc))
+
+    def test_due_check_is_a_read_that_takes_no_writer(self):
+        self.service.mark("garmin", self.local_time)
+        calls = self.manager.unit_of_work_calls
+
+        self.assertFalse(self.service.is_due("garmin", self.local_time))
+        self.assertTrue(self.service.is_due("calendar", self.local_time))
+
+        self.assertEqual(self.manager.unit_of_work_calls, calls)
 
     def test_attempt_suppresses_refresh_for_one_hour(self):
         self.service.mark_attempt("garmin", self.local_time)

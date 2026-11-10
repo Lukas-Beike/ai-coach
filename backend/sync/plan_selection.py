@@ -9,6 +9,7 @@ from typing import Any
 from backend.db import DatabaseManager
 from backend.errors import AppError
 from backend.planning import library as planning_library
+from backend.planning import planned_units
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.plan_commands import PlanPushCommandService
 
@@ -234,7 +235,7 @@ class StructuredPlanSyncService:
                 ).fetchone()
                 if row:
                     entry["expected_payload_hash"] = (
-                        planning_library.library_payload_hash(row["payload"])
+                        planned_units.plan_push_payload_hash(row["payload"])
                     )
         return entries
 
@@ -265,8 +266,9 @@ class StructuredPlanSyncService:
             (
                 row
                 for row in rows
-                if planning_library.library_payload_hash(row["payload"])
-                == entry["expected_payload_hash"]
+                if planned_units.plan_push_hash_matches(
+                    row["payload"], entry["expected_payload_hash"]
+                )
             ),
             None,
         )

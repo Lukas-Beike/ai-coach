@@ -56,7 +56,7 @@ from backend.providers.garmin_activity_detail_mapping import (
 from backend.sync.garmin import GARMIN_CAPABILITY_PAUSE_SECONDS
 from backend.sync.refresh import sync_job_error_class
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 ACTIVITY_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9_-]{1,200}")
 COOLDOWN: Final = timedelta(minutes=10)
 BACKFILL_BATCH_SIZE: Final = 10
@@ -64,15 +64,12 @@ BACKFILL_WINDOW: Final = timedelta(days=90)
 BACKFILL_RATE_LIMIT_PAUSE: Final = timedelta(seconds=GARMIN_CAPABILITY_PAUSE_SECONDS)
 BACKFILL_STATE_KEY: Final = "garmin_activity_detail_backfill"
 BACKFILL_RETRY_ATTEMPTS: Final = 3
-# The optional ``activity_fit`` and ``activity_exercise_sets`` parts pause only
-# themselves, never the other parts. Exercise sets are fetched for strength
-# activities only.
-DETAIL_CAPABILITIES: Final = (
-    "activity_details",
-    "activity_splits",
-    "activity_hr_zones",
-    "activity_power_zones",
-)
+# The backfill needs only ``activity_details``, the part both transports serve.
+# The SDK-only parts (splits, HR and power zones, exercise sets) and the Personal
+# API-only FIT file pause only themselves; the collector skips a paused part
+# without a call, so a paused part never gates the others or the backfill.
+# Exercise sets are fetched for strength activities only.
+DETAIL_CAPABILITIES: Final = ("activity_details",)
 
 
 @dataclass(frozen=True)
@@ -309,7 +306,7 @@ class GarminActivityDetailService:
                     "garmin activity detail backfill stopped after an error",
                     extra={
                         "event": "garmin_activity_detail_backfill_failed",
-                        "error_type": type(error).__name__,
+                        "context": {"error_type": type(error).__name__},
                     },
                 )
         finally:
@@ -331,14 +328,19 @@ class GarminActivityDetailService:
             now=observed,
         )
         # Malformed parts are dropped by the mapper, so they count like failures.
-        incomplete = _incomplete(collected) or bool(mapped.issues)
+        failed = _failed(collected) or bool(mapped.issues)
         retry = dict(outcome.retry)
-        _note_attempt(
-            retry,
-            provider_activity_id,
-            candidate["summary_sha256"],
-            incomplete=incomplete,
-        )
+        if collected.get("skipped") and not failed:
+            # Paused parts are no attempt: keep the activity a candidate without
+            # spending its retries, so it is fetched again once the pause ends.
+            _keep_candidate(retry, provider_activity_id, candidate["summary_sha256"])
+        else:
+            _note_attempt(
+                retry,
+                provider_activity_id,
+                candidate["summary_sha256"],
+                incomplete=failed,
+            )
         # The retry entry is committed with the detail rows, so a stop before the
         # final state write cannot leave a partial fetch looking complete.
         stored = bool(mapped.records) and self._store_records(
@@ -360,7 +362,7 @@ class GarminActivityDetailService:
         if mapped.records:
             if not stored:
                 outcome.skipped += 1
-        elif incomplete:
+        elif failed or collected.get("skipped"):
             # Nothing is marked, so a later sync retries this activity.
             outcome.status = "failed"
             return False
@@ -483,7 +485,7 @@ def _map_collected(
             "garmin activity detail mapping produced issues",
             extra={
                 "event": "garmin_activity_detail_mapping_issues",
-                "issues": len(mapped.issues),
+                "context": {"issues": len(mapped.issues)},
             },
         )
     return mapped
@@ -600,7 +602,7 @@ def _parse_retry(value: object) -> dict[str, tuple[str, int]]:
             and len(entry) == 2
             and isinstance(entry[0], str)
             and type(entry[1]) is int
-            and entry[1] > 0
+            and entry[1] >= 0
         ):
             retry[str(key)] = (entry[0], entry[1])
     return retry
@@ -613,6 +615,22 @@ def _incomplete(collected: Mapping[str, Any]) -> bool:
         or collected.get("rate_limited")
         or collected.get("skipped")
     )
+
+
+def _failed(collected: Mapping[str, Any]) -> bool:
+    """True when a part failed or was rate limited; a paused part is not a failure."""
+    return bool(collected.get("errors") or collected.get("rate_limited"))
+
+
+def _keep_candidate(
+    retry: dict[str, tuple[str, int]], provider_activity_id: str, summary_sha256: str
+) -> None:
+    """Keep a retry entry for the summary without counting another attempt."""
+    previous = retry.get(provider_activity_id)
+    attempts = (
+        previous[1] if previous is not None and previous[0] == summary_sha256 else 0
+    )
+    retry[provider_activity_id] = (summary_sha256, attempts)
 
 
 def _retries_exhausted(entry: tuple[str, int] | None, summary_sha256: str) -> bool:

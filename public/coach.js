@@ -418,13 +418,28 @@ function consumeChatStreamBlock(block, context) {
   if (parsed) applyChatStreamEvent(parsed.event, parsed.payload, context);
 }
 
+// The server sends a heartbeat every 15 s; three missed ones mean the route is dead.
+const CHAT_STREAM_SILENCE_MS = 45_000;
+
+// A half-open connection never errors, so a silent read is aborted into the recovery polls.
+function readChatStreamChunk(reader, controller, silenceMs = CHAT_STREAM_SILENCE_MS) {
+  let timer;
+  const silent = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller?.abort();
+      reject(new Error("Die Verbindung zum Coach ist abgerissen."));
+    }, silenceMs);
+  });
+  return Promise.race([reader.read(), silent]).finally(() => clearTimeout(timer));
+}
+
 async function readChatStream(response, context) {
   if (!response.body) throw new Error("Der Browser unterstützt keinen Antwort-Stream.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   while (true) {
-    const chunk = await reader.read();
+    const chunk = await readChatStreamChunk(reader, context.stream?.controller);
     if (chunk.done) break;
     buffer += decoder.decode(chunk.value, { stream: true });
     const blocks = buffer.split(/\r?\n\r?\n/);
@@ -715,7 +730,7 @@ async function resetCoachChat() {
   button.disabled = true;
   button.textContent = "Wird zurückgesetzt…";
   try {
-    const reset = await api("/api/chat/reset", { method: "POST", body: "{}" });
+    const reset = await api("/api/chat/reset", { method: "POST", body: JSON.stringify({ confirmed: true }) });
     state.chatAttachments = [];
     renderChatAttachments();
     if (state.data) state.data.messages_generation = reset.generation;
@@ -1325,6 +1340,10 @@ function coachActionDescription(proposal) {
   return "Diese Garmin-Aufzeichnung ist nahezu identisch mit der Wahoo-Einheit. Nur das Garmin-Duplikat aus Intervals.icu löschen?";
 }
 
+function coachActionExpired(proposal) {
+  return Number(proposal.expires_at) <= Date.now() / 1000;
+}
+
 function coachActionStatus(proposal) {
   return proposal.status === "used"
     ? "Freigabe bereits verwendet. Bitte den Ausführungsbeleg prüfen."
@@ -1419,7 +1438,7 @@ function coachActionCard(proposal) {
     card.append(status, actions);
     return card;
   }
-  if (!["preview", "ready"].includes(proposal.status)) {
+  if (!["preview", "ready"].includes(proposal.status) || coachActionExpired(proposal)) {
     const status = document.createElement("p");
     status.textContent = coachActionStatus(proposal);
     card.append(status);
@@ -1448,14 +1467,11 @@ function coachActionReceipt(proposal, result) {
         : { message: "Die Mahlzeitvorlage wurde lokal gespeichert.", title: "Mahlzeitvorlage gespeichert", details: ["Nur lokal gespeichert; keine Synchronisierung an Intervals.icu"] };
     }
     if (undo) return { message: "Die lokale Änderung wurde zurückgenommen.", title: "Änderung zurückgenommen" };
-    if (remoteWrite) {
-      const queued = ["queued", "running"].includes(result.status)
-        || Boolean(result.sync_job_id || result.sync_job_ids?.length);
-      return queued
-        ? { message: "Die freigegebene Änderung ist eingereiht; das Ergebnis steht noch aus.", title: "Remote-Änderung eingereiht" }
-        : { message: "Die freigegebene Remote-Änderung wurde ausgeführt.", title: "Remote-Änderung ausgeführt" };
-    }
-    return { message: `${result.local_planned} Einheit(en) lokal geplant.` };
+    const queued = ["queued", "running"].includes(result.status)
+      || Boolean(result.sync_job_id || result.sync_job_ids?.length);
+    return queued
+      ? { message: "Die freigegebene Änderung ist eingereiht; das Ergebnis steht noch aus.", title: "Remote-Änderung eingereiht" }
+      : { message: "Die freigegebene Remote-Änderung wurde ausgeführt.", title: "Remote-Änderung ausgeführt" };
   }
   const undo = proposal.action_type === "undo_change";
   const remoteWrite = proposal.action_type === "remote_coach_write";
@@ -1524,7 +1540,7 @@ async function executeCoachActionProposal(proposal, button) {
     await load("/api/bootstrap?local=1", ["plan", "library", "profile", "feedback"]);
   } catch (error) {
     if (executeSent && !executeResponded && !isHttpClientRejection(error)) lockUnknownCoachActionOutcome(proposal, error);
-    else rejectCoachActionProposal(proposal, button, error);
+    else rejectCoachActionProposal(proposal, button, error, !executeSent);
   }
 }
 
@@ -1542,12 +1558,13 @@ function lockUnknownCoachActionOutcome(proposal, error) {
   toast(error.message, true);
 }
 
-function rejectCoachActionProposal(proposal, button, error) {
-  addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
-  if (error.reason === "proposal_expired") {
+function rejectCoachActionProposal(proposal, button, error, confirmStage = false) {
+  if (!isSessionEndedError(error)) addCoachReceipt({ title: "Aktion nicht bestätigt", message: error.message, status: "error" });
+  // The server refused the proposal for good; keeping the button would only repeat the refusal.
+  if (error.reason === "proposal_expired" || error.reason === "proposal_payload_changed") {
     proposal.status = "expired";
     renderCoachActionReview();
-  } else if (["proposal_invalid", "proposal_used", "proposal_unavailable"].includes(error.reason)) {
+  } else if (["proposal_invalid", "proposal_used", "proposal_unavailable"].includes(error.reason) || (confirmStage && error.status === 409)) {
     proposal.status = "used";
     renderCoachActionReview();
   }
@@ -1577,7 +1594,7 @@ function createPendingMessage(entry, index = 0) {
 function pendingQueueButton(text, name, onClick) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "message-action";
+  button.className = "pending-action";
   button.textContent = text;
   button.setAttribute("aria-label", name);
   button.title = name;

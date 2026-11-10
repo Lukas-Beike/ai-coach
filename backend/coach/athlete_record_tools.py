@@ -217,6 +217,18 @@ class CoachAthleteRecordToolService:
 
     @staticmethod
     def _nutrition_scope(name: str, arguments: dict[str, Any]) -> str:
+        if name == "save_nutrition_template":
+            payload = arguments.get("payload")
+            template_id = (
+                str(payload.get("id") or "").strip()
+                if isinstance(payload, dict)
+                else ""
+            )
+            return (
+                f"nutrition_template:{template_id}"
+                if template_id
+                else "local_nutrition"
+            )
         if name != "save_nutrition_product":
             return "local_nutrition"
         product_id = str(structured_action_payload(arguments).get("id") or "").strip()

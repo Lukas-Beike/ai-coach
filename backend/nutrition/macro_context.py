@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 from backend.errors import AppError
@@ -12,18 +13,24 @@ def macro_context(
     performance_service: Callable[[], Any],
     plan_service: Callable[[], Any],
     profile_service: Callable[[], Any],
+    day: str,
 ) -> tuple[Any, Any]:
+    """Weight and the training calendar around ``day`` (an ISO date)."""
     try:
         performance = performance_service().performance_state()["performance"]
         weight = performance.get("metrics", {}).get("weight_kg", {}).get("value")
     except AppError, OSError, RuntimeError, ValueError:
-        logging.getLogger(__name__).warning("Nutrition performance data unavailable")
+        logging.getLogger("intervals_coach").warning(
+            "Nutrition performance data unavailable"
+        )
         weight = None
     if weight is None:
         weight = as_number(profile_service().get().get("weight_kg"))
     try:
-        calendar = plan_service().read_public(local_only=True).get("training_calendar")
+        calendar = plan_service().read_training_day(date.fromisoformat(day))
     except AppError, OSError, RuntimeError, ValueError:
-        logging.getLogger(__name__).warning("Nutrition training data unavailable")
+        logging.getLogger("intervals_coach").warning(
+            "Nutrition training data unavailable"
+        )
         calendar = None
     return weight, calendar

@@ -57,6 +57,22 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
                 dependencies.openai_client.delete_conversation.assert_not_called()
                 dependencies.planning_revision_service.mark_reset_pending.assert_not_called()
 
+    def test_delete_passes_the_coach_cancel_hook_to_the_maintenance_gate(self) -> None:
+        service, mocks = self.service()
+        cancel = Mock()
+        service = PrivacyDeleteService(
+            PrivacyDeleteDependencies(**vars(mocks), cancel_coach_turns=cancel)
+        )
+        db = MagicMock()
+        db.execute.return_value.fetchone.return_value = {"count": 0}
+        mocks.database_manager.unit_of_work.return_value.__enter__.return_value = db
+        mocks.database_manager.reader.return_value.__enter__.return_value = db
+        mocks.key_value_repository.get.return_value = ""
+
+        service.delete(PRIVACY_DELETE_CONFIRMATION_TEXT)
+
+        mocks.maintenance_gate.restore.assert_called_once_with(cancel)
+
     def test_exact_confirmation_reaches_existing_local_deletion(self) -> None:
         service, dependencies = self.service()
         db = MagicMock()
@@ -77,7 +93,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
             "DELETE FROM nutrition_products",
             [call.args[0] for call in db.execute.call_args_list],
         )
-        dependencies.maintenance_gate.restore.assert_called_once_with()
+        dependencies.maintenance_gate.restore.assert_called_once_with(None)
         self.assertEqual(dependencies.database_manager.reader.call_count, 1)
         self.assertEqual(dependencies.database_manager.unit_of_work.call_count, 1)
         dependencies.planning_revision_service.mark_reset_pending.assert_called_once_with()

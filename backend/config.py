@@ -19,7 +19,7 @@ from backend.errors import AppError
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_SYNC_HISTORY_EARLIEST_DATE = date(2000, 1, 1)
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("intervals_coach")
 
 
 def validated_openai_base_url(value: str) -> str:
@@ -143,7 +143,7 @@ def _env_date(environ: Mapping[str, str], name: str, default: date) -> date:
     except ValueError:
         _LOGGER.warning(
             "Ignoring invalid ISO date setting",
-            extra={"event": "config_invalid_date", "setting": name},
+            extra={"event": "config_invalid_date", "context": {"setting": name}},
         )
         return default
 

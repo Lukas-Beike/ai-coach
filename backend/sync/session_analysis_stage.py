@@ -380,11 +380,18 @@ class SessionAnalysisStage:
         try:
             merged = merge_details(detail_candidates(session.records, stored))
             analysis = session_analysis(session.records, merged, targets)
+            # The thresholds of the zone times, so the profile colors and the
+            # zones of one session agree (watch zone set included).
+            zones = session.zones
             profile = calendar_profile(
                 session.records,
                 merged,
-                ftp_w=_value(session.thresholds.get("ftp")),
-                threshold_hr_bpm=_value(session.thresholds.get("threshold_hr")),
+                ftp_w=_value(session.thresholds.get("ftp"))
+                if zones is None
+                else zones.ftp,
+                threshold_hr_bpm=_value(session.thresholds.get("threshold_hr"))
+                if zones is None
+                else zones.lthr,
             )
         except ArithmeticError, TypeError, ValueError:
             # One unreadable session must not stop the pass; it stays without

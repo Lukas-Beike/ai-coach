@@ -62,7 +62,7 @@ The client SHALL escape untrusted content before rendering its supported Markdow
 Evidence: `public/views.js::inlineMarkdown`, `public/views.js::replaceMarkdownLinks`, `public/views.js::markdownToHtml`, `public/activity-details.js::node`; `tests/markdown-table.test.cjs::table cells are escaped and never pass raw HTML through`, `tests/markdown-table.test.cjs::a table inside a code fence is rendered as code, not as a table`, `e2e/contracts.spec.js::Markdown links preserve URLs and format labels without interpreting markup`.
 
 ### Requirement: Installable shell has a coherent offline asset set
-The PWA SHALL advertise a standalone manifest named "Pacecraft · AI Coach" (short name "Pacecraft") and precache the current shell asset set. The service worker cache name `pacecraft-vN` and the `?v=` asset versions SHALL change together with the shell assets in `index.html`. API requests and non-GET mutations SHALL NOT be cached.
+The PWA SHALL advertise a standalone manifest named "Pacecraft · AI Coach" (short name "Pacecraft") and precache the current shell asset set. The server SHALL stamp the `?v=` asset versions and the service worker cache name `pacecraft-<hash>` from the content of the shell assets when serving; source files carry no versions. API requests and non-GET mutations SHALL NOT be cached.
 
 #### Scenario: Fresh installation
 - **WHEN** the service worker installs successfully
@@ -74,7 +74,7 @@ The PWA SHALL advertise a standalone manifest named "Pacecraft · AI Coach" (sho
 
 #### Scenario: Release asset set
 - **WHEN** the shell assets change
-- **THEN** every versioned reference in `index.html` appears in the service-worker precache list and the cache name keeps the `pacecraft-v` prefix.
+- **THEN** every stamped reference in the served `index.html` appears in the served service-worker precache list, and the cache name changes exactly when a cached asset changes.
 
 #### Scenario: Open page after an update
 - **WHEN** a replaced worker takes control of an open page

@@ -42,7 +42,6 @@ from backend.http_api.nutrition import (
     NutritionPutRoutes,
 )
 from backend.http_api.planned_unit_focus_post import PlannedUnitFocusPostRoutes
-from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.post_dispatch import (
     HttpAuthenticatedPostRoutes,
@@ -84,6 +83,7 @@ from backend.planning.race_results import with_race_results
 from backend.planning.season_preparation import load_scenarios, season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
 
 
 @dataclass(frozen=True)
@@ -169,8 +169,6 @@ class HttpCoachWriteActions:
     proposal_confirmation_service: Callable[[], Any]
     proposal_execution_service: Callable[[], Any]
     reset_service: Callable[[], Any]
-    provision_service: Callable[[], Any]
-    planning_command_service: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -203,7 +201,6 @@ class HttpAthleteServices:
     competition: Callable[[], Any]
     activity_read: Callable[[], Any]
     checkin: Callable[[], Any]
-    context_service: Callable[[], Any]
     clock: Any
     local_today: Callable[[], Any]
     state_event_buffer: Any
@@ -381,10 +378,8 @@ class HttpApiAssembly:
         proposal_confirmation_service = coach_writes.proposal_confirmation_service
         proposal_execution_service = coach_writes.proposal_execution_service
         coach_reset_service = coach_writes.reset_service
-        coach_provision_service = coach_writes.provision_service
         max_chat_request_bytes = coach_stream.max_chat_request_bytes
         chat_stream_registry = coach_stream.chat_stream_registry
-        coach_planning_command_service = coach_writes.planning_command_service
         public_bootstrap_service = public.bootstrap
         public_plan_state_service = public.plan_state
         public_weather_state_service = public.weather_state
@@ -395,7 +390,6 @@ class HttpApiAssembly:
         competition_service = athlete.competition
         activity_read_service = athlete.activity_read
         checkin_service = athlete.checkin
-        athlete_context_service = athlete.context_service
         athlete_clock = athlete.clock
         local_today = athlete.local_today
         state_event_buffer = athlete.state_event_buffer
@@ -479,6 +473,8 @@ class HttpApiAssembly:
             local_today,
             all_sync_days,
             athlete.session_corrections,
+            full_provider_resync_service,
+            dict(DEFAULT_PROVIDER_REGISTRY.full_resync_routes()),
         )
         self.history_get_routes = HistoryGetRoutes(
             session_auth_service, change_history_service
@@ -598,6 +594,7 @@ class HttpApiAssembly:
             logger,
             max_request_bytes=max_chat_request_bytes,
             response_timeout_seconds=timeout,
+            maintenance_pending=lambda: bool(maintenance_gate.state()["active"]),
         )
         self.transcribe_post_routes = TranscribePostRoutes(
             audio_transcription_client,
@@ -620,17 +617,14 @@ class HttpApiAssembly:
         )
         self.settings_put_routes = SettingsPutRoutes(settings)
         provider_credentials = dependencies.domains.provider_credentials
-        self.credentials_put_routes = _when(provider_credentials, CredentialsPutRoutes)
+        self.credentials_put_routes = _when(
+            provider_credentials, CredentialsPutRoutes, session_auth_service
+        )
         self.athlete_put_routes = AthletePutRoutes(
-            athlete_context_service,
             profile_service,
             database_lock(),
             athlete.zones,
             athlete.body_export,
-        )
-        self.planning_commands_post_routes = PlanningCommandsPostRoutes(
-            coach_planning_command_service,
-            coach_provision_service,
         )
         self.feedback_post_routes = FeedbackPostRoutes(
             checkin_service,
@@ -718,7 +712,6 @@ class HttpApiAssembly:
             self.coach_actions_post_routes,
             self.chat_post_routes,
             self.transcribe_post_routes,
-            self.planning_commands_post_routes,
             self.feedback_post_routes,
             self.chat_stream_transport,
             self.sync_command_post_route,

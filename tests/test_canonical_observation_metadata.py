@@ -512,7 +512,7 @@ class MergedSessionRetentionTests(ObservationStoreFixture):
             )
         )
 
-    def test_a_deleted_alias_keeps_its_survivor_until_it_is_revived(self) -> None:
+    def test_a_revived_alias_rejoins_its_retained_survivor(self) -> None:
         keep = self.seed("wahoo-1", ProviderId.WAHOO)
         alias = self.seed("intervals-1", ProviderId.INTERVALS)
         self.merge(alias, keep)
@@ -523,9 +523,9 @@ class MergedSessionRetentionTests(ObservationStoreFixture):
             canonical_store.effective_session_ids(self.db, [alias, keep, "missing"]),
         )
         self.seed("intervals-1", ProviderId.INTERVALS)
-        self.assertEqual(("active", None, None), self.session(alias))
+        self.assertEqual(("duplicate", keep, None), self.session(alias))
         self.assertEqual(
-            {alias: alias}, canonical_store.effective_session_ids(self.db, [alias])
+            {alias: keep}, canonical_store.effective_session_ids(self.db, [alias])
         )
         self.assertEqual({}, canonical_store.effective_session_ids(self.db, []))
 

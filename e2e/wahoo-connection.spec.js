@@ -62,6 +62,25 @@ test("@responsive a rejected Wahoo token asks for a reconnect", async ({ page })
   await expect(page.locator("#wahooConnectButton")).toHaveText("Wahoo erneut verbinden");
 });
 
+test("@responsive retrying a stale Wahoo entry starts one Wahoo sync", async ({ page }) => {
+  const posts = [];
+  await withWahooState(page, { configured: true, connected: true, scope: "workouts_read", connected_at: "2026-01-02T08:00:00+00:00" }, (body) => ({
+    provider_freshness: [...(body.provider_freshness || []), { provider: "wahoo", label: "Wahoo", area: "activities", state: "stale", configured: true, read_only: true }],
+  }));
+  await page.route("**/api/wahoo/sync", (route) => {
+    posts.push(route.request().method());
+    return route.fulfill({ status: 202, json: { id: "job-wahoo-retry", status: "queued" } });
+  });
+  await page.route("**/api/sync/jobs/job-wahoo-retry", (route) => route.fulfill({ json: { id: "job-wahoo-retry", status: "completed", items: [] } }));
+  await openConnections(page);
+  const retry = page.locator("#providerFreshnessTimeline").getByRole("button", { name: "Erneut versuchen" });
+  await retry.click();
+  await expect.poll(() => posts.length).toBe(1);
+  await expect(page.locator("#toast")).toContainText("Wahoo synchronisiert");
+  await page.waitForLoadState("networkidle");
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 test("@responsive connected Wahoo shows its label everywhere and can be disconnected", async ({ page }, testInfo) => {
   let disconnected = false;
   await withWahooState(page, { configured: true, connected: true, scope: "workouts_read", connected_at: "2026-01-02T08:00:00+00:00" }, (body) => ({
@@ -99,8 +118,9 @@ test("@responsive connected Wahoo runs manual and full resync with the CSRF toke
   });
   await page.route("**/api/sync/jobs/job-wahoo-fixture", (route) => route.fulfill({ json: { id: "job-wahoo-fixture", status: "completed", items: [] } }));
   await page.route("**/api/wahoo/full-resync", (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: { running: false, status: null, last_resync_at: null, last_error: null, outcome: { operation_id: "op-wahoo", status: "ok" } } });
     requests.push({ path: "/api/wahoo/full-resync", method: route.request().method(), csrf: route.request().headers()["x-csrf-token"] });
-    return route.fulfill({ json: { status: "ok", source: "wahoo" } });
+    return route.fulfill({ status: 202, json: { status: "started", source: "wahoo", operation_id: "op-wahoo" } });
   });
   const card = await openConnections(page);
   await expect(page.locator("#wahooSyncButton")).toBeVisible();
@@ -120,6 +140,10 @@ test("@responsive connected Wahoo runs manual and full resync with the CSRF toke
     { path: "/api/wahoo/sync", method: "POST", csrf },
     { path: "/api/wahoo/full-resync", method: "POST", csrf },
   ]);
+  await expect(page.locator("#toast")).toContainText("Wahoo vollständig neu geladen");
+  await expect(page.locator("#wahooFullResyncButton")).not.toHaveClass(/busy/);
+  await expect(page.locator("#wahooFullResyncButton")).toBeEnabled();
+  await expect(page.locator("#wahooFullResyncButton")).toHaveText("Vollständig neu synchronisieren");
   await page.waitForLoadState("networkidle");
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });

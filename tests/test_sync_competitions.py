@@ -5,6 +5,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -247,7 +248,10 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             lambda: client,
             reconciler or self.reconciler,
             CompetitionService(
-                self.database_manager, CompetitionRepository(), lambda: NOW
+                self.database_manager,
+                CompetitionRepository(),
+                lambda: NOW,
+                date.today,
             ),
             self.database_manager,
             key_value_repository or self.key_value_repository,

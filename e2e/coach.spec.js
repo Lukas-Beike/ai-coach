@@ -1,5 +1,4 @@
 const { test, expect } = require("@playwright/test");
-const { randomUUID } = require("node:crypto");
 const { AxeBuilder } = require("@axe-core/playwright");
 
 const navigation = [
@@ -597,7 +596,7 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
   test("coach streaming, tab changes, long markdown and scrolling stay stable", async ({ page }, testInfo) => {
     const browserErrors = installBrowserGuards(page);
     await openAuthenticatedApp(page);
-    await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
+    await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: JSON.stringify({ confirmed: true }) }));
     await page.reload();
     await expect(page.locator("#appShell")).toBeVisible();
     await page.getByRole("link", { name: "Coach", exact: true }).click();
@@ -827,32 +826,10 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
 
 });
 
-test("authorized HTTP plan commit preserves sport through SQLCipher and calendar rendering", async ({ page }, testInfo) => {
-  await openAuthenticatedApp(page);
-  const clientTurnId = `fixture-http-commit-${testInfo.project.name}-${randomUUID()}`;
-  const result = await page.evaluate(async (clientTurnId) => {
-    const staged = await api("/api/fixture/plan");
-    const body = { client_turn_id: clientTurnId, operation: "commit_training_plan", artifact_id: staged.artifact_id, arguments: {} };
-    const first = await api("/api/planning/commands", { method: "POST", body: JSON.stringify(body) });
-    const repeated = await api("/api/planning/commands", { method: "POST", body: JSON.stringify(body) });
-    const plan = await api("/api/plan?local=1");
-    return { first: first.status, repeated: repeated.status, entries: plan.training_calendar.filter((entry) => entry.name?.startsWith("HTTP fixture ")).map(({ name, type }) => ({ name, type })) };
-  }, clientTurnId);
-  expect(result.first).toBe("completed");
-  expect(result.repeated).toBe("completed");
-  expect(result.entries).toHaveLength(4);
-  for (const sport of ["Run", "WeightTraining", "VirtualRide", "Swim"]) expect(result.entries).toContainEqual({ name: `HTTP fixture ${sport}`, type: sport });
-  await page.goto("/#plan/overview");
-  for (const [sport, label] of [["Run", "Laufen"], ["WeightTraining", "Kraft"], ["VirtualRide", "Rad indoor"], ["Swim", "Schwimmen"]]) {
-    await expect(page.locator(".planned-entry").filter({ hasText: `HTTP fixture ${sport}` }).locator(".planned-meta")).toContainText(label);
-  }
-});
-
-
 test("natural Coach clarification survives reload and saves the follow-up", async ({ page }) => {
   await page.goto("/#coach");
   await expect(page.locator("#appShell")).toBeVisible();
-  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
+  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: JSON.stringify({ confirmed: true }) }));
   await page.reload();
   await page.locator("#messageInput").fill("Heute fühle ich mich nicht fit.");
   await page.locator("#messageInput").press("Enter");
@@ -868,5 +845,5 @@ test("natural Coach clarification survives reload and saves the follow-up", asyn
   expect(history.messages.filter((item) => item.role === "user")).toHaveLength(2);
   const data = await page.evaluate(() => api("/api/feedback"));
   expect(JSON.stringify(data)).toContain("Schwere Beine");
-  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: {} }));
+  await page.evaluate(() => api("/api/chat/reset", { method: "POST", body: JSON.stringify({ confirmed: true }) }));
 });

@@ -635,13 +635,13 @@
     const deadline = Date.now() + 120_000;
     while (!["completed", "failed", "partial"].includes(job.status)) {
       if (!isCurrent()) return false;
-      if (Date.now() >= deadline) throw new Error("Der Job läuft weiter. Öffne die Aktivität später erneut oder prüfe den Sync-Status unter Mehr.");
+      if (Date.now() >= deadline) throw new Error("Der Job läuft weiter. Öffne die Aktivität später erneut oder prüfe Mehr → Anbindungen.");
       onStatus("Detaildaten werden im Hintergrund geladen …");
       await new Promise((resolve) => setTimeout(resolve, 1500));
       if (!isCurrent()) return false;
       job = await api(`/api/sync/jobs/${encodeURIComponent(job.id)}`);
     }
-    if (job.status !== "completed") throw new Error("Detaildaten konnten nicht vollständig geladen werden. Der vorherige Stand bleibt erhalten. Details stehen im Sync-Status unter Mehr.");
+    if (job.status !== "completed") throw new Error("Detaildaten konnten nicht vollständig geladen werden. Der vorherige Stand bleibt erhalten. Details stehen unter Mehr → Anbindungen.");
     return isCurrent();
   }
 

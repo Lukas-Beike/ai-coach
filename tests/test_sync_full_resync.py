@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import closing, contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from provider_runtime_fakes import ACME_ID, acme_descriptor, fake_binding
 
@@ -115,7 +117,14 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.competition_calls.append(kwargs)
         return self.competition_result
 
-    def _service(self, *, config=None, key_values=None, operation_id_factory=None):
+    def _service(
+        self,
+        *,
+        config=None,
+        key_values=None,
+        operation_id_factory=None,
+        after_resync=None,
+    ):
         operation_journal = FullResyncOperationJournal(
             self.observer,
             self.logger,
@@ -138,6 +147,7 @@ class FullProviderResyncServiceTests(unittest.TestCase):
             ),
             operation_journal,
             gates=gates,
+            **({"after_resync": after_resync} if after_resync else {}),
         )
 
     def _get_value(self, provider, field):
@@ -225,6 +235,188 @@ class FullProviderResyncServiceTests(unittest.TestCase):
         self.assertEqual(self._get_value("garmin", "status"), "")
         self.assertEqual(self._get_value("garmin", "last_at"), NOW)
         self.assertFalse(self.garmin_gate.is_resetting())
+
+    def _wait_for_outcome(self, service, provider="garmin"):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            outcome = service.progress(provider)["outcome"]
+            if outcome is not None:
+                return outcome
+            time.sleep(0.01)
+        self.fail("the background resync did not finish")
+
+    def _blocking_garmin_sync(self):
+        """Make the Garmin read outlast the caller, until the test releases it."""
+        started = threading.Event()
+        release = threading.Event()
+
+        def sync(**kwargs):
+            self.garmin_calls.append(kwargs)
+            started.set()
+            release.wait(5)
+            return self.garmin_result
+
+        self.garmin_service.sync = sync
+        return started, release
+
+    def test_a_resync_longer_than_the_request_is_accepted_and_later_reported_done(self):
+        started, release = self._blocking_garmin_sync()
+
+        accepted = self.service.start("garmin", "op-1")
+
+        self.assertEqual(
+            accepted,
+            {"status": "started", "source": "garmin", "operation_id": "op-1"},
+        )
+        self.assertTrue(started.wait(5))
+        running = self.service.progress("garmin")
+        self.assertTrue(running["running"])
+        self.assertIsNone(running["outcome"])
+        self.assertIsNone(running["last_resync_at"])
+
+        release.set()
+        outcome = self._wait_for_outcome(self.service)
+
+        self.assertEqual(outcome, {"operation_id": "op-1", "status": "ok"})
+        done = self.service.progress("garmin")
+        self.assertFalse(done["running"])
+        self.assertEqual(done["last_resync_at"], NOW)
+        self.assertIsNone(done["last_error"])
+
+    def test_a_repeated_start_runs_no_second_resync(self):
+        started, release = self._blocking_garmin_sync()
+        self.service.start("garmin", "op-1")
+        self.assertTrue(started.wait(5))
+
+        repeated = self.service.start("garmin", "op-2")
+        self.assertEqual(
+            repeated,
+            {"status": "already_running", "source": "garmin", "operation_id": "op-1"},
+        )
+        release.set()
+        self._wait_for_outcome(self.service)
+
+        self.assertEqual([call["operation_id"] for call in self.garmin_calls], ["op-1"])
+        self.assertEqual(self.service.start("garmin", "op-3")["status"], "started")
+        self._wait_for_outcome(self.service)
+
+    def test_start_reports_a_missing_configuration_before_any_thread_runs(self):
+        self.garmin_service.configured = lambda: False
+
+        with self.assertRaises(AppError) as caught:
+            self.service.start("garmin", "op-1")
+
+        self.assertEqual(caught.exception.status, 503)
+        self.assertEqual(self.garmin_calls, [])
+        self.assertIsNone(self.service.progress("garmin")["outcome"])
+
+    def test_a_partial_resync_is_not_recorded_as_complete(self):
+        self.garmin_result = {"status": "partial", "records": 7}
+
+        result = self.service.resync("garmin", "op-1")
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["records"], 7)
+        self.assertNotIn("resynced_at", result)
+        self.assertIsNone(self._get_value("garmin", "last_at"))
+        self.assertEqual(
+            self._get_value("garmin", "error"),
+            "Teilweise geladen. Bitte erneut starten.",
+        )
+        self.assertEqual(self._get_value("garmin", "running"), "0")
+
+    def test_a_partial_resync_keeps_the_last_complete_time_and_reports_partial(self):
+        self.service.resync("garmin", "op-1")
+        self.garmin_result = {"status": "partial"}
+
+        self.service.start("garmin", "op-2")
+        outcome = self._wait_for_outcome(self.service)
+
+        self.assertEqual(outcome, {"operation_id": "op-2", "status": "partial"})
+        self.assertEqual(self._get_value("garmin", "last_at"), NOW)
+
+    def test_a_contended_garmin_read_is_a_failed_resync_without_a_completion_time(self):
+        self.garmin_result = {"status": "already_running"}
+
+        self.service.start("garmin", "op-1")
+        outcome = self._wait_for_outcome(self.service)
+
+        self.assertEqual(
+            outcome,
+            {"operation_id": "op-1", "status": "failed", "reason": "already_running"},
+        )
+        self.assertIsNone(self._get_value("garmin", "last_at"))
+        self.assertIn("läuft bereits", self._get_value("garmin", "error"))
+        self.assertFalse(self.garmin_gate.is_resetting())
+
+    def test_a_failed_background_resync_keeps_the_error_and_ends_the_run(self):
+        self.garmin_service.sync = Mock(side_effect=AppError(502, "Garmin down"))
+
+        self.service.start("garmin", "op-1")
+        outcome = self._wait_for_outcome(self.service)
+
+        self.assertEqual(outcome["status"], "failed")
+        state = self.service.progress("garmin")
+        self.assertFalse(state["running"])
+        self.assertEqual(state["last_error"], "Garmin down")
+        self.assertEqual(self.service.start("garmin", "op-2")["status"], "started")
+        self._wait_for_outcome(self.service)
+
+    def test_the_derived_passes_run_before_the_background_resync_ends(self):
+        seen = []
+        service = self._service(
+            after_resync=lambda job: seen.append(service.progress("garmin")["running"])
+        )
+
+        service.start("garmin", "op-1")
+        self._wait_for_outcome(service)
+
+        self.assertEqual(seen, [True])
+
+    def test_a_finished_resync_requests_the_derived_passes_after_the_gate_ends(self):
+        requested = []
+        gate_state = []
+
+        def after_resync(job):
+            requested.append(dict(job))
+            gate_state.append(self.garmin_gate.is_resetting())
+
+        service = self._service(after_resync=after_resync)
+
+        service.resync("garmin", "garmin-operation")
+
+        self.assertEqual(requested, [{"provider": "garmin", "type": "refresh"}])
+        self.assertEqual(gate_state, [False])
+
+    def test_a_partial_resync_requests_the_derived_passes(self):
+        requested = []
+        service = self._service(after_resync=requested.append)
+        self.garmin_service.sync = Mock(return_value={"status": "partial"})
+
+        result = service.resync("garmin")
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(requested, [{"provider": "garmin", "type": "refresh"}])
+
+    def test_a_failed_resync_requests_no_derived_pass(self):
+        requested = []
+        service = self._service(after_resync=requested.append)
+        self.garmin_service.sync = Mock(side_effect=AppError(502, "Garmin down"))
+
+        with self.assertRaises(AppError):
+            service.resync("garmin")
+
+        self.assertEqual(requested, [])
+
+    def test_an_already_running_resync_requests_no_derived_pass(self):
+        requested = []
+        service = self._service(after_resync=requested.append)
+        self.garmin_gate.begin_reset()
+
+        result = service.resync("garmin")
+
+        self.assertEqual(result["status"], "already_running")
+        self.assertEqual(requested, [])
 
     def test_gate_and_context_are_restored_when_status_cleanup_fails(self):
         class FailingStatusCleanupRepository:

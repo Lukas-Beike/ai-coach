@@ -420,6 +420,22 @@ class BrowserRunnerTests(unittest.TestCase):
                 )
             self.assertEqual(1, len(runner.failed_tests(output)))
 
+    def test_keep_going_runs_every_child_and_reports_all_failures(self):
+        code, value, _path = self.run_main(
+            FakeProcesses(fail_browser=True), extra_args=["--keep-going"]
+        )
+        self.assertNotEqual(code, 0)
+        statuses = [child["status"] for child in value["children"]]
+        self.assertEqual(statuses, ["failed"] * 3)
+        self.assertTrue(all(child.get("exit_code") for child in value["children"]))
+        self.assertIn("3 browser children failed", value["error"])
+
+    def test_without_keep_going_the_first_failure_stops_the_run(self):
+        code, value, _path = self.run_main(FakeProcesses(fail_browser=True))
+        self.assertNotEqual(code, 0)
+        ran = [child for child in value["children"] if child.get("exit_code")]
+        self.assertEqual(len(ran), 1)
+
     def test_child_without_test_report_says_it_failed_outside_a_test(self):
         code, value, _path = self.run_main(FakeProcesses(fail_browser=True))
         self.assertNotEqual(code, 0)
@@ -430,10 +446,38 @@ class BrowserRunnerTests(unittest.TestCase):
         code, value, _path = self.run_main(FakeProcesses(), current=False)
         self.assertEqual(code, 0)
         self.assertIs(False, value["images"]["application_matches_source"])
-        self.assertIn("docker build -t pacecraft:e2e .", self.stderr)
+        self.assertIn(
+            f"docker build -t {runner.worktree_image_tag(runner.ROOT)} .", self.stderr
+        )
         for current in (True, None):
             self.run_main(FakeProcesses(), current=current)
             self.assertNotIn("Warning", self.stderr)
+
+    def test_each_checkout_gets_its_own_application_image_tag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory) / "first", Path(directory) / "second"
+            first.mkdir()
+            second.mkdir()
+            tag = runner.worktree_image_tag(first)
+            self.assertRegex(tag, r"^pacecraft:e2e-[0-9a-f]{8}$")
+            self.assertEqual(tag, runner.worktree_image_tag(first))
+            self.assertEqual(tag, runner.worktree_image_tag(first / "." / "../first"))
+            self.assertNotEqual(tag, runner.worktree_image_tag(second))
+        self.assertEqual(
+            runner.worktree_image_tag(runner.ROOT),
+            runner.parser().parse_args(["--project", "all"]).image,
+        )
+
+    def test_print_image_needs_no_project_and_starts_nothing(self):
+        with (
+            mock.patch.object(runner, "Processes") as processes,
+            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            self.assertEqual(0, runner.main(["--print-image"]))
+        self.assertEqual(
+            runner.worktree_image_tag(runner.ROOT), stdout.getvalue().strip()
+        )
+        processes.assert_not_called()
 
     def test_image_source_comparison_hashes_content_and_ignores_bytecode(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -8,7 +8,10 @@ from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.coach.activity_read_tools import CoachActivityReadToolService
-from backend.coach.context import bounded_coach_context_value, coach_context_json_size
+from backend.coach.context import (
+    bounded_coach_context_sections_by_priority,
+    coach_context_json_size,
+)
 from backend.coach.context_selection import (
     CONTEXT_SECTIONS,
     CoachContextSelection,
@@ -93,7 +96,7 @@ class CoachReadToolService:
                 include_library=False,
             )
         )
-        bounded = bounded_coach_context_value(context, 40_000)
+        bounded = bounded_coach_context_sections_by_priority(context, 40_000)
         return {
             "ok": True,
             "context": bounded,
@@ -101,6 +104,9 @@ class CoachReadToolService:
                 "requested_sections": requested,
                 "characters": coach_context_json_size(bounded),
                 "complete": coach_context_json_size(context) <= 40_000,
+                "omitted_sections": sorted(
+                    section for section in requested if section not in bounded
+                ),
             },
         }
 

@@ -30,6 +30,7 @@ _FULLY_TRACKED_TOOLS = frozenset(
         "update_nutrition_entry",
         "delete_nutrition_entry",
         "log_nutrition_template",
+        "save_checkin",
     }
 )
 
@@ -104,10 +105,12 @@ def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | N
 
 
 def turn_changes(command_receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Undo references of a turn, in the order they were recorded."""
+    """Undo references of a turn's tracked changes, in the order recorded."""
     return [
         change
         for entry in command_receipts
-        if isinstance(entry, dict) and isinstance(entry.get("changes"), list)
+        if isinstance(entry, dict)
+        and entry.get("tool") in _FULLY_TRACKED_TOOLS
+        and isinstance(entry.get("changes"), list)
         for change in entry["changes"]
     ]

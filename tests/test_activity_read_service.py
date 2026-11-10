@@ -185,6 +185,16 @@ class ActivityReadServiceTests(unittest.TestCase):
         self.assertEqual(["act_old"], [item["id"] for item in second["activities"]])
         self.assertIsNone(second["next_cursor"])
 
+    def test_page_clamps_oversized_days_instead_of_overflowing(self):
+        service = self.service()
+        for days in ("999999999", 10**30, "99999999999999999999"):
+            page = service.page(days=days, today=date(2026, 9, 20))
+            self.assertEqual(3650, page["days"])
+            self.assertEqual(
+                ["act_new", "act_old"], [item["id"] for item in page["activities"]]
+            )
+        self.assertEqual(1, service.page(days=0, today=date(2026, 9, 20))["days"])
+
     def test_recent_filters_by_explicit_today_without_mutating_snapshot(self):
         service = self.service()
         before = copy.deepcopy(self.snapshot)

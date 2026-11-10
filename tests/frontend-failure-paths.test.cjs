@@ -201,3 +201,26 @@ test("a cancel that fails after the session ended restores the flags without a s
   assert.equal(harness.state.chatRequest.cancelRequested, false);
   assert.deepEqual(harness.toasts, []);
 });
+
+test("the session-ended abort is German, marked, and never toasted", () => {
+  const shared = readPublic("shared.js");
+  const rendered = [];
+  const node = { replaceChildren(...args) { rendered.push(args); }, querySelector: () => null, append() {}, setAttribute() {} };
+  const context = vm.createContext({
+    DOMException,
+    $: () => node,
+    document: { createElement: () => ({ setAttribute() {}, addEventListener() {}, append() {} }) },
+    clearTimeout() {},
+    setTimeout() {},
+    hideToast() {},
+  });
+  const constant = /^const SESSION_ENDED_MESSAGE = .*;$/m.exec(shared)[0];
+  vm.runInContext([constant, ...["sessionEndedError", "isSessionEndedError", "toast"].map((name) => extractFunction(shared, name))].join("\n"), context);
+  const error = context.sessionEndedError();
+  assert.equal(error.name, "AbortError");
+  assert.equal(context.isSessionEndedError(error), true);
+  assert.equal(context.isSessionEndedError(abortError()), false);
+  assert.doesNotMatch(error.message, /Session ended/);
+  context.toast(error.message, true);
+  assert.deepEqual(rendered, []);
+});

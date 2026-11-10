@@ -6,12 +6,14 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import CompetitionRepository
 from backend.db.schema import initialize_schema
+from backend.errors import AppError
 from backend.planning.competition_service import CompetitionService
 
 NOW = "2026-09-20T08:00:00+00:00"
@@ -29,7 +31,10 @@ class CompetitionServiceTests(unittest.TestCase):
             initialize_schema(db)
         self.now = NOW
         self.service = CompetitionService(
-            self.manager, CompetitionRepository(), lambda: self.now
+            self.manager,
+            CompetitionRepository(),
+            lambda: self.now,
+            lambda: date(2026, 9, 20),
         )
 
     def tearDown(self):
@@ -68,6 +73,130 @@ class CompetitionServiceTests(unittest.TestCase):
                 "SELECT action FROM change_history ORDER BY created_at"
             ).fetchall()
         self.assertEqual([row["action"] for row in history], ["create", "update"])
+
+    def _save_many(self, count, first_day):
+        for index in range(count):
+            self.service.save(
+                self.competition(
+                    name=f"Race {index}",
+                    event_date=(first_day + timedelta(days=index)).isoformat(),
+                )
+            )
+
+    def test_twenty_past_races_do_not_block_a_new_race(self):
+        self._save_many(20, date(2026, 1, 1))
+
+        created = self.service.save(self.competition(event_date="2026-10-03"))
+
+        self.assertEqual(created["status"], "created")
+        self.assertEqual(len(created["competitions"]), 21)
+
+    def test_twenty_upcoming_races_reject_the_next_one_and_keep_the_archive(self):
+        self._save_many(5, date(2026, 1, 1))
+        self._save_many(20, date(2026, 9, 20))
+
+        with self.assertRaises(AppError) as raised:
+            self.service.save(self.competition(event_date="2026-12-01"))
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(len(self.service.list()), 25)
+
+    def test_full_upcoming_cap_allows_past_race_and_blocks_move_into_future(self):
+        past = self.service.save(self.competition(event_date="2026-02-01"))
+        self._save_many(20, date(2026, 9, 20))
+
+        archived = self.service.save(self.competition(event_date="2026-03-01"))
+        with self.assertRaises(AppError) as raised:
+            self.service.save(
+                {
+                    "competition_id": past["competition"]["id"],
+                    "event_date": "2026-12-01",
+                }
+            )
+
+        self.assertEqual(archived["status"], "created")
+        self.assertEqual(raised.exception.status, 400)
+
+    def test_empty_values_clear_optional_fields_and_absent_ones_keep_them(self):
+        created = self.service.save(self.competition(description="Flat"))
+        competition_id = created["competition"]["id"]
+
+        cleared = self.service.save(
+            {"competition_id": competition_id, "target": "", "notes": None}
+        )
+        kept = self.service.save({"competition_id": competition_id, "name": "Renamed"})
+
+        saved = cleared["competition"]
+        self.assertEqual(saved["target"], "")
+        self.assertEqual(saved["notes"], "")
+        self.assertEqual(saved["distance"], "42200")
+        self.assertEqual(saved["description"], "Flat")
+        self.assertEqual(kept["competition"]["target"], "")
+        no_description = self.service.save(
+            {"competition_id": competition_id, "description": ""}
+        )
+        self.assertEqual(no_description["competition"]["description"], "")
+        with self.manager.reader() as db:
+            diff = db.execute(
+                "SELECT diff FROM change_history WHERE action='update' ORDER BY rowid"
+            ).fetchone()["diff"]
+        self.assertIn("target", diff)
+        self.assertIn("notes", diff)
+
+    def test_clearing_the_start_time_falls_back_to_the_race_day(self):
+        created = self.service.save(
+            self.competition(starts_at_local="2027-09-26T09:30")
+        )
+
+        cleared = self.service.save(
+            {
+                "competition_id": created["competition"]["id"],
+                "starts_at_local": "",
+            }
+        )
+
+        self.assertEqual(cleared["competition"]["event_date"], "2027-09-26")
+        self.assertEqual(
+            cleared["competition"]["starts_at_local"], "2027-09-26T00:00:00"
+        )
+
+    def test_a_start_time_alone_moves_the_race_day(self):
+        created = self.service.save(
+            self.competition(starts_at_local="2027-09-26T09:30")
+        )
+        competition_id = created["competition"]["id"]
+
+        moved = self.service.save(
+            {"competition_id": competition_id, "starts_at_local": "2027-09-27T09:00"}
+        )
+
+        self.assertEqual(moved["competition"]["event_date"], "2027-09-27")
+        self.assertEqual(moved["competition"]["starts_at_local"], "2027-09-27T09:00:00")
+        with self.manager.reader() as db:
+            self.assertEqual(
+                db.execute(
+                    "SELECT event_date FROM competitions WHERE id=?",
+                    (competition_id,),
+                ).fetchone()["event_date"],
+                "2027-09-27",
+            )
+
+    def test_a_start_time_on_another_day_than_the_event_date_is_rejected(self):
+        created = self.service.save(self.competition())
+        competition_id = created["competition"]["id"]
+
+        with self.assertRaises(AppError) as raised:
+            self.service.save(
+                {
+                    "competition_id": competition_id,
+                    "event_date": "2027-09-26",
+                    "starts_at_local": "2027-09-27T09:00",
+                }
+            )
+
+        self.assertEqual(raised.exception.status, 400)
+        self.assertIn("Startzeit", raised.exception.message)
+        self.assertEqual(self.service.list()[0]["event_date"], "2027-09-26")
 
     def test_failed_history_write_rolls_back_competition(self):
         with (

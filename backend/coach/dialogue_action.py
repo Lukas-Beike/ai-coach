@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from backend.canonical.labels import provider_name
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.authorization import TRAINING_PLAN_SCOPE_PREFIX, require_coach_scope
 from backend.coach.dialogue import validate_request
@@ -41,6 +42,7 @@ LOCAL_BROAD_SCOPES = frozenset(
         "adaptive_replan",
         "intervals_sync",
         "garmin_sync",
+        "wahoo_sync",
         "local_nutrition",
         "local_nutrition_product",
         "local_equipment",
@@ -125,8 +127,11 @@ class CoachDialogueActionService:
         scope = set(request["scope"])
         if name in {"delete_nutrition_template", "log_nutrition_template"}:
             scope.add("nutrition_template:" + str(arguments.get("id") or ""))
-        remote_write, refresh = self._retry_metadata(name, arguments, target)
-        self._validate_target(request, target, scope, remote_write, refresh, name)
+        retry_job = self._retry_job(name, arguments, target)
+        remote_write, refresh = self._retry_metadata(name, arguments, retry_job)
+        self._validate_target(
+            request, target, scope, remote_write, refresh, name, retry_job
+        )
         self._validate_objects(name, arguments, scope)
         action = {
             "intent": "remote_sync" if remote_write or refresh else "local_action",
@@ -141,24 +146,31 @@ class CoachDialogueActionService:
         self._apply_operation_scope(name, arguments, action)
         return action
 
-    def _retry_metadata(
+    def _retry_job(
         self, name: str, arguments: dict[str, Any], target: str
+    ) -> dict[str, Any] | None:
+        """Return the job a retry names; its provider and type decide the scope."""
+        if name != "resolve_training_sync_conflict" or not arguments.get("job_id"):
+            return None
+        if arguments.get("local_id"):
+            raise AppError(
+                400,
+                "Wähle entweder einen lokalen Konflikt oder einen Synchronisationsjob.",
+                reason="tool_arguments_invalid",
+            )
+        retry_job = self._sync_jobs().state(str(arguments["job_id"]))
+        if target != retry_job["provider"]:
+            raise AppError(
+                403,
+                f"Die Wiederholung benötigt das Ziel {provider_name(retry_job['provider'])} des ursprünglichen Jobs.",
+                reason="request_target",
+            )
+        return retry_job
+
+    @staticmethod
+    def _retry_metadata(
+        name: str, arguments: dict[str, Any], retry_job: dict[str, Any] | None
     ) -> tuple[bool, bool]:
-        retry_job = None
-        if name == "resolve_training_sync_conflict" and arguments.get("job_id"):
-            if arguments.get("local_id"):
-                raise AppError(
-                    400,
-                    "Wähle entweder einen lokalen Konflikt oder einen Synchronisationsjob.",
-                    reason="tool_arguments_invalid",
-                )
-            retry_job = self._sync_jobs().state(str(arguments["job_id"]))
-            if target != retry_job["provider"]:
-                raise AppError(
-                    403,
-                    "Die Wiederholung benötigt den Anbieter des ursprünglichen Jobs.",
-                    reason="request_target",
-                )
         retry_push = bool(
             retry_job
             and retry_job["type"] in {"plan_push", "competition_push", "nutrition_sync"}
@@ -188,19 +200,22 @@ class CoachDialogueActionService:
         remote_write: bool,
         refresh: bool,
         name: str = "",
+        retry_job: dict[str, Any] | None = None,
     ) -> None:
-        # Each remote write names its own provider and that provider's sync scope.
-        provider, sync_scope = (
-            (ProviderId.GARMIN, "garmin_sync")
-            if name == "push_strength_to_garmin"
-            else (ProviderId.INTERVALS, "intervals_sync")
-        )
+        # Each remote write names its own provider and that provider's sync
+        # scope; a retry takes both from the job it retries.
+        provider = str(ProviderId.INTERVALS)
+        if retry_job:
+            provider = str(retry_job["provider"])
+        elif name == "push_strength_to_garmin":
+            provider = str(ProviderId.GARMIN)
+        sync_scope = f"{provider}_sync"
         if remote_write and (
             not request["remote_write"] or target != provider or sync_scope not in scope
         ):
             raise AppError(
                 403,
-                "Für diesen Schritt fehlt der zugehörige Synchronisierungsauftrag.",
+                f"Für diesen Schritt fehlt der {provider_name(provider)}-Synchronisierungsauftrag.",
                 reason="remote_scope_denied",
             )
         if request["remote_write"] != bool(remote_write) or (
@@ -407,6 +422,9 @@ class CoachDialogueActionService:
             "update_nutrition_entry",
             "delete_nutrition_entry",
         }:
+            template_id = CoachDialogueActionService._nutrition_template_id(
+                name, arguments
+            )
             if name == "save_nutrition_product":
                 product_id = str((arguments.get("payload") or {}).get("id") or "")
                 require_coach_scope(
@@ -415,11 +433,8 @@ class CoachDialogueActionService:
                     if product_id
                     else "local_nutrition_product",
                 )
-            else:
+            elif name != "save_nutrition_template" or template_id is None:
                 require_coach_scope(action, "local_nutrition")
-            template_id = CoachDialogueActionService._nutrition_template_id(
-                name, arguments
-            )
             if template_id is not None:
                 require_coach_scope(action, f"nutrition_template:{template_id}")
 

@@ -26,7 +26,7 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
   const linkedRoute = String(link.getAttribute("href") || "").replace(/^#/, "").trim();
   void AppRouter.navigate(linkedRoute || link.dataset.route, { historyMode: "push" });
 }));
-const { renderAdaptivePlanning, renderExternalCalendar, renderTrainingPlans, renderPlanned, renderLibrary, renderCompetitions, renderCompetitionReadStatus, focusPlannedToday, bindPlanNavigation, bindExternalCalendar } = AppPlanViews.create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue });
+const { renderAdaptivePlanning, renderExternalCalendar, renderPlanned, renderLibrary, renderCompetitions, renderCompetitionReadStatus, focusPlannedToday, bindPlanNavigation, bindExternalCalendar } = AppPlanViews.create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue });
 bindPlanNavigation();
 document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -66,6 +66,7 @@ $("#wahooSyncButton").addEventListener("click", syncWahoo);
 $("#wahooFullResyncButton").addEventListener("click", () => fullResync(providerIds().wahoo));
 for (const provider of Object.keys(CREDENTIAL_FORMS)) {
   $("#" + credentialFormIds(provider).form).addEventListener("submit", (event) => saveProviderCredentials(event, provider));
+  $("#" + credentialFormIds(provider).form).addEventListener("input", () => syncCredentialPasswordRow(provider));
   for (const field of CREDENTIAL_FORMS[provider]) {
     $("#" + credentialFieldIds(field).clear).addEventListener("click", () => clearProviderCredential(field, provider));
   }
@@ -89,6 +90,7 @@ $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings
 $('details[data-more-segment-panel="connections"]').addEventListener("toggle", (event) => { if (event.currentTarget.open) { void loadYazioStatus(); void loadProviderChecks(); } });
 $("#zoneSettings").addEventListener("toggle", (event) => { if (event.currentTarget.open) void loadZones(); });
 ["#zoneSport", "#zoneMetric", "#zoneEnvironment"].forEach((selector) => $(selector).addEventListener("change", renderZoneEditor));
+$("#zoneFromBeginning").addEventListener("change", toggleZoneFromBeginning);
 $("#zoneForm").addEventListener("submit", saveZones);
 $("#zoneRemoveButton").addEventListener("click", removeZones);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);

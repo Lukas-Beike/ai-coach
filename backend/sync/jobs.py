@@ -14,8 +14,8 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, date, datetime
+from collections.abc import Callable, Collection, Mapping, Sequence
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
@@ -51,6 +51,10 @@ BACKFILL_CURSOR_STREAMS: dict[str, str] = {
     STREAM_BACKFILL: STREAM_HISTORY_CURSOR,
 }
 BACKFILL_JOB_TYPES = frozenset(BACKFILL_CURSOR_STREAMS)
+# Jobs that only read providers and store the result locally: running one again
+# is safe. Every other type (plan_push, competition_push, nutrition_sync) may
+# have written to a remote service, so a lost outcome is never replayed for it.
+REPLAYABLE_JOB_TYPES = frozenset({"refresh", "activity_details", *BACKFILL_JOB_TYPES})
 _BACKFILL_PROVIDER_MESSAGES = {
     "historical_backfill": ("Historischer Backfill ist nur für Garmin zulässig."),
     WELLNESS_BACKFILL: "Der Wellness-Backfill ist nur für Garmin zulässig.",
@@ -86,6 +90,12 @@ RETRYABLE_ERROR_CLASSES = frozenset(
     }
 )
 SYNC_JOB_LIST_LIMIT = 50
+# Retention of finished jobs: a completed job is pruned once it is older than
+# the age bound, and the newest SYNC_JOB_KEEP_NEWEST jobs of any status stay
+# regardless. Queued, running, failed and partial jobs are never pruned: they
+# are work in flight or need the athlete's attention.
+SYNC_JOB_RETENTION_DAYS = 30
+SYNC_JOB_KEEP_NEWEST = 200
 SYNC_JOB_MAX_ATTEMPTS = 3
 MAX_JOB_REFRESH_DAYS = 3660
 MAX_EMPTY_BACKFILL_CHUNKS = 100
@@ -161,6 +171,9 @@ def job_dto(
         for item in normalized_items
     ]
     completed, total = bounded_progress(item_dtos)
+    # The one documented, redacted cause: an item's already redacted detail, failed items first.
+    detailed = [item for item in item_dtos if item["error_detail"]]
+    detailed.sort(key=lambda item: item["status"] != "failed")
     return {
         "id": job["id"],
         "provider": job["provider"],
@@ -174,6 +187,7 @@ def job_dto(
         "started_at": job.get("started_at"),
         "finished_at": job.get("finished_at"),
         "error_class": job.get("error_class"),
+        "error_detail": detailed[0]["error_detail"] if detailed else None,
         "items": item_dtos,
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
@@ -192,7 +206,7 @@ _SETTLED_ITEMS = "status NOT IN ('completed', 'skipped')"
 # Only automatic requesters coalesce; an explicit user or coach request always
 # queues. A "backfill" continuation carries the next chunk's end_date cursor, so it
 # is never folded into another job: that would drop the cursor and stop the chain.
-_COALESCED_REQUESTERS = frozenset({"scheduler", "startup"})
+_COALESCED_REQUESTERS = frozenset({"scheduler", "startup", "connection"})
 _COALESCED_TYPES = frozenset({"refresh", *BACKFILL_JOB_TYPES})
 
 
@@ -639,12 +653,15 @@ class SyncJobStore:
         *,
         registry: ProviderRegistry = DEFAULT_PROVIDER_REGISTRY,
         foreground_busy: Callable[[], bool] | None = None,
+        held_providers: Callable[[], Collection[str]] | None = None,
     ):
         self._database_manager = database_manager
         self._now = now
         self._uuid_factory = uuid_factory
         self._registry = registry
         self._foreground_busy = foreground_busy
+        # Providers whose queued jobs stay unclaimed (a running full resync).
+        self._held_providers = held_providers
 
     def state(self, job_id: str) -> dict[str, Any] | None:
         # Job reads are pure SELECTs: a WAL snapshot never waits behind a sync.
@@ -661,20 +678,57 @@ class SyncJobStore:
         with self._database_manager.reader() as db:
             return has_active_job(db, provider, job_type)
 
+    def prune_finished(
+        self,
+        *,
+        retention_days: int = SYNC_JOB_RETENTION_DAYS,
+        keep_newest: int = SYNC_JOB_KEEP_NEWEST,
+    ) -> int:
+        """Delete old completed jobs and their items; return how many jobs went.
+
+        A job is pruned only when it completed more than ``retention_days`` ago
+        and is not among the ``keep_newest`` most recently created jobs.
+        """
+        now = datetime.fromisoformat(self._now())
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
+        cutoff = (now - timedelta(days=max(1, retention_days))).isoformat()
+        with self._database_manager.unit_of_work() as db:
+            stale = (
+                "SELECT id FROM sync_jobs WHERE status='completed' "
+                "AND COALESCE(finished_at, updated_at, created_at) < ? "
+                "AND id NOT IN (SELECT id FROM sync_jobs "
+                "ORDER BY created_at DESC, id DESC LIMIT ?)"
+            )
+            parameters = (cutoff, max(0, keep_newest))
+            db.execute(
+                f"DELETE FROM sync_job_items WHERE job_id IN ({stale})", parameters
+            )
+            return int(
+                db.execute(
+                    f"DELETE FROM sync_jobs WHERE id IN ({stale})", parameters
+                ).rowcount
+            )
+
     def has_backfill_continuation(
         self,
         provider: str,
         end_date: str,
         created_since: str,
         job_type: str = "historical_backfill",
+        exclude_job_id: str = "",
     ) -> bool:
-        """Report whether a backfill chain already continued to ``end_date``."""
+        """Report whether a backfill chain already continued to ``end_date``.
+
+        ``exclude_job_id`` is the job asking: a chunk that re-reads its own window
+        (a skipped file) names its own end day and must not count as its successor.
+        """
         with self._database_manager.reader() as db:
             row = db.execute(
                 "SELECT 1 FROM sync_jobs WHERE provider=? AND type=? "
                 "AND requested_by='backfill' AND json_extract(payload, '$.end_date')=? "
-                "AND created_at>=? LIMIT 1",
-                (provider, job_type, end_date, created_since),
+                "AND created_at>=? AND id!=? LIMIT 1",
+                (provider, job_type, end_date, created_since, exclude_job_id),
             ).fetchone()
             return row is not None
 
@@ -761,27 +815,7 @@ class SyncJobStore:
     def resume_interrupted(self) -> int:
         now = self._now()
         with self._database_manager.unit_of_work() as db:
-            jobs = db.execute(
-                "SELECT id FROM sync_jobs WHERE status='running'"
-            ).fetchall()
-            for job in jobs:
-                self._transition(
-                    db,
-                    job["id"],
-                    "running",
-                    "queued",
-                    {
-                        "available_at": now,
-                        "started_at": None,
-                        "error_class": "process_interrupted",
-                        "updated_at": now,
-                    },
-                )
-                db.execute(
-                    "UPDATE sync_job_items SET status='queued', error_class='process_interrupted', "
-                    "error_detail=NULL, updated_at=? WHERE job_id=? AND status='running'",
-                    (now, job["id"]),
-                )
+            resumed = self._requeue_running(db, now)
             # Callers run before the workers start or under the drained restore
             # gate, so no competition sync can be in flight either.
             db.execute(
@@ -794,23 +828,82 @@ class SyncJobStore:
                 "WHERE key='competition_sync_status' AND value!=''",
                 (now,),
             )
-            return len(jobs)
+            return resumed
+
+    def requeue_unowned_running(self) -> int:
+        """Settle ``running`` jobs while the single worker is between claims.
+
+        Only the worker runs jobs and it calls this before each claim, so a row
+        still ``running`` then lost its outcome (a failed write). A read-only job
+        (``REPLAYABLE_JOB_TYPES``) runs again instead of blocking its provider's
+        scheduled work until a restart. A job that may have written to a remote
+        service, or that used up its attempts, is marked failed with
+        ``outcome_not_persisted`` and its open items fail with it: only the
+        athlete's explicit resolve runs it again. Returns how many jobs were settled.
+        """
+        with self._database_manager.reader() as db:
+            running = db.execute(
+                "SELECT id, type, attempts FROM sync_jobs WHERE status='running'"
+            ).fetchall()
+        failed = 0
+        for row in running:
+            if (
+                row["type"] not in REPLAYABLE_JOB_TYPES
+                or int(row["attempts"] or 0) >= SYNC_JOB_MAX_ATTEMPTS
+            ):
+                self.update(row["id"], "failed", "outcome_not_persisted")
+                failed += 1
+        if len(running) == failed:
+            return failed
+        with self._database_manager.unit_of_work() as db:
+            return failed + self._requeue_running(db, self._now())
+
+    def _requeue_running(self, db: Any, now: str) -> int:
+        jobs = db.execute("SELECT id FROM sync_jobs WHERE status='running'").fetchall()
+        for job in jobs:
+            self._transition(
+                db,
+                job["id"],
+                "running",
+                "queued",
+                {
+                    "available_at": now,
+                    "started_at": None,
+                    "error_class": "process_interrupted",
+                    "updated_at": now,
+                },
+            )
+            db.execute(
+                "UPDATE sync_job_items SET status='queued', error_class='process_interrupted', "
+                "error_detail=NULL, updated_at=? WHERE job_id=? AND status='running'",
+                (now, job["id"]),
+            )
+        return len(jobs)
 
     def claim(self) -> dict[str, Any] | None:
         """Claim the oldest due job; backfill jobs yield to all other work.
 
         While the Coach has queued or running work, backfill jobs stay queued so
-        the single database writer remains free for the athlete's request.
+        the single database writer remains free for the athlete's request. Jobs
+        of a provider whose full resync is running stay queued as well: they are
+        neither claimed nor charged an attempt, and run once the resync ends.
         """
         now = self._now()
         hold_backfill = self._foreground_busy is not None and self._foreground_busy()
+        held = tuple(self._held_providers()) if self._held_providers else ()
         with self._database_manager.unit_of_work() as db:
             candidate = db.execute(
                 "SELECT id FROM sync_jobs WHERE status='queued' "
                 "AND (available_at IS NULL OR available_at<=?) "
                 + (f"AND type NOT IN {_BACKFILL_TYPES_SQL} " if hold_backfill else "")
+                # Placeholders only; the provider names are bound parameters.
+                + (
+                    f"AND provider NOT IN ({', '.join('?' * len(held))}) "
+                    if held
+                    else ""
+                )
                 + f"ORDER BY type IN {_BACKFILL_TYPES_SQL}, created_at, id LIMIT 1",
-                (now,),
+                (now, *held),
             ).fetchone()
             if not candidate:
                 return None
@@ -836,7 +929,19 @@ class SyncJobStore:
                 (now, job_id),
             )
             job = db.execute("SELECT * FROM sync_jobs WHERE id=?", (job_id,)).fetchone()
-            return dict(job) if job else None
+            if not job:
+                return None
+            claimed = dict(job)
+            # A retried or resumed job re-runs only the items still open.
+            claimed["settled_item_keys"] = [
+                str(row["item_key"])
+                for row in db.execute(
+                    "SELECT item_key FROM sync_job_items WHERE job_id=? "
+                    "AND status IN ('completed', 'skipped')",
+                    (job_id,),
+                ).fetchall()
+            ]
+            return claimed
 
     def update(
         self,
@@ -912,7 +1017,7 @@ class SyncJobStore:
             stored_items = [
                 dict(item)
                 for item in db.execute(
-                    f"SELECT id, item_key FROM sync_job_items WHERE job_id=? ORDER BY {ITEM_ORDER}",
+                    f"SELECT id, item_key, status FROM sync_job_items WHERE job_id=? ORDER BY {ITEM_ORDER}",
                     (job_id,),
                 ).fetchall()
             ]
@@ -1008,6 +1113,9 @@ class SyncJobStore:
             if outcome in {"synced", "already_synced", "skipped"}
             else "failed"
         )
+        if item_state == "failed" and target.get("status") in {"completed", "skipped"}:
+            # A settled item stays settled; a re-run never downgrades it.
+            return
         detail = str(redact(str(item.get("error") or "")) or "")[:500] or None
         db.execute(
             "UPDATE sync_job_items SET status=?, remote_id=COALESCE(?, remote_id), "
@@ -1055,6 +1163,43 @@ class SyncJobStore:
                 "UPDATE sync_job_items SET status='queued', error_class=?, error_detail=?, updated_at=? "
                 f"WHERE job_id=? AND {_SETTLED_ITEMS}",
                 (error_class, clipped_detail, now, job_id),
+            )
+            return True
+
+    def defer(self, job: Mapping[str, Any], available_at: str) -> bool:
+        """Requeue a claimed job without charging the attempt its claim counted.
+
+        For a job that met a busy provider lock: it did no work, so it retries at
+        ``available_at`` with the attempt budget it had before the claim.
+        """
+        now = self._now()
+        try:
+            attempts = max(0, int(job.get("attempts") or 1) - 1)
+            job_id = str(job["id"])
+            scheduled_at = self._scheduled_at(available_at, now)
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise SyncJobInvalidOperationError(
+                "Claimed sync job or retry time is invalid."
+            ) from exc
+        with self._database_manager.unit_of_work() as db:
+            self._transition(
+                db,
+                job_id,
+                "running",
+                "queued",
+                {
+                    "attempts": attempts,
+                    "available_at": scheduled_at,
+                    "finished_at": None,
+                    "error_class": None,
+                    "updated_at": now,
+                },
+            )
+            db.execute(
+                "UPDATE sync_job_items SET status='queued', "
+                "attempts=MAX(attempts-1, 0), updated_at=? "
+                f"WHERE job_id=? AND {_SETTLED_ITEMS}",
+                (now, job_id),
             )
             return True
 
@@ -1142,12 +1287,14 @@ class SyncJobStore:
 
     @staticmethod
     def _log_transition_rejection(expected_status: str, target_status: str) -> None:
-        logging.getLogger(__name__).warning(
+        logging.getLogger("intervals_coach").warning(
             "Sync job status transition rejected",
             extra={
                 "event": "sync_job_transition_rejected",
-                "expected_status": expected_status,
-                "target_status": target_status,
+                "context": {
+                    "expected_status": expected_status,
+                    "target_status": target_status,
+                },
             },
         )
 

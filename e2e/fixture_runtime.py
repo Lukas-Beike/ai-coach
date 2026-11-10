@@ -2609,19 +2609,6 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
             )
             self.send_json(200, {"activity_id": activity["id"]})
             return
-        if self.path == "/api/fixture/plan":
-            try:
-                self.auth_service.require_auth(self)
-                stage_fixture_artifact()
-                self.send_json(200, artifact)
-            except server.AppError as error:
-                self.send_json(error.status, {"error": error.message})
-            except Exception as error:  # noqa: BLE001 - report fixture setup failures as HTTP
-                self.send_json(
-                    500,
-                    {"error": type(error).__name__, "reason": "fixture_setup_failed"},
-                )
-            return
         super().do_GET()
 
 

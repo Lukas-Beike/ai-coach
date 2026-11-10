@@ -196,6 +196,13 @@ class YazioClient:
     def configured(self) -> bool:
         return self._config().yazio_configured
 
+    def secret_values(self) -> tuple[str, ...]:
+        """In-memory session tokens, for the log redactor only."""
+        with self._lock:
+            return tuple(
+                token for token in (self._access_token, self._refresh_token) if token
+            )
+
     def connection_status(self) -> dict[str, Any]:
         """Read only local verification state; never contact the provider."""
         with self._lock:

@@ -1,6 +1,6 @@
 import unittest
 
-from backend.errors import AppError, ClientDisconnected
+from backend.errors import AppError, ClientDisconnected, DatabaseBusyError
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.runtime.events import StateEventBuffer
 
@@ -56,6 +56,23 @@ class StateEventTransportTests(unittest.TestCase):
                 session_is_active=lambda: True,
             )
         return raised.exception, calls
+
+    def test_cursor_is_bounded_to_nineteen_digits(self):
+        error, calls = self._cursor_rejection("/api/state/events?since=" + "9" * 20)
+        self.assertEqual((error.status, error.reason), (400, "invalid_event_cursor"))
+        self.assertEqual(calls, [])
+
+        events = []
+        StateEventTransport(
+            FakeEventBuffer([{"events": [], "latest_event_id": 0, "gap": True}])
+        ).handle(
+            "/api/state/events?since=" + "9" * 19,
+            send_headers=lambda: None,
+            send_event=lambda *event: events.append(event),
+            set_connection_timeout=lambda _value: None,
+            session_is_active=lambda: False,
+        )
+        self.assertEqual(events[0][0], "reset")
 
     def test_non_ascii_digit_cursors_are_invalid_cursor_not_server_error(self):
         # U+00B2 SUPERSCRIPT TWO (int() rejects it) and U+0663 ARABIC-INDIC DIGIT THREE
@@ -201,6 +218,54 @@ class StateEventTransportTests(unittest.TestCase):
         )
 
         self.assertEqual(timeout_calls, [None])
+
+    def test_errors_after_the_headers_end_the_stream_without_a_second_response(self):
+        for error in (
+            DatabaseBusyError("reader"),
+            AppError(503, "synthetic"),
+            RuntimeError("synthetic"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                buffer = FakeEventBuffer(
+                    [{"events": [], "latest_event_id": 3, "gap": False}]
+                )
+                events = []
+                headers = []
+
+                def session_is_active(error=error):
+                    raise error
+
+                with self.assertLogs("intervals_coach", level="WARNING") as logs:
+                    # Returning normally keeps do_GET from calling send_json.
+                    StateEventTransport(buffer).handle(
+                        "/api/state/events?since=3",
+                        send_headers=lambda headers=headers: headers.append(True),
+                        send_event=lambda *event, events=events: events.append(event),
+                        set_connection_timeout=lambda _value: None,
+                        session_is_active=session_is_active,
+                    )
+
+                self.assertEqual(headers, [True])
+                self.assertEqual(events, [("ready", {"latest_event_id": 3}, 3)])
+                self.assertEqual(
+                    logs.records[0].context["error_type"], type(error).__name__
+                )
+                # Expected busy/app errors carry no traceback; surprises do.
+                self.assertEqual(
+                    bool(logs.records[0].exc_info),
+                    isinstance(error, RuntimeError),
+                )
+
+    def test_error_while_sending_headers_still_propagates(self):
+        # No byte is on the wire yet, so the caller may still answer normally.
+        with self.assertRaises(DatabaseBusyError):
+            StateEventTransport(FakeEventBuffer([])).handle(
+                "/api/state/events",
+                send_headers=lambda: (_ for _ in ()).throw(DatabaseBusyError("reader")),
+                send_event=lambda *_args: self.fail("no event should be sent"),
+                set_connection_timeout=lambda _value: None,
+                session_is_active=lambda: True,
+            )
 
     def test_inactive_session_ends_stream_before_sending_pending_events(self):
         buffer = FakeEventBuffer(

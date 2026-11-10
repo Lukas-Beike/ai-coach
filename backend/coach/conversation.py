@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.coach.constants import AI_PROVIDER
+from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.service import command_receipt
 from backend.coach.streams import ChatStreamRegistry
 from backend.db.manager import DatabaseManager
@@ -121,11 +122,14 @@ class CoachConversationResetService:
         self.remote_delete_thread.start()
         return True
 
-    def _active_operation_ids(self) -> list[str]:
+    def _active_operation_ids(self, *, running_only: bool = False) -> list[str]:
+        query = (
+            "SELECT receipt FROM coach_commands WHERE status = 'running'"
+            if running_only
+            else "SELECT receipt FROM coach_commands WHERE status IN ('queued', 'running')"
+        )
         with self._db_lock, self._database_manager.unit_of_work() as db:
-            rows = db.execute(
-                "SELECT receipt FROM coach_commands WHERE status IN ('queued', 'running')"
-            ).fetchall()
+            rows = db.execute(query).fetchall()
         operation_ids = (
             str(command_receipt(row["receipt"]).get("operation_id") or "")
             for row in rows
@@ -164,7 +168,11 @@ class CoachConversationResetService:
                 db.execute(
                     "UPDATE coach_commands SET status='completed', receipt=?, updated_at=? WHERE client_turn_id=?",
                     (
-                        json.dumps(receipt, ensure_ascii=False, separators=(",", ":")),
+                        json.dumps(
+                            compact_receipt(receipt),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
                         now,
                         row["client_turn_id"],
                     ),
@@ -183,6 +191,10 @@ class CoachConversationResetService:
             )
             self._key_values.set(db, "coach_pending_request", "null")
         return operation_ids, conversation_id, generation
+
+    def cancel_running_turns(self) -> None:
+        """Stop running turns before maintenance; queued turns stay queued."""
+        self._cancel_turns(self._active_operation_ids(running_only=True))
 
     def reset(self) -> dict[str, Any]:
         # A running turn holds the conversation lock until it ends, so ask it to
@@ -228,7 +240,7 @@ class CoachConversationProvisionService:
         self._key_values = key_value_repository
         self._client = openai_responses_client
         self._db_lock = db_lock
-        self._logger = logger or logging.getLogger(__name__)
+        self._logger = logger or logging.getLogger("intervals_coach")
         self.remote_delete_thread: threading.Thread | None = None
 
     def _create_remote(self) -> str:

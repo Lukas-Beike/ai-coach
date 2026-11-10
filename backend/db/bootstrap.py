@@ -81,6 +81,26 @@ def initialize_application_database(
             "AND id <> (SELECT MAX(id) FROM snapshots)",
             (cutoff,),
         ).rowcount
+        # Receipts hold copies of the chat; a turn whose changes can still be
+        # undone keeps its receipt, which is the only place that lists them.
+        commands_deleted = db.execute(
+            "DELETE FROM coach_commands WHERE status='completed' AND created_at < ? "
+            "AND NOT CASE WHEN json_valid(receipt) THEN "
+            "COALESCE(json_extract(receipt, '$.change_summary.undoable') = 1 "
+            "AND json_extract(receipt, '$.change_summary.undone_at') IS NULL, 0) "
+            "ELSE 0 END",
+            (cutoff,),
+        ).rowcount
+        artifacts_deleted = db.execute(
+            "DELETE FROM coach_plan_artifacts WHERE status <> 'draft' "
+            "AND created_at < ? AND id NOT IN "
+            "(SELECT artifact_id FROM coach_commands WHERE artifact_id IS NOT NULL)",
+            (cutoff,),
+        ).rowcount
+        proposals_deleted = db.execute(
+            "DELETE FROM coach_action_proposals WHERE expires_at <= ?",
+            (current_time.timestamp(),),
+        ).rowcount
         LOGGER.info(
             "Data retention purge completed",
             extra={
@@ -89,6 +109,9 @@ def initialize_application_database(
                     "retention_days": bounded_retention_days,
                     "messages_deleted": messages_deleted,
                     "snapshots_deleted": snapshots_deleted,
+                    "coach_commands_deleted": commands_deleted,
+                    "coach_plan_artifacts_deleted": artifacts_deleted,
+                    "coach_action_proposals_deleted": proposals_deleted,
                 },
             },
         )

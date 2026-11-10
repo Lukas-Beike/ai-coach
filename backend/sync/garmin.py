@@ -26,6 +26,11 @@ from backend.observability import Redactor
 from backend.performance.freshness import GarminSyncStatus
 from backend.provider_credentials import GARMIN_PERSONAL_KEY_REJECTED_KEY
 from backend.providers.descriptors import GARMIN_ID
+from backend.providers.garmin_capability import (
+    capability_failure_class,
+    capability_key,
+    clear_capability_state,
+)
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
 from backend.providers.garmin_gear_fields import garmin_gear_id
 from backend.sync.canonical_ingest import DeletionWindow, fetch_deletion_window
@@ -37,7 +42,6 @@ from backend.sync.garmin_snapshot_writer import (
     GarminSnapshotWriter,
     complete_activity_read_window,
 )
-from backend.sync.refresh import sync_job_error_class
 from backend.sync.state import SyncStateRepository
 
 GARMIN_CAPABILITY_FAILURE_LIMIT = 3
@@ -193,6 +197,19 @@ def _daily_metrics_due(state: dict[str, Any], today: date) -> bool:
         return True
 
 
+def _body_battery_reconciliation_due(state: dict[str, Any], today: date) -> bool:
+    provider_sync = state.get("provider_sync")
+    marker = (
+        provider_sync.get("body_battery_reconciled_on")
+        if isinstance(provider_sync, dict)
+        else None
+    )
+    try:
+        return date.fromisoformat(str(marker)) < today
+    except TypeError, ValueError:
+        return True
+
+
 def _wide_run_today(run: Any, today: date) -> bool:
     """Return whether a run read at least the reconciliation span ending today."""
     try:
@@ -304,6 +321,10 @@ class GarminPayloadService:
         """Return whether no refresh has read the daily metrics on this local day."""
         return _daily_metrics_due(self.state(), self._local_today())
 
+    def body_battery_reconciliation_due(self) -> bool:
+        """Return whether no sync has reconciled Body Battery on this local day."""
+        return _body_battery_reconciliation_due(self.state(), self._local_today())
+
     def daily_metrics_retry_due(self) -> bool:
         """Return whether a daily metric source failed on its last read."""
         return _daily_metrics_retry_due(self.state())
@@ -342,9 +363,17 @@ class GarminPayloadService:
         if _daily_metrics_due(snapshot, self._local_today()):
             minimum_days = max(minimum_days, GARMIN_RECONCILIATION_DAYS)
         freshness = snapshot.get("source_freshness") or {}
-        sources = GARMIN_WINDOW_SOURCES | (
-            set(freshness) & {"daily_stats", "resting_hr", "training_status"}
-        )
+        optional = set(freshness) & {"daily_stats", "resting_hr", "training_status"}
+        last_read = (snapshot.get("provider_sync") or {}).get("pagination")
+        if isinstance(last_read, dict) and {"daily_stats", "resting_hr"} & set(
+            last_read
+        ):
+            # A source the current transport no longer serves (an SDK-only
+            # collection after an SDK disconnect) keeps its stored coverage but
+            # must not pin the window to its old end. Only a run that read the
+            # recovery collections tells this; a backfill chunk skips them all.
+            optional &= set(last_read)
+        sources = GARMIN_WINDOW_SOURCES | optional
         today = self._local_today()
         oldest_end: date | None = None
         for source in sources:
@@ -437,6 +466,15 @@ class GarminPayloadService:
             for key in ("daily_metrics_on", "daily_metrics_retry"):
                 if previous_sync.get(key):
                     provider_sync[key] = previous_sync[key]
+        # A run without the Body Battery reconciliation keeps the day it last ran.
+        if (
+            "body_battery_reconciled_on" not in provider_sync
+            and isinstance(previous_sync, dict)
+            and previous_sync.get("body_battery_reconciled_on")
+        ):
+            provider_sync["body_battery_reconciled_on"] = previous_sync[
+                "body_battery_reconciled_on"
+            ]
         _keep_daily_read_window(
             provider_sync,
             previous_sync if isinstance(previous_sync, dict) else {},
@@ -727,7 +765,7 @@ class GarminSyncStateService:
 
     def capability_state(self, source: str) -> dict[str, Any]:
         try:
-            value = json.loads(self._get(f"garmin_capability_{source}") or "{}")
+            value = json.loads(self._get(capability_key(source)) or "{}")
         except TypeError, ValueError:
             value = {}
         return value if isinstance(value, dict) else {}
@@ -741,9 +779,19 @@ class GarminSyncStateService:
             return True
 
     def record_capability_failure(self, source: str, error: BaseException) -> None:
+        """Count a capability failure; three in a row of one class pause the source.
+
+        Only the classes of ``capability_failure_class`` count (rate limited,
+        not found, unsupported); a network error, timeout or 5xx is ignored and
+        leaves the count as it is. An expired pause starts the count again, so
+        one later failure does not pause for another day.
+        """
+        error_class = capability_failure_class(error)
+        if error_class is None:
+            return
         state = self.capability_state(source)
-        error_class = sync_job_error_class(error)
-        if state.get("error_class") != error_class:
+        expired = bool(state.get("paused_until")) and self.capability_allowed(source)
+        if expired or state.get("error_class") != error_class:
             state = {"error_class": error_class, "count": 0}
         count = int(state.get("count") or 0) + 1
         state["count"] = count
@@ -754,13 +802,18 @@ class GarminSyncStateService:
                 + timedelta(seconds=GARMIN_CAPABILITY_PAUSE_SECONDS)
             ).isoformat()
         self._set(
-            f"garmin_capability_{source}",
+            capability_key(source),
             json.dumps(state, ensure_ascii=False, separators=(",", ":")),
         )
 
     def record_capability_success(self, source: str) -> None:
         if self.capability_state(source):
-            self._set(f"garmin_capability_{source}", "")
+            self._set(capability_key(source), "")
+
+    def clear_capability_state(self) -> None:
+        """Forget every capability pause after a new key, login or reconnect."""
+        with self._database_manager.unit_of_work() as db:
+            clear_capability_state(db, self._key_value_repository)
 
     def record_sdk_skipped(self, reason: str) -> None:
         """Keep the last SDK login skip so the card can ask for a new login."""

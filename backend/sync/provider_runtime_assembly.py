@@ -44,6 +44,7 @@ from backend.sync.executor import (
     CalendarWeatherJobAdapter,
     GarminJobAdapter,
     IntervalsJobAdapter,
+    PerJobOwner,
     StreamBackfill,
     WahooJobAdapter,
 )
@@ -99,7 +100,7 @@ def intervals_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBindi
     """Bind the Intervals.icu output job routing: plan, competition and nutrition."""
     intervals = deps.intervals
 
-    def job_owner() -> ProviderJobOwner:
+    def build() -> ProviderJobOwner:
         return IntervalsJobAdapter(
             jobs=build_intervals_owner(intervals),
             nutrition_sync_service=intervals.nutrition_sync_service(),
@@ -107,7 +108,7 @@ def intervals_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBindi
 
     return ProviderRuntimeBinding(
         provider_id=INTERVALS_ID,
-        job_owner=job_owner,
+        job_owner=lambda: PerJobOwner(build),
         configured=lambda: bool(deps.config().intervals_api_key),
         gate=intervals.resync_gate,
         freshness=DEFAULT_FRESHNESS_SOURCES[INTERVALS_ID],
@@ -119,7 +120,7 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
     garmin = deps.garmin
     all_sync_days = deps.historical.all_sync_days
 
-    def job_owner() -> ProviderJobOwner:
+    def build() -> ProviderJobOwner:
         historical_sync = build_historical_owner(deps.historical, deps.state)
         return GarminJobAdapter(
             jobs=build_garmin_owner(historical_sync, garmin, all_sync_days),
@@ -132,7 +133,9 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
     def schedule() -> GarminSchedulePolicy:
         return GarminSchedulePolicy(
-            garmin.sync_service(), deps.garmin_automatic_sync_days
+            garmin.sync_service(),
+            deps.garmin_automatic_sync_days,
+            deps.garmin_resync_gate,
         )
 
     def full_resync() -> GarminFullResync:
@@ -149,7 +152,7 @@ def garmin_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding:
 
     return ProviderRuntimeBinding(
         provider_id=GARMIN_ID,
-        job_owner=job_owner,
+        job_owner=lambda: PerJobOwner(build),
         configured=lambda: bool(garmin.sync_service().configured()),
         gate=deps.garmin_resync_gate,
         schedule=schedule,

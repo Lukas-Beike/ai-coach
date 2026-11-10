@@ -213,7 +213,7 @@ async function downloadDatabaseBackup() {
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.href = url;
-    link.download = `intervals-coach-database-${todayIso()}.backup`;
+    link.download = `pacecraft-database-${todayIso()}.backup`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Verschlüsseltes Backup heruntergeladen");
@@ -310,7 +310,7 @@ async function downloadPrivacyExport() {
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.href = url;
-    link.download = `intervals-coach-export-${todayIso()}.zip`;
+    link.download = `pacecraft-export-${todayIso()}.zip`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast("Datenexport erstellt");
@@ -377,10 +377,13 @@ async function deletePrivacyData() {
     const result = await api("/api/privacy/delete", { method: "POST", body: JSON.stringify({ confirm: confirmation }) });
     const notice = $("#privacyDeleteNotice");
     if (notice) {
-      notice.hidden = !(result.remote_delete_attempted && !result.remote_conversation_deleted);
-      notice.textContent = notice.hidden
-        ? ""
-        : "Lokale Daten wurden gelöscht, aber die OpenAI-Konversation konnte remote nicht bestätigt gelöscht werden. Prüfe den Anbieterstatus separat.";
+      const problems = [];
+      if (result.remote_delete_attempted && !result.remote_conversation_deleted) problems.push("die OpenAI-Konversation konnte remote nicht bestätigt gelöscht werden");
+      if (result.wahoo_revoke_attempted && !result.wahoo_revoked) problems.push("der Wahoo-Zugriff konnte bei Wahoo nicht widerrufen werden (in den Wahoo-Kontoeinstellungen entfernen)");
+      notice.hidden = !problems.length;
+      notice.textContent = problems.length
+        ? `Lokale Daten wurden gelöscht, aber ${problems.join(" und ")}. Prüfe den Anbieterstatus separat.`
+        : "";
     }
     const resultNotice = $("#privacyDeleteResult");
     if (resultNotice) {
@@ -420,15 +423,19 @@ async function saveServiceTier(event) {
 // Local zones win over provider zones; the editor shows both and saves local values only.
 const ZONE_METRIC_LABELS = {
   power: { threshold: "FTP (W)", limits: "Zonenobergrenzen (% der FTP)", key: "percent_limits" },
-  heart_rate: { threshold: "LTHR (bpm)", limits: "Zonenobergrenzen (bpm)", key: "limits" },
+  heart_rate: { threshold: "Schwellenpuls (LSHF, bpm)", limits: "Zonenobergrenzen (bpm)", key: "limits" },
   pace: { threshold: "", limits: "Zonenobergrenzen (% der Schwellenpace)", key: "percent_limits" },
 };
 let zoneConfigurations = [];
+let zoneEffective = [];
+let zoneToday = "";
 
 async function loadZones() {
   try {
     const result = await api("/api/zones");
     zoneConfigurations = result.configurations || [];
+    zoneEffective = result.effective || [];
+    zoneToday = result.today || "";
     renderZoneEditor();
     renderZoneWarnings(result.threshold_warnings);
     // The strip follows a save or removal at once, not only the next bootstrap.
@@ -493,7 +500,9 @@ function selectedZoneConfigurations() {
   const sport = $("#zoneSport").value;
   const metric = $("#zoneMetric").value;
   const environment = $("#zoneEnvironment").value || null;
-  return zoneConfigurations.filter((item) => item.sport === sport && item.metric === metric && item.environment === environment && !item.valid_from);
+  // The server picks the configuration in effect today, Garmin defaults included.
+  const effective = zoneEffective.find((item) => item.sport === sport && item.metric === metric && item.environment === environment);
+  return zoneConfigurations.filter((item) => item.key === effective?.key);
 }
 
 function zoneLimitsText(item) {
@@ -515,6 +524,11 @@ function renderZoneEditor() {
   $("#zoneMaximum").value = shown?.maximum ?? "";
   $("#zoneLimits").value = shown ? zoneLimitsText(shown) : "";
   $("#zoneRemoveButton").hidden = !local;
+  $("#zoneFromBeginningField").hidden = selected.length > 0;
+  $("#zoneFromBeginning").checked = false;
+  $("#zoneValidFrom").disabled = false;
+  $("#zoneValidFrom").max = zoneToday;
+  $("#zoneValidFrom").value = zoneToday;
   $("#zoneRemoveButton").dataset.key = local?.key || "";
   const sources = $("#zoneSources");
   sources.replaceChildren(...selected.map((item) => {
@@ -523,6 +537,12 @@ function renderZoneEditor() {
     line.textContent = `${item.source === "local" ? "Lokal (gilt)" : item.label || item.source}${threshold} · ${zoneLimitsText(item)}`;
     return line;
   }));
+}
+
+function toggleZoneFromBeginning() {
+  const beginning = $("#zoneFromBeginning").checked;
+  $("#zoneValidFrom").disabled = beginning;
+  $("#zoneValidFrom").required = !beginning;
 }
 
 function zoneNumber(value) {
@@ -542,6 +562,7 @@ async function saveZones(event) {
         sport: $("#zoneSport").value,
         metric,
         environment: $("#zoneEnvironment").value || null,
+        ...($("#zoneFromBeginning").checked ? { from_beginning: true } : { valid_from: $("#zoneValidFrom").value }),
         threshold: ZONE_METRIC_LABELS[metric].threshold ? zoneNumber($("#zoneThreshold").value) : null,
         maximum: metric === "heart_rate" ? zoneNumber($("#zoneMaximum").value) : null,
         [ZONE_METRIC_LABELS[metric].key]: limits,

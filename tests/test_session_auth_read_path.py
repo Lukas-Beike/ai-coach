@@ -234,6 +234,44 @@ class SessionAuthReadPathTests(unittest.TestCase):
             self.auth.login_user(handler_for(), "wrong-password")
         self.assertEqual(failure.exception.status, 401)
 
+    def test_successful_logins_do_not_use_up_the_login_limit(self) -> None:
+        for _ in range(3):
+            self.auth.login_user(handler_for(), "synthetic-password")
+        for _ in range(2):
+            with self.assertRaises(AppError) as failure:
+                self.auth.login_user(handler_for(), "wrong-password")
+            self.assertEqual(failure.exception.status, 401)
+        self.assertTrue(self.auth.login_user(handler_for(), "synthetic-password"))
+
+    def test_failed_logins_stay_limited_with_retry_after(self) -> None:
+        for _ in range(5):
+            with self.assertRaises(AppError) as failure:
+                self.auth.login_user(handler_for(), "wrong-password")
+            self.assertEqual(failure.exception.status, 401)
+        for password in ("wrong-password", "synthetic-password"):
+            with self.assertRaises(AppError) as limited:
+                self.auth.login_user(handler_for(), password)
+            self.assertEqual(limited.exception.status, 429)
+            self.assertGreater(limited.exception.retry_after_seconds or 0, 0)
+
+    def test_foreign_non_rfc_cookies_keep_the_session_and_csrf_values(self) -> None:
+        for foreign in (
+            'grafana_session=ab; x={"a":1}',
+            "x=a b",
+            "x=\u00fc",
+            "novalue; =empty",
+        ):
+            with self.subTest(foreign=foreign):
+                handler = SimpleNamespace(
+                    headers={
+                        "Cookie": f"{foreign}; {SESSION_COOKIE}=TOK; ic_csrf=CSRF; "
+                        f"{SESSION_COOKIE}=SECOND"
+                    }
+                )
+                self.assertEqual(self.auth.cookie_value(handler, SESSION_COOKIE), "TOK")
+                self.assertEqual(self.auth.cookie_value(handler, "ic_csrf"), "CSRF")
+                self.assertEqual(self.auth.cookie_value(handler, "missing"), "")
+
     def test_login_and_logout_do_not_queue_behind_the_shared_database_lock(
         self,
     ) -> None:
