@@ -63,9 +63,11 @@ class NutritionHistoryTests(unittest.TestCase):
         unused: Any = None
         undo = HistoryUndoService(
             self.manager,
-            ChangeHistoryService(self.manager, unused, nutrition_diary=self.diary),
+            ChangeHistoryService(
+                self.manager, unused, record_services={"nutrition_entry": self.diary}
+            ),
             *(unused,) * 6,
-            nutrition_diary=self.diary,
+            record_services={"nutrition_entry": self.diary},
             profile_mutation_coordinator=threading.RLock(),
         )
         with self.manager.unit_of_work() as db:

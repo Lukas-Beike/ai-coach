@@ -27,6 +27,7 @@ ENTITY_TYPES = {
     "activity_feedback",
     "activity_session",
     "nutrition_entry",
+    "checkin",
     "metric_export",
 }
 # A metric export to a provider; its entity id is "<provider>:<remote record>".
@@ -182,11 +183,30 @@ NUTRITION_ENTRY_FIELDS = (
     "nutrition_basis",
     "logged_time_known",
 )
+# One daily check-in; its entity id is the check-in date. The day status and the
+# tag answers live beside the row and are present only once the athlete set them.
+CHECKIN_FIELDS = (
+    "checkin_date",
+    "soreness",
+    "stress",
+    "motivation",
+    "session_rpe",
+    "day_form",
+    "illness",
+    "pain",
+    "available_minutes",
+    "availability_notes",
+    "notes",
+    "day_status",
+    "tag_answers",
+)
 # A composite meal keeps its ingredient snapshots in nutrition_basis.
 _FIELD_LIMITS = {
     "activity_feedback": 400_000,
     "activity_session": 20_000,
     "nutrition_entry": 100_000,
+    # Free-text notes reach 4000 characters, more once JSON-escaped.
+    "checkin": 20_000,
 }
 _DEFAULT_FIELD_LIMIT = 4000
 # A local zone configuration; its entity id is the configuration key.
@@ -225,6 +245,7 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "activity_feedback": set(ACTIVITY_FEEDBACK_FIELDS),
         "activity_session": set(ACTIVITY_SESSION_FIELDS),
         "nutrition_entry": set(NUTRITION_ENTRY_FIELDS),
+        "checkin": set(CHECKIN_FIELDS),
         METRIC_EXPORT_ENTITY: set(METRIC_EXPORT_FIELDS),
     }
     try:

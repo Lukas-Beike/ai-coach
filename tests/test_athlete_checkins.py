@@ -1,7 +1,9 @@
 import sqlite3
+import threading
 import unittest
 from datetime import date
 
+from backend import change_history
 from backend.athlete.checkins import (
     CHECKIN_SCORE_FIELDS,
     CHECKIN_TEXT_LIMITS,
@@ -10,8 +12,11 @@ from backend.athlete.checkins import (
     bounded_score,
     normalize_checkin,
 )
+from backend.coach.change_receipts import change_summary, turn_changes
 from backend.db.repositories import CheckinRepository
 from backend.errors import AppError
+from backend.history.service import ChangeHistoryService
+from backend.history.undo_service import HistoryUndoService
 
 TODAY = date(2026, 8, 31)
 
@@ -25,6 +30,12 @@ class FakeManager:
             "checkin_date TEXT PRIMARY KEY, soreness INTEGER, stress INTEGER, motivation INTEGER, "
             "session_rpe INTEGER, day_form TEXT, illness TEXT, pain TEXT, available_minutes INTEGER, "
             "availability_notes TEXT, notes TEXT, created_at TEXT, updated_at TEXT)"
+        )
+        self.connection.execute(
+            "CREATE TABLE change_history (id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, "
+            "entity_id TEXT NOT NULL, action TEXT NOT NULL, source TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, before_hash TEXT NOT NULL, after_hash TEXT NOT NULL, "
+            "diff TEXT NOT NULL)"
         )
         self.commits = 0
         self.rollbacks = 0
@@ -385,6 +396,130 @@ class AthleteCheckinTests(unittest.TestCase):
             saved = self.repository.list(db, 365)
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0]["notes"], "committed")
+
+
+def _history_rows(manager, action=None):
+    with manager.unit_of_work() as db:
+        rows = db.execute(
+            "SELECT entity_type, entity_id, action FROM change_history ORDER BY rowid"
+        ).fetchall()
+    return [tuple(row) for row in rows if action in (None, row["action"])]
+
+
+def _undo(manager, service, changes):
+    unused = None
+    undo = HistoryUndoService(
+        manager,
+        ChangeHistoryService(manager, unused, record_services={"checkin": service}),
+        *(unused,) * 6,
+        record_services={"checkin": service},
+        profile_mutation_coordinator=threading.RLock(),
+    )
+    with manager.unit_of_work() as db:
+        return undo.apply_many(db, changes)
+
+
+class AthleteCheckinHistoryTests(unittest.TestCase):
+    def setUp(self):
+        self.manager = FakeManager()
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+            )
+        repository = CheckinRepository(lambda: "2026-08-31T12:00:00+00:00")
+        self.service = CheckinService(self.manager, repository, lambda: TODAY)
+
+    def tearDown(self):
+        self.manager.close()
+
+    def saved(self):
+        return next(
+            item
+            for item in self.service.list(365)
+            if item["checkin_date"] == TODAY.isoformat()
+        )
+
+    def test_create_update_and_clear_each_record_one_change(self):
+        first = self.service.save({"soreness": 4, "notes": "tired"})
+        self.assertEqual(first["change"]["action"], "create")
+        second = self.service.save_coach({"soreness": 6})
+        self.assertEqual(second["change"]["action"], "update")
+        cleared = self.service.save_coach({"clear_fields": ["notes"]})
+        self.assertEqual(cleared["change"]["action"], "update")
+        today = TODAY.isoformat()
+        self.assertEqual(
+            _history_rows(self.manager),
+            [
+                ("checkin", today, "create"),
+                ("checkin", today, "update"),
+                ("checkin", today, "update"),
+            ],
+        )
+
+    def test_unchanged_save_records_nothing(self):
+        self.service.save({"soreness": 4})
+        again = self.service.save({"soreness": 4})
+        self.assertIsNone(again["change"])
+        self.assertEqual(len(_history_rows(self.manager)), 1)
+
+    def test_undo_of_a_first_check_in_removes_it_with_status_and_tags(self):
+        with change_history.collect_changes() as changes:
+            self.service.save(
+                {"soreness": 4, "day_status": "rest", "tag_answers": {"travel": True}}
+            )
+        _undo(self.manager, self.service, changes)
+        self.assertEqual(self.service.list(365), [])
+        with self.manager.unit_of_work() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM kv").fetchone()[0], 0)
+
+    def test_undo_of_a_coach_overwrite_restores_cleared_fields_and_tags(self):
+        self.service.save(
+            {
+                "soreness": 3,
+                "illness": "Erkältung",
+                "pain": "",
+                "notes": "Knie",
+                "available_minutes": 60,
+            }
+        )
+        before = self.saved()
+        with change_history.collect_changes() as changes:
+            self.service.save_coach(
+                {
+                    "soreness": 8,
+                    "pain": "Knie",
+                    "clear_fields": ["illness", "notes", "available_minutes"],
+                    "day_status": "rest",
+                    "tag_answers": {"travel": False},
+                }
+            )
+        after = self.saved()
+        self.assertEqual(after["illness"], "")
+        self.assertEqual(after["pain"], "Knie")
+        self.assertEqual(after["day_status"], "rest")
+        _undo(self.manager, self.service, changes)
+        restored = self.saved()
+        self.assertEqual(restored, before)
+        self.assertNotIn("day_status", restored)
+        self.assertNotIn("tag_answers", restored)
+
+    def test_undo_is_rejected_when_the_day_changed_since(self):
+        self.service.save({"soreness": 3})
+        with change_history.collect_changes() as changes:
+            self.service.save({"soreness": 4})
+        self.service.save({"soreness": 5})
+        with self.assertRaises(AppError) as error:
+            _undo(self.manager, self.service, changes)
+        self.assertEqual(error.exception.status, 409)
+        self.assertEqual(self.saved()["soreness"], 5)
+
+    def test_coach_receipt_offers_undo_for_a_saved_check_in(self):
+        with change_history.collect_changes() as changes:
+            result = {"ok": True, **self.service.save_coach({"notes": "ok"})}
+        receipt = {"tool": "save_checkin", "result": result, "changes": changes}
+        summary = change_summary([receipt])
+        self.assertTrue(summary["undoable"])
+        self.assertEqual(turn_changes([receipt]), changes)
 
 
 if __name__ == "__main__":
