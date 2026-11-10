@@ -1,5 +1,7 @@
 """Real Coach/job execution with synthetic model and provider responses."""
 
+import json
+import re
 import threading
 import unittest
 import uuid
@@ -10,7 +12,7 @@ from unittest.mock import patch
 from support import parsed_workout_fixture
 from test_coach_dialogue import DialogueHarness, server
 
-from backend.activities.hr_cap import effective_caps
+from backend.activities.hr_cap import effective_caps, resolved_range
 from backend.calendar import external as calendar_external
 from backend.coach.authorization import require_coach_scope
 from backend.http_api import pagination as api_pagination
@@ -31,6 +33,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.mutations = []
         self.bad_parse = False
         self.fail_delete = False
+        self.mirror_sent = False
         self.enterContext(
             patch.object(
                 server.PROVIDER_TRANSPORT.json_http_client(),
@@ -80,6 +83,20 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 4500, sport=payload["type"], kind="hr", units="hr_zone", value=1
             )
             result = {**payload, **parsed, "id": identity}
+            if self.mirror_sent:
+                # The provider parses the text it received, bpm range included.
+                low, high = re.search(
+                    r"(\d+)-(\d+)bpm", payload["description"]
+                ).groups()
+                result["workout_doc"] = {
+                    "duration": 4500,
+                    "steps": [
+                        {
+                            "duration": 4500,
+                            "hr": {"units": "bpm", "start": int(low), "end": int(high)},
+                        }
+                    ],
+                }
             if self.bad_parse:
                 result["workout_doc"] = {"steps": []}
             self.remote[identity] = result
@@ -279,6 +296,30 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(
             [value for kind, value in self.mutations if kind == "delete"], ["duplicate"]
         )
+
+    def test_repair_of_a_capped_run_verifies_the_text_that_was_sent(self):
+        local_id = self.seed()
+        cap = effective_caps(None)["easy"]
+        with server.database_manager().unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET payload=json_set(payload, "
+                "'$.session_focus', 'easy', '$.hr_cap', json(?)) WHERE local_id=?",
+                (json.dumps(cap), local_id),
+            )
+        self.mirror_sent = True
+        lthr = 170.0
+        with patch.object(server.RUN_LTHR, "resolver", return_value=lambda _unit: lthr):
+            result = self.repair(local_id)
+        self.assertTrue(result["ok"], result)
+        low, high = resolved_range(cap, lthr)
+        sent = [value for kind, value in self.mutations if kind == "upsert"][-1]
+        self.assertIn(f"{low}-{high}bpm", sent["description"])
+        unit = next(
+            item
+            for item in server.PLANNING_DATA.planned_unit().list()
+            if item["id"] == local_id
+        )
+        self.assertEqual(unit["sync_status"], "synced")
 
     def test_multi_unit_repair_reads_calendar_twice_and_checks_all_final_results(self):
         ids = []

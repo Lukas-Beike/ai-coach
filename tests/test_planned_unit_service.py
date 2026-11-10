@@ -16,6 +16,7 @@ from unittest.mock import patch
 import remote_planned_unit_fixture
 
 from backend import change_history
+from backend.activities.hr_cap import HR_CAP_PERCENT, hr_cap
 from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import DatabaseManager, row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
@@ -631,6 +632,58 @@ class PlannedUnitServiceTests(unittest.TestCase):
             (planned[0]["sync_state"], planned[0]["sync_dirty"]), ("synced", 0)
         )
         self.assertNotIn("session_focus", json.loads(planned[0]["payload"]))
+
+    def mark_synced(self):
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET sync_state='synced', sync_dirty=0 "
+                "WHERE local_id=?",
+                (str(self.id),),
+            )
+
+    def synced_capped_unit(self, focus):
+        self.service.create(self.workout())
+        self.service.update(
+            str(self.id),
+            {"session_focus": focus, "hr_cap": hr_cap(HR_CAP_PERCENT["easy"])},
+        )
+        self.mark_synced()
+
+    def sync_state(self):
+        planned, _history, _revision = self.state()
+        return planned[0]["sync_state"], planned[0]["sync_dirty"]
+
+    def test_a_focus_edit_that_changes_the_exported_cap_marks_the_unit_pending(self):
+        # The stored cap applies only to a capped focus, so the label decides
+        # whether the watch gets the bpm range or the zone text.
+        self.synced_capped_unit("endurance")
+        self.service.update(str(self.id), {"session_focus": "easy"})
+        self.assertEqual(self.sync_state(), ("local", 1))
+
+        self.mark_synced()
+        self.service.update(str(self.id), {"session_focus": "endurance"})
+        self.assertEqual(self.sync_state(), ("local", 1))
+
+    def test_a_focus_edit_that_keeps_the_exported_cap_stays_synced(self):
+        self.synced_capped_unit("easy")
+        self.service.update(str(self.id), {"session_focus": "long"})
+        self.assertEqual(self.sync_state(), ("synced", 0))
+
+    def test_undoing_a_focus_edit_that_changes_the_cap_marks_the_unit_pending(self):
+        self.synced_capped_unit("endurance")
+        self.service.update(str(self.id), {"session_focus": "easy"})
+        self.assertEqual(self.sync_state(), ("local", 1))
+        self.mark_synced()
+        with self.manager.reader() as db:
+            current = db.execute(
+                "SELECT * FROM planned_units WHERE local_id=?", (str(self.id),)
+            ).fetchone()
+        target = {**json.loads(current["payload"]), "session_focus": "endurance"}
+        with self.manager.unit_of_work() as db:
+            self.service.restore_in_transaction(
+                db, str(self.id), dict(current), target, "undo"
+            )
+        self.assertEqual(self.sync_state(), ("local", 1))
 
     def test_archive_and_restore_are_dirty_local_updates(self):
         self.service.create(self.workout())

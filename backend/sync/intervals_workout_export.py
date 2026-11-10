@@ -141,8 +141,9 @@ class IntervalsWorkoutExport:
     def verify_library_readback(
         self, workout: dict[str, Any], remote: dict[str, Any]
     ) -> None:
+        # The read-back is checked against the text that was sent, cap included.
         planning_workouts.validate_intervals_workout_result(
-            workout,
+            planning_workouts.library_sent_workout(workout),
             intervals_fields_from_planning(remote)
             if isinstance(remote, dict)
             else remote,

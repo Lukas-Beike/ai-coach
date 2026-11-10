@@ -10,6 +10,7 @@ callers stable.
 from datetime import date, datetime
 from typing import Any
 
+from backend.activities.hr_cap_export import capped_description
 from backend.activities.workout_text import (
     WorkoutTextError,
     canonical_workout_zones,
@@ -60,11 +61,25 @@ def workout_event_payload(
     )
 
 
+def library_sent_workout(workout: dict[str, Any]) -> dict[str, Any]:
+    """The library entry as Intervals.icu receives it: the cap as percent of the LTHR.
+
+    A library entry has no date to resolve a threshold HR on, so, like the Wahoo
+    export, it carries the percent form. The stored description stays unchanged.
+    """
+    return {
+        **workout,
+        "description": capped_description(
+            str(workout.get("description") or ""), workout, percent_basis=True
+        ),
+    }
+
+
 def library_workout_payload(workout: dict[str, Any]) -> dict[str, Any]:
     validate_workout_description(workout)
     payload = {
         "name": str(workout.get("name") or "Coach-Einheit")[:200],
-        "description": str(workout.get("description") or "")[:12000],
+        "description": library_sent_workout(workout)["description"][:12000],
         "type": intervals_record_type(workout),
         "target": workout.get("target") or "AUTO",
     }
@@ -84,7 +99,7 @@ def library_workout_event_payload(
         "date": plan_date,
         **planned_stored_sport(workout).fields(),
         "name": workout.get("name") or "Bibliotheks-Einheit",
-        "description": workout.get("description") or "",
+        "description": library_sent_workout(workout)["description"],
         "duration_minutes": workout.get("duration_minutes")
         or max(5, round(float(workout.get("planned_duration_s") or 3600) / 60)),
         "target": workout.get("target") or "AUTO",

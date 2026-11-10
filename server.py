@@ -1425,6 +1425,7 @@ WORKOUT_LIBRARY_SYNC = WorkoutLibrarySyncAssembly(
             redactor=REDACTOR,
             utc_now=runtime_clock.utc_now,
             local_today=lambda: ATHLETE_CLOCK.now().date(),
+            hr_cap_resync=lambda db, payloads: RUN_LTHR.resync(db, payloads),
         ),
         uuid_factory=uuid.uuid4,
     )
