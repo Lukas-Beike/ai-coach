@@ -7,6 +7,8 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from support import temp_database
+
 from backend.db.manager import (
     DatabaseManager,
     DatabaseManagerCache,
@@ -89,9 +91,7 @@ class DatabaseManagerTests(unittest.TestCase):
         self.assertNotIn("160 MiB", doc)
 
     def make_manager(self, root: str) -> DatabaseManager:
-        return DatabaseManager(
-            Path(root) / "test.db", sqlite3, reader_count=4, row_factory=sqlite3.Row
-        )
+        return temp_database(self, path=Path(root) / "test.db", reader_count=4)
 
     def test_cache_reuses_replaces_and_resets_the_active_manager(self):
         with tempfile.TemporaryDirectory() as root:
@@ -255,11 +255,8 @@ class DatabaseManagerTests(unittest.TestCase):
 
     def test_writer_wait_is_bounded(self):
         with tempfile.TemporaryDirectory() as root:
-            manager = DatabaseManager(
-                Path(root) / "bounded-writer.db",
-                sqlite3,
-                timeout=0.05,
-                row_factory=sqlite3.Row,
+            manager = temp_database(
+                self, path=Path(root) / "bounded-writer.db", timeout=0.05
             )
             with manager.unit_of_work() as db:
                 db.execute("CREATE TABLE records (value INTEGER NOT NULL)")
@@ -299,14 +296,9 @@ class DatabaseManagerTests(unittest.TestCase):
 
     def test_readers_are_bounded_and_nested_reader_calls_reuse_the_lease(self):
         with tempfile.TemporaryDirectory() as root:
-            manager = DatabaseManager(
-                Path(root) / "bounded.db",
-                sqlite3,
-                reader_count=1,
-                timeout=0.05,
-                row_factory=sqlite3.Row,
+            manager = temp_database(
+                self, path=Path(root) / "bounded.db", reader_count=1, timeout=0.05
             )
-            self.addCleanup(manager.close)
             with manager.reader() as first:
                 with manager.reader() as nested:
                     self.assertIs(first, nested)
@@ -327,14 +319,7 @@ class DatabaseManagerTests(unittest.TestCase):
             manager.close()
 
     def make_wal_manager(self, **options) -> DatabaseManager:
-        root = self.enterContext(tempfile.TemporaryDirectory())
-        manager = DatabaseManager(
-            Path(root) / "snapshot.db",
-            sqlite3,
-            row_factory=sqlite3.Row,
-            **options,
-        )
-        self.addCleanup(manager.close)
+        manager = temp_database(self, "snapshot.db", **options)
         with manager.unit_of_work() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("CREATE TABLE records (value INTEGER NOT NULL)")
@@ -836,11 +821,7 @@ class WriterGateTests(unittest.TestCase):
             holder.join(5)
 
     def make_manager(self) -> DatabaseManager:
-        root = self.enterContext(tempfile.TemporaryDirectory())
-        manager = DatabaseManager(
-            Path(root) / "gate.db", sqlite3, row_factory=sqlite3.Row
-        )
-        self.addCleanup(manager.close)
+        manager = temp_database(self, "gate.db")
         with manager.unit_of_work() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("CREATE TABLE records (value INTEGER NOT NULL)")

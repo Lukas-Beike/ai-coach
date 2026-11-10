@@ -24,6 +24,7 @@ from unittest import mock
 
 import test_db_migrations as gate
 import test_db_strength_sets_migration as strength_sets
+from support import temp_database
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.restore_validation import (
@@ -259,15 +260,14 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                 self.assert_encrypted(path)
 
     def manager(self, path: Path) -> DatabaseManager:
-        manager = DatabaseManager(
-            path,
-            cipher_backend,
+        return temp_database(
+            self,
+            path=path,
+            backend=cipher_backend,
             password=CIPHER_PHRASE,
             configure=configure_cipher,
             row_factory=row_factory,
         )
-        self.addCleanup(manager.close)
-        return manager
 
     def upgraded(self, version: int) -> Path:
         path, _ = self.released(version)

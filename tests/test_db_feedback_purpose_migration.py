@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from support import connect
+
 from backend.db import migrations
 from backend.db.migrations import migrate_schema
 from backend.db.schema import (
@@ -38,13 +40,6 @@ FEEDBACK = (
     ("g1", "Ride", "fine", 5, "garmin", SESSION, STAMP),
     ("w1", "Run", "", 0, None, None, None),
 )
-
-
-def connect(path: str | Path = ":memory:") -> sqlite3.Connection:
-    db = sqlite3.connect(path)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys = ON")
-    return db
 
 
 def populated(release: int) -> sqlite3.Connection:

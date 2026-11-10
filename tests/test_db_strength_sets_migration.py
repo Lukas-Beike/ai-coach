@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from support import connect
+
 from backend.db import migrations
 from backend.db.migrations import migrate_schema
 from backend.db.schema import (
@@ -49,13 +51,6 @@ V21_SET_COLUMNS = (
     "zone_boundary_source, summary_sha256, content_sha256, fetched_at, "
     "created_at, updated_at"
 )
-
-
-def connect(path: str | Path = ":memory:") -> sqlite3.Connection:
-    db = sqlite3.connect(path)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys = ON")
-    return db
 
 
 def populate(db: sqlite3.Connection, version: int) -> None:
