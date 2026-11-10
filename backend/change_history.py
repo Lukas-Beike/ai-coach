@@ -193,6 +193,13 @@ NUTRITION_TEMPLATE_FIELDS = (
     "description",
     "meal_type",
     "meal_type_explicit",
+    "kcal",
+    "carbs_g",
+    "protein_g",
+    "fat_g",
+    "source",
+    "nutrition_basis",
+)
 # A saved food product; the update time is not tracked, so a save without a change
 # records nothing. The favorite flag is a display preference and stays out, so
 # toggling it neither enters the history nor blocks undo of an earlier change.
@@ -207,8 +214,6 @@ NUTRITION_PRODUCT_FIELDS = (
     "carbs_g",
     "protein_g",
     "fat_g",
-    "source",
-    "nutrition_basis",
     "sugar_g",
     "fiber_g",
     "salt_g",
