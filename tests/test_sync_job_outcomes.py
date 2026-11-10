@@ -217,6 +217,17 @@ class SyncJobOutcomeServiceTests(unittest.TestCase):
         self.assertEqual(status, "queued")
         self.assertEqual(self.store.state(job["id"])["status"], "queued")
 
+    def test_a_failure_clears_the_contention_start(self):
+        job = self.enqueue()
+        claimed = self.claim(job)
+        self.service.complete(job["id"], {"status": "already_running"}, job=claimed)
+        self.assertIn(job["id"], job_outcomes._CONTENDED_SINCE)
+        self.current_time += timedelta(seconds=31)
+
+        self.service.record_failure(self.claim(job), AppError(502, "down"))
+
+        self.assertNotIn(job["id"], job_outcomes._CONTENDED_SINCE)
+
     def test_retryable_failure_requeues_wakes_and_publishes_no_event(self):
         job = self.enqueue()
         claimed = self.claim(job)

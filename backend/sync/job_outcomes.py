@@ -130,6 +130,7 @@ class SyncJobOutcomeService:
 
     def record_failure(self, job: dict[str, Any], exc: BaseException) -> None:
         """Requeue a retryable failure or persist and log its final outcome."""
+        _clear_contention(str(job.get("id") or ""))
         error_class = sync_job_error_class(exc)
         detail = self._redactor(str(getattr(exc, "message", "") or exc))[:500]
         attempt = int(job.get("attempts") or 1)
