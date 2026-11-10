@@ -157,6 +157,23 @@ class SessionRebundleTests(LinkingCase):
             self._summary(),
         )
 
+    def test_a_copy_on_a_neighbouring_local_date_is_bundled(self) -> None:
+        self._unbundled_pairs()
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_records SET local_date = '2026-09-03' "
+                "WHERE provider = 'wahoo' AND provider_activity_id = ?",
+                (RUN_WAHOO,),
+            )
+
+        self._run()
+
+        sessions = self._sessions()
+        self.assertEqual("duplicate", sessions[RUN_WAHOO]["state"])
+        self.assertEqual(
+            sessions[RUN_GARMIN]["activity_id"], sessions[RUN_WAHOO]["merged_into"]
+        )
+
     def test_a_second_startup_does_nothing(self) -> None:
         self._unbundled_pairs()
         self._run()
