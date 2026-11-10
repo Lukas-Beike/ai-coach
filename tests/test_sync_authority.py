@@ -193,12 +193,22 @@ class PlanningAuthorityServiceTests(unittest.TestCase):
         self.add_planned("moved", state="synced", dirty=0, payload=capped)
         self.add_planned("steady", state="synced", dirty=0, payload=capped)
         self.add_planned("plain", state="synced", dirty=0)
+        self.add_planned(
+            "archived", state="synced", dirty=0, payload={**capped, "archived": True}
+        )
+        self.add_planned(
+            "deleted",
+            state="synced",
+            dirty=0,
+            payload={**capped, "local_deleted": True},
+        )
         self.add_planned("open", state="local")
         seen: list[dict[str, object]] = []
 
         def resync(_db: object, payloads: list[dict[str, object]]) -> set[str]:
             seen.extend(payloads)
-            return {"moved"}
+            # A moved range on an archived or deleted unit must not be offered.
+            return {"moved", "archived", "deleted"}
 
         state_service = WorkoutLibrarySyncStateService(
             self.database_manager,

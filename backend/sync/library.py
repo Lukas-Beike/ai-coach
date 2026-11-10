@@ -132,9 +132,17 @@ class WorkoutLibrarySyncStateService:
             {**payload, "local_id": row["local_id"], "sync_status": row["sync_state"]}
             for row in rows
             if isinstance(payload := self._parse_payload(row["payload"]), dict)
+            # Like the calendar: archived or deleted units are never offered.
+            and not payload.get("archived")
+            and not payload.get("local_deleted")
         ]
+        active = {str(payload["local_id"]) for payload in payloads}
         moved = self._hr_cap_resync(db, payloads) if payloads else set()
-        return [row for row in rows if str(row["local_id"]) in moved]
+        return [
+            row
+            for row in rows
+            if str(row["local_id"]) in moved and str(row["local_id"]) in active
+        ]
 
     @staticmethod
     def _with_linked_external_ids(
