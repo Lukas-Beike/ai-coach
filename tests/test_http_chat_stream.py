@@ -112,6 +112,30 @@ class CoachChatStreamTransportTests(unittest.TestCase):
         )
         self.assertFalse(self.cancel_event.is_set())
 
+    def test_pending_maintenance_detaches_a_queued_turn_relay(self) -> None:
+        self.transport = CoachChatStreamTransport(
+            self.registry,
+            self.submission_factory,
+            self.receipt_factory,
+            self.redact,
+            self.logger,
+            max_request_bytes=12345,
+            response_timeout_seconds=180,
+            maintenance_pending=lambda: True,
+        )
+        self.events = Mock()
+        self.events.get.side_effect = [queue.Empty()]
+        self.registry.events.return_value = self.events
+        self.submission.active.return_value = True
+
+        self.transport.handle(self.handler, self.session)
+
+        self.handler.send_sse_event.assert_called_with(
+            "background", {"operation_id": "new-operation"}
+        )
+        self.assertFalse(self.cancel_event.is_set())
+        self.registry.unregister.assert_called_once()
+
     def test_header_disconnect_still_submits_without_further_events(self) -> None:
         self.handler.send_sse_headers.side_effect = ClientDisconnected()
         self.events.put(("completed", {"status": "done"}))

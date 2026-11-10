@@ -25,8 +25,10 @@ class CoachChatStreamTransport:
         *,
         max_request_bytes: int,
         response_timeout_seconds: int,
+        maintenance_pending: Callable[[], bool] = lambda: False,
     ) -> None:
         self._registry = registry
+        self._maintenance_pending = maintenance_pending
         self._submission_service = submission_service
         self._receipt_service = receipt_service
         self._redact_text = redact_text
@@ -151,6 +153,11 @@ class CoachChatStreamTransport:
                 event, data = events.get(timeout=15)
             except queue.Empty:
                 active = self._submission_service().active(session_hash, operation_id)
+                if active and self._maintenance_pending():
+                    # A pending restore or delete drains open requests; detach so
+                    # a queued turn's relay does not hold its operation.
+                    send_event("background", {"operation_id": operation_id})
+                    break
                 if active:
                     send_event("heartbeat", {"operation_id": operation_id})
                     continue
