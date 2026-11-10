@@ -20,7 +20,6 @@ class ChangeHistoryService:
         zone_service: Any | None = None,
         feedback_service: Any | None = None,
         session_corrections: Any | None = None,
-        nutrition_diary: Any | None = None,
         *,
         record_services: Mapping[str, Any] | None = None,
     ):
@@ -29,7 +28,6 @@ class ChangeHistoryService:
         self._zone_service = zone_service
         self._feedback_service = feedback_service
         self._session_corrections = session_corrections
-        self._nutrition_diary = nutrition_diary
         # Entity type -> service with current(db, id) -> (value, projection).
         self._record_services = dict(record_services or {})
 
@@ -64,8 +62,6 @@ class ChangeHistoryService:
             entity_type == "activity_session" and self._session_corrections is not None
         ):
             return self._session_corrections.current(db, entity_id)
-        elif entity_type == "nutrition_entry" and self._nutrition_diary is not None:
-            return self._nutrition_diary.current(db, entity_id)
         elif entity_type in self._record_services:
             return self._record_services[entity_type].current(db, entity_id)
         else:

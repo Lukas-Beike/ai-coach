@@ -72,18 +72,16 @@ class HistoryAssembly:
             zone_service=self._zones(),
             feedback_service=self._feedback(),
             session_corrections=self._corrections(),
-            nutrition_diary=self._nutrition(),
             record_services=self._record_services(),
         )
 
     def _record_services(self) -> dict[str, Any]:
         services = {}
+        if self._nutrition_diary is not None:
+            services["nutrition_entry"] = self._nutrition_diary()
         if self._checkin_service is not None:
             services["checkin"] = self._checkin_service()
         return services
-
-    def _nutrition(self) -> Any | None:
-        return None if self._nutrition_diary is None else self._nutrition_diary()
 
     def _corrections(self) -> Any | None:
         return (
@@ -109,7 +107,6 @@ class HistoryAssembly:
             zone_service=self._zones(),
             feedback_service=self._feedback(),
             session_corrections=self._corrections(),
-            nutrition_diary=self._nutrition(),
             record_services=self._record_services(),
             profile_mutation_coordinator=self._profile_service().mutation_coordinator,
         )
