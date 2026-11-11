@@ -840,6 +840,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
             result = service.delete("LOKALE DATEN LÖSCHEN")
         self.assertEqual(result["recovery_copies_failed"], 3)
         self.assertTrue(result["log_files_failed"])
+        self.assertNotIn("server_logs", result["deleted_categories"])
         self.assertEqual(result["deleted_categories"]["recovery_copies"], 0)
         self.assertTrue(result["local_data_deleted"])
 

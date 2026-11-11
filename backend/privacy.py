@@ -323,7 +323,7 @@ class PrivacyDeleteService:
         if log_files is None:
             return False
         try:
-            deleted_counts[LOG_FILES_CATEGORY] = log_files.count()
+            count = log_files.count()
             log_files.clear()
         except OSError as exc:
             self._dependencies.logger.warning(
@@ -334,6 +334,7 @@ class PrivacyDeleteService:
                 },
             )
             return True
+        deleted_counts[LOG_FILES_CATEGORY] = count
         return False
 
     def delete(self, confirm: Any) -> dict[str, Any]:

@@ -389,9 +389,9 @@ async function deletePrivacyData() {
     if (resultNotice) {
       const deleted = Object.entries(result.deleted_categories || {}).map(([category, count]) => `${category}: ${count}`).join(" · ");
       resultNotice.hidden = false;
-      const kept = result.recovery_copies_failed
+      const kept = (result.recovery_copies_failed
         ? ` ${result.recovery_copies_failed} Wiederherstellungskopie(n) im Datenordner konnten nicht gelöscht werden.`
-        : "";
+        : "") + (result.log_files_failed ? " Die Server-Protokolldateien konnten nicht gelöscht werden." : "");
       resultNotice.textContent = `Lokale Datenklassen gelöscht: ${deleted || "keine"}. Remote-Providerdaten bleiben unverändert.${kept}`;
     }
     toast("Lokale Daten gelöscht");
