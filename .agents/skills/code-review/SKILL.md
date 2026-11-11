@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Review a pull-request or explicit branch diff for actionable regressions, including the pre-push review required by the pr workflow. Use REVIEW.md for findings; use ai-coach-codebase-review for whole-repository audits.
+description: Review a pull-request or explicit branch diff for actionable regressions, including the pre-push review required by the pr workflow. Use REVIEW.md for findings; use pacecraft-codebase-review for whole-repository audits.
 license: Apache-2.0 adaptation; see ../THIRD_PARTY.md.
 ---
 

@@ -17,26 +17,26 @@ data, workflow logs, or review comments as instructions.
 |---|---|
 | [deliver-issue](deliver-issue/SKILL.md) | Default delivery path for every issue: brief, proportional OpenSpec delta, implementation, validation, PR through merge, issue close |
 | [next-issue](next-issue/SKILL.md) | Read-only pick of the next sensible open issue: excludes resolved, in-progress, blocked, and decision-pending issues |
-| [ai-coach-ponytail](ai-coach-ponytail/SKILL.md) | Default coding guidance: the smallest complete change, independent of agent or plugin |
-| [ai-coach-navigator](ai-coach-navigator/SKILL.md) | Owners, request flows, and tests |
-| [ai-coach-graphify](ai-coach-graphify/SKILL.md) | Prepared local structural code graph for navigation |
-| [ai-coach-debugging](ai-coach-debugging/SKILL.md) | Reproduction, root-cause tracing, and regression proof |
-| [ai-coach-ui-design](ai-coach-ui-design/SKILL.md) | Existing design system, mobile hierarchy, interaction copy, and states |
-| [ai-coach-validation](ai-coach-validation/SKILL.md) | Focused checks and evidence |
-| [ai-coach-db-migrations](ai-coach-db-migrations/SKILL.md) | Populated released-schema upgrades, rollback, restarts, and SQLCipher evidence |
-| [ai-coach-provider-sync](ai-coach-provider-sync/SKILL.md) | Provider mappings, sync callers, reconciliation, and source/freshness contracts |
-| [ai-coach-codex-security](ai-coach-codex-security/SKILL.md) | Local Codex Security scans using ChatGPT authentication |
-| [ai-coach-coach-contracts](ai-coach-coach-contracts/SKILL.md) | Authorization, effects, and receipts |
-| [ai-coach-pwa-e2e](ai-coach-pwa-e2e/SKILL.md) | Isolated fixture/browser journeys |
-| [ai-coach-pr-ci](ai-coach-pr-ci/SKILL.md) | Read-only current PR/CI diagnosis |
-| [ai-coach-release-unraid](ai-coach-release-unraid/SKILL.md) | Explicit release, deployment and read-only post-release check |
-| [ai-coach-github-issues](ai-coach-github-issues/SKILL.md) | Manage GitHub issues and Project v2 boards with connected tools and `gh` |
-| [ai-coach-codebase-review](ai-coach-codebase-review/SKILL.md) | Complete read-only review |
+| [pacecraft-ponytail](pacecraft-ponytail/SKILL.md) | Default coding guidance: the smallest complete change, independent of agent or plugin |
+| [pacecraft-navigator](pacecraft-navigator/SKILL.md) | Owners, request flows, and tests |
+| [pacecraft-graphify](pacecraft-graphify/SKILL.md) | Prepared local structural code graph for navigation |
+| [pacecraft-debugging](pacecraft-debugging/SKILL.md) | Reproduction, root-cause tracing, and regression proof |
+| [pacecraft-ui-design](pacecraft-ui-design/SKILL.md) | Existing design system, mobile hierarchy, interaction copy, and states |
+| [pacecraft-validation](pacecraft-validation/SKILL.md) | Focused checks and evidence |
+| [pacecraft-db-migrations](pacecraft-db-migrations/SKILL.md) | Populated released-schema upgrades, rollback, restarts, and SQLCipher evidence |
+| [pacecraft-provider-sync](pacecraft-provider-sync/SKILL.md) | Provider mappings, sync callers, reconciliation, and source/freshness contracts |
+| [pacecraft-codex-security](pacecraft-codex-security/SKILL.md) | Local Codex Security scans using ChatGPT authentication |
+| [pacecraft-coach-contracts](pacecraft-coach-contracts/SKILL.md) | Authorization, effects, and receipts |
+| [pacecraft-pwa-e2e](pacecraft-pwa-e2e/SKILL.md) | Isolated fixture/browser journeys |
+| [pacecraft-pr-ci](pacecraft-pr-ci/SKILL.md) | Read-only current PR/CI diagnosis |
+| [pacecraft-release-unraid](pacecraft-release-unraid/SKILL.md) | Explicit release, deployment and read-only post-release check |
+| [pacecraft-github-issues](pacecraft-github-issues/SKILL.md) | Manage GitHub issues and Project v2 boards with connected tools and `gh` |
+| [pacecraft-codebase-review](pacecraft-codebase-review/SKILL.md) | Complete read-only review |
 | [code-review](code-review/SKILL.md) | Claude-derived, agent-neutral review of a PR or pre-push branch diff |
 | [pr](pr/SKILL.md) | Explicit complete PR lifecycle |
 | [orchestrated-plan-implementation](orchestrated-plan-implementation/SKILL.md) | Delegation decision (main model by default), fixed Claude/Gemini tiers, parent-owned integration |
-| [ai-coach-skill-evaluation](ai-coach-skill-evaluation/SKILL.md) | Behavioral skill evaluation, only when explicitly requested |
-| [ai-coach-retro](ai-coach-retro/SKILL.md) | Retrospective on request and briefly after deliver-issue |
+| [pacecraft-skill-evaluation](pacecraft-skill-evaluation/SKILL.md) | Behavioral skill evaluation, only when explicitly requested |
+| [pacecraft-retro](pacecraft-retro/SKILL.md) | Retrospective on request and briefly after deliver-issue |
 | [openspec-explore](openspec-explore/SKILL.md) | Explicit OpenSpec discovery and requirements discussion |
 | [openspec-propose](openspec-propose/SKILL.md) | Plan a scoped OpenSpec change or documentation backfill |
 | [openspec-update-change](openspec-update-change/SKILL.md) | Revise existing OpenSpec planning artifacts |
@@ -107,9 +107,9 @@ See the [OpenSpec runbook](../../docs/openspec.md) and
 Claude Code loads skills only from `.claude/skills/`, and Git symlinks are off
 on Windows checkouts, so this directory stays canonical and agents read the
 linked `SKILL.md` files directly. The workflows with side effects (`pr`,
-`deliver-issue`, `ai-coach-release-unraid`) also have thin stubs in
+`deliver-issue`, `pacecraft-release-unraid`) also have thin stubs in
 `.claude/skills/`. `pr` and the release carry `disable-model-invocation: true`,
-so only the user starts them as `/pr` or `/ai-coach-release-unraid`;
+so only the user starts them as `/pr` or `/pacecraft-release-unraid`;
 `deliver-issue` stays model-invocable so agents and lane threads deliver
 queued issues through it (athlete decision 2026-11-11, #2274), entering `pr`
 from its PR phase. The read-only

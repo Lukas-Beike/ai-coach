@@ -73,7 +73,7 @@ class AiDocsContractTests(unittest.TestCase):
     def test_skill_evaluation_cases_are_valid_and_targets_exist(self) -> None:
         catalogue = json.loads(
             (
-                SKILL_ROOT / "ai-coach-skill-evaluation" / "evals" / "cases.json"
+                SKILL_ROOT / "pacecraft-skill-evaluation" / "evals" / "cases.json"
             ).read_text(encoding="utf-8")
         )
         self.assertIs(type(catalogue["catalog_version"]), int)
@@ -134,7 +134,7 @@ class AiDocsContractTests(unittest.TestCase):
 
     def test_validation_skill_does_not_reference_removed_test_module(self) -> None:
         validation = (
-            ROOT / ".agents" / "skills" / "ai-coach-validation" / "SKILL.md"
+            ROOT / ".agents" / "skills" / "pacecraft-validation" / "SKILL.md"
         ).read_text(encoding="utf-8")
         self.assertNotIn("tests/test_server.py", validation)
         self.assertTrue((ROOT / "tests" / "run_tests.py").is_file())
