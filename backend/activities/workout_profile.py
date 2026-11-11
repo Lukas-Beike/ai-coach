@@ -7,7 +7,6 @@ from typing import Any
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.activities.zone_settings import (
     ZoneSettings,
-    percent_zone,
 )
 
 _ZONE_TARGET = re.compile(r"Z([1-7])(?:\s*-\s*Z([1-7]))?(?:\s+(?:HR|PACE))?")
@@ -62,16 +61,12 @@ def planned_profile(
 
 
 def recorded_profile(
-    activity: dict[str, Any],
-    *,
-    ftp_w: float | None = None,
-    threshold_hr_bpm: float | None = None,
-    zones: ZoneSettings | None = None,
+    activity: dict[str, Any], zones: ZoneSettings | None = None
 ) -> dict[str, Any] | None:
-    """Profile of the recorded watts, else heart rate, colored by the threshold.
+    """Profile of the recorded watts, else heart rate, colored by the session's zones.
 
-    ``zones`` gives the session's configured zone limits; without it the
-    default limits apply.
+    ``zones`` holds the thresholds and limits resolved locally for the session
+    date; without a matching threshold the segments stay uncolored.
     """
     streams = _profile_streams(activity)
     if streams is None:
@@ -79,20 +74,14 @@ def recorded_profile(
     times, values, kind, start, end = streams
     width = (end - start) / 60
     totals, known = _bucket_totals(times, values, kind, start, end)
-    threshold = _number(ftp_w if kind == "watts" else threshold_hr_bpm)
-    zones = zones or ZoneSettings()
-    limits = zones.power_limits if kind == "watts" else zones.hr_limits
+    unit = "W" if kind == "watts" else "bpm"
     segments = [
-        _recorded_segment(total, coverage, width, kind, threshold, limits)
+        _recorded_segment(total, coverage, width, unit, zones or ZoneSettings())
         for total, coverage in zip(totals, known, strict=True)
     ]
     if not any(item["value"] is not None for item in segments):
         return None
-    return {
-        "source": "recorded",
-        "unit": "W" if kind == "watts" else "bpm",
-        "segments": segments,
-    }
+    return {"source": "recorded", "unit": unit, "segments": segments}
 
 
 def _planned_segments(
@@ -235,25 +224,13 @@ def _bucket_totals(
 
 
 def _recorded_segment(
-    total: float,
-    coverage: float,
-    width: float,
-    kind: str,
-    threshold: float | None,
-    limits: tuple[float, ...],
+    total: float, coverage: float, width: float, unit: str, zones: ZoneSettings
 ) -> dict[str, Any]:
     value = total / coverage if coverage >= width * 0.8 else None
-    zone = None
-    if value is not None and threshold and threshold > 0:
-        zone = percent_zone(value / threshold * 100, limits)
-    label = "Missing"
-    if value is not None:
-        unit = "W" if kind == "watts" else "bpm"
-        label = f"{value:.0f} {unit}"
     return {
         "duration": width,
         "value": value,
         "end_value": value,
-        "zone": zone,
-        "label": label,
+        "zone": None if value is None else zones.absolute_zone(unit, value),
+        "label": "Missing" if value is None else f"{value:.0f} {unit}",
     }

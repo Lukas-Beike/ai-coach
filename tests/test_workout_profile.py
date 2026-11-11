@@ -150,12 +150,18 @@ class WorkoutProfileTests(unittest.TestCase):
             "streams": {"time": list(range(61)), "heartrate": [140] * 61},
             "lthr": 170,
         }
-        profile = recorded_profile(activity, threshold_hr_bpm=170)
+        profile = recorded_profile(activity, ZoneSettings(lthr=170))
         self.assertEqual(2, profile["segments"][0]["zone"])
         # C-504: configured limits color the recording (82 % of LTHR is above 80 %).
-        configured = ZoneSettings(hr_limits=(60, 80, 90, 100))
-        profile = recorded_profile(activity, threshold_hr_bpm=170, zones=configured)
+        profile = recorded_profile(
+            activity, ZoneSettings(lthr=170, hr_limits=(60, 80, 90, 100))
+        )
         self.assertEqual(3, profile["segments"][0]["zone"])
+        # Without an LTHR the max-HR reference of the watch zones colors it too.
+        reference = ZoneSettings(hr_reference_bpm=170, hr_limits=(60, 80, 90, 100))
+        self.assertEqual(
+            3, recorded_profile(activity, reference)["segments"][0]["zone"]
+        )
         # A provider threshold in the activity is never read.
         self.assertIsNone(recorded_profile(activity)["segments"][0]["zone"])
 
@@ -166,14 +172,13 @@ class WorkoutProfileTests(unittest.TestCase):
             "streams": {"time": list(range(61)), "watts": samples},
             "icu_ftp": 200,
         }
-        configured = ZoneSettings(power_limits=(45, 60, 75, 90, 105, 120))
         self.assertEqual(
             2,
-            recorded_profile(activity, ftp_w=200, zones=configured)["segments"][0][
-                "zone"
-            ],
+            recorded_profile(
+                activity, ZoneSettings(ftp=200, power_limits=(45, 60, 75, 90, 105, 120))
+            )["segments"][0]["zone"],
         )
-        profile = recorded_profile(activity, ftp_w=200)
+        profile = recorded_profile(activity, ZoneSettings(ftp=200))
         self.assertEqual("recorded", profile["source"])
         self.assertEqual(60, len(profile["segments"]))
         self.assertEqual(100, profile["segments"][0]["value"])

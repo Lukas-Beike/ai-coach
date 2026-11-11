@@ -175,27 +175,16 @@ def session_analysis(
 
 
 def calendar_profile(
-    records: Sequence[ActivityRecord],
-    merged: MergedDetail,
-    *,
-    ftp_w: float | None,
-    threshold_hr_bpm: float | None,
-    zones: ZoneSettings | None = None,
+    records: Sequence[ActivityRecord], merged: MergedDetail, zones: ZoneSettings
 ) -> dict[str, Any] | None:
     """The recorded workout profile of the calendar, from the merged streams.
 
-    Power segments are colored against ``ftp_w``, heart-rate segments against
-    ``threshold_hr_bpm``, both resolved locally for the session date, with the
-    limits of the session's ``zones``.
+    ``zones`` are the session's thresholds and limits, resolved locally for the
+    session date, the same the zone times count with.
     """
     ordered = measured_order(records)
     adapted = analysis_input(ordered[0], merged.streams, None, members=ordered)
-    return recorded_profile(
-        adapted.activity,
-        ftp_w=ftp_w,
-        threshold_hr_bpm=threshold_hr_bpm,
-        zones=zones,
-    )
+    return recorded_profile(adapted.activity, zones)
 
 
 def session_heart_rate_histogram(
