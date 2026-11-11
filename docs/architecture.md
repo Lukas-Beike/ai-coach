@@ -76,5 +76,8 @@ remaining modules own their named domains: `api.js`, `navigation.js`,
 `state.js`, `state-loader.js`, `views.js`, `plan-views.js`, `coach.js`,
 `analysis.js`, `activity-details.js`, `activity-analysis.js`, `nutrition.js`,
 `components.js`, `connection-status.js` (provider status chips),
-`status-strip.js` (the one status strip), and
+`status-strip.js` (the one status strip), `format.js` (number, date and
+duration formats), `view-refresh.js` (the refresh control of a view),
+`provider-connections.js` (credential forms), `provider-checks.js` (explicit
+connection checks), `wahoo-connection.js` (the Wahoo connection card), and
 `appearance.js`. The service worker owns the offline asset cache.
