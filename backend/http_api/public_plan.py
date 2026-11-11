@@ -82,8 +82,8 @@ class PublicPlanStateService:
     def read_public(self, local_only: bool = False) -> dict[str, Any]:
         """Return the plan state with neutral metric names for the browser.
 
-        ``read`` keeps the stored metric keys because the training report and
-        season scenarios consume them internally.
+        ``read`` keeps the stored metric keys because the training report
+        consumes them internally.
         """
         return neutral_calendar_state(self.read(local_only=local_only))
 

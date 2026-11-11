@@ -267,7 +267,7 @@ class ActivityCallerResolutionTests(_Fixture):
             repository,
             references=ActivityReferences(self.manager),
         )
-        routes = FeedbackPostRoutes(lambda: Mock(), lambda: service)
+        routes = FeedbackPostRoutes(lambda: service)
         handler = SimpleNamespace(
             read_json=Mock(return_value={"session_rpe": 6}), send_json=Mock()
         )
@@ -282,7 +282,7 @@ class ActivityCallerResolutionTests(_Fixture):
             Mock(get=Mock(return_value=None)),
             references=ActivityReferences(self.manager),
         )
-        routes = FeedbackPostRoutes(lambda: Mock(), lambda: service)
+        routes = FeedbackPostRoutes(lambda: service)
         handler = SimpleNamespace(
             read_json=Mock(return_value={"session_rpe": 6}), send_json=Mock()
         )

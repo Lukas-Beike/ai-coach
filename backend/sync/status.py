@@ -212,5 +212,5 @@ class SyncPublicStateService:
         # them out of the nested sync card preserves its bounded payload size.
         for key in ("state_versions", "provider_freshness", "maintenance"):
             result.pop(key, None)
-        result["status"] = self._get_value("sync_status") or result.get("message")
+        result["status"] = result.get("message")
         return result

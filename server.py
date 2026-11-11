@@ -2204,9 +2204,6 @@ SESSION_FOCUS_BACKFILL = SessionFocusBackfill(
     ),
     bump_planning_revision=PLANNING_REVISION_SERVICE.bump,
     database_manager=database_manager,
-    history_undo=HISTORY.undo_service,
-    database_lock=DB_LOCK,
-    maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     publish_change=lambda: runtime_events.STATE_EVENT_BUFFER.publish(
         "coach", {"status": "changed"}
     ),
@@ -2373,7 +2370,6 @@ HTTP_API = HttpApiAssembly(
                 actions=HttpCoachWriteActions(
                     job_cancellation_service=COACH_BACKGROUND_JOBS.cancellation_service,
                     context_preview_service=COACH_CONTEXT.preview_service,
-                    proposal_creation_service=COACH_PROPOSALS.creation_service,
                     proposal_confirmation_service=COACH_PROPOSALS.confirmation_service,
                     proposal_execution_service=COACH_PROPOSALS.execution_service,
                     reset_service=COACH_CONVERSATION.reset_service,
@@ -2420,9 +2416,7 @@ HTTP_API = HttpApiAssembly(
                 report=DIAGNOSTICS_ASSEMBLY.report_service,
             ),
             history=HttpHistoryServices(
-                change_history=HISTORY.change_history_service,
                 undo=HISTORY.undo_service,
-                session_focus_backfill_undo=lambda: SESSION_FOCUS_BACKFILL.undo,
             ),
             workout_library=PLANNING_DATA.workout_library,
             planned_unit=PLANNING_DATA.planned_unit,

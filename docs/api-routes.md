@@ -56,12 +56,11 @@ activity IDs no longer resolve.
 | GET | `/api/sync/status`, `/api/sync/jobs/{id}` | Synchronization status and job result | Auth |
 | GET | `/api/garmin/full-resync`, `/api/wahoo/full-resync` | State and outcome of the full resync that was started in the background | Auth |
 | GET | `/api/chat/history`, `/api/chat/receipt`, `/api/chat/status` | Coach history, receipts and status | Auth |
-| GET | `/api/change-history` | Local change history | Auth |
 | GET | `/api/state/events` | Authenticated state event stream | Auth |
 | GET | `/api/logs`, `/api/logs/download`, `/api/diagnostics` | Diagnostics and redacted logs | Auth |
 | GET | `/api/privacy/export`, `/api/privacy/delete/preview`, `/api/privacy/backup`, `/api/privacy/gps` | Privacy export, deletion preview, backup, and the GPS-track setting with its stored-track count | Auth |
-| GET | `/api/analysis/endurance`, `/api/analysis/power-profiles`, `/api/analysis/season`, `/api/analysis/training-records` | Analysis projections | Auth |
-| GET | `/api/nutrition/day`, `/api/nutrition/range`, `/api/nutrition/templates`, `/api/nutrition/week`, `/api/nutrition/products` | Nutrition projections and product search | Auth |
+| GET | `/api/analysis/power-profiles`, `/api/analysis/training-records` | Analysis projections | Auth |
+| GET | `/api/nutrition/day`, `/api/nutrition/week`, `/api/nutrition/products` | Nutrition projections and product search | Auth |
 | GET | `/api/nutrition/yazio/status` | Read the last local Yazio authentication check without contacting Yazio | Auth |
 | GET | `/api/providers/connections` | Read the last local connection check per provider without contacting any provider | Auth |
 
@@ -69,33 +68,28 @@ activity IDs no longer resolve.
 
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
-| POST | `/api/chat`, `/api/chat/stream`, `/api/chat/reset`, `/api/chat/cancel` | Submit, stream, reset (body `{"confirmed": true}`, else 400 `confirmation_required`) or cancel Coach work | CSRF |
+| POST | `/api/chat/stream`, `/api/chat/reset`, `/api/chat/cancel` | Stream, reset (body `{"confirmed": true}`, else 400 `confirmation_required`) or cancel Coach work | CSRF |
 | POST | `/api/coach/actions/confirm`, `/api/coach/actions/cancel`, `/api/coach/actions/execute` | Confirm, cancel or execute a Coach proposal | CSRF |
-| POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback; activity feedback returns a `change` undo reference | CSRF |
+| POST | `/api/activities/{id}/feedback` | Save activity feedback; returns a `change` undo reference | CSRF |
 | POST | `/api/activities/{id}/session` | Confirm, split, merge or delete one session bundle | CSRF |
 | POST | `/api/planned-units/{id}/focus` | Set or clear `session_focus` and `strength_intensity` of a planned unit; returns the unit | CSRF |
 | POST | `/api/planned-units/{id}/garmin-exercise` | Assign the Garmin exercise of one strength exercise (`exercise_index`, `garmin_exercise`, `expected_payload_hash`) | CSRF |
-| POST | `/api/sync/jobs`, `/api/sync/jobs/{id}/resolve` | Queue or resolve a sync job | CSRF |
+| POST | `/api/sync/jobs` | Queue a sync job | CSRF |
 | POST | `/api/garmin/sync`, `/api/wahoo/sync` | Queue provider synchronization | CSRF |
 | POST | `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Start the confirmed full resync in the background (`202` with `operation_id`; `200` `already_running` while one runs) | CSRF |
 | POST | `/api/external-calendar/sync`, `/api/weather/sync`, `/api/analysis/refresh`, `/api/nutrition/refresh` | Queue or run a targeted refresh | CSRF |
-| POST | `/api/analysis/scenarios` | Project a training scenario without saving it | CSRF |
-| POST | `/api/change-history/undo/preview`, `/api/change-history/undo`, `/api/change-history/undo-turn` | Preview or apply an undo, or undo one Coach turn | CSRF |
-| POST | `/api/change-history/undo-focus-backfill` | Restore every unit the one-time session focus backfill changed, or none | CSRF |
+| POST | `/api/change-history/undo`, `/api/change-history/undo-turn` | Apply an undo, or undo one Coach turn | CSRF |
 | POST | `/api/privacy/delete`, `/api/privacy/restore` | Delete or restore privacy data | CSRF |
 | POST | `/api/privacy/gps`, `/api/privacy/gps/delete` | Turn GPS-track storage on or off; delete every stored track and the routes derived from them after the typed confirmation | CSRF |
 | POST | `/api/routes/rename` | Rename a recognised route (`route_id`, `name`: 1 to 60 characters without control characters); answers `route_id` and `label` only | CSRF |
 | POST | `/api/logs/delete`, `/api/diagnostics/delete` | Clear diagnostics data | CSRF |
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |
-| POST | `/api/equipment/sensor` | Link a recorded sensor to equipment, or unlink it | CSRF |
 | POST | `/api/profile/first-threshold/adopt` | Store the shown first threshold estimate (`percent_lthr`) as the profile's first threshold with origin `estimated`; `replace_measured: true` is needed when a measured value is stored | CSRF |
 | POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/entry/add-product` | Write or delete nutrition entries, or add a saved product to a logged meal | CSRF |
 | POST | `/api/nutrition/yazio/check` | Explicitly check Yazio authentication and record an in-memory result | CSRF |
 | POST | `/api/providers/{id}/check` | Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result | CSRF |
 | POST | `/api/nutrition/products`, `/api/nutrition/products/lookup`, `/api/nutrition/products/extract`, `/api/nutrition/products/archive`, `/api/nutrition/products/favorite`, `/api/nutrition/products/database/delete` | Save, look up, extract, archive or mark as favorite products, or forget a food database entry | CSRF |
 | POST | `/api/wahoo/connect`, `/api/wahoo/disconnect` | Start the Wahoo OAuth connection or disconnect Wahoo | CSRF |
-| POST | `/api/metric-export/preview` | Preview metric values for export without writing | CSRF |
-| POST | `/api/metric-export/execute` | Intervals.icu write: send the confirmed metric selection | CSRF |
 | POST | `/api/metric-export/automatic` | Intervals.icu write: switch the automatic metric export (consent per field); needs `confirmed: true`, a boolean `enabled`, `source: "garmin"` and `provider: "intervals"` | CSRF |
 | POST | `/api/transcribe` | Transcribe short-lived voice input | CSRF |
 

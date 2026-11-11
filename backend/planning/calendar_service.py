@@ -6,7 +6,6 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import markers
-from backend.errors import AppError
 from backend.planning import calendar, context
 from backend.planning.conflicts import (
     calendar_conflicts_for_items,
@@ -26,7 +25,6 @@ class CalendarConflictService:
         self, workout: dict[str, Any], events: list[dict[str, Any]] | None = None
     ) -> list[dict[str, Any]]:
         """Return current marker decisions with source and freshness evidence."""
-        self._require_current_calendar_constraints()
         conflicts = []
         source_events = (
             self._external_calendar_reader.list_events(
@@ -56,24 +54,6 @@ class CalendarConflictService:
                 }
             )
         return conflicts
-
-    def _require_current_calendar_constraints(self) -> None:
-        with self._database_manager.unit_of_work() as db:
-            # Some lightweight domain test fixtures omit unrelated durable tables.
-            has_kv = db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kv'"
-            ).fetchone()
-            if not has_kv:
-                return
-            required = db.execute(
-                "SELECT value FROM kv WHERE key='external_calendar_constraints_refresh_required'"
-            ).fetchone()
-        if required and required["value"] == "1":
-            raise AppError(
-                409,
-                "Bitte den Kalender synchronisieren, bevor Kalenderbeschränkungen geprüft werden können.",
-                reason="calendar_refresh_required",
-            )
 
     def conflicts(
         self,

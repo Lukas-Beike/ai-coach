@@ -35,12 +35,7 @@ class SyncCommandEndpointTests(unittest.TestCase):
         self.assertFalse(SyncCommandEndpoint.handles("/api/other"))
         self.assertFalse(SyncCommandEndpoint.needs_body("/api/weather/sync"))
         self.assertTrue(SyncCommandEndpoint.needs_body("/api/garmin/full-resync"))
-        self.assertTrue(
-            SyncCommandEndpoint.needs_body("/api/sync/jobs/abc-123/resolve")
-        )
-        self.assertFalse(
-            SyncCommandEndpoint.handles("/api/sync/jobs/not_valid/resolve")
-        )
+        self.assertFalse(SyncCommandEndpoint.handles("/api/sync/jobs/abc-123/resolve"))
 
     def test_manual_period_validation_precedes_queue_mutation(self):
         self.state.sync_period.return_value = 30
@@ -119,7 +114,7 @@ class SyncCommandEndpointTests(unittest.TestCase):
             self.assertEqual(raised.exception.status, 400)
         self.queue.enqueue.assert_not_called()
 
-    def test_job_request_and_conflict_resolution_keep_requested_by_and_status(self):
+    def test_job_request_keeps_requested_by_and_status(self):
         self.queue.enqueue.return_value = {"id": "job-2"}
         self.assertEqual(
             self.endpoint.execute(
@@ -133,16 +128,6 @@ class SyncCommandEndpointTests(unittest.TestCase):
             {"force": True},
             requested_by="user",
             item_operations=None,
-        )
-        self.queue.resolve.return_value = {"status": "resolved"}
-        self.assertEqual(
-            self.endpoint.execute(
-                "/api/sync/jobs/abc-123/resolve", {"strategy": "keep_local"}
-            ),
-            (200, {"status": "resolved"}),
-        )
-        self.queue.resolve.assert_called_once_with(
-            "abc-123", {"strategy": "keep_local"}
         )
 
     def test_a_ui_plan_push_stores_one_job_item_per_entry(self):

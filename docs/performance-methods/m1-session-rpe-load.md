@@ -115,7 +115,6 @@ endurance athlete.
 | Duration unit | minutes | source | R1 uses minutes for 30/60/90-min bouts. |
 | Duration includes warm-up and cool-down | yes | product assumption | R1 text read does not say; R2 rated sessions including warm-up and cool-down. Decided to match the rated whole session. |
 | Fallback rating source | Garmin `directWorkoutRpe` / 10, then Intervals `icu_rpe`, only without local rating | product assumption | Decision D3 on #1406, precedence local -> Garmin from #1724 (the Intervals.icu ingest is removed, #1728/#1819; only an `icu_rpe` stored earlier is read); keeps provider value labelled and separate. |
-| Existing scenario model constants (not M1) | 42 and 7 days | product assumption | `backend/planning/season_preparation.py` (`load_scenarios` parameters `ctl_days` and `atl_days`, and the exponential steps in the same module); R17 model form, parameters not validated for this athlete. |
 | Long interruption mark | elapsed − moving > 15 min or > 20 % of elapsed | product assumption | Science review 2026-11-07 (#1770), athlete decision; not a published value. A café stop on a long ride is marked, short traffic stops are not. |
 | Sports exempt from the mark | strength, yoga | product assumption | Athlete decision 2026-11-07 (#1770): rests between sets are part of the rated session. |
 | Duplicate session matching | start within 30 min, duration within max(120 s, 10 %), distance within max(500 m, 10 %) | product assumption | Existing canonical session bundling in `bundle_sessions`; not a scientific rule. |

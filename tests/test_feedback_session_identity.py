@@ -28,10 +28,8 @@ from backend.performance.report_service import (
     TrainingReportReadService,
 )
 from backend.planning.block_review import block_review, last_completed_test
-from backend.planning.season_preparation import load_scenarios
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from tests.test_training_report import (
-    _empty_season_source,
     _FakeDatabaseManager,
     _Rows,
     _summary,
@@ -396,8 +394,6 @@ class ReportFeedbackTests(FeedbackSessionFixture):
             read_checkins=list,
             read_feedback=self.service.for_activity_ids,
             today=lambda: date(2026, 10, 2),
-            load_scenarios=load_scenarios,
-            season_source=_empty_season_source(),
             canonical=CanonicalPerformanceSource(
                 database_manager=_FakeDatabaseManager,
                 observation_reader=_EmptyReader,

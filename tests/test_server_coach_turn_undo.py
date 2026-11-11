@@ -65,9 +65,7 @@ class CoachTurnUndoTests(ServerTestCase):
     def _undo(self, turn_id: str) -> dict:
         handler = Mock()
         handler.read_json.return_value = {"client_turn_id": turn_id}
-        handled = server.HTTP_API.history_undo_post_routes.handle(
-            handler, _ROUTE, {"csrf_hash": "session-csrf-hash"}
-        )
+        handled = server.HTTP_API.history_undo_post_routes.handle(handler, _ROUTE)
         self.assertTrue(handled)
         status, payload = handler.send_json.call_args.args
         self.assertEqual(status, 200)

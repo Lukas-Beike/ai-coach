@@ -11,7 +11,6 @@ from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.provider_credentials import WAHOO_TOKENS_KEY, garmin_tokens_connected
-from backend.sync.intervals_state import latest_library_timestamp
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.wahoo_connection import connection_status
 
@@ -223,7 +222,4 @@ class PublicBootstrapService:
 
 
 def _library_activity_at(deps: Any, db: Any) -> str | None:
-    return latest_library_timestamp(
-        deps.key_values.get_in_transaction(db, "last_library_sync_at"),
-        deps.key_values.get_in_transaction(db, "last_library_push_at"),
-    )
+    return deps.key_values.get_in_transaction(db, "last_library_push_at") or None

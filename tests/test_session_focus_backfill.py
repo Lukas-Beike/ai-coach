@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
 import unittest
 import uuid
 from datetime import date
@@ -15,8 +14,6 @@ from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository, PlanningStateRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.history.service import ChangeHistoryService
-from backend.history.undo_service import HistoryUndoService
 from backend.planning.planned_unit_load import estimate_planned_unit
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
@@ -67,17 +64,6 @@ class SessionFocusBackfillTests(unittest.TestCase):
             NoCalendarConflicts(),
             lambda: None,
         )
-        self.undo_service = HistoryUndoService(
-            self.manager,
-            ChangeHistoryService(self.manager, None),
-            None,
-            None,
-            None,
-            self.units,
-            None,
-            self.revisions,
-            profile_mutation_coordinator=threading.RLock(),
-        )
         self.key_values = KeyValueRepository(lambda: NOW)
         self.stage = SessionFocusBackfill(
             key_values=self.key_values,
@@ -89,9 +75,6 @@ class SessionFocusBackfillTests(unittest.TestCase):
             update_unit=self.units.update,
             bump_planning_revision=self.revisions.bump,
             database_manager=lambda: self.manager,
-            history_undo=lambda: self.undo_service,
-            database_lock=threading.RLock(),
-            maintenance_gate=MaintenanceGate(),
             publish_change=lambda: self.published.append("changed"),
         )
 
@@ -221,7 +204,6 @@ class SessionFocusBackfillTests(unittest.TestCase):
         self.assertEqual("easy", self.payload(refused)["session_focus"])
         self.assertEqual("complete", self.state()["status"])
         self.assertEqual(2, len(self.state()["changes"]))
-        self.assertEqual(2, self.stage.undo()["restored"])
 
     def test_a_second_run_changes_nothing(self) -> None:
         self.create()
@@ -237,45 +219,6 @@ class SessionFocusBackfillTests(unittest.TestCase):
         self.assertEqual(history, self.history_count())
         self.assertEqual(revision, self.revision())
         self.assertNotIn("session_focus", self.payload(later))
-
-    def test_undo_restores_every_unit_in_one_step(self) -> None:
-        first = self.create()
-        second = self.create(name="Lockerer Ride", sport="Ride")
-        self.run_stage()
-        self.assertEqual("easy", self.payload(first)["session_focus"])
-
-        result = self.stage.undo()
-
-        self.assertEqual(
-            {"status": "undone", "restored": 2},
-            {key: result[key] for key in ("status", "restored")},
-        )
-        for local_id in (first, second):
-            self.assertNotIn("session_focus", self.payload(local_id))
-        with self.assertRaises(AppError) as again:
-            self.stage.undo()
-        self.assertEqual(409, again.exception.status)
-
-    def test_undo_is_all_or_nothing_when_a_unit_was_edited_since(self) -> None:
-        first = self.create()
-        second = self.create(name="Lockerer Ride", sport="Ride")
-        self.run_stage()
-        self.units.update(second, {"session_focus": "recovery"})
-
-        with self.assertRaises(AppError):
-            self.stage.undo()
-
-        self.assertEqual("easy", self.payload(first)["session_focus"])
-        self.assertEqual("recovery", self.payload(second)["session_focus"])
-        self.assertNotIn("undone_at", self.state())
-
-    def test_undo_without_a_run_or_changes_is_refused(self) -> None:
-        with self.assertRaises(AppError):
-            self.stage.undo()
-        self.create(name="Lauf")
-        self.run_stage()
-        with self.assertRaises(AppError):
-            self.stage.undo()
 
     def test_a_failed_run_is_marked_and_retried(self) -> None:
         self.create()

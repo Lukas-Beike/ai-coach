@@ -9,9 +9,7 @@ from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.report_service import TrainingReportReadService
-from backend.planning.season_preparation import load_scenarios
 from tests.test_training_report import (
-    _empty_season_source,
     _FakeDatabaseManager,
     _Rows,
     _summary,
@@ -42,8 +40,6 @@ class WeeklyProgressTests(unittest.TestCase):
             read_checkins=list,
             read_feedback=lambda keys: [],
             today=lambda: self.TODAY,
-            load_scenarios=load_scenarios,
-            season_source=_empty_season_source(),
             canonical=CanonicalPerformanceSource(
                 database_manager=_FakeDatabaseManager,
                 observation_reader=_EmptyReader,

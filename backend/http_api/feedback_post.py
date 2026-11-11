@@ -1,4 +1,4 @@
-"""Authenticated athlete feedback and activity session correction POST routes."""
+"""Authenticated activity feedback and session correction POST routes."""
 
 from __future__ import annotations
 
@@ -6,22 +6,19 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from backend.athlete.checkins import CheckinService
 from backend.errors import AppError
 from backend.http_api.session_load_response import with_session_load
 
 
 class FeedbackPostRoutes:
-    """Dispatch athlete feedback and session corrections to their domain services."""
+    """Dispatch activity feedback and session corrections to their domain services."""
 
     def __init__(
         self,
-        checkin_service: Callable[[], CheckinService],
         activity_feedback_service: Callable[[], Any] | None = None,
         session_rpe_load: Callable[[str], Any] | None = None,
         session_corrections: Callable[[], Any] | None = None,
     ) -> None:
-        self._checkin_service = checkin_service
         self._activity_feedback_service = activity_feedback_service
         self._session_rpe_load = session_rpe_load
         self._session_corrections = session_corrections
@@ -54,13 +51,7 @@ class FeedbackPostRoutes:
             result = with_session_load(result, self._session_rpe_load, activity_id)
             handler.send_json(200, result)
             return True
-        if path != "/api/feedback":
-            return False
-
-        payload = handler.read_json()
-        result = self._checkin_service().save(payload)
-        handler.send_json(200, result)
-        return True
+        return False
 
     def _correct_session(self, activity_id: str, payload: Any) -> dict[str, Any]:
         """Confirm, split or merge one session; the response carries its new bundle."""

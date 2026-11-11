@@ -405,7 +405,6 @@
  "test_http_export_streams.ExportStreamTransportTests": 0.007,
  "test_http_feedback_post.ActivityFeedbackPostRouteTests": 0.001,
  "test_http_feedback_post.FeedbackPostRoutesTests": 0.001,
- "test_http_history_get_routes.HistoryGetRoutesTests": 0.007,
  "test_http_history_undo_post_routes.HistoryUndoPostRoutesTests": 0.006,
  "test_http_planning_commands_post.PlanningCommandsPostRoutesTests": 0.002,
  "test_http_planning_get_routes.PlanningGetRoutesTests": 0.006,
