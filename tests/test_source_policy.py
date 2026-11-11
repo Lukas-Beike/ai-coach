@@ -9,10 +9,12 @@ the canonical path intentionally differs from the legacy output.
 
 from __future__ import annotations
 
+import re
 import unittest
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -36,6 +38,7 @@ from backend.performance.recovery_context import performance_recovery_context
 from backend.performance.source_policy import (
     CURRENT_RULES,
     DAILY_RULES,
+    PREFERENCE_PROFILE_FIELDS,
     Candidate,
     preferences_from_profile,
     resolve_candidates,
@@ -47,6 +50,8 @@ from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 GARMIN = ProviderId.GARMIN
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def current_performance_metrics(snapshot, profile, garmin, **kwargs):
@@ -710,7 +715,10 @@ class PreferredSourceTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(dict(preferences), {"resting_hr": GARMIN})
+        self.assertEqual(dict(preferences), {})
+        # Only the body group has a preference (#2084); garmin is its one choice.
+        body = preferences_from_profile({"preferred_source_body": "garmin"})
+        self.assertEqual(dict(body), {"body": GARMIN})
 
     def test_a_stored_intervals_preference_is_ignored_everywhere(self) -> None:
         profile = {
@@ -742,11 +750,11 @@ class PreferredSourceTests(unittest.TestCase):
         )
 
     def test_preferring_garmin_never_falls_back_to_another_method(self) -> None:
-        preferences = preferences_from_profile({"preferred_source_sleep": "garmin"})
-        intervals = _obs(MetricKind.SLEEP_SCORE, 80.0, TODAY)
+        preferences = preferences_from_profile({"preferred_source_body": "garmin"})
+        intervals = _obs(MetricKind.BODY_FAT, 18.0, TODAY)
 
         self.assertIsNone(
-            select_current([intervals], MetricKind.SLEEP_SCORE, preferences=preferences)
+            select_current([intervals], MetricKind.BODY_FAT, preferences=preferences)
         )
 
     def test_a_garmin_body_preference_keeps_the_profile_value_behind_garmin(
@@ -766,6 +774,16 @@ class PreferredSourceTests(unittest.TestCase):
         assert resolved is not None
         self.assertIs(resolved.winner, garmin)
         self.assertEqual(resolved.alternatives, (profile,))
+        # The control changes the outcome: without it the newer entry wins.
+        default = resolve_candidates(MetricKind.WEIGHT, (profile, garmin), as_of=TODAY)
+        assert default is not None
+        self.assertIs(default.winner, profile)
+
+    def test_the_settings_show_one_control_per_effective_group(self) -> None:
+        # Every source control shown changes an outcome, or is gone (#2084).
+        page = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+        shown = set(re.findall(r'name="(preferred_source_\w+)"', page))
+        self.assertEqual(shown, set(PREFERENCE_PROFILE_FIELDS.values()))
 
 
 class DailySelectionTests(unittest.TestCase):

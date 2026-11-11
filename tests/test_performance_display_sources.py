@@ -47,7 +47,6 @@ class PreferredDisplayTests(unittest.TestCase):
         payload = preferred_providers(
             preferences_from_profile(
                 {
-                    "preferred_source_hrv": "garmin",
                     "preferred_source_body": "garmin",
                     "preferred_source_resting_hr": "intervals",
                 }
