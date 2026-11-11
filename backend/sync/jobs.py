@@ -819,6 +819,13 @@ class SyncJobStore:
             return job_dto(job, items), True
 
     def resume_interrupted(self) -> int:
+        """Settle the jobs a stopped process left ``running``; return the requeued.
+
+        A restart is a lost outcome like any other (#2137, A-501): a job that may
+        have written to a remote service, or that used up its attempts, fails
+        with ``outcome_not_persisted`` instead of running again.
+        """
+        self._fail_unreplayable_running()
         now = self._now()
         with self._database_manager.unit_of_work() as db:
             resumed = self._requeue_running(db, now)
@@ -847,6 +854,17 @@ class SyncJobStore:
         ``outcome_not_persisted`` and its open items fail with it: only the
         athlete's explicit resolve runs it again. Returns how many jobs were settled.
         """
+        failed, replayable = self._fail_unreplayable_running()
+        if not replayable:
+            return failed
+        with self._database_manager.unit_of_work() as db:
+            return failed + self._requeue_running(db, self._now())
+
+    def _fail_unreplayable_running(self) -> tuple[int, int]:
+        """Fail running jobs with remote effects or no attempts left.
+
+        Returns how many failed and how many running jobs remain to requeue.
+        """
         with self._database_manager.reader() as db:
             running = db.execute(
                 "SELECT id, type, attempts FROM sync_jobs WHERE status='running'"
@@ -859,10 +877,7 @@ class SyncJobStore:
             ):
                 self.update(row["id"], "failed", "outcome_not_persisted")
                 failed += 1
-        if len(running) == failed:
-            return failed
-        with self._database_manager.unit_of_work() as db:
-            return failed + self._requeue_running(db, self._now())
+        return failed, len(running) - failed
 
     def _requeue_running(self, db: Any, now: str) -> int:
         jobs = db.execute("SELECT id FROM sync_jobs WHERE status='running'").fetchall()

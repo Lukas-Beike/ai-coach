@@ -116,17 +116,21 @@ Detailed contract: Historical work SHALL yield to non-backfill jobs and active f
 Evidence: `backend/sync/executor.py:HistoricalSyncJobOwner`, `backend/sync/garmin_wellness_history.py:GarminWellnessHistoryService`, `backend/providers/garmin_wellness_history.py:collect_wellness_history`; `tests/test_garmin_wellness_history.py`, `backend/sync/garmin_rating_backfill.py:GarminRatingBackfillService`, `tests/test_garmin_rating_backfill.py`, `backend/sync/stream_backfill.py:StreamBackfillService`, `tests/test_stream_backfill.py`, `backend/sync/windows.py:split_date_windows`, `backend/sync/jobs.py:SyncJobStore.claim`; `tests/test_startup_sync_scheduler.py:test_cursor_date_and_earliest_boundary_contract`, `tests/test_sync_jobs.py:test_claim_holds_backfill_while_foreground_work_runs`, `tests/test_sync_jobs.py:test_backfill_continuation_keeps_its_cursor_while_a_chunk_runs`.
 
 ### Requirement: Worker retries and restart recovery
-The system SHALL conditionally claim due queued jobs and increment attempts once, enforce declared job-state transitions, preserve completed items across retry, and classify complete, partial, failed, and skipped item outcomes. Retryable failures SHALL use bounded backoff and at most three attempts. Restart recovery SHALL requeue interrupted running work. Explicit resolution SHALL accept only `action=retry` for failed or partial jobs.
+The system SHALL conditionally claim due queued jobs and increment attempts once, enforce declared job-state transitions, preserve completed items across retry, and classify complete, partial, failed, and skipped item outcomes. Retryable failures SHALL use bounded backoff and at most three attempts. Restart recovery SHALL treat interrupted work as a lost outcome. Explicit resolution SHALL accept only `action=retry` for failed or partial jobs.
 
 #### Scenario: Temporary provider failure
 - **WHEN** a claimed job fails with a retryable class below its attempt limit
 - **THEN** it is requeued for a future eligible instant while already completed items remain complete.
 
+#### Scenario: Restart during a remote write
+- **WHEN** the process stops while a plan push, competition push or nutrition export is running, or while a job runs its last attempt
+- **THEN** after the restart that job is failed with `outcome_not_persisted` and its open items with it, never replayed, until the athlete retries it; interrupted read-only jobs are requeued.
+
 #### Scenario: Invalid manual retry
 - **WHEN** a caller retries a completed job, an unknown job, or a payload without the explicit retry action
 - **THEN** the system returns its appropriate validation, conflict, or not-found error without resetting successful work.
 
-Evidence: `backend/sync/jobs.py:SyncJobStore.claim`, `backend/sync/jobs.py:SyncJobStore.resume_interrupted`, `backend/sync/job_outcomes.py:SyncJobOutcomeService`, `backend/sync/queue.py:SyncJobQueueService.resolve`; `tests/test_sync_jobs.py:test_resume_interrupted_resets_running_records_and_claims_again`, `tests/test_sync_jobs.py:test_failure_and_requeue_never_overwrite_completed_items`, `tests/test_sync_job_outcomes.py:test_exhausted_retry_updates_and_publishes_final_failure`.
+Evidence: `backend/sync/jobs.py:SyncJobStore.claim`, `backend/sync/jobs.py:SyncJobStore.resume_interrupted`, `backend/sync/job_outcomes.py:SyncJobOutcomeService`, `backend/sync/queue.py:SyncJobQueueService.resolve`; `tests/test_sync_jobs.py:test_resume_interrupted_resets_running_records_and_claims_again`, `tests/test_sync_jobs.py:test_requeue_unowned_running_never_replays_a_job_with_remote_effects`, `tests/test_sync_jobs.py:test_requeue_unowned_running_fails_a_job_without_attempts_left`, `tests/test_sync_jobs.py:test_failure_and_requeue_never_overwrite_completed_items`, `tests/test_sync_job_outcomes.py:test_exhausted_retry_updates_and_publishes_final_failure`.
 
 ### Requirement: Explicit full resync and safe status
 The system SHALL require `confirm=FULL_RESYNC` on a full-resync route, serialize the operation with a provider reset gate, reject missing configuration before resetting, and release the gate and operation context on success or failure. A full read resync SHALL not imply remote plan or competition writes.
