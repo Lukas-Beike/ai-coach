@@ -330,7 +330,7 @@ class DiagnosticReportService:
                 ),
                 "session_rebundle": section(
                     "session_rebundle",
-                    lambda: summarize_session_rebundle(deps.key_values, db),
+                    lambda: summarize_session_rebundle(key_values, db),
                 ),
                 "logs": log_entries,
                 "debug_capture": {
