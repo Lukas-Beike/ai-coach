@@ -26,6 +26,7 @@ from backend.history.undo_service import HistoryUndoService
 from backend.planning import planned_units
 from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.changes import StructuredTrainingChangeValidator
+from backend.planning.intervals_orphans import find_intervals_orphans
 from backend.planning.local_start import known_start
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
@@ -1250,7 +1251,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertIsNone(deleted)
         self.assertEqual(self.state(), ([], [], 0))
 
-    def test_undoing_a_creation_keeps_the_garmin_link_of_a_pushed_workout(self):
+    def test_undoing_a_creation_keeps_the_links_of_a_pushed_workout(self):
         entity_id = str(self.id)
         entry = planned_units.normalize_planned_unit(self.workout(), local_id=entity_id)
         repository = RemoteLinkRepository()
@@ -1279,7 +1280,13 @@ class PlannedUnitServiceTests(unittest.TestCase):
                     db, RemoteEntityKind.PLANNED_UNIT, entity_id
                 )
             ]
-        self.assertEqual(["garmin"], kept)
+            orphans, _count = find_intervals_orphans(db, date(2026, 9, 20))
+        # The Intervals.icu event stays reachable as a hidden leftover (#2135).
+        self.assertEqual(["garmin", "intervals"], sorted(kept))
+        self.assertEqual([entity_id], [orphan.local_id for orphan in orphans])
+        hidden = json.loads(self.state()[0][0]["payload"])
+        self.assertTrue(hidden["local_deleted"])
+        self.assertEqual("intervals-1", hidden["remote_event_id"])
 
     def test_restore_in_transaction_rejects_conflict_and_corrupt_payload(self):
         entity_id = str(self.id)
