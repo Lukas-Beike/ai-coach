@@ -13,6 +13,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.mapping import coerce_comma_decimal_number
 from backend.performance import freshness as performance_freshness
+from backend.performance.activity_validation import PERFORMANCE_METRIC_BOUNDS
 from backend.performance.current_metrics import as_number as _as_number
 from backend.performance.garmin_canonical import profile_max_hr_for
 from backend.performance.garmin_metrics import (
@@ -402,16 +403,14 @@ def _garmin_payload_thresholds(
             snapshot.get("cycling_ftp"),
             {"functionalthresholdpower", "ftp", "cyclingftp"},
         ),
-        50,
-        700,
+        *PERFORMANCE_METRIC_BOUNDS["cycling_ftp_watts"],
     )
     running_power = garmin_bounded_metric(
         _garmin_last_numeric(
             running_threshold,
             {"functionalthresholdpower", "ftp", "runningftp", "power"},
         ),
-        50,
-        800,
+        *PERFORMANCE_METRIC_BOUNDS["run_threshold_watts"],
     )
     running_pace = _garmin_pace_seconds(
         _garmin_last_value(
@@ -433,13 +432,11 @@ def _garmin_payload_thresholds(
             running_threshold,
             {"heartrate", "hearrate", "heartraterunning", "lthr"},
         ),
-        80,
-        230,
+        *PERFORMANCE_METRIC_BOUNDS["run_threshold_hr_bpm"],
     )
     cycling_hr = garmin_bounded_metric(
         _garmin_last_numeric(running_threshold, {"heartratecycling"}),
-        80,
-        230,
+        *PERFORMANCE_METRIC_BOUNDS["bike_threshold_hr_bpm"],
     )
     return cycling_ftp, running_power, running_pace, running_hr, cycling_hr
 

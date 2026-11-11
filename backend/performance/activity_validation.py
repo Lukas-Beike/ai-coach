@@ -120,8 +120,16 @@ def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
     """Return only bounded numeric estimates explicitly attached to an activity."""
     estimates: dict[str, float | int] = {}
     for key, summary_key, minimum, maximum in (
-        ("activity_vo2max", "vo2max", 10, 100),
-        ("activity_configured_ftp_watts", "ftp_w", 20, 2000),
+        (
+            "activity_vo2max",
+            "vo2max",
+            *PERFORMANCE_METRIC_BOUNDS["cycling_vo2max_ml_kg_min"],
+        ),
+        (
+            "activity_configured_ftp_watts",
+            "ftp_w",
+            *PERFORMANCE_METRIC_BOUNDS["cycling_ftp_watts"],
+        ),
     ):
         value = bounded_activity_metric(_present(latest, summary_key), minimum, maximum)
         if value is not None:
@@ -129,25 +137,29 @@ def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
     return estimates
 
 
+# One plausibility bound set per kind: the current value, the chart series, W/kg and
+# the activity validation accept the same range.
+PERFORMANCE_METRIC_BOUNDS: dict[str, tuple[float, float]] = {
+    "cycling_ftp_watts": (50, 700),
+    "run_threshold_watts": (50, 800),
+    "running_vo2max_ml_kg_min": (20, 100),
+    "cycling_vo2max_ml_kg_min": (20, 100),
+    "run_threshold_pace_seconds_per_km": (120, 1800),
+    "run_threshold_hr_bpm": (80, 230),
+    "bike_threshold_hr_bpm": (80, 230),
+    "run_5k_seconds": (1, 86400),
+    "run_10k_seconds": (1, 86400),
+    "run_half_marathon_seconds": (1, 172800),
+    "run_marathon_seconds": (1, 345600),
+}
+
+
 def bounded_performance_metric(key: str, value: Any) -> float | int | None:
     """Normalize provider performance values before using them for validation."""
-    bounds = {
-        "cycling_ftp_watts": (20, 2000),
-        "run_threshold_watts": (20, 2000),
-        "running_vo2max_ml_kg_min": (10, 100),
-        "cycling_vo2max_ml_kg_min": (10, 100),
-        "run_threshold_pace_seconds_per_km": (120, 1800),
-        "run_threshold_hr_bpm": (80, 230),
-        "bike_threshold_hr_bpm": (80, 230),
-        "run_5k_seconds": (1, 86400),
-        "run_10k_seconds": (1, 86400),
-        "run_half_marathon_seconds": (1, 172800),
-        "run_marathon_seconds": (1, 345600),
-    }
-    minimum, maximum = bounds.get(key, (None, None))
-    if minimum is None:
+    bounds = PERFORMANCE_METRIC_BOUNDS.get(key)
+    if bounds is None:
         return _as_number(value)
-    return bounded_activity_metric(value, minimum, maximum)
+    return bounded_activity_metric(value, *bounds)
 
 
 def cycling_activity_validation_details(
@@ -157,10 +169,9 @@ def cycling_activity_validation_details(
     ftp_record = (
         metrics.get("cycling_ftp_watts", {}) if isinstance(metrics, dict) else {}
     )
-    ftp = bounded_activity_metric(
+    ftp = bounded_performance_metric(
+        "cycling_ftp_watts",
         ftp_record.get("value") if isinstance(ftp_record, dict) else None,
-        20,
-        2000,
     )
     weighted_power = activity_evidence.get(
         "weighted_power_watts"

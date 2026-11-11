@@ -1,7 +1,9 @@
 import copy
 import unittest
 
+from backend.canonical.vocabulary import MetricKind
 from backend.performance.activity_validation import (
+    PERFORMANCE_METRIC_BOUNDS,
     activity_direct_estimates,
     activity_intensity,
     activity_pace_seconds_per_km,
@@ -11,6 +13,7 @@ from backend.performance.activity_validation import (
     bounded_performance_metric,
     latest_activity_for_validation,
 )
+from backend.performance.source_policy import CURRENT_RULES
 
 
 class ActivityPerformanceValidationTests(unittest.TestCase):
@@ -140,6 +143,20 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
         self.assertEqual(activity_intensity(3), 3)
         self.assertIsNone(activity_intensity(999))
         self.assertEqual(bounded_performance_metric("cycling_ftp_watts", 300), 300)
+        # C-505: the chart and validation bounds are the current value's bounds.
+        self.assertIsNone(bounded_performance_metric("cycling_ftp_watts", 900))
+        self.assertIsNone(bounded_performance_metric("cycling_ftp_watts", 30))
+        self.assertIsNone(bounded_performance_metric("running_vo2max_ml_kg_min", 15))
+        self.assertEqual(activity_direct_estimates({"ftp_w": 1500}), {})
+        for kind, key in (
+            (MetricKind.FTP, "cycling_ftp_watts"),
+            (MetricKind.VO2MAX, "running_vo2max_ml_kg_min"),
+            (MetricKind.THRESHOLD_HR, "run_threshold_hr_bpm"),
+        ):
+            rule = CURRENT_RULES[kind].bounds[0]
+            self.assertEqual(
+                (rule.lower, rule.upper), PERFORMANCE_METRIC_BOUNDS[key], kind
+            )
         self.assertIsNone(
             bounded_performance_metric("cycling_ftp_watts", {"value": 300})
         )

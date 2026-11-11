@@ -11,6 +11,7 @@ from typing import Any
 
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import freshness as performance_freshness
+from backend.performance.activity_validation import bounded_performance_metric
 from backend.performance.current_metrics import as_number as _as_number
 from backend.performance.current_metrics import metric as _metric
 from backend.performance.garmin_canonical import (
@@ -53,11 +54,17 @@ def _garmin_canonical_thresholds(
 ]:
     """Thresholds from the Garmin observations."""
     return (
-        garmin_bounded_metric(canonical.cycling_ftp_watts, 50, 700),
-        garmin_bounded_metric(canonical.run_threshold_watts, 50, 800),
+        bounded_performance_metric("cycling_ftp_watts", canonical.cycling_ftp_watts),
+        bounded_performance_metric(
+            "run_threshold_watts", canonical.run_threshold_watts
+        ),
         canonical.run_threshold_pace_seconds_per_km,
-        garmin_bounded_metric(canonical.run_threshold_hr_bpm, 80, 230),
-        garmin_bounded_metric(canonical.bike_threshold_hr_bpm, 80, 230),
+        bounded_performance_metric(
+            "run_threshold_hr_bpm", canonical.run_threshold_hr_bpm
+        ),
+        bounded_performance_metric(
+            "bike_threshold_hr_bpm", canonical.bike_threshold_hr_bpm
+        ),
     )
 
 
