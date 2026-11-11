@@ -425,7 +425,7 @@ class StrengthSetStoreTests(unittest.TestCase):
             2,
         )
 
-    def test_the_schema_requires_the_set_source_for_strength_sets_only(self) -> None:
+    def test_the_schema_requires_the_set_source_and_a_parent_set(self) -> None:
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute(
                 "INSERT INTO activity_detail_sets(provider, provider_activity_id, "
@@ -434,6 +434,11 @@ class StrengthSetStoreTests(unittest.TestCase):
                 "('garmin', ?, 'strength_sets', 1, 'fetch', 'provider_reported', "
                 "'garmin', ?, ?, ?, ?)",
                 (ID, "c" * 64, STAMP, STAMP, STAMP),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO activity_strength_sets(provider, provider_activity_id, "
+                "set_index, set_type) VALUES ('garmin', 'missing', 0, 'active')"
             )
 
     def test_strength_record_ids_selects_strength_records_only(self) -> None:

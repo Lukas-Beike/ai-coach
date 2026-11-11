@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v26 and supports upgrades from v21 (releases 1.13.41 to 1.13.44), v22 (the 2.0.0 candidate), v23, v24 and v25; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The only supported baseline is the schema production runs, v26 (release 2.0.5), which is also the current schema; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -26,15 +26,19 @@ A configured application database SHALL be opened/created through SQLCipher with
 
 Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::DatabaseManager`; `server.py::database_manager`; `backend/config.py::security_configuration_error`. Tests: `tests/test_server_database.py::test_unavailable_sqlcipher_closes_manager_for_changed_secure_configuration`; `tests/test_db_migrations.py::test_encrypted_current_database_reopens_with_same_key`.
 
-### Requirement: Supported released-schema upgrades
+### Requirement: Baseline schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from released schemas v21, v22, v23, v24 and v25 and the current schema v26, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize the version-and-shape pair of the baseline, the schema production runs (v26, release 2.0.5, frozen as one fixture and one digest), and of the current schema, executing the versioned steps from the baseline within one rollback-capable migration transaction. A schema that never reached production SHALL get no frozen shape of its own.
 
-#### Scenario: Released baseline upgrade
-- **WHEN** a populated released v21 database is opened by this build
-- **THEN** the remaining migrations run to the exact current schema while preserving existing rows.
+#### Scenario: Baseline database
+- **WHEN** a populated baseline database is opened by this build
+- **THEN** the steps from the baseline run to the exact current schema while preserving existing rows; while the baseline is the current schema, nothing changes.
 
-Evidence: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py::test_oldest_supported_release_schema_upgrades_to_current`, `tests/test_db_strength_sets_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+#### Scenario: One step from the previous shape
+- **WHEN** a previous shape with one registered step is opened
+- **THEN** the step runs in one transaction to the exact current schema and keeps every row.
+
+Evidence: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py::test_populated_baseline_reaches_the_live_schema_with_its_rows`, `tests/test_db_migrations.py::test_frozen_baseline_fixture_is_the_recorded_production_shape`, `tests/test_db_migrations.py::test_a_previous_shape_upgrades_in_one_step_with_its_rows`, `tests/test_db_encrypted_upgrade_matrix.py`.
 
 ### Requirement: Unknown schema preservation
 
@@ -56,7 +60,7 @@ Evidence: `backend/db/migrations.py::migrate_schema`; `backend/db/schema.py::dat
 
 ### Requirement: Rollback on failed upgrades
 
-A failing migration SHALL roll back its schema and data changes, preserve the original upgrade error even when a savepoint was lost, and leave the released database available for a later valid attempt.
+A failing migration SHALL roll back its schema and data changes, preserve the original upgrade error even when a savepoint was lost, and leave the database available for a later valid attempt.
 
 #### Scenario: Upgrade step fails
 - **WHEN** a schema/data upgrade raises before current-schema validation succeeds
@@ -66,7 +70,7 @@ A failing migration SHALL roll back its schema and data changes, preserve the or
 - **WHEN** a storage failure rolls back the outer transaction and removes the savepoint
 - **THEN** cleanup does not replace the original migration exception with a savepoint error
 
-Evidence: `backend/db/migrations.py::migrate_schema`; `backend/db/migrations.py::_abandon_migration_savepoint`; `backend/db/schema.py::execute_ddl`. Tests: `tests/test_db_strength_sets_migration.py::test_failed_upgrade_leaves_the_release_unchanged`; `tests/test_db_encrypted_upgrade_matrix.py::test_a_failing_upgrade_leaves_every_released_schema_unchanged`; `tests/test_db_migrations.py::test_lost_savepoint_does_not_mask_the_original_upgrade_error`.
+Evidence: `backend/db/migrations.py::migrate_schema`; `backend/db/migrations.py::_abandon_migration_savepoint`; `backend/db/schema.py::execute_ddl`. Tests: `tests/test_db_encrypted_upgrade_matrix.py::test_a_failing_upgrade_leaves_the_encrypted_database_unchanged`; `tests/test_db_migrations.py::test_lost_savepoint_does_not_mask_the_original_upgrade_error`.
 
 ### Requirement: Owned atomic transactions and consistent reads
 
@@ -101,82 +105,46 @@ The database manager SHALL block new leases, wait for active operations and clos
 Evidence: `backend/db/manager.py::DatabaseManager.restore_drain`; `backend/db/manager.py::DatabaseManagerCache`. Tests: `tests/test_db_manager.py`; `tests/test_database_restore_service.py::test_restores_after_checkpoint_and_drain_then_resumes_both_job_owners`.
 
 ### Requirement: Canonical extension upgrade preservation
-The extended schema SHALL preserve all athlete records, feedback, snapshots, tombstones, plans, sessions, settings, conversations, usage and sync state. Supported populated upgrades, injected-failure rollback, same-build restart and encrypted backup/restore SHALL be verified from v21 (release 1.13.44, the only production instance) and every later released schema.
+The extended schema SHALL preserve all athlete records, feedback, snapshots, tombstones, plans, sessions, settings, conversations, usage and sync state. Supported populated upgrades, injected-failure rollback, same-build restart and encrypted backup/restore SHALL be verified from the baseline, the schema production runs (v26, release 2.0.5, the only production instance).
 
-#### Scenario: Populated released schemas
-- **WHEN** each frozen released schema covered by the requirement is upgraded
+#### Scenario: Populated baseline
+- **WHEN** the frozen baseline schema is populated and opened
 - **THEN** existing identities, values, relationships and sync markers survive and new canonical structures satisfy their validation rules.
 
 #### Scenario: Upgrade fails partway
 - **WHEN** an injected failure interrupts a supported migration
-- **THEN** schema and rows return to the unchanged released state and a later valid attempt remains possible.
+- **THEN** schema and rows return to the unchanged prior state and a later valid attempt remains possible.
 
 #### Scenario: Encrypted restart and backup
-- **WHEN** an upgraded temporary SQLCipher database is restarted and restored through the supported backup workflow
+- **WHEN** an opened temporary SQLCipher baseline database is restarted and restored through the supported backup workflow
 - **THEN** encryption stays enabled and old plus new canonical records and relationships remain available.
 
 #### Scenario: Unknown or newer shape
 - **WHEN** a database has an unsupported version, unrecognized shape or mismatched version/shape pair
 - **THEN** initialization rejects it without deleting, resetting or partially modifying it.
 
-Evidence: `backend/db/migrations.py`; `tests/test_db_encrypted_upgrade_matrix.py::test_every_released_schema_upgrades_encrypted_like_the_plain_upgrade`, `tests/test_db_encrypted_upgrade_matrix.py::test_a_failing_upgrade_leaves_every_released_schema_unchanged`, `tests/test_db_encrypted_upgrade_matrix.py::test_an_encrypted_backup_of_an_upgrade_restores_the_same_rows`, `tests/test_database_restore_validation.py::test_validate_upgrades_a_populated_release_v21_backup`.
+Evidence: `backend/db/migrations.py`; `tests/test_db_encrypted_upgrade_matrix.py::test_the_encrypted_baseline_reaches_the_live_schema_like_the_plain_one`, `tests/test_db_encrypted_upgrade_matrix.py::test_a_failing_upgrade_leaves_the_encrypted_database_unchanged`, `tests/test_db_encrypted_upgrade_matrix.py::test_the_baseline_restarts_unchanged_and_needs_its_key`, `tests/test_db_encrypted_upgrade_matrix.py::test_an_encrypted_backup_at_the_baseline_restores_the_same_rows`, `tests/test_database_restore_validation.py::test_validate_accepts_a_populated_baseline_backup`.
 
 ### Requirement: Retired schema rejection
 
-The database SHALL reject schema versions older than v21 (releases before 1.13.41) before changing their data or schema, with a message that names release 1.13.44 for the upgrade. Change-history entries written before v16 under the former planning field names are not translated and cannot be undone.
+The database SHALL reject schema versions older than the baseline v26 (releases before 2.0.5) before changing their data or schema, with a message that names release 2.0.5 for the upgrade. Change-history entries written before v16 under the former planning field names are not translated and cannot be undone.
 
 #### Scenario: Opening an older database
-- **WHEN** a database from a release with schema v20 or older is opened
-- **THEN** startup rejects it with the release 1.13.44 hint and leaves its rows and version unchanged.
+- **WHEN** a database from a release with schema v25 or older is opened
+- **THEN** startup rejects it with the release 2.0.5 hint and leaves its rows and version unchanged.
 
 Evidence: `backend/db/migrations.py::migrate_schema`, `backend/db/schema_history.py::OLDEST_SUPPORTED_SCHEMA_VERSION`; `tests/test_db_migrations.py::test_older_database_file_is_refused_at_startup_without_changes`, `tests/test_db_migrations.py::test_older_or_newer_schema_version_is_rejected_without_modification`, `tests/test_change_history.py::test_planning_field_names_before_schema_v16_are_not_translated`.
 
-### Requirement: Strength set storage upgrade
+### Requirement: Closed value columns of the current schema
 
-The v21 to v22 step SHALL rebuild the detail set tables so the kind CHECK accepts `strength_sets`, add `activity_detail_sets.set_source` (NULL for every released set) and an empty `activity_strength_sets` table, keep every stream, lap, zone and analysis row unchanged with foreign keys enforced, and fail without changes when a detail row has no parent.
+The current schema SHALL check each closed value column to its vocabulary or JSON shape (each nullable), SHALL require the parent detail set of a strength set row, and SHALL serve the backfill-continuation lookup from the partial index `idx_sync_jobs_backfill_end`. Release 2.0.5 upgrades older schemas to these columns with NULL values.
 
-#### Scenario: Populated release upgrade
-- **WHEN** a populated v21 database is opened by this build
-- **THEN** every detail row and its cascade survive, strength sets can be stored afterwards, and a failure rolls back to the unchanged release.
+#### Scenario: Value outside the vocabulary
+- **WHEN** `activity_feedback.purpose` is written outside training, race, commute, warmup and cooldown, `activity_detail_sets.hr_source` outside chest_strap, optical and unknown, `power_source` outside power_meter, trainer, estimated and unknown, `sensors` as anything but a JSON array, or `dfa_alpha1` as anything but a JSON object
+- **THEN** the database rejects the write.
 
-Evidence: `backend/db/migrations.py:_upgrade_v21_to_v22`; `tests/test_db_strength_sets_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+#### Scenario: Orphan strength set and continuation lookup
+- **WHEN** a strength set row names no detail set, or the backfill-continuation lookup runs
+- **THEN** the insert is rejected, and the lookup's query plan reads `idx_sync_jobs_backfill_end`.
 
-### Requirement: Session purpose marking upgrade
-
-The v22 to v23 step SHALL add `activity_feedback.purpose` (NULL for every existing row, checked to the five purposes training, race, commute, warmup and cooldown) and keep every other row unchanged. A v21 database SHALL reach v23 through the v22 shape in the same transaction.
-
-#### Scenario: Populated release upgrade
-- **WHEN** a populated v21 or v22 database is opened by this build
-- **THEN** every feedback row and every other table survive with no marking, a marking can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
-
-Evidence: `backend/db/migrations.py:_upgrade_v22_to_v23`; `tests/test_db_feedback_purpose_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
-
-### Requirement: Stream sensor source upgrade
-
-The v23 to v24 step SHALL add `activity_detail_sets.hr_source`, `power_source` and `sensors` (NULL for every existing row, checked to the heart rate sources chest_strap, optical and unknown, the power sources power_meter, trainer, estimated and unknown, and a JSON array) and keep every other row unchanged. A v21 or v22 database SHALL reach v24 through the later shapes in the same transaction.
-
-#### Scenario: Populated release upgrade
-- **WHEN** a populated v21, v22 or v23 database is opened by this build
-- **THEN** every detail row and every other table survive with no source, a source can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
-
-Evidence: `backend/db/migrations.py:_upgrade_v23_to_v24`; `tests/test_db_stream_sensors_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
-
-### Requirement: Stream first threshold estimate upgrade
-
-The v24 to v25 step SHALL add `activity_detail_sets.dfa_alpha1` (NULL for every existing row, checked to a JSON object) and keep every other row unchanged. A v21, v22 or v23 database SHALL reach v25 through the later shapes in the same transaction.
-
-#### Scenario: Populated release upgrade
-- **WHEN** a populated v21, v22, v23 or v24 database is opened by this build
-- **THEN** every detail row and every other table survive with no estimate, an estimate can be stored afterwards, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
-
-Evidence: `backend/db/migrations.py:_upgrade_v24_to_v25`; `tests/test_db_first_threshold_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
-
-### Requirement: Backfill continuation index upgrade
-
-The v25 to v26 step SHALL add the partial expression index `idx_sync_jobs_backfill_end` over `sync_jobs(provider, type, json_extract(payload, '$.end_date'), created_at)` for backfill jobs, so the backfill-continuation lookup reads the index. It SHALL change no row. A v21, v22, v23, v24 or v25 database SHALL reach v26 through the later shapes in the same transaction.
-
-#### Scenario: Populated release upgrade
-- **WHEN** a populated v21, v22, v23, v24 or v25 database with sync jobs is opened by this build
-- **THEN** every sync job and every other table survive unchanged, the lookup answers as before from the index, a failure rolls back to the unchanged release, and a restart with the same build changes nothing.
-
-Evidence: `backend/db/migrations.py:_upgrade_v25_to_v26`; `tests/test_db_backfill_index_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+Evidence: `backend/db/schema.py`; `tests/test_db_provider_schema.py::test_closed_value_columns_accept_only_their_values`, `tests/test_strength_sets.py::test_the_schema_requires_the_set_source_and_a_parent_set`, `tests/test_sync_jobs.py::test_backfill_continuation_lookup_reads_its_index_on_the_live_schema`.

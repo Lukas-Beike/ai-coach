@@ -919,7 +919,7 @@ REMOTE_LINKS_DDL = """
 # Stream channels hold zlib-compressed little-endian float64 points (NaN = gap).
 # The analysis row caches values computed for one canonical session.
 # Schema version 22 adds the strength set kind, its ``set_source`` header and
-# the ``activity_strength_sets`` rows (backend.db.strength_sets_migration).
+# the ``activity_strength_sets`` rows.
 _DETAIL_KINDS = _sql_in_list(ActivityDetailKind)
 _DETAIL_ORIGINS = _sql_in_list(ActivityDetailOrigin)
 _ZONE_DETAIL_KINDS = _sql_in_list_of(ZONE_DETAIL_KINDS.values())

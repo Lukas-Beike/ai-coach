@@ -1,11 +1,11 @@
 """Frozen signatures of the schema shapes written by supported releases.
 
-Each digest is the SHA-256 of the normalized schema signature (object type,
-name, table and whitespace-normalized SQL) of one released shape. The digests
-were computed once from the frozen fixtures in tests/fixtures and are
-hard-coded here, so the runtime never reads fixture files. The current shape is
-deliberately not frozen: it is derived from the live schema in
-backend.db.schema.
+Only the schema production runs is frozen: the baseline. Its digest is the
+SHA-256 of the normalized schema signature (object type, name, table and
+whitespace-normalized SQL), computed once from the frozen fixture in
+tests/fixtures and hard-coded here, so the runtime never reads fixture files.
+The current shape is deliberately not frozen: it is derived from the live
+schema in backend.db.schema.
 """
 
 from __future__ import annotations
@@ -19,41 +19,26 @@ from backend.db.schema import CURRENT_SCHEMA_VERSION
 
 type SchemaSignature = tuple[tuple[str, str, str, str], ...]
 
-# Schema version 21, releases 1.13.41 to 1.13.44: the observation lifecycle and
-# the oldest supported schema.
-SHAPE_SCHEMA_V21: Final = "schema-v21"
-# Schema version 22: executed strength sets.
-SHAPE_SCHEMA_V22: Final = "schema-v22"
-# Schema version 23: the athlete's session purpose marking.
-SHAPE_SCHEMA_V23: Final = "schema-v23"
-# Schema version 24: heart rate and power source and sensors of stream sets.
-SHAPE_SCHEMA_V24: Final = "schema-v24"
-# Schema version 25: the first threshold estimate of stream sets.
-SHAPE_SCHEMA_V25: Final = "schema-v25"
+# Schema version 26, release 2.0.5: the schema production runs and the only
+# supported baseline. While it is also the live schema, a database of this
+# version is recognized as the current shape; the digest freezes it for the
+# first upgrade step after it.
+SHAPE_SCHEMA_V26: Final = "schema-v26"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
 RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
-    SHAPE_SCHEMA_V21: "2d81edf3d70d6b81e3eb9b048fc9fefb0c9c4a70885c14cd9848fd18b0cd2052",
-    SHAPE_SCHEMA_V22: "cfb3171eb12a18c5eaa91f1bd71458d00f4b60a17da28f5a0d674b2a49691faf",
-    SHAPE_SCHEMA_V23: "86b67a1f09a92430e6cc939fe710cb38b04dba715d4e35d8edb7284a758d7082",
-    SHAPE_SCHEMA_V24: "7fbc031ef220921dd89b1bde02df5439e9213d3d66755f89c1c9c9de734cc0a2",
-    SHAPE_SCHEMA_V25: "7124b1fdc6474e051e9e3b1637bc9e598aae368234ac885fe7f586201877c5a0",
+    SHAPE_SCHEMA_V26: "edbf1d3aa11f13e3bad44e233d9605d173c1370e6fc3ac67ad3abeda9bd0ea03",
 }
 
-# Releases before 1.13.41 wrote lower versions; they are rejected unchanged.
-OLDEST_SUPPORTED_SCHEMA_VERSION: Final = 21
+# Releases before 2.0.5 wrote lower versions; they are rejected unchanged.
+OLDEST_SUPPORTED_SCHEMA_VERSION: Final = 26
 
 # Stored PRAGMA user_version -> schema shapes that version is allowed to hold.
-# When CURRENT_SCHEMA_VERSION is bumped, first freeze the outgoing live shape
-# here (digest, fixture, lookup entry and upgrade step) so its databases stay
-# recognizable.
+# When CURRENT_SCHEMA_VERSION is bumped, accept the baseline shape for its
+# version here and add one upgrade step from it; a schema that never reached
+# production gets no frozen shape of its own.
 ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
-    21: frozenset({SHAPE_SCHEMA_V21}),
-    22: frozenset({SHAPE_SCHEMA_V22}),
-    23: frozenset({SHAPE_SCHEMA_V23}),
-    24: frozenset({SHAPE_SCHEMA_V24}),
-    25: frozenset({SHAPE_SCHEMA_V25}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 
