@@ -7,7 +7,8 @@ hashes, the start and the distance before any stream is decoded; only sessions
 whose stored input hash differs are decoded, fingerprinted
 (``backend.activities.routes``) and placed, oldest first, so a pass without
 changes decodes nothing. Sessions that are gone and routes without a session
-leave the index, athlete names stay on the routes that remain. Nothing is requested remotely.
+leave the index, athlete names stay on the routes that remain. Nothing is
+requested remotely.
 
 Turning "GPS-Spuren speichern" off keeps the index. It is removed only with the
 confirmed GPS-track deletion or the purge (``route_store.clear_routes``).
