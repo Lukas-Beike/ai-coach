@@ -958,19 +958,54 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   }
 
   // Each value once; duration and distance stay in the card's row.
+  // The values a session shows, per sport (athlete decision #2258); a value without data is left out.
+  function actualCalendarFacts(actual) {
+    const rpe = calendarRpeLabel(actual.rpe);
+    const values = {
+      Belastung: calendarMetricNumber(actual.training_load),
+      RPE: rpe != null ? `${rpe}/10` : null,
+      Intensität: calendarIntensityLabel(actual.intensity),
+      "Ø Puls": calendarMetricNumber(actual.avg_hr, " bpm"),
+      "Ø Leistung": calendarMetricNumber(actual.avg_power, " W"),
+      Pace: calendarPaceLabel(actual),
+      Höhenmeter: calendarMetricNumber(actual.elevation_gain_m, " m"),
+    };
+    const sport = activitySportLabel(calendarSportType(actual));
+    if (sport === "Laufen") {
+      const cadence = Number(actual.avg_cadence);
+      return [
+        ["Pace", values.Pace], ["Ø Puls", values["Ø Puls"]],
+        // Runs store the cadence per leg; the step frequency counts both legs.
+        ["Schrittfrequenz", cadence > 0 ? calendarMetricNumber(Math.round(cadence * 2), " spm") : null],
+        ["Ø Leistung", values["Ø Leistung"]], ["Belastung", values.Belastung], ["RPE", values.RPE],
+        ["Bodenkontaktzeit", calendarMetricNumber(actual.ground_contact_time_ms != null ? Math.round(Number(actual.ground_contact_time_ms)) : null, " ms")],
+        ["Höhenmeter", values.Höhenmeter],
+      ];
+    }
+    if (sport === "Radfahren" || sport === "Rad indoor") {
+      const intensity = Number(actual.intensity);
+      const factor = intensity > 0 ? (intensity <= 2 ? intensity : intensity / 100) : null;
+      const speed = Number(actual.avg_speed_mps) > 0 ? Number(actual.avg_speed_mps)
+        : (Number(actual.moving_duration_s) > 0 && Number(actual.distance_m) > 0 ? Number(actual.distance_m) / Number(actual.moving_duration_s) : null);
+      return [
+        ["Normalized Power", calendarMetricNumber(actual.normalized_power, " W")], ["Ø Leistung", values["Ø Leistung"]],
+        ["Intensitätsfaktor", factor != null ? AppFormat.number(factor, { digits: 2 }) : null], ["Ø Puls", values["Ø Puls"]],
+        ["Trittfrequenz", calendarMetricNumber(actual.avg_cadence != null ? Math.round(Number(actual.avg_cadence)) : null, " rpm")],
+        ["Belastung", values.Belastung], ["RPE", values.RPE],
+        ["Ø Tempo", speed != null ? `${AppFormat.number(speed * 3.6, { digits: 1 })} km/h` : null],
+        ["Höhenmeter", values.Höhenmeter],
+      ];
+    }
+    return Object.entries(values);
+  }
+
+  // Each value once; duration and distance stay in the card's row.
   function appendActualCalendarDetails(details, actual) {
     if (!actual) return;
-    const rpe = calendarRpeLabel(actual.rpe);
     const facts = document.createElement("div");
     facts.className = "planned-actual-facts";
-    appendCalendarFact(facts, "Belastung", calendarMetricNumber(actual.training_load));
-    appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
-    appendCalendarFact(facts, "Intensität", calendarIntensityLabel(actual.intensity));
-    appendCalendarFact(facts, "Ø Puls", calendarMetricNumber(actual.avg_hr, " bpm"));
-    appendCalendarFact(facts, "Ø Leistung", calendarMetricNumber(actual.avg_power, " W"));
-    appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
-    appendCalendarFact(facts, "Höhenmeter", calendarMetricNumber(actual.elevation_gain_m, " m"));
-    details.append(facts);
+    for (const [label, value] of actualCalendarFacts(actual)) appendCalendarFact(facts, label, value);
+    if (facts.childElementCount) details.append(facts);
   }
 
   // One compact row: sport icon, title, sport/time/status line, duration and distance.
