@@ -71,12 +71,25 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.port, 8090)
         self.assertEqual(config.app_password, "process")
 
-    def test_blank_openai_base_url_uses_documented_default(self):
+    def test_blank_values_use_their_documented_defaults(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            config = load_config(root, root, {"OPENAI_BASE_URL": "  "})
+            config = load_config(
+                root,
+                root,
+                {
+                    "OPENAI_BASE_URL": "  ",
+                    "OPENAI_MODEL": "",
+                    "INTERVALS_ATHLETE_ID": " ",
+                    "GARMINTOKENS": "",
+                },
+            )
 
         self.assertEqual(config.openai_base_url, "https://api.openai.com/v1")
+        # A blank model id was offered and selected in the settings (#2137).
+        self.assertEqual(config.openai_model, "gpt-6-luna")
+        self.assertEqual(config.intervals_athlete_id, "0")
+        self.assertEqual(config.garmin_tokenstore, str(root / "garmin_tokens"))
 
     def test_sync_history_floor_defaults_parses_and_rejects_invalid_values(self):
         with tempfile.TemporaryDirectory() as temporary:

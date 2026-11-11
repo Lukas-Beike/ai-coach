@@ -1,6 +1,6 @@
 # Configuration
 
-Configuration comes from container environment variables or a `.env` file in the application root; `APP_PASSWORD` belongs in the container environment or that root file, never in `DATA_DIR`. The [README](../README.md#configuration) lists every variable in one line; this file adds the details. Only `APP_PASSWORD` is required to start. The Coach needs an OpenAI key (environment or **Mehr > Anbindungen > Zugangsdaten**). Intervals.icu and the other providers are optional.
+Configuration comes from container environment variables or a `.env` file in the application root; `APP_PASSWORD` belongs in the container environment or that root file, never in `DATA_DIR`. The [README](../README.md#configuration) lists every variable in one line; this file adds the details. Only `APP_PASSWORD` is required to start. An empty `OPENAI_BASE_URL`, `OPENAI_MODEL`, `INTERVALS_ATHLETE_ID` or `GARMINTOKENS` counts as unset and takes its default. The Coach needs an OpenAI key (environment or **Mehr > Anbindungen > Zugangsdaten**). Intervals.icu and the other providers are optional.
 
 ## Models
 

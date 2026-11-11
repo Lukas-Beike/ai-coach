@@ -21,7 +21,11 @@ Configuration loading SHALL use explicit root/data paths and a supplied environm
 - **WHEN** two loads use distinct supplied environments and directories
 - **THEN** each result uses its own inputs rather than a previous configuration singleton
 
-Evidence: `backend/config.py::load_local_env`; `backend/config.py::load_config`. Tests: `tests/test_config.py::test_two_loads_use_their_supplied_environment_and_paths`; `tests/test_config.py::test_process_values_win_over_persisted_values`; `tests/test_config.py::test_import_has_no_filesystem_side_effect`.
+#### Scenario: Blank value
+- **WHEN** `OPENAI_BASE_URL`, `OPENAI_MODEL`, `INTERVALS_ATHLETE_ID` or `GARMINTOKENS` is set to an empty or blank value
+- **THEN** it counts as unset and the documented default applies, so a blank model id is never offered or selected
+
+Evidence: `backend/config.py::load_local_env`; `backend/config.py::load_config`. Tests: `tests/test_config.py::test_two_loads_use_their_supplied_environment_and_paths`; `tests/test_config.py::test_blank_values_use_their_documented_defaults`; `tests/test_config.py::test_process_values_win_over_persisted_values`; `tests/test_config.py::test_import_has_no_filesystem_side_effect`.
 
 ### Requirement: Validated endpoints and server-side credentials
 
