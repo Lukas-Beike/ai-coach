@@ -112,12 +112,11 @@ class NutritionProductContractTests(unittest.TestCase):
         )
         reread = self.library.product_catalog.get_product(saved["id"])
         self.assertEqual(reread["salt_g"], 0.5)
-        self.assertEqual(
-            self.library.product_catalog.update_product(saved["id"], {"salt_g": None})[
-                "salt_g"
-            ],
-            None,
+        # An edit that empties a filled field keeps it empty and drops its origin.
+        cleared = self.library.product_catalog.update_product(
+            saved["id"], {"salt_g": None}
         )
+        self.assertEqual((cleared["salt_g"], cleared["filled_fields"]), (None, {}))
 
     def test_confirmed_product_is_persistent_and_can_be_archived(self):
         saved = self.library.product_catalog.save_product(self.product_payload())

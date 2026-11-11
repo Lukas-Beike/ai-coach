@@ -204,6 +204,7 @@ class NutritionProductRepository:
         return self._row(row) if row else None
 
     def save(self, db: Any, product: dict[str, Any]) -> dict[str, Any]:
+        self._forget_changed_fills(db, product)
         columns = (
             "id",
             "barcode",
@@ -250,6 +251,28 @@ class NutritionProductRepository:
             ),
         )
         return self.get(db, str(product["id"])) or product
+
+    @staticmethod
+    def _forget_changed_fills(db: Any, product: dict[str, Any]) -> None:
+        """A filled field the athlete edits or clears is no longer filled."""
+        row = db.execute(
+            "SELECT brand, details, "
+            + ", ".join(NUTRIENT_COLUMNS)
+            + " FROM nutrition_products WHERE id=? AND origin = 'own'",
+            (product.get("id"),),
+        ).fetchone()
+        if row is None:
+            return
+        details = json.loads(row["details"])
+        filled = details.get("filled_fields", {})
+        changed = [key for key in filled if product.get(key) != row[key]]
+        if changed:
+            for key in changed:
+                del filled[key]
+            db.execute(
+                "UPDATE nutrition_products SET details=? WHERE id=?",
+                (json.dumps(details, ensure_ascii=False), product["id"]),
+            )
 
     @staticmethod
     def fill_from_database_entries(db: Any, product_id: str, barcode: str) -> bool:
