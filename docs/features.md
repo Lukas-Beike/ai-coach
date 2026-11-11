@@ -127,7 +127,7 @@
 - **Strict Session Security**: High-security session cookies hardened with `HttpOnly`, `SameSite=Strict`, and optional `Secure` flags.
 - **Bounded HTTP Input**: At most 32 active handlers, with separate 20-second absolute limits for request headers and bodies. Login admission is checked before reading its body; these input limits do not shorten Coach responses or SSE streams.
 - **Zero Third-Party Trackers**: Self-hosted architecture containing zero tracking scripts, third-party analytics, external CDNs, or telemetry reporting.
-- **Comprehensive Privacy Export**: Single-click export producing a complete, unencrypted JSON archive of all profile records, workouts, metrics, and chat history.
+- **Comprehensive Privacy Export**: Single-click export producing a complete, unencrypted ZIP archive of JSON and JSON Lines files of all profile records, workouts, metrics, and chat history.
 - **Confirmed Local Data Purge**: Irreversible deletion of all local athlete data, including stored provider credentials and Garmin tokens, guarded by an explicit typed confirmation phrase (`LOKALE DATEN LÖSCHEN`). The Garmin account and Intervals.icu/Wahoo accounts themselves are not changed, but the app's Wahoo grant is revoked at Wahoo first (best effort; a failure is reported and does not stop the purge).
 - **Zero-Downtime Maintenance Mode**: Process-level maintenance gate that prevents concurrent writes and ensures transaction safety during database restoration.
 - **Pre-Restore Rollback Copies**: Automated creation of a safety copy of the existing database before executing any database restore or replacement.

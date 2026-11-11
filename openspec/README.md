@@ -1,6 +1,6 @@
 # Pacecraft behavior specifications
 
-This baseline backfills the existing application at
+This baseline backfilled the existing application at
 `b8c911c9dda83a7920171916ace32681c0c38ba0` (version 1.13.22, schema v13).
 The baseline's 30 capabilities contained 272 observable requirements and 759 scenarios;
 later changes extend them, and the index below is current.
@@ -44,7 +44,7 @@ are in the docs.
 | [view-refresh-and-client-state](specs/view-refresh-and-client-state/spec.md) | Device reads, session epochs, scoped refresh and background updates |
 | [voice-and-notifications](specs/voice-and-notifications/spec.md) | Optional transient audio and privacy-conscious client notifications |
 | [authentication-and-http](specs/authentication-and-http/spec.md) | Sessions, CSRF, rate/body limits and safe HTTP contracts |
-| [encrypted-storage-and-migrations](specs/encrypted-storage-and-migrations/spec.md) | SQLCipher, atomic transactions and supported v9-v13 upgrades |
+| [encrypted-storage-and-migrations](specs/encrypted-storage-and-migrations/spec.md) | SQLCipher, atomic transactions and the upgrade contract from the v26 baseline |
 | [backup-restore-and-privacy](specs/backup-restore-and-privacy/spec.md) | Consistent exports, validated restore, recovery and explicit erasure |
 | [runtime-and-configuration](specs/runtime-and-configuration/spec.md) | Secure composition/startup, maintenance, readiness/events and shutdown |
 | [diagnostics-and-observability](specs/diagnostics-and-observability/spec.md) | Redacted bounded capture, local reports, logs and safe correlation |

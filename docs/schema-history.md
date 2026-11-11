@@ -13,7 +13,9 @@ required when the athlete explicitly chooses to start over. Future schema
 changes add explicit, versioned and transactional migrations from the baseline
 with upgrade regression tests; the baseline moves only when production runs a
 newer schema.
-The current schema is version 26. Version 10 adds canonical activity detail
+The current schema is version 26. Releases wrote version 21 (1.13.41 to
+1.13.44), 22 (2.0.0), 23 (2.0.1), 24 (2.0.2), 25 (2.0.3 and 2.0.4) and 26
+(2.0.5). Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
 `garmin_snapshot` value, version 13 adds the maximum speed of each lap, and

@@ -124,18 +124,25 @@ Evidence: `backend/runtime/events.py::StateEventBuffer`; `backend/http_api/state
 
 ### Requirement: Explicit bounded retention
 
-Database startup SHALL retain messages and snapshots indefinitely when DATA_RETENTION_DAYS is nonpositive; a positive value SHALL be clamped to 30 through 3650 days and SHALL preserve the newest snapshot even when old.
-
+With DATA_RETENTION_DAYS at 0 or below (default -1) startup SHALL delete nothing. A positive value SHALL be clamped to 30 through 3650 days; startup SHALL then delete old chat messages, old snapshots except the newest, old finished Coach receipts whose changes can no longer be undone, old unreferenced non-draft Coach plan drafts and expired Coach action proposals.
 
 #### Scenario: Default/unlimited retention
 - **WHEN** retention_days is zero or negative
-- **THEN** bootstrap does not purge old messages or provider snapshots
+- **THEN** bootstrap deletes no message, snapshot, Coach receipt, plan draft or proposal
 
 #### Scenario: Positive retention
 - **WHEN** a positive configured retention period is applied
 - **THEN** old messages and non-latest snapshots are purged using the bounded period while the latest snapshot remains
 
-Evidence: `backend/db/bootstrap.py::initialize_application_database`; `backend/config.py::load_config`. Tests: `tests/test_server_runtime.py::test_unlimited_retention_does_not_delete_history`; `tests/test_server_database.py::test_snapshot_repository_preserves_latest_payload_and_retention_contract`.
+#### Scenario: Coach receipts, drafts and proposals
+- **WHEN** a completed Coach command is older than the cutoff
+- **THEN** it is deleted unless its receipt lists undoable changes that are not yet undone; a non-draft Coach plan artifact older than the cutoff and referenced by no command is deleted, and every action proposal past its expiry is deleted
+
+#### Scenario: Untouched data
+- **WHEN** retention runs
+- **THEN** athlete records, plans, settings, canonical provider data, change history and diagnostics stay, and one log event `data_retention_purged` carries the clamped days and the deletion counts
+
+Evidence: `backend/db/bootstrap.py::initialize_application_database`; `backend/config.py::load_config`. Tests: `tests/test_server_runtime.py::test_unlimited_retention_does_not_delete_history`; `tests/test_db_bootstrap.py::test_retention_purges_old_receipts_artifacts_and_expired_proposals`; `tests/test_db_bootstrap.py::test_unlimited_retention_keeps_old_receipts_and_expired_proposals`; `tests/test_db_bootstrap.py::test_retention_keeps_the_newest_snapshot_after_a_long_sync_gap`; `tests/test_server_database.py::test_snapshot_repository_preserves_latest_payload_and_retention_contract`.
 
 ### Requirement: Bounded request concurrency and graceful stop
 
