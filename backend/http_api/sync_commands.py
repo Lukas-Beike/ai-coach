@@ -228,7 +228,16 @@ class SyncCommandEndpoint:
             }
         provider: Any = payload.get("provider")
         self._require_provider_configured(provider)
-        job_type = payload.get("type", "refresh")
+        # Normalized as the queue does, so the check below cannot be sidestepped.
+        job_type = str(payload.get("type", "refresh") or "").strip().casefold()
+        if job_type == "nutrition_sync":
+            # Only an approved Coach card exports nutrition, through the queue
+            # directly; a manifest sent here proves no approval (#2137, F-001).
+            raise AppError(
+                400,
+                "Der Ernährungs-Export braucht eine bestätigte Vorschau.",
+                reason="invalid_job_request",
+            )
         return 202, self._queue.enqueue(
             provider,
             job_type,
