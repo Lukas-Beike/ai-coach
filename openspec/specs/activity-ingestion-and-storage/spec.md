@@ -226,6 +226,10 @@ The system SHALL let the athlete confirm a canonical session's bundle, split one
 - **WHEN** the athlete deletes an activity in the app after confirming the prompt
 - **THEN** its session and every merged copy are deleted, the survivor retains itself and its copies retain it, which marks an athlete delete, so no copy revives when a provider later deletes the primary copy or delivers the same copy again, nothing is deleted at a provider, and the receipt's undo restores the session.
 
+#### Scenario: Copy arriving after an athlete delete
+- **WHEN** a provider copy arrives for the first time, or was stored separately by an earlier build, and the bundling rules would join it to a session the athlete deleted
+- **THEN** it is deleted with that session and retains it, so it never becomes a new live activity; undoing the athlete's delete brings it back into the restored session.
+
 #### Scenario: Undo a correction
 - **WHEN** the athlete undoes a correction's receipt while the touched sessions are unchanged since
 - **THEN** the recorded session rows are restored; a later change to them makes the undo conflict instead.
@@ -236,5 +240,5 @@ The system SHALL let the athlete confirm a canonical session's bundle, split one
 
 Detailed contract: the activity detail response carries `session_bundle` with the live session id, link kind, confirmation, the provider copies (`session_id`, provider label, recording origin, start, duration, and the provider's `native_type` with the terrain and assist it maps to) and the live sessions of the same local date as merge candidates. A correction touching more than 16 session rows is refused so its receipt stays restorable.
 
-Evidence: `backend/activities/session_corrections.py:SessionCorrectionService`, `backend/http_api/feedback_post.py:FeedbackPostRoutes`, `public/activity-details.js:renderBundle`; `tests/test_session_corrections.py`.
+Evidence: `backend/activities/session_corrections.py:SessionCorrectionService`, `backend/http_api/feedback_post.py:FeedbackPostRoutes`, `public/activity-details.js:renderBundle`; `tests/test_session_corrections.py`, `tests/test_session_linking.py:test_a_session_the_athlete_deleted_stays_deleted_on_redelivery`, `tests/test_session_rebundle.py:test_confirmed_and_deleted_sessions_stay_untouched`.
 
