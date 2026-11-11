@@ -26,8 +26,6 @@ def save_snapshot(
             set_value(db, "last_sync_error", "")
             if activity_days is not None:
                 set_value(db, "last_sync_activity_days", str(activity_days))
-        elif update_full_sync is False:
-            set_value(db, "last_performance_refresh_at", snapshot["synced_at"])
 
 
 def save_view(repository: Any, snapshot: dict[str, Any]) -> None:

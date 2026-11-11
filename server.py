@@ -2115,7 +2115,6 @@ PUBLIC_STATE = PublicStateAssembly(
             coverage=lambda: CANONICAL_READ,
         ),
         owners=PublicStateOwnerAssemblies(
-            snapshot_repository=SNAPSHOT_REPOSITORY,
             sync_persistence=lambda: SYNC_PERSISTENCE,
             planning_data=lambda: PLANNING_DATA,
             athlete_data=lambda: ATHLETE_DATA,

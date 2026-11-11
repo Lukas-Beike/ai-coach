@@ -439,6 +439,13 @@ class StateVersionRepository:
                 "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS latest "
                 "FROM activity_feedback"
             ).fetchone(),
+            # Counts only: these tables have no updated_at index to scan cheaply.
+            "activities": db.execute(
+                "SELECT COUNT(*) AS count FROM activity_records"
+            ).fetchone(),
+            "observations": db.execute(
+                "SELECT COUNT(*) AS count FROM observations"
+            ).fetchone(),
         }
 
 

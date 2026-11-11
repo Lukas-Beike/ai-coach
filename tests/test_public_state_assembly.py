@@ -40,7 +40,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
             "intervals_state",
             "diagnostic_capture",
             "workout_library_sync_running",
-            "snapshot_repository",
             "daily_context",
             "adaptive_followup",
             "adaptive_preview",
@@ -87,7 +86,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
                     key_value_service=deps["key_value_service"],
                 ),
                 owners=PublicStateOwnerAssemblies(
-                    snapshot_repository=deps["snapshot_repository"],
                     sync_persistence=deps["sync_persistence"],
                     planning_data=deps["planning_data"],
                     athlete_data=deps["athlete_data"],
@@ -171,9 +169,6 @@ class PublicStateAssemblyTests(unittest.TestCase):
         self.assertIs(service._database_manager, owners["manager"])
         self.assertIs(
             service._state_version_data._key_values, deps["key_value_service"]()
-        )
-        self.assertIs(
-            service._state_version_data._snapshots, deps["snapshot_repository"]
         )
         self.assertIs(service._profile_service, profile_service)
 

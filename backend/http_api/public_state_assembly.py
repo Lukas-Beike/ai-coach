@@ -70,7 +70,6 @@ class PublicStateCoreInputs:
 
 @dataclass(frozen=True)
 class PublicStateOwnerAssemblies:
-    snapshot_repository: Any
     sync_persistence: Callable[[], Any]
     planning_data: Callable[[], Any]
     athlete_data: Callable[[], Any]
@@ -151,7 +150,6 @@ class PublicStateAssembly:
         self._canonical_serving = core.canonical_serving
         self._activity_summary_reader = core.activity_summary_reader
         self._coverage = core.coverage
-        self._snapshot_repository = owners.snapshot_repository
         self._sync_persistence = owners.sync_persistence
         self._planning_data = owners.planning_data
         self._athlete_data = owners.athlete_data
@@ -252,7 +250,6 @@ class PublicStateAssembly:
         return StateVersionService(
             self._database_manager(),
             self._key_value_service(),
-            self._snapshot_repository,
             self._athlete_data().profile(),
         )
 

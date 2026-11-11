@@ -1142,12 +1142,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_state_versions.py",
-      "code": "method-assign",
-      "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_authority.py",
       "code": "method-assign",
       "message_sha256": "ce57bf1eebc7447182367ab98165b0258d7fbda9bd33ae5d9b0b13328e6af6ee"

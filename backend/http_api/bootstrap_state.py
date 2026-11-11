@@ -93,9 +93,7 @@ class PublicBootstrapService:
                 read_only=True,
             )
             jobs = deps.sync_job_queue_service().list()
-            state_version_values = deps.state_version_service().versions(
-                deps.sync_state_repository().latest_metadata(db)
-            )
+            state_version_values = deps.state_version_service().versions()
             state = {
                 "schema_version": 3,
                 "state_versions": state_version_values,

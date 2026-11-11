@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import snapshot_seed
 
@@ -63,7 +64,6 @@ class StateVersionServiceTests(unittest.TestCase):
         self.service = StateVersionService(
             self.manager,
             KeyValueService(self.manager, self.key_values),
-            self.snapshot_repository,
             self.profile,
         )
 
@@ -124,13 +124,33 @@ class StateVersionServiceTests(unittest.TestCase):
                 "INSERT INTO activity_feedback(activity_id, created_at, updated_at) "
                 "VALUES ('a1', '2026-09-14T08:00:00', '2026-09-20T09:00:00')"
             )
+            # K-031: the markers follow the provider syncs and the canonical
+            # rows they write, not a stored snapshot.
+            for provider, activity_id in (("garmin", "g1"), ("wahoo", "w1")):
+                db.execute(
+                    "INSERT INTO activity_records(provider, provider_activity_id, "
+                    "mapper_version, source_kind, recorded_by, sport, environment, "
+                    "started_at, load_model, fetched_at, created_at, updated_at) "
+                    "VALUES (?, ?, 1, 'provider', ?, 'ride', 'outdoor', ?, 'none', "
+                    "?, ?, ?)",
+                    (provider, activity_id, provider, NOW, NOW, NOW, NOW),
+                )
+            db.execute(
+                "INSERT INTO observations(natural_key, metric, value, unit, "
+                "source_kind, recorded_by, observed_on, mapper_version, "
+                "created_at, updated_at) VALUES ('hrv:1', 'hrv', 50, 'ms', "
+                "'provider', 'garmin', '2026-09-20', 1, ?, ?)",
+                (NOW, NOW),
+            )
             db.execute(
                 "INSERT INTO kv(key, value, updated_at) VALUES "
-                "('last_performance_refresh_at', 'performance-at', ?), "
+                "('last_performance_refresh_at', 'stale-performance-at', ?), "
                 "('last_garmin_sync_at', 'garmin-at', ?), "
+                "('last_wahoo_sync_at', 'wahoo-at', ?), "
                 "('last_external_calendar_sync_at', 'calendar-at', ?), "
                 "('profile', ?, ?)",
                 (
+                    NOW,
                     NOW,
                     NOW,
                     NOW,
@@ -138,8 +158,9 @@ class StateVersionServiceTests(unittest.TestCase):
                     NOW,
                 ),
             )
-        snapshot_seed.save_view(self.sync_state, 
-            {"synced_at": "intervals-at", "recent_activities": [{}, {}, {}]}
+        snapshot_seed.save_view(
+            self.sync_state,
+            {"synced_at": "frozen-at", "recent_activities": [{}, {}, {}]},
         )
         profile = self.profile.get()
         expected_profile = hashlib.sha256(
@@ -153,19 +174,26 @@ class StateVersionServiceTests(unittest.TestCase):
         self.assertEqual(
             actual,
             {
-                "activities": "intervals-at:3",
-                "performance": "performance-at",
+                "activities": "garmin-at:wahoo-at:2",
+                "performance": "garmin-at:wahoo-at:1",
                 "garmin": "garmin-at",
                 "chat": "9:2",
                 "library": "2026-09-16:2",
                 "checkins": "2026-09-19T08:00:00:2",
                 "activity_feedback": "2026-09-20T09:00:00:1",
                 "profile": expected_profile,
-                "plan": "intervals-at:calendar-at:2026-09-16:2026-09-18:2026-09-19T08:00:00",
+                "plan": "calendar-at:2026-09-16:2026-09-18:2026-09-19T08:00:00",
             },
         )
         self.assertEqual(self.manager.reader_calls, 1)
         self.assertEqual(self.manager.unit_of_work_calls, 0)
+
+        # A Wahoo-only sync moves both markers the browser reloads views on.
+        with self.manager.unit_of_work() as db:
+            self.key_values.set(db, "last_wahoo_sync_at", "wahoo-later")
+        after = self.service.versions()
+        self.assertEqual(after["activities"], "garmin-at:wahoo-later:2")
+        self.assertEqual(after["performance"], "garmin-at:wahoo-later:1")
 
     def test_versions_keep_empty_snapshot_and_marker_fallbacks(self) -> None:
         self.manager.reader_calls = 0
@@ -186,20 +214,20 @@ class StateVersionServiceTests(unittest.TestCase):
                 "plan",
             },
         )
-        self.assertEqual(actual["activities"], ":0")
-        self.assertEqual(actual["performance"], "")
+        self.assertEqual(actual["activities"], "::0")
+        self.assertEqual(actual["performance"], "::0")
         self.assertEqual(actual["garmin"], "")
         self.assertEqual(actual["chat"], "0:0")
         self.assertEqual(actual["library"], ":0")
         self.assertEqual(actual["checkins"], ":0")
         self.assertEqual(actual["activity_feedback"], ":0")
-        self.assertEqual(actual["plan"], "::::")
+        self.assertEqual(actual["plan"], ":::")
         self.assertEqual(self.manager.reader_calls, 1)
         self.assertEqual(self.manager.unit_of_work_calls, 0)
 
-    def test_snapshot_markers_are_atomic_and_do_not_decode_full_payload(self) -> None:
-        snapshot_seed.save_view(self.sync_state, 
-            {"synced_at": "before", "recent_activities": [{}, {}]}
+    def test_snapshot_rows_are_atomic_and_never_feed_the_markers(self) -> None:
+        snapshot_seed.save_view(
+            self.sync_state, {"synced_at": "before", "recent_activities": [{}, {}]}
         )
         with self.manager.reader() as db:
             self.assertEqual(
@@ -221,11 +249,12 @@ class StateVersionServiceTests(unittest.TestCase):
                 self.snapshot_repository.latest_metadata(db)["synced_at"], "before"
             )
 
-        def fail_if_decoded(_db):
-            raise AssertionError("decoded snapshot")
-
-        self.snapshot_repository.latest_payload = fail_if_decoded
-        self.assertEqual(self.service.versions()["activities"], "before:2")
+        read = AssertionError("read snapshot")
+        with (
+            patch.object(self.snapshot_repository, "latest_payload", side_effect=read),
+            patch.object(self.snapshot_repository, "latest_metadata", side_effect=read),
+        ):
+            self.assertEqual(self.service.versions()["activities"], "::0")
 
 
 if __name__ == "__main__":

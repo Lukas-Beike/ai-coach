@@ -17,9 +17,7 @@ from backend.sync.queue import SyncJobQueueService
 
 
 class _StateVersionProvider(Protocol):
-    def versions(
-        self, snapshot_metadata: dict[str, Any] | None = None
-    ) -> dict[str, str]: ...
+    def versions(self) -> dict[str, str]: ...
 
 
 class SyncOperationStateWriter:
