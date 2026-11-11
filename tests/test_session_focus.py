@@ -25,6 +25,7 @@ from backend.planning.session_focus import (
     SessionFocus,
     allowed_foci,
     carry_focus,
+    is_hard,
     session_focus,
     unambiguous_values,
 )
@@ -248,6 +249,123 @@ class FrontendParityTests(unittest.TestCase):
         self.assertEqual(set(re.findall(r"(\w+):", labels)), set(ALL_FOCI))
 
 
+# The one hard-session rule (athlete decision 2026-11-11, #2083). Expected values
+# come from the decision table on the issue, not from the code.
+HARD_TABLE = (
+    (
+        "threshold Z4 steps",
+        unit("Ride", description="- 15m Z2\n\n3x\n- 10m Z4\n- 3m Z1"),
+        True,
+    ),
+    ("110 % intervals", unit("Ride", description="5x\n- 4m 110%\n- 4m 50%"), True),
+    (
+        "VO2max run in Z5",
+        unit("Run", description="6x\n- 3m Z5 Pace\n- 2m Z1 Pace"),
+        True,
+    ),
+    (
+        "tempo Z3 steps",
+        unit("Ride", name="Tempo", description="2x\n- 20m Z3\n- 5m Z1"),
+        False,
+    ),
+    (
+        "sweet spot at 90 %",
+        unit("Ride", name="Sweet Spot", description="3x\n- 12m 90%\n- 4m 55%"),
+        False,
+    ),
+    (
+        "strides",
+        unit("Run", description="- 40m Z2 Pace\n\n6x\n- 20s 120% Pace\n- 1m Z1 Pace"),
+        False,
+    ),
+    (
+        "sprints",
+        unit(
+            "Ride", name="Sprints", description="- 50m Z2\n\n6x\n- 15s 150%\n- 3m 50%"
+        ),
+        False,
+    ),
+    (
+        "long Z2 run",
+        unit("Run", name="Langer Lauf", description="- 100m Z2 Pace"),
+        False,
+    ),
+    (
+        "steps beat hard text",
+        unit("Ride", name="Z5 recovery", description="- 60m 60%"),
+        False,
+    ),
+    (
+        "name only: intervals",
+        unit("Ride", name="Intervalltraining", description=""),
+        True,
+    ),
+    ("name only: threshold", unit("Run", name="Schwelle 3×10", description=""), True),
+    ("name only: VO2", unit("Run", name="VO2 reps", description=""), True),
+    ("name only: race", unit("Run", name="Race 10k", description=""), True),
+    ("name only: tempo", unit("Run", name="Tempo run", description=""), False),
+    (
+        "percent text without steps",
+        unit("Run", name="Build to 115%", description=""),
+        False,
+    ),
+    ("Z4 text without steps", unit("Run", name="Lauf", description="3x8 min Z4"), True),
+    (
+        "negated zone",
+        unit("Run", name="Lauf", description="Locker, bleib unter Z4"),
+        False,
+    ),
+    (
+        "negated word",
+        unit("Run", name="ohne Intervalle, locker", description=""),
+        False,
+    ),
+    (
+        "Intervals.icu is a name",
+        unit("Ride", name="Sync to Intervals.icu", description=""),
+        False,
+    ),
+    (
+        "planned intensity 0.9",
+        unit("Ride", name="Training", description="", planned_intensity=0.9),
+        True,
+    ),
+    (
+        "planned intensity 0.6",
+        unit("Ride", name="Training", description="", planned_intensity=0.6),
+        False,
+    ),
+    (
+        "set threshold beats easy text",
+        unit("Ride", name="Locker", description="- 60m Z2", session_focus="threshold"),
+        True,
+    ),
+    (
+        "set easy beats hard text",
+        unit("Run", name="Intervalle", description="- 30m Z4", session_focus="easy"),
+        False,
+    ),
+    ("set tempo is not hard", unit("Ride", session_focus="tempo"), False),
+    (
+        "hard step field",
+        unit("Ride", description="- 60m 60%", intervals="4x 8m threshold"),
+        True,
+    ),
+    (
+        "strength is never hard",
+        unit("WeightTraining", name="Schwer, Intervalle", description=""),
+        False,
+    ),
+)
+
+
+class HardRuleTests(unittest.TestCase):
+    def test_one_hard_rule_table(self):
+        for label, planned_unit, expected in HARD_TABLE:
+            with self.subTest(label):
+                self.assertIs(expected, is_hard(planned_unit))
+
+
 class CheckTests(unittest.TestCase):
     def test_set_focus_decides_hardness_before_text(self):
         easy = unit(
@@ -257,11 +375,6 @@ class CheckTests(unittest.TestCase):
         self.assertTrue(plan_checks.is_hard(unit("Run", session_focus="threshold")))
         self.assertTrue(plan_checks.is_hard(unit("Ride", session_focus="sweet_spot")))
         self.assertFalse(plan_checks.is_hard(unit("Run", session_focus="long")))
-
-    def test_derived_keyword_focus_marks_hard_without_other_evidence(self):
-        self.assertTrue(
-            plan_checks.is_hard(unit("Run", name="Schwelle 3×10", description=""))
-        )
 
     def test_back_to_back_uses_the_focus(self):
         units = [

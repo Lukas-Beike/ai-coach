@@ -192,7 +192,10 @@ class PlanningCalendarTests(unittest.TestCase):
                 {**run, "session_focus": "easy"}, event
             )
         )
-        decision = planning_calendar.calendar_constraint_decision(run, event)
+        # A [NO_INTENSITY] day blocks only hard units (#2083): Z2 passes.
+        self.assertIsNone(planning_calendar.calendar_constraint_decision(run, event))
+        hard = {**run, "description": "3x\n- 8m Z4 HR\n- 2m Z1 HR"}
+        decision = planning_calendar.calendar_constraint_decision(hard, event)
         assert decision is not None
         self.assertEqual(decision["reason"], "no_intensity")
 

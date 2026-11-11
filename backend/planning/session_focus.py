@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal
 
 from backend.activities.hr_cap import HR_CAP_KEY, normalize_hr_cap
-from backend.activities.workout_load import WorkoutEstimate
+from backend.activities.workout_load import AthleteThresholds, WorkoutEstimate
+from backend.athlete.measurements import number
 from backend.canonical import planning_fields
 from backend.canonical.planning_fields import (
     SESSION_FOCUS,
@@ -25,6 +26,7 @@ from backend.canonical.planning_fields import (
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.planning import strength_structure
+from backend.planning.planned_unit_load import estimate_planned_unit
 from backend.planning.sport import planned_sport_environment
 
 FOCUS_KEY: Final = SESSION_FOCUS
@@ -46,6 +48,25 @@ Origin = Literal["set", "derived"]
 _LONG_SESSION_S = 5400
 _TEMPO_STEP_S = 1200
 _HARD_STEP_S = 300
+# A planned intensity factor from this value up is hard (#2083).
+HARD_INTENSITY: Final = 0.85
+_HARD_ZONE: Final = 4
+# A Z4+ target counts unless a negation such as "unter Z4" or "kein Z5" precedes it.
+_HARD_ZONE_TEXT: Final = re.compile(
+    r"(?<!unter )(?<!kein )(?<!keine )(?<!nicht )(?<!below )(?<!under )(?<!no )"
+    r"\b(?:z|zone\s*)[4-7]\b",
+    re.IGNORECASE,
+)
+# Words that name a hard session when no step can be read (#2083); tempo and
+# sprints are not hard.
+_HARD_WORDS: Final = re.compile(
+    r"\b(?:intervall\w*|intervals?\b(?!\.icu)|vo2(?:max)?|schwelle\w*|threshold|"
+    r"sweet\s*spot|rennen|race|wettkampf|test|hiit|tabata|anaerob\w*)",
+    re.IGNORECASE,
+)
+# Step fields besides the description that some payloads carry
+# (``intervals`` is the provider workout text field).
+_STEP_FIELDS: Final = ("steps", "intervals", "workout_steps")
 _EASY_INTENSITY = 0.75
 
 
@@ -393,3 +414,61 @@ def unambiguous_values(
         if intensity in STRENGTH_INTENSITIES:
             values[INTENSITY_KEY] = str(intensity)
     return values
+
+
+def planned_intensity_factor(unit: Mapping[str, Any]) -> float | None:
+    """Planned intensity as a factor; percent values above 1.5 are divided by 100."""
+    value = number(unit.get("planned_intensity"))
+    if value is None:
+        return None
+    return value / 100 if value > 1.5 else value
+
+
+def computed_hard(estimate: WorkoutEstimate) -> bool | None:
+    """Hard by computed zone; ``None`` when any step's intensity is unknown.
+
+    Hard is at least five minutes in steps of zone 4 or higher (power, pace or
+    heart-rate zones), so a hard interval set inside an easy session counts and
+    short strides or sprints do not.
+    """
+    if not estimate.steps or estimate.intensity_factor is None:
+        return None
+    hard_s = sum(
+        step.duration_s or 0.0
+        for step in estimate.steps
+        if (step.zone or 0) >= _HARD_ZONE
+    )
+    return hard_s >= _HARD_STEP_S
+
+
+def is_hard(unit: Mapping[str, Any], computed: bool | None = None) -> bool:
+    """The one hard-session rule (athlete decision 2026-11-11, #2083).
+
+    The first stage with an answer decides: a set focus; the workout steps
+    (``computed`` from the caller's thresholds, else the zone and percent steps
+    read without thresholds); a planned intensity factor of at least 0.85; and,
+    only without readable steps, a non-negated Z4-Z7 target or a hard word.
+    Strength is never hard here; heavy strength has its own rule.
+    """
+    sport = planned_sport_environment(unit)[0]
+    if sport is Sport.STRENGTH:
+        return False
+    focus = session_focus(unit)
+    if focus.origin == "set":
+        return bool(focus.is_hard)
+    # Separate step fields are exported as the workout, so they count too.
+    if _hard_text(" ".join(str(unit.get(key) or "") for key in _STEP_FIELDS)):
+        return True
+    if computed is None:
+        computed = computed_hard(estimate_planned_unit(unit, AthleteThresholds()))
+    if computed is not None:
+        return computed
+    factor = planned_intensity_factor(unit)
+    if factor is not None and factor >= HARD_INTENSITY:
+        return True
+    return _hard_text(f"{unit.get('name') or ''} {unit.get('description') or ''}")
+
+
+def _hard_text(text: str) -> bool:
+    affirmed = _affirmed(text)
+    return bool(_HARD_ZONE_TEXT.search(affirmed) or _HARD_WORDS.search(affirmed))

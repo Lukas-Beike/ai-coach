@@ -8,24 +8,19 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar.markers import has_marker
-from backend.planning.session_focus import session_focus
+from backend.planning.session_focus import is_hard, session_focus
 from backend.providers.intervals_workouts import WORKOUT_INTERVALS_FIELD
 
 _HARD_KEYWORD_PATTERN = re.compile(
     r"\b(intervals?|vo2(max)?|threshold|tempo|sprints?|race|tabata|hiit|hard|sweet\s*spot)\b"
 )
 _HARD_PERCENT_PATTERN = re.compile(r"\b(9\d|[1-9]\d{2})%", re.ASCII)
-# Without a set session_focus, [NO_INTENSITY] and rest classification stay
+# Without a set session_focus, explicit-easy and rest classification stay
 # conservative: a named zone from Z2 up is not easy. A set easy focus wins.
+# [NO_INTENSITY] days block only hard units (``session_focus.is_hard``, #2083).
 _HARD_EFFORT_PATTERNS = (
     _HARD_KEYWORD_PATTERN,
     re.compile(r"\bz(one)?\s*[2-9]\b"),
-    _HARD_PERCENT_PATTERN,
-)
-# Race-proximity conflicts treat zone 2 endurance as easy; only Z3+ counts as hard.
-_RACE_HARD_EFFORT_PATTERNS = (
-    _HARD_KEYWORD_PATTERN,
-    re.compile(r"\bz(one)?\s*[3-9]\b"),
     _HARD_PERCENT_PATTERN,
 )
 _EASY_EFFORT_PATTERN = re.compile(
@@ -40,12 +35,6 @@ def _effort_text(workout: dict[str, Any]) -> str:
         f"{workout.get('steps', '')} {workout.get(WORKOUT_INTERVALS_FIELD, '')} "
         f"{workout.get('workout_steps', '')}"
     ).casefold()
-
-
-def workout_is_hard_effort(workout: dict[str, Any]) -> bool:
-    """Return whether name, description, targets or steps name race-relevant hard effort."""
-    text = _effort_text(workout)
-    return any(pattern.search(text) for pattern in _RACE_HARD_EFFORT_PATTERNS)
 
 
 _EASY_FOCI = frozenset({"recovery", "easy", "endurance", "long", "mobility"})
@@ -138,7 +127,7 @@ def calendar_constraint_decision(
             "reason": "no_training",
             "marker": NO_TRAINING_MARKER,
         }
-    if no_intensity and not workout_is_explicitly_easy(workout):
+    if no_intensity and is_hard(workout):
         return {
             "blocked": True,
             "reason": "no_intensity",

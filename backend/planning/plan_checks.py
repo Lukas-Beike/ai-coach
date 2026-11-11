@@ -19,9 +19,9 @@ Rules (references are observational or practice-based, not individual advice):
 - back_to_back_hard: hard run/ride sessions on consecutive days. Hard means a
   set session focus (threshold, sweet_spot, vo2max, anaerobic, race, test), else a
   computed workout zone (at least five minutes in zone 4+ steps,
-  ``load_checks.computed_hard``), else a planned intensity key of at least 0.85 (percent values above 1.5 are
-  divided by 100) or workout text with a Z4-Z7 / zone 4-7 target, else a keyword-derived hard focus. Unknown is not
-  hard.
+  ``session_focus.computed_hard``), else a planned intensity key of at least 0.85 (percent values above 1.5 are
+  divided by 100), else, without readable steps, workout text with a Z4-Z7 / zone 4-7 target or a hard word
+  (``session_focus.is_hard``, the one rule of #2083). Unknown is not hard.
 - strength_hard_same_day: heavy strength (set or structure-derived strength_intensity, else planned intensity >= 0.85 or text
   naming heavy, schwer, maximal or a 1-6 RM) and a hard run/ride on one date
   with less than 6 h between start times, or an unknown start time
@@ -68,10 +68,14 @@ from backend.planning import (
 from backend.planning.local_start import known_start
 from backend.planning.session_focus import (
     FOCUS_KEY,
+    HARD_INTENSITY,
     INTENSITY_KEY,
     allowed_foci,
+    computed_hard,
+    planned_intensity_factor,
     session_focus,
 )
+from backend.planning.session_focus import is_hard as unit_is_hard
 from backend.planning.sport import planned_sport_environment
 
 ALL_DAY_EVENT = "all_day_event"
@@ -143,7 +147,6 @@ RULE_SUMMARY = {
     code: f"{'Blocks' if code in (*BLOCKING_CODES, *REQUIRED_CODES) else 'Note'}: {text}"
     for code, text in _RULE_TEXT.items()
 }
-HARD_INTENSITY = 0.85
 MIN_STRENGTH_GAP_H = 6
 TAPER_DAYS = 14
 TAPER_MIN_REDUCTION = 0.20
@@ -155,18 +158,12 @@ RUN_WINDOW_DAYS = 30
 # Key check_plan sets on a unit copy whose steps give a computed intensity.
 COMPUTED_HARD = "_computed_hard"
 _ENDURANCE = frozenset({Sport.RUN, Sport.RIDE})
-# A Z4+ target counts unless a negation such as "unter Z4" or "kein Z5" precedes it.
-_HARD_ZONE = re.compile(
-    r"(?<!unter )(?<!kein )(?<!keine )(?<!nicht )(?<!below )(?<!under )(?<!no )"
-    r"\b(?:z|zone\s*)[4-7]\b",
-    re.IGNORECASE,
-)
 # "maximal" is left out: in German it mostly means "at most".
 _HEAVY = re.compile(r"\b(?:heavy|schwer|[1-6]\s*rm)\b", re.IGNORECASE)
 
 
 def intensity_factor(unit: Mapping[str, Any]) -> float | None:
-    return leg_strength.planned_intensity_factor(unit)
+    return planned_intensity_factor(unit)
 
 
 def _text(unit: Mapping[str, Any]) -> str:
@@ -190,20 +187,13 @@ def _duration_s(unit: Mapping[str, Any]) -> float:
 
 
 def is_hard(unit: Mapping[str, Any]) -> bool:
-    """Whether a planned run or ride is hard: computed intensity, else key or text."""
-    if _sport(unit) not in _ENDURANCE:
-        return False
-    focus = session_focus(unit)
-    if focus.origin == "set":
-        return bool(focus.is_hard)
+    """Whether a planned run or ride is hard by the one rule (#2083).
+
+    The steps are judged with the thresholds ``check_plan`` computed them with.
+    """
     computed = unit.get(COMPUTED_HARD)
-    if isinstance(computed, bool):
-        return computed
-    factor = intensity_factor(unit)
-    return (
-        (factor is not None and factor >= HARD_INTENSITY)
-        or bool(_HARD_ZONE.search(_text(unit)))
-        or bool(focus.is_hard)
+    return _sport(unit) in _ENDURANCE and unit_is_hard(
+        unit, computed if isinstance(computed, bool) else None
     )
 
 
@@ -619,7 +609,7 @@ def _with_computed_hard(
 ) -> list[Mapping[str, Any]]:
     """Unit copies carrying the hardness computed from their workout steps."""
     computed = {
-        id(session.unit): load_checks.computed_hard(session.estimate)
+        id(session.unit): computed_hard(session.estimate)
         for session in sessions
     }
     return [

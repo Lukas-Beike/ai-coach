@@ -19,6 +19,7 @@ from backend.planning.adaptive_preview_service import (
     AdaptiveReplanPreviewService,
 )
 from backend.planning.plan_checks import ILLNESS_DAYS
+from backend.planning.session_focus import is_hard
 
 
 class _Checkins:
@@ -269,7 +270,7 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         payload = easy["payload"]
         self.assertEqual(payload["name"], adaptive.ADAPTIVE_EASY_NAME)
         self.assertEqual(easy["after"]["name"], adaptive.ADAPTIVE_EASY_NAME)
-        self.assertFalse(calendar.workout_is_hard_effort({"name": payload["name"]}))
+        self.assertFalse(is_hard({"name": payload["name"]}))
         self.assertTrue(calendar.workout_is_explicitly_easy(payload))
         self.assertEqual(payload["target"], "AUTO")
         self.assertEqual(payload["duration_minutes"], 75)
