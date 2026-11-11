@@ -24,9 +24,10 @@ subagents.
 
 Sessions default to `medium` effort (`effortLevel` in `.claude/settings.json`);
 raise it with `/effort high` for tricky work. Agents may not go above `high`
-without your approval. `/pr`, `/deliver-issue`, `/next-issue`, and `/ai-coach-release-unraid`
-are user-only Claude Code commands (`disable-model-invocation: true`) that load
-the canonical workflows in `.agents/skills/`.
+without your approval. `/pr`, `/next-issue`, and `/ai-coach-release-unraid` are user-only Claude Code
+commands (`disable-model-invocation: true`); `/deliver-issue` is also model-invocable,
+so agents deliver queued issues through it (#2274). All load the canonical
+workflows in `.agents/skills/`.
 
 To keep usage down, start a fresh session (`/clear`) for each unrelated task;
 every turn re-sends the whole conversation. Check `/usage` occasionally to see

@@ -12,7 +12,8 @@ worked. The outcome is an evidence-backed, prioritized improvement plan.
 
 ## When to run
 
-Run when the user asks, and briefly at the end of a `deliver-issue` run. Scale
+Run when the user asks, briefly at the end of a `deliver-issue` run, and once
+over the whole run at the end of a lane that delivered a queue of issues. Scale
 depth to the work; a short run needs only a few evidence-backed lines, or "no
 actionable findings". Do not review the retro itself.
 
