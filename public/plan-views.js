@@ -9,7 +9,7 @@
     ].filter(Boolean);
   }
 
-globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets, plannedWeekSyncJobs, plannedGarminBlockedText });
+globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets, plannedWeekSyncJobs, runPlannedWeekSync, plannedGarminBlockedText });
 
 // One explicit plan_push job, carrying the hashes the entries were shown with.
 async function runPlanPush(provider, entries) {
@@ -124,6 +124,25 @@ function plannedWeekSyncJobs(units, leftovers, todayKey, configured, ids) {
     }
   }
   return jobs;
+}
+
+// Run a week's jobs one after another; a failed job never stops the others. The message names
+// the failures first, then what arrived where.
+async function runPlannedWeekSync(jobs, ids, providerLabel) {
+  const failures = [];
+  const done = [];
+  for (const job of jobs) {
+    const name = providerLabel(job.provider);
+    try {
+      const outcome = await runPlanPush(job.provider, job.entries);
+      if (outcome.status === "completed") done.push(job);
+      else failures.push(`${name}: ${job.kind === "remove" ? "Alte Einträge nicht entfernt: " : ""}${globalThis.providerJobErrorDetail?.(outcome) || "Synchronisierung fehlgeschlagen"}`);
+    } catch (error) {
+      failures.push(`${name}: ${error.message}`);
+    }
+  }
+  const summary = plannedWeekSyncSummary(done, ids, providerLabel);
+  return { failed: failures.length > 0, message: [...failures, summary].filter(Boolean).join(" · ") || "Synchronisiert" };
 }
 
 // A leftover belongs to the week of its day; an undated or earlier one to the current week and a
@@ -1107,13 +1126,17 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   // One button per week: it sends every unit of the week a provider still waits for and removes
   // what the app left there for that week. Each job carries the hashes the units were shown with,
   // so a unit edited meanwhile is refused instead of sent.
-  function plannedWeekSyncButton(weekKey, weekEntries, leftovers, todayKey) {
-    const ids = providerIds();
-    const configured = plannedProviderConfiguration();
+  // The week's sync jobs from its calendar entries and leftovers; none when nothing waits.
+  function plannedWeekJobs(weekEntries, leftovers, todayKey) {
     const units = weekEntries
       .filter((entry) => !entry.is_completed_activity)
       .map((entry) => ({ entry, dateKey: plannedEventDate(entry), completed: Boolean(calendarActualActivity(entry)) }));
-    const jobs = plannedWeekSyncJobs(units, leftovers || {}, todayKey, configured, ids);
+    return plannedWeekSyncJobs(units, leftovers || {}, todayKey, plannedProviderConfiguration(), providerIds());
+  }
+
+  function plannedWeekSyncButton(weekKey, weekEntries, leftovers, todayKey) {
+    const ids = providerIds();
+    const jobs = plannedWeekJobs(weekEntries, leftovers, todayKey);
     if (!jobs.length) return null;
     state.plannedSyncInFlight ||= new Set();
     const key = "week:" + weekKey;
@@ -1128,21 +1151,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       state.plannedSyncInFlight.add(key);
       button.disabled = true;
       button.classList.add("busy");
-      const failures = [];
-      const done = [];
-      for (const job of jobs) {
-        const name = coachProviderLabel(job.provider);
-        try {
-          const outcome = await runPlanPush(job.provider, job.entries);
-          if (outcome.status === "completed") done.push(job);
-          else failures.push(`${name}: ${job.kind === "remove" ? "Alte Einträge nicht entfernt: " : ""}${globalThis.providerJobErrorDetail?.(outcome) || "Synchronisierung fehlgeschlagen"}`);
-        } catch (error) {
-          failures.push(`${name}: ${error.message}`);
-        }
-      }
+      const outcome = await runPlannedWeekSync(jobs, ids, coachProviderLabel);
       state.plannedSyncInFlight.delete(key);
-      const summary = plannedWeekSyncSummary(done, ids, coachProviderLabel);
-      globalThis.toast?.([...failures, summary].filter(Boolean).join(" · ") || "Synchronisiert", failures.length > 0);
+      globalThis.toast?.(outcome.message, outcome.failed);
       button.disabled = false;
       button.classList.remove("busy");
       await globalThis.load?.();

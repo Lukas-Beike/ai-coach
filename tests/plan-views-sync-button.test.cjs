@@ -9,13 +9,15 @@ const start = source.indexOf("async function runPlanPush");
 const end = source.indexOf("const CALENDAR_MARKERS", start);
 const sent = [];
 const context = vm.createContext({
-  api: async (url, options) => { sent.push(JSON.parse(options.body)); return { id: "job-1" }; },
-  waitForSyncJob: async (id) => ({ id, status: "completed" }),
+  api: async (url, options) => { sent.push(JSON.parse(options.body)); return { id: JSON.parse(options.body).provider }; },
+  // A Wahoo job fails, every other job completes.
+  waitForSyncJob: async (id) => ({ id, status: id === "wahoo" ? "failed" : "completed" }),
+  providerJobErrorDetail: () => "abgelehnt",
   focusSport: (entry) => String(entry?.sport || "").toLowerCase() || null,
 });
 vm.runInContext(source.slice(start, end) + `;Object.assign(globalThis, {
   targets: plannedPushTargets, run: runPlanPush, leftover: leftoverEntry, blocked: plannedGarminBlockedText,
-  weekJobs: plannedWeekSyncJobs, leftoverWeek: plannedLeftoverWeek, summary: plannedWeekSyncSummary,
+  weekJobs: plannedWeekSyncJobs, leftoverWeek: plannedLeftoverWeek, summary: plannedWeekSyncSummary, runWeek: runPlannedWeekSync,
 });`, context);
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -116,4 +118,20 @@ test("a push job carries its entries; a leftover is removed by the entry its pro
   // A Wahoo plan of a deleted library entry is removed the same way.
   assert.deepEqual(plain(context.leftover("wahoo", { id: "old-2" }, ids)), { library_workout_id: "old-2", remove: true });
   assert.deepEqual(plain(context.leftover("intervals", { id: "old-3", hash }, ids)), { library_workout_id: "old-3", expected_payload_hash: hash });
+});
+
+test("a week's sync runs every job, reports failures first and keeps going after one", async () => {
+  sent.length = 0;
+  const label = (provider) => ({ garmin: "Garmin", intervals: "Intervals.icu", wahoo: "Wahoo" })[provider];
+  const jobs = [
+    { provider: "garmin", kind: "send", entries: [{ library_workout_id: "s1" }], units: [{ sport: "strength" }] },
+    { provider: "wahoo", kind: "remove", entries: [{ library_workout_id: "old-w", remove: true }], units: [] },
+    { provider: "intervals", kind: "send", entries: [{ library_workout_id: "r1" }], units: [{ sport: "ride" }] },
+  ];
+  const outcome = plain(await context.runWeek(jobs, ids, label));
+  assert.deepEqual(sent.map((body) => body.provider), ["garmin", "wahoo", "intervals"]);
+  assert.deepEqual(outcome, {
+    failed: true,
+    message: "Wahoo: Alte Einträge nicht entfernt: abgelehnt · Garmin: 1 strukturiert · Intervals.icu: 1 gesendet",
+  });
 });
