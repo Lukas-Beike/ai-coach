@@ -8,23 +8,26 @@ description: Plan, implement, or review SQLCipher schema migrations and released
 1. Read root and `backend/AGENTS.md`, then locate the schema owner in
    `backend/db/schema.py`, `schema_history.py`, and `migrations.py`. Trace changed
    readers, writers, restore validation, and startup before choosing a migration.
-   Record the current version and every supported released fixture from code;
-   v21 (release 1.13.44, the only production instance) is the oldest schema the
-   code opens; new changes need evidence from v21 onward.
+   Record the current version and the baseline from code: the schema
+   production runs, v26 (release 2.0.5, the only production instance), with its
+   frozen fixture. It is the oldest schema the code opens; new changes need
+   evidence from it. Move the baseline only after the athlete confirms a newer
+   production schema from the diagnostics report.
    Before choosing a number, fetch `develop` and record its `CURRENT_SCHEMA_VERSION`
    and any open schema PRs; take the next free version and rebase on conflict.
 2. Plan the before/after records, version transition, transaction boundary,
-   constraints/indexes, defaults, and skipped-release paths. Preserve every
-   athlete record class, snapshots, tombstones, settings, and sync state. Never
-   rewrite frozen released-schema fixtures to make a migration pass.
+   constraints/indexes, defaults, and the chain from the baseline. Preserve
+   every athlete record class, snapshots, tombstones, settings, and sync state.
+   Never rewrite the frozen baseline fixture to make a migration pass, and add
+   no fixture for a schema that never reached production.
 3. Put migration logic in its cohesive database owner. Reject unknown/newer
    versions or unrecognized shapes before modifying anything. Keep SQLCipher
    enabled; neither an empty data directory nor plaintext startup is an upgrade.
-4. Use populated temporary fixtures for each supported released schema. Assert
-   preserved identities, values, relationships, and sync markers, plus new
-   defaults and constraints. Inject a failure partway through the migration and
-   verify rollback to the unchanged prior schema and rows. Verify same-build
-   restarts and direct skipped-release upgrades to the current version.
+4. Populate a temporary database from the baseline fixture. Assert preserved
+   identities, values, relationships, and sync markers, plus new defaults and
+   constraints. Inject a failure partway through the migration and verify
+   rollback to the unchanged prior schema and rows. Verify same-build restarts
+   and the whole chain from the baseline to the current version.
 5. Trace backup/restore compatibility and existing-record edits after upgrade.
    Use existing tests such as `tests/test_db_migrations.py` and restore-validation
    tests; select checks with [validation](../ai-coach-validation/SKILL.md).

@@ -11,14 +11,14 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
 
 - Preserve all athlete data, including records, snapshots, tombstones, plans,
   sessions, settings, conversations, usage, and sync state, not just chat history.
-- Schema changes require versioned, transactional SQLCipher migrations from
-  supported released schemas, including documented skipped-release upgrades.
-  Release 1.13.44 (schema v21, the only production instance) is the oldest
-  schema the code still opens; older schemas are refused unchanged. New schema
-  changes need upgrade evidence from v21 and each newer released schema.
-  Preserve frozen released-schema fixtures; verify populated upgrades, rollback
-  on failure, and same-build restarts. A schema PR is not release-ready without
-  this evidence.
+- Upgrades start only at the baseline: the schema production runs, confirmed
+  from its diagnostics. It is v26 (release 2.0.5, the only production
+  instance); older schemas are refused unchanged, and release 2.0.5 opens a
+  v21 to v25 database or backup first. Keep one frozen baseline fixture and one
+  versioned, transactional SQLCipher migration chain from it to current; a
+  schema that never reached production gets no fixture. Schema changes need
+  evidence from the baseline: populated upgrade, rollback on failure, and
+  same-build restart. A schema PR is not release-ready without it.
 - Fresh databases require an explicit user request; tests use temporary storage.
   Never make an empty data directory the default upgrade/development policy.
 - Keep one current Coach/API/persistence contract and the supported migrations.

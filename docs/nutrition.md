@@ -34,7 +34,7 @@ For the Coach, matches carry the origin `data_origin` (`live`,
 `local_database`, `local_database_stale`). In the "Produkte" tab, the "Datenbank" (database)
 section lists the stored entries; "Lokal speichern" (save locally) takes over an
 entry as an own product after review, "Aus Datenbank entfernen" (remove from database) deletes only
-the mirror entry. The mirror is part of backup, export and data deletion. The table exists in every supported schema (from v21) and is kept on upgrade.
+the mirror entry. The mirror is part of backup, export and data deletion. The table exists in every supported schema and is kept on upgrade.
 
 ## Yazio product search (optional)
 

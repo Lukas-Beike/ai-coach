@@ -65,14 +65,12 @@ flow rather than demanding unrelated changes or a repository-wide redesign.
   SQLCipher remains enabled, writes retain their transaction boundaries, and
   failures do not leave partially applied state.
 - Schema changes require an explicit versioned, transactional migration from
-  supported released schemas, including documented skipped-release upgrades.
-  Release 1.13.44 (schema v21, the only production instance) is the oldest
-  schema the code still opens; missing upgrades from older releases are
-  intended and not a finding, but opening or restoring one must still be
-  refused unchanged. New schema changes need evidence from v21 and each newer
-  released schema.
-  Require frozen released-schema fixtures and regression evidence for populated
-  upgrades, rollback on failure, and same-build restart. Identify the specific
+  the baseline: the schema production runs, v26 (release 2.0.5, the only
+  production instance). Missing upgrades from older schemas are intended and
+  not a finding, but opening or restoring one must still be refused unchanged.
+  Require the frozen baseline fixture and regression evidence from it for
+  populated upgrade, rollback on failure, and same-build restart; a schema that
+  never reached production needs no fixture of its own. Identify the specific
   missing upgrade path or evidence when reporting a violation.
 - Unknown/newer schemas must fail without reset or partial modification. Check
   backup validation, restore, worker/maintenance coordination, and recovery paths

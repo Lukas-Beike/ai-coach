@@ -9,9 +9,11 @@ from unittest.mock import patch
 from provider_runtime_fakes import ACME_ID, acme_descriptor
 from support import temp_database
 
+from backend.db.schema import initialize_schema
 from backend.providers.descriptors import DEFAULT_PROVIDER_DESCRIPTORS
 from backend.sync.jobs import (
     ALLOWED_JOB_TRANSITIONS,
+    BACKFILL_CONTINUATION_SQL,
     JOB_TYPES,
     PROVIDERS,
     SYNC_JOB_MAX_ATTEMPTS,
@@ -265,6 +267,47 @@ class SyncJobContractTests(unittest.TestCase):
         )
         self.assertEqual(result["payload"], {})
         self.assertEqual(result["status"], "completed")
+
+    def test_backfill_continuation_lookup_reads_its_index_on_the_live_schema(self):
+        db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
+        initialize_schema(db)
+        stamp = "2026-11-01T00:00:00+00:00"
+        for job_id, provider, job_type, requested_by, end_date in (
+            ("job-a", "garmin", "historical_backfill", "backfill", "2026-10-31"),
+            ("job-b", "garmin", "historical_backfill", "backfill", "2026-10-24"),
+            ("job-c", "wahoo", "historical_backfill", "backfill", "2026-10-31"),
+            ("job-d", "garmin", "historical_backfill", "athlete", "2026-10-31"),
+            ("job-e", "garmin", "refresh", "coach", None),
+        ):
+            db.execute(
+                "INSERT INTO sync_jobs(id, provider, type, status, payload, "
+                "requested_by, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'completed', ?, ?, ?, ?)",
+                (
+                    job_id,
+                    provider,
+                    job_type,
+                    json.dumps({} if end_date is None else {"end_date": end_date}),
+                    requested_by,
+                    stamp,
+                    stamp,
+                ),
+            )
+
+        def continued(provider, end_date, exclude=""):
+            arguments = (provider, "historical_backfill", end_date, stamp, exclude)
+            return db.execute(BACKFILL_CONTINUATION_SQL, arguments).fetchone()
+
+        self.assertIsNotNone(continued("garmin", "2026-10-31"))
+        self.assertIsNone(continued("garmin", "2026-10-31", exclude="job-a"))
+        self.assertIsNone(continued("wahoo", "2026-10-24"))
+        self.assertIsNone(continued("garmin", "2026-01-01"))
+        plan = db.execute(
+            f"EXPLAIN QUERY PLAN {BACKFILL_CONTINUATION_SQL}",
+            ("garmin", "historical_backfill", "2026-10-31", stamp, ""),
+        ).fetchall()
+        self.assertIn("idx_sync_jobs_backfill_end", " ".join(str(row[3]) for row in plan))
 
 
 class SyncJobRequestNormalizationTests(unittest.TestCase):

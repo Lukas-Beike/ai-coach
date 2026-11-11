@@ -19,11 +19,8 @@ from backend.db.schema import CURRENT_SCHEMA_VERSION, database_schema_is_current
 from backend.errors import AppError
 from backend.planning.revision import PlanningRevisionService
 
-V21_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v21.sql.txt"
-V22_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v22.sql.txt"
-V23_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v23.sql.txt"
-V24_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v24.sql.txt"
-V25_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v25.sql.txt"
+# Schema v26, release 2.0.5: the schema production runs and the only baseline.
+BASELINE_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v26.sql.txt"
 
 
 def service(data_dir: Path, **overrides: object) -> DatabaseRestoreValidationService:
@@ -41,41 +38,6 @@ def service(data_dir: Path, **overrides: object) -> DatabaseRestoreValidationSer
     }
     values.update(overrides)
     return DatabaseRestoreValidationService(DatabaseRestoreValidationConfig(**values))  # type: ignore[arg-type]
-
-
-# Provider tables arrived with schema v6; an old release backup has none.
-OLD_RELEASE_ABSENT_PROVIDER_TABLES = (
-    "activity_records",
-    "activity_sessions",
-    "observations",
-    "provider_records",
-)
-
-# The released activity_feedback table predates the schema v7 provider column.
-# DROP COLUMN would leave different stored SQL text than a released schema, so
-# the empty table is recreated with its released DDL.
-RELEASED_ACTIVITY_FEEDBACK_SQL = """
-    CREATE TABLE activity_feedback (
-        activity_id TEXT PRIMARY KEY,
-        activity_name TEXT NOT NULL DEFAULT '',
-        activity_date TEXT NOT NULL DEFAULT '',
-        notes TEXT NOT NULL DEFAULT '',
-        session_rpe REAL CHECK (session_rpe IS NULL OR (session_rpe >= 0 AND session_rpe <= 10)),
-        deviation_reason TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )"""
-
-
-# Schema v8 added remote_links and the tombstone provider column; the released
-# tombstone table is recreated from its DDL for the same reason as above.
-RELEASED_TOMBSTONES_SQL = """
-    CREATE TABLE competition_sync_tombstones (
-        id TEXT PRIMARY KEY,
-        intervals_event_id TEXT,
-        external_id TEXT,
-        created_at TEXT NOT NULL
-    )"""
 
 
 class DatabaseRestoreValidationTests(unittest.TestCase):
@@ -142,52 +104,40 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0
                 )
 
-    def test_validate_upgrades_a_populated_released_backup(self) -> None:
-        for fixture in (
-            V21_FIXTURE,
-            V22_FIXTURE,
-            V23_FIXTURE,
-            V24_FIXTURE,
-            V25_FIXTURE,
-        ):
-            with (
-                self.subTest(fixture=fixture.name),
-                tempfile.TemporaryDirectory() as directory,
-            ):
-                path = Path(directory) / "backup.db"
-                with closing(sqlite3.connect(path)) as connection:
-                    connection.executescript(fixture.read_text(encoding="utf-8"))
-                    connection.execute(
-                        "INSERT INTO messages(role, content, created_at) "
-                        "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
-                    )
-                    connection.commit()
-                service(
-                    Path(directory),
-                    maximum_bytes=10_000_000,
-                    schema_is_current=database_schema_is_current,
-                    migrate_schema=migrate_schema,
-                ).validate(path)
-                with closing(sqlite3.connect(path)) as connection:
-                    connection.row_factory = sqlite3.Row
-                    self.assertEqual(
-                        connection.execute("PRAGMA user_version").fetchone()[0],
-                        CURRENT_SCHEMA_VERSION,
-                    )
-                    self.assertTrue(database_schema_is_current(connection))
-                    self.assertEqual(
-                        connection.execute("SELECT content FROM messages").fetchone()[
-                            0
-                        ],
-                        "Hallo",
-                    )
+    def test_validate_accepts_a_populated_baseline_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.db"
+            with closing(sqlite3.connect(path)) as connection:
+                connection.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
+                connection.execute(
+                    "INSERT INTO messages(role, content, created_at) "
+                    "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
+                )
+                connection.commit()
+            service(
+                Path(directory),
+                maximum_bytes=10_000_000,
+                schema_is_current=database_schema_is_current,
+                migrate_schema=migrate_schema,
+            ).validate(path)
+            with closing(sqlite3.connect(path)) as connection:
+                connection.row_factory = sqlite3.Row
+                self.assertEqual(
+                    connection.execute("PRAGMA user_version").fetchone()[0],
+                    CURRENT_SCHEMA_VERSION,
+                )
+                self.assertTrue(database_schema_is_current(connection))
+                self.assertEqual(
+                    connection.execute("SELECT content FROM messages").fetchone()[0],
+                    "Hallo",
+                )
 
     def test_validate_applies_startup_invariants_to_the_restored_database(self) -> None:
         # A backup taken mid-resync, after a privacy purge, before any planning write.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "backup.db"
             with closing(sqlite3.connect(path)) as connection:
-                connection.executescript(V24_FIXTURE.read_text(encoding="utf-8"))
+                connection.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
                 connection.execute("DELETE FROM planning_state")
                 connection.execute("DELETE FROM kv WHERE key = 'profile'")
                 connection.execute(
@@ -233,18 +183,18 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                 revision.bump(connection)
                 self.assertEqual(revision.read(connection), 1)
 
-    def test_validate_rejects_a_pre_v21_backup_by_release_without_modifying_it(
+    def test_validate_rejects_a_pre_baseline_backup_by_release_without_modifying_it(
         self,
     ) -> None:
-        # Releases before 1.13.41 wrote schemas below 21; their backups are refused.
+        # Releases before 2.0.5 wrote schemas below 26; their backups are refused.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "backup.db"
             with closing(sqlite3.connect(path)) as connection:
-                connection.executescript(V21_FIXTURE.read_text(encoding="utf-8"))
+                connection.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
                 connection.execute(
                     "INSERT INTO messages(role, content, created_at) VALUES ('user', 'Hallo', 'now')"
                 )
-                connection.execute("PRAGMA user_version = 20")
+                connection.execute("PRAGMA user_version = 25")
                 connection.commit()
                 before = list(connection.iterdump())
             with self.assertRaises(AppError) as raised:
@@ -254,12 +204,12 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     migrate_schema=migrate_schema,
                 ).validate(path)
             self.assertEqual(raised.exception.status, 400)
-            self.assertIn("vor 1.13.41", str(raised.exception))
-            self.assertIn("Release 1.13.44", str(raised.exception))
+            self.assertIn("vor 2.0.5", str(raised.exception))
+            self.assertIn("Release 2.0.5 öffnen", str(raised.exception))
             with closing(sqlite3.connect(path)) as connection:
                 self.assertEqual(list(connection.iterdump()), before)
                 self.assertEqual(
-                    connection.execute("PRAGMA user_version").fetchone()[0], 20
+                    connection.execute("PRAGMA user_version").fetchone()[0], 25
                 )
 
     def test_validate_rejects_unexpected_schema_without_scrubbing_backup(self) -> None:
