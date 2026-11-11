@@ -958,7 +958,7 @@ h2 {
 .planned-month-day { display: grid; min-width: 0; min-height: 48px; justify-items: center; align-content: start; gap: 3px; padding: 4px 0; border: 0; border-radius: 10px; color: var(--ink); background: none; font: inherit; cursor: pointer; }
 .planned-month-day.is-outside { color: var(--muted); }
 .planned-month-day:disabled { opacity: .45; cursor: default; }
-.planned-month-number { display: grid; width: 30px; height: 30px; place-items: center; border: 2px solid transparent; border-radius: 50%; font-size: .85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.planned-month-number { display: grid; width: 30px; height: 30px; place-items: center; border: 2px solid var(--transparent); border-radius: 50%; font-size: .85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
 .planned-month-day.is-today .planned-month-number { color: var(--white); background: var(--accent); }
 .planned-month-day[aria-pressed="true"] .planned-month-number { border-color: var(--accent-bright); }
 .planned-month-marks { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }

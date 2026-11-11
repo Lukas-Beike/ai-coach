@@ -1581,7 +1581,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   // The month of the selected day: weeks Monday to Sunday with the ISO week and its planned time.
   function renderPlannedMonth(view) {
-    const { eventsByDate, firstWeekKey, lastDateKey, todayKey } = view;
+    const { firstWeekKey, lastDateKey, todayKey } = view;
     const monthKey = monthStartKey(view.dayKey);
     const nextMonthKey = monthStartKey(monthKey, 1);
     const month = document.createElement("section");
@@ -1592,13 +1592,10 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const title = document.createElement("h4");
     title.id = "plannedMonthTitle";
     title.textContent = new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(dateFromKey(monthKey));
-    const previousKey = monthStartKey(monthKey, -1);
-    const stepTo = (key) => {
-      const day = [todayKey, key].find((item) => item.slice(0, 7) === key.slice(0, 7) && item >= key && item >= firstWeekKey && item <= lastDateKey);
-      return day || (key < firstWeekKey ? firstWeekKey : key);
-    };
+    // A month step selects today when it lies in that month, else the month's first loaded day.
+    const stepTo = (key) => (todayKey.startsWith(key.slice(0, 7)) ? todayKey : [key, firstWeekKey].sort().at(-1));
     heading.append(title,
-      plannedStep(-1, "Vorheriger Monat", addDateKey(monthKey, -1) >= firstWeekKey ? () => selectPlannedDay(stepTo(previousKey)) : null, "month"),
+      plannedStep(-1, "Vorheriger Monat", addDateKey(monthKey, -1) >= firstWeekKey ? () => selectPlannedDay(stepTo(monthStartKey(monthKey, -1))) : null, "month"),
       plannedStep(1, "Nächster Monat", nextMonthKey <= lastDateKey ? () => selectPlannedDay(stepTo(nextMonthKey)) : null, "month"),
       plannedViewSwitch());
     const grid = document.createElement("div");
@@ -1608,22 +1605,24 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     names.setAttribute("aria-hidden", "true");
     for (const name of ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So", "KW"]) names.append(Object.assign(document.createElement("span"), { textContent: name }));
     grid.append(names);
-    const currentWeekKey = planWeekStart(todayKey);
-    for (let weekKey = planWeekStart(monthKey); weekKey < nextMonthKey; weekKey = addDateKey(weekKey, 7)) {
-      const row = document.createElement("div");
-      row.className = `planned-month-row${weekKey === currentWeekKey ? " is-current" : ""}`;
-      for (let offset = 0; offset < 7; offset += 1) row.append(plannedMonthDay(view, addDateKey(weekKey, offset), monthKey));
-      const planned = Array.from({ length: 7 }, (_, offset) => eventsByDate.get(addDateKey(weekKey, offset)) || []).flat()
-        .filter((entry) => !entry.is_completed_activity);
-      const seconds = planned.reduce((total, entry) => total + plannedDurationSeconds(entry), 0);
-      const week = document.createElement("span");
-      week.className = "planned-month-kw";
-      week.textContent = [`KW ${isoWeekNumber(weekKey)}`, seconds > 0 ? calendarHours(seconds) : ""].filter(Boolean).join(" · ");
-      row.append(week);
-      grid.append(row);
-    }
+    for (let weekKey = planWeekStart(monthKey); weekKey < nextMonthKey; weekKey = addDateKey(weekKey, 7)) grid.append(plannedMonthRow(view, weekKey, monthKey));
     month.append(heading, grid);
     return month;
+  }
+
+  // One week of the month grid: seven days, then the ISO week with its planned time.
+  function plannedMonthRow(view, weekKey, monthKey) {
+    const row = document.createElement("div");
+    row.className = `planned-month-row${weekKey === planWeekStart(view.todayKey) ? " is-current" : ""}`;
+    for (let offset = 0; offset < 7; offset += 1) row.append(plannedMonthDay(view, addDateKey(weekKey, offset), monthKey));
+    const seconds = Array.from({ length: 7 }, (_, offset) => view.eventsByDate.get(addDateKey(weekKey, offset)) || []).flat()
+      .filter((entry) => !entry.is_completed_activity)
+      .reduce((total, entry) => total + plannedDurationSeconds(entry), 0);
+    const week = document.createElement("span");
+    week.className = "planned-month-kw";
+    week.textContent = [`KW ${isoWeekNumber(weekKey)}`, seconds > 0 ? calendarHours(seconds) : ""].filter(Boolean).join(" · ");
+    row.append(week);
+    return row;
   }
 
   // A step button; after the step, focus stays on it or on the other one of its pair.
@@ -1755,6 +1754,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   let selectedDayKey = "";
   let renderedCalendar = [];
 
+  // Keeps the shown week (and in the month view the selected day, which sets the week) inside the loaded weeks.
+  function keepPlannedSelection(todayKey, firstKey, lastKey) {
+    const currentWeekKey = planWeekStart(todayKey);
+    if (!selectedWeekKey || selectedWeekKey < firstKey || selectedWeekKey > lastKey) selectedWeekKey = currentWeekKey;
+    if (calendarView !== "month") return;
+    if (!selectedDayKey || selectedDayKey < firstKey || selectedDayKey > lastKey) selectedDayKey = selectedWeekKey === currentWeekKey ? todayKey : selectedWeekKey;
+    selectedWeekKey = planWeekStart(selectedDayKey);
+  }
+
   function renderPlanned(trainingCalendar) {
     const root = $("#plannedCalendar");
     if (!root) return;
@@ -1766,12 +1774,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const futureWeeks = calendarDisplayValue(display.future_weeks, 4);
     const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
     const lastWeekKey = addDateKey(currentWeekKey, 7 * futureWeeks);
-    if (!selectedWeekKey || selectedWeekKey < firstWeekKey || selectedWeekKey > lastWeekKey) selectedWeekKey = currentWeekKey;
     const lastDateKey = addDateKey(lastWeekKey, 6);
-    if (calendarView === "month") {
-      if (!selectedDayKey || selectedDayKey < firstWeekKey || selectedDayKey > lastDateKey) selectedDayKey = selectedWeekKey === currentWeekKey ? todayKey : selectedWeekKey;
-      selectedWeekKey = planWeekStart(selectedDayKey);
-    }
+    keepPlannedSelection(todayKey, firstWeekKey, lastDateKey);
     const snapshot = JSON.stringify([trainingCalendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
