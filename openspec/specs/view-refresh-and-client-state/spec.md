@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe device snapshots, session-scoped client state, view loading, explicit refresh, and sync-event/poll recovery at application revision `d1beefd77`. A cached view is a device read snapshot, not evidence of current provider data or queued offline writes. Nutrition reads and provider refresh semantics are specified by `nutrition-diary-and-targets` and `nutrition-provider-sync`; shell/controls by `web-pwa-and-accessibility`. Source and existing tests were inspected; the handoff distinguishes actual bounded test execution from unexecuted browser scenarios.
+Describe device snapshots, session-scoped client state, view loading, explicit refresh, and sync-event/poll recovery. A cached view is a device read snapshot, not evidence of current provider data or queued offline writes. Nutrition reads and provider refresh semantics are specified by `nutrition-diary-and-targets` and `nutrition-provider-sync`; shell/controls by `web-pwa-and-accessibility`. Source and existing tests were inspected; the handoff distinguishes actual bounded test execution from unexecuted browser scenarios.
 
 ## Requirements
 
@@ -49,13 +49,13 @@ The client SHALL show compatible stored reads promptly while authentication and 
 
 #### Scenario: Start after asset update
 - **WHEN** a saved snapshot belongs to an earlier asset set
-- **THEN** update processing stays visible until fresh bootstrap/state is available; a server-unreachable start can fall back to the stored data and retry authentication later.
+- **THEN** update processing stays visible until fresh bootstrap/state is available; when the server cannot be reached, or the fresh start data fails to load, the start falls back to the stored data and retries authentication later.
 
 #### Scenario: Slow or failed area
 - **WHEN** one startup area is slow or fails while others load
 - **THEN** usable prior values remain for the pending/failed area while successful areas replace and save their own data; placeholders are not persisted as a successful full read.
 
-Evidence: `public/auth.js::bootstrapAuth`, `public/auth.js::showStateSnapshot`, `public/state-loader.js::withShownSnapshotAreas`, `public/state-loader.js::render`; `e2e/update-start.spec.js::a start after an update shows the update loading screen until fresh data loads @responsive`, `tests/state-loader-startup.test.cjs::snapshot data never overrides the startup bootstrap or claims its versions`, `tests/state-loader-startup.test.cjs::a failed area keeps its previous snapshot value while the others are stored early`.
+Evidence: `public/auth.js::bootstrapAuth`, `public/auth.js::showStateSnapshot`, `public/state-loader.js::withShownSnapshotAreas`, `public/state-loader.js::render`; `e2e/update-start.spec.js::a start after an update shows the update loading screen until fresh data loads @responsive`, `e2e/update-start.spec.js::a start after an update whose fresh data fails shows the stored data @responsive`, `tests/state-loader-startup.test.cjs::snapshot data never overrides the startup bootstrap or claims its versions`, `tests/state-loader-startup.test.cjs::a failed area keeps its previous snapshot value while the others are stored early`.
 
 ### Requirement: Session and privacy transitions invalidate device state
 The client SHALL clear cached state, view reads, and recent messages when login becomes required or privacy data is deleted, and invalidate already-started loads so deleted or previous-session data cannot reappear.

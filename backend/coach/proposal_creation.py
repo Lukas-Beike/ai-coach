@@ -737,6 +737,11 @@ def _label_intervals_removals(
     return details
 
 
+_COMPETITION_MANIFEST_CHANGED = (
+    "Der Wettkampfbestand hat sich vor der Freigabe geändert."
+)
+
+
 def _competition_approval_details(
     arguments: dict[str, Any], database_manager: DatabaseManager
 ) -> list[dict[str, str]]:
@@ -754,9 +759,7 @@ def _competition_detail(db: Any, item: dict[str, Any]) -> dict[str, str]:
         ).fetchone()
         if not row:
             return {}
-        _validate_manifest_row(
-            row, item, "Der Wettkampfbestand hat sich vor der Freigabe geändert."
-        )
+        _validate_manifest_row(row, item, _COMPETITION_MANIFEST_CHANGED)
         return {
             "name": str(row["name"] or "Wettkampf")[:120],
             "date": _approval_date(row["event_date"]),
@@ -767,8 +770,8 @@ def _competition_detail(db: Any, item: dict[str, Any]) -> dict[str, str]:
         "SELECT * FROM competition_sync_tombstones WHERE id=?", (item["id"],)
     ).fetchone()
     if not row:
-        raise AppError(409, "Competition manifest changed before approval.")
-    _validate_manifest_row(row, item, "Competition manifest changed before approval.")
+        raise AppError(409, _COMPETITION_MANIFEST_CHANGED)
+    _validate_manifest_row(row, item, _COMPETITION_MANIFEST_CHANGED)
     label = CompetitionRepository.tombstone_label(db, str(row["id"]))
     if label:
         return {

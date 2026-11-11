@@ -29,6 +29,7 @@ are in the docs.
 | [model-selection-and-usage](specs/model-selection-and-usage/spec.md) | Selected model/thinking/speed, Responses lifecycle and daily token counts |
 | [sync-jobs-and-scheduling](specs/sync-jobs-and-scheduling/spec.md) | Queue, provider cadence/windows, retries and historical work |
 | [provider-connections](specs/provider-connections/spec.md) | Intervals, Garmin, Wahoo, credential lifecycle and explicit metric/library export |
+| [garmin-strength-workout-push](specs/garmin-strength-workout-push/spec.md) | Strength units sent to the Garmin watch as structured workouts on explicit action |
 | [garmin-profile-body-export](specs/garmin-profile-body-export/spec.md) | Profile weight/body-fat changes sent to Garmin as dated body-composition entries |
 | [provider-normalization-and-provenance](specs/provider-normalization-and-provenance/spec.md) | Canonical fields/units/dates, per-metric source rules and reprojection |
 | [activity-ingestion-and-storage](specs/activity-ingestion-and-storage/spec.md) | Provider identity, session copies, detail acquisition and deletion |
@@ -49,6 +50,7 @@ are in the docs.
 | [runtime-and-configuration](specs/runtime-and-configuration/spec.md) | Secure composition/startup, maintenance, readiness/events and shutdown |
 | [diagnostics-and-observability](specs/diagnostics-and-observability/spec.md) | Redacted bounded capture, local reports, logs and safe correlation |
 | [build-release-and-deployment](specs/build-release-and-deployment/spec.md) | Pinned standalone runtime, protected immutable delivery and signed digests |
+| [isolated-test-execution](specs/isolated-test-execution/spec.md) | Focused and complete test selection, isolated browser and SQLCipher runs |
 
 ## Coverage and changes
 

@@ -643,7 +643,7 @@ class BrowserRunnerTests(unittest.TestCase):
 
     def test_synthetic_identity_parity_across_all_projects_and_shards(self):
         listing_report = report()
-        projects = {"desktop", "mobile", "mobile-small", "tablet", "tablet-landscape"}
+        projects = {"desktop", "mobile", "tablet-landscape"}
         for spec in listing_report["suites"][0]["specs"]:
             spec["tests"] = [
                 {"projectName": project, "projectId": project}
@@ -653,7 +653,7 @@ class BrowserRunnerTests(unittest.TestCase):
         timing = runner.read_weights(None)
         baseline = runner.select(listing, "all", [], 1, 1, timing)
         self.assertEqual({child["project"] for child in baseline}, projects)
-        self.assertEqual(sum(identities(baseline).values()), 15)
+        self.assertEqual(sum(identities(baseline).values()), 9)
         combined = []
         for project in sorted(projects):
             for shard in (1, 2):

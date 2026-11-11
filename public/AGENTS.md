@@ -29,10 +29,10 @@
   over the view cache; older messages load when scrolling up. After an update the
   start shows a non-interactive "Update wird verarbeitet…" loading screen until
   the fresh bootstrap arrives; the previous snapshot is shown only when the
-  server cannot be reached. Logout, a 401, an
+  server cannot be reached or the fresh start data fails to load. Logout, a 401, an
   unauthenticated start and a privacy deletion clear this device data. Never
   store credentials, session data or CSRF tokens in it.
 - Keep microphone and notification features opt-in, bounded, and functional in
   browsers that do not support them. Audio must not be persisted by the client.
-- Keep UI text and feature documentation in `README.md` accurate when adding
-  or changing user-visible behavior.
+- Keep UI text and the `README.md` and `docs/` files it links accurate when
+  adding or changing user-visible behavior.

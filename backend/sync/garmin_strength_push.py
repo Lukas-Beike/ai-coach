@@ -14,6 +14,11 @@ cannot find is replaced by a new upload after the old one is unscheduled and
 deleted. Writes go through the unofficial SDK, because the Personal API is
 read-only. One remote failure other than a client error stops the remaining
 units of the run, so a Garmin outage never turns into a burst of requests.
+
+The one write without a request (athlete decision 2026-11-11, #2185): after each
+Garmin refresh, ``remove_past`` unschedules and deletes the linked workouts whose
+planned day has passed, so they do not fill the watch's workout list. It touches
+only linked ids, never a recorded activity.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from backend.canonical.vocabulary import (
@@ -63,6 +68,9 @@ SDK_REQUIRED_MESSAGE = (
 )
 # First line of every description, so a workout this app sent can be told apart.
 WORKOUT_MARKER = "Pacecraft"
+# Workouts of past days removed per refresh; the next refresh takes the rest.
+_PAST_REMOVAL_BATCH = 20
+_PAST_REMOVAL_ATTEMPTS = 2 * _PAST_REMOVAL_BATCH
 _STOPPED = "Nicht gesendet: Der Lauf wurde nach einem Garmin-Fehler beendet."
 
 
@@ -118,8 +126,11 @@ class GarminStrengthPushService:
         now: Callable[[], datetime],
         redactor: Callable[[str], str],
         gate: ProviderResyncGate | None = None,
+        write_ready: Callable[[], bool] = lambda: True,
     ) -> None:
         self._configured = configured
+        # False while the latest refresh could not log the SDK in (login, MFA).
+        self._write_ready = write_ready
         self._database_manager = database_manager
         self._sdk_session = sdk_session
         self._today = today
@@ -158,6 +169,89 @@ class GarminStrengthPushService:
             "failed_object_ids": failed,
             "retry_scope": _RETRY_SCOPE if failed else None,
         }
+
+    def remove_past(self) -> int:
+        """Delete the linked workouts of units dated before today; return how many.
+
+        Runs after a Garmin refresh. Nothing happens while the latest refresh
+        could not log the SDK in, so no extra login is tried. A failure is logged
+        and never fails the refresh: the links stay for the next refresh.
+        """
+        removed = [0]
+        try:
+            if not self._configured() or not self._write_ready():
+                return 0
+            if not self._past_links():
+                return 0
+            operation = (
+                self._gate.operation() if self._gate is not None else nullcontext()
+            )
+            with operation, self._lock, self._sdk_session() as client:
+                # Read again under the lock: a push may have moved a unit meanwhile.
+                self._remove_links(client, self._past_links(), removed)
+        except Exception:  # noqa: BLE001 - the refresh outcome stays unchanged
+            _LOGGER.warning(
+                "Garmin past workout removal failed",
+                extra={"event": "garmin_past_workout_removal_failed"},
+            )
+        if removed[0]:
+            _LOGGER.info(
+                "Garmin past workouts removed",
+                extra={
+                    "event": "garmin_past_workouts_removed",
+                    "context": {"count": removed[0]},
+                },
+            )
+        return removed[0]
+
+    def _past_links(self) -> list[tuple[str, str | None, str | None]]:
+        """(unit id, workout id, schedule id) of linked units before today, oldest first."""
+        with self._database_manager().unit_of_work() as db:
+            rows = db.execute(
+                "SELECT l.local_id, l.remote_id, l.remote_external_id FROM remote_links l "
+                "JOIN planned_units p ON p.local_id = l.local_id "
+                "WHERE l.provider=? AND l.entity_kind=? AND json_valid(p.payload) "
+                "AND substr(json_extract(p.payload, '$.date'), 1, 10) "
+                "BETWEEN '0001-01-01' AND ? "
+                "ORDER BY substr(json_extract(p.payload, '$.date'), 1, 10), l.local_id",
+                (
+                    GARMIN,
+                    RemoteEntityKind.PLANNED_UNIT.value,
+                    # BETWEEN is inclusive: the day before today is the last one.
+                    (self._today() - timedelta(days=1)).isoformat(),
+                ),
+            ).fetchall()
+        return [
+            (str(row["local_id"]), row["remote_id"], row["remote_external_id"])
+            for row in rows
+        ]
+
+    def _remove_links(
+        self,
+        client: Any,
+        links: list[tuple[str, str | None, str | None]],
+        removed: list[int],
+    ) -> None:
+        """Remove up to one batch with a bounded number of attempts.
+
+        A refused workout keeps its link and uses an attempt but no removal slot,
+        so a few refusals never block the later workouts and many never turn into
+        a burst of requests.
+        """
+        for attempt, (local_id, workout_id, schedule_id) in enumerate(links):
+            if removed[0] >= _PAST_REMOVAL_BATCH or attempt >= _PAST_REMOVAL_ATTEMPTS:
+                return
+            try:
+                self._discard(client, workout_id, schedule_id)
+            except _StopRun:
+                return
+            except AppError:
+                continue  # Garmin refused this one; the next refresh tries again
+            with self._database_manager().unit_of_work() as db:
+                _REMOTE_LINKS.delete(
+                    db, RemoteEntityKind.PLANNED_UNIT, local_id, GARMIN
+                )
+            removed[0] += 1
 
     def _run(self, requested: list[dict[str, Any]]) -> list[dict[str, Any]]:
         results: dict[str, dict[str, Any]] = {}

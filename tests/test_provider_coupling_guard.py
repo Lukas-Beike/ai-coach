@@ -1,6 +1,5 @@
-"""Ratchet provider coupling outside the adapters and test the scanner itself."""
+"""Guard provider coupling outside the adapters and test the scanner itself."""
 
-import json
 import tempfile
 import unittest
 from collections.abc import Callable, Mapping
@@ -8,37 +7,25 @@ from pathlib import Path
 
 try:
     from .provider_coupling import (
-        BASELINE_PATH,
         OWNER_READ_ALLOWLIST,
         PROVIDER_LITERAL_ALLOWED_FILES,
         SOURCE_ROOT,
         CouplingEntry,
-        compare_coupling,
-        load_baseline,
-        render_baseline,
         scan_owner_reads,
         scan_provider_coupling,
-        snapshot_refusals,
         stale_owner_allowlist,
         unallowed_owner_reads,
-        write_baseline,
     )
 except ImportError:
     from provider_coupling import (
-        BASELINE_PATH,
         OWNER_READ_ALLOWLIST,
         PROVIDER_LITERAL_ALLOWED_FILES,
         SOURCE_ROOT,
         CouplingEntry,
-        compare_coupling,
-        load_baseline,
-        render_baseline,
         scan_owner_reads,
         scan_provider_coupling,
-        snapshot_refusals,
         stale_owner_allowlist,
         unallowed_owner_reads,
-        write_baseline,
     )
 
 
@@ -80,29 +67,13 @@ class ProviderCouplingRatchetTests(unittest.TestCase):
         for relative_path in sorted(PROVIDER_LITERAL_ALLOWED_FILES):
             self.assertTrue((SOURCE_ROOT / relative_path).is_file(), relative_path)
 
-    def test_provider_coupling_does_not_grow(self) -> None:
-        comparison = compare_coupling(load_baseline(), scan_provider_coupling())
+    def test_provider_coupling_has_no_findings(self) -> None:
         self.assertEqual(
             [],
-            [change.describe() for change in comparison.grown],
-            "Provider coupling grew outside the adapters. Move the code behind a "
+            _summary(scan_provider_coupling()),
+            "Provider coupling outside the adapters. Move the code behind a "
             "provider adapter or canonical model.",
         )
-
-    def test_provider_coupling_baseline_shrinks_with_removed_coupling(self) -> None:
-        comparison = compare_coupling(load_baseline(), scan_provider_coupling())
-        self.assertEqual(
-            [],
-            [change.describe() for change in comparison.shrunk],
-            "The provider coupling baseline must shrink. Regenerate it with "
-            "`python tests/provider_coupling.py --snapshot`.",
-        )
-
-    def test_baseline_is_canonically_sorted_and_round_trips(self) -> None:
-        entries = load_baseline()
-        self.assertEqual(entries, sorted(entries))
-        committed = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(committed, json.loads(render_baseline(entries)))
 
 
 class ProviderCouplingScannerTests(unittest.TestCase):
@@ -285,32 +256,6 @@ class ProviderCouplingScannerTests(unittest.TestCase):
         ):
             scan_provider_coupling(Path(directory))
 
-    def test_snapshot_refuses_growth_and_empty_scans(self) -> None:
-        baseline = [_entry("provider_literal", "backend/a.py", "garmin", 1)]
-        grown = [_entry("provider_literal", "backend/a.py", "garmin", 2)]
-        growth_message = (
-            "refusing to record growth: provider_literal backend/a.py "
-            "'garmin': baseline 1, current 2"
-        )
-        self.assertEqual([growth_message], snapshot_refusals(baseline, grown))
-        unchanged = [_entry("provider_literal", "backend/a.py", "garmin", 1)]
-        self.assertEqual([], snapshot_refusals(baseline, unchanged))
-        empty_message = (
-            "the scan found no provider sources; refusing to record an empty baseline"
-        )
-        self.assertEqual([empty_message], snapshot_refusals(baseline, []))
-        self.assertEqual(
-            [empty_message], snapshot_refusals(None, [], sources_scanned=True)
-        )
-
-    def test_snapshot_records_removal_of_the_last_entry_after_a_scan(self) -> None:
-        baseline = [_entry("provider_literal", "backend/a.py", "garmin", 1)]
-        self.assertEqual([], snapshot_refusals(baseline, [], sources_scanned=True))
-
-    def test_snapshot_allows_bootstrap_without_a_committed_baseline(self) -> None:
-        current = [_entry("provider_literal", "backend/a.py", "garmin", 1)]
-        self.assertEqual([], snapshot_refusals(None, current))
-
     def test_counts_aggregate_per_file_and_token(self) -> None:
         entries = _scan_files(
             {
@@ -328,86 +273,6 @@ class ProviderCouplingScannerTests(unittest.TestCase):
             ],
             _summary(entries),
         )
-
-    def test_comparison_reports_new_increased_decreased_and_obsolete(self) -> None:
-        baseline = [
-            _entry("icu_identifier", "backend/a.py", "icu_a", 2),
-            _entry("icu_identifier", "backend/b.py", "icu_b", 1),
-            _entry("garmin_wire_key", "backend/c.py", "calendarDate", 3),
-            _entry("provider_literal", "backend/d.py", "garmin", 1),
-        ]
-        current = [
-            _entry("icu_identifier", "backend/a.py", "icu_a", 2),
-            _entry("icu_identifier", "backend/b.py", "icu_b", 4),
-            _entry("garmin_wire_key", "backend/c.py", "calendarDate", 1),
-            _entry("provider_literal", "backend/e.py", "intervals", 1),
-        ]
-        comparison = compare_coupling(baseline, current)
-        self.assertEqual(
-            [("provider_literal", "backend/e.py", "intervals", 0, 1)],
-            [(c.rule, c.path, c.token, c.baseline, c.current) for c in comparison.new],
-        )
-        self.assertEqual(
-            [("icu_identifier", "backend/b.py", "icu_b", 1, 4)],
-            [
-                (c.rule, c.path, c.token, c.baseline, c.current)
-                for c in comparison.increased
-            ],
-        )
-        self.assertEqual(
-            [("garmin_wire_key", "backend/c.py", "calendarDate", 3, 1)],
-            [
-                (c.rule, c.path, c.token, c.baseline, c.current)
-                for c in comparison.decreased
-            ],
-        )
-        self.assertEqual(
-            [("provider_literal", "backend/d.py", "garmin", 1, 0)],
-            [
-                (c.rule, c.path, c.token, c.baseline, c.current)
-                for c in comparison.obsolete
-            ],
-        )
-
-    def test_unchanged_coupling_produces_no_comparison_changes(self) -> None:
-        entries = [_entry("icu_identifier", "backend/a.py", "icu_a", 2)]
-        comparison = compare_coupling(entries, entries)
-        self.assertEqual((), comparison.grown)
-        self.assertEqual((), comparison.shrunk)
-
-    def test_snapshot_writes_sorted_lf_json_that_loads_back(self) -> None:
-        entries = [
-            _entry("provider_literal", "public/app.js", "garmin", 1),
-            _entry("icu_identifier", "backend/a.py", "icu_a", 2),
-        ]
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "baseline.json"
-            write_baseline(entries, path)
-            raw = path.read_bytes()
-            self.assertNotIn(b"\r", raw)
-            self.assertEqual(
-                [
-                    _entry("icu_identifier", "backend/a.py", "icu_a", 2),
-                    _entry("provider_literal", "public/app.js", "garmin", 1),
-                ],
-                load_baseline(path),
-            )
-
-    def test_loading_rejects_duplicate_entries(self) -> None:
-        duplicate = {"rule": "icu_identifier", "path": "backend/a.py"}
-        document = {
-            "description": "test",
-            "regeneration": "test",
-            "entries": [
-                {**duplicate, "token": "icu_a", "count": 1},
-                {**duplicate, "token": "icu_a", "count": 2},
-            ],
-        }
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "baseline.json"
-            path.write_text(json.dumps(document), encoding="utf-8")
-            with self.assertRaises(ValueError):
-                load_baseline(path)
 
 
 def _owner_reads(files: Mapping[str, str]) -> list[tuple[str, str, str, int]]:
@@ -802,11 +667,10 @@ class OwnerReadGuardTests(unittest.TestCase):
     def test_owner_allowlist_has_no_stale_entries(self) -> None:
         self.assertEqual([], stale_owner_allowlist(scan_owner_reads()))
 
-    def test_owner_allowlist_is_explained_and_the_baseline_stays_empty(self) -> None:
+    def test_owner_allowlist_is_explained(self) -> None:
         for (_rule, relative_path), reason in OWNER_READ_ALLOWLIST.items():
             self.assertTrue((SOURCE_ROOT / relative_path).is_file(), relative_path)
             self.assertTrue(reason.strip(), relative_path)
-        self.assertEqual([], load_baseline())
 
 
 if __name__ == "__main__":

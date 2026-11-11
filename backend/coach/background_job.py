@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from datetime import date
 from typing import Any, Protocol
 
 from backend.coach.chat_turn import CoachChatTurnService
@@ -180,7 +181,13 @@ class CoachBackgroundJobRunner:
             "openai_response_id"
         ):
             raise_if_chat_cancelled(cancel_event)
-            self._morning().prepare()
+            prepared_for = self._morning().prepare()
+            if isinstance(prepared_for, date):
+                # The marker names the day prepared for, also when the turn
+                # completes after midnight or resumes (#2134, E-014).
+                self._jobs.merge_receipt(
+                    client_turn_id, {"morning_checkin_date": prepared_for.isoformat()}
+                )
             raise_if_chat_cancelled(cancel_event)
         result = self._chat_turn().run(
             message,

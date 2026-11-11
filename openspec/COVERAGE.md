@@ -8,6 +8,8 @@ v13). OpenSpec CLI/skill setup is the separate documentation/tooling checkpoint
 `6f942515a`. The backfill changes documentation only. Subsequent application
 changes must update affected requirements, scenarios and their evidence.
 
+This ledger is a frozen snapshot of that revision and is not updated by later changes.
+
 This is a capability baseline, not a claim that every source line was audited or
 every scenario was executed. Requirement evidence names the current implementation
 and inspected regression tests. Test execution is recorded separately below.

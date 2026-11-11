@@ -7,8 +7,9 @@ per ``VERSION`` it runs the regular session linking (``link_activity_sessions``,
 the entry point ingest uses, with no second matching rule) on every day holding
 an active Garmin and an active Wahoo record.
 
-Linking never touches hidden or deleted sessions or athlete-confirmed sessions,
-and it never splits a session. The whole pass is one transaction: a failure
+Linking never touches hidden sessions or athlete-confirmed sessions and never
+splits a session; a copy of a session the athlete deleted is deleted with it
+(undoing that delete brings the copy back). The whole pass is one transaction: a failure
 leaves the data unchanged and the next pass retries. The state and the log line
 hold counts only, never names, dates or activity content.
 """
@@ -29,8 +30,9 @@ from backend.sync.canonical_backfill import BatchReport
 
 STAGE: Final = "session_rebundle"
 STATE_KEY: Final = "session_rebundle_state"
-# Bump to run the pass once more after the matching rules change again.
-VERSION: Final = 1
+# Bump to run the pass once more after the matching rules change again. Version
+# 2 deletes stored copies of sessions the athlete deleted (#2137, B-011).
+VERSION: Final = 2
 _PROVIDERS: Final = (ProviderId.GARMIN.value, ProviderId.WAHOO.value)
 _LOGGER = logging.getLogger("intervals_coach")
 

@@ -1,8 +1,8 @@
 """Registry of configured provider descriptors for synchronization.
 
 Provider data lives in backend/providers/descriptors.py. This module names no
-provider, so it stays free of provider literals and needs no coupling baseline
-entry. Lookups take provider identifiers from the caller.
+provider, so it stays free of the provider literals the coupling guard
+forbids. Lookups take provider identifiers from the caller.
 """
 
 from __future__ import annotations

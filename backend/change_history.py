@@ -143,6 +143,7 @@ PLANNED_UNIT_FIELDS = {
     "sync_status",
     "remote_event_id",
     "remote_event_external_id",
+    "remote_event_category",
     "local_deleted",
     *FOCUS_KEYS,
 }
@@ -457,14 +458,15 @@ def audit_diff(
     }
 
 
-def cleanup(db: Any, *, current_time: datetime | None = None) -> None:
+def cleanup(db: Any, *, current_time: datetime | None = None, reserve: int = 0) -> None:
+    """Drop expired rows and keep at most ``MAX_ROWS - reserve`` of the newest."""
     now = current_time or datetime.now(UTC)
     cutoff = (now - timedelta(days=RETENTION_DAYS)).isoformat()
     db.execute("DELETE FROM change_history WHERE created_at < ?", (cutoff,))
     db.execute(
         "DELETE FROM change_history WHERE id NOT IN "
         "(SELECT id FROM change_history ORDER BY created_at DESC LIMIT ?)",
-        (MAX_ROWS,),
+        (MAX_ROWS - reserve,),
     )
 
 
@@ -519,7 +521,8 @@ def record_change(
         ),
     }
     if source != "coach_replacement":
-        cleanup(db)
+        # Room for the row inserted below, so the cap holds (#2134, G-016).
+        cleanup(db, reserve=1)
     db.execute(
         "INSERT INTO change_history(id, entity_type, entity_id, action, source, created_at, before_hash, after_hash, diff) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

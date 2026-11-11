@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe the private athlete-facing PWA shell, navigation, accessible controls, safe content, Coach interaction, and operational UIs at application revision `d1beefd77`. This is an inspected brownfield contract, not a claim of full browser execution or universal accessibility compliance. Durable training, planning, performance, activity, profile, history/undo, authentication, credentials, backup/restore, and privacy effects belong to their domain specifications. Nutrition behavior is specified in `nutrition-diary-and-targets` and `food-catalog-and-meal-library`; refresh/cache behavior in `view-refresh-and-client-state`; microphone/notification behavior in `voice-and-notifications`.
+Describe the private athlete-facing PWA shell, navigation, accessible controls, safe content, Coach interaction, and operational UIs. This is an inspected brownfield contract, not a claim of full browser execution or universal accessibility compliance. Durable training, planning, performance, activity, profile, history/undo, authentication, credentials, backup/restore, and privacy effects belong to their domain specifications. Nutrition behavior is specified in `nutrition-diary-and-targets` and `food-catalog-and-meal-library`; refresh/cache behavior in `view-refresh-and-client-state`; microphone/notification behavior in `voice-and-notifications`.
 
 ## Requirements
 
@@ -104,7 +104,7 @@ The client SHALL keep the application behind the required login dialog until suc
 Evidence: `public/auth.js::installLoginDialogGuards`, `public/auth.js::loginErrorMessage`, `public/auth.js::logout`, `public/auth.js::showLogin`, `public/sync-status.js::renderMaintenanceStatus`; `e2e/login-dialog.spec.js::Escape keeps the login dialog open and logout shows it again @responsive`, `tests/login-errors.test.cjs::a rate-limited login names the wait from Retry-After`, `tests/login-errors.test.cjs::a lasting server error keeps its own message instead of asking to retry`.
 
 ### Requirement: One status strip ranks the notices above every screen
-The client SHALL show at most one status strip above every screen: the most severe notice as text, the others behind a count button. Severity SHALL rank maintenance, offline, OpenAI key, Coach error, provider attention, Garmin hint, thresholds, and last the dismissible Intervals.icu key hint, which appears only when nothing else does.
+The client SHALL show at most one status strip above every screen: the most severe notice as text, the others behind a count button. Severity SHALL rank the start loading notice, which shows alone, then maintenance, offline, OpenAI key, Coach error, data load failure, provider attention, Garmin hint, thresholds, and last the dismissible Intervals.icu key hint, which appears only when nothing else does.
 
 #### Scenario: Age of device data
 - **WHEN** the offline or load-failure notice shows data from the device
@@ -112,13 +112,13 @@ The client SHALL show at most one status strip above every screen: the most seve
 
 #### Scenario: Several notices at once
 - **WHEN** the browser is offline, the Coach reports an error and an optional provider key is missing
-- **THEN** one strip shows the offline notice with a "+N Hinweise" button, and the button lists the Coach error.
+- **THEN** one strip shows the offline notice with a "+N Hinweise" button ("+1 Hinweis" for one further notice), and the button lists the Coach error.
 
 #### Scenario: Low screen
 - **WHEN** the viewport is lower than 500 px
 - **THEN** the strip is one line, non-critical notices appear only as a count button, and the composer is one row.
 
-Evidence: `public/status-strip.js::statusStripItems`, `public/status-strip.js::renderStatusStrip`, `public/shared.js::renderStatus`, `public/sync-status.js::renderProviderAttention`, `public/settings.js::thresholdStatusItem`; `e2e/status-strip.spec.js::offline, a Coach error and the missing Intervals.icu key show one strip @responsive`, `tests/status-strip.test.cjs::the strip ranks notices by the athlete's order and shows only one as text`.
+Evidence: `public/status-strip.js::statusStripItems`, `public/status-strip.js::renderStatusStrip`, `public/shared.js::renderStatus`, `public/sync-status.js::renderProviderAttention`, `public/settings.js::thresholdStatusItem`; `e2e/status-strip.spec.js::offline, a Coach error and the missing Intervals.icu key show one strip @responsive`, `tests/status-strip.test.cjs::the strip ranks notices by the athlete's order and shows only one as text`, `tests/status-strip.test.cjs::the loading notice stands alone`.
 
 ### Requirement: Mehr groups settings under one title with text status and a structured profile
 The client SHALL show the settings areas under the fixed title "Mehr" as one swipeable row whose active area is filled, state every provider connection as a text chip (Verbunden, Nicht eingerichtet, Fehler or Nicht geprüft) and let the athlete pick sports by touch. The profile SHALL be four collapsible sections with a one-line summary each and a save bar that stays above the navigation and shows the unsaved state.
@@ -271,9 +271,9 @@ Evidence: `public/diagnostics.js::loadLogs`, `public/diagnostics.js::deleteDiagn
 ### Requirement: Domain views preserve supplied facts and source distinctions
 The client SHALL present domain-provided planning, performance, activity, and equipment facts with their dates, units, source distinctions, and missing-data states. Rendering or opening a domain view SHALL not itself substitute for an authorized durable domain action.
 
-#### Scenario: Agenda, library, and season
-- **WHEN** the athlete opens plan overview, library, or season
-- **THEN** the agenda prioritizes dates and sessions with expandable weather/details, the active undated library is grouped by sport, and season calculations retain their evidence and estimate labels; explicit preview/apply/export effects remain governed by the planning domain.
+#### Scenario: Agenda, library, and competitions
+- **WHEN** the athlete opens plan overview, library, or the competitions tab
+- **THEN** the agenda prioritizes dates and sessions with expandable weather/details, the active undated library is grouped by sport, and the competitions tab lists the saved competitions with their source labels; explicit preview/apply/export effects remain governed by the planning domain.
 
 #### Scenario: Compact calendar week
 - **WHEN** the athlete opens a calendar week with past, today's and planned sessions
@@ -285,7 +285,7 @@ The client SHALL present domain-provided planning, performance, activity, and eq
 
 #### Scenario: Loading, empty, missing and failed reads
 - **WHEN** an analysis or session read is pending, has no data yet, lacks a single value, or fails
-- **THEN** a pending read shows a busy status line; an install without data shows one empty card per analysis tab with one action (the connections when no Garmin or Wahoo source is connected, otherwise a sync); a missing value reads "nicht erfasst" in a muted style; a failed or 15-second timed-out read shows a "Konnte nicht geladen werden." alert with an "Erneut versuchen" action and neither a permanent loading line nor the empty card.
+- **THEN** a pending read shows a busy status line; an install without data shows one empty card per analysis tab with one action (the connections when no Garmin or Wahoo source is connected, "12 Wochen anzeigen" when a source is connected and the tab shows the 14-day period, otherwise a sync); a missing value reads "nicht erfasst" in a muted style; a failed or 15-second timed-out read shows a "Konnte nicht geladen werden." alert with an "Erneut versuchen" action and neither a permanent loading line nor the empty card.
 
 #### Scenario: Chart units and labels
 - **WHEN** an analysis chart plots daily values, weekly sums, or weekly means
@@ -311,14 +311,14 @@ The client SHALL present domain-provided planning, performance, activity, and eq
 - **WHEN** equipment is displayed or maintenance is requested
 - **THEN** local authoritative items and imported/archived sources remain distinguishable, and only eligible active local gear offers the maintenance action under the equipment domain contract.
 
-Evidence: `public/plan-views.js::renderPlanned`, `public/plan-views.js::renderLibrary`, `public/analysis.js::renderAnalysisHistory`, `public/analysis.js::renderTrainingRecords`, `public/analysis.js::recoveryReferenceLabel`, `public/analysis.js::recoveryRollingNote`, `public/components.js::createErrorState`, `public/components.js::createLoadingState`, `public/components.js::markValueMissing`, `public/analysis.js::requestAnalysisReport`, `public/analysis.js::renderRecoveryCharts`, `public/performance-view.js::renderPerformance`, `public/activity-analysis.js::renderPanel`, `public/activity-details.js::render`; `e2e/contracts.spec.js::planned agenda prioritizes dates and sessions with compact weather and expandable details`, `e2e/calendar-week-compact.spec.js::@responsive compact calendar week collapses past days, groups repeats and keeps one conflict style`, `e2e/analysis-info.spec.js::@responsive latest measurement stays visible without inventing measurements in empty weeks`, `e2e/analysis-info.spec.js::@responsive recovery uses independent scales, honest coverage over exactly fourteen days`, `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`, `e2e/training-feature-panels.spec.js::@responsive equipment keeps local authority and groups archived sources`, `e2e/data-states.spec.js::@responsive an empty install shows one empty card with one action per analysis tab`, `e2e/data-states.spec.js::@responsive a failed analysis read shows an error with retry instead of a permanent loading line`, `e2e/data-states.spec.js::@responsive a hanging analysis read times out into the retry state`, `e2e/analysis-info.spec.js::@responsive steps and floors show per-day units, whole numbers and the plotted basis`, `tests/analysis-presentation.test.cjs`, `e2e/planned-sync-button.spec.js::@responsive a pending planned unit offers a sync button that queues its push`, `e2e/strength-garmin-blocked.spec.js::@responsive a strength unit says why it does not reach Garmin and offers the fix`, `e2e/library-wahoo-state.spec.js::@responsive a changed Wahoo library workout offers the explicit send`. Source sections and these browser scenarios were inspected; this requirement does not independently re-specify backend calculations.
+Evidence: `public/plan-views.js::renderPlanned`, `public/plan-views.js::renderLibrary`, `public/analysis.js::renderAnalysisHistory`, `public/analysis.js::renderTrainingRecords`, `public/analysis.js::recoveryReferenceLabel`, `public/analysis.js::recoveryRollingNote`, `public/components.js::createErrorState`, `public/components.js::createLoadingState`, `public/components.js::markValueMissing`, `public/analysis.js::requestAnalysisReport`, `public/analysis.js::renderRecoveryCharts`, `public/performance-view.js::renderPerformance`, `public/activity-analysis.js::renderPanel`, `public/activity-details.js::render`; `e2e/contracts.spec.js::planned agenda prioritizes dates and sessions with compact weather and expandable details`, `e2e/calendar-week-compact.spec.js::@responsive compact calendar week collapses past days, groups repeats and keeps one conflict style`, `e2e/analysis-info.spec.js::@responsive latest measurement stays visible without inventing measurements in empty weeks`, `e2e/analysis-info.spec.js::@responsive recovery uses independent scales, honest coverage over exactly fourteen days`, `e2e/activity-details.spec.js::@responsive analysis lists sessions whose details failed to load`, `e2e/training-feature-panels.spec.js::@responsive equipment keeps local authority and groups archived sources`, `e2e/data-states.spec.js::@responsive an empty install shows one empty card with one action per analysis tab`, `e2e/data-states.spec.js::@responsive a failed analysis read shows an error with retry instead of a permanent loading line`, `e2e/data-states.spec.js::@responsive a hanging analysis read times out into the retry state`, `e2e/analysis-info.spec.js::@responsive steps and floors show per-day units, whole numbers and the plotted basis`, `tests/analysis-presentation.test.cjs`, `e2e/planned-sync-button.spec.js::@responsive a week with pending units offers one sync button that queues their pushes`, `e2e/strength-garmin-blocked.spec.js::@responsive a strength unit says why it does not reach Garmin and offers the fix`, `e2e/library-wahoo-state.spec.js::@responsive a changed Wahoo library workout offers the explicit send`. Source sections and these browser scenarios were inspected; this requirement does not independently re-specify backend calculations.
 
 ### Requirement: Action reviews distinguish known rejection from unknown outcome
 The client SHALL offer confirmation only for current confirmable proposals, preserve pending/failed/completed receipt states, and keep an action locked when its execution outcome cannot be confirmed. Reconciliation SHALL determine whether retry is safe rather than automatically repeating an uncertain write.
 
 #### Scenario: Current authorized action
 - **WHEN** a pending current proposal exposes a confirmable action
-- **THEN** the client presents its concrete review/diff and submits the identified server action, showing the resulting receipt and available domain navigation/undo affordances.
+- **THEN** the client presents its concrete review/diff and submits the identified server action, reporting the outcome as a toast and showing the available domain navigation/undo affordances.
 
 #### Scenario: Definite conflict rejection
 - **WHEN** execution receives a definite client/conflict rejection

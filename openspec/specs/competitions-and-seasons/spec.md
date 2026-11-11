@@ -166,7 +166,7 @@ The competition overview SHALL exclude date-derived training phases, weekly trai
 - **WHEN** the competition overview is loaded or an event is expanded
 - **THEN** only competition facts and existing event-workflow access are presented, without weekly charts, evidence tables, phase labels or scenario inputs.
 
-Evidence: `public/plan-views.js:renderCompetitions`; `public/shared.js` requests no season preparation on route entry; `e2e/competitions.spec.js` (no analysis request on mobile-small and desktop); `e2e/training-feature-panels.spec.js`.
+Evidence: `public/plan-views.js:renderCompetitions`; `public/shared.js` requests no season preparation on route entry; `e2e/competitions.spec.js` (no analysis request on mobile and desktop); `e2e/training-feature-panels.spec.js`.
 
 ### Requirement: CS12 Read state and competition authority
 The overview SHALL preserve canonical local records, existing Coach editing and receipt/undo workflows, compact source/local-change indications and explicit synchronization authorization. Opening, expanding, archiving visually or refreshing the overview SHALL perform no durable mutation or provider write.

@@ -474,6 +474,7 @@ from backend.weather.assembly import (
     WeatherStateOwners,
     WeatherSyncRuntime,
 )
+from backend.weather.recommendations import PLANNED_WORKOUT_LABEL
 
 try:
     from sqlcipher3 import dbapi2 as sqlite_backend
@@ -489,12 +490,10 @@ PUBLIC_DIR = ROOT / "public"
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 DB_PATH = DATA_DIR / "intervals-coach.db"
 LOG_PATH = DATA_DIR / "intervals-coach.log"
-PROVIDER_INTERVALS_NAME = "Intervals.icu"
 JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
-PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Pacecraft · AI Coach"
-APP_VERSION = "2.0.6"
+APP_VERSION = "2.0.7"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000

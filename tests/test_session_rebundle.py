@@ -38,6 +38,8 @@ CONFIRMED_GARMIN = "9103"
 CONFIRMED_WAHOO = "603"
 DELETED_GARMIN = "9104"
 DELETED_WAHOO = "604"
+ATHLETE_DELETED_GARMIN = "9105"
+ATHLETE_DELETED_WAHOO = "605"
 
 
 def _wahoo_run() -> dict[str, Any]:
@@ -151,7 +153,7 @@ class SessionRebundleTests(LinkingCase):
         self.assertEqual(
             {
                 "status": "complete",
-                "version": 1,
+                "version": 2,
                 "counts": {"days": 2, "linked": 2},
             },
             self._summary(),
@@ -203,6 +205,20 @@ class SessionRebundleTests(LinkingCase):
         self._unbundle(CONFIRMED_WAHOO, DELETED_WAHOO)
         self._set_session(CONFIRMED_WAHOO, athlete_confirmed=1, link_kind="confirmed")
         self._set_session(DELETED_WAHOO, state="deleted")
+        # A copy an older build kept after the athlete deleted its session
+        # (#2137, B-011): both stored, separated, then the Garmin one deleted.
+        gone = _pair(ATHLETE_DELETED_GARMIN, ATHLETE_DELETED_WAHOO, "10")
+        self._ingest_garmin([gone[0]], FIRST)
+        self._ingest_wahoo([gone[1]], SECOND)
+        self._unbundle(ATHLETE_DELETED_WAHOO)
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_sessions SET state = 'deleted', "
+                "merged_into_retained = activity_id "
+                "WHERE primary_provider_activity_id = ?",
+                (ATHLETE_DELETED_GARMIN,),
+            )
+        self.assertEqual("active", self._sessions()[ATHLETE_DELETED_WAHOO]["state"])
         untouched = {CONFIRMED_GARMIN, CONFIRMED_WAHOO, DELETED_GARMIN, DELETED_WAHOO}
         before = {key: row for key, row in self._sessions().items() if key in untouched}
 
@@ -213,6 +229,16 @@ class SessionRebundleTests(LinkingCase):
         self.assertEqual("duplicate", sessions[RUN_WAHOO]["state"])
         self.assertEqual("duplicate", sessions[RIDE_WAHOO]["state"])
         self.assertEqual("deleted", sessions[DELETED_WAHOO]["state"])
+        with self.manager.reader() as db:
+            copy = db.execute(
+                "SELECT state, merged_into_retained FROM activity_sessions "
+                "WHERE primary_provider_activity_id = ?",
+                (ATHLETE_DELETED_WAHOO,),
+            ).fetchone()
+        self.assertEqual(
+            ("deleted", sessions[ATHLETE_DELETED_GARMIN]["activity_id"]),
+            (copy["state"], copy["merged_into_retained"]),
+        )
 
     def test_a_failure_leaves_the_data_unchanged_and_is_retried(self) -> None:
         self._unbundled_pairs()

@@ -3,7 +3,8 @@
 ## Project scope
 
 Pacecraft is a private, mobile-first PWA for one athlete, using Python
-`http.server`, SQLCipher, Intervals.icu, optional Garmin, and OpenAI Responses.
+`http.server`, SQLCipher, Garmin and Wahoo as sources, Intervals.icu as
+output-only target, and OpenAI Responses.
 Keep it standalone on a trusted LAN/private VPN, never directly on the internet.
 Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) and [docs/operations.md](docs/operations.md) for setup and operational commands.
 
@@ -46,7 +47,9 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
   validated, data-preserving migrations; encryption must remain enabled.
 - Workouts created by the coach are local training-library entries until the
   athlete explicitly synchronizes the library to Intervals.icu. Do not add
-  implicit remote workout writes.
+  implicit remote workout writes. The one exception is the deletion of the
+  app's own linked Garmin workouts once their day has passed, after a Garmin
+  refresh (athlete decision 2026-11-11, #2185).
 - Adaptive replanning may update future local library entries only after its preview is
   explicitly approved; it must not silently overwrite, delete, or reschedule
   remote calendar events.
@@ -71,7 +74,8 @@ Use [README.md](README.md) for the overview and [docs/setup.md](docs/setup.md) a
   `performance/` (derived/readiness), `runtime/` (lifecycle/maintenance),
   `weather/` (weather/cache), and `canonical/` (stdlib-only vocabulary/records).
   Cross-cutting owners: `config.py`, `privacy.py`, `settings.py`,
-  `change_history.py`, `observability.py`. Extend a cohesive owner first.
+  `change_history.py`, `observability.py`, `errors.py`, `pagination.py`,
+  `provider_credentials.py`. Extend a cohesive owner first.
 - Apply scoped [backend](backend/AGENTS.md), [frontend](public/AGENTS.md), and
   [test](tests/AGENTS.md) instructions, plus [browser fixtures](e2e/AGENTS.md)
   and [CI/release](.github/AGENTS.md), when working in those directories.
@@ -126,7 +130,8 @@ outgoing commits for secrets and runs the quality ratchet; never bypass either.
 - Work in a dedicated task worktree; leave the primary checkout unchanged. Check
   the branch and existing diff before editing and preserve prior work; keep
   runtime files and worktrees out of commits.
-  `python scripts/prepare_worktree.py` installs Node dependencies and Graphify;
+  `python scripts/prepare_worktree.py` installs Node dependencies, Graphify and the
+  hash-locked Ruff and mypy, then reports newer versions (advisory, online);
   the SessionStart hook keeps the graph current. For symbol, caller, or
   dependency lookups, query Graphify (`python scripts/graphify_local.py query`)
   before Grep. Verify graph results in source.
@@ -166,8 +171,8 @@ node --test tests/*.cjs
 Tests use temporary data and mocked services, never real `.env`, `/data`, or
 OpenAI/Intervals.icu/Garmin accounts. For Dockerfile, dependency, startup, or
 deployment changes also run `docker build -t pacecraft:local .`. Browser changes
-run the affected Playwright project (`npm run test:e2e`; projects mobile-small,
-mobile, tablet, tablet-landscape, desktop) and, when a browser is available,
+run the affected Playwright project (`npm run test:e2e`; projects mobile,
+tablet-landscape, desktop) and, when a browser is available,
 check login, fresh PWA install/offline assets, safe Markdown, Enter versus
 Shift+Enter, microphone, notifications, and the changed flow.
 

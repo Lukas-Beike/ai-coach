@@ -36,7 +36,7 @@ test("all contracts run on desktop and only responsive contracts repeat on small
   for (const suite of report.suites) check(suite);
   for (const [key, { responsive, projects }] of selected) {
     assert.deepEqual(projects.sort(), responsive
-      ? ["desktop", "mobile", "mobile-small", "tablet", "tablet-landscape"]
+      ? ["desktop", "mobile", "tablet-landscape"]
       : ["desktop"], key);
     counts.set(responsive, (counts.get(responsive) || 0) + 1);
   }
@@ -136,9 +136,9 @@ print(json.dumps({"baseline": baseline, "partitions": partitions, "commands": co
     assert.equal(baseline.selection.mode, "complete");
     assert.deepEqual(keys(baseline.selection.expected_identities), keys(expected));
     assert.deepEqual(keys(childIdentities(baseline.children)), keys(expected));
-    const projects = ["desktop", "mobile", "mobile-small", "tablet", "tablet-landscape"];
+    const projects = ["desktop", "mobile", "tablet-landscape"];
     assert.deepEqual([...new Set(baseline.children.map((child) => child.project))].sort(), projects);
-    assert.equal(value.partitions.length, 10);
+    assert.equal(value.partitions.length, 6);
     const combined = value.partitions.flatMap((partition) => partition.children);
     assert.deepEqual(keys(childIdentities(combined)), keys(expected));
     assert.equal(new Set(keys(childIdentities(combined))).size, expected.length);

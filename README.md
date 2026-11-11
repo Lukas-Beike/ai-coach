@@ -35,7 +35,7 @@ Open `http://localhost:8090`, log in with `APP_PASSWORD`, and add the OpenAI key
 
 ## Configuration
 
-Set variables in the container environment or a root `.env`. Full reference: [docs/configuration.md](docs/configuration.md).
+Set variables in the container environment or a root `.env`; `DATA_DIR` and `TZ` only in the process environment. Full reference: [docs/configuration.md](docs/configuration.md).
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
@@ -47,7 +47,7 @@ Set variables in the container environment or a root `.env`. Full reference: [do
 | `GARMIN_PERSONAL_API_KEY` | none | Official read-only Garmin Personal API key. |
 | `GARMIN_PERSONAL_API_KEY_EXPIRES` | none | Key expiry date (`YYYY-MM-DD`) for the renewal warning. |
 | `GARMIN_EMAIL`, `GARMIN_PASSWORD` | none | Fallback for the optional unofficial Garmin login. |
-| `GARMINTOKENS` | `/data/garmin_tokens` | Legacy token file, imported once. |
+| `GARMINTOKENS` | `<DATA_DIR>/garmin_tokens` | Legacy token file, imported once. |
 | `GARMIN_FIXTURE_PATH` | none | Mock Garmin data for development. |
 | `WAHOO_CLIENT_ID`, `WAHOO_CLIENT_SECRET`, `WAHOO_REDIRECT_URI` | none | Wahoo Cloud API application; all three enable Wahoo. |
 | `YAZIO_EMAIL`, `YAZIO_PASSWORD` | none | Optional Yazio product lookup. |
@@ -59,7 +59,7 @@ Set variables in the container environment or a root `.env`. Full reference: [do
 | `DATA_RETENTION_DAYS` | `-1` | `-1` keeps everything; positive values (30-3650) prune old chats, snapshots and Coach receipts. |
 | `SYNC_HISTORY_EARLIEST_DATE` | `2000-01-01` | Earliest date of the historical Garmin backfill. |
 | `PORT` | `8090` | Listening port. |
-| `DATA_DIR` | `/data` | Encrypted database and legacy token file. |
+| `DATA_DIR` | `/data` in the image | Encrypted database and legacy token file. |
 | `TZ` | `Europe/Berlin` | Default athlete time zone. |
 
 ## Providers

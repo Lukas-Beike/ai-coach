@@ -1,4 +1,4 @@
-"""Ratchet provider-specific coupling outside the provider adapters.
+"""Guard provider-specific coupling outside the provider adapters.
 
 The scanner reads backend/**/*.py, server.py and public/*.js and counts three
 kinds of findings, each keyed by (rule, repository-relative posix path, token):
@@ -15,24 +15,20 @@ literals.
 
 Four owner-read rules, ``snapshot_key``, ``legacy_read``, ``source_label`` and
 ``field_module_import``, are checked apart
-from the baseline against ``OWNER_READ_ALLOWLIST``: raw snapshot reads and provider
+against ``OWNER_READ_ALLOWLIST``: raw snapshot reads and provider
 display-name literals belong to the sync/provider owners, not to consumers.
 
-The committed baseline may only shrink. New or increased entries mean the code
-must move behind a provider adapter or the canonical model. Removed or decreased
-entries are recorded with ``python tests/provider_coupling.py --snapshot``, which
-refuses to record growth and is reviewed like any other diff.
+Any finding of the three coupling rules fails the guard: the code must move
+behind a provider adapter or the canonical model.
 """
 
 from __future__ import annotations
 
-import argparse
 import ast
-import json
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -46,17 +42,6 @@ except ImportError:
 # is /app because publish-container.yml runs with --workdir /app. Both layouts
 # yield identical repository-relative paths.
 SOURCE_ROOT = BACKEND_ROOT.parent
-BASELINE_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "provider_coupling_baseline.json"
-)
-REGENERATE_COMMAND = "python tests/provider_coupling.py --snapshot"
-BASELINE_DESCRIPTION = (
-    "Ratchet baseline for provider-specific coupling outside backend/providers/ "
-    "and backend/canonical/. Entries may only shrink: move new coupling behind a "
-    "provider adapter or canonical model, and regenerate this file after removing "
-    "coupling."
-)
-
 RULE_ICU_IDENTIFIER = "icu_identifier"
 RULE_GARMIN_WIRE_KEY = "garmin_wire_key"
 RULE_PROVIDER_LITERAL = "provider_literal"
@@ -118,8 +103,8 @@ RULE_LEGACY_READ = "legacy_read"
 RULE_SOURCE_LABEL = "source_label"
 RULE_FIELD_MODULE_IMPORT = "field_module_import"
 
-# Owner-read rules. Unlike the ratchet rules above they are checked against an
-# explicit per-file allowlist and never enter the baseline, which stays empty.
+# Owner-read rules. Unlike the coupling rules above they are checked against an
+# explicit per-file allowlist.
 #
 # ``snapshot_key`` flags, in backend/**/*.py and server.py, a quoted raw snapshot
 # key-value key and any reference to ``latest_snapshot`` (the Intervals.icu raw
@@ -265,37 +250,6 @@ class CouplingEntry:
     @property
     def key(self) -> FindingKey:
         return (self.rule, self.path, self.token)
-
-
-@dataclass(frozen=True)
-class CouplingChange:
-    rule: str
-    path: str
-    token: str
-    baseline: int
-    current: int
-
-    def describe(self) -> str:
-        return (
-            f"{self.rule} {self.path} {self.token!r}: "
-            f"baseline {self.baseline}, current {self.current}"
-        )
-
-
-@dataclass(frozen=True)
-class CouplingComparison:
-    new: tuple[CouplingChange, ...]
-    increased: tuple[CouplingChange, ...]
-    decreased: tuple[CouplingChange, ...]
-    obsolete: tuple[CouplingChange, ...]
-
-    @property
-    def grown(self) -> tuple[CouplingChange, ...]:
-        return self.new + self.increased
-
-    @property
-    def shrunk(self) -> tuple[CouplingChange, ...]:
-        return self.decreased + self.obsolete
 
 
 def _is_adapter_path(relative_path: str) -> bool:
@@ -549,135 +503,3 @@ def stale_owner_allowlist(
         if (RULE_FIELD_MODULE_IMPORT, file_path) in allowlist
     ]
     return sorted(set(allowlist) - observed) + stale_modules
-
-
-def load_baseline(path: Path = BASELINE_PATH) -> list[CouplingEntry]:
-    document = json.loads(path.read_text(encoding="utf-8"))
-    entries = [
-        CouplingEntry(
-            rule=str(item["rule"]),
-            path=str(item["path"]),
-            token=str(item["token"]),
-            count=int(item["count"]),
-        )
-        for item in document["entries"]
-    ]
-    if len({entry.key for entry in entries}) != len(entries):
-        raise ValueError("provider coupling baseline contains duplicate entries")
-    if any(entry.count < 1 for entry in entries):
-        raise ValueError("provider coupling baseline counts must be positive")
-    return entries
-
-
-def render_baseline(entries: Sequence[CouplingEntry]) -> str:
-    document = {
-        "description": BASELINE_DESCRIPTION,
-        "regeneration": REGENERATE_COMMAND,
-        "entries": [asdict(entry) for entry in sorted(entries)],
-    }
-    return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
-
-
-def write_baseline(
-    entries: Sequence[CouplingEntry], path: Path = BASELINE_PATH
-) -> None:
-    # Fixed LF endings keep the snapshot byte-identical on Windows and Linux.
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write(render_baseline(entries))
-
-
-def compare_coupling(
-    baseline: Sequence[CouplingEntry], current: Sequence[CouplingEntry]
-) -> CouplingComparison:
-    expected = {entry.key: entry.count for entry in baseline}
-    observed = {entry.key: entry.count for entry in current}
-    new: list[CouplingChange] = []
-    increased: list[CouplingChange] = []
-    decreased: list[CouplingChange] = []
-    obsolete: list[CouplingChange] = []
-    for key in sorted(set(expected) | set(observed)):
-        before = expected.get(key, 0)
-        after = observed.get(key, 0)
-        change = CouplingChange(
-            rule=key[0], path=key[1], token=key[2], baseline=before, current=after
-        )
-        if before == 0:
-            new.append(change)
-        elif after == 0:
-            obsolete.append(change)
-        elif after > before:
-            increased.append(change)
-        elif after < before:
-            decreased.append(change)
-    return CouplingComparison(
-        new=tuple(new),
-        increased=tuple(increased),
-        decreased=tuple(decreased),
-        obsolete=tuple(obsolete),
-    )
-
-
-def snapshot_refusals(
-    baseline: Sequence[CouplingEntry] | None,
-    current: Sequence[CouplingEntry],
-    *,
-    sources_scanned: bool = False,
-) -> list[str]:
-    """Return why a snapshot must not be recorded; an empty list means allowed.
-
-    A ``None`` baseline means the committed file does not exist yet, which is only
-    the bootstrap case. Growth is refused once a baseline exists. An empty scan is
-    recorded only when an existing baseline confirms that source files were
-    scanned and every remaining entry was removed.
-    """
-    if not current and (baseline is None or not sources_scanned):
-        return [
-            "the scan found no provider sources; refusing to record an empty baseline"
-        ]
-    if baseline is None:
-        return []
-    comparison = compare_coupling(baseline, current)
-    return [
-        f"refusing to record growth: {change.describe()}" for change in comparison.grown
-    ]
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--snapshot",
-        action="store_true",
-        help="record removed coupling in the baseline from the current source tree",
-    )
-    arguments = parser.parse_args(argv)
-    current = scan_provider_coupling()
-    if arguments.snapshot:
-        baseline = load_baseline() if BASELINE_PATH.exists() else None
-        refusals = snapshot_refusals(
-            baseline, current, sources_scanned=bool(scanned_paths(SOURCE_ROOT))
-        )
-        if refusals:
-            for refusal in refusals:
-                print(refusal)
-            return 1
-        write_baseline(current)
-        print(f"Wrote {len(current)} provider coupling entries to {BASELINE_PATH}.")
-        return 0
-    comparison = compare_coupling(load_baseline(), current)
-    changes = comparison.grown + comparison.shrunk
-    if not changes:
-        print("Provider coupling matches the baseline.")
-        return 0
-    for change in comparison.new:
-        print(f"new: {change.describe()}")
-    for change in comparison.increased:
-        print(f"increased: {change.describe()}")
-    for change in comparison.decreased:
-        print(f"decreased: {change.describe()}")
-    for change in comparison.obsolete:
-        print(f"obsolete: {change.describe()}")
-    return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

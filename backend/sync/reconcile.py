@@ -34,11 +34,16 @@ def _apply_remote_event(
         return ""
     remote_event = planning_fields_from_intervals(remote_event)
     if remote_event.get("id") not in (None, ""):
+        if str(remote_event["id"]) != str(payload.get("remote_event_id") or ""):
+            # Another event: a category recorded for the old one no longer applies.
+            payload.pop("remote_event_category", None)
         payload["remote_event_id"] = str(remote_event["id"])
     if remote_event.get("external_id") not in (None, ""):
         external_id = str(remote_event["external_id"])
         payload["remote_event_external_id"] = external_id
         payload["external_id"] = external_id
+    if remote_event.get("category") not in (None, ""):
+        payload["remote_event_category"] = str(remote_event["category"])
     if state == "synced":
         # The event is the answer to the push of the local unit. Derived metrics
         # follow it; the planned duration is the athlete's own value that was just
@@ -201,3 +206,4 @@ def _drop_remote_event_ids(*targets: dict[str, Any]) -> None:
     for target in targets:
         target.pop("remote_event_id", None)
         target.pop("remote_event_external_id", None)
+        target.pop("remote_event_category", None)

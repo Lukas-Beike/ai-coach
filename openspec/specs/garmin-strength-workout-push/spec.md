@@ -48,11 +48,11 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 Evidence: `backend/sync/garmin_strength_push.py`, `backend/sync/jobs.py`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py` (PushTests, JobValidationTests).
 
 ### Requirement: Calendar sync button
-The calendar list SHALL show one sync action on each future, not yet completed planned unit that still needs a push to a configured provider: Intervals.icu when its state is local, sync_error or remote_missing; Garmin when it is a strength unit with a valid structure whose name, date, structure or workout document version differ from the pushed ones. It SHALL send one `plan_push` job per provider, Intervals.icu last, with the current payload hash.
+Each calendar week SHALL show one sync button, "Woche synchronisieren", while a future, not yet completed unit of that week still needs a push to a configured provider, or a leftover of that week waits for removal. Intervals.icu waits when the unit's state is local, sync_error or remote_missing, or its event has another category than it gets now. Garmin waits when a strength unit with a valid structure differs from the pushed one. Planned unit cards SHALL carry no sync button.
 
 #### Scenario: Pending structured strength unit
 - **WHEN** a future strength unit with a structure is neither synced to Intervals.icu nor pushed to Garmin in its current version
-- **THEN** its calendar card shows "Synchronisieren", and a click queues an Intervals.icu and a Garmin `plan_push` job for it without opening the card.
+- **THEN** its week shows "Woche synchronisieren", and a click queues the week's Garmin and Intervals.icu `plan_push` jobs, Intervals.icu last, each entry with its current payload hash and at most 28 entries per job.
 
 #### Scenario: Intervals.icu receives a note
 - **WHEN** a strength unit is pushed to Intervals.icu
@@ -63,13 +63,13 @@ The calendar list SHALL show one sync action on each future, not yet completed p
 - **THEN** no Garmin push is offered and the card says why; an unmatched exercise lists up to five catalogue suggestions that save the choice for the unit, and the Coach can structure or map it.
 
 #### Scenario: Nothing pending
-- **WHEN** a unit is synced everywhere, in a sync conflict, in the past, already matched to a recorded activity, or its only pending provider is not configured
-- **THEN** no sync action is shown.
+- **WHEN** every unit of a week is synced everywhere, in a sync conflict, in the past, already matched to a recorded activity, or waits only for a provider that is not configured, and no leftover belongs to the week
+- **THEN** the week shows no sync button.
 
-Evidence: `backend/planning/push_state.py`, `backend/planning/planned_unit_service.py:PlannedUnitService.list`, `backend/http_api/planned_unit_focus_post.py`, `public/plan-views.js:plannedPushTargets`, `public/plan-views.js:plannedGarminBlocked`; `tests/test_planning_push_state.py`, `tests/plan-views-sync-button.test.cjs`, `tests/test_workout_export_intervals.py:test_strength_is_sent_and_read_back_as_a_note`.
+Evidence: `backend/planning/push_state.py`, `backend/planning/planned_unit_service.py:PlannedUnitService.list`, `backend/http_api/planned_unit_focus_post.py`, `public/plan-views.js:plannedPushTargets`, `public/plan-views.js:plannedWeekSyncJobs`, `public/plan-views.js:plannedWeekSyncButton`, `public/plan-views.js:plannedGarminBlocked`; `tests/test_planning_push_state.py`, `tests/plan-views-sync-button.test.cjs`, `tests/test_workout_export_intervals.py:test_strength_is_sent_and_read_back_as_a_note`, `e2e/calendar-week-sync.spec.js`, `e2e/planned-sync-button.spec.js`.
 
 ### Requirement: Safe Garmin write outcomes
-A saved workout whose exercise steps differ from the sent ones SHALL be deleted when just created, or unscheduled when updated, and reported. Removal SHALL happen only for a `remove` entry, which the job contract accepts for Garmin and Wahoo and refuses for Intervals.icu, and SHALL delete only the linked workout and schedule. A non-client remote failure SHALL stop the remaining units; messages SHALL never contain Garmin's response text.
+A saved workout whose exercise steps differ from the sent ones SHALL be deleted when just created, or unscheduled when updated, and reported. Apart from the removal of past workouts after a refresh, removal SHALL happen only for a `remove` entry, which the job contract accepts for Garmin and Wahoo and refuses for Intervals.icu, and SHALL delete only the linked workout and schedule. A non-client remote failure SHALL stop the remaining units; messages SHALL never contain Garmin's response text.
 
 #### Scenario: Garmin blanks an exercise
 - **WHEN** the read-back workout lacks a sent exercise name
@@ -90,7 +90,7 @@ A saved workout whose exercise steps differ from the sent ones SHALL be deleted 
 Evidence: `backend/sync/garmin_strength_push.py`, `backend/sync/jobs.py:_normalize_plan_push_entry`; `tests/test_garmin_strength_push.py`, `tests/test_sync_jobs.py:test_plan_push_normalizes_entries_reason_and_repair`.
 
 ### Requirement: Garmin leftovers are removed by the explicit sync
-A link of provider `garmin` whose planned unit is missing, tombstoned, archived, deleted, no longer a strength unit, or no longer pushable SHALL count as an orphan. The explicit Garmin job SHALL carry up to 20 orphans as `remove` entries and calendar and Coach cards SHALL list them ("Wird bei Garmin entfernt"); nothing SHALL be removed outside an explicit sync, and a Garmin workout without a link SHALL never be touched.
+A link of provider `garmin` whose planned unit is missing, tombstoned, archived, deleted, no longer a strength unit, or no longer pushable SHALL count as an orphan. The explicit Garmin job SHALL carry up to 20 orphans as `remove` entries, the week sync button and Coach cards SHALL remove or list them ("Wird bei Garmin entfernt"); nothing else SHALL be removed outside an explicit sync, and a Garmin workout without a link SHALL never be touched.
 
 #### Scenario: Unpushable or unreadable unit
 - **WHEN** a linked strength unit has no valid structure or an exercise without a Garmin match, or its stored payload cannot be read
@@ -112,6 +112,23 @@ A link of provider `garmin` whose planned unit is missing, tombstoned, archived,
 - **WHEN** the Garmin calendar holds a workout this app did not send
 - **THEN** no orphan removal reads, changes or deletes it.
 
-Detailed contract: the calendar lists the orphans once, on the first card offering the Garmin sync.
+Detailed contract: an orphan belongs to the week button of its day; an undated or earlier one to the current week, a later one beyond the shown weeks to the last shown week. The week sends its leftovers in jobs of their own, so a leftover that cannot be removed never fails a unit.
 
-Evidence: `backend/planning/garmin_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/db/remote_links.py:RemoteLinkRepository.delete_for_entity`, `public/plan-views.js:plannedCleanup`; `tests/test_garmin_strength_push.py` (PushTests orphan tests, `test_a_linked_unit_that_became_unpushable_is_an_orphan`, `test_a_unit_with_an_unreadable_payload_is_no_orphan`), `tests/plan-views-sync-button.test.cjs`, `tests/test_sync_jobs.py:test_one_stored_item_keeps_a_failure_among_several_results`.
+Evidence: `backend/planning/garmin_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_approved_garmin_arguments`, `backend/db/remote_links.py:RemoteLinkRepository.delete_for_entity`, `public/plan-views.js:plannedLeftoversByWeek`; `tests/test_garmin_strength_push.py` (PushTests orphan tests, `test_a_linked_unit_that_became_unpushable_is_an_orphan`, `test_a_unit_with_an_unreadable_payload_is_no_orphan`), `tests/plan-views-sync-button.test.cjs`, `tests/test_sync_jobs.py:test_one_stored_item_keeps_a_failure_among_several_results`.
+
+### Requirement: Past Garmin workouts are removed after a refresh
+After each Garmin `refresh` job, the system SHALL unschedule and delete the linked workout of every planned unit dated before the athlete's local today and drop its link, at most 20 per refresh, oldest day first. This is the one Garmin write without an athlete request (athlete decision 2026-11-11). It SHALL touch only linked ids, never a recorded activity or an unlinked workout, SHALL try no SDK login the latest refresh could not make, and SHALL never change the refresh result.
+
+#### Scenario: Day passed
+- **WHEN** a Garmin refresh finishes and a linked strength unit's day lies before today
+- **THEN** its workout is unscheduled and deleted at Garmin and its link is dropped, while today's linked workout stays.
+
+#### Scenario: Garmin failure
+- **WHEN** Garmin answers the removal with a server error, or the Garmin login is busy
+- **THEN** the refresh is unaffected, a server error stops the run, and every link stays for the next refresh.
+
+#### Scenario: Refused workout
+- **WHEN** Garmin refuses one workout's deletion with a client error
+- **THEN** its link stays for the next refresh and the other past workouts are still removed; one refresh makes at most 40 removal attempts.
+
+Evidence: `backend/sync/garmin_strength_push.py:GarminStrengthPushService.remove_past`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py:PastWorkoutRemovalTests`.

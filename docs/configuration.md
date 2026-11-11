@@ -1,6 +1,6 @@
 # Configuration
 
-Configuration comes from container environment variables or a `.env` file in the application root; `APP_PASSWORD` belongs in the container environment or that root file, never in `DATA_DIR`. The [README](../README.md#configuration) lists every variable in one line; this file adds the details. Only `APP_PASSWORD` is required to start. An empty `OPENAI_BASE_URL`, `OPENAI_MODEL`, `INTERVALS_ATHLETE_ID` or `GARMINTOKENS` counts as unset and takes its default. The Coach needs an OpenAI key (environment or **Mehr > Anbindungen > Zugangsdaten**). Intervals.icu and the other providers are optional.
+Configuration comes from container environment variables or a `.env` file in the application root; `APP_PASSWORD` belongs in the container environment or that root file, never in `DATA_DIR`. `DATA_DIR` and `TZ` are read from the process environment only (container environment or Docker `--env-file`); a root `.env` file does not set them. The [README](../README.md#configuration) lists every variable in one line; this file adds the details. Only `APP_PASSWORD` is required to start. An empty `OPENAI_BASE_URL`, `OPENAI_MODEL`, `INTERVALS_ATHLETE_ID` or `GARMINTOKENS` counts as unset and takes its default. The Coach needs an OpenAI key (environment or **Mehr > Anbindungen > Zugangsdaten**). Intervals.icu and the other providers are optional.
 
 ## Models
 
@@ -20,7 +20,7 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 | `GARMIN_PASSWORD` | *None* | No | Garmin Connect account password. Read-only fallback for login; the UI never stores the password. Remove it once tokens are stored. |
 | `GARMIN_PERSONAL_API_KEY` | *None* | No | Garmin Personal API key (Garmin Connect Web > Settings > Personal API Key). Can also be set in **Mehr > Anbindungen > Zugangsdaten**. Exchanged server-side for a 24-hour access token on demand; never logged or returned. |
 | `GARMIN_PERSONAL_API_KEY_EXPIRES` | *None* | No | Expiry date (`YYYY-MM-DD`) of the Personal API key, shown in Garmin Connect Web. Can also be set as **Gültig bis** next to the key. The Garmin card warns 14 days ahead and when the key is rejected; saving or removing the key in the app clears its stored date. |
-| `GARMINTOKENS` | `/data/garmin_tokens` | No | Path of the legacy Garmin token file. It is imported once when the database has no Garmin tokens and is left in place. |
+| `GARMINTOKENS` | `<DATA_DIR>/garmin_tokens` | No | Path of the legacy Garmin token file. It is imported once when the database has no Garmin tokens and is left in place. |
 | `GARMIN_FIXTURE_PATH` | *None* | No | Local mock JSON fixture path for development and testing without live Garmin credentials. |
 | `WAHOO_CLIENT_ID` | *None* | No | Wahoo Cloud API application client ID. Wahoo counts as configured only when all three `WAHOO_*` values are set. |
 | `WAHOO_CLIENT_SECRET` | *None* | No | Wahoo Cloud API application client secret. Stored server-side only and redacted from logs. |
@@ -34,5 +34,5 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 | `DATA_RETENTION_DAYS` | `-1` | No | `-1` (or any value ≤ 0) retains data indefinitely; positive values are clamped to 30–3650 days and remove older chat messages, snapshots and Coach receipts (`coach_commands`) at startup, together with expired Coach action proposals and unreferenced, non-draft Coach plan drafts. A Coach receipt whose changes can still be undone is kept until the undo is used. Athlete records, plans and settings are never removed. Diagnostic capture entries expire after 7 days regardless of this setting. |
 | `SYNC_HISTORY_EARLIEST_DATE` | `2000-01-01` | No | ISO date (`YYYY-MM-DD`) that bounds the historical Garmin backfill. The backfill walks back in 90-day chunks, never beyond this date, and stops after 180 consecutive days without records. An invalid value is ignored with a logged warning. |
 | `PORT` | `8090` | No | Internal HTTP port the application listens on. |
-| `DATA_DIR` | `/data` | No | Path to the directory where the encrypted database and any legacy Garmin token file are stored. |
-| `TZ` | `Europe/Berlin` | No | IANA timezone (e.g., `Europe/Berlin`) used as the default athlete timezone when none is saved and as the container's local timezone. Crucial for accurate daily scheduling and sleep windows. |
+| `DATA_DIR` | `/data` in the image, otherwise `data` beside `server.py` | No | Path to the directory where the encrypted database and any legacy Garmin token file are stored. Process environment only. |
+| `TZ` | `Europe/Berlin` | No | IANA timezone (e.g., `Europe/Berlin`) used as the default athlete timezone when none is saved and as the container's local timezone. Crucial for accurate daily scheduling and sleep windows. Process environment only. |

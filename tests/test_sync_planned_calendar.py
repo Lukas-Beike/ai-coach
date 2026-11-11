@@ -520,6 +520,106 @@ class PlannedCalendarSyncTests(unittest.TestCase):
         self.assertNotIn("id", sent)
         self.assertEqual(sent["external_id"], f"intervals-coach-{LOCAL_ID}")
 
+    def test_strength_sent_as_a_workout_event_is_replaced_by_a_note(self):
+        # Before #1807 strength went out as a WORKOUT event, which Intervals.icu
+        # forwards to Garmin; no category was recorded then (#2185).
+        self.add_unit(payload=self.workout(remote_event_id="event-1"))
+        self.client.remote_event = self.remote_event("event-1", category="WORKOUT")
+        self.client.responses = [
+            [{"id": "event-2", "type": "WeightTraining", "category": "NOTE"}],
+            [{"id": "event-2", "type": "WeightTraining", "category": "NOTE"}],
+        ]
+
+        self.service.sync_entry(LOCAL_ID)
+
+        self.assertEqual(self.client.deleted, ["event-1"])
+        sent = self.client.upserts[0][0]
+        self.assertNotIn("id", sent)
+        self.assertEqual(
+            (sent["category"], sent["external_id"]),
+            ("NOTE", f"intervals-coach-{LOCAL_ID}"),
+        )
+        stored = json.loads(self.unit()["payload"])
+        self.assertEqual(
+            (stored["remote_event_id"], stored["remote_event_category"]),
+            ("event-2", "NOTE"),
+        )
+        # The note is now recorded, so the next push updates it in place.
+        self.service.sync_entry(LOCAL_ID)
+        self.assertEqual(self.client.deleted, ["event-1"])
+        self.assertEqual(self.client.upserts[1][0]["id"], "event-2")
+
+    def test_a_replaced_event_takes_the_units_own_identity(self):
+        self.add_unit(
+            payload=self.workout(
+                remote_event_id="event-1", remote_event_external_id="adopted-1"
+            )
+        )
+        self.client.remote_event = self.remote_event(
+            "event-1", external_id="adopted-1", category="WORKOUT"
+        )
+        self.client.responses = [[{"id": "event-2", "type": "WeightTraining"}]]
+
+        self.service.sync_entry(LOCAL_ID)
+
+        sent = self.client.upserts[0][0]
+        self.assertEqual(sent["external_id"], f"intervals-coach-{LOCAL_ID}")
+        stored = json.loads(self.unit()["payload"])
+        self.assertEqual(
+            stored["remote_event_external_id"], f"intervals-coach-{LOCAL_ID}"
+        )
+
+    def test_a_paired_outdated_event_is_updated_in_place(self):
+        self.add_unit(payload=self.workout(remote_event_id="event-1"))
+        self.client.remote_event = self.remote_event(
+            "event-1", category="WORKOUT", paired_activity_id="a1"
+        )
+        self.client.responses = [
+            [{"id": "event-1", "type": "WeightTraining", "category": "NOTE"}]
+        ]
+
+        self.service.sync_entry(LOCAL_ID)
+
+        self.assertEqual(self.client.deleted, [])
+        self.assertEqual(self.client.upserts[0][0]["id"], "event-1")
+
+    def test_another_event_drops_the_category_of_the_old_one(self):
+        self.add_unit(
+            payload=self.workout(
+                sport="Yoga",
+                name="Yoga",
+                description="Ruhig",
+                remote_event_id="event-0",
+                remote_event_category="NOTE",
+            )
+        )
+        # The answer names another event and no category; the read-back fails.
+        self.client.responses = [[{"id": "event-1", "type": "Ride"}]]
+        with self.assertRaises(AppError):
+            self.service.sync_entry(LOCAL_ID)
+
+        stored = json.loads(self.unit()["payload"])
+        self.assertEqual(stored["remote_event_id"], "event-1")
+        self.assertNotIn("remote_event_category", stored)
+
+    def test_a_workout_event_without_a_recorded_category_is_updated_in_place(self):
+        self.add_unit(
+            payload=self.workout(
+                sport="Yoga",
+                name="Yoga",
+                description="Ruhig",
+                remote_event_id="event-1",
+            )
+        )
+        self.client.responses = [[{"id": "event-1", "type": "Yoga"}]]
+
+        self.service.sync_entry(LOCAL_ID)
+
+        self.assertEqual((self.client.deleted, self.client.read_ids), ([], []))
+        self.assertEqual(self.client.upserts[0][0]["id"], "event-1")
+        stored = json.loads(self.unit()["payload"])
+        self.assertEqual(stored["remote_event_category"], "WORKOUT")
+
     def test_unit_before_today_with_an_event_is_not_overwritten(self):
         yesterday = (TODAY - timedelta(days=1)).isoformat()
         self.add_unit(payload=self.workout(date=yesterday, remote_event_id="event-1"))

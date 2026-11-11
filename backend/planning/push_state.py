@@ -33,6 +33,10 @@ from backend.providers.garmin_strength_workout import (
     resolved_exercises,
     suggestions,
 )
+from backend.providers.intervals_workouts import (
+    INTERVALS_EVENT_CATEGORY,
+    intervals_event_category,
+)
 
 if TYPE_CHECKING:
     from backend.planning.garmin_orphans import GarminOrphan
@@ -43,6 +47,20 @@ if TYPE_CHECKING:
 # decision first, and "syncing" is already on its way.
 _INTERVALS_PENDING: Final = frozenset({"local", "sync_error", "remote_missing"})
 _REMOTE_LINKS = RemoteLinkRepository()
+
+
+def intervals_event_outdated(payload: Mapping[str, Any]) -> bool:
+    """Whether the unit's Intervals.icu event has another category than it gets now.
+
+    A unit sent before the category was recorded counts as a WORKOUT event, the
+    category every unit had before strength became a note (#1807): such a strength
+    event would keep reaching Garmin as an unstructured copy until it is replaced.
+    """
+    if not str(payload.get("remote_event_id") or "").strip():
+        return False
+    sport, _environment = planned_sport_environment(payload)
+    sent = str(payload.get("remote_event_category") or INTERVALS_EVENT_CATEGORY)
+    return sent != intervals_event_category(sport)
 
 
 def garmin_baselines(db: Any) -> dict[str, str | None]:
@@ -167,8 +185,8 @@ def _unit_cleanup(
 ) -> dict[str, list[dict[str, str]]]:
     """The leftovers each provider removes with the sync of this upcoming unit.
 
-    Every unit a provider waits for carries them; the calendar shows them once,
-    on the first card that really offers that provider's sync button.
+    Every unit a provider waits for carries them; the calendar collects them
+    once and gives each to the week sync button of its own day's week.
     """
     if str(payload.get("date") or "")[:10] < today.isoformat():
         return {}
@@ -207,16 +225,14 @@ def attach_push_state(
     for row, payload in pairs:
         payloads.append(payload)
         digest = plan_push_payload_hash(row["payload"])
-        # A synced run unit whose heart-rate range moved with the threshold HR
-        # (the bpm path of the cap export) is changed too.
-        pending: dict[str, bool] = {
-            ProviderId.INTERVALS.value: str(row["sync_state"] or "local")
-            in _INTERVALS_PENDING
-            or str(row["local_id"]) in resync
-        }
         # A unit in a sync conflict needs the athlete's decision first; no
         # provider is offered, so the conflicted version never reaches the watch.
         conflicted = str(row["sync_state"] or "") == "conflict"
+        pending: dict[str, bool] = {
+            ProviderId.INTERVALS.value: _intervals_pending(
+                row, payload, resync, conflicted
+            )
+        }
         fingerprint, blocked = pushable_fingerprint(payload, remembered or {})
         if fingerprint is not None:
             pending[ProviderId.GARMIN.value] = (
@@ -236,6 +252,22 @@ def attach_push_state(
             else []
         )
     _carry_unclaimed_cleanup(lists, payloads, today)
+
+
+def _intervals_pending(
+    row: Any, payload: dict[str, Any], resync: Iterable[str], conflicted: bool
+) -> bool:
+    """Whether Intervals.icu waits for this unit.
+
+    A synced run unit whose heart-rate range moved with the threshold HR (the bpm
+    path of the cap export) is changed too, and so is a unit whose event has
+    another category than it gets now, unless it is in a sync conflict.
+    """
+    return (
+        str(row["sync_state"] or "local") in _INTERVALS_PENDING
+        or str(row["local_id"]) in resync
+        or (not conflicted and intervals_event_outdated(payload))
+    )
 
 
 def _carry_unclaimed_cleanup(

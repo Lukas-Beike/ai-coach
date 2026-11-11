@@ -3,7 +3,7 @@
 # stops the push before anything else runs.
 root="$(git rev-parse --show-toplevel)"
 python "$root/scripts/check_push_secrets.py" || exit $?
-# CI's repository-wide quality ratchet (mypy, Ruff, complexity) on a clean
+# CI's repository-wide quality ratchet (mypy and Ruff) on a clean
 # export of HEAD, so uncommitted edits neither hide nor add findings.
 tree="$(mktemp -d)" || exit 1
 trap 'rm -rf "$tree"' EXIT

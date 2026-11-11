@@ -80,6 +80,30 @@ class ChangeHistoryTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             change_history.reserve_capacity(self.db, change_history.MAX_ROWS + 1)
         self.assertEqual(raised.exception.reason, "change_history_limit")
+        # A full history plus one recorded change stays at the cap (#2134).
+        recent = datetime.now(UTC) - timedelta(days=1)
+        self.db.executemany(
+            "INSERT INTO change_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    f"row-{index}",
+                    "profile",
+                    "profile",
+                    "update",
+                    "local",
+                    (recent + timedelta(seconds=index)).isoformat(),
+                    "a",
+                    "b",
+                    "{}",
+                )
+                for index in range(change_history.MAX_ROWS)
+            ],
+        )
+        change_history.record_change(
+            self.db, "profile", "profile", "update", {"name": "A"}, {"name": "B"}
+        )
+        count = self.db.execute("SELECT COUNT(*) FROM change_history").fetchone()[0]
+        self.assertEqual(count, change_history.MAX_ROWS)
 
     def test_public_view_never_exposes_diff_values(self):
         row = {

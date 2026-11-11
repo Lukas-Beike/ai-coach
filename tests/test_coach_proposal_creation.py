@@ -12,6 +12,7 @@ from uuid import UUID
 
 from support import temp_database
 
+from backend.coach import proposal_creation
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_models import COACH_ACTION_TTL_SECONDS, coach_action_hash
 from backend.db import row_factory
@@ -429,6 +430,18 @@ class CoachProposalCreationTests(unittest.TestCase):
                 }
             ],
         )
+        # A deletion marker gone or changed before approval reads German (#2134).
+        with self.database_manager.reader() as db:
+            for item in (
+                {"type": "tombstone", "id": "missing", "sha256": "0" * 64},
+                {"type": "tombstone", "id": "deleted-1", "sha256": "0" * 64},
+            ):
+                with self.subTest(id=item["id"]), self.assertRaises(AppError) as raised:
+                    proposal_creation._competition_detail(db, item)
+                self.assertEqual(
+                    (raised.exception.status, raised.exception.message),
+                    (409, "Der Wettkampfbestand hat sich vor der Freigabe geändert."),
+                )
 
     def _stored_preview(self, **pause: Any) -> None:
         payload = {

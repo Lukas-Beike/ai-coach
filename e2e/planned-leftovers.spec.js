@@ -1,7 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const { stubSyncJobs } = require("./helpers/sync-jobs");
 
-test("@responsive old Garmin and Wahoo entries are removable although no unit waits for a sync", async ({ page, request }) => {
+test("@responsive the week button removes old Garmin and Wahoo entries although no unit waits for a sync", async ({ page, request }) => {
   test.setTimeout(180_000);
   expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
   const posted = await stubSyncJobs(page);
@@ -38,28 +38,21 @@ test("@responsive old Garmin and Wahoo entries are removable although no unit wa
   await page.goto("/#plan/overview");
   await page.waitForFunction(() => state.initialStateLoaded);
   expect(carrier).not.toBe("");
-  const garmin = page.locator(".planned-leftovers-button").filter({ hasText: "1 alter Eintrag bei Garmin entfernen" });
-  const wahoo = page.locator(".planned-leftovers-button").filter({ hasText: "1 alter Eintrag bei Wahoo entfernen" });
-  await garmin.evaluate((element) => {
-    for (let node = element.parentElement; node; node = node.parentElement) if (node.tagName === "DETAILS" && !node.classList.contains("planned-entry")) node.open = true;
+  // Both leftovers (one dated before this week, one undated) belong to the current week's button.
+  const button = page.locator(".planned-week").filter({ has: page.locator(".planned-day.is-today") }).locator(".planned-week-sync-button");
+  await button.evaluate((element) => {
+    for (let node = element.parentElement; node; node = node.parentElement) if (node.tagName === "DETAILS") node.open = true;
   });
-  await garmin.scrollIntoViewIfNeeded();
-  await expect(garmin).toBeVisible();
-  await expect(wahoo).toBeVisible();
-  // No pending unit: no sync button competes with the leftover item.
-  await expect(page.locator(".planned-entry .planned-sync-button")).toHaveCount(0);
-  expect((await garmin.boundingBox()).height).toBeGreaterThanOrEqual(32);
-  const card = garmin.locator("xpath=ancestor::details[contains(@class,'planned-entry')]");
+  await button.scrollIntoViewIfNeeded();
+  await expect(button).toBeVisible();
+  await expect(page.locator(".planned-week-sync-button")).toHaveCount(1);
+  expect((await button.boundingBox()).height).toBeGreaterThanOrEqual(28);
   // Nothing is sent before the athlete asks for it.
   expect(posted).toHaveLength(0);
-  await garmin.click();
-  await expect.poll(() => posted.length).toBe(1);
-  await wahoo.click();
+  await button.click();
   await expect.poll(() => posted.length).toBe(2);
   expect(posted[0]).toEqual({ provider: "garmin", type: "plan_push", payload: { entries: [{ library_workout_id: garminOld, remove: true }] } });
   expect(posted[1]).toEqual({ provider: "wahoo", type: "plan_push", payload: { entries: [{ library_workout_id: wahooOld, remove: true }] } });
-  // The item sits in the card summary; a click must not toggle the card.
-  expect(await card.evaluate((element) => element.open)).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });

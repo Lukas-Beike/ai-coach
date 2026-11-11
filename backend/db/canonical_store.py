@@ -1921,27 +1921,41 @@ _LINKABLE_COLUMNS: Final = (
 )
 
 
+# Sessions linking bundles: active or alias and not athlete-confirmed, or deleted
+# by the athlete, so that a later copy of the activity is deleted with it (#2137,
+# B-011). Hidden sessions and provider deletes never take part.
+_LINKABLE_SESSION: Final = (
+    "((s.state IN (?, ?) AND s.athlete_confirmed = 0) OR s.activity_id IN "
+    "(SELECT activity_id FROM activity_sessions WHERE state = ? AND {deleted}))"
+)
+
+
+def _linkable_session_sql() -> tuple[str, tuple[str, ...]]:
+    return _LINKABLE_SESSION.format(deleted=ATHLETE_DELETED), (
+        ActivitySessionState.ACTIVE.value,
+        ActivitySessionState.DUPLICATE.value,
+        ActivitySessionState.DELETED.value,
+    )
+
+
 def linkable_activity_rows(db: Any, *, start: str, end: str) -> list[dict[str, Any]]:
     """Return active activity rows that session linking may bundle, by ISO local date.
 
     A record qualifies when its session is active or an alias (``duplicate``) and
-    not athlete-confirmed. Hidden, deleted and confirmed sessions are never linked.
-    ``start`` and ``end`` are inclusive ISO dates on the stored athlete-local date.
+    not athlete-confirmed, or when the athlete deleted its session: linking never
+    merges into such a session but deletes a new copy with it. Hidden sessions,
+    provider deletes and confirmed sessions are never linked. ``start`` and
+    ``end`` are inclusive ISO dates on the stored athlete-local date.
     """
+    session_sql, session_args = _linkable_session_sql()
     return _fetch_all(
         db,
         f"SELECT {', '.join(_LINKABLE_COLUMNS)} FROM activity_records AS r "
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-        "WHERE r.state = ? AND s.state IN (?, ?) AND s.athlete_confirmed = 0 "
+        f"WHERE r.state = ? AND {session_sql} "
         "AND r.local_date >= ? AND r.local_date <= ? "
         "ORDER BY r.started_at, r.provider, r.provider_activity_id",
-        (
-            ActivityRecordState.ACTIVE.value,
-            ActivitySessionState.ACTIVE.value,
-            ActivitySessionState.DUPLICATE.value,
-            start,
-            end,
-        ),
+        (ActivityRecordState.ACTIVE.value, *session_args, start, end),
     )
 
 
@@ -1955,19 +1969,15 @@ def linkable_dates_with_providers(db: Any, providers: Sequence[str]) -> list[str
     session is active or an alias and not athlete-confirmed.
     """
     wanted = set(providers)
+    session_sql, session_args = _linkable_session_sql()
     rows = _fetch_all(
         db,
         "SELECT DISTINCT r.local_date AS local_date, r.provider AS provider "
         "FROM activity_records AS r "
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-        "WHERE r.state = ? AND s.state IN (?, ?) AND s.athlete_confirmed = 0 "
+        f"WHERE r.state = ? AND {session_sql} "
         f"AND r.provider IN ({_placeholders(list(wanted))})",
-        (
-            ActivityRecordState.ACTIVE.value,
-            ActivitySessionState.ACTIVE.value,
-            ActivitySessionState.DUPLICATE.value,
-            *wanted,
-        ),
+        (ActivityRecordState.ACTIVE.value, *session_args, *wanted),
     )
     by_date: dict[date, set[str]] = {}
     for row in rows:

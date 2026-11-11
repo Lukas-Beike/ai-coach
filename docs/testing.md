@@ -19,9 +19,13 @@ modules whose file changed, that transitively import a changed module, or whose
 string literals name a changed path or module; a data file under `backend/`
 selects the tests of the module that names it. Imports reached only through
 `server.py` count only when `server.py`, `backend/http_api/`, or
-`backend/runtime/` changed. Changes under
-`backend/canonical/`, `backend/db/`, `tests/fixtures/`, the test harness, or
-dependency and build files run the full suite. The slow tooling modules
+`backend/runtime/` changed. The full suite runs when `backend/db/manager.py`,
+`backend/db/bootstrap.py`, `backend/db/migrations.py`, the test harness
+(`tests/run_tests.py`, `tests/changed_tests.py`, `tests/support.py`,
+`tests/server_test_support.py`), `tests/fixtures/`, or dependency and build
+files (`requirements*`, `Dockerfile`, `pyproject.toml`) changed, when a source
+cannot be parsed, or when the selection covers at least 80% of the test
+modules; the run prints the reason. The slow tooling modules
 `test_fixture_standard_data` and `test_ci_contracts` run under `--changed` only
 when their own inputs change (the fixture runtime under `e2e/` and the test
 fixtures, or the CI workflows, build, dependency and test-runner files), even if
@@ -118,14 +122,14 @@ npm ci --ignore-scripts
 node node_modules/@playwright/test/cli.js install chromium
 docker build -t "$(python scripts/run_browser_tests.py --print-image)" .
 python scripts/run_browser_tests.py --project all --list
-python scripts/run_browser_tests.py --project mobile-small --spec e2e/css-cascade.spec.js
+python scripts/run_browser_tests.py --project mobile --spec e2e/css-cascade.spec.js
 python scripts/run_browser_tests.py --project all --jobs 1 --cache-state warm
 ```
 
 The image tag is per checkout, so parallel worktrees keep their own builds.
 `--list` starts no containers. A project/spec selection reports its focused scope;
 unknown projects, missing specs, invalid shards and empty selections fail. Desktop
-runs every functional contract, and the four smaller projects repeat only
+runs every functional contract, and the two smaller projects repeat only
 `@responsive` scenarios. Use `--shard 1 --total 2` and `--shard 2 --total 2` for
 complementary whole-file selections. Assignment uses the frozen
 `e2e/browser_durations.json` weights, longest first to the least-loaded shard,
@@ -157,8 +161,8 @@ version and digest in `scripts/browser_environment.json`; ordinary matrix jobs
 pull that image and install no browser OS packages. The runner checks the locked
 package and installed browser revisions before tests. The required `Browser
 checks` aggregate rejects failed/missing shards and incomplete or duplicate
-selection evidence. Summaries are scoped to the GitHub run attempt; rerun all
-jobs to supply a complete matrix rather than rerunning only failed jobs.
+selection evidence. Summaries of every run attempt are kept and each shard's latest attempt
+counts, so rerunning only the failed jobs is valid.
 Summaries are uploaded separately from failure reports; authentication remains
 in private temporary storage.
 
@@ -188,10 +192,8 @@ Direct `npm run test:e2e` remains available for an explicitly prepared fixture;
 stateful specs require the shared runner's fresh per-file fixtures.
 
 Configured viewports in `playwright.config.cjs`:
-- `mobile-small`: 320x568 (Compact mobile)
 - `mobile`: 390x844 (Standard mobile)
-- `tablet`: 768x1024 (Tablet portrait)
-- `tablet-landscape`: 844x390 (Mobile/tablet landscape)
+- `tablet-landscape`: 844x390 (Phone landscape)
 - `desktop`: 1440x1000 (Desktop workstation)
 
 ## Measuring validation performance
@@ -246,13 +248,18 @@ and active, archived, component, zero-target, no-target, and over-target gear.
 All values are synthetic and providers remain blocked; no credentials or live
 athlete data are read. The seed is idempotent and carries a version marker so
 an older demo seed is upgraded in place when the disposable database is reused.
-Version 6 adds review scenarios on top of the v5 data: a rest day and a sick
+Version 8 is current. Version 6 added review scenarios on top of the v5 data: a rest day and a sick
 day with illness text in the check-ins, a planned 30-minute Swim unit with
 planned load next to a 20-minute swim at 11:00 and a fitting 30-minute swim at
 18:00 on the same day (activity matching ambiguity), a
 `[NO_INTENSITY]` camp day with a hard planned unit, a weekly `[SHORT_ONLY]`
 series with a 90-minute ride. Upgrades from v5 add these records once; repeated
-seeds and restarts keep the counts stable. The default seed does not add a long
+seeds and restarts keep the counts stable. Version 7 completes the synthetic
+Garmin history (race predictions, thresholds, readiness, sleep and body battery),
+adds manual nutrition products on gram and millilitre bases (one archived) and
+reusable library templates for Ride, VirtualRide and Run. Version 8 adds one
+distance-based run, "Tempolauf nach Distanz", on the first free day from day 4 on.
+The default seed does not add a long
 chat history; longer conversations are added on demand for specific scenarios.
 
 `FIXTURE_OPENAI_MODE` controls the simulated OpenAI path. The default
@@ -264,8 +271,8 @@ deliberately configured with a fake key (`OPENAI_API_KEY="e2e-fixture-openai-key
 in every mode, so Coach requests still take the normal Responses API path and no
 real credential is needed.
 
-Use a fresh fixture browser profile and check the mobile-small and mobile
-projects when reviewing this preview.
+Use a fresh fixture browser profile and check the mobile
+project when reviewing this preview.
 
 `scripts/demo-container.ps1` builds the image and starts a disposable demo
 container that seeds this data itself on every start (`FIXTURE_AUTO_SEED=1`).

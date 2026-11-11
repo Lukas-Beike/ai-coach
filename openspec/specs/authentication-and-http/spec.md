@@ -58,7 +58,7 @@ Evidence: `backend/http_api/auth.py::SessionAuthService.authenticated_session`; 
 
 ### Requirement: CSRF and cookie boundaries
 
-State-changing authenticated HTTP requests SHALL require the X-CSRF-Token value matching the stored session hash; session cookies SHALL be HttpOnly and both cookies SHALL use SameSite=Strict and the configured Secure setting.
+State-changing authenticated HTTP requests SHALL require the X-CSRF-Token value matching the stored session hash; the session cookie SHALL be HttpOnly (the CSRF cookie stays script-readable) and both cookies SHALL use SameSite=Strict and the configured Secure setting.
 
 
 #### Scenario: Missing or mismatched CSRF token
@@ -77,8 +77,8 @@ The authentication service SHALL limit login attempts and authenticated API requ
 
 
 #### Scenario: Exceeded login allowance
-- **WHEN** more than the allowed five login attempts occur in a 900-second client window
-- **THEN** the next login is rejected with a rate-limited response and retry metadata
+- **WHEN** five login attempts with a wrong password or an invalid body occur in a 900-second client window
+- **THEN** the next login is rejected with a rate-limited response and retry metadata before its body is read; a correct password returns its slot, so successful logins never use up the allowance
 
 #### Scenario: Untrusted forwarding header
 - **WHEN** an untrusted socket peer supplies X-Forwarded-For
@@ -88,7 +88,7 @@ The authentication service SHALL limit login attempts and authenticated API requ
 - **WHEN** the resolved client exceeds 180 authenticated API requests in 60 seconds
 - **THEN** the API returns HTTP 429 with retry information
 
-Evidence: `backend/http_api/auth.py::resolve_client_ip`; `backend/http_api/auth.py::SessionAuthService.login_user`; `backend/http_api/auth.py::SessionAuthService.require_auth`; `backend/http_api/rate_limit.py::RateLimiter`. Tests: `tests/test_config.py::test_trusted_proxies_parse_addresses_and_networks`; `tests/test_http_database_busy.py::test_rate_limit_errors_also_send_retry_after`.
+Evidence: `backend/http_api/auth.py::resolve_client_ip`; `backend/http_api/auth.py::SessionAuthService.login_user`; `backend/http_api/auth.py::SessionAuthService.require_auth`; `backend/http_api/rate_limit.py::RateLimiter`. Tests: `tests/test_config.py::test_trusted_proxies_parse_addresses_and_networks`; `tests/test_session_auth_read_path.py::test_successful_logins_do_not_use_up_the_login_limit`; `tests/test_security_resource_limits.py::test_login_throttles_before_reading_and_counts_malformed_requests`; `tests/test_http_database_busy.py::test_rate_limit_errors_also_send_retry_after`.
 
 ### Requirement: Request body shape and size
 

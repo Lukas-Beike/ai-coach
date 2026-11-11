@@ -203,6 +203,7 @@ class GarminAssembly:
             now=self._datetime_now,
             redactor=self._redactor.redact_text,
             gate=self._resync_gate,
+            write_ready=lambda: self.sync_state_service().sdk_skipped() is None,
         )
 
     def body_export(self, profile: Any) -> Any:
