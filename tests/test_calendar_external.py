@@ -1,7 +1,8 @@
 import sqlite3
 import unittest
-from contextlib import contextmanager
 from datetime import date, timedelta
+
+from support import FakeManager
 
 from backend.calendar.external import (
     ExternalCalendarReader,
@@ -11,20 +12,6 @@ from backend.calendar.external import (
     state,
 )
 from backend.planning.context import build_daily_planning_context
-
-
-class Manager:
-    def __init__(self, db):
-        self.db = db
-
-    @contextmanager
-    def unit_of_work(self):
-        yield self.db
-
-    def reader(self):
-        return self.unit_of_work()
-
-    read_snapshot = reader
 
 
 class ExternalCalendarTests(unittest.TestCase):
@@ -196,7 +183,7 @@ class ExternalCalendarTests(unittest.TestCase):
         self.db.set_trace_callback(queries.append)
 
         counts = event_counts(self.db, today=self.today)
-        reader = ExternalCalendarReader(Manager(self.db), lambda: self.today)
+        reader = ExternalCalendarReader(FakeManager(self.db), lambda: self.today)
 
         self.assertEqual({"total": 401, "upcoming": 400}, counts)
         self.assertEqual(counts, reader.event_counts(self.db))
@@ -332,7 +319,7 @@ class ExternalCalendarTests(unittest.TestCase):
     def test_reader_owns_transactions_for_lists_and_state(self):
         self.add_event("event")
         self.add_kv("last_external_calendar_sync_at", "2026-09-20T12:00:00+00:00")
-        reader = ExternalCalendarReader(Manager(self.db), lambda: self.today)
+        reader = ExternalCalendarReader(FakeManager(self.db), lambda: self.today)
 
         self.assertEqual(reader.list_events()[0]["id"], "event")
         projected = reader.state(configured=True, running=False, window_days=56)

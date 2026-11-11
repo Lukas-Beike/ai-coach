@@ -1,22 +1,20 @@
 """Synthetic persistence checks for the profile mutation coordinator."""
 
 import json
-import sqlite3
-import tempfile
 import threading
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+
+from support import temp_database
 
 from backend.athlete.profile import ProfileService
 from backend.coach.profile_update import CoachProfileUpdateService
 from backend.coach.structured_tool_round import CoachStructuredToolRoundService
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.turn_undo import CoachTurnUndoService
-from backend.db import DatabaseManager, row_factory
+from backend.db import row_factory
 from backend.db.repositories import KeyValueRepository, ProfileRepository
-from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
@@ -26,12 +24,9 @@ from backend.sync.garmin_profile_body_export import GarminProfileBodyExport
 
 class ProfileCoordinatorTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.manager = DatabaseManager(
-            Path(self.tmp.name) / "profile.db", sqlite3, row_factory=row_factory
+        self.manager = temp_database(
+            self, "profile.db", row_factory=row_factory, schema=True
         )
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.coordinator = threading.RLock()
         self.database_lock = threading.RLock()
         self.kv = KeyValueRepository(lambda: "2026-10-29T12:00:00+00:00")
@@ -54,10 +49,6 @@ class ProfileCoordinatorTests(unittest.TestCase):
             None,
             profile_mutation_coordinator=self.coordinator,
         )
-
-    def tearDown(self):
-        self.manager.close()
-        self.tmp.cleanup()
 
     def change(self):
         with self.manager.reader() as db:

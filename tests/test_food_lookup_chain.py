@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, cast
 
-from backend.db import DatabaseManager, row_factory
-from backend.db.schema import initialize_schema
+from support import temp_database
+
+from backend.db import row_factory
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.food_mirror import FoodDatabaseMirror
@@ -114,14 +112,9 @@ UNAVAILABLE = AppError(502, "offline", reason="food_database_unavailable")
 
 class LookupChainTests(unittest.TestCase):
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.manager = DatabaseManager(
-            Path(directory.name) / "chain.db", sqlite3, row_factory=row_factory
+        self.manager = temp_database(
+            self, "chain.db", row_factory=row_factory, schema=True
         )
-        self.addCleanup(self.manager.close)
-        with self.manager.unit_of_work() as db:
-            initialize_schema(db)
         self.now = START
         self.mirror = FoodDatabaseMirror(
             lambda: self.manager, threading.RLock(), lambda: self.now.isoformat()

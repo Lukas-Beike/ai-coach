@@ -1,29 +1,23 @@
 import sqlite3
-import tempfile
 import threading
 import unittest
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from canonical_daily_health_support import MappedDailyReader
 from nutrition_service_support import build_nutrition_services
+from support import temp_database
 
-from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.db.schema import initialize_schema
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 
 class NutritionGarminExpenditureTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
-        manager = DatabaseManager(
-            Path(self.temp_dir.name) / "nutrition.db", sqlite3, row_factory=sqlite3.Row
+        manager = temp_database(
+            self, "nutrition.db", row_factory=sqlite3.Row, schema=True
         )
         self.manager = manager
-        with manager.unit_of_work() as db:
-            initialize_schema(db)
         self.fixed_now = "2026-09-24T12:00:00+00:00"
         self.service, _ = build_nutrition_services(
             manager,
@@ -31,10 +25,6 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
             lambda: self.fixed_now,
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
         )
-
-    def tearDown(self) -> None:
-        self.manager.close()
-        self.temp_dir.cleanup()
 
     def store_garmin(self, payload: dict[str, Any]) -> None:
         payload = {"synced_at": "2026-09-24T08:00:00Z", **payload}

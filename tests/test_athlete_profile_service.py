@@ -2,30 +2,13 @@ import json
 import sqlite3
 import threading
 import unittest
-from contextlib import contextmanager
+
+from support import FakeManager
 
 from backend.athlete.profile import DEFAULT_PROFILE, ProfileService
 from backend.db.repositories import KeyValueRepository, ProfileRepository
 from backend.errors import AppError
 from backend.weather import cache as weather_cache
-
-
-class _Manager:
-    def __init__(self, db):
-        self.db = db
-
-    @contextmanager
-    def unit_of_work(self):
-        try:
-            yield self.db
-            self.db.commit()
-        except Exception:
-            self.db.rollback()
-            raise
-
-    @contextmanager
-    def reader(self):
-        yield self.db
 
 
 class ProfileServiceTests(unittest.TestCase):
@@ -42,7 +25,7 @@ class ProfileServiceTests(unittest.TestCase):
         )
         self.key_values = KeyValueRepository(lambda: "2026-09-20T00:00:00+00:00")
         self.service = ProfileService(
-            _Manager(self.db),
+            FakeManager(self.db),
             ProfileRepository(self.key_values),
             self.key_values,
             mutation_coordinator=threading.RLock(),
