@@ -160,10 +160,10 @@ The system SHALL show an estimated first threshold heart rate, derived from stor
 Evidence: `backend/performance/first_threshold_estimate.py:first_threshold_estimate`, `backend/performance/first_threshold_service.py:FirstThresholdService`; `tests/test_first_threshold_estimate.py`.
 
 ### Requirement: Recorded sensors linked to equipment
-The system SHALL list the distinct heart rate, power meter and trainer sensors named by recordings, each with its hashed short id, role, manufacturer, product, first and last day and session count, and SHALL let the athlete link a sensor to an active main equipment item or remove the link. A serial number SHALL never be stored or shown.
+The system SHALL list the distinct heart rate, power meter and trainer sensors named by recordings, each with its hashed short id, role, manufacturer, product, first and last day and session count, and SHALL keep a link of a sensor to an active main equipment item; no HTTP route sets or removes a link. A serial number SHALL never be stored or shown.
 
 #### Scenario: Link a sensor
-- **WHEN** the athlete links a listed sensor to an active main equipment item
+- **WHEN** the equipment service links a listed sensor to an active main equipment item
 - **THEN** the registry shows that equipment id for the sensor; an unknown sensor or an archived, component or unknown item is rejected, and a null equipment id removes the link.
 
 Evidence: `backend/athlete/equipment.py:EquipmentService.assign_sensor`, `backend/canonical/sensor_registry.py:registry`; `tests/test_sensor_equipment.py`.

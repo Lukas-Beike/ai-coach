@@ -7,21 +7,21 @@ Describe the athlete's local nutrition diary, nutrient completeness, expenditure
 ## Requirements
 
 ### Requirement: Protected diary reads and explicit local mutations
-The system SHALL expose day, date-range, and history reads only to an authenticated athlete and process nutrition mutations through the authenticated, CSRF-protected API boundary.
+The system SHALL expose day and history reads only to an authenticated athlete and process nutrition mutations through the authenticated, CSRF-protected API boundary.
 
 #### Scenario: Read a selected day
 - **WHEN** an authenticated athlete requests a valid diary date
 - **THEN** the response contains that date's local entries, counts, totals, and expenditure metadata; an omitted date uses the athlete-local day.
 
 #### Scenario: Reject unauthenticated reads
-- **WHEN** an unauthenticated caller requests nutrition history or saved meals
+- **WHEN** an unauthenticated caller requests nutrition history
 - **THEN** authentication fails before accessing the nutrition service.
 
 #### Scenario: Reject an unauthorized mutation
 - **WHEN** a nutrition POST or PUT lacks the required session or CSRF proof
 - **THEN** the shared HTTP boundary rejects it before dispatching a durable nutrition mutation.
 
-Evidence: `backend/http_api/nutrition.py::NutritionGetRoutes.handle`, `backend/http_api/handler.py::RequestHandler.do_POST`; `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_week_route_rejects_unauthenticated_read_before_service_access`, `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_templates_route_requires_authentication`. Mutation protection also uses the shared HTTP authentication contract; these route-unit tests do not exercise a real browser session.
+Evidence: `backend/http_api/nutrition.py::NutritionGetRoutes.handle`, `backend/http_api/handler.py::RequestHandler.do_POST`; `tests/test_nutrition_api_and_sync.py::NutritionHttpApiTests.test_week_route_rejects_unauthenticated_read_before_service_access`. Mutation protection also uses the shared HTTP authentication contract; these route-unit tests do not exercise a real browser session.
 
 ### Requirement: Validated local entries with trustworthy provenance
 The system SHALL validate diary entry data before persistence, retain an entry identity and source provenance, and derive nutrition provenance from the accepted input path rather than trusting a supplied provenance object.

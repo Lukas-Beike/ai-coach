@@ -105,7 +105,7 @@ class HttpPostDispatcher:
             return
         if self._coach_actions.handle(handler, path, session):
             return
-        if self._chat.handle(handler, path, session):
+        if self._chat.handle(handler, path):
             return
         if self._transcribe.handle(handler, path):
             return
@@ -116,7 +116,7 @@ class HttpPostDispatcher:
             return
         if self._sync_commands.handle(handler, path):
             return
-        if self._history_undo.handle(handler, path, session):
+        if self._history_undo.handle(handler, path):
             return
         if self._privacy_delete.handle(handler, path):
             return

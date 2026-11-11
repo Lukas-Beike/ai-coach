@@ -1122,16 +1122,11 @@ class MetricExportHttpTests(ServerTestCase):
         return response, data
 
     def test_routes_require_session_and_csrf(self):
-        for path in (
-            "/api/metric-export/preview",
-            "/api/metric-export/execute",
-            "/api/metric-export/automatic",
-        ):
-            with self.subTest(path=path):
-                response, _ = self.call(path, session=False, csrf=False)
-                self.assertEqual(response.status, 401)
-                response, _ = self.call(path, csrf=False)
-                self.assertEqual(response.status, 403)
+        path = "/api/metric-export/automatic"
+        response, _ = self.call(path, session=False, csrf=False)
+        self.assertEqual(response.status, 401)
+        response, _ = self.call(path, csrf=False)
+        self.assertEqual(response.status, 403)
         self.transport.assert_not_called()
 
     def test_automatic_configuration_requires_explicit_source_target_and_confirmation(
@@ -1153,47 +1148,11 @@ class MetricExportHttpTests(ServerTestCase):
             self.assertEqual(json.loads(data)["enabled"], enabled)
         self.transport.assert_not_called()
 
-    def test_preview_and_unconfirmed_execute(self):
-        response, data = self.call("/api/metric-export/preview")
-        self.assertEqual(response.status, 200)
-        preview = json.loads(data)
-        self.assertEqual(preview["provider"], "intervals")
-        self.assertIsInstance(preview["items"], list)
-
-        response, data = self.call(
-            "/api/metric-export/execute",
-            {
-                "provider": "intervals",
-                "metrics": [
-                    {
-                        "key": "weight|",
-                        "observed_on": "2026-10-10",
-                        "value": 70,
-                        "current_remote_value": None,
-                    }
-                ],
-            },
-        )
-        self.assertEqual(response.status, 400)
-        self.assertEqual(json.loads(data)["reason"], "confirmation_required")
-
-        response, data = self.call(
-            "/api/metric-export/execute",
-            {
-                "confirmed": True,
-                "provider": "intervals",
-                "metrics": [
-                    {
-                        "key": "weight|",
-                        "observed_on": "2026-10-10",
-                        "value": 70,
-                        "current_remote_value": None,
-                    }
-                ],
-            },
-        )
-        self.assertEqual(response.status, 409)
-        self.assertEqual(json.loads(data)["reason"], "metric_export_changed")
+    def test_manual_preview_and_execute_routes_are_not_registered(self):
+        for path in ("/api/metric-export/preview", "/api/metric-export/execute"):
+            with self.subTest(path=path):
+                response, _ = self.call(path)
+                self.assertEqual(response.status, 404)
         self.transport.assert_not_called()
 
 

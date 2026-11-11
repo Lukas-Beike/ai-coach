@@ -678,10 +678,14 @@ class TrainingReportTests(unittest.TestCase):
             "/api/analysis/reports",
             "/api/analysis/impact",
             "/api/analysis/comparisons",
+            "/api/analysis/endurance",
+            "/api/analysis/season",
         ):
             with self.subTest(path=path):
                 self.assertFalse(route.handle(handler, path))
-        self.assertFalse(route.handle_post(handler, "/api/analysis/reports"))
+        for path in ("/api/analysis/reports", "/api/analysis/scenarios"):
+            with self.subTest(path=path):
+                self.assertFalse(route.handle_post(handler, path))
         auth.require_auth.assert_not_called()
         reports.assert_not_called()
         handler.send_json.assert_not_called()
@@ -692,9 +696,7 @@ class TrainingReportTests(unittest.TestCase):
         reports = Mock()
         route = AnalysisRoutes(lambda: auth, reports)
         for path in (
-            "/api/analysis/endurance",
             "/api/analysis/power-profiles",
-            "/api/analysis/season",
             "/api/analysis/training-records",
         ):
             with self.subTest(path=path), self.assertRaises(AppError):

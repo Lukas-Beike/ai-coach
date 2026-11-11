@@ -388,7 +388,7 @@ Planned units and library templates SHALL carry an optional local session focus,
 #### Scenario: One-time backfill of future units
 - **WHEN** the application starts and the versioned focus backfill has not run
 - **THEN** every future, non-archived unit without a focus (and every strength unit without an intensity) receives the derived value only if its sources agree: steps and text do not contradict, exactly one keyword group matches, and the strength intensity comes from the structure or from exactly one named level; contested units, past units and sports without a focus vocabulary stay untouched, no exercise structure is invented, the sync state is kept and no provider is written.
-- **AND** the changes are recorded in the change history and in the step's state (counts and change references only, reported by diagnostics), and `POST /api/change-history/undo-focus-backfill` restores all of them in one transaction, or none when a unit was edited since; a second run changes nothing.
+- **AND** the changes are recorded in the change history and in the step's state (counts and change references only, reported by diagnostics); a second run changes nothing.
 
 Evidence: `backend/planning/session_focus.py`, `backend/sync/session_focus_backfill.py`; `tests/test_session_focus.py`, `tests/test_session_focus_backfill.py`, `e2e/session-focus.spec.js`.
 

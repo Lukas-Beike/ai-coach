@@ -67,10 +67,6 @@ REGISTERED_ELSEWHERE = {
         '"/api/planned-units/([^/]+)/focus"',
     ),
     "/api/sync/jobs/{id}": ("sync_get.py", '"^/api/sync/jobs/([0-9a-f-]+)$"'),
-    "/api/sync/jobs/{id}/resolve": (
-        "sync_commands.py",
-        '"^/api/sync/jobs/([0-9a-f-]+)/resolve$"',
-    ),
 }
 # Former aliases the document names as no longer registered.
 RETIRED_ALIASES = {"/api/logs/clear", "/api/diagnostics/clear"}

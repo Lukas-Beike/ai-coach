@@ -32,7 +32,6 @@ from backend.http_api.handler import (
     HttpRequestHandlerDependencies,
     create_request_handler,
 )
-from backend.http_api.history_get import HistoryGetRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.library_page import LibraryPageService
 from backend.http_api.metric_export_post import MetricExportPostRoutes
@@ -165,7 +164,6 @@ class HttpCoachReadServices:
 class HttpCoachWriteActions:
     job_cancellation_service: Callable[[], Any]
     context_preview_service: Callable[[], Any]
-    proposal_creation_service: Callable[[], Any]
     proposal_confirmation_service: Callable[[], Any]
     proposal_execution_service: Callable[[], Any]
     reset_service: Callable[[], Any]
@@ -215,11 +213,7 @@ class HttpAthleteServices:
 
 @dataclass(frozen=True)
 class HttpHistoryServices:
-    change_history: Callable[[], Any]
     undo: Callable[[], Any]
-    session_focus_backfill_undo: Callable[[], Callable[[], dict[str, Any]]] | None = (
-        None
-    )
 
 
 @dataclass(frozen=True)
@@ -374,7 +368,6 @@ class HttpApiAssembly:
         coach_job_submission_service = coach_reads.job_submission_service
         coach_job_cancellation_service = coach_writes.job_cancellation_service
         coach_context_preview_service = coach_writes.context_preview_service
-        proposal_creation_service = coach_writes.proposal_creation_service
         proposal_confirmation_service = coach_writes.proposal_confirmation_service
         proposal_execution_service = coach_writes.proposal_execution_service
         coach_reset_service = coach_writes.reset_service
@@ -393,7 +386,6 @@ class HttpApiAssembly:
         athlete_clock = athlete.clock
         local_today = athlete.local_today
         state_event_buffer = athlete.state_event_buffer
-        change_history_service = history.change_history
         history_undo_service = history.undo
         recent_log_entries_service = diagnostics.recent_logs
         diagnostic_report_service = diagnostics.report
@@ -475,9 +467,6 @@ class HttpApiAssembly:
             athlete.session_corrections,
             full_provider_resync_service,
             dict(DEFAULT_PROVIDER_REGISTRY.full_resync_routes()),
-        )
-        self.history_get_routes = HistoryGetRoutes(
-            session_auth_service, change_history_service
         )
         report_plan = lambda: public_plan_state_service().read(local_only=True)
         report_checkins = lambda: checkin_service().list(365)
@@ -570,21 +559,17 @@ class HttpApiAssembly:
         )
         self.history_undo_post_routes = HistoryUndoPostRoutes(
             history_undo_service,
-            proposal_creation_service,
             CoachTurnUndoService(
                 database_manager, database_lock(), history_undo_service
             ),
             session_rpe_load,
-            history.session_focus_backfill_undo,
         )
         self.coach_actions_post_routes = CoachActionsPostRoutes(
             proposal_confirmation_service,
             proposal_execution_service,
         )
         self.chat_post_routes = ChatPostRoutes(
-            coach_job_submission_service,
-            coach_reset_service,
-            max_chat_request_bytes,
+            coach_reset_service, max_chat_request_bytes
         )
         self.chat_stream_transport = CoachChatStreamTransport(
             chat_stream_registry,
@@ -627,7 +612,6 @@ class HttpApiAssembly:
             athlete.body_export,
         )
         self.feedback_post_routes = FeedbackPostRoutes(
-            checkin_service,
             athlete.activity_feedback,
             session_rpe_load,
             athlete.session_corrections,
@@ -683,7 +667,6 @@ class HttpApiAssembly:
                 self.state_events_get_routes,
                 self.coach_get_routes,
                 self.athlete_get_routes,
-                self.history_get_routes,
                 self.diagnostics_get_routes,
                 self.privacy_get_routes,
                 self.nutrition_get_routes,

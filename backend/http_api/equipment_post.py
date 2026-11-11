@@ -20,9 +20,4 @@ class EquipmentPostRoutes:
                 200, self._equipment_service().maintain(handler.read_json())
             )
             return True
-        if path == "/api/equipment/sensor":
-            handler.send_json(
-                200, self._equipment_service().assign_sensor(handler.read_json())
-            )
-            return True
         return False

@@ -81,17 +81,6 @@ class NutritionHttpApiTests(unittest.TestCase):
         with self.assertRaises(AppError):
             self.get_routes.handle(self.handler, "/api/nutrition/week")
 
-    def test_templates_route_requires_authentication(self) -> None:
-        self.handler.path = "/api/nutrition/templates"
-        self.meal_library_service.list_templates.return_value = [{"id": "template-1"}]
-        self.assertTrue(
-            self.get_routes.handle(self.handler, "/api/nutrition/templates")
-        )
-        self.auth.require_auth.assert_called_once_with(self.handler)
-        self.handler.send_json.assert_called_once_with(
-            200, {"ok": True, "templates": [{"id": "template-1"}]}
-        )
-
     def test_get_day_route(self) -> None:
         self.handler.path = "/api/nutrition/day?date=2026-09-24"
         self.diary_service.get_day_summary.return_value = {
@@ -173,9 +162,16 @@ class NutritionHttpApiTests(unittest.TestCase):
             200, {"ok": True, "balance_days": 7}
         )
 
-    def test_removed_fueling_route_is_not_handled(self) -> None:
-        self.handler.path = "/api/nutrition/fueling"
-        self.assertFalse(self.get_routes.handle(self.handler, "/api/nutrition/fueling"))
+    def test_removed_get_routes_are_not_handled(self) -> None:
+        for path in (
+            "/api/nutrition/fueling",
+            "/api/nutrition/templates",
+            "/api/nutrition/range",
+        ):
+            with self.subTest(path=path):
+                self.handler.path = path
+                self.assertFalse(self.get_routes.handle(self.handler, path))
+        self.auth.require_auth.assert_not_called()
 
     def test_week_route_rejects_unauthenticated_read_before_service_access(
         self,
@@ -185,28 +181,6 @@ class NutritionHttpApiTests(unittest.TestCase):
         with self.assertRaises(AppError):
             self.get_routes.handle(self.handler, "/api/nutrition/week")
         self.diary_service.get_week_summary.assert_not_called()
-
-    def test_get_range_route(self) -> None:
-        self.handler.path = "/api/nutrition/range?start=2026-09-20&end=2026-09-24"
-        self.diary_service.get_range_summary.return_value = [
-            {"date": "2026-09-20", "total_kcal": 1800},
-            {"date": "2026-09-24", "total_kcal": 2000},
-        ]
-        handled = self.get_routes.handle(self.handler, "/api/nutrition/range")
-        self.assertTrue(handled)
-        self.diary_service.get_range_summary.assert_called_once_with(
-            "2026-09-20", "2026-09-24"
-        )
-        self.handler.send_json.assert_called_once_with(
-            200,
-            {
-                "ok": True,
-                "summaries": [
-                    {"date": "2026-09-20", "total_kcal": 1800},
-                    {"date": "2026-09-24", "total_kcal": 2000},
-                ],
-            },
-        )
 
     def test_post_entry_route(self) -> None:
         self.handler.read_json.return_value = {
