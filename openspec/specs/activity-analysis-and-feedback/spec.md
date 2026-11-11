@@ -412,7 +412,7 @@ The activity list (`GET /api/activities`) and the Coach tool `list_recent_activi
 - **WHEN** a listed session's Intervals.icu record has a stored detail failure note
 - **THEN** the row carries no `detail_error`.
 
-Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService.recent`; `tests/test_activity_canonical_reads.py:test_read_service_lists_nothing_until_the_tables_serve`, `tests/test_activity_canonical_reads.py:test_limit_one_pages_walk_every_session_and_old_cursors_restart`, `tests/test_activity_canonical_reads.py:test_garmin_only_session_is_listed_and_its_detail_loads`, `e2e/activity-details.spec.js::@responsive analysis lists a Garmin-only indoor session and loads more`.
+Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService.recent`; `tests/test_activity_canonical_reads.py:test_read_service_lists_nothing_until_the_tables_serve`, `tests/test_activity_canonical_reads.py:test_limit_one_pages_walk_every_session_and_old_cursors_restart`, `tests/test_activity_canonical_reads.py:test_garmin_only_session_is_listed_and_its_detail_loads`, `e2e/activity-details.spec.js::@responsive the calendar details open a Garmin-only indoor session; old Einheiten links land on the calendar`.
 
 ### Requirement: Summary fingerprints from one sync-owned port
 Freshness checks outside the sync owner SHALL read current summary fingerprints only through the `summary_fingerprints` port, for the requested activities only. Providers SHALL use the payload hash of the active raw record. Intervals.icu is an output target, so its stored rows have no fingerprint and the port returns none for them.

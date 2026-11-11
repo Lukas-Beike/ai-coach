@@ -1343,10 +1343,21 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return row;
   }
 
-  // The Coach analyses the session the athlete picked: one turn, the same as typing the request.
-  // The message names the session by date, sport, time, duration and its local id; the stored name
-  // never becomes Coach input.
+  // "Details" opens the session's charts, zones, laps and all values in the card (#2258);
+  // the Coach analyses it in one athlete-started turn; "Feedback" opens the rating and session dialog.
+  // The Coach message names the session by date, sport, time, duration and its local id; the stored
+  // name never becomes Coach input.
   function plannedActivityActions(actual, dateKey, title) {
+    const more = document.createElement("details");
+    more.className = "planned-activity-more";
+    const moreSummary = document.createElement("summary");
+    moreSummary.textContent = "Details";
+    const panel = document.createElement("div");
+    panel.className = "activity-analysis-panel";
+    more.append(moreSummary, panel);
+    more.addEventListener("toggle", () => {
+      if (more.open && !panel.childElementCount) void globalThis.ActivityAnalysis.loadPanel(panel, actual);
+    });
     const actions = document.createElement("div");
     actions.className = "planned-activity-actions";
     const id = String(actual.activity_id || actual.id || "");
@@ -1357,13 +1368,13 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       /^[\w:.-]{1,80}$/.test(id) ? `ID ${id}` : null,
     ].filter(Boolean).join(", ")}).`;
     const coach = plannedCoachButton("Mit dem Coach analysieren", prompt, "secondary-button");
-    const details = document.createElement("button");
-    details.type = "button";
-    details.className = "secondary-button planned-activity-details";
-    details.textContent = "Details";
-    details.addEventListener("click", () => globalThis.ActivityDetails.open({ ...actual, name: title }, { api, showDialog: showAccessibleDialog }));
-    actions.append(coach, details);
-    return actions;
+    const feedback = document.createElement("button");
+    feedback.type = "button";
+    feedback.className = "secondary-button planned-activity-feedback";
+    feedback.textContent = "Feedback";
+    feedback.addEventListener("click", () => globalThis.ActivityDetails.open({ ...actual, name: title }, { api, showDialog: showAccessibleDialog }));
+    actions.append(coach, feedback);
+    return [more, actions];
   }
 
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}, weekHasPlan = true) {
@@ -1415,7 +1426,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const metrics = actual ? null : plannedSessionMetrics(entry);
     if (metrics) details.append(metrics);
     appendActualCalendarDetails(details, actual);
-    if (actual && (actual.id || actual.activity_id)) details.append(plannedActivityActions(actual, dateKey, title));
+    if (actual && (actual.id || actual.activity_id)) details.append(...plannedActivityActions(actual, dateKey, title));
     appendPlannedCalendarComparison(details, entry, actual);
     const focusForm = plannedFocusForm(entry, dateKey);
     if (focusForm) details.append(focusForm);

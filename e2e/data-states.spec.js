@@ -8,7 +8,6 @@ const ANALYSIS_TABS = [
   ["load", "Noch keine Belastungsdaten"],
   ["performance", "Noch keine Leistungsdaten"],
   ["recovery", "Noch keine Erholungsdaten"],
-  ["sessions", "Noch keine Einheiten"],
 ];
 
 async function openAnalysis(page, segment) {
@@ -29,7 +28,7 @@ test("@responsive an empty install shows one empty card with one action per anal
     await expect(card.locator("a, button")).toHaveText(connected ? "Jetzt abgleichen" : "Anbindung einrichten");
     await expect(page.locator("#dataPanel")).not.toContainText("Keine Daten:");
     await expect(card).not.toContainText("Intervals.icu");
-    for (const id of ["sessionPerformance", "analysisLoadCharts", "trainingZoneCharts", "currentPerformance", "analysisHistoryCharts", "activityAnalysis"]) {
+    for (const id of ["sessionPerformance", "analysisLoadCharts", "trainingZoneCharts", "currentPerformance", "analysisHistoryCharts"]) {
       await expect(page.locator(`#${id}`)).toBeHidden();
     }
   }
@@ -89,23 +88,11 @@ test("@responsive a hanging analysis read times out into the retry state", async
   await expect(profile.getByRole("button", { name: "Erneut versuchen" })).toBeVisible();
 });
 
-test("@responsive a failed session list or equipment read offers a retry", async ({ page }) => {
+test("@responsive a failed equipment read offers a retry", async ({ page }) => {
   let fail = true;
   const failing = (message) => (route) => (fail ? route.fulfill({ status: 503, json: { error: message } }) : route.fallback());
-  await page.route(/\/api\/activities\?limit=/, failing("E2E fixture: Einheiten nicht erreichbar"));
   await page.route("**/api/analysis/training-records", failing("E2E fixture: Ausrüstung nicht erreichbar"));
-  await openAnalysis(page, "sessions");
-  const list = page.locator("#activityAnalysis");
-  await expect(list.locator(".error-state")).toBeVisible();
-  await expect(page.locator("#analysisEmptyState")).toBeHidden();
-  fail = false;
-  await list.getByRole("button", { name: "Erneut versuchen" }).click();
-  // The empty fixture has no sessions, so the retry ends in the tab's one empty card.
-  await expect(page.locator("#analysisEmptyState .empty-state strong")).toHaveText("Noch keine Einheiten");
-  await expect(list).toBeHidden();
-
-  // J-201: the equipment read fails into the same retry card.
-  fail = true;
+  // J-201: the equipment read fails into the retry card. A session's details retry in the calendar (activity-details spec).
   await page.goto("/#more/equipment");
   const gear = page.locator("#equipmentItems");
   await expect(gear.locator(".error-state")).toContainText("Ausrüstung nicht erreichbar");

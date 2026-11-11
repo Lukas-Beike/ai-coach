@@ -230,6 +230,9 @@ def activity_detail_contract(
         "session": _session(session_id, measured, zone),
         "metrics": metrics,
         "streams": _streams(merged.streams),
+        # The calendar's details chart the running dynamics per second (#2258); the
+        # Coach tool leaves them out. They share the time axis of ``streams``.
+        "running_dynamics_streams": _channels(merged.streams, running_dynamics=True),
         "laps": _laps(merged.laps, merged.streams),
         "zones": _zones(merged.zones),
         "strength_sets": _strength_sets(stored),
@@ -384,16 +387,26 @@ def _streams(streams: MergedStreams | None) -> dict[str, Any] | None:
     return {
         "time_s": _downsample_series(list(streams.time_s)),
         "source": _candidate_source(streams.primary),
-        "channels": {
-            channel.value: {
-                "values": _downsample_series(list(choice.values)),
-                "source": _candidate_source(choice.source),
-                "aligned": choice.aligned,
-            }
-            for channel, choice in streams.channels.items()
-            if channel not in RUNNING_DYNAMICS_CHANNELS
-        },
+        "channels": _channels(streams, running_dynamics=False) or {},
     }
+
+
+def _channels(
+    streams: MergedStreams | None, *, running_dynamics: bool
+) -> dict[str, Any] | None:
+    """The downsampled channels of one kind; ``None`` without any."""
+    if streams is None:
+        return None
+    channels = {
+        channel.value: {
+            "values": _downsample_series(list(choice.values)),
+            "source": _candidate_source(choice.source),
+            "aligned": choice.aligned,
+        }
+        for channel, choice in streams.channels.items()
+        if (channel in RUNNING_DYNAMICS_CHANNELS) is running_dynamics
+    }
+    return channels or None
 
 
 def _laps(

@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { renderCalendarSessions, openSessionDetails } = require("./helpers/ui");
 
 // P3 polish of the 2026-11 UX review (#1790).
 const style = (locator) => locator.evaluate((element) => {
@@ -77,24 +78,20 @@ test("the calendar has a refresh button and the library rows show a count and a 
   expect(await row.evaluate((element) => getComputedStyle(element, "::after").content)).not.toBe("none");
 });
 
-test("session rows show icon, time and key metric and a flat series stays a line on a real axis @responsive", async ({ page }) => {
-  const summary = { id: "flat-ride", name: "Flat ride", sport: "ride", environment: "outdoor", started_at_local: "2026-10-17T08:30:00", moving_duration_s: 3600, avg_hr: 142 };
-  await page.route(/\/api\/activities(\?|\/)/, (route) => {
-    const id = new URL(route.request().url()).pathname.split("/")[3];
+test("a session's calendar details keep a flat series as a line on a real axis @responsive", async ({ page }) => {
+  await page.route(/\/api\/activities\//, (route) => {
     const times = Array.from({ length: 30 }, (_, index) => index * 10);
-    const body = id
-      ? { session: { activity_id: id, sport: "ride" }, metrics: {}, streams: { time_s: times, channels: { heart_rate_bpm: { values: times.map(() => 200) } } }, detail_data: { providers: [] } }
-      : { activities: [summary], snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null };
-    return route.fulfill({ json: body });
+    return route.fulfill({ json: { session: { activity_id: "flat-ride", sport: "ride" }, metrics: {}, streams: { time_s: times, channels: { heart_rate_bpm: { values: times.map(() => 200) } } }, detail_data: { providers: [] } } });
   });
-  await page.goto("/#analysis/sessions");
+  await page.goto("/#plan/overview");
   await expect(page.locator("#appShell")).toBeVisible();
-  const row = page.locator(".activity-analysis-item").filter({ hasText: "Flat ride" });
-  await expect(row.locator(".planned-session-icon")).toBeVisible();
-  await expect(row).toContainText("08:30");
-  await expect(row.locator(".activity-analysis-load")).toHaveText("Ø 142 bpm");
-  await row.locator("summary").click();
-  const chart = row.locator(".activity-analysis-chart.is-heart");
+  await page.waitForFunction(() => state.initialStateLoaded);
+  await renderCalendarSessions(page, [{ id: "flat-ride", name: "Flat ride", sport: "ride", environment: "outdoor", started_at_local: "2026-10-17T08:30:00", moving_duration_s: 3600, avg_hr: 142 }]);
+  const card = page.locator(".planned-entry.is-completed").filter({ hasText: "Flat ride" });
+  await expect(card.locator(".planned-session-icon")).toBeVisible();
+  await expect(card).toContainText("08:30");
+  const details = await openSessionDetails(page, "Flat ride");
+  const chart = details.locator(".activity-analysis-chart.is-heart");
   await expect(chart.getByRole("img")).toBeVisible();
   await expect(chart.locator("path.activity-analysis-area")).toHaveCount(0);
   const ticks = (await chart.locator("svg text").allTextContents()).filter((text) => /^\d+$/.test(text)).map(Number);
