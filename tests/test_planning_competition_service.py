@@ -89,6 +89,14 @@ class CompetitionServiceTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status, 400)
         self.assertEqual(len(self.service.list()), 25)
+        # A limit keeps the upcoming races, not the earliest ones (#2135, D-531).
+        self.assertEqual(
+            [row["event_date"] for row in self.service.list(limit=20)],
+            [
+                (date(2026, 9, 20) + timedelta(days=day)).isoformat()
+                for day in range(20)
+            ],
+        )
 
     def test_full_upcoming_cap_allows_past_race_and_blocks_move_into_future(self):
         past = self.service.save(self.competition(event_date="2026-02-01"))
