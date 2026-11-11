@@ -104,38 +104,3 @@ function createSkeletonStack(rows = 3) {
   return root;
 }
 
-function createActionReceipt({ title, message, status = "success", details = [] } = {}) {
-  const root = document.createElement("article");
-  root.className = `action-receipt${status === "error" ? " is-error" : ""}`;
-  root.setAttribute("role", status === "error" ? "alert" : "status");
-  const heading = document.createElement("div");
-  heading.className = "action-receipt-heading";
-  const label = document.createElement("strong");
-  label.textContent = title || "Aktion";
-  let statusLabel = "Erledigt";
-  let statusCode = "ready";
-  if (status === "error") {
-    statusLabel = "Fehler";
-    statusCode = "error";
-  } else if (status === "pending") {
-    statusLabel = "Ausstehend";
-    statusCode = "pending";
-  }
-  heading.append(label, createStatusChip(statusLabel, statusCode));
-  root.append(heading);
-  if (message) {
-    const copy = document.createElement("p");
-    copy.textContent = message;
-    root.append(copy);
-  }
-  if (details.length) {
-    const list = document.createElement("ul");
-    details.slice(0, 4).forEach((detail) => {
-      const item = document.createElement("li");
-      item.textContent = detail;
-      list.append(item);
-    });
-    root.append(list);
-  }
-  return root;
-}

@@ -382,7 +382,7 @@ test("reload recovers a partial write receipt and executable undo proposal", asy
   } }));
   await page.reload();
   await expect(page.locator(".message.assistant").filter({ hasText: "Check-in saved; summary unavailable." })).toBeVisible();
-  await expect(page.locator("#coachReceipts")).toContainText("Tages-Check-in gespeichert");
+  await expect(page.locator("#toast")).toContainText("Tages-Check-in gespeichert");
   await expect(page.getByRole("button", { name: "Änderung zurücknehmen", exact: true })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("coachPendingTurn"))).toBe(null);
 });

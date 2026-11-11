@@ -137,7 +137,7 @@ class ServerFrontendTests(ServerTestCase):
             "updateChatControls",
             "announceChatStatus",
             "renderCoachOverview",
-            "renderCoachReceipts",
+            "toastCoachReceipts",
             "addStructuredCoachReceipts",
             "askCoach",
             "renderMessages",
@@ -737,9 +737,9 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn('id="coachProviderStatus"', index)
         self.assertNotIn('id="coachReadyStatus"', index)
         self.assertNotIn('id="coachAdjustPlanButton"', index)
-        self.assertIn('id="coachReceipts"', index)
+        self.assertNotIn('id="coachReceipts"', index)
         self.assertIn("function renderCoachOverview(data)", coach)
-        self.assertIn("function renderCoachReceipts()", coach)
+        self.assertIn("function toastCoachReceipts(receipts)", coach)
         self.assertIn(
             "if (HIDDEN_CHAT_RECEIPT_TOOLS.has(entry.tool) && !failedSync && !failedSyncJob) return false;",
             coach,
@@ -750,7 +750,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('node.setAttribute("aria-label", coachWorkingLabel());', coach)
         self.assertNotIn('label.id = "coachWorkingLabel"', app)
         self.assertIn(".coach-working { align-self: flex-start;", styles)
-        self.assertIn("function createActionReceipt(", components)
+        self.assertNotIn("function createActionReceipt(", components)
         self.assertIn("createSkeletonStack(4)", coach)
         self.assertNotIn('id="todaySummary"', index)
         self.assertNotIn("today-priority", app)
@@ -768,7 +768,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('id="performancePredictions"', index)
         self.assertEqual(index.count('aria-label="Kalender"'), 2)
         self.assertIn("<h2>Kalender</h2>", index)
-        self.assertIn("coachReceipts: []", state)
+        self.assertNotIn("coachReceipts", state)
         self.assertNotIn('id="activitiesPanel"', index)
 
     def test_plan_route_has_read_only_overview_and_library_segments(self):

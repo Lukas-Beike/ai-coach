@@ -9,15 +9,14 @@ test("synchronization progress stays outside chat receipts", async ({ page }) =>
     { tool: "start_intervals_plan_sync", result: { ok: true, status: "queued", sync_job_id: "synthetic-job" } },
     { tool: "get_sync_job", result: { ok: true, job: { id: "synthetic-job", status: "running" } } },
   ] }));
-  const receipts = page.locator("#coachReceipts");
-  await expect(receipts.locator(".action-receipt")).toHaveCount(0);
-  await expect(receipts).not.toContainText("Synthetic invalid ID");
-  await expect(receipts).not.toContainText("Erledigt");
-  await expect(receipts.locator(".status-chip")).toHaveCount(0);
+  // J-203: the toast is the receipt; synchronization progress shows none and no hidden region exists.
+  await expect(page.locator("#coachReceipts")).toHaveCount(0);
+  const receipts = page.locator("#toast");
+  await expect(receipts).not.toHaveClass(/show/);
   await page.evaluate(() => addStructuredCoachReceipts({ command_receipts: [
     { tool: "get_sync_job", result: { ok: true, job: { id: "synthetic-job", status: "completed" } } },
   ] }));
-  await expect(receipts.locator(".action-receipt")).toHaveCount(0);
+  await expect(receipts).not.toHaveClass(/show/);
   await expect(receipts).not.toContainText("Synchronisierung abgeschlossen");
 });
 
@@ -30,10 +29,15 @@ test("profile writes have a useful receipt and unresolved errors stay visible sa
     { tool: "update_profile", result: { ok: true, stored_locally: true } },
     { tool: "save_checkin", resolved: false, result: { ok: false, error: "<img src=x onerror=alert(1)>" } },
   ] }));
-  const receipts = page.locator("#coachReceipts");
-  await expect(receipts).toContainText("Profil aktualisiert");
-  await expect(receipts).toContainText("Geplante Einheiten angepasst");
-  await expect(receipts).toContainText("Coach-Aktion fehlgeschlagen");
+  // An unresolved failure leads the toast as an alert, as inert text.
+  const receipts = page.locator("#toast");
+  await expect(receipts).toHaveAttribute("role", "alert");
+  await expect(receipts).toContainText("Coach-Aktion fehlgeschlagen: <img src=x onerror=alert(1)>");
   await expect(receipts.locator("img")).toHaveCount(0);
-  await expect(receipts.locator(".is-error .status-chip")).toHaveText("Fehler");
+  await page.evaluate(() => addStructuredCoachReceipts({ command_receipts: [
+    { tool: "apply_training_patch", result: { ok: true, status: "applied" } },
+    { tool: "update_profile", result: { ok: true, stored_locally: true } },
+  ] }));
+  await expect(receipts).toHaveAttribute("role", "status");
+  await expect(receipts).toContainText("Geplante Einheiten angepasst · Profil aktualisiert");
 });

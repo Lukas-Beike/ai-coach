@@ -12,9 +12,10 @@ function render(commands) {
   assert.ok(start >= 0 && end > start);
   const cards = [];
   const context = vm.createContext({
-    state: {}, renderCoachReceipts() {}, addCoachReceipt(card) { cards.push(card); },
+    state: {}, toast() {},
   });
   vm.runInContext(source.slice(start, end), context);
+  context.toastCoachReceipts = (receipts) => cards.push(...receipts);
   context.addStructuredCoachReceipts({ command_receipts: commands });
   return cards;
 }
@@ -45,6 +46,8 @@ test("synchronization progress does not create chat cards", () => {
     { tool: "start_intervals_plan_sync", result: { ok: true, status: "queued", sync_job_id: "sync-1" } },
     { tool: "get_sync_job", result: { job: { id: "sync-1", status: "running" } } },
     { tool: "start_provider_refresh", result: { ok: true, status: "queued", sync_job_id: "sync-2" } },
+    // Read-only tools change nothing and announce nothing.
+    { tool: "read_coach_context", result: { ok: true } },
   ]);
   assert.deepEqual(cards, []);
 });

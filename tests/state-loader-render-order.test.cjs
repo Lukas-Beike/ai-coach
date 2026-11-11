@@ -21,7 +21,7 @@ function loader(route) {
     loadNutritionProducts: () => reloads.push(["products", state.data?.profile?.timezone]),
   });
   for (const name of [
-    "renderAppVersion", "renderCoachOverview", "renderCoachReceipts", "renderQuickMessageTemplates", "notifyState",
+    "renderAppVersion", "renderCoachOverview", "renderQuickMessageTemplates", "notifyState",
     "renderStatus", "renderMessages", "renderPlanned", "renderLibrary", "renderProfile", "renderCompetitions", "renderGarmin",
     "renderAdaptivePlanning", "renderExternalCalendar", "renderPerformance", "renderModel", "renderThinkingLevel",
     "renderServiceTier", "renderDiagnosticCapture", "renderSettings", "updateVoiceButton",

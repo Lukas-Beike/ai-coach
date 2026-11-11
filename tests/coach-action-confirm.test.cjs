@@ -45,7 +45,8 @@ test("a confirm response without a proposed payload is rejected before execute i
   assert.equal(receipts[0].title, "Aktion nicht bestätigt");
   assert.equal(receipts[0].status, "error");
   assert.match(receipts[0].message, /^Die Freigabe konnte nicht bestätigt werden/);
-  assert.equal(toasts.at(-1).isError, true);
+  // J-203: the receipt is the toast, so no second toast replaces it.
+  assert.deepEqual(toasts, []);
   assert.equal(button.disabled, false);
 });
 
