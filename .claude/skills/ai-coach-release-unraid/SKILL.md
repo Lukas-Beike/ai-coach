@@ -1,6 +1,6 @@
 ---
 name: ai-coach-release-unraid
-description: Carry out an explicitly requested Pacecraft release, verify the exact GHCR image, then update its Unraid container. Do not use for release-status questions, release planning, or unrelated server maintenance.
+description: Carry out an explicitly requested Pacecraft release, verify the exact GHCR image, then update its Unraid container and run the read-only post-release check. Do not use for release-status questions, release planning, or unrelated server maintenance.
 disable-model-invocation: true
 ---
 
