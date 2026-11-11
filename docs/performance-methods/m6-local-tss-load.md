@@ -14,7 +14,10 @@ A training-stress estimate per completed session, on the TSS scale, where one
 hour at the athlete's threshold scores about 100, plus the session's intensity
 factor. It comes from the session summary and the thresholds in effect on the
 session's day. The sessions sum to the day, week and period load of the
-rollups and of the local fitness and fatigue curves (#1726). It is not
+rollups and of the local fitness and fatigue curves (#1726), and the plan
+checks compare planned load with the stored values (athlete decision
+2026-11-11, #2082: one completed-session load for plan checks and charts; a
+session without a stored value is unknown there). It is not
 measured fatigue, readiness, metabolic stress or injury risk, and not the
 session-RPE load M1.
 

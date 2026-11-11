@@ -10,7 +10,8 @@ Rules (references are observational or practice-based, not individual advice):
   distance comes from the workout steps; unknown distance or no run in 30 days:
   no finding.
 - load_spike, weekly_load_rise, load_unknown: load = duration x intensity^2 per
-  sport (``load_checks``). A planned run or ride more than 10 % (warning: 30 %)
+  sport for planned units, the stored card M6 load for completed sessions
+  (``load_checks``). A planned run or ride more than 10 % (warning: 30 %)
   above the highest-load session of its sport in 30 days; a planned weekly load
   more than 20 % above the mean of the previous 3-4 weeks; load that cannot be
   computed (missing or stale thresholds, unparsed steps) is named, not guessed.
@@ -644,8 +645,8 @@ def _load_findings(
 ) -> list[dict[str, Any]]:
     drafts = load_checks.unknown_load(sessions, thresholds)
     if not thresholds.unavailable:
-        drafts += load_checks.session_spikes(sessions, completed, thresholds, today)
-        drafts += load_checks.weekly_rises(sessions, completed, thresholds, today)
+        drafts += load_checks.session_spikes(sessions, completed, today)
+        drafts += load_checks.weekly_rises(sessions, completed, today)
     return _drafted(drafts)
 
 
