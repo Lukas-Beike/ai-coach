@@ -153,7 +153,7 @@ def _calendar_limits(
     no_intensity_limited = any(
         calendar.calendar_event_has_constraint(event, "no_intensity")
         for event in calendar_events
-    ) and is_hard(draft)
+    ) and calendar.breaks_no_intensity(draft)
     no_training = any(bool(event.get("no_training")) for event in calendar_events)
     calendar_limited = is_hard(draft) or (
         duration is not None and duration > calendar_limit

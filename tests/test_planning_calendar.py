@@ -220,6 +220,15 @@ class PlanningCalendarTests(unittest.TestCase):
                 {**strength, "session_focus": "legs", "strength_intensity": "heavy"}
             )
         )
+        # Strength is never "hard" under #2083, so a [NO_INTENSITY] day keeps
+        # blocking strength that is not explicitly easy.
+        event = {"id": "e", "name": "x [NO_INTENSITY]", "no_intensity": True}
+        heavy = {**strength, "session_focus": "legs", "strength_intensity": "heavy"}
+        light = {**strength, "session_focus": "legs", "strength_intensity": "light"}
+        decision = planning_calendar.calendar_constraint_decision(heavy, event)
+        assert decision is not None
+        self.assertEqual("no_intensity", decision["reason"])
+        self.assertIsNone(planning_calendar.calendar_constraint_decision(light, event))
 
 
 class AdaptiveChangeCalendarBlockedTests(unittest.TestCase):

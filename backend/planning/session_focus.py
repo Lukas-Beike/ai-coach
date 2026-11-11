@@ -28,6 +28,7 @@ from backend.errors import AppError
 from backend.planning import strength_structure
 from backend.planning.planned_unit_load import estimate_planned_unit
 from backend.planning.sport import planned_sport_environment
+from backend.providers.intervals_workouts import WORKOUT_INTERVALS_FIELD
 
 FOCUS_KEY: Final = SESSION_FOCUS
 INTENSITY_KEY: Final = STRENGTH_INTENSITY
@@ -66,7 +67,7 @@ _HARD_WORDS: Final = re.compile(
 )
 # Step fields besides the description that some payloads carry
 # (``intervals`` is the provider workout text field).
-_STEP_FIELDS: Final = ("steps", "intervals", "workout_steps")
+_STEP_FIELDS: Final = ("steps", WORKOUT_INTERVALS_FIELD, "workout_steps")
 _EASY_INTENSITY = 0.75
 
 
