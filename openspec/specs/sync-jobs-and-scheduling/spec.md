@@ -17,12 +17,12 @@ The system SHALL validate provider and job type together using the configured re
 - **WHEN** a request assigns historical backfill to Wahoo or supplies an unsupported field or non-boolean force flag
 - **THEN** validation rejects it before creating a job.
 
-Detailed contract: Intervals supports plan push, competition push, and nutrition sync; Garmin supports refresh, activity details, plan push, historical backfill, wellness backfill, and rating backfill; Wahoo supports refresh and plan push; weather and calendar support refresh. Nutrition approval semantics belong to the nutrition capability.
+Detailed contract: Intervals supports plan push, competition push, and nutrition sync; Garmin supports refresh, activity details, plan push, historical backfill, wellness backfill, rating backfill, and stream backfill; Wahoo supports refresh, plan push, and stream backfill; weather and calendar support refresh. Nutrition approval semantics belong to the nutrition capability.
 
 Evidence: `backend/sync/jobs.py:normalize_sync_job_request`, `backend/providers/descriptors.py:DEFAULT_PROVIDER_DESCRIPTORS`; `tests/test_sync_jobs.py:test_every_provider_and_job_type_pair_matches_the_live_validator`, `tests/test_sync_jobs.py:test_boolean_fields_require_actual_booleans`.
 
 ### Requirement: Durable jobs and duplicate suppression
-The system SHALL persist jobs and ordered items atomically, expose bounded progress and safe errors, and atomically coalesce active scheduler- or startup-requested refresh and backfill jobs. Coalescing SHALL preserve the existing job identity and avoid a second created event or worker wake. User requests are not covered by a blanket exactly-once guarantee.
+The system SHALL persist jobs and ordered items atomically, expose bounded progress and safe errors, and atomically coalesce active refresh and backfill jobs requested by `scheduler`, `startup` or `connection`. Coalescing SHALL preserve the existing job identity and avoid a second created event or worker wake. Requests by `user`, `coach` or `backfill` (the continuation of a chain, which carries its own cursor) always create their own job.
 
 #### Scenario: Concurrent automatic enqueue
 - **WHEN** concurrent eligible automatic requests target the same provider and operation while one job is queued or running
@@ -101,7 +101,7 @@ The system SHALL walk Garmin history in inclusive chunks of at most 90 days down
 
 #### Scenario: Garmin wellness history
 - **WHEN** Garmin is configured and its `wellness_history` cursor has not reached the floor
-- **THEN** startup queues one `wellness_backfill` chain that walks the same chunks and reads only sleep (one full night element per night, with SpO2, respiration and sleeping heart rate), HRV, daily summaries with their resting heart rate, Body Battery daily reports (an optional source: its pause or failure skips it for the chunk), and weigh-ins, through the Personal API or the SDK; it adds only days not stored yet, replaces a stored night only when it has no night values, merges weigh-ins with the stored readings winning, and never prunes or deletes. A client error or an unreadable answer skips only that night or source; a paused source, rate limit or other provider error fails the chunk for a retry and keeps the cursor.
+- **THEN** startup queues one `wellness_backfill` chain that walks the same chunks and reads only sleep (one full night element per night, with SpO2, respiration and sleeping heart rate), HRV, daily summaries with their resting heart rate, Body Battery daily reports (an optional source: its pause or failure skips it for the chunk), and weigh-ins, through the Personal API or the SDK; it adds only days not stored yet, replaces a stored night only when it has no night values, replaces a stored Body Battery report only when the read one differs, merges weigh-ins with the stored readings winning, and never prunes or deletes. A client error or an unreadable answer skips only that night or source; a paused source, rate limit or other provider error fails the chunk for a retry and keeps the cursor.
 
 #### Scenario: Garmin rating history
 - **WHEN** Garmin is configured and its `rating_history` cursor has not reached the floor
