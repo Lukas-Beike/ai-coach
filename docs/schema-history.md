@@ -13,7 +13,7 @@ required when the athlete explicitly chooses to start over. Future schema
 changes add explicit, versioned and transactional migrations from the baseline
 with upgrade regression tests; the baseline moves only when production runs a
 newer schema.
-The current schema is version 26. Releases wrote version 21 (1.13.41 to
+The current schema is version 27. Releases wrote version 21 (1.13.41 to
 1.13.44), 22 (2.0.0), 23 (2.0.1), 24 (2.0.2), 25 (2.0.3 and 2.0.4) and 26
 (2.0.5). Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
@@ -37,7 +37,12 @@ rate and power of a stream set (chest strap or optical, power meter, trainer
 or estimate) and the external sensors its recording named (without serial
 numbers), and version 25 stores the first threshold estimate (DFA-a1) of a
 chest-strap stream set as a derived result only, never the RR intervals, and version 26 adds
-an index that serves the backfill-continuation lookup of sync jobs. Release
+an index that serves the backfill-continuation lookup of sync jobs, and version 27 gives
+products one canonical table: own products and foods saved from a database
+lookup are rows of `nutrition_products` with an origin (`own` or the
+database), the database's fetch time and its further fields; the upgrade moves
+every `food_database_entries` row into it and fills only the empty fields of
+an own product that holds a food's EAN or id. Release
 2.0.5 upgrades a version 21 to 25 database or backup to it in place within one
 transaction, and a failed upgrade leaves it unchanged. Change-history entries
 written before version 16 still name the former fields and can no longer be

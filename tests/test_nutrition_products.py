@@ -14,6 +14,7 @@ from nutrition_service_support import build_nutrition_services
 from support import temp_database
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
+from backend.db.repositories import FoodDatabaseEntryRepository
 from backend.errors import AppError
 from backend.nutrition.photo import (
     NutritionPhotoExtractionService,
@@ -85,6 +86,37 @@ class NutritionProductContractTests(unittest.TestCase):
             "external_id": "",
             **changes,
         }
+
+    def test_a_new_product_fills_its_gaps_from_stored_foods_of_its_ean(self):
+        stored = {
+            "id": "off:4006381333931",
+            "name": "Synthetic whey",
+            "brands": "",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "per_100": {"kcal": 380, "salt_g": 0.5},
+        }
+        with self.manager.unit_of_work() as db:
+            FoodDatabaseEntryRepository().upsert(db, stored, "2026-10-01")
+
+        saved = self.library.product_catalog.save_product(
+            self.product_payload(id="off:4006381333931", salt_g=None)
+        )
+
+        # A new product never takes a stored food's id, and only its gaps fill.
+        self.assertNotEqual(saved["id"], "off:4006381333931")
+        self.assertEqual((saved["kcal"], saved["salt_g"]), (376, 0.5))
+        self.assertEqual(
+            saved["filled_fields"],
+            {"salt_g": {"origin": "open_food_facts", "fetched_at": "2026-10-01"}},
+        )
+        reread = self.library.product_catalog.get_product(saved["id"])
+        self.assertEqual(reread["salt_g"], 0.5)
+        # An edit that empties a filled field keeps it empty and drops its origin.
+        cleared = self.library.product_catalog.update_product(
+            saved["id"], {"salt_g": None}
+        )
+        self.assertEqual((cleared["salt_g"], cleared["filled_fields"]), (None, {}))
 
     def test_confirmed_product_is_persistent_and_can_be_archived(self):
         saved = self.library.product_catalog.save_product(self.product_payload())

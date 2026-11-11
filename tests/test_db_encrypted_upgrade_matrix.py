@@ -32,6 +32,7 @@ from backend.backup.restore_validation import (
 from backend.db import row_factory
 from backend.db.manager import DatabaseManager
 from backend.db.migrations import migrate_schema
+from backend.db.repositories import FoodDatabaseEntryRepository
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     configure_cipher,
@@ -102,11 +103,7 @@ def add_rows(db: Any) -> None:
 
 def populated_baseline(db: Any) -> None:
     db.executescript(gate.BASELINE_FIXTURE.read_text(encoding="utf-8"))
-    add_rows(db)
-
-
-def populated_previous_shape(db: Any) -> None:
-    gate.previous_shape_database(db)
+    gate.add_baseline_nutrition_rows(db)
     add_rows(db)
 
 
@@ -202,15 +199,23 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
         self.assert_encrypted(path)
 
     def test_a_failing_upgrade_leaves_the_encrypted_database_unchanged(self) -> None:
-        def failing_step(connection: Any) -> None:
-            gate.add_index_step(connection)
-            raise RuntimeError("injected migration failure")
+        # The baseline step fails after it moved the own products and two foods.
+        upsert = FoodDatabaseEntryRepository.upsert
+        calls: list[int] = []
 
-        path, before = self.encrypted(populated_previous_shape, "previous")
+        def failing_upsert(repository: Any, *args: Any) -> bool:
+            calls.append(1)
+            if len(calls) == 3:
+                raise RuntimeError("injected migration failure")
+            return upsert(repository, *args)
+
+        path, before = self.encrypted(populated_baseline, "baseline")
         db = self.connect(path)
         try:
             with (
-                gate.registered_previous_shape(db, failing_step),
+                mock.patch.object(
+                    FoodDatabaseEntryRepository, "upsert", failing_upsert
+                ),
                 self.assertRaisesRegex(RuntimeError, "injected"),
             ):
                 migrate_schema(db)
@@ -222,12 +227,11 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
             self.assertEqual(snapshot(reopened), before)
             self.assertEqual(
                 reopened.execute("PRAGMA user_version").fetchone()[0],
-                gate.PREVIOUS_VERSION,
+                gate.OLDEST_SUPPORTED_VERSION,
             )
-            with gate.registered_previous_shape(reopened):
-                migrate_schema(reopened)
+            migrate_schema(reopened)
             reopened.commit()
-            self.assertEqual(snapshot(reopened), before)
+            self.assertEqual(snapshot(reopened), plain_baseline())
             self.assertTrue(database_schema_is_current(reopened))
         finally:
             reopened.close()

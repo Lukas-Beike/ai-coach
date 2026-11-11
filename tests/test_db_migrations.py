@@ -1,5 +1,6 @@
 """Schema gate: the production baseline reaches the live schema; all else stays unchanged."""
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -15,7 +16,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.db import migrations, schema_history
 from backend.db.bootstrap import initialize_application_database
 from backend.db.migrations import OlderSchemaError, migrate_schema
-from backend.db.repositories import KeyValueRepository
+from backend.db.repositories import FoodDatabaseEntryRepository, KeyValueRepository
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     SYNC_JOBS_BACKFILL_INDEX_DDL,
@@ -62,8 +63,12 @@ def registered_previous_shape(
     """Make the stand-in shape of ``db`` the baseline, one step below the live schema."""
     digest = signature_digest(database_schema_signature(db))
     with (
-        mock.patch.object(migrations, "OLDEST_SUPPORTED_SCHEMA_VERSION", PREVIOUS_VERSION),
-        mock.patch.dict(schema_history.RELEASED_SHAPE_DIGESTS, {PREVIOUS_SHAPE: digest}),
+        mock.patch.object(
+            migrations, "OLDEST_SUPPORTED_SCHEMA_VERSION", PREVIOUS_VERSION
+        ),
+        mock.patch.dict(
+            schema_history.RELEASED_SHAPE_DIGESTS, {PREVIOUS_SHAPE: digest}
+        ),
         mock.patch.dict(
             schema_history.ACCEPTED_SHAPES_BY_VERSION,
             {PREVIOUS_VERSION: frozenset({PREVIOUS_SHAPE})},
@@ -73,6 +78,99 @@ def registered_previous_shape(
         ),
     ):
         yield
+
+
+EAN_OWN, EAN_OTHER = "4006381333931", "4000000000017"
+YAZIO_ID = "yazio:0f0f0f0f-0000-4000-8000-000000000001"
+OWN_FOOD_ID = "off:4000000000024"
+NUTRIENTS = ("kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "fiber_g", "salt_g")
+
+
+def mirror_food(food_id: str, unit: str | None, **per_100: float | None) -> dict:
+    return {
+        "id": food_id,
+        "name": "Riegel " + food_id,
+        "brands": "Marke",
+        "source": "Open Food Facts",
+        "source_url": "https://example.test/" + food_id,
+        "license": "ODbL",
+        "basis_amount": 100,
+        "basis_unit": unit,
+        "per_100": per_100,
+        "quality": "community_label_data",
+    }
+
+
+# Mirrored foods of the baseline: (food, barcode column, fetched_at).
+BASELINE_MIRROR = (
+    # Newest food with the own product's EAN: fills its empty fields first.
+    (
+        mirror_food(f"off:{EAN_OWN}", "g", **dict.fromkeys(NUTRIENTS, 1.0)),
+        EAN_OWN,
+        "2026-10-03",
+    ),
+    # Older food with the same EAN from Yazio: takes only what is still empty.
+    (mirror_food(YAZIO_ID, "g", fiber_g=7.0), EAN_OWN, "2026-10-02"),
+    # Unknown unit and a payload from before sugar, fibre and salt were read.
+    (
+        mirror_food(
+            f"off:{EAN_OTHER}", None, kcal=80.0, carbs_g=None, protein_g=2.0, fat_g=1.0
+        ),
+        EAN_OTHER,
+        "2026-10-01",
+    ),
+    # A food without brand and source page keeps both absent.
+    (
+        {
+            **{
+                key: value
+                for key, value in mirror_food(
+                    YAZIO_ID.replace("1", "2"), "ml", **dict.fromkeys(NUTRIENTS)
+                ).items()
+                if key != "source_url"
+            },
+            "brands": None,
+        },
+        "",
+        "2026-10-01",
+    ),
+    # An own product already holds this food's id: it wins and keeps its row.
+    (mirror_food(OWN_FOOD_ID, "g", kcal=99.0), OWN_FOOD_ID[4:], "2026-10-01"),
+)
+
+
+def add_baseline_nutrition_rows(db) -> None:
+    """An own product with gaps and mirrored foods of the v26 baseline."""
+    db.execute(
+        "INSERT INTO nutrition_products(id, barcode, name, brand, basis_amount, "
+        "basis_unit, kcal, fat_g, source, created_at, updated_at, favorite) "
+        "VALUES ('prod-own', ?, 'Mein Riegel', '', 100, 'g', 500, 30, "
+        "'packaging_label', ?, ?, 1)",
+        (EAN_OWN, STAMP, STAMP),
+    )
+    db.execute(
+        "INSERT INTO nutrition_products(id, name, basis_amount, basis_unit, source, "
+        "created_at, updated_at) VALUES (?, 'Eigenes', 100, 'g', 'manual', ?, ?)",
+        (OWN_FOOD_ID, STAMP, STAMP),
+    )
+    db.executemany(
+        "INSERT INTO food_database_entries(food_id, barcode, name, brand, payload, "
+        "fetched_at, updated_at) VALUES (?, ?, ?, 'Marke', ?, ?, ?)",
+        [
+            (food["id"], barcode, food["name"], json.dumps(food), fetched, fetched)
+            for food, barcode, fetched in BASELINE_MIRROR
+        ],
+    )
+
+
+def populated_baseline_database(db) -> None:
+    db.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
+    db.execute(
+        "INSERT INTO messages(role, content, created_at) VALUES ('user', 'Hallo', ?)",
+        (STAMP,),
+    )
+    add_baseline_nutrition_rows(db)
+    db.commit()
 
 
 try:
@@ -115,15 +213,8 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         self.assertTrue(database_schema_is_current(db))
 
     def test_populated_baseline_reaches_the_live_schema_with_its_rows(self):
-        # While the baseline is the live schema this is a no-op; after the next
-        # schema version it runs that version's step.
         db = self.connect()
-        db.executescript(BASELINE_FIXTURE.read_text(encoding="utf-8"))
-        db.execute(
-            "INSERT INTO messages(role, content, created_at) "
-            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
-        )
-        db.commit()
+        populated_baseline_database(db)
         self.assertEqual(
             db.execute("PRAGMA user_version").fetchone()[0], OLDEST_SUPPORTED_VERSION
         )
@@ -139,6 +230,74 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         self.assertEqual(
             db.execute("SELECT content FROM messages").fetchone()[0], "Hallo"
         )
+
+    def test_baseline_mirror_rows_become_canonical_products_without_loss(self):
+        db = self.connect()
+        populated_baseline_database(db)
+        migrate_schema(db)
+        db.commit()
+        own = db.execute(
+            "SELECT * FROM nutrition_products WHERE origin = 'own' ORDER BY id DESC"
+        ).fetchall()
+        self.assertEqual([row["id"] for row in own], ["prod-own", OWN_FOOD_ID])
+        self.assertEqual((own[1]["kcal"], own[1]["name"]), (99.0, "Eigenes"))
+        self.assertEqual(
+            [own[0][key] for key in ("id", "barcode", "brand", "favorite", *NUTRIENTS)],
+            ["prod-own", EAN_OWN, "Marke", 1, 500, 1.0, 1.0, 30, 1.0, 1.0, 1.0],
+        )
+        self.assertEqual(
+            set(json.loads(own[0]["details"])["filled_fields"]),
+            {"brand", "carbs_g", "protein_g", "sugar_g", "fiber_g", "salt_g"},
+        )
+        entries = FoodDatabaseEntryRepository()
+        # Every mirrored food stays stored with all its fields; the own
+        # product's EAN lists none of them as a separate entry.
+        for food, barcode, fetched in BASELINE_MIRROR[:-1]:
+            with self.subTest(food=food["id"]):
+                stored = entries.get(db, food["id"])
+                self.assertEqual(stored.pop("fetched_at"), fetched)
+                expected = dict(food)
+                if barcode and food["id"].startswith("yazio:"):
+                    expected["barcode"] = barcode
+                self.assertEqual(stored, expected)
+        self.assertIsNone(entries.get(db, OWN_FOOD_ID))
+        self.assertEqual(
+            {entry["id"] for entry in entries.search(db, "")},
+            {f"off:{EAN_OTHER}", YAZIO_ID.replace("1", "2")},
+        )
+        self.assertEqual(
+            [
+                tuple(row)
+                for row in db.execute(
+                    "SELECT origin, COUNT(*) FROM nutrition_products GROUP BY origin"
+                )
+            ],
+            [("open_food_facts", 2), ("own", 2), ("yazio", 2)],
+        )
+
+    def test_failing_baseline_upgrade_rolls_back_and_a_retry_succeeds(self):
+        db = self.connect()
+        populated_baseline_database(db)
+        before = list(db.iterdump())
+        upsert = FoodDatabaseEntryRepository.upsert
+        calls = []
+
+        def failing_upsert(repository, *args, **kwargs):
+            calls.append(1)
+            if len(calls) == 3:
+                raise RuntimeError("injected migration failure")
+            return upsert(repository, *args, **kwargs)
+
+        with (
+            mock.patch.object(FoodDatabaseEntryRepository, "upsert", failing_upsert),
+            self.assertRaisesRegex(RuntimeError, "injected"),
+        ):
+            migrate_schema(db)
+        db.rollback()
+        self.assertEqual(list(db.iterdump()), before)
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
 
     def test_frozen_baseline_fixture_is_the_recorded_production_shape(self):
         db = self.connect()
@@ -304,9 +463,8 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             db = sqlite3.connect(path)
             db.row_factory = sqlite3.Row
             try:
-                previous_shape_database(db)
-                with registered_previous_shape(db):
-                    migrate_schema(db)
+                populated_baseline_database(db)
+                migrate_schema(db)
                 db.commit()
                 upgraded = list(db.iterdump())
             finally:

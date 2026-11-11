@@ -7,6 +7,7 @@ network, a real data directory or an encryption key.
 
 from __future__ import annotations
 
+import json
 import threading
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,7 @@ from unittest.mock import patch
 from support import temp_database
 
 from backend.db import row_factory
+from backend.db.repositories import NutritionProductRepository
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.food_mirror import MAX_AGE, FoodDatabaseMirror
@@ -124,6 +126,89 @@ class FoodMirrorTests(MirrorFixture):
         with self.assertRaises(AppError) as raised:
             self.mirror.delete(f"off:{BARCODE}")
         self.assertEqual(raised.exception.reason, "food_not_found")
+
+    def test_an_entry_reads_back_as_the_food_it_stored(self):
+        stored = {
+            **food(),
+            "source_url": "https://example.test/product",
+            "license": "ODbL",
+            "origins": {"kcal": "label"},
+        }
+        self.mirror.store([stored])
+
+        entry = self.mirror.get(f"off:{BARCODE}")
+        self.assertEqual(entry.pop("fetched_at"), START.isoformat())
+        self.assertEqual(entry, stored)
+
+    def own_product(self, **values: Any) -> dict[str, Any]:
+        product = {
+            "id": "prod-own",
+            "barcode": BARCODE,
+            "name": "Mein Riegel",
+            "brand": "",
+            "basis_amount": 100,
+            "basis_unit": "g",
+            "source": "packaging_label",
+            "source_url": "",
+            "external_id": "",
+            "provenance": {"kind": "packaging_label"},
+            "status": "active",
+            "created_at": START.isoformat(),
+            "updated_at": START.isoformat(),
+            **values,
+        }
+        with self.manager.unit_of_work() as db:
+            return NutritionProductRepository().save(db, product)
+
+    def filled_fields(self) -> dict[str, Any]:
+        with self.manager.reader() as db:
+            row = db.execute(
+                "SELECT details FROM nutrition_products WHERE id='prod-own'"
+            ).fetchone()
+        return json.loads(row["details"]).get("filled_fields", {})
+
+    def test_an_own_products_ean_lists_no_entry_and_a_lookup_never_changes_it(self):
+        self.own_product(kcal=500)
+
+        self.mirror.store([food()])
+
+        # The food stays stored for lookups by id, but is listed as the product.
+        self.assertEqual(self.mirror.get(f"off:{BARCODE}")["per_100"]["carbs_g"], 50)
+        self.assertEqual(self.mirror.search(""), [])
+        with self.manager.reader() as db:
+            product = NutritionProductRepository().get(db, "prod-own")
+        self.assertEqual((product["kcal"], product["carbs_g"]), (500, None))
+        self.assertEqual(self.filled_fields(), {})
+
+    def test_a_new_own_product_takes_only_empty_fields_from_its_eans_foods(self):
+        self.mirror.store([food()])
+        self.own_product(kcal=520, fat_g=30, basis_amount=50)
+
+        with self.manager.unit_of_work() as db:
+            products = NutritionProductRepository()
+            self.assertTrue(
+                products.fill_from_database_entries(db, "prod-own", BARCODE)
+            )
+            saved = products.get(db, "prod-own")
+        self.assertEqual(
+            [saved[key] for key in ("brand", "kcal", "carbs_g", "protein_g", "fat_g")],
+            ["Knoppers", 520, 25, 4, 30],
+        )
+        self.assertEqual(
+            saved["filled_fields"],
+            {
+                key: {"origin": "open_food_facts", "fetched_at": START.isoformat()}
+                for key in ("brand", "carbs_g", "protein_g")
+            },
+        )
+        # Per-100-g values never fill a product counted per portion.
+        self.own_product(basis_unit="portion", basis_amount=1, brand="Eigen")
+        with self.manager.unit_of_work() as db:
+            self.assertFalse(
+                NutritionProductRepository().fill_from_database_entries(
+                    db, "prod-own", BARCODE
+                )
+            )
 
 
 class FoodDatabaseServiceMirrorTests(MirrorFixture):

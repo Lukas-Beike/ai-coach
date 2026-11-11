@@ -29,7 +29,11 @@ OBJECT_SCOPE_TABLES = {
     "change": ("change_history", "id"),
     "sync_job": ("sync_jobs", "id"),
     "nutrition_template": ("nutrition_templates", "id"),
-    "nutrition_product": ("nutrition_products", "id"),
+    # Stored database foods share the table; only own products are objects.
+    "nutrition_product": (
+        "(SELECT id FROM nutrition_products WHERE origin = 'own')",
+        "id",
+    ),
 }
 LOCAL_BROAD_SCOPES = frozenset(
     {

@@ -77,7 +77,10 @@ TimeoutErrorFactory = Callable[[], Exception]
 # files now hold one object per row with the stored document under payload. It
 # adds coach_action_proposals.jsonl without the session and action-token hashes
 # (no schema change).
-PRIVACY_EXPORT_FORMAT_VERSION = 17
+# Version 18 drops food_database_entries.jsonl: foods saved from a database
+# lookup are rows of nutrition_products.jsonl with their origin, fetch time and
+# details (schema v27).
+PRIVACY_EXPORT_FORMAT_VERSION = 18
 
 
 class PrivacyArchiveExportService:
@@ -513,7 +516,6 @@ PRIVACY_EXPORT_JSONL_SOURCES: tuple[tuple[str, RowSource], ...] = (
             "nutrition_sync_dates",
             "nutrition_templates",
             "nutrition_products",
-            "food_database_entries",
         )
     ),
     (
