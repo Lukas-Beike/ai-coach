@@ -93,11 +93,23 @@ class SyncCommandEndpointTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 400)
         self.full_resync.start.assert_not_called()
         # A nutrition export needs the approval manifest of a Coach card (#2137).
-        for payload in ({"date": "2026-09-24"}, {"pending_limit": 3}, {}, None):
-            with self.subTest(payload=payload), self.assertRaises(AppError) as raised:
+        cases = [
+            ("nutrition_sync", {"date": "2026-09-24"}),
+            ("nutrition_sync", {"pending_limit": 3}),
+            ("nutrition_sync", {}),
+            ("nutrition_sync", None),
+            # The queue normalizes the type, so the route must as well.
+            ("Nutrition_Sync", {"pending_limit": 3}),
+            (" NUTRITION_SYNC ", {"date": "2026-09-24"}),
+        ]
+        for job_type, payload in cases:
+            with (
+                self.subTest(job_type=job_type, payload=payload),
+                self.assertRaises(AppError) as raised,
+            ):
                 self.endpoint.execute(
                     "/api/sync/jobs",
-                    {"provider": "intervals", "type": "nutrition_sync"}
+                    {"provider": "intervals", "type": job_type}
                     | ({} if payload is None else {"payload": payload}),
                 )
             self.assertEqual(raised.exception.status, 400)

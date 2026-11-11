@@ -228,7 +228,8 @@ class SyncCommandEndpoint:
             }
         provider: Any = payload.get("provider")
         self._require_provider_configured(provider)
-        job_type = payload.get("type", "refresh")
+        # Normalized as the queue does, so the check below cannot be sidestepped.
+        job_type = str(payload.get("type", "refresh") or "").strip().casefold()
         if job_type == "nutrition_sync" and not (
             isinstance(envelope, dict) and "approval_manifest" in envelope
         ):
