@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe durable provider activity ingestion, identity and session bundling, detail acquisition, pagination, corrections, and explicit deletion behavior. Garmin and Wahoo are the activity sources. Intervals.icu is an output target only (#1728): it is no longer read, and statements about Intervals.icu records describe copies stored earlier until the one-time purge removes them.
+Describe durable provider activity ingestion, identity and session bundling, detail acquisition, pagination, corrections, and explicit deletion behavior. Garmin and Wahoo are the activity sources. Intervals.icu is an output target only (#1728): it is no longer read, and statements about Intervals.icu records describe copies stored by earlier releases. The one-time purge of release 2.0.0 ran in production and its code was removed (#1848): the current build contains no code that deletes stored Intervals.icu rows, and the production database holds none (athlete count-only check, 2026-11-10).
 
 ## Requirements
 
@@ -202,13 +202,13 @@ The system SHALL compute the Garmin status counts `activities` and `duplicate_ac
 - **THEN** the counts come from the canonical activity summaries and neither the stored snapshot nor the raw Garmin view is read for activities.
 
 #### Scenario: No Intervals rows
-- **WHEN** no session bundles a Garmin record with an Intervals.icu record, as after the purge
+- **WHEN** no session bundles a Garmin record with an Intervals.icu record, as in a database without stored Intervals.icu rows
 - **THEN** no Garmin activity is skipped as a duplicate.
 
 Evidence: `backend/sync/garmin_projection_service.py:GarminProjectionService._canonical_read`, `backend/sync/garmin_projection_service.py:_garmin_sessions`; `tests/test_garmin_canonical_reads.py`, `tests/test_sync_garmin_projection_service.py:test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors`, `tests/test_sync_garmin_projection_service.py:test_duplicates_are_counted_against_the_canonical_sessions_only`. `tests/test_sync_garmin_projection_service.py:test_the_projection_requires_the_canonical_sources`.
 
 ### Requirement: Athlete session corrections
-The system SHALL let the athlete confirm a canonical session's bundle, split one provider copy into its own session, merge two live sessions, and delete an activity locally, from the activity detail view or through local Coach tools. Each correction SHALL mark the resulting sessions athlete-confirmed, record a change-history receipt whose undo restores the touched session rows, and change no provider record, provider data or feedback row.
+The system SHALL let the athlete confirm a canonical session's bundle, split one provider copy into its own session, merge two live sessions, and delete an activity locally, from the activity detail view or through local Coach tools. Confirm, split and merge SHALL mark the resulting sessions athlete-confirmed. Each correction SHALL record a change-history receipt whose undo restores the touched session rows and change no provider record, provider data or feedback row.
 
 #### Scenario: Confirm a bundle
 - **WHEN** the athlete confirms a session that bundles several provider copies
@@ -224,7 +224,7 @@ The system SHALL let the athlete confirm a canonical session's bundle, split one
 
 #### Scenario: Delete an activity locally
 - **WHEN** the athlete deletes an activity in the app after confirming the prompt
-- **THEN** its session and every merged copy are deleted and athlete-confirmed, no copy revives when a provider later deletes the primary copy or delivers a copy again, nothing is deleted at a provider, and the receipt's undo restores the session.
+- **THEN** its session and every merged copy are deleted, the survivor retains itself and its copies retain it, which marks an athlete delete, so no copy revives when a provider later deletes the primary copy or delivers the same copy again, nothing is deleted at a provider, and the receipt's undo restores the session.
 
 #### Scenario: Undo a correction
 - **WHEN** the athlete undoes a correction's receipt while the touched sessions are unchanged since

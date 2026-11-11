@@ -55,11 +55,11 @@ The system SHALL merge alternative detail sets deterministically without mutatin
 
 #### Scenario: Sensor source decides the channel
 - **WHEN** two alternative sets carry the same heart rate or power channel and one names a chest strap or power meter while the other names optical heart rate or an estimate
-- **THEN** the channel comes from the set whose named source is better; the activity device class only ranks sets that name no source. The session analysis states the shown heart rate and power source and marks optical heart rate in intervals as less reliable.
+- **THEN** the channel comes from the set whose named source is better; the activity device class only breaks ties between equal sources and ranks sets that name none. Heart rate ranks chest strap, then unknown or absent, then optical; power ranks power meter, trainer, unknown or absent, estimated. The session analysis states the shown heart rate and power source and marks optical heart rate in intervals as less reliable.
 
 #### Scenario: Power meter change marker
-- **WHEN** the external power meters of a sport's consecutive recordings share no sensor
-- **THEN** a marker with the day and the hashed sensor ids is served with the power profiles and the Coach, and critical power inside its window carries it; a serial number is never stored, shown or logged.
+- **WHEN** a recording of a sport names external power meters that share none with any earlier recording of that sport (recordings without a named meter are skipped, so alternating between two bikes with their own meters raises a marker only when the second meter first appears)
+- **THEN** a marker with the day and the hashed sensor ids is served with the power profiles and the Coach, and critical power inside its window carries it; a serial number is never stored, shown or logged. The day is the date part of the stored start time, which Garmin and Wahoo records store in UTC, not the athlete-local day.
 
 #### Scenario: Complementary sensors
 - **WHEN** a chest-strap heart-rate stream and a power-meter power stream can align to the selected axis
@@ -401,7 +401,7 @@ Evidence: `backend/db/repositories.py:ActivityFeedbackRepository.upsert`, `backe
 The activity list (`GET /api/activities`) and the Coach tool `list_recent_activities` SHALL list each live canonical session exactly once, from every provider, as its session summary keyed by the local session id, newest first. Paging SHALL use a version-3 keyset cursor; any other cursor SHALL restart at page one. Rows SHALL carry no `detail_error`: Intervals.icu details are never served (#1685), so their failure notes mark no session.
 
 #### Scenario: Sessions from several providers
-- **WHEN** the tables hold a Garmin-only session, a Wahoo-only session, a bundled Garmin and Wahoo session and, until the #1728 purge has run, Intervals.icu-only sessions or an Intervals.icu duplicate pair bundled into one session
+- **WHEN** the tables hold a Garmin-only session, a Wahoo-only session, a bundled Garmin and Wahoo session and, in a database that still holds stored Intervals.icu rows, Intervals.icu-only sessions or an Intervals.icu duplicate pair bundled into one session
 - **THEN** the list and the Coach tool contain each session once under its `act_` id, the Garmin-only session included, and paging with limit 1 walks all of them in the same order.
 
 #### Scenario: Older cursor

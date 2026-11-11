@@ -101,7 +101,7 @@ The system SHALL walk Garmin history in inclusive chunks of at most 90 days down
 
 #### Scenario: Garmin wellness history
 - **WHEN** Garmin is configured and its `wellness_history` cursor has not reached the floor
-- **THEN** startup queues one `wellness_backfill` chain that walks the same chunks and reads only sleep (one full night element per night, with SpO2, respiration and sleeping heart rate), HRV, daily summaries with their resting heart rate, and weigh-ins, through the Personal API or the SDK; it adds only days not stored yet, replaces a stored night only when it has no night values, merges weigh-ins with the stored readings winning, and never prunes or deletes. A client error or an unreadable answer skips only that night or source; a paused source, rate limit or other provider error fails the chunk for a retry and keeps the cursor.
+- **THEN** startup queues one `wellness_backfill` chain that walks the same chunks and reads only sleep (one full night element per night, with SpO2, respiration and sleeping heart rate), HRV, daily summaries with their resting heart rate, Body Battery daily reports (an optional source: its pause or failure skips it for the chunk), and weigh-ins, through the Personal API or the SDK; it adds only days not stored yet, replaces a stored night only when it has no night values, merges weigh-ins with the stored readings winning, and never prunes or deletes. A client error or an unreadable answer skips only that night or source; a paused source, rate limit or other provider error fails the chunk for a retry and keeps the cursor.
 
 #### Scenario: Garmin rating history
 - **WHEN** Garmin is configured and its `rating_history` cursor has not reached the floor

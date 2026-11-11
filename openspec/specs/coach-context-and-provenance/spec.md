@@ -90,7 +90,7 @@ The system SHALL build ordinary Coach context from saved Garmin, Wahoo and local
 - **THEN** context assembly reads saved data and weather with refresh disabled rather than issuing provider calls for every message.
 
 #### Scenario: No stored Intervals.icu sync
-- **WHEN** the canonical provider coverage holds no Intervals.icu sync, which is the case after the #1728 purge
+- **WHEN** the canonical provider coverage holds no Intervals.icu sync, which is always the case, since Intervals.icu is no longer read (#1728)
 - **THEN** the recovery section requests Garmin's performance values beside the recovery records, keeps provider recovery separate and keeps unavailable evidence explicit.
 
 #### Scenario: Recovery section from canonical records

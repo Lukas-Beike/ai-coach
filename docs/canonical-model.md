@@ -20,7 +20,7 @@ Each observation carries its provider, source kind, observation time and retriev
 
 ## Raw payload replay
 
-Raw payloads are stored, so a mapper fix does not need a new download. Every provider record remembers its `mapper_version`; when the code's version is ahead, a background backfill re-projects the stored raw data into the canonical tables, without reviving deleted activities, and retires observations a newer mapper no longer emits (they stay stored, but are no longer served). Reads come from the canonical tables once the first backfill has completed; until then the app reports that data is being prepared instead of showing partial values.
+Raw provider records (activity summaries and observations) are stored, so a mapper fix to them does not need a new download. Every provider record remembers its `mapper_version`; when the code's version is ahead, a background backfill re-projects the stored raw data into the canonical tables, without reviving deleted activities, and retires observations a newer mapper no longer emits (they stay stored, but are no longer served). Reads come from the canonical tables once the first backfill has completed; until then the app reports that data is being prepared instead of showing partial values. Activity detail (streams, laps, zones, strength sets, sensors) is mapped from files that are not stored: a detail-mapper change is applied by fetching the file again inside the provider's sync or replay window, and older detail sets keep their earlier projection.
 
 ## Derived records
 
