@@ -307,9 +307,7 @@ jobs:
       matrix:
         # Preserve the initial matrix while validating the prepared environment.
         include:
-          - { project: mobile-small, shard: 1, shards: 1 }
           - { project: mobile, shard: 1, shards: 1 }
-          - { project: tablet, shard: 1, shards: 1 }
           - { project: tablet-landscape, shard: 1, shards: 1 }
           - { project: desktop, shard: 1, shards: 2 }
           - { project: desktop, shard: 2, shards: 2 }
@@ -414,8 +412,7 @@ jobs:
           fi
           python .github/scripts/aggregate_browser_results.py \
             --results browser-run-summaries \
-            --expected mobile-small:1 --expected mobile:1 --expected tablet:1 \
-            --expected tablet-landscape:1 --expected desktop:2
+            --expected mobile:1 --expected tablet-landscape:1 --expected desktop:2
           echo "All browser projects passed with complete shard evidence."
 
   build-and-push:

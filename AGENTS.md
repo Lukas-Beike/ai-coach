@@ -171,8 +171,8 @@ node --test tests/*.cjs
 Tests use temporary data and mocked services, never real `.env`, `/data`, or
 OpenAI/Intervals.icu/Garmin accounts. For Dockerfile, dependency, startup, or
 deployment changes also run `docker build -t pacecraft:local .`. Browser changes
-run the affected Playwright project (`npm run test:e2e`; projects mobile-small,
-mobile, tablet, tablet-landscape, desktop) and, when a browser is available,
+run the affected Playwright project (`npm run test:e2e`; projects mobile,
+tablet-landscape, desktop) and, when a browser is available,
 check login, fresh PWA install/offline assets, safe Markdown, Enter versus
 Shift+Enter, microphone, notifications, and the changed flow.
 

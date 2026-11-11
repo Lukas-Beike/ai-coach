@@ -167,7 +167,7 @@ The connected local test environment may be used for read-sync and observation w
 
 ## 8. Complete UI/UX journey audit
 
-Do not review screens in isolation. Exercise full journeys on `mobile-small`, `mobile`, `tablet`, `tablet-landscape`, and `desktop`, plus touch/keyboard where relevant:
+Do not review screens in isolation. Exercise full journeys on `mobile`, `tablet-landscape`, and `desktop`, plus touch/keyboard where relevant:
 
 - cold start -> loading shell -> login failure/success -> initial bootstrap -> Coach ready;
 - ask a read-only question -> receive streaming answer -> navigate away/back -> reload;

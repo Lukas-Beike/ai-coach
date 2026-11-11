@@ -122,14 +122,14 @@ npm ci --ignore-scripts
 node node_modules/@playwright/test/cli.js install chromium
 docker build -t "$(python scripts/run_browser_tests.py --print-image)" .
 python scripts/run_browser_tests.py --project all --list
-python scripts/run_browser_tests.py --project mobile-small --spec e2e/css-cascade.spec.js
+python scripts/run_browser_tests.py --project mobile --spec e2e/css-cascade.spec.js
 python scripts/run_browser_tests.py --project all --jobs 1 --cache-state warm
 ```
 
 The image tag is per checkout, so parallel worktrees keep their own builds.
 `--list` starts no containers. A project/spec selection reports its focused scope;
 unknown projects, missing specs, invalid shards and empty selections fail. Desktop
-runs every functional contract, and the four smaller projects repeat only
+runs every functional contract, and the two smaller projects repeat only
 `@responsive` scenarios. Use `--shard 1 --total 2` and `--shard 2 --total 2` for
 complementary whole-file selections. Assignment uses the frozen
 `e2e/browser_durations.json` weights, longest first to the least-loaded shard,
@@ -192,10 +192,8 @@ Direct `npm run test:e2e` remains available for an explicitly prepared fixture;
 stateful specs require the shared runner's fresh per-file fixtures.
 
 Configured viewports in `playwright.config.cjs`:
-- `mobile-small`: 320x568 (Compact mobile)
 - `mobile`: 390x844 (Standard mobile)
-- `tablet`: 768x1024 (Tablet portrait)
-- `tablet-landscape`: 844x390 (Mobile/tablet landscape)
+- `tablet-landscape`: 844x390 (Phone landscape)
 - `desktop`: 1440x1000 (Desktop workstation)
 
 ## Measuring validation performance
@@ -273,8 +271,8 @@ deliberately configured with a fake key (`OPENAI_API_KEY="e2e-fixture-openai-key
 in every mode, so Coach requests still take the normal Responses API path and no
 real credential is needed.
 
-Use a fresh fixture browser profile and check the mobile-small and mobile
-projects when reviewing this preview.
+Use a fresh fixture browser profile and check the mobile
+project when reviewing this preview.
 
 `scripts/demo-container.ps1` builds the image and starts a disposable demo
 container that seeds this data itself on every start (`FIXTURE_AUTO_SEED=1`).
