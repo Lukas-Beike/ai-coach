@@ -51,6 +51,10 @@ class CoachCancellationServiceTests(unittest.TestCase):
         self.submissions.active.side_effect = lambda _session, requested=None: (
             durable if requested == operation_id else None
         )
+        # Persisted before the stream is signalled (#2134, E-013).
+        self.jobs.merge_receipt.side_effect = lambda *_: self.assertFalse(
+            event.is_set()
+        )
         try:
             self.assertEqual(
                 self.service.cancel("session"),

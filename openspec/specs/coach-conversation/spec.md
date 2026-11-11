@@ -79,7 +79,7 @@ The system SHALL cancel only the session's matching operation, persist cancellat
 
 #### Scenario: Active operation cancellation
 - **WHEN** the owning session cancels its attached or durable operation
-- **THEN** the system records durable cancellation before signalling the background event, closes any provider response handle, and reports cancelling.
+- **THEN** the system records durable cancellation before signalling the attached stream or the background event, closes any provider response handle, and reports cancelling.
 
 #### Scenario: Unknown or mismatched operation
 - **WHEN** there is no active operation or the supplied operation ID conflicts with the attached operation
@@ -89,7 +89,7 @@ The system SHALL cancel only the session's matching operation, persist cancellat
 - **WHEN** a provider summary fails after a tool has committed a local effect
 - **THEN** the final failure receipt and answer retain that successful effect and any supported undo references rather than claiming that nothing changed.
 
-Evidence: `backend/coach/cancellation.py:CoachCancellationService.cancel`; `backend/coach/turn_failures.py:CoachTurnFailureService.persist`; `tests/test_coach_cancellation.py:test_background_cancel_persists_before_signalling_and_does_not_recreate_event`, `tests/test_coach_cancellation.py:test_attached_cancel_closes_provider_and_rejects_wrong_operation`, `tests/test_coach_cancellation.py:test_no_active_job_does_not_create_or_write_cancel_state`; `tests/test_coach_dialogue.py:test_summary_failure_preserves_effect_and_replays_receipt`.
+Evidence: `backend/coach/cancellation.py:CoachCancellationService.cancel`; `backend/coach/turn_failures.py:CoachTurnFailureService.persist`; `tests/test_coach_cancellation.py:test_background_cancel_persists_before_signalling_and_does_not_recreate_event`, `tests/test_coach_cancellation.py:test_attached_cancel_closes_provider_and_rejects_wrong_operation`, `tests/test_coach_cancellation.py:test_attached_cancel_persists_cancel_on_the_matching_durable_job_only`, `tests/test_coach_cancellation.py:test_no_active_job_does_not_create_or_write_cancel_state`; `tests/test_coach_dialogue.py:test_summary_failure_preserves_effect_and_replays_receipt`.
 
 ### Requirement: CC6 Persisted clarification and conversational continuation
 The system SHALL bind clarification to stored athlete messages, persist unresolved constraints for a relevant follow-up, and close a cancelled pending request without undoing completed effects.
