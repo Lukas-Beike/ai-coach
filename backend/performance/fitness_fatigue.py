@@ -35,6 +35,7 @@ from backend.performance.local_tss import METHOD_ID as LOAD_METHOD_ID
 from backend.performance.local_tss import METHOD_VERSION as LOAD_METHOD_VERSION
 from backend.performance.session_rpe_load import session_load
 from backend.performance.smoothed_load import (
+    WARMUP_TAUS,
     complete_before,
     empty_reason,
     ewma_walk,
@@ -49,7 +50,6 @@ EVIDENCE_CARD: Final = "docs/performance-methods/m7-local-fitness-fatigue.md"
 SOURCE_LABEL: Final = "Lokal berechnet (M7)"
 FITNESS_TAU_DAYS: Final = 42
 FATIGUE_TAU_DAYS: Final = 7
-WARMUP_TAUS: Final = 2
 METHOD_NOTE: Final = (
     "Fitness (tau 42 d), fatigue (tau 7 d) and form (fitness minus fatigue) from "
     "the local TSS-scale session load of the whole stored history. Starts at 0 "
