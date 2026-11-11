@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,8 +8,9 @@ from types import SimpleNamespace
 from typing import Self
 from unittest.mock import Mock
 
+from support import temp_database
+
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
-from backend.db.manager import DatabaseManager
 from backend.http_api.export_streams import ExportStreamTransport
 
 
@@ -29,11 +29,12 @@ class TrackedLock:
 class ExportStreamTransportTests(unittest.TestCase):
     def backup(self, root: Path, lock: TrackedLock) -> DatabaseBackupService:
         database_path = root / "coach.db"
-        manager = DatabaseManager(database_path, sqlite3, persist_connections=False)
+        manager = temp_database(
+            self, path=database_path, row_factory=None, persist_connections=False
+        )
         with manager.unit_of_work() as db:
             db.execute("CREATE TABLE records(value TEXT NOT NULL)")
             db.execute("INSERT INTO records VALUES ('saved')")
-        self.addCleanup(manager.close)
         return DatabaseBackupService(
             manager,
             lock,
