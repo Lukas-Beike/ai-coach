@@ -166,6 +166,15 @@ class BodyHistoryTests(unittest.TestCase):
                 ]
             )
         )
+        # C-505: W/kg divides only an FTP inside the current value's 50 to 700 W.
+        outlier = body_history(
+            {},
+            {"weight": [{"date": "2026-10-06", "weightKg": 70}]},
+            TODAY,
+            garmin_ftp={TODAY: 1500.0},
+        )
+        points = _series(outlier, "14d", "cycling_w_per_kg", "Garmin Connect")["points"]
+        self.assertIsNone(points[-1]["value"])
 
     def test_garmin_daily_record_uses_latest_timestamp_and_converts_pounds(self):
         snapshot = {

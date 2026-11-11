@@ -2,12 +2,41 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Any, Final
 
 from backend.activities.activity_summary import summary_duration_s
 from backend.activities.identity import activity_datetime
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.labels import sport_label_de
+from backend.canonical.vocabulary import MetricKind
+from backend.performance.source_policy import CURRENT_RULES
+
+
+def _current_bounds(kind: MetricKind) -> tuple[float, float]:
+    """The plausibility bounds the current value of ``kind`` applies."""
+    bounds = CURRENT_RULES[kind].bounds[0]
+    return bounds.lower, bounds.upper
+
+
+# One plausibility bound set per kind: the current value, the chart series, W/kg,
+# the Garmin readers and the activity validation accept the same range.
+PERFORMANCE_METRIC_BOUNDS: Final[Mapping[str, tuple[float, float]]] = MappingProxyType(
+    {
+        "cycling_ftp_watts": _current_bounds(MetricKind.FTP),
+        "run_threshold_watts": _current_bounds(MetricKind.FTP),
+        "running_vo2max_ml_kg_min": _current_bounds(MetricKind.VO2MAX),
+        "cycling_vo2max_ml_kg_min": _current_bounds(MetricKind.VO2MAX),
+        "run_threshold_pace_seconds_per_km": (120, 900),
+        "run_threshold_hr_bpm": _current_bounds(MetricKind.THRESHOLD_HR),
+        "bike_threshold_hr_bpm": _current_bounds(MetricKind.THRESHOLD_HR),
+        "run_5k_seconds": (1, 86400),
+        "run_10k_seconds": (1, 86400),
+        "run_half_marathon_seconds": (1, 172800),
+        "run_marathon_seconds": (1, 345600),
+    }
+)
 
 
 def _present(item: Any, key: str) -> Any:
@@ -120,8 +149,16 @@ def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
     """Return only bounded numeric estimates explicitly attached to an activity."""
     estimates: dict[str, float | int] = {}
     for key, summary_key, minimum, maximum in (
-        ("activity_vo2max", "vo2max", 10, 100),
-        ("activity_configured_ftp_watts", "ftp_w", 20, 2000),
+        (
+            "activity_vo2max",
+            "vo2max",
+            *PERFORMANCE_METRIC_BOUNDS["cycling_vo2max_ml_kg_min"],
+        ),
+        (
+            "activity_configured_ftp_watts",
+            "ftp_w",
+            *PERFORMANCE_METRIC_BOUNDS["cycling_ftp_watts"],
+        ),
     ):
         value = bounded_activity_metric(_present(latest, summary_key), minimum, maximum)
         if value is not None:
@@ -131,23 +168,10 @@ def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
 
 def bounded_performance_metric(key: str, value: Any) -> float | int | None:
     """Normalize provider performance values before using them for validation."""
-    bounds = {
-        "cycling_ftp_watts": (20, 2000),
-        "run_threshold_watts": (20, 2000),
-        "running_vo2max_ml_kg_min": (10, 100),
-        "cycling_vo2max_ml_kg_min": (10, 100),
-        "run_threshold_pace_seconds_per_km": (120, 1800),
-        "run_threshold_hr_bpm": (80, 230),
-        "bike_threshold_hr_bpm": (80, 230),
-        "run_5k_seconds": (1, 86400),
-        "run_10k_seconds": (1, 86400),
-        "run_half_marathon_seconds": (1, 172800),
-        "run_marathon_seconds": (1, 345600),
-    }
-    minimum, maximum = bounds.get(key, (None, None))
-    if minimum is None:
+    bounds = PERFORMANCE_METRIC_BOUNDS.get(key)
+    if bounds is None:
         return _as_number(value)
-    return bounded_activity_metric(value, minimum, maximum)
+    return bounded_activity_metric(value, *bounds)
 
 
 def cycling_activity_validation_details(
@@ -157,10 +181,9 @@ def cycling_activity_validation_details(
     ftp_record = (
         metrics.get("cycling_ftp_watts", {}) if isinstance(metrics, dict) else {}
     )
-    ftp = bounded_activity_metric(
+    ftp = bounded_performance_metric(
+        "cycling_ftp_watts",
         ftp_record.get("value") if isinstance(ftp_record, dict) else None,
-        20,
-        2000,
     )
     weighted_power = activity_evidence.get(
         "weighted_power_watts"
