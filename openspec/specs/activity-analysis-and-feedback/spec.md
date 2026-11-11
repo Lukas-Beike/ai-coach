@@ -162,14 +162,14 @@ The system SHALL set a run's or ride's execution against comparable earlier sess
 Evidence: `backend/performance/comparable_sessions.py:comparable_sessions`, `backend/performance/session_execution.py:comparison_metrics`, `backend/performance/mean_max_curve.py:SessionCurveReader.curves`, `backend/db/activity_detail_store.py:lap_set_keys`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService._session_checks`; `tests/test_comparable_sessions.py`, `tests/test_coach_session_checks.py:ComparableSessionsCheckTests`, `tests/test_mean_max_curve.py:SessionExecutionCurveTests`.
 
 ### Requirement: Recognised routes of outdoor sessions
-The system SHALL group repeated outdoor rides and runs with a stored GPS track into routes and give the activity view and the Coach only a route label, visit number, visit count and opaque id. The athlete SHALL be able to rename a route.
+The system SHALL group repeated rides and runs with a stored GPS track that are not known to be indoor or virtual (an unknown environment, such as Garmin's generic running and cycling types, counts) into routes and give the activity view and the Coach only a route label, visit number, visit count and opaque id. The athlete SHALL be able to rename a route.
 
 #### Scenario: Repeats of one loop
-- **WHEN** several outdoor sessions follow the same loop, also with GPS jitter or in the reverse direction: distances within 10 %, start in or beside the other's start (or end) cell and a Jaccard overlap of the coarse grid cells of at least 0.6
+- **WHEN** several outdoor sessions, or sessions of unknown environment, follow the same loop, also with GPS jitter or in the reverse direction: distances within 10 %, start in or beside the other's start (or end) cell and a Jaccard overlap of the coarse grid cells of at least 0.6
 - **THEN** they share one route and `get_activity_details` returns `route` with the label ("Strecke n" until renamed), `repeat_index` by start time and `repeat_count`
 
 #### Scenario: Different or short tracks
-- **WHEN** another loop from the same start, a distance more than 10 % apart, an indoor session, a short track or a session without positions is compared
+- **WHEN** another loop from the same start, a distance more than 10 % apart, an indoor or virtual session, a short track or a session without positions is compared
 - **THEN** it joins no route of the first loop and the last three get no route
 
 #### Scenario: Rename

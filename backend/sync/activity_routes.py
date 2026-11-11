@@ -1,12 +1,14 @@
 """Recognise repeated outdoor routes from the stored GPS tracks (#1868).
 
 ``ActivityRoutesStage`` is a follow-up stage of the canonical backfill worker.
-Per outdoor ride or run it fingerprints the stream content hashes, the start
-and the distance before any stream is decoded; only sessions whose stored input
-hash differs are decoded, fingerprinted (``backend.activities.routes``) and
-placed, oldest first, so a pass without changes decodes nothing. Sessions that
-are gone and routes without a session leave the index, athlete names stay on
-the routes that remain. Nothing is requested remotely.
+Per ride or run not known to be indoor or virtual (Garmin's generic running and
+cycling types map to an unknown environment) it fingerprints the stream content
+hashes, the start and the distance before any stream is decoded; only sessions
+whose stored input hash differs are decoded, fingerprinted
+(``backend.activities.routes``) and placed, oldest first, so a pass without
+changes decodes nothing. Sessions that are gone and routes without a session
+leave the index, athlete names stay on the routes that remain. Nothing is
+requested remotely.
 
 Turning "GPS-Spuren speichern" off keeps the index. It is removed only with the
 confirmed GPS-track deletion or the purge (``route_store.clear_routes``).
@@ -27,15 +29,14 @@ from backend.activities import route_store, routes
 from backend.activities.activity_summary import activity_summaries
 from backend.canonical.activity_detail import ActivityStreamSet
 from backend.canonical.records import fingerprint_inputs
+from backend.canonical.sports import is_outdoor_endurance
 from backend.canonical.vocabulary import (
     PROVIDER_PRECEDENCE,
-    Environment,
     ProviderId,
     StreamChannel,
 )
 from backend.db import activity_detail_store
 from backend.db.repositories import KeyValueRepository
-from backend.performance.session_metrics import METRIC_SPORTS
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
@@ -52,9 +53,9 @@ _RANK: Final = {
 
 
 def _wants(summary: Mapping[str, Any]) -> bool:
-    return (
-        summary.get("sport") in METRIC_SPORTS
-        and summary.get("environment") == Environment.OUTDOOR.value
+    """A ride or run that may have a track; the track itself decides later."""
+    return is_outdoor_endurance(
+        str(summary.get("sport")), str(summary.get("environment"))
     )
 
 
@@ -208,7 +209,7 @@ class ActivityRoutesStage:
         return summarize_activity_routes(self._key_values, db)
 
     def _wanted(self, db: Any) -> dict[str, Mapping[str, Any]]:
-        """Outdoor rides and runs by session id, oldest first."""
+        """Rides and runs not known to be indoor, by session id, oldest first."""
         sessions = [
             (session_id, records)
             for session_id, records in self._reader.activity_sessions(db)

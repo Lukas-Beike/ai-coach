@@ -370,7 +370,10 @@ class StageTests(StageCase):
         add_outdoor_session(
             self.manager, 6, loop(seed=6, centre_east=True), sport="ride"
         )
-        add_outdoor_session(self.manager, 7, reverse(loop(seed=7)))
+        # Garmin's generic "running" maps to an unknown environment (#2137).
+        add_outdoor_session(
+            self.manager, 7, reverse(loop(seed=7)), environment="unknown"
+        )
         report = self._run_stage()
         self.assertTrue(report.done)
         self.assertEqual(7, report.items)
@@ -407,8 +410,10 @@ class StageTests(StageCase):
         add_outdoor_session(self.manager, 2, loop(seed=2), environment="indoor")
         add_outdoor_session(self.manager, 3, None)
         add_outdoor_session(self.manager, 4, loop(seed=4), sport="swim")
+        add_outdoor_session(self.manager, 5, loop(seed=5), environment="virtual")
+        add_outdoor_session(self.manager, 6, None, environment="unknown")
         self._run_stage()
-        for number in (1, 2, 3, 4):
+        for number in (1, 2, 3, 4, 5, 6):
             self.assertIsNone(self._block(f"act_g{number}"))
         self.assertEqual({}, self._index()["routes"])
 
