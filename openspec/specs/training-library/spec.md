@@ -244,9 +244,13 @@ Evidence: `backend/sync/planned_calendar.py:PlannedCalendarSyncService._delete_r
 
 #### Scenario: Hidden units are removed by the next explicit sync
 - **WHEN** a unit that is archived or deleted (a replan archives the replaced unit) still holds a remote event ID in an open sync state and is dated today or later
-- **THEN** every upcoming unit Intervals.icu waits for carries it and the calendar lists it once ("Wird bei Intervals.icu entfernt"), on the first card that offers the sync button, the calendar sync button and a selected Coach card carry it (at most 20 per sync) as one more entry of the same job, and only the linked event is deleted; a sync bound to the units of one Coach turn and events without a stored unit are never touched.
+- **THEN** every upcoming unit Intervals.icu waits for carries it and the calendar lists it once ("Wird bei Intervals.icu entfernt"), on the first card that offers the sync button (at most 20 events, soonest first), and only the linked event is deleted; a sync bound to the units of one Coach turn and events without a stored unit are never touched. The calendar sync button sends the unit in one `plan_push` job and the listed leftovers in a job of their own, so a leftover that cannot be removed never fails the unit; a selected Coach card adds them as further entries of its own job while the job has room.
 
-Evidence: `backend/planning/intervals_orphans.py`, `backend/planning/push_state.py:attach_push_state`, `backend/coach/proposal_creation.py:_with_intervals_leftovers`, `public/plan-views.js:plannedCleanup`; `tests/test_intervals_orphans.py`, `tests/test_sync_planned_calendar.py:test_removing_a_replaced_unit_leaves_foreign_events_alone`.
+#### Scenario: Leftovers no pending unit carries
+- **WHEN** hidden units hold an Intervals.icu event but no pending unit waits for that provider
+- **THEN** the list rides on the visible unit nearest to today, whose card offers a separate button "<n> alte Einträge bei <provider> entfernen" that removes them in a job of their own; Garmin and Wahoo leftovers use the same mechanism.
+
+Evidence: `backend/planning/intervals_orphans.py`, `backend/planning/leftovers.py:MAX_CLEANUP`, `backend/planning/push_state.py:attach_push_state`, `backend/planning/push_state.py:_carry_unclaimed_cleanup`, `backend/coach/proposal_creation.py:_with_intervals_leftovers`, `public/plan-views.js:plannedCleanup`, `public/plan-views.js:plannedLeftoverItem`, `public/plan-views.js:pushToProvider`; `tests/test_intervals_orphans.py`, `tests/test_planning_push_state.py:test_leftovers_ride_on_a_unit_even_when_no_provider_waits`, `tests/test_sync_planned_calendar.py:test_removing_a_replaced_unit_leaves_foreign_events_alone`.
 
 ### Requirement: TL13 Exact repair ownership and bounded duplicate cleanup
 The system SHALL repair selected planned units dated today or later using current local hashes and concrete remote identities, refuse identified unsafe or ambiguous candidates, and limit cleanup to identity-checked related events in the repair window.
