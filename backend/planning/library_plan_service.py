@@ -78,9 +78,7 @@ class WorkoutLibraryPlanService:
 
         row = db.execute(SELECT_LIBRARY_PAYLOAD_SQL, (workout_id,)).fetchone()
         if not row:
-            raise AppError(
-                404, "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren."
-            )
+            raise AppError(404, "Bibliothekseinheit nicht gefunden.")
         try:
             workout = json.loads(row["payload"])
         except (TypeError, ValueError) as exc:

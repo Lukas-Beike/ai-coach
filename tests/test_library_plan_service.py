@@ -166,10 +166,8 @@ class LibraryPlanServiceTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             self.service.apply([{"library_workout_id": missing_id, "date": TODAY}])
         self.assertEqual(raised.exception.status, 404)
-        self.assertEqual(
-            raised.exception.message,
-            "Bibliothekseinheit nicht gefunden. Bitte zuerst synchronisieren.",
-        )
+        # Library entries are local; no sync brings a missing one (#2135, D-009).
+        self.assertEqual(raised.exception.message, "Bibliothekseinheit nicht gefunden.")
 
         corrupt_id = str(uuid.uuid4())
         not_object_id = str(uuid.uuid4())
