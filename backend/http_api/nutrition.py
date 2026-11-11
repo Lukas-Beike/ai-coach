@@ -328,47 +328,37 @@ class NutritionPostRoutes:
 
 
 class NutritionPutRoutes:
-    """Handle authenticated nutrition updates."""
+    """Handle authenticated product updates.
+
+    Diary entries change only through the Coach correction, which enforces the
+    field whitelist, the ``manual_correction`` basis and the undo reference; the
+    old ``PUT /api/nutrition/entry`` skipped all three (#2137, F-018).
+    """
 
     def __init__(
-        self,
-        diary_service: Callable[[], NutritionDiaryService],
-        meal_library_service: Callable[[], NutritionMealLibraryService],
+        self, meal_library_service: Callable[[], NutritionMealLibraryService]
     ) -> None:
-        self._diary_service = diary_service
         self._meal_library_service = meal_library_service
 
     def handle(self, handler: Any, path: str) -> bool:
-        if path == "/api/nutrition/products":
-            payload = _read_object(handler)
-            if payload.pop("confirmed", None) is not True:
-                raise AppError(
-                    400,
-                    "Das Produkt muss ausdrücklich bestätigt werden.",
-                    reason="confirmation_required",
-                )
-            product_id = str(payload.get("id") or "").strip()
-            if not product_id:
-                raise AppError(400, "id ist erforderlich zum Aktualisieren.")
-            with change_history.collect_changes() as changes:
-                updated = self._meal_library_service().update_product(
-                    product_id, payload
-                )
-            handler.send_json(
-                200,
-                {"ok": True, "product": updated, **_change(changes, PRODUCT_ENTITY)},
-            )
-            return True
-        if path != NUTRITION_ENTRY_PATH:
+        if path != "/api/nutrition/products":
             return False
-
         payload = _read_object(handler)
-        entry_id = payload.get("id") or payload.get("entry_id")
-        if not entry_id:
+        if payload.pop("confirmed", None) is not True:
+            raise AppError(
+                400,
+                "Das Produkt muss ausdrücklich bestätigt werden.",
+                reason="confirmation_required",
+            )
+        product_id = str(payload.get("id") or "").strip()
+        if not product_id:
             raise AppError(400, "id ist erforderlich zum Aktualisieren.")
-        svc = self._diary_service()
-        updated = svc.update_meal(str(entry_id), payload)
-        handler.send_json(200, {"ok": True, "entry": updated})
+        with change_history.collect_changes() as changes:
+            updated = self._meal_library_service().update_product(product_id, payload)
+        handler.send_json(
+            200,
+            {"ok": True, "product": updated, **_change(changes, PRODUCT_ENTITY)},
+        )
         return True
 
 
