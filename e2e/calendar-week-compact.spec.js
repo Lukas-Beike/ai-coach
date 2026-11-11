@@ -137,3 +137,46 @@ test("extra activities show no Zusätzlich badge in a week without a plan", asyn
   await expect(day.locator(".planned-group > summary .planned-session-title")).toHaveText("2× Trainingseinheit");
   await expect(page.locator(".planned-week-totals").first()).not.toContainText("zusätzlich");
 });
+
+test("@responsive the Monat switch shows the month grid and the calendar returns to the week", async ({ page, request }) => {
+  await openCalendar(page, request);
+  const days = await renderSyntheticCalendar(page);
+  await expect(page.locator(".planned-view-switch [data-view='week']")).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".planned-view-switch [data-view='month']").click();
+  const month = page.locator(".planned-month");
+  await expect(month).toBeVisible();
+  await expect(page.locator(".planned-view-switch")).toHaveCount(1);
+  await expect(month.locator(".planned-view-switch [data-view='month']")).toHaveAttribute("aria-pressed", "true");
+  // Whole weeks Monday to Sunday: every day of the month, the neighbouring ones muted.
+  const cells = month.locator(".planned-month-day");
+  expect((await cells.count()) % 7).toBe(0);
+  const monthDays = await page.evaluate((today) => new Date(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0).getDate(), days.today);
+  await expect(month.locator(".planned-month-day:not(.is-outside)")).toHaveCount(monthDays);
+  const today = month.locator(`.planned-month-day[data-date="${days.today}"]`);
+  await expect(today).toHaveClass(/is-today/);
+  await expect(today).toHaveAttribute("aria-pressed", "true");
+  await expect(today.locator(".planned-month-mark")).toHaveCount(3);
+  await expect(month.locator(".planned-month-row.is-current")).toHaveCount(1);
+  // The missed unit is marked red, a planned one outlined.
+  const missed = month.locator(`.planned-month-day[data-date="${days.missed}"] .planned-month-mark`);
+  if (await missed.count()) await expect(missed).toHaveClass(/is-missed/);
+  const next = month.locator(`.planned-month-day[data-date="${days.next}"]`);
+  if (await next.count()) {
+    await expect(next.locator(".planned-month-mark")).toHaveClass(/is-planned/);
+    await next.click();
+    await expect(page.locator(`.planned-day[data-date="${days.next}"]`)).toHaveCount(1);
+    await expect(month.locator(`.planned-month-day[data-date="${days.next}"]`)).toHaveAttribute("aria-pressed", "true");
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  for (const cell of await cells.all()) expect((await cell.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  await page.locator(".planned-view-switch [data-view='week']").click();
+  await expect(page.locator(".planned-month")).toHaveCount(0);
+  // Entering the calendar again always opens the week view.
+  await page.locator(".planned-view-switch [data-view='month']").click();
+  await page.evaluate(async () => {
+    await AppRouter.navigate("coach", { historyMode: "replace" });
+    await AppRouter.navigate("plan/overview", { historyMode: "push" });
+  });
+  await expect(page.locator(".planned-month")).toHaveCount(0);
+  await expect(page.locator(".planned-day.is-today")).toHaveCount(1);
+});

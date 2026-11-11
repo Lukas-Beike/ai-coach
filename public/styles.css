@@ -943,6 +943,41 @@ h2 {
 .planned-entry.is-completed { border-color: var(--session-color); }
 .planned-entry:is(.is-planned, .is-today, .is-missed, .is-skipped) .planned-session-header { background: var(--transparent); }
 .planned-entry > summary .calendar-workout-profile, .planned-group > summary .calendar-workout-profile { height: 16px; margin: 2px 0 0; }
+/* Month view (#2189): one row per week; dots on narrow screens, duration chips and the ISO week on wide ones. */
+.planned-month { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.planned-month h4 { margin-right: auto; }
+.planned-view-switch { display: flex; flex-basis: 100%; padding: 3px; border-radius: 10px; background: var(--surface-raised); }
+.planned-view-switch button { flex: 1; min-height: 38px; border: 0; border-radius: 8px; color: var(--muted); background: none; font: inherit; font-size: .8rem; font-weight: 650; cursor: pointer; }
+.planned-view-switch button[aria-pressed="true"] { color: var(--ink); background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.planned-view-switch button:focus-visible, .planned-month-day:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
+.planned-month-grid { display: grid; gap: 2px; padding: 8px; }
+.planned-month-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; border-radius: 10px; }
+.planned-month-row.is-current { background: var(--accent-soft); }
+.planned-month-names span { padding: 4px 0; color: var(--muted); font-size: .72rem; font-weight: 650; text-align: center; }
+.planned-month-names span:last-child, .planned-month-kw { display: none; }
+.planned-month-day { display: grid; min-width: 0; min-height: 48px; justify-items: center; align-content: start; gap: 3px; padding: 4px 0; border: 0; border-radius: 10px; color: var(--ink); background: none; font: inherit; cursor: pointer; }
+.planned-month-day.is-outside { color: var(--muted); }
+.planned-month-day:disabled { opacity: .45; cursor: default; }
+.planned-month-number { display: grid; width: 30px; height: 30px; place-items: center; border: 2px solid transparent; border-radius: 50%; font-size: .85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.planned-month-day.is-today .planned-month-number { color: var(--white); background: var(--accent); }
+.planned-month-day[aria-pressed="true"] .planned-month-number { border-color: var(--accent-bright); }
+.planned-month-marks { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
+.planned-month-mark { --session-color: var(--planned-session-default); width: 6px; height: 6px; overflow: hidden; border-radius: 50%; color: var(--white); background: var(--session-color); font-size: 0; }
+.planned-month-mark:is([data-sport="Radfahren"], [data-sport="Rad indoor"]) { --session-color: var(--planned-session-bike); }
+.planned-month-mark[data-sport="Laufen"] { --session-color: var(--planned-session-run); }
+.planned-month-mark[data-sport="Schwimmen"] { --session-color: var(--planned-session-swim); }
+.planned-month-mark[data-sport="Kraft"] { --session-color: var(--planned-session-strength); }
+.planned-month-mark:is(.is-planned, .is-today) { color: var(--ink); background: none; box-shadow: inset 0 0 0 1.5px var(--session-color); }
+.planned-month-mark.is-missed { --session-color: var(--danger); color: var(--white); background: var(--danger); box-shadow: none; }
+@media (min-width: 1100px) {
+  .planned-month-row { grid-template-columns: repeat(7, minmax(0, 1fr)) 64px; }
+  .planned-month-names span:last-child, .planned-month-kw { display: block; }
+  .planned-month-kw { align-self: center; color: var(--muted); font-size: .72rem; text-align: center; }
+  .planned-month-day { min-height: 76px; justify-items: stretch; padding: 4px; }
+  .planned-month-number { justify-self: center; }
+  .planned-month-marks { display: grid; gap: 2px; }
+  .planned-month-mark { width: auto; height: auto; padding: 1px 2px; border-radius: 4px; font-size: .72rem; line-height: 1.3; text-align: center; white-space: nowrap; text-overflow: ellipsis; }
+}
 .planned-detail-head { display: none; }
 .planned-detail-profile { display: grid; gap: 4px; }
 .calendar-workout-profile.is-detail { height: 96px; margin: 0; }
