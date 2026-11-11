@@ -121,7 +121,7 @@ class ProviderReviewTests(unittest.TestCase):
         deletion.join(5)
         self.assertEqual(errors, [])
         self.assertTrue(deleted.is_set())
-        self.assertIsNone(server.SYNC_PERSISTENCE.state_repository().latest_snapshot())
+        self.assertIsNone(snapshot_seed.latest_snapshot(server.database_manager()))
         self.assertEqual(
             runtime_maintenance.MAINTENANCE_GATE.state(),
             {"active": False, "running_operations": 0},

@@ -342,22 +342,6 @@ class ServerDatabaseTests(ServerTestCase):
                 [row["activity_id"] for row in repository.list(db)], ["activity-old"]
             )
 
-    def test_snapshot_repository_preserves_latest_payload_and_retention_contract(self):
-        repository = server.SnapshotRepository()
-        with server.database_manager().unit_of_work() as db:
-            for index in range(13):
-                repository.save(
-                    db,
-                    {"synced_at": f"2026-09-{index + 1:02d}", "index": index},
-                    f"2026-09-{index + 1:02d}",
-                )
-            payload = repository.latest_payload(db)
-            count = db.execute("SELECT COUNT(*) AS count FROM snapshots").fetchone()[
-                "count"
-            ]
-        self.assertEqual(json.loads(payload)["index"], 12)
-        self.assertEqual(count, 12)
-
     def test_local_public_state_reuses_request_database_connections(self):
         backend = (
             server.sqlite_backend if server.CONFIG.app_password else server.sqlite3

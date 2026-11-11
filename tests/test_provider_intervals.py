@@ -1,5 +1,4 @@
 import base64
-import json
 import unittest
 from unittest.mock import Mock
 
@@ -66,37 +65,16 @@ class IntervalsApiClientTests(unittest.TestCase):
             )
         )
 
-    def test_pagination_accumulates_and_state_is_independent(self):
-        first = Mock(side_effect=[[{"id": 1}, {"id": 2}], [{"id": 3}], [{"id": 4}]])
-        second = Mock(side_effect=[[{"id": 3}]])
-        first_client = IntervalsApiClient(api_key="key", request=first)
-        second_client = IntervalsApiClient(api_key="key", request=second)
+    def test_paged_collection_concatenates_pages_until_a_short_page(self):
+        request = Mock(side_effect=[[{"id": 1}, {"id": 2}], [{"id": 3}]])
+        client = IntervalsApiClient(api_key="key", request=request)
 
-        first_client.get_paged_collection(
+        rows = client.get_paged_collection(
             "/items", {"sport": "Run"}, "items", page_size=2
         )
-        first_client.get_paged_collection(
-            "/items", {"sport": "Run"}, "items", page_size=2
-        )
-        second_client.get_paged_collection("/items", {}, "items")
 
-        self.assertEqual(
-            dict(first_client.pagination["items"]),
-            {"pages": 3, "records": 4, "complete": True},
-        )
-        self.assertEqual(
-            dict(second_client.pagination["items"]),
-            {"pages": 1, "records": 1, "complete": True},
-        )
-        pagination_copy = first_client.pagination
-        self.assertEqual(
-            json.loads(json.dumps(pagination_copy)),
-            {
-                "items": {"pages": 3, "records": 4, "complete": True},
-            },
-        )
-        pagination_copy["items"]["pages"] = 0
-        self.assertEqual(first_client.pagination["items"]["pages"], 3)
+        self.assertEqual(rows, [{"id": 1}, {"id": 2}, {"id": 3}])
+        self.assertEqual(request.call_count, 2)
 
     def test_pagination_errors_are_app_errors(self):
         for response, message in (

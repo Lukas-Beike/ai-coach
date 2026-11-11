@@ -18,16 +18,12 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         ]
         snapshot = {
             "recent_activities": activity_rows.compact.return_value,
-            "provider_sync": {
-                "calendar_window": {"start": "2026-01-01", "end": "2026-03-01"}
-            },
         }
         planned = [{"id": "planned-1", "starts_at_local": "2026-01-02T07:00:00"}]
         competitions = [{"id": "competition-1"}]
         external_1000 = [{"id": f"external-{index}"} for index in range(1000)]
         external_window = [{"id": f"daily-{index}"} for index in range(60)]
         services: dict[str, Any] = {
-            "sync": Mock(),
             "planned": Mock(),
             "feedback": Mock(),
             "weather": Mock(),
@@ -42,9 +38,6 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             "competitions": Mock(),
             "adaptive": Mock(),
             "quick_actions": Mock(),
-        }
-        services["sync"].sync_metadata.return_value = {
-            "provider_sync": snapshot["provider_sync"]
         }
         services["planned"].list.return_value = planned
         services["feedback"].attach_to_activities.side_effect = lambda rows: rows
@@ -71,7 +64,6 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         projection = Mock(return_value={"planned": planned, "training_calendar": []})
         service = PublicPlanStateService(
             PublicPlanDependencies(
-                sync_state=services["sync"],
                 planned_units=services["planned"],
                 activity_feedback=services["feedback"],
                 weather=services["weather"],
@@ -143,10 +135,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         self.assertEqual(len(projected[1]), 1000)
         self.assertEqual(projected[3], competitions)
         self.assertEqual(projected[4], external_1000)
-        self.assertEqual(
-            projection.call_args.kwargs["provider_window"],
-            snapshot["provider_sync"]["calendar_window"],
-        )
+        self.assertNotIn("provider_window", projection.call_args.kwargs)
         self.assertEqual(services["daily"].build.call_args.args[-1], external_window)
         self.assertEqual(state["external_calendar"]["events"], external_1000[:300])
 

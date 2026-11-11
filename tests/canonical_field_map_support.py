@@ -24,8 +24,6 @@ RECORD_MODULES = (
     "backend.canonical.activity_detail",
     "backend.canonical.domain_records",
 )
-# Canonical record constructors whose keyword arguments are emitted fields.
-EXTRA_RECORD_NAMES = frozenset({"PowerCurvePoint", "PowerCurveFetch"})
 
 BACKTICKED = re.compile(r"`([^`\n]+)`")
 HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
@@ -65,7 +63,7 @@ def record_fields(cls: type) -> list[str]:
 def emitted_tokens(source: str) -> set[str]:
     """Enum values and record keyword names a mapper source names in code."""
     enums = vocabulary_enums()
-    records = set(record_classes()) | EXTRA_RECORD_NAMES
+    records = set(record_classes())
     tokens: set[str] = set()
     for node in ast.walk(ast.parse(source)):
         if (
@@ -144,7 +142,7 @@ def section_for_module(sections, filename: str) -> str | None:
 
 def record_constructor_calls(source: str) -> bool:
     """Whether the source calls a canonical record constructor with keywords."""
-    records = set(record_classes()) | EXTRA_RECORD_NAMES
+    records = set(record_classes())
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Call) and any(kw.arg for kw in node.keywords):
             func = node.func

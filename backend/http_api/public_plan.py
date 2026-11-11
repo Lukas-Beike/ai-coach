@@ -25,7 +25,6 @@ from backend.weather import history as weather_history
 
 @dataclass(frozen=True)
 class PublicPlanDependencies:
-    sync_state: Any
     planned_units: Any
     activity_feedback: Any
     weather: Any
@@ -56,7 +55,6 @@ class PublicPlanStateService:
     """Compose bounded local planning reads into the public plan response."""
 
     def __init__(self, dependencies: PublicPlanDependencies) -> None:
-        self._sync_state = dependencies.sync_state
         self._planned_units = dependencies.planned_units
         self._activity_feedback = dependencies.activity_feedback
         self._weather = dependencies.weather
@@ -149,7 +147,6 @@ class PublicPlanStateService:
         return {**row, "workout_profile": profile}
 
     def _read(self, weather: dict[str, Any] | None, db: Any) -> dict[str, Any]:
-        sync_metadata = self._sync_state.sync_metadata(db)
         local_planned = self._planned_units.list(500, push_state=True)
         canonical_planned = calendar_canonical.canonical_planned_workouts(local_planned)
         activities = self._activity_rows.compact() if self._activity_rows else []
@@ -159,12 +156,6 @@ class PublicPlanStateService:
         history, profiles = self._history_and_profiles()
         activities = [self._with_profile(row, profiles) for row in activities]
         weather = weather_history.calendar_state(history, weather, today=self._today())
-        provider_sync = sync_metadata["provider_sync"]
-        calendar_window = (
-            provider_sync.get("calendar_window", {})
-            if isinstance(provider_sync, dict)
-            else {}
-        )
         competitions = self._competitions.list()
         external_events = self._external_calendar.list_events(
             1000, training_relevant_only=True
@@ -176,7 +167,6 @@ class PublicPlanStateService:
             competitions,
             external_events,
             today=self._today(),
-            provider_window=calendar_window,
             default_name=self._default_workout_name,
             sport_thresholds=self._sport_thresholds(db),
             zone_configurations=self._zone_configurations(),

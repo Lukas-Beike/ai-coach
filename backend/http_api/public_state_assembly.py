@@ -326,14 +326,12 @@ class PublicStateAssembly:
         )
 
     def plan_state_service(self) -> PublicPlanStateService:
-        sync = self._sync_persistence()
         planning = self._planning_data()
         athlete = self._athlete_data()
         calendar = self._external_calendar()
         config = self._config()
         return PublicPlanStateService(
             PublicPlanDependencies(
-                sync_state=sync.state_repository(),
                 planned_units=planning.planned_unit(),
                 activity_feedback=athlete.activity_feedback(),
                 weather=self._weather().service(),

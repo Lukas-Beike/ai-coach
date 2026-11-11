@@ -47,8 +47,6 @@ from backend.activities.strength_sets import (
 from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.domain_records import (
-    EMPTY_POWER_CURVE,
-    PowerCurve,
     SleepPeriod,
 )
 from backend.canonical.records import ActivityRecord, Observation
@@ -138,10 +136,6 @@ class _PendingReader:
     ) -> tuple[SleepPeriod, ...]:
         del start, end, db
         return ()
-
-    def power_curve(self, db: Any) -> PowerCurve:
-        del db
-        return EMPTY_POWER_CURVE
 
     def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
         del db

@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from backend.athlete.clock import AthleteLocalClock
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
+from backend.db.repositories import KeyValueRepository
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 from backend.sync.state import SyncStateRepository
@@ -20,13 +20,11 @@ class SyncPersistenceAssembly:
         *,
         database_manager: Callable[[], DatabaseManager],
         key_values: KeyValueRepository,
-        snapshots: SnapshotRepository,
         utc_now: Callable[[], str],
         athlete_clock: Callable[[], AthleteLocalClock],
     ) -> None:
         self._database_manager = database_manager
         self._key_values = key_values
-        self._snapshots = snapshots
         self._utc_now = utc_now
         self._athlete_clock = athlete_clock
 
@@ -37,7 +35,6 @@ class SyncPersistenceAssembly:
         return SyncStateRepository(
             self._database_manager(),
             self._key_values,
-            self._snapshots,
             self._utc_now,
             registry=registry,
         )

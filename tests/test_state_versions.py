@@ -7,7 +7,6 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 import snapshot_seed
 
@@ -17,7 +16,6 @@ from backend.db.key_value import KeyValueService
 from backend.db.repositories import (
     KeyValueRepository,
     ProfileRepository,
-    SnapshotRepository,
 )
 from backend.db.schema import initialize_schema
 from backend.http_api.state_versions import StateVersionService
@@ -50,9 +48,8 @@ class StateVersionServiceTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
         self.key_values = KeyValueRepository(lambda: NOW)
-        self.snapshot_repository = SnapshotRepository()
         self.sync_state = SyncStateRepository(
-            self.manager, self.key_values, self.snapshot_repository, lambda: NOW
+            self.manager, self.key_values, lambda: NOW
         )
         self.profile = ProfileService(
             self.manager,
@@ -225,36 +222,11 @@ class StateVersionServiceTests(unittest.TestCase):
         self.assertEqual(self.manager.reader_calls, 1)
         self.assertEqual(self.manager.unit_of_work_calls, 0)
 
-    def test_snapshot_rows_are_atomic_and_never_feed_the_markers(self) -> None:
+    def test_snapshot_rows_never_feed_the_markers(self) -> None:
         snapshot_seed.save_view(
             self.sync_state, {"synced_at": "before", "recent_activities": [{}, {}]}
         )
-        with self.manager.reader() as db:
-            self.assertEqual(
-                self.snapshot_repository.latest_metadata(db),
-                {"synced_at": "before", "recent_activity_count": 2},
-            )
-        try:
-            with self.manager.unit_of_work() as db:
-                self.snapshot_repository.save(
-                    db,
-                    {"synced_at": "rolled-back", "recent_activities": [{}]},
-                    "rolled-back",
-                )
-                raise RuntimeError("rollback")
-        except RuntimeError:
-            pass
-        with self.manager.reader() as db:
-            self.assertEqual(
-                self.snapshot_repository.latest_metadata(db)["synced_at"], "before"
-            )
-
-        read = AssertionError("read snapshot")
-        with (
-            patch.object(self.snapshot_repository, "latest_payload", side_effect=read),
-            patch.object(self.snapshot_repository, "latest_metadata", side_effect=read),
-        ):
-            self.assertEqual(self.service.versions()["activities"], "::0")
+        self.assertEqual(self.service.versions()["activities"], "::0")
 
 
 if __name__ == "__main__":

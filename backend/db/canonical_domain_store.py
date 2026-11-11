@@ -20,8 +20,6 @@ from backend.canonical.domain_records import (
     CategoricalObservation,
     GearActivityLink,
     GearItem,
-    PowerCurveFetch,
-    PowerCurvePoint,
     SleepPeriod,
     ZoneConfiguration,
 )
@@ -418,15 +416,11 @@ def replace_source_rows(
     zones: Sequence[ZoneConfiguration] = (),
     gear_items: Sequence[GearItem] = (),
     gear_links: Sequence[GearActivityLink] = (),
-    power_curve: Sequence[PowerCurvePoint] | None = None,
-    power_curve_fetch: PowerCurveFetch | None = None,
 ) -> ReplaceResult:
     """Replace every domain row of one provider source record, in every table.
 
     A table the source record no longer emits rows for has its rows retired, so
-    an empty call retires all of them. The power curve tables are the exception:
-    ``power_curve`` or ``power_curve_fetch`` None leaves that table's rows as they
-    are, because a fetch that reports no usable curve keeps the earlier one.
+    an empty call retires all of them.
     """
     _require_mapper_version(mapper_version)
     replacements: tuple[tuple[_Table, list[dict[str, object]]], ...] = (
@@ -474,33 +468,6 @@ def replace_source_rows(
             ],
         ),
     )
-    if power_curve is not None:
-        replacements += (
-            (
-                _POWER_CURVE,
-                [
-                    _power_curve_row(
-                        require_instance(point, PowerCurvePoint, "point"),
-                        mapper_version,
-                    )
-                    for point in power_curve
-                ],
-            ),
-        )
-    if power_curve_fetch is not None:
-        replacements += (
-            (
-                _POWER_CURVE_FETCH,
-                [
-                    _power_curve_fetch_row(
-                        require_instance(
-                            power_curve_fetch, PowerCurveFetch, "power_curve_fetch"
-                        ),
-                        mapper_version,
-                    )
-                ],
-            ),
-        )
     results = [
         _replace(
             db,
@@ -598,16 +565,6 @@ def active_gear_link_rows(db: Any) -> list[dict[str, Any]]:
     return _active_rows(
         db, _GEAR_LINKS, [], [], "provider, gear_id, provider_activity_id"
     )
-
-
-def active_power_curve_rows(db: Any) -> list[dict[str, Any]]:
-    """Return the active power curve rows by provider and duration."""
-    return _active_rows(db, _POWER_CURVE, [], [], "provider, duration_s")
-
-
-def active_power_curve_fetch_rows(db: Any) -> list[dict[str, Any]]:
-    """Return the active power curve fetch rows by provider and source record."""
-    return _active_rows(db, _POWER_CURVE_FETCH, [], [], "provider, source_record_id")
 
 
 def zone_configuration_export_rows(db: Any) -> Iterable[dict[str, Any]]:
@@ -870,27 +827,4 @@ def _gear_link_row(link: GearActivityLink, mapper_version: int) -> dict[str, obj
         **_provenance_values(link.provenance, mapper_version),
         "gear_id": link.gear_id,
         "provider_activity_id": link.provider_activity_id,
-    }
-
-
-def _power_curve_row(point: PowerCurvePoint, mapper_version: int) -> dict[str, object]:
-    return {
-        **_provenance_values(point.provenance, mapper_version),
-        "duration_s": point.duration_s,
-        "watts": point.watts,
-        "observed_on": point.observed_on.isoformat(),
-        "provider_activity_id": point.provider_activity_id,
-        "details": _details(point.provenance),
-    }
-
-
-def _power_curve_fetch_row(
-    fetch: PowerCurveFetch, mapper_version: int
-) -> dict[str, object]:
-    return {
-        **_provenance_values(fetch.provenance, mapper_version),
-        "fetch_status": fetch.fetch_status,
-        "window_start": _iso_day(fetch.window_start),
-        "window_end": _iso_day(fetch.window_end),
-        "details": _details(fetch.provenance),
     }

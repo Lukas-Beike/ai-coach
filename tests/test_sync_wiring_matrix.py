@@ -30,7 +30,7 @@ from unittest import mock
 
 from support import temp_database
 
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
+from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.nutrition.contracts import nutrition_approval_item
@@ -252,9 +252,7 @@ class Harness:
             retry_base_seconds=1,
             retry_max_seconds=60,
         )
-        state_repository = SyncStateRepository(
-            self.database, key_values, SnapshotRepository(), NOW.isoformat
-        )
+        state_repository = SyncStateRepository(self.database, key_values, NOW.isoformat)
         historical = HistoricalSyncDependencies(
             local_now=lambda: NOW,
             sync_period_defaults={GARMIN_ID: 7, WAHOO_ID: 7},

@@ -13,7 +13,7 @@ from support import temp_database
 
 from backend.config import Config
 from backend.db import garmin_store
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
+from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.providers.garmin_capability import WELLNESS_BACKFILL_PREFIX
@@ -369,7 +369,7 @@ class GarminSyncStateServiceTests(unittest.TestCase):
         )
         self.key_values = KeyValueRepository(lambda: UTC_NOW)
         self.sync_state = SyncStateRepository(
-            self.manager, self.key_values, SnapshotRepository(), lambda: UTC_NOW
+            self.manager, self.key_values, lambda: UTC_NOW
         )
         self.daily_markers = DailySyncMarkerService(
             self.manager, self.key_values, lambda: self.local_now
@@ -384,9 +384,7 @@ class GarminSyncStateServiceTests(unittest.TestCase):
         return GarminSyncStateService(
             self.manager,
             key_values,
-            SyncStateRepository(
-                self.manager, key_values, SnapshotRepository(), lambda: UTC_NOW
-            ),
+            SyncStateRepository(self.manager, key_values, lambda: UTC_NOW),
             daily_markers
             or DailySyncMarkerService(self.manager, key_values, lambda: self.local_now),
             self.redactor,

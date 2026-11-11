@@ -3,12 +3,11 @@ from __future__ import annotations
 import sqlite3
 import unittest
 
-import snapshot_seed
 from provider_runtime_fakes import ACME_ID, acme_descriptor
 from support import temp_database
 
 from backend.db import row_factory
-from backend.db.repositories import KeyValueRepository, SnapshotRepository
+from backend.db.repositories import KeyValueRepository
 from backend.sync.provider_registry import ProviderRegistry
 from backend.sync.state import SyncStateRepository
 
@@ -37,14 +36,12 @@ class SyncStateRepositoryTests(unittest.TestCase):
             schema=True,
         )
         self.key_values = KeyValueRepository(lambda: NOW)
-        self.snapshots = SnapshotRepository()
         self.repository = self.make_repository()
 
     def make_repository(self, key_values=None):
         return SyncStateRepository(
             self.database_manager,
             key_values or self.key_values,
-            self.snapshots,
             lambda: NOW,
         )
 
@@ -104,7 +101,6 @@ class SyncStateRepositoryTests(unittest.TestCase):
         repository = SyncStateRepository(
             self.database_manager,
             self.key_values,
-            self.snapshots,
             lambda: NOW,
             registry=ProviderRegistry([acme_descriptor()]),
         )
@@ -152,14 +148,7 @@ class SyncStateRepositoryTests(unittest.TestCase):
                 self.repository.sync_period("intervals", DEFAULTS, ALL_DAYS), 90
             )
             self.repository.cursor("garmin", "data")
-            self.assertIsNone(self.repository.latest_snapshot())
             self.assertEqual(self.backend.connect_count, connect_count)
-
-    def test_latest_snapshot_returns_the_stored_payload(self):
-        self.assertIsNone(self.repository.latest_snapshot())
-        snapshot = {"synced_at": NOW, "athlete": {"id": "fake"}}
-        snapshot_seed.save_snapshot(self.repository, snapshot)
-        self.assertEqual(self.repository.latest_snapshot(), snapshot)
 
 
 if __name__ == "__main__":

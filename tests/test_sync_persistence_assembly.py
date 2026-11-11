@@ -13,7 +13,6 @@ class SyncPersistenceAssemblyTests(unittest.TestCase):
         assembly = persistence_assembly.SyncPersistenceAssembly(
             database_manager=Mock(return_value=Mock()),
             key_values=Mock(),
-            snapshots=Mock(),
             utc_now=Mock(),
             athlete_clock=Mock(),
         )
@@ -34,14 +33,12 @@ class SyncPersistenceAssemblyTests(unittest.TestCase):
         manager = Mock()
         manager_provider = Mock(side_effect=[manager, manager])
         key_values = Mock()
-        snapshots = Mock()
         utc_now = Mock()
         athlete_clock = Mock()
         athlete_clock.return_value.now = Mock()
         assembly = persistence_assembly.SyncPersistenceAssembly(
             database_manager=manager_provider,
             key_values=key_values,
-            snapshots=snapshots,
             utc_now=utc_now,
             athlete_clock=athlete_clock,
         )
@@ -59,7 +56,6 @@ class SyncPersistenceAssemblyTests(unittest.TestCase):
         state_factory.assert_called_once_with(
             manager,
             key_values,
-            snapshots,
             utc_now,
             registry=DEFAULT_PROVIDER_REGISTRY,
         )

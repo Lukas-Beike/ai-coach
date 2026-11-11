@@ -131,7 +131,6 @@ class PlanningCalendarReadModelTests(unittest.TestCase):
                 "training_relevant": 0,
             },
         ]
-        provider_window = {"start": "2026-09-01", "end": "2026-10-01"}
         originals = copy.deepcopy(
             (local_planned, activities, weather, competitions, external_events)
         )
@@ -143,7 +142,6 @@ class PlanningCalendarReadModelTests(unittest.TestCase):
             competitions,
             external_events,
             today=today,
-            provider_window=provider_window,
             default_name="Planned workout",
         )
 
@@ -197,8 +195,7 @@ class PlanningCalendarReadModelTests(unittest.TestCase):
         self.assertEqual(planning_view["source"], "local")
         self.assertEqual(planning_view["local_count"], 2)
         self.assertEqual(planning_view["remote_count"], 0)
-        self.assertIs(planning_view["provider_window"], provider_window)
-        self.assertEqual(planning_view["provider_window"], provider_window)
+        self.assertNotIn("provider_window", planning_view)
         self.assertIs(planning_view["items"], result["planned"])
         self.assertEqual(result["planning_compliance"][0]["completed_units"], 1)
         self.assertEqual(
@@ -391,7 +388,6 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
             [_race("2026-10-14", "A")],
             [_marker(no_training=1)],
             today=date(2026, 10, 10),
-            provider_window={},
             default_name="Planned workout",
         )
 
@@ -433,7 +429,6 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
                 [],
                 [],
                 today=date(2026, 10, 10),
-                provider_window={},
                 default_name="Planned workout",
                 zone_configurations=configurations,
                 sport_thresholds=thresholds,
@@ -474,7 +469,6 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
             [],
             [],
             today=date(2026, 10, 10),
-            provider_window={},
             default_name="Planned workout",
             zone_configurations=configurations,
             sport_thresholds=thresholds,
@@ -549,7 +543,6 @@ class TrainingDayProjectionTests(unittest.TestCase):
             [],
             [],
             today=self.TODAY,
-            provider_window={},
             default_name="Planned workout",
         )["training_calendar"]
         days = [date(2026, 10, 31) + timedelta(days=offset) for offset in range(8)]
