@@ -40,6 +40,7 @@ EXPECTED_LIBRARY_FIELDS = {
     "local_deleted",
     "remote_event_id",
     "remote_event_external_id",
+    "remote_event_category",
     "category",
     "paired_event_id",
 }

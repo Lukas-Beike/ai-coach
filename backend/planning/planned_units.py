@@ -111,6 +111,7 @@ _PUSH_SYNC_KEYS = frozenset(
     {
         "remote_event_id",
         "remote_event_external_id",
+        "remote_event_category",
         "external_id",
         "sync_error",
         *(key for key in REMOTE_PLANNED_METRIC_KEYS if key != PLANNING_DURATION_FIELD),
@@ -162,6 +163,7 @@ def _planned_unit_metadata(workout: dict[str, Any]) -> dict[str, Any]:
         ("status", 80),
         ("remote_event_id", 120),
         ("remote_event_external_id", 200),
+        ("remote_event_category", 20),
     ):
         if workout.get(field) is not None:
             metadata[field] = str(workout.get(field) or "")[:limit]
@@ -370,6 +372,7 @@ def _preserve_local_planned_workout_metadata(
         "rationale",
         "remote_event_id",
         "remote_event_external_id",
+        "remote_event_category",
         "private_calendar_adjustment",
         "local_deleted",
     ):
