@@ -340,9 +340,17 @@ function calendarWeekLoad(items) {
 }
 
 // The week summary uses one duration format, hours and minutes.
-function calendarHours(seconds) {
+function calendarClock(seconds) {
   const minutes = Math.round(Math.max(0, Number(seconds) || 0) / 60);
-  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")} h`;
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function calendarHours(seconds) {
+  return `${calendarClock(seconds)} h`;
+}
+
+function plannedDurationSeconds(entry) {
+  return Math.max(0, Number(entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s) || 0);
 }
 
 const CALENDAR_SPORT_ICONS = { Radfahren: "🚴", "Rad indoor": "🚴", Laufen: "🏃", Schwimmen: "🏊", Kraft: "🏋" };
@@ -798,7 +806,7 @@ function plannedWeekMetrics(planned, actual) {
   const totals = document.createElement("span");
   totals.className = "planned-week-metrics";
   totals.dataset.columns = String(columns.length);
-  const plannedSeconds = planned.reduce((total, entry) => total + Math.max(0, Number(entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s) || 0), 0);
+  const plannedSeconds = planned.reduce((total, entry) => total + plannedDurationSeconds(entry), 0);
   const actualSeconds = actual.reduce((total, entry) => total + Math.max(0, Number(entry.moving_duration_s ?? entry.elapsed_duration_s) || 0), 0);
   const plannedDistance = planned.reduce((total, entry) => total + Math.max(0, Number(entry.distance) || 0), 0);
   const rows = [
@@ -957,13 +965,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     ].filter(Boolean).join(" · ");
   }
 
-  // Entering the calendar shows the current week and scrolls to today.
+  // Entering the calendar shows the current week in the week view and scrolls to today.
   function focusPlannedToday() {
     if (!state.plannedTodayFocusPending || !state.loadedAreas.has("plan")) return false;
     if (AppRouter.baseRoute(state.route) !== "plan" || AppRouter.planSegmentFromRoute(state.route) !== "overview") return false;
     const currentWeekKey = planWeekStart(timezoneDateKey(state.data?.profile?.timezone, new Date()));
-    if (selectedWeekKey !== currentWeekKey) {
+    if (selectedWeekKey !== currentWeekKey || calendarView !== "week") {
       selectedWeekKey = currentWeekKey;
+      calendarView = "week";
+      selectedDayKey = "";
       renderPlanned(renderedCalendar);
     }
     const today = $("#plannedCalendar")?.querySelector(".planned-day.is-today");
@@ -1480,22 +1490,170 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return 1 + Math.round((dateFromKey(weekKey) - dateFromKey(firstWeek)) / (7 * 86_400_000));
   }
 
-  function plannedWeekStep(step, target) {
+  // "Woche | Monat": the view is a switch only; the calendar always opens on the week.
+  function plannedViewSwitch() {
+    const group = document.createElement("div");
+    group.className = "planned-view-switch";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "Ansicht");
+    for (const [value, label] of [["week", "Woche"], ["month", "Monat"]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.view = value;
+      button.textContent = label;
+      button.setAttribute("aria-pressed", String(calendarView === value));
+      button.addEventListener("click", () => {
+        if (calendarView === value) return;
+        // The athlete's choice wins over a still pending jump to today.
+        state.plannedTodayFocusPending = false;
+        calendarView = value;
+        selectedDayKey = "";
+        renderPlanned(renderedCalendar);
+        $("#plannedCalendar")?.querySelector(`.planned-view-switch [data-view="${value}"]`)?.focus();
+      });
+      group.append(button);
+    }
+    return group;
+  }
+
+  function monthStartKey(dateKey, offset = 0) {
+    const date = dateFromKey(`${dateKey.slice(0, 8)}01`);
+    date.setMonth(date.getMonth() + offset);
+    return localDateKey(date);
+  }
+
+  // In the month view the selected day also sets the week shown below (renderPlanned).
+  function selectPlannedDay(dateKey) {
+    selectedDayKey = dateKey;
+    renderPlanned(renderedCalendar);
+  }
+
+  // One day of the month grid: its number and one mark per unit (a dot, on wide screens its duration).
+  function plannedMonthDay(view, dateKey, monthKey) {
+    const { eventsByDate, firstWeekKey, lastDateKey, planningContextByDate, todayKey } = view;
+    const entries = eventsByDate.get(dateKey) || [];
+    const dayContext = planningContextByDate.get(dateKey) || {};
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "icon-button planned-week-step";
-    button.dataset.weekStep = String(step);
-    button.textContent = step < 0 ? "\u2039" : "\u203a";
-    button.setAttribute("aria-label", step < 0 ? "Vorherige Woche" : "Nächste Woche");
-    button.disabled = !target;
+    button.className = "planned-month-day";
+    button.dataset.date = dateKey;
+    button.classList.toggle("is-outside", dateKey.slice(0, 7) !== monthKey.slice(0, 7));
+    button.classList.toggle("is-today", dateKey === todayKey);
+    button.setAttribute("aria-pressed", String(dateKey === view.dayKey));
+    button.disabled = dateKey < firstWeekKey || dateKey > lastDateKey;
+    const number = document.createElement("span");
+    number.className = "planned-month-number";
+    number.textContent = String(dateFromKey(dateKey).getDate());
+    const marks = document.createElement("span");
+    marks.className = "planned-month-marks";
+    for (const entry of entries) {
+      const actual = calendarActualActivity(entry);
+      const status = calendarEntryStatus(entry, dateKey, todayKey);
+      const mark = document.createElement("span");
+      // As on the card: a missed unit on a rest or pause day counts as skipped.
+      mark.className = `planned-month-mark is-${status === "missed" && plannedDayStatusLabel(dayContext.day_status) ? "skipped" : status}`;
+      mark.dataset.sport = activitySportLabel(calendarSportType(actual || entry));
+      const seconds = actual ? Number(actual.moving_duration_s ?? actual.elapsed_duration_s) : plannedDurationSeconds(entry);
+      // h:mm fits a day cell; the full label stays on the card.
+      mark.textContent = seconds >= 30 ? calendarClock(seconds) : "•";
+      marks.append(mark);
+    }
+    button.append(number, marks);
+    const units = entries.length ? countLabel(entries.length, "Einheit", "Einheiten") : "keine Einheit";
+    button.setAttribute("aria-label", `${DETAIL_DATE_FORMAT.format(dateFromKey(dateKey))}: ${units}`);
     button.addEventListener("click", () => {
-      selectedWeekKey = target;
-      renderPlanned(renderedCalendar);
-      const steps = [...($("#plannedCalendar")?.querySelectorAll(".planned-week-step:not(:disabled)") || [])];
-      (steps.find((item) => item.dataset.weekStep === String(step)) || steps[0])?.focus();
+      state.plannedTodayFocusPending = false;
+      selectPlannedDay(dateKey);
+      const root = $("#plannedCalendar");
+      root?.querySelector(`.planned-month-day[data-date="${dateKey}"]`)?.focus();
+      if (!wideCalendar?.matches) return;
+      const card = root?.querySelector(`.planned-day[data-date="${dateKey}"] .planned-entry`);
+      const group = card?.closest(".planned-group");
+      if (group) group.open = true;
+      if (card) card.open = true;
+      else {
+        const shown = shownPlannedEntry(root);
+        if (shown) shown.open = false;
+      }
     });
     return button;
   }
+
+  // The month of the selected day: weeks Monday to Sunday with the ISO week and its planned time.
+  function renderPlannedMonth(view) {
+    const { firstWeekKey, lastDateKey, todayKey } = view;
+    const monthKey = monthStartKey(view.dayKey);
+    const nextMonthKey = monthStartKey(monthKey, 1);
+    const month = document.createElement("section");
+    month.className = "planned-month";
+    month.setAttribute("aria-labelledby", "plannedMonthTitle");
+    const heading = document.createElement("header");
+    heading.className = "planned-week-heading";
+    const title = document.createElement("h4");
+    title.id = "plannedMonthTitle";
+    title.textContent = new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(dateFromKey(monthKey));
+    // A month step selects today when it lies in that month, else the month's first loaded day.
+    const stepTo = (key) => (todayKey.startsWith(key.slice(0, 7)) ? todayKey : [key, firstWeekKey].sort((left, right) => left.localeCompare(right)).at(-1));
+    heading.append(title,
+      plannedStep(-1, "Vorheriger Monat", addDateKey(monthKey, -1) >= firstWeekKey ? () => selectPlannedDay(stepTo(monthStartKey(monthKey, -1))) : null, "month"),
+      plannedStep(1, "Nächster Monat", nextMonthKey <= lastDateKey ? () => selectPlannedDay(stepTo(nextMonthKey)) : null, "month"),
+      plannedViewSwitch());
+    const grid = document.createElement("div");
+    grid.className = "planned-month-grid";
+    const names = document.createElement("div");
+    names.className = "planned-month-row planned-month-names";
+    names.setAttribute("aria-hidden", "true");
+    for (const name of ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So", "KW"]) names.append(Object.assign(document.createElement("span"), { textContent: name }));
+    grid.append(names);
+    for (let weekKey = planWeekStart(monthKey); weekKey < nextMonthKey; weekKey = addDateKey(weekKey, 7)) grid.append(plannedMonthRow(view, weekKey, monthKey));
+    month.append(heading, grid);
+    return month;
+  }
+
+  // One week of the month grid: seven days, then the ISO week with its planned time.
+  function plannedMonthRow(view, weekKey, monthKey) {
+    const row = document.createElement("div");
+    row.className = `planned-month-row${weekKey === planWeekStart(view.todayKey) ? " is-current" : ""}`;
+    for (let offset = 0; offset < 7; offset += 1) row.append(plannedMonthDay(view, addDateKey(weekKey, offset), monthKey));
+    const seconds = Array.from({ length: 7 }, (_, offset) => view.eventsByDate.get(addDateKey(weekKey, offset)) || []).flat()
+      .filter((entry) => !entry.is_completed_activity)
+      .reduce((total, entry) => total + plannedDurationSeconds(entry), 0);
+    const week = document.createElement("span");
+    week.className = "planned-month-kw";
+    week.textContent = [`KW ${isoWeekNumber(weekKey)}`, seconds > 0 ? calendarHours(seconds) : ""].filter(Boolean).join(" · ");
+    row.append(week);
+    return row;
+  }
+
+  // A step button; after the step, focus stays on it or on the other one of its pair.
+  function plannedStep(step, label, onStep, pair) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "icon-button planned-week-step";
+    button.dataset.step = String(step);
+    button.dataset.pair = pair;
+    button.textContent = step < 0 ? "\u2039" : "\u203a";
+    button.setAttribute("aria-label", label);
+    button.disabled = !onStep;
+    button.addEventListener("click", () => {
+      state.plannedTodayFocusPending = false;
+      onStep();
+      const steps = [...($("#plannedCalendar")?.querySelectorAll(`.planned-week-step[data-pair="${pair}"]:not(:disabled)`) || [])];
+      (steps.find((item) => item.dataset.step === String(step)) || steps[0])?.focus();
+    });
+    return button;
+  }
+
+  function plannedWeekStep(step, target) {
+    const button = plannedStep(step, step < 0 ? "Vorherige Woche" : "Nächste Woche", target ? () => {
+      selectedWeekKey = target;
+      if (calendarView === "month") selectedDayKey = target;
+      renderPlanned(renderedCalendar);
+    } : null, "week");
+    button.dataset.weekStep = String(step);
+    return button;
+  }
+
 
   function renderPlannedWeek(view) {
     const { eventsByDate, firstWeekKey, lastWeekKey, todayKey, weekKey, weeklyCompliance } = view;
@@ -1518,8 +1676,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     count.textContent = calendarCountLabel(weekEntries, todayKey) || "Keine Einheiten";
     heading.append(title, number,
       plannedWeekStep(-1, weekKey > firstWeekKey ? addDateKey(weekKey, -7) : ""),
-      plannedWeekStep(1, weekKey < lastWeekKey ? addDateKey(weekKey, 7) : ""),
-      count);
+      plannedWeekStep(1, weekKey < lastWeekKey ? addDateKey(weekKey, 7) : ""));
+    if (calendarView === "week") heading.append(plannedViewSwitch());
+    heading.append(count);
     const planned = weekEntries.filter((entry) => !entry.is_completed_activity);
     const actual = weekEntries.map(calendarActualActivity).filter(Boolean);
     const totals = plannedWeekMetrics(planned, actual);
@@ -1591,7 +1750,18 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   let plannedRenderSnapshot = null;
   let selectedWeekKey = "";
+  let calendarView = "week";
+  let selectedDayKey = "";
   let renderedCalendar = [];
+
+  // Keeps the shown week (and in the month view the selected day, which sets the week) inside the loaded weeks.
+  function keepPlannedSelection(todayKey, firstKey, lastKey) {
+    const currentWeekKey = planWeekStart(todayKey);
+    if (!selectedWeekKey || selectedWeekKey < firstKey || selectedWeekKey > lastKey) selectedWeekKey = currentWeekKey;
+    if (calendarView !== "month") return;
+    if (!selectedDayKey || selectedDayKey < firstKey || selectedDayKey > lastKey) selectedDayKey = selectedWeekKey === currentWeekKey ? todayKey : selectedWeekKey;
+    selectedWeekKey = planWeekStart(selectedDayKey);
+  }
 
   function renderPlanned(trainingCalendar) {
     const root = $("#plannedCalendar");
@@ -1604,8 +1774,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const futureWeeks = calendarDisplayValue(display.future_weeks, 4);
     const firstWeekKey = addDateKey(currentWeekKey, -7 * pastWeeks);
     const lastWeekKey = addDateKey(currentWeekKey, 7 * futureWeeks);
-    if (!selectedWeekKey || selectedWeekKey < firstWeekKey || selectedWeekKey > lastWeekKey) selectedWeekKey = currentWeekKey;
-    const snapshot = JSON.stringify([trainingCalendar, todayKey, selectedWeekKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather]);
+    const lastDateKey = addDateKey(lastWeekKey, 6);
+    keepPlannedSelection(todayKey, firstWeekKey, lastDateKey);
+    const snapshot = JSON.stringify([trainingCalendar, todayKey, selectedWeekKey, calendarView, selectedDayKey, display, state.data?.daily_planning_context, state.data?.planning_compliance, state.data?.competitions, state.data?.weather]);
     if (snapshot === plannedRenderSnapshot && root.childElementCount) {
       if (state.plannedTodayFocusPending) requestAnimationFrame(() => focusPlannedToday());
       return;
@@ -1623,7 +1794,6 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
         .filter((item) => item?.week_start)
         .map((item) => [String(item.week_start).slice(0, 10), item]),
     );
-    const lastDateKey = addDateKey(lastWeekKey, 6);
     const entries = (Array.isArray(trainingCalendar) ? trainingCalendar : [])
       .filter((item) => item && !item.archived && !item.local_deleted && plannedEventDate(item))
       .filter((item) => plannedEventDate(item) >= firstWeekKey && plannedEventDate(item) <= lastDateKey)
@@ -1646,13 +1816,16 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const view = {
       leftoversByWeek: plannedLeftoversByWeek(trainingCalendar, currentWeekKey, lastWeekKey),
       eventsByDate,
+      dayKey: selectedDayKey,
       firstWeekKey,
+      lastDateKey,
       lastWeekKey,
       planningContextByDate,
       todayKey,
       weekKey: selectedWeekKey,
       weeklyCompliance,
     };
+    if (calendarView === "month") root.append(renderPlannedMonth(view));
     const week = renderPlannedWeek(view);
     openDefaultPlannedEntry(week);
     root.append(week);
