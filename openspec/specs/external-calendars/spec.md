@@ -43,11 +43,15 @@ The system SHALL expand supported daily, weekly, monthly, and yearly recurrence 
 - **WHEN** an instance is excluded, overridden by recurrence identity, or cancelled
 - **THEN** the expanded set reflects the exception without retaining an extra unchanged duplicate.
 
+#### Scenario: Yearly weekday position
+- **WHEN** a yearly rule names a weekday with a position, such as `BYDAY=20MO` or `BYDAY=-1MO`
+- **THEN** without BYMONTH the position counts within the year (one date a year), and with BYMONTH within each named month.
+
 #### Scenario: Excessive recurrence
 - **WHEN** requested recurrence count exceeds 1000, iteration exceeds supported bounds, or expanded results exceed 1000 events
 - **THEN** the parser rejects the unsafe feed instead of claiming a complete truncated event set.
 
-Evidence: `backend/providers/calendar.py:_ical_rrule`, `backend/providers/calendar.py:_ical_instances`, `backend/providers/calendar.py:parse_ical_calendar`; `tests/test_provider_calendar.py:test_tzid_weekly_recurrence_keeps_source_wall_time_across_dst`, `tests/test_provider_calendar.py:test_rdate_exdate_recurrence_id_and_cancelled`, `tests/test_provider_calendar.py:test_recurrence_iteration_caps_are_fixed_not_tautological`.
+Evidence: `backend/providers/calendar.py:_ical_rrule`, `backend/providers/calendar.py:_ical_instances`, `backend/providers/calendar.py:parse_ical_calendar`; `tests/test_provider_calendar.py:test_tzid_weekly_recurrence_keeps_source_wall_time_across_dst`, `tests/test_provider_calendar.py:test_rdate_exdate_recurrence_id_and_cancelled`, `tests/test_provider_calendar.py:test_monthly_yearly_filters_and_bounds`, `tests/test_provider_calendar.py:test_recurrence_iteration_caps_are_fixed_not_tautological`.
 
 ### Requirement: Training constraints from external event data
 The system SHALL derive training constraints from recognized NO_TRAINING, NO_INTENSITY, and SHORT_ONLY markers in event title/description, tolerating supported case, whitespace, hyphen, underscore, and bracket variants. It SHALL project constraint flags while dropping free-text description from persisted external-event DTOs. Blocking markers SHALL remain visible to planning even if ordinary training relevance is false; plain nonrelevant events may be excluded from that planning projection.

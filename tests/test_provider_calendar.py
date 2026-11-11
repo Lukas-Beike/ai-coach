@@ -748,6 +748,23 @@ class CalendarProviderTests(unittest.TestCase):
             end=date(2026, 10, 27),
         )
         self.assertEqual([item["event_date"] for item in yearly], ["2026-09-15"])
+        # Without BYMONTH a yearly ordinal counts in the year (#2137, K-040).
+        for rule, start, expected in (
+            ("BYDAY=20MO", date(2026, 5, 1), ["2026-05-18"]),
+            ("BYDAY=1MO", date(2026, 1, 1), ["2026-01-05"]),
+            ("BYDAY=-1MO", date(2026, 11, 15), ["2026-12-28"]),
+            ("BYMONTH=5;BYDAY=-1MO", date(2026, 5, 1), ["2026-05-25"]),
+        ):
+            with self.subTest(rule=rule):
+                events = parse(
+                    feed(
+                        "UID:ordinal\r\nDTSTART;VALUE=DATE:20260101\r\n"
+                        f"RRULE:FREQ=YEARLY;{rule}"
+                    ),
+                    start=start,
+                    end=start + timedelta(days=EXTERNAL_CALENDAR_WINDOW_DAYS),
+                )
+                self.assertEqual([item["event_date"] for item in events], expected)
         over = feed(
             "UID:many\r\nDTSTART:20260901T100000Z\r\nRRULE:FREQ=DAILY;COUNT=1001"
         )
