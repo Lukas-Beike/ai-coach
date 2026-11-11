@@ -64,7 +64,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
             PrivacyDeleteDependencies(**vars(mocks), cancel_coach_turns=cancel)
         )
         db = MagicMock()
-        db.execute.return_value.fetchone.return_value = {"count": 0}
+        db.execute.return_value.fetchone.return_value = {"count": 0, "value": None}
         mocks.database_manager.unit_of_work.return_value.__enter__.return_value = db
         mocks.database_manager.reader.return_value.__enter__.return_value = db
         mocks.key_value_repository.get.return_value = ""
@@ -76,7 +76,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
     def test_exact_confirmation_reaches_existing_local_deletion(self) -> None:
         service, dependencies = self.service()
         db = MagicMock()
-        db.execute.return_value.fetchone.return_value = {"count": 0}
+        db.execute.return_value.fetchone.return_value = {"count": 0, "value": None}
         dependencies.database_manager.unit_of_work.return_value.__enter__.return_value = db
         dependencies.database_manager.reader.return_value.__enter__.return_value = db
         dependencies.key_value_repository.get.return_value = ""
@@ -115,7 +115,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
             if sql == "DELETE FROM kv":
                 stored.clear()
             result = MagicMock()
-            result.fetchone.return_value = {"count": 0}
+            result.fetchone.return_value = {"count": 0, "value": None}
             return result
 
         db = MagicMock()

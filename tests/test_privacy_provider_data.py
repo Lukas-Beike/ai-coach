@@ -684,19 +684,27 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         self.assertEqual(cancelled, [True])
 
     def test_delete_clears_every_garmin_capability_pause(self):
-        for key in (
-            "garmin_capability_activities",
-            "garmin_capability_wellness_backfill_sleep",
+        for key, value in (
+            ("garmin_capability_activities", '{"count":3}'),
+            ("garmin_capability_wellness_backfill_sleep", '{"count":3}'),
+            ("gps_tracks_enabled", "0"),
         ):
             self.db.execute(
                 "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                (key, '{"count":3}', "2026-11-09T08:00:00+00:00"),
+                (key, value, "2026-11-09T08:00:00+00:00"),
             )
-        self.service().delete("LOKALE DATEN LÖSCHEN")
+        service = self.service()
+        service.delete("LOKALE DATEN LÖSCHEN")
         remaining = self.db.execute(
             "SELECT key FROM kv WHERE instr(key, 'capability') > 0"
         ).fetchall()
         self.assertEqual(remaining, [])
+        # A switched-off GPS setting survives the erasure (#2137, K-002) ...
+        self.assertEqual(self.key_values.values.get("gps_tracks_enabled"), "0")
+        # ... and one that was on stays absent, which means on.
+        self.key_values.values.clear()
+        service.delete("LOKALE DATEN LÖSCHEN")
+        self.assertNotIn("gps_tracks_enabled", self.key_values.values)
 
     def connected_wahoo(self, request):
         """A real Wahoo connection service over the fixture database, already connected."""

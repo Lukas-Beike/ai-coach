@@ -180,7 +180,7 @@ Local privacy deletion SHALL require the exact backend confirmation text before 
 
 #### Scenario: Confirmed erasure
 - **WHEN** the exact confirmation is supplied
-- **THEN** the declared durable tables and KV state, including the Personal API key, its expiry date, the consent and purge state and the profile sex, are cleared transactionally and the default profile/reset state is restored
+- **THEN** the declared durable tables and KV state, including the Personal API key, its expiry date, the consent and purge state and the profile sex, are cleared transactionally and the default profile/reset state is restored; a switched-off "GPS-Spuren speichern" setting stays off
 
 #### Scenario: Remote links in the preview
 - **WHEN** the preview counts the deletion scope
@@ -198,7 +198,7 @@ Local privacy deletion SHALL require the exact backend confirmation text before 
 - **WHEN** restores or the Intervals.icu purge of release 2.0.0 saved database recovery copies and a purge marker file in the data directory
 - **THEN** the preview counts them, the confirmed erasure deletes them after the transaction commits, and a copy that cannot be removed is reported without failing the erasure
 
-Evidence: `backend/privacy.py::PrivacyDeleteService.preview`; `backend/privacy.py::PrivacyDeleteService.delete`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`; `backend/backup/recovery_copies.py::RecoveryCopies`. Tests: `tests/test_data_safety_coverage.py::DataKindDeleteTests`; `tests/test_privacy_provider_data.py::test_preview_counts_remote_links_by_owning_group`; `tests/test_privacy_delete_confirmation.py::test_missing_or_wrong_confirmation_fails_before_any_dependency_access`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`; `tests/test_server_database.py::test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure`.
+Evidence: `backend/privacy.py::PrivacyDeleteService.preview`; `backend/privacy.py::PrivacyDeleteService.delete`; `backend/privacy.py::PRIVACY_DELETE_SCOPE`; `backend/backup/recovery_copies.py::RecoveryCopies`. Tests: `tests/test_data_safety_coverage.py::DataKindDeleteTests`; `tests/test_privacy_provider_data.py::test_preview_counts_remote_links_by_owning_group`; `tests/test_privacy_provider_data.py::test_delete_clears_every_garmin_capability_pause`; `tests/test_privacy_delete_confirmation.py::test_missing_or_wrong_confirmation_fails_before_any_dependency_access`; `tests/test_server_database.py::test_privacy_delete_preview_covers_every_durable_table_and_reports_counts`; `tests/test_server_database.py::test_privacy_delete_rolls_back_earlier_table_deletes_on_sql_failure`.
 
 ### Requirement: Remote-erasure and credential outcomes remain separate
 
