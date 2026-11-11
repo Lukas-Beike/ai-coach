@@ -33,7 +33,8 @@ TIMEOUT = 900
 SAFE_RULE = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
 SAFE_FILE = re.compile(r"[\w./\\@+ -]{1,200}")
 # Top-level keys that are not issue sections.
-NOT_SECTIONS = frozenset({"failures", "errors", "globalError", "paging"})
+# `messages` holds CLI notices whose text is never printed.
+NOT_SECTIONS = frozenset({"failures", "errors", "globalError", "paging", "messages"})
 
 
 def find_sonar() -> str | None:
@@ -77,8 +78,14 @@ def parse_json(text: str) -> Any:
 
 
 def issue_list(value: Any) -> list[dict] | None:
-    """The issue dicts of a section value, or None when it is not a section."""
+    """The issue dicts of a section value, or None when it is not a section.
+
+    `sonar analyze` nests sections such as `secrets` and `agentic`; one without
+    an `issues` list but with a `summary` is a section with no listed issue.
+    """
     if isinstance(value, dict):
+        if "issues" not in value and isinstance(value.get("summary"), dict):
+            return []
         value = value.get("issues")
     if isinstance(value, list) and all(isinstance(item, dict) for item in value):
         return value
@@ -106,16 +113,27 @@ def count_of(value: Any) -> int:
     return len(value) if isinstance(value, list) else 0
 
 
-def failures_of(data: Any) -> int:
+def parts(data: Any) -> list[dict]:
+    """The top level and each nested section, where failures and errors live."""
     if not isinstance(data, dict):
-        return 0
-    return count_of(data.get("failures")) + count_of(data.get("errors"))
+        return []
+    return [data, *(v for v in data.values() if isinstance(v, dict))]
+
+
+def failures_of(data: Any) -> int:
+    return sum(
+        count_of(part.get("failures")) + count_of(part.get("errors"))
+        for part in parts(data)
+    )
 
 
 def global_error_kind(data: Any) -> str | None:
-    error = data.get("globalError") if isinstance(data, dict) else None
-    kind = error.get("kind") if isinstance(error, dict) else None
-    return kind if isinstance(kind, str) and SAFE_RULE.fullmatch(kind) else None
+    for part in parts(data):
+        error = part.get("globalError")
+        kind = error.get("kind") if isinstance(error, dict) else None
+        if isinstance(kind, str) and SAFE_RULE.fullmatch(kind):
+            return kind
+    return None
 
 
 def safe(value: Any, pattern: re.Pattern[str]) -> str:

@@ -32,6 +32,16 @@ ANALYZE = {
 }
 CLEAN: dict[str, list] = {"issues": []}
 FORBIDDEN = {"issues": [], "globalError": {"kind": "forbidden", "message": FAKE_SECRET}}
+# The shape `sonar analyze` printed on 2026-11-11: nested sections, the global
+# error inside `agentic`, and CLI `messages` that are not issues.
+NESTED = {
+    "secrets": {"issues": [{"ruleKey": "secrets:S6290", "file": "a.py", "line": 2}], "summary": {}},
+    "agentic": {
+        "files": ["a.py"], "failures": [], "skipped": [], "summary": {"totalIssues": 0},
+        "globalError": {"kind": "forbidden", "message": FAKE_SECRET},
+    },
+    "messages": [{"text": FAKE_SECRET}],
+}  # fmt: skip
 LIST_ISSUES = {
     "issues": [
         {
@@ -89,7 +99,7 @@ class SonarCheckTests(unittest.TestCase):
         self.assertIn("issue secrets:S6290 backend/c.py:7", out)
 
     def test_no_payload_text_is_ever_printed(self):
-        for payload in (ANALYZE, FORBIDDEN, LIST_ISSUES):
+        for payload in (ANALYZE, FORBIDDEN, LIST_ISSUES, NESTED):
             with self.subTest(keys=sorted(payload)):
                 _, out, err = run_main(["--pr", "5"], FakeSonar(payload))
                 self.assertNotIn(FAKE_SECRET, out + err)
@@ -101,6 +111,15 @@ class SonarCheckTests(unittest.TestCase):
         self.assertIn("issues 0, failures 0", out)
         self.assertIn("limit:", out)
         self.assertIn("not a pass", out)
+
+    def test_nested_sections_and_global_error_of_the_real_cli(self):
+        code, out, _ = run_main([], FakeSonar(NESTED, returncode=1))
+        self.assertEqual(code, 1)
+        self.assertIn("issues 1, failures 0", out)
+        self.assertIn("section agentic: 0", out)
+        self.assertNotIn("section messages", out)
+        self.assertIn("limit:", out)
+        self.assertIn("issue secrets:S6290 a.py:2", out)
 
     def test_clean_result_has_no_limit_line(self):
         code, out, _ = run_main([], FakeSonar(CLEAN))
