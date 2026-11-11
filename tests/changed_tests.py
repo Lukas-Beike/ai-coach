@@ -44,10 +44,22 @@ FULL_SUITE_PATHS = (
 # Slow tooling modules run locally only when one of their own inputs changed;
 # CI runs them on every PR. Each maps to the path prefixes it guards.
 HEAVY_MODULES = {
-    "test_fixture_standard_data": ("e2e/", "tests/test_fixture_standard_data.py"),
+    "test_fixture_standard_data": (
+        "e2e/",
+        "tests/fixtures/",
+        "tests/server_test_support.py",
+        "tests/test_fixture_standard_data.py",
+    ),
     "test_ci_contracts": (
         ".github/",
         "Dockerfile",
+        "pyproject.toml",
+        "requirements",
+        "playwright.config.cjs",
+        "scripts/run_browser_tests.py",
+        "scripts/run_sqlcipher_tests.py",
+        "tests/run_sqlcipher_tests.ps1",
+        "tests/fixtures/quality_baseline.json",
         "tests/run_tests.py",
         "tests/changed_tests.py",
         "tests/test_durations.json",
