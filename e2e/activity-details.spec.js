@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { renderCalendarSessions, openSessionDetails } = require("./helpers/ui");
 
 test("@responsive activity details preserve calendar without Coach shortcuts", async ({ page, request }) => {
   const seed = await request.get("/api/fixture/activity");
@@ -8,8 +9,8 @@ test("@responsive activity details preserve calendar without Coach shortcuts", a
   await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
   const entry = page.locator(".planned-entry").filter({ hasText: "Synthetic ride <img src=x>" }).first();
   // On wide screens a unit of the week may already be open as the detail pane.
-  if (!(await entry.evaluate((element) => element.open))) await entry.locator("summary").click();
-  const open = entry.getByRole("button", { name: "Details" });
+  if (!(await entry.evaluate((element) => element.open))) await entry.locator(":scope > summary").click();
+  const open = entry.getByRole("button", { name: "Feedback" });
   await open.click();
   const dialog = page.getByRole("dialog", { name: "Synthetic ride <img src=x>" });
   await expect(dialog).toBeVisible();
@@ -180,68 +181,113 @@ test("@responsive running cadence shows step frequency of both legs", async ({ p
   expect(headings.Ride.find((text) => text.startsWith("Kadenz (rpm)"))).toContain("90");
 });
 
-test("@responsive analysis shows running step frequency and cycling cadence", async ({ page }) => {
-  const summaries = [
+test("@responsive calendar details show running step frequency and cycling cadence", async ({ page }) => {
+  const sessions = [
     { id: "synthetic-run", name: "Synthetic run", sport: "run", environment: "outdoor", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3 },
     { id: "synthetic-ride", name: "Synthetic ride cadence", sport: "ride", environment: "outdoor", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 3 },
   ];
-  await page.route(/\/api\/activities(\?|\/)/, (route) => {
+  await page.route(/\/api\/activities\//, (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[3];
-    const body = id
-      ? {
-        session: { activity_id: id, sport: id === "synthetic-run" ? "run" : "ride" },
-        metrics: { avg_cadence: { value: 86 }, max_cadence: { value: 90 } },
-        streams: { time_s: [0, 1, 2], channels: { cadence_rpm: { values: [84, 86, 90] } } },
-        detail_data: { providers: [] },
-      }
-      : { activities: summaries, snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null };
-    return route.fulfill({ json: body });
+    return route.fulfill({ json: {
+      session: { activity_id: id, sport: id === "synthetic-run" ? "run" : "ride" },
+      metrics: { avg_cadence: { value: 86 }, max_cadence: { value: 90 } },
+      streams: { time_s: [0, 1, 2], channels: { cadence_rpm: { values: [84, 86, 90] } } },
+      detail_data: { providers: [] },
+    } });
   });
-  await page.goto("/#analysis/sessions");
+  await page.goto("/#plan/overview");
   await expect(page.locator("#appShell")).toBeVisible();
-  const run = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic run" });
-  await run.locator("summary").click();
+  await page.waitForFunction(() => state.initialStateLoaded);
+  await renderCalendarSessions(page, sessions);
+  const run = await openSessionDetails(page, "Synthetic run");
   await expect(run.locator(".activity-analysis-stats div").filter({ hasText: "Ø Schrittfrequenz" })).toContainText("172 spm");
   await expect(run.getByRole("img", { name: /^Schrittfrequenz: Ø 172/ })).toBeVisible();
-  const ride = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic ride cadence" });
-  await ride.locator("summary").click();
+  const ride = await openSessionDetails(page, "Synthetic ride cadence");
   await expect(ride.locator(".activity-analysis-stats div").filter({ hasText: "Ø Kadenz" })).toContainText("86 rpm");
   await expect(ride.getByRole("img", { name: /^Kadenz: Ø 86/ })).toBeVisible();
 });
 
-test("@responsive analysis lists a Garmin-only indoor session and loads more", async ({ page }) => {
-  const first = { id: "act_garmin_only", sport: "ride", environment: "virtual", record_ids: { garmin: "910002" }, started_at: "2026-10-17T08:00:00+02:00", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3600, distance_m: 30000 };
-  const second = { id: "act_older", name: "Synthetic older run", sport: "run", environment: "outdoor", record_ids: { intervals: "i-1" }, started_at: "2026-10-16T08:00:00+02:00", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 1800 };
+test("@responsive calendar details chart running dynamics per second and retry a failed read", async ({ page }) => {
+  let fail = true;
+  const times = Array.from({ length: 30 }, (_, index) => index * 10);
+  await page.route(/\/api\/activities\//, (route) => (fail
+    ? route.fulfill({ status: 503, json: { error: "E2E fixture: Details nicht erreichbar" } })
+    : route.fulfill({ json: {
+      session: { activity_id: "act_dyn", sport: "run" },
+      metrics: { ground_contact_time_ms: { value: 250 }, step_length_m: { value: 1.1 } },
+      streams: { time_s: times, channels: { heart_rate_bpm: { values: times.map((time) => 140 + (time % 20)) } } },
+      running_dynamics_streams: {
+        ground_contact_time_ms: { values: times.map((time) => 240 + (time % 30)) },
+        step_length_m: { values: times.map((time) => 1 + (time % 20) / 100) },
+      },
+      detail_data: { providers: [] },
+    } })));
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.waitForFunction(() => state.initialStateLoaded);
+  await renderCalendarSessions(page, [{ id: "act_dyn", name: "Synthetic dynamics run", sport: "run", started_at_local: "2026-10-17T07:00:00", moving_duration_s: 300 }]);
+  const details = await openSessionDetails(page, "Synthetic dynamics run");
+  // A failed read shows the retry card; the retry loads the details.
+  await expect(details.locator(".error-state")).toContainText("Details nicht erreichbar");
+  fail = false;
+  await details.getByRole("button", { name: "Erneut versuchen" }).click();
+  await expect(details.getByRole("img", { name: /^Bodenkontaktzeit: Ø 250/ })).toBeVisible();
+  await expect(details.getByRole("img", { name: /^Schrittlänge: / })).toBeVisible();
+  await expect(details.locator(".error-state")).toHaveCount(0);
+});
+
+test("@responsive the calendar details open a Garmin-only indoor session; old Einheiten links land on the calendar", async ({ page }) => {
+  await page.route(/\/api\/activities\//, (route) => route.fulfill({ json: { session: { activity_id: "act_garmin_only", sport: "ride", environment: "virtual" }, metrics: {}, detail_data: { providers: [] } } }));
+  await page.goto("/#analysis/sessions");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.waitForFunction(() => state.initialStateLoaded);
+  // The Einheiten segment is gone (#2258): its link lands on the calendar, and Analyse lists no such tab.
+  await expect(page).toHaveURL(/#plan\/overview$/);
+  await expect(page.getByRole("navigation", { name: "Analysebereiche" }).getByRole("link", { name: "Einheiten" })).toHaveCount(0);
+  await renderCalendarSessions(page, [{ id: "act_garmin_only", name: "Indoor-Fahrt", sport: "ride", environment: "virtual", record_ids: { garmin: "910002" }, started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3600, distance_m: 30000 }]);
+  const details = await openSessionDetails(page, "Indoor-Fahrt");
+  await expect(details.locator(".activity-analysis-panel")).toBeVisible();
+  await expect(details.locator(".loading-state")).toHaveCount(0);
+});
+
+test("@responsive the calendar pages back past the loaded weeks and loads older sessions", async ({ page }) => {
+  // #2258 (athlete option A): paging back has no limit; older sessions come from the session list.
+  let oldDay = null;
+  let listed = 0;
   await page.route(/\/api\/activities(\?|\/)/, (route) => {
     const url = new URL(route.request().url());
     const id = url.pathname.split("/")[3];
-    const body = id
-      ? { session: { activity_id: id, sport: "ride", environment: "virtual" }, metrics: {}, detail_data: { providers: [] } }
-      : url.searchParams.get("cursor")
-        ? { activities: [second], snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null }
-        : { activities: [first], snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: "page-2" };
-    return route.fulfill({ json: body });
+    if (id) return route.fulfill({ json: { session: { activity_id: id, sport: "run" }, metrics: { avg_hr: { value: 141 } }, detail_data: { providers: [] } } });
+    listed += 1;
+    const day = url.searchParams.get("cursor") ? null : oldDay;
+    return route.fulfill({ json: { activities: day ? [{ id: "act_old", name: "Alter Lauf", sport: "run", started_at_local: `${day}T07:00:00`, moving_duration_s: 1800 }] : [], snapshot_synced_at: null, next_cursor: null } });
   });
-  await page.goto("/#analysis/sessions");
+  await page.goto("/#plan/overview");
   await expect(page.locator("#appShell")).toBeVisible();
-  const garmin = page.locator(".activity-analysis-item").first();
-  await expect(garmin).toContainText("Rad indoor");
-  await garmin.locator("summary").click();
-  await expect(garmin.locator(".activity-analysis-panel")).toBeVisible();
-  await page.getByRole("button", { name: "Weitere Einheiten laden" }).click();
-  await expect(page.locator(".activity-analysis-item").filter({ hasText: "Synthetic older run" })).toContainText("Laufen");
+  await page.waitForFunction(() => state.initialStateLoaded);
+  oldDay = await page.evaluate(() => addDateKey(timezoneDateKey(state.data?.profile?.timezone, new Date()), -35));
+  const previous = page.getByRole("button", { name: "Vorherige Woche" });
+  for (let step = 0; step < 6 && !(await page.locator(".planned-entry").filter({ hasText: "Alter Lauf" }).count()); step += 1) {
+    await expect(previous).toBeEnabled();
+    await previous.click();
+    await page.waitForTimeout(200);
+  }
+  await expect(page.locator(".planned-entry").filter({ hasText: "Alter Lauf" })).toBeVisible();
+  expect(listed).toBeGreaterThan(0);
+  const details = await openSessionDetails(page, "Alter Lauf");
+  await expect(details.locator(".activity-analysis-stats")).toContainText("141 bpm");
 });
 
-test("@responsive analysis sessions list expands Garmin-style charts", async ({ page, request }) => {
+test("@responsive calendar details expand Garmin-style charts", async ({ page, request }) => {
   const seed = await request.get("/api/fixture/activity");
   expect(seed.ok()).toBeTruthy();
-  await page.goto("/#analysis/sessions");
+  await page.goto("/#plan/overview");
   await expect(page.locator("#appShell")).toBeVisible();
-  const nav = page.getByRole("navigation", { name: "Analysebereiche" });
-  await expect(nav.getByRole("link", { name: "Einheiten" })).toHaveAttribute("aria-current", "page");
-  await expect(page.locator("#sessionPerformance")).toBeHidden();
-  const item = page.locator(".activity-analysis-item").filter({ hasText: "Synthetic ride <img src=x>" }).first();
-  await item.locator("summary").click();
+  await page.evaluate(async () => { await AppRouter.navigate("plan/overview", { historyMode: "replace" }); });
+  const card = page.locator(".planned-entry").filter({ hasText: "Synthetic ride <img src=x>" }).first();
+  await card.evaluate((element) => { element.open = true; });
+  const item = card.locator(".planned-activity-more");
+  await item.locator(":scope > summary").click();
   await expect(item.locator(".activity-analysis-stats")).toContainText("25,0 km");
   await expect(item.locator(".activity-analysis-stats div").filter({ hasText: "Normalized Power" })).toContainText("205 W");
   const power = item.getByRole("img", { name: /^Leistung: Ø 200/ });
@@ -256,7 +302,7 @@ test("@responsive analysis sessions list expands Garmin-style charts", async ({ 
     const color = (node) => getComputedStyle(node).getPropertyValue("--zone-color").trim();
     const detail = rows.map((row) => ({ zone: row.dataset.zone, color: color(row), track: row.querySelector(".activity-analysis-zone-bar").getBoundingClientRect().width }));
     const overview = trainingFocusDistribution("HF-Zonen", trainingFocusZoneSeconds([{ seconds: Object.fromEntries(detail.map(({ zone }, index) => [zone, (index + 1) * 600])) }]), "seconds", "");
-    document.querySelector("#activityAnalysis").append(overview);
+    rows[0].closest(".activity-analysis-panel").append(overview);
     const result = { detail, overview: [...overview.querySelectorAll(".training-focus-row")].map((row) => ({ zone: row.dataset.zone, color: color(row), track: row.querySelector("progress").getBoundingClientRect().width })) };
     overview.remove();
     return result;
@@ -271,9 +317,6 @@ test("@responsive analysis sessions list expands Garmin-style charts", async ({ 
   await expect(item).toContainText("Datenabdeckung");
   expect(await item.locator("img").count()).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-  for (const link of await nav.getByRole("link").all()) {
-    expect(await link.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBeTruthy();
-  }
 });
 
 test("@responsive feedback save and undo show the returned load without a detail refetch", async ({ page }) => {

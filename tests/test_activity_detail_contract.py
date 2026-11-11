@@ -279,6 +279,7 @@ class DocumentShapeTests(unittest.TestCase):
                 "session",
                 "metrics",
                 "streams",
+                "running_dynamics_streams",
                 "laps",
                 "zones",
                 "strength_sets",
@@ -590,13 +591,24 @@ class StreamTests(unittest.TestCase):
                     stream_set(
                         INTERVALS,
                         "i-ride-99",
-                        {HR: heart_rate_values(), POWER: (200.0,) * len(TIME)},
+                        {
+                            HR: heart_rate_values(),
+                            POWER: (200.0,) * len(TIME),
+                            StreamChannel.GROUND_CONTACT_TIME_MS: (250.0,) * len(TIME),
+                        },
                         label="Intervals.icu",
                     )
                 )
             ],
         )
 
+        # #2258: running dynamics come per second in their own section, same time axis.
+        dynamics = doc["running_dynamics_streams"]
+        self.assertEqual({"ground_contact_time_ms"}, set(dynamics))
+        self.assertEqual(
+            len(doc["streams"]["time_s"]),
+            len(dynamics["ground_contact_time_ms"]["values"]),
+        )
         streams = doc["streams"]
         time_s = streams["time_s"]
         self.assertLessEqual(len(time_s), 2000)
@@ -612,6 +624,9 @@ class StreamTests(unittest.TestCase):
 
     def test_streams_are_absent_without_stream_sets(self) -> None:
         self.assertIsNone(build([record(INTERVALS, "i-ride-99")])["streams"])
+        self.assertIsNone(
+            build([record(INTERVALS, "i-ride-99")])["running_dynamics_streams"]
+        )
 
 
 class LapAndZoneTests(unittest.TestCase):

@@ -89,7 +89,29 @@ async function showCalendarEntry(page, match) {
   await showCalendarDay(page, dateKey);
 }
 
+// Puts synthetic completed sessions on today's calendar day and renders the week (#2258).
+async function renderCalendarSessions(page, sessions) {
+  await page.evaluate(async (items) => {
+    await AppRouter.navigate("plan/overview", { historyMode: "replace" });
+    const today = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    // The calendar places a completed session by its local start, so it moves to today at its own time.
+    state.data.training_calendar = items.map((item) => ({ ...item, date: today, is_completed_activity: true, started_at_local: `${today}T${String(item.started_at_local || "").slice(11) || "08:00:00"}` }));
+    renderPlanned(state.data.training_calendar);
+  }, sessions);
+}
+
+// Opens a completed session's card and its "Details"; returns the details element.
+async function openSessionDetails(page, name) {
+  const card = page.locator(".planned-entry.is-completed").filter({ hasText: name }).first();
+  await card.evaluate((element) => { element.open = true; });
+  const more = card.locator(".planned-activity-more");
+  await more.locator(":scope > summary").click();
+  return more;
+}
+
 module.exports = {
+  renderCalendarSessions,
+  openSessionDetails,
   showCalendarDay,
   showCalendarEntry,
   contrastRatio,

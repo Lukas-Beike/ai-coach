@@ -660,7 +660,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     const contrasts = computedColors.map(([foreground, background]) => contrastRatio(foreground, background));
     expect(contrasts.every((ratio) => ratio >= 4.5), `${theme} completed session contrast`).toBe(true);
   }
-  if (!(await completed.evaluate((element) => element.open))) await completed.locator("summary").click();
+  if (!(await completed.evaluate((element) => element.open))) await completed.locator(":scope > summary").click();
   // Every value once with German labels; the Coach button names the session, never its stored name.
   const facts = completed.locator(".planned-actual-facts");
   await expect(facts).toContainText("Belastung 42");

@@ -1,11 +1,9 @@
-/* Single-session analysis list. Charts follow the Garmin Connect app: one filled area per channel, average line and tap readout. */
+/* One session's details in its calendar card (#2258). Charts follow the Garmin Connect app: one filled area per channel, average line and tap readout. */
 (() => {
   const SVG_NS = "http://www.w3.org/2000/svg";
-  const PAGE_SIZE = 20;
   const WIDTH = 340; const HEIGHT = 150; const LEFT = 40; const RIGHT = 8; const TOP = 10; const BOTTOM = 22;
-  // `epoch` changes only when the list is rebuilt; open panels and pagination stay valid across unchanged renders.
-  let list = { key: null, cursor: null, epoch: 0 };
-  let pending = null; let rerun = false;
+  // The latest load of each panel; an older answer for the same panel is dropped.
+  const panelLoads = new WeakMap();
 
   function node(tag, text, className) {
     const element = document.createElement(tag);
@@ -30,19 +28,12 @@
     return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
   };
 
-  // List rows and the loaded document both carry the session's neutral sport.
+  // The calendar entry and the loaded document both carry the session's neutral sport.
   function sportKind(activity) {
     const sport = activity?.sport;
     if (sport === "swim") return "swim";
     if (["run", "walk", "hike"].includes(sport)) return "run";
     return "other";
-  }
-
-  // Walking and hiking use pace charts like running, so they need their own labels instead of "Andere".
-  function sportLabel(activity) {
-    if (activity?.sport === "hike") return "Wandern";
-    if (activity?.sport === "walk") return "Gehen";
-    return activitySportLabel(activity);
   }
 
   // Pace sports show min/km (or min/100 m); others km/h. Stops below 0.3 m/s become gaps.
@@ -68,6 +59,8 @@
       cadenceChannel(activity, metrics),
       { key: "altitude_m", label: "Höhe", unit: "m", color: "elevation", format: (v) => numberText(v), elevation: true },
       { key: "temperature_c", label: "Temperatur", unit: "°C", color: "temperature", format: (v) => numberText(v, 1), average: metrics.avg_temp_c, max: metrics.max_temp_c },
+      // Running dynamics per second, named like their averages in the values (#2258).
+      ...ActivityDetails.RUNNING_DYNAMICS.map(([key, label, unit, digits]) => ({ key, label, unit, color: "dynamics", format: (v) => numberText(v, digits), average: metrics[key] })),
     ].filter((channel) => Array.isArray(streams.channels?.[channel.key]?.values));
   }
 
@@ -224,12 +217,12 @@
     return converted == null ? null : speed.format(converted);
   }
 
-  // Before the document loads, the list row's summary values stand in under the document's metric keys.
+  // When the document cannot be read, the calendar entry's summary values stand in under the document's metric keys.
   function rowMetrics(row) {
     const keys = ["distance_m", "moving_duration_s", "elapsed_duration_s", "avg_speed_mps", "max_speed_mps", "avg_hr", "max_hr", "avg_power", "normalized_power", "elevation_gain_m", "intensity", "efficiency_factor", "efficiency_factor_unit", "variability_index", "work_kj", "decoupling_pct", "energy_kj", "energy_kcal", "ground_contact_time_ms", "ground_contact_balance_pct", "vertical_oscillation_cm", "vertical_ratio_pct", "step_length_m"];
     const metrics = {};
     for (const key of keys) if (row?.[key] != null) metrics[key] = row[key];
-    // The list row names its load like planned units do (training_load); the document calls it load.
+    // The calendar entry names its load like planned units do (training_load); the document calls it load.
     if (row?.training_load != null) metrics.load = row.training_load;
     return metrics;
   }
@@ -325,9 +318,9 @@
     return section;
   }
 
-  function renderPanel(panel, summary, payload, epoch) {
+  function renderPanel(panel, summary, payload, token) {
     panel.replaceChildren();
-    // The document's session wins; the list row stands in until it loads.
+    // The document's session wins; the calendar entry stands in until it loads.
     const session = payload?.session || summary;
     const activity = { sport: session.sport, environment: session.environment };
     const metrics = payload ? ActivityDetails.metricValues(payload) : rowMetrics(summary);
@@ -340,7 +333,8 @@
       drift.append(...driftLines.map((line) => node("p", line)));
       panel.append(drift);
     }
-    const streams = payload?.streams;
+    // The running dynamics share the time axis of the other channels.
+    const streams = payload?.streams && { ...payload.streams, channels: { ...payload.streams.channels, ...payload.running_dynamics_streams } };
     const charts = streams ? channels(activity, metrics, streams).map((channel) => chart(streams, channel)).filter(Boolean) : [];
     if (charts.length) {
       const grid = node("div", null, "activity-analysis-charts");
@@ -353,130 +347,35 @@
     if (!payload) return;
     if (streams && !charts.length) panel.append(node("p", "Keine darstellbaren Messreihen", "muted"));
     panel.append(...ActivityDetails.providerNotes(payload));
-    appendRefresh(panel, summary, payload, epoch);
+    appendRefresh(panel, summary, payload, token);
   }
 
   // The newest activities are preloaded after each provider refresh; older ones load through these actions.
-  function appendRefresh(panel, summary, payload, epoch) {
+  function appendRefresh(panel, summary, payload, token) {
     const status = node("p", "", "muted"); status.setAttribute("role", "status");
-    const isCurrent = () => epoch === list.epoch && panel.isConnected;
+    const isCurrent = () => panelLoads.get(panel) === token && panel.isConnected;
     panel.append(ActivityDetails.refreshActions(payload, {
       api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => loadPanel(panel, summary),
     }), status);
   }
 
   async function loadPanel(panel, summary) {
-    const epoch = list.epoch;
-    panel.replaceChildren(createLoadingState("Analyse wird geladen …"));
+    const token = {};
+    panelLoads.set(panel, token);
+    const current = () => panelLoads.get(panel) === token && panel.isConnected;
+    panel.replaceChildren(createLoadingState("Details werden geladen …"));
     let payload;
     try {
-      payload = await api(`/api/activities/${encodeURIComponent(String(summary.id))}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
+      payload = await api(`/api/activities/${encodeURIComponent(String(summary.activity_id || summary.id))}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
     } catch (error) {
-      if (epoch !== list.epoch || !panel.isConnected) return;
-      // The list row's summary still renders when the detail document cannot be read.
-      renderPanel(panel, summary, null, epoch);
+      if (!current()) return;
+      // The card's summary values still render when the detail document cannot be read.
+      renderPanel(panel, summary, null, token);
       panel.prepend(createErrorState(error.message, () => void loadPanel(panel, summary)));
       return;
     }
-    if (epoch === list.epoch && panel.isConnected) renderPanel(panel, summary, payload, epoch);
+    if (current()) renderPanel(panel, summary, payload, token);
   }
 
-  // Right-hand key metric of a list row: load, else average power, else average heart rate.
-  function keyMetric(activity) {
-    if (finite(activity.training_load)) return `${numberText(activity.training_load)} Last`;
-    if (finite(activity.avg_power)) return `Ø ${numberText(activity.avg_power)} W`;
-    if (finite(activity.avg_hr)) return `Ø ${numberText(activity.avg_hr)} bpm`;
-    return null;
-  }
-
-  function item(activity) {
-    const entry = node("details", null, "activity-analysis-item");
-    entry.dataset.sport = sportKind(activity);
-    const sportName = activitySportLabel(activity);
-    entry.dataset.sportLabel = sportName;
-    const summary = node("summary");
-    const icon = node("span", CALENDAR_SPORT_ICONS[sportName] || "•", "planned-session-icon");
-    icon.setAttribute("aria-hidden", "true");
-    const text = node("span", null, "activity-analysis-title");
-    const label = sportLabel(activity);
-    const title = activity.name || label;
-    text.append(node("strong", title));
-    // Local start dates are already day keys; reparsing them as UTC instants could shift the day.
-    const start = String(activity.started_at_local || "");
-    const day = String(activity.started_at_local || activity.started_at || "").slice(0, 10);
-    const time = /T\d{2}:\d{2}/.test(start) ? start.slice(11, 16) : null;
-    const facts = [day ? dateLabel(day) : null, time, title === label ? null : label, finite(activity.moving_duration_s) ? AppFormat.duration(activity.moving_duration_s) : null, AppFormat.distance(activity.distance_m)].filter(Boolean);
-    text.append(node("span", facts.join(" · "), "muted"));
-    summary.append(icon, text);
-    const metric = keyMetric(activity);
-    if (metric) summary.append(node("span", metric, "activity-analysis-load"));
-    const panel = node("div", null, "activity-analysis-panel");
-    entry.append(summary, panel);
-    entry.addEventListener("toggle", () => { if (entry.open && !panel.childElementCount) void loadPanel(panel, activity); });
-    return entry;
-  }
-
-  function appendPage(root, payload) {
-    root.querySelector(".activity-analysis-more")?.remove();
-    const items = (payload.activities || []).filter((activity) => activity?.id != null);
-    root.querySelector(".activity-analysis-list").append(...items.map(item));
-    list.cursor = payload.next_cursor || null;
-    if (!list.cursor) return;
-    const more = node("button", "Weitere Einheiten laden", "secondary-button activity-analysis-more");
-    more.type = "button";
-    more.addEventListener("click", async () => {
-      more.disabled = true;
-      const epoch = list.epoch;
-      try {
-        const next = await api(`/api/activities?limit=${PAGE_SIZE}&cursor=${encodeURIComponent(list.cursor)}`);
-        if (epoch === list.epoch && more.isConnected) appendPage(root, next);
-      } catch (error) {
-        if (!more.isConnected) return;
-        more.disabled = false;
-        more.textContent = `${error.message} Erneut versuchen`;
-      }
-    });
-    root.append(more);
-  }
-
-  // Route entry and performance refreshes may both ask for the list; overlapping calls share one request plus one follow-up.
-  function render() {
-    if (pending) { rerun = true; return pending; }
-    pending = load().finally(() => {
-      pending = null;
-      if (rerun) { rerun = false; void render(); }
-    });
-    return pending;
-  }
-
-  async function load() {
-    const root = document.getElementById("activityAnalysis");
-    if (!root) return;
-    if (!root.querySelector(".activity-analysis-list")) {
-      root.dataset.analysisEmpty = "loading";
-      root.replaceChildren(createLoadingState("Einheiten werden geladen …"));
-    }
-    try {
-      const payload = await api(`/api/activities?limit=${PAGE_SIZE}`, { timeoutMs: DATA_LOAD_TIMEOUT_MS });
-      const key = `${payload.snapshot_synced_at}|${(payload.activities || []).map((activity) => activity.id).join(",")}`;
-      // An unchanged sync keeps opened sessions and loaded pages in place.
-      if (key === list.key && root.querySelector(".activity-analysis-list")) return;
-      list = { key, cursor: null, epoch: list.epoch + 1 };
-      const items = node("div", null, "activity-analysis-list");
-      root.replaceChildren(items);
-      // No sessions: the analysis view shows its one empty card instead of the list (#1783).
-      root.dataset.analysisEmpty = String(!payload.activities?.length);
-      appendPage(root, payload);
-    } catch (error) {
-      if (error?.name === "AbortError") return;
-      // A failed refresh keeps an already rendered list.
-      if (root.querySelector(".activity-analysis-list")) return;
-      root.dataset.analysisEmpty = "failed";
-      root.replaceChildren(createErrorState(error.message, () => void render()));
-    } finally {
-      renderAnalysisSegmentsIfActive();
-    }
-  }
-
-  globalThis.ActivityAnalysis = { render };
+  globalThis.ActivityAnalysis = { loadPanel };
 })();

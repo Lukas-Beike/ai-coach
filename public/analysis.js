@@ -1312,9 +1312,8 @@ const ANALYSIS_SEGMENT_CONTENT = {
   load: ["sessionPerformance", "analysisLoadCharts", "trainingZoneCharts"],
   performance: ["currentPerformance", "performanceEnduranceCharts", "analysisHistoryCharts", "performancePredictions", "cyclingPowerProfile"],
   recovery: ["personalRecovery"],
-  sessions: ["activityAnalysis"],
 };
-const ANALYSIS_EMPTY_TITLES = { load: "Noch keine Belastungsdaten", performance: "Noch keine Leistungsdaten", recovery: "Noch keine Erholungsdaten", sessions: "Noch keine Einheiten" };
+const ANALYSIS_EMPTY_TITLES = { load: "Noch keine Belastungsdaten", performance: "Noch keine Leistungsdaten", recovery: "Noch keine Erholungsdaten" };
 
 function analysisSegmentEmpty(segment) {
   return ANALYSIS_SEGMENT_CONTENT[segment].every((id) => document.getElementById(id)?.dataset.analysisEmpty === "true");
@@ -1372,9 +1371,9 @@ function renderAnalysisSegmentsIfActive() {
 }
 
 function renderAnalysisSegments(route = state.route) {
-  const segment = { "analysis/load": "load", "analysis/recovery": "recovery", "analysis/sessions": "sessions" }[route] || "performance";
+  const segment = { "analysis/load": "load", "analysis/recovery": "recovery" }[route] || "performance";
   const empty = renderAnalysisEmptyState(segment);
-  const labels = { performance: "Leistung", load: "Belastung", recovery: "Erholung", sessions: "Einheiten" };
+  const labels = { performance: "Leistung", load: "Belastung", recovery: "Erholung" };
   document.getElementById("analysisRefreshButton").setAttribute("aria-label", `Analyse aktualisieren: ${labels[segment]}`);
   const performance = segment === "performance" && !empty;
   const load = segment === "load" && !empty;
@@ -1388,7 +1387,6 @@ function renderAnalysisSegments(route = state.route) {
   document.getElementById("trainingZoneCharts").hidden = !load;
   document.getElementById("analysisLoadCharts").hidden = !load;
   document.getElementById("personalRecovery").hidden = segment !== "recovery";
-  document.getElementById("activityAnalysis").hidden = segment !== "sessions" || empty;
   document.querySelectorAll("[data-analysis-segment]").forEach((link) => {
     const active = link.dataset.analysisSegment === segment;
     link.classList.toggle("active", active);
@@ -1413,7 +1411,6 @@ const analysisRefresh = AppViewRefresh.create({
     const performance = state.data.performance;
     clearAnalysisReportCache();
     if (route === "analysis/recovery") renderPersonalRecovery(performance.personal_recovery);
-    else if (route === "analysis/sessions") await ActivityAnalysis.render();
     else {
       renderAnalysisHistory(performance.history);
       if (route === "analysis/load") renderTrainingFocus(performance.training_focus_periods?.[analysisHistoryPeriod] || performance.training_focus);

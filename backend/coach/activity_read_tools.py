@@ -167,6 +167,9 @@ class CoachActivityReadToolService:
                 profile=self._profile.get(),
                 today=self._today(),
             )
+            # Per-second running dynamics are for the calendar's charts; the Coach
+            # reads their averages from the metrics.
+            detail.pop("running_dynamics_streams", None)
             result = self._with_session_context(detail)
             session = detail.get("session")
             if self._session_corrections is not None and isinstance(session, dict):

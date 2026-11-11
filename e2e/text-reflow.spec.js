@@ -8,7 +8,6 @@ const routes = [
   ["analysis/load", (page) => page.locator("#sessionPerformance").getByRole("heading", { name: /^Trainingsfokus/ })],
   ["analysis/performance", (page) => page.locator("#performancePredictions .race-predictions-table")],
   ["analysis/recovery", (page) => page.locator("#personalRecovery .analysis-chart-card").first()],
-  ["analysis/sessions", (page) => page.locator("#activityAnalysis")],
 ];
 
 test("@responsive navigation and banners keep their text inside at 200 % text size", async ({ page }) => {
