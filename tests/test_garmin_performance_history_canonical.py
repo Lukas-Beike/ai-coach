@@ -11,13 +11,13 @@ snapshots only; no account, network or real data is used.
 from __future__ import annotations
 
 import json
-import sqlite3
-import tempfile
 import unittest
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from support import temp_database
 
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import body, chart_history, trends
@@ -78,49 +78,41 @@ class StoredHistoryPrecedenceTests(unittest.TestCase):
         )
 
     def test_the_dedicated_ftp_of_a_day_survives_the_next_sync(self) -> None:
-        from backend.db import DatabaseManager, row_factory
+        from backend.db import row_factory
         from backend.db.schema import initialize_schema
         from backend.sync.canonical_table_reader import CanonicalTableReader
 
         day = "2026-10-10"
-        with tempfile.TemporaryDirectory() as directory:
-            manager = DatabaseManager(
-                Path(directory) / "history.db", sqlite3, row_factory=row_factory
+        manager = temp_database(self, "history.db", row_factory=row_factory)
+        with manager.unit_of_work() as db:
+            initialize_schema(db)
+            self.write(
+                db,
+                "2026-10-10T06:00:00+00:00",
+                cycling_ftp_history=[
+                    {"calendarDate": day, "functionalThresholdPower": 280}
+                ],
+                performance_history=[
+                    {"date": day, "metrics": {"cycling_ftp_watts": 279}}
+                ],
             )
-            try:
-                with manager.unit_of_work() as db:
-                    initialize_schema(db)
-                    self.write(
-                        db,
-                        "2026-10-10T06:00:00+00:00",
-                        cycling_ftp_history=[
-                            {"calendarDate": day, "functionalThresholdPower": 280}
-                        ],
-                        performance_history=[
-                            {"date": day, "metrics": {"cycling_ftp_watts": 279}}
-                        ],
-                    )
-                    # The next sync re-sends the accumulated history only.
-                    self.write(
-                        db,
-                        "2026-10-11T06:00:00+00:00",
-                        performance_history=[
-                            {"date": day, "metrics": {"cycling_ftp_watts": 279}},
-                            {
-                                "date": "2026-10-11",
-                                "metrics": {"cycling_ftp_watts": 281},
-                            },
-                        ],
-                    )
-                with manager.reader() as db:
-                    ftp = {
-                        item.observed_on.isoformat(): item.value.value
-                        for item in CanonicalTableReader().observations(
-                            db, MetricKind.FTP
-                        )
-                    }
-            finally:
-                manager.close()
+            # The next sync re-sends the accumulated history only.
+            self.write(
+                db,
+                "2026-10-11T06:00:00+00:00",
+                performance_history=[
+                    {"date": day, "metrics": {"cycling_ftp_watts": 279}},
+                    {
+                        "date": "2026-10-11",
+                        "metrics": {"cycling_ftp_watts": 281},
+                    },
+                ],
+            )
+        with manager.reader() as db:
+            ftp = {
+                item.observed_on.isoformat(): item.value.value
+                for item in CanonicalTableReader().observations(db, MetricKind.FTP)
+            }
         self.assertEqual(ftp, {day: 280.0, "2026-10-11": 281.0})
 
     def test_history_refills_a_day_whose_dedicated_row_is_outdated(self) -> None:
@@ -133,7 +125,7 @@ class StoredHistoryPrecedenceTests(unittest.TestCase):
             SourceKind,
             Sport,
         )
-        from backend.db import DatabaseManager, canonical_store, row_factory
+        from backend.db import canonical_store, row_factory
         from backend.db.schema import initialize_schema
         from backend.providers.garmin_health_mapping import MAPPER_VERSION
         from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -154,33 +146,27 @@ class StoredHistoryPrecedenceTests(unittest.TestCase):
                 label="Garmin Connect",
             ),
         )
-        with tempfile.TemporaryDirectory() as directory:
-            manager = DatabaseManager(
-                Path(directory) / "history.db", sqlite3, row_factory=row_factory
+        manager = temp_database(self, "history.db", row_factory=row_factory)
+        with manager.unit_of_work() as db:
+            initialize_schema(db)
+            canonical_store.upsert_observation(
+                db,
+                stale,
+                mapper_version=MAPPER_VERSION - 1,
+                now="2026-10-10T06:00:00+00:00",
             )
-            try:
-                with manager.unit_of_work() as db:
-                    initialize_schema(db)
-                    canonical_store.upsert_observation(
-                        db,
-                        stale,
-                        mapper_version=MAPPER_VERSION - 1,
-                        now="2026-10-10T06:00:00+00:00",
-                    )
-                    self.write(
-                        db,
-                        "2026-10-11T06:00:00+00:00",
-                        performance_history=[
-                            {
-                                "date": day.isoformat(),
-                                "metrics": {"cycling_ftp_watts": 279},
-                            }
-                        ],
-                    )
-                with manager.reader() as db:
-                    (served,) = CanonicalTableReader().observations(db, MetricKind.FTP)
-            finally:
-                manager.close()
+            self.write(
+                db,
+                "2026-10-11T06:00:00+00:00",
+                performance_history=[
+                    {
+                        "date": day.isoformat(),
+                        "metrics": {"cycling_ftp_watts": 279},
+                    }
+                ],
+            )
+        with manager.reader() as db:
+            (served,) = CanonicalTableReader().observations(db, MetricKind.FTP)
         self.assertEqual((served.observed_on, served.value.value), (day, 279.0))
 
 
