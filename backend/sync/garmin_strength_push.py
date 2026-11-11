@@ -70,6 +70,7 @@ SDK_REQUIRED_MESSAGE = (
 WORKOUT_MARKER = "Pacecraft"
 # Workouts of past days removed per refresh; the next refresh takes the rest.
 _PAST_REMOVAL_BATCH = 20
+_PAST_REMOVAL_ATTEMPTS = 2 * _PAST_REMOVAL_BATCH
 _STOPPED = "Nicht gesendet: Der Lauf wurde nach einem Garmin-Fehler beendet."
 
 
@@ -231,9 +232,14 @@ class GarminStrengthPushService:
         links: list[tuple[str, str | None, str | None]],
         removed: list[int],
     ) -> None:
-        """Remove up to one batch; a refused workout keeps its link but no slot."""
-        for local_id, workout_id, schedule_id in links:
-            if removed[0] >= _PAST_REMOVAL_BATCH:
+        """Remove up to one batch with a bounded number of attempts.
+
+        A refused workout keeps its link and uses an attempt but no removal slot,
+        so a few refusals never block the later workouts and many never turn into
+        a burst of requests.
+        """
+        for attempt, (local_id, workout_id, schedule_id) in enumerate(links):
+            if removed[0] >= _PAST_REMOVAL_BATCH or attempt >= _PAST_REMOVAL_ATTEMPTS:
                 return
             try:
                 self._discard(client, workout_id, schedule_id)

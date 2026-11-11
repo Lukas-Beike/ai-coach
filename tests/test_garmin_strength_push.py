@@ -1117,6 +1117,19 @@ class PastWorkoutRemovalTests(unittest.TestCase):
         self.assertIsNone(self.link(U1))
         self.assertEqual(refused, self.link(U3).remote_id)
 
+    def test_refusals_bound_the_attempts_of_one_refresh(self) -> None:
+        units = [f"{index:08d}-1111-4111-8111-111111111111" for index in range(41)]
+        for index, local_id in enumerate(units):
+            self.linked(local_id, f"2026-10-{index % 28 + 1:02d}")
+
+        with patch.object(
+            self.garmin, "delete_workout", side_effect=_http_error(403)
+        ) as delete:
+            self.assertEqual(0, self.service.remove_past())
+
+        # Every workout is refused: 40 attempts, then the next refresh goes on.
+        self.assertEqual(40, delete.call_count)
+
     def test_a_workout_already_gone_still_drops_its_link(self) -> None:
         workout_id = self.linked(U1, "2026-11-05")
         del self.garmin.workouts[workout_id]

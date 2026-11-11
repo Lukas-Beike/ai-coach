@@ -129,6 +129,6 @@ After each Garmin `refresh` job, the system SHALL unschedule and delete the link
 
 #### Scenario: Refused workout
 - **WHEN** Garmin refuses one workout's deletion with a client error
-- **THEN** its link stays for the next refresh and the other past workouts are still removed.
+- **THEN** its link stays for the next refresh and the other past workouts are still removed; one refresh makes at most 40 removal attempts.
 
 Evidence: `backend/sync/garmin_strength_push.py:GarminStrengthPushService.remove_past`, `backend/sync/executor.py:GarminJobAdapter`; `tests/test_garmin_strength_push.py:PastWorkoutRemovalTests`.
