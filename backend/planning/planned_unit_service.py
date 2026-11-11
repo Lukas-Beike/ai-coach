@@ -193,8 +193,10 @@ class PlannedUnitService:
         The hidden unit keeps its links, so the leftover listing and the next
         "Woche synchronisieren" remove the event by its id (#2135, D-533).
         """
+        if current is None:
+            return None
         try:
-            payload = json.loads((current or {}).get("payload") or "{}")
+            payload = json.loads(current.get("payload") or "{}")
         except TypeError, ValueError:
             return None
         remote_id = _REMOTE_LINKS.resolve_remote_id(
