@@ -2,7 +2,7 @@
 
 Pace and power, planned and analysed by your AI coach. Pacecraft is a private, mobile-first PWA for a single athlete. It reads completed training and health data from Garmin and Wahoo, keeps plans, workouts and history in an encrypted local database, and coaches through an OpenAI Responses-compatible model (requests use `store: false`; attachments are sent as parsed measurements without metadata and without the first and last 500 m of positions, details in [docs/operations.md](docs/operations.md)). Intervals.icu is an output target only: the app writes workouts, competitions, nutrition and thresholds there when the athlete asks, and never reads training data from it; it only reads back what an explicit export wrote.
 
-It is standalone software for a trusted LAN or private VPN (WireGuard, Tailscale). Never expose it directly to the internet; use an authenticated TLS reverse proxy if it must be reachable from outside. Version 2.0.0.
+It is standalone software for a trusted LAN or private VPN (WireGuard, Tailscale). Never expose it directly to the internet; use an authenticated TLS reverse proxy if it must be reachable from outside.
 
 ## Top 10 features
 

@@ -21,11 +21,12 @@ success check or treat a missing, failed, or pending check as a completed review
 
 Every review conversation must be resolved before merge, including outdated
 threads and threads from other reviewers. Keep
-`required_review_thread_resolution: true` with no bypass actors in the Default
-and Main release protection rulesets.
+`required_review_thread_resolution: true` in the Default and Main release
+protection rulesets, whose only bypass actor is the user-level pull-request
+bypass named below.
 This applies to human, Dependabot, and release automation PRs alike. Fix or
 reconcile each finding before resolving its thread; never resolve it merely to
 unblock merging. Ordinary PR comments have no resolved state: complete their
 requested action or record the evidence-based disposition before merging.
-An existing user-level pull-request bypass is present in both live rulesets;
+The user-level pull-request bypass is present in both live rulesets;
 automation must not use it.

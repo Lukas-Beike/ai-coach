@@ -57,14 +57,14 @@ The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines m
 - **THEN** it holds the derived session-load and session-metric observations, the Garmin RPE, feel and minimum-heart-rate ratings, the Garmin and FIT detail sets with the executed strength sets and their source, the heart-rate histogram and zone times of each session analysis, the remote links of every provider and entity kind, the field names of nutrition-entry changes, the backfill cursors, the athlete's session purpose marking, the profile sex and the consent, purge and stage state
 
 #### Scenario: Credential-bearing runtime state
-- **WHEN** stored application state contains sessions, provider credentials, the Personal API key or its expiry date, or Garmin or Wahoo tokens
-- **THEN** those values are excluded from the archive
+- **WHEN** stored application state contains sessions, provider credentials, the Personal API key or Garmin or Wahoo tokens
+- **THEN** those values are excluded from the archive, and the non-secret Personal API key expiry date appears only in `provider_settings.json`
 
 #### Scenario: Unauthenticated download
 - **WHEN** a privacy download is requested without a valid session
 - **THEN** authentication fails before export streaming starts
 
-Evidence: `backend/backup/export.py::PrivacyArchiveExportService`; `backend/backup/export.py::PRIVACY_EXPORT_JSONL_FILES`; `backend/http_api/privacy_get.py`. Only the archive is served. `backend/provider_credentials.py::stored_visible_settings` selects the exported provider fields. Tests: `tests/test_data_safety_coverage.py::DataKindExportTests`; `tests/test_server_database.py::test_privacy_export_zip_streams_collections_and_contains_complete_manifest`; `tests/test_privacy_provider_data.py`; `tests/test_server_database.py::test_privacy_download_routes_require_auth_before_streaming`.
+Evidence: `backend/backup/export.py::PrivacyArchiveExportService`; `backend/backup/export.py::PRIVACY_EXPORT_JSONL_FILES`; `backend/http_api/privacy_get.py`. Only the archive is served. `backend/provider_credentials.py::stored_visible_settings` selects the exported provider fields. Tests: `tests/test_data_safety_coverage.py::DataKindExportTests`; `tests/test_privacy_provider_data.py::test_stored_non_secret_provider_fields_are_exported_without_secrets`; `tests/test_server_database.py::test_privacy_export_zip_streams_collections_and_contains_complete_manifest`; `tests/test_privacy_provider_data.py`; `tests/test_server_database.py::test_privacy_download_routes_require_auth_before_streaming`.
 
 ### Requirement: Coverage guards for stored data kinds
 
@@ -188,7 +188,7 @@ Local privacy deletion SHALL require the exact backend confirmation text before 
 
 #### Scenario: Files beside the database
 - **WHEN** local erasure completes
-- **THEN** recovery copies and the purge marker file beside the database stay, like the legacy Garmin token file
+- **THEN** the legacy Garmin token file and the `.env` file stay, and recovery copies and purge marker files are deleted (next scenario)
 
 #### Scenario: Delete fails midway
 - **WHEN** a table deletion fails within the local transaction

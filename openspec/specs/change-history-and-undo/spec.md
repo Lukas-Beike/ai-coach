@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Describe bounded local audit history and optimistic undo for profile, workout-library, planned-unit, competition, training-plan, zone-configuration, activity-feedback, activity-session and nutrition-entry records, the listed-but-never-undone metric export entries, together with receipt visibility and the narrower complete-turn undo surface.
+Describe bounded local audit history and optimistic undo for profile, workout-library, planned-unit, competition, training-plan, zone-configuration, activity-feedback, activity-session, nutrition-entry, nutrition-template, nutrition-product, check-in, equipment, equipment-assignment and equipment-maintenance records, the listed-but-never-undone metric export entries, together with receipt visibility and the narrower complete-turn undo surface.
 
 ## Requirements
 
@@ -58,17 +58,17 @@ The system SHALL preview undo only for an existing supported create/update/delet
 Evidence: `backend/history/undo_service.py:HistoryUndoService.preview`, `backend/history/undo_service.py:HistoryUndoService._load_history`; `backend/history/service.py:ChangeHistoryService.target`; `tests/test_history_undo_service.py:test_preview_returns_safe_proposal_and_opens_one_uow`, `tests/test_history_undo_service.py:test_preview_rejects_changed_current_hash`, `tests/test_history_undo_service.py:test_invalid_missing_and_repeated_change_ids_are_rejected`; `tests/test_history_service.py:test_target_preserves_action_diff_and_error_semantics`.
 
 ### Requirement: HU3a Supported entities and never-undone entries
-The system SHALL audit and restore the entity types profile, workout_library, planned_unit, competition, training_plan, zone_configuration, activity_feedback, activity_session, nutrition_entry, nutrition_template, nutrition_product, checkin, equipment, equipment_assignment and equipment_maintenance through their owning services, and SHALL record confirmed metric exports to a provider as `metric_export` entries that stay listed with remote sync scope but are never undone, as are entries marked not undoable by the Intervals.icu ingest purge.
+The system SHALL audit and restore the entity types profile, workout_library, planned_unit, competition, training_plan, zone_configuration, activity_feedback, activity_session, nutrition_entry, nutrition_template, nutrition_product, checkin, equipment, equipment_assignment and equipment_maintenance through their owning services, and SHALL record confirmed metric exports to a provider as `metric_export` entries that stay listed with remote sync scope but are never undone; entries whose diff carries `undoable: false` stay listed and are never undone either.
 
 #### Scenario: Metric export entry
 - **WHEN** a confirmed or automatic metric export writes values to the provider
 - **THEN** an update entry for `<provider>:<remote record>` with the allowlisted field names is recorded, shows `remote_sync` remote and `undoable` false, and a preview or apply for it fails with HTTP 400
 
 #### Scenario: Entry marked not undoable
-- **WHEN** an entry's diff carries `undoable: false`, as set by the Intervals.icu purge of release 2.0.0 for the feedback rows it re-keyed
+- **WHEN** an entry's diff carries `undoable: false`, as set by the Intervals.icu purge of release 2.0.0 for the feedback rows it re-keyed (no current code sets the marker)
 - **THEN** the entry stays listed but preview and apply fail with HTTP 400 instead of restoring a record the purge moved
 
-Evidence: `backend/change_history.py:ENTITY_TYPES`, `backend/change_history.py:NOT_UNDOABLE_ENTITY_TYPES`, `backend/change_history.py:undoable`, `backend/change_history.py:mark_not_undoable`, `backend/history/undo_service.py:HistoryUndoService._restore`, `backend/history/undo_service.py:HistoryUndoService._load_history`, `backend/sync/metric_export.py`; `tests/test_metric_export.py:test_writes_are_in_the_change_history_without_undo`.
+Evidence: `backend/change_history.py:ENTITY_TYPES`, `backend/change_history.py:NOT_UNDOABLE_ENTITY_TYPES`, `backend/change_history.py:undoable` (the unused `mark_not_undoable` is the only writer of the marker), `backend/history/undo_service.py:HistoryUndoService._restore`, `backend/history/undo_service.py:HistoryUndoService._load_history`, `backend/sync/metric_export.py`; `tests/test_metric_export.py:test_writes_are_in_the_change_history_without_undo`.
 
 ### Requirement: HU4 Atomic hash-checked domain restore
 The system SHALL revalidate both recorded after-hash and supplied expected current hash during apply, restore through the owning domain transaction, audit the undo and leave remote state untouched.
@@ -125,7 +125,7 @@ Evidence: `backend/coach/planning_action_tools.py:CoachPlanningActionToolService
 The system SHALL summarize applied Coach record changes on receipts/answers and expose whole-turn undo only when every applied effect is fully tracked with history references.
 
 #### Scenario: Fully tracked turn
-- **WHEN** all applied changes in a turn are supported fully tracked profile, competition-save or template-management effects with history references
+- **WHEN** all applied changes in a turn come from fully tracked tools (profile, competition save, training-template management, activity feedback and sessions, nutrition entries, templates and products, check-ins and equipment), each with history references
 - **THEN** the receipt/assistant message exposes distinct change labels, an undoable flag and no undone timestamp before undo.
 
 #### Scenario: Mixed untracked effects
@@ -144,7 +144,7 @@ The system SHALL summarize applied Coach record changes on receipts/answers and 
 - **WHEN** a turn only reads, fails before applying, stages/previews or waits for approval
 - **THEN** those steps do not appear as applied record changes, and model input does not receive private undo references.
 
-Evidence: `backend/coach/change_receipts.py:change_summary`, `backend/coach/change_receipts.py:turn_changes`; `backend/coach/final_receipt.py:CoachFinalReceiptService.persist`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_change_receipts.py:test_a_write_with_untracked_effects_is_listed_without_turn_undo`, `tests/test_coach_change_receipts.py:test_an_applied_history_undo_is_listed_and_blocks_turn_undo`, `tests/test_coach_planning_action_tools.py:test_undo_applies_directly_when_apply_is_true`, `tests/test_coach_change_receipts.py:test_reads_failures_proposals_and_previews_are_not_changes`, `tests/test_coach_change_receipts.py:test_the_model_never_receives_undo_references`; `tests/test_server_coach_turn_undo.py:test_turn_changes_show_on_the_answer_and_undo_together`.
+Evidence: `backend/coach/change_receipts.py:change_summary`, `backend/coach/change_receipts.py:_FULLY_TRACKED_TOOLS`, `backend/coach/change_receipts.py:turn_changes`; `backend/coach/final_receipt.py:CoachFinalReceiptService.persist`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_applied_tracked_writes_are_listed_once_and_undoable`, `tests/test_coach_change_receipts.py:test_a_write_with_untracked_effects_is_listed_without_turn_undo`, `tests/test_coach_change_receipts.py:test_an_applied_history_undo_is_listed_and_blocks_turn_undo`, `tests/test_coach_planning_action_tools.py:test_undo_applies_directly_when_apply_is_true`, `tests/test_coach_change_receipts.py:test_reads_failures_proposals_and_previews_are_not_changes`, `tests/test_coach_change_receipts.py:test_the_model_never_receives_undo_references`; `tests/test_server_coach_turn_undo.py:test_turn_changes_show_on_the_answer_and_undo_together`.
 
 ### Requirement: HU8 All-or-none whole-turn undo
 The system SHALL undo an eligible completed turn's collected local changes newest-first in one transaction and update its durable receipt once, refusing repeated or stale/ineligible turn undo.

@@ -73,7 +73,7 @@ The diagnostic report SHALL compose local configuration flags, provider/job stat
 
 #### Scenario: Canonical session conflicts
 - **WHEN** the report is generated
-- **THEN** `canonical_session_conflicts` lists the newest canonical sessions (with their total count) that hold more than one active record of one provider and recording origin, by session id, local date, provider, origin and record count only
+- **THEN** `canonical_session_conflicts` lists the newest canonical sessions (with their total count) that hold more than one active record of one provider and recording origin, by session id, local date, provider, origin and record count only (at most 50 sessions), and `link_kinds` counts the active sessions per link kind
 
 #### Scenario: Canonical provider composition
 - **WHEN** the report is generated
