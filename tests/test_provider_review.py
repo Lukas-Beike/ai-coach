@@ -16,6 +16,7 @@ from garmin_support import read_garmin, save_garmin
 from support import store_canonical_snapshot
 
 from backend.db.manager import DATABASE_MANAGER_CACHE
+from backend.errors import AppError
 from backend.http_api.auth import RATE_LIMITER
 from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
@@ -80,7 +81,6 @@ class ProviderReviewTests(unittest.TestCase):
             item.stop()
         self.directory.cleanup()
 
-
     def test_privacy_delete_drains_nested_writer_before_reporting_success(self):
         entered, release, deleted = (
             threading.Event(),
@@ -95,11 +95,12 @@ class ProviderReviewTests(unittest.TestCase):
                 entered.set()
                 release.wait(5)
                 with runtime_maintenance.MAINTENANCE_GATE.operation():
-                    snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+                    snapshot_seed.save_snapshot(
+                        server.SYNC_PERSISTENCE.state_repository(),
                         {
                             "synced_at": "synthetic",
                             "recent_activities": [{"id": "private"}],
-                        }
+                        },
                     )
             except Exception as exc:  # noqa: BLE001 - Collect every worker-thread failure for the main-thread assertion.
                 errors.append(exc)
@@ -160,7 +161,7 @@ class ProviderReviewTests(unittest.TestCase):
             entered.set()
             release.wait(5)
             server.key_value_service().set("private_after_fetch", "synthetic")
-            raise server.AppError(400, "Synthetic provider failure")
+            raise AppError(400, "Synthetic provider failure")
 
         def erase():
             server.PRIVACY_ASSEMBLY.delete_service().delete("LOKALE DATEN LÖSCHEN")
@@ -215,7 +216,7 @@ class ProviderReviewTests(unittest.TestCase):
                 )
                 self.assertTrue(result["authenticated"])
                 rate_limit.assert_called_with(RATE_LIMITER, "login:127.0.0.1", 5, 900)
-                with self.assertRaises(server.AppError) as error:
+                with self.assertRaises(AppError) as error:
                     server.session_auth_service().login_user(
                         Mock(client_address=("127.0.0.1", 0)), password + "x"
                     )
@@ -225,8 +226,6 @@ class ProviderReviewTests(unittest.TestCase):
     def manager_for_login(self):
         with patch.object(server, "CONFIG", replace(server.CONFIG, app_password="")):
             return server.database_manager()
-
-
 
     def test_retained_metric_freshness_reaches_coach_and_public_without_new_history(
         self,
@@ -263,13 +262,14 @@ class ProviderReviewTests(unittest.TestCase):
             }
             payloads.prepare_remote(second)
             save_garmin(second, replace=False)
-            snapshot_seed.save_snapshot(server.SYNC_PERSISTENCE.state_repository(), 
+            snapshot_seed.save_snapshot(
+                server.SYNC_PERSISTENCE.state_repository(),
                 {
                     "synced_at": second["synced_at"],
                     "athlete": {},
                     "recent_wellness": [],
                     "recent_activities": [],
-                }
+                },
             )
             garmin = read_garmin()
             public = performance_context.current_performance_context(

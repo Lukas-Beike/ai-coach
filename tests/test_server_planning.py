@@ -19,6 +19,7 @@ from backend import change_history
 from backend.activities import calendar_projection as activity_calendar_projection
 from backend.coach import context as coach_context
 from backend.coach import limits as coach_limits
+from backend.errors import AppError
 from backend.performance.context import current_performance_context
 from backend.performance.freshness import GarminSyncStatus
 from backend.planning import adaptive as planning_adaptive
@@ -139,7 +140,7 @@ class ServerPlanningTests(ServerTestCase):
             "ambiguities": [],
             "authorization_scope": ["local_plan_create"],
         }
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "apply_training_changes",
                 {
@@ -426,7 +427,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(
             server.ATHLETE_DATA.checkin().context()["today"]["pain"], "left knee"
         )
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.ATHLETE_DATA.checkin().save({"soreness": 11})
 
     def test_empty_activity_feedback_removes_entry_and_input_is_bounded(self):
@@ -946,7 +947,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual((category, priority), ("RACE_A", "A"))
         normalized_id = planning_competitions.competition_normalized_id("not-a-uuid")
         self.assertEqual(str(uuid.UUID(normalized_id)), normalized_id)
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             planning_competitions.competition_category_and_priority(
                 {"priority": "Z"}, "Race"
             )
@@ -983,7 +984,7 @@ class ServerPlanningTests(ServerTestCase):
         old = (
             _local_datetime.now().astimezone().date() - timedelta(days=4)
         ).isoformat()
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             planning_workouts.workout_event_payload(
                 "abc",
                 {"date": old, "duration_minutes": 60},
@@ -1116,7 +1117,7 @@ class ServerPlanningTests(ServerTestCase):
             ),
             "duration_minutes": 50,
         }
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             server.PLANNING_WORKFLOWS.local_plan_creation_service().save([workout])
         self.assertIn("Zeile 6", str(raised.exception))
         self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
@@ -1134,7 +1135,7 @@ class ServerPlanningTests(ServerTestCase):
         ):
             with (
                 self.subTest(description=description),
-                self.assertRaises(server.AppError),
+                self.assertRaises(AppError),
             ):
                 planning_workouts.validate_workout_description(
                     {"type": "Run", "description": description}
@@ -1209,14 +1210,14 @@ class ServerPlanningTests(ServerTestCase):
                     "synthetic", workout, today=server.ATHLETE_CLOCK.now().date()
                 ),
             ):
-                with self.assertRaises(server.AppError):
+                with self.assertRaises(AppError):
                     operation()
             folder.assert_not_called()
             post.assert_not_called()
             put.assert_not_called()
 
     def test_local_template_and_planned_edit_reject_ambiguous_extension(self):
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.PLANNING_DATA.workout_library().create_template(
                 {
                     "sport": "Run",
@@ -1237,7 +1238,7 @@ class ServerPlanningTests(ServerTestCase):
                 }
             ]
         )[0]
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.PLANNING_DATA.planned_unit().update(
                 entry["id"], {"description": "- If fresh extend to 8km"}
             )
@@ -1271,7 +1272,7 @@ class ServerPlanningTests(ServerTestCase):
                 return_value={"id": "synthetic-remote", **parsed_workout_fixture()},
             ) as update,
         ):
-            with self.assertRaises(server.AppError) as raised:
+            with self.assertRaises(AppError) as raised:
                 server.WORKOUT_LIBRARY_SYNC.sync_service().sync_entry(entry["id"])
             self.assertEqual(
                 raised.exception.reason, "intervals_workout_verification_failed"
@@ -1296,7 +1297,7 @@ class ServerPlanningTests(ServerTestCase):
             "description": "- 30m 85%",
             "duration_minutes": 30,
         }
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
                 [
                     valid,
@@ -1312,7 +1313,7 @@ class ServerPlanningTests(ServerTestCase):
             )
         self.assertEqual(server.PLANNING_DATA.planned_unit().list(), [])
         entry = server.PLANNING_WORKFLOWS.local_plan_creation_service().save([valid])[0]
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.PLANNING_DATA.planned_unit().update(
                 entry["id"], {"duration_minutes": 65}
             )
@@ -1392,7 +1393,7 @@ class ServerPlanningTests(ServerTestCase):
         tomorrow = (
             _local_datetime.now().astimezone().date() + timedelta(days=1)
         ).isoformat()
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             server.PLANNING_WORKFLOWS.workout_library_plan_service().apply(
                 [
                     {"library_workout_id": library["id"], "date": tomorrow},
@@ -1606,7 +1607,7 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(created["sync_status"], "local")
 
     def test_structured_training_create_requires_all_workout_fields(self):
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             server.PLANNING_WORKFLOWS.structured_training_change_service().apply(
                 {
                     "changes": [
@@ -1772,7 +1773,7 @@ class ServerPlanningTests(ServerTestCase):
                 "conflicts",
                 return_value=[{"name": "Occupied"}],
             ) as conflicts,
-            self.assertRaises(server.AppError) as raised,
+            self.assertRaises(AppError) as raised,
         ):
             server.PLANNING_WORKFLOWS.structured_training_change_service().apply(
                 {
@@ -2173,7 +2174,7 @@ class ServerPlanningTests(ServerTestCase):
             )
             for index in range(28)
         ]
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             server.PLANNING_WORKFLOWS.structured_training_change_service().apply(
                 {
                     "changes": [
@@ -2206,7 +2207,7 @@ class ServerPlanningTests(ServerTestCase):
         )
 
     def test_structured_training_changes_reject_more_than_complete_plan_limit(self):
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             server.PLANNING_WORKFLOWS.structured_training_change_service().apply(
                 {
                     "changes": [{"local_id": str(uuid.uuid4()), "action": "delete"}]
@@ -2432,7 +2433,7 @@ class ServerPlanningTests(ServerTestCase):
 
         with (
             patch.object(change_history, "MAX_ROWS", 3),
-            self.assertRaises(server.AppError) as error,
+            self.assertRaises(AppError) as error,
         ):
             server.PLANNING_WORKFLOWS.structured_training_plan_replacement_service().replace(
                 {
@@ -2707,7 +2708,7 @@ class ServerPlanningTests(ServerTestCase):
             and item["entity_id"] == old["id"]
             and item["action"] == "delete"
         )
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.HISTORY.undo_service().apply(
                 {
                     "change_id": deleted_history["id"],
@@ -2831,7 +2832,7 @@ class ServerPlanningTests(ServerTestCase):
                     "description": "- 30m 60% easy",
                 }
             )
-            with self.assertRaises(server.AppError) as raised:
+            with self.assertRaises(AppError) as raised:
                 server.PLANNING_WORKFLOWS.structured_training_state_service().read(
                     cursor=first_page["planned_units_page"]["next_cursor"]
                 )
@@ -2855,7 +2856,7 @@ class ServerPlanningTests(ServerTestCase):
             "authorization_scope": ["local_plan"],
             "bulk_change": True,
         }
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             server.COACH_TOOL_DISPATCH.service().execute(
                 "apply_training_changes",
                 {"changes": [{"local_id": planned["id"], "action": "update"}]},
@@ -3148,7 +3149,7 @@ class ServerPlanningTests(ServerTestCase):
         )
         self.assertTrue(result["remote_untouched"])
         self.assertEqual(server.ATHLETE_DATA.profile().get()["name"], "Ada")
-        with self.assertRaises(server.AppError) as replay:
+        with self.assertRaises(AppError) as replay:
             server.HISTORY.undo_service().preview(latest["id"])
         self.assertEqual(replay.exception.status, 409)
 

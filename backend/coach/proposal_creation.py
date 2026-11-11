@@ -237,7 +237,7 @@ class CoachProposalCreationService:
             nutrition = self._nutrition_meal_library_service()
             if payload.get("tool") == "save_nutrition_product":
                 try:
-                    existing = nutrition.get_product(template_id)
+                    existing = nutrition.product_catalog.get_product(template_id)
                 except AppError:
                     existing = None
             else:
@@ -262,7 +262,7 @@ class CoachProposalCreationService:
         if "components" in values:
             if self._nutrition_meal_library_service is None:
                 raise AppError(503, "Lebensmitteldatenbank ist nicht verfügbar.")
-            calculation = self._nutrition_meal_library_service().calculate_components(
+            calculation = self._nutrition_meal_library_service().product_catalog.calculate_components(
                 values["components"]
             )
             preview_values.update(calculation)
@@ -834,8 +834,8 @@ def _nutrition_approval_arguments(
         raise AppError(400, "Wähle ein Datum oder ausstehende Tage.")
     nutrition = nutrition_diary_service()
     manifest = (
-        nutrition.approval_manifest(meal_date=date_value)
+        nutrition.sync_status.approval_manifest(meal_date=date_value)
         if date_value
-        else nutrition.approval_manifest(pending_limit=limit)
+        else nutrition.sync_status.approval_manifest(pending_limit=limit)
     )
     return {**arguments, "_approval_manifest": manifest}

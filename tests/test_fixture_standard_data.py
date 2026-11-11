@@ -194,7 +194,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             with server.database_manager().unit_of_work() as db:
                 restarted = garmin_store.read_view(db)
             today = server.ATHLETE_CLOCK.now().date()
-            products = server.NUTRITION_ASSEMBLY.meal_library_service().list_products(
+            products = server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog.list_products(
                 include_archived=True
             )
             templates = server.PLANNING_DATA.workout_library().list()
@@ -1009,7 +1009,7 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
             patch.object(fixture_runtime, "fixture_coach_response") as canned,
         ):
             for call in calls:
-                with self.assertRaises(server.AppError) as raised:
+                with self.assertRaises(AppError) as raised:
                     call()
                 self.assertEqual(raised.exception.status, 502)
                 self.assertEqual(raised.exception.reason, "network_error")

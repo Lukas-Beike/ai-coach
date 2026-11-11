@@ -13,9 +13,6 @@ import uuid
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from http.server import (
-    BaseHTTPRequestHandler,  # noqa: F401 - compatibility export for tests
-)
 from pathlib import Path
 
 from backend import config as app_config
@@ -165,10 +162,7 @@ from backend.diagnostics.assembly import (
     DiagnosticsAssembly,
 )
 from backend.diagnostics.logs import RecentLogEntriesService
-from backend.errors import (
-    INTERNAL_SERVER_ERROR,
-    AppError,  # noqa: F401 - compatibility export for tests
-)
+from backend.errors import INTERNAL_SERVER_ERROR
 from backend.history.assembly import (
     HistoryAssembly,
     HistoryAthleteServices,

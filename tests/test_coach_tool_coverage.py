@@ -19,10 +19,10 @@ from backend.activities.hr_cap import effective_caps
 from backend.coach.receipt_compaction import compact_receipt
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.coach.write_gate import CLASSIFIER_DOMAINS, TOOL_DOMAIN
+from backend.errors import AppError
 from backend.planning import library as planning_library
 from backend.planning.planned_units import plan_push_payload_hash
 from backend.providers import http as provider_http
-from backend.providers import openai as openai_provider
 from backend.sync.adaptive import IllnessPauseSyncService
 
 
@@ -160,7 +160,6 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         for owner, name in (
             (server.PROVIDER_TRANSPORT.json_http_client(), "request"),
             (provider_http, "urlopen"),
-            (openai_provider, "urlopen"),
         ):
             guard = patch.object(
                 owner,
@@ -1552,7 +1551,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(updated["name"], "Synthetic cocoa whey, corrected")
         self.assertEqual(updated["kcal"], 380)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.meal_library_service().get_product(saved["id"]),
+            server.NUTRITION_ASSEMBLY.meal_library_service().product_catalog.get_product(
+                saved["id"]
+            ),
             updated,
         )
         self.assertEqual(
@@ -1594,9 +1595,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(deleted["deleted_id"], entry_id)
         self.assertEqual(
-            server.NUTRITION_ASSEMBLY.diary_service().get_day_summary("2026-09-07")[
-                "entry_count"
-            ],
+            server.NUTRITION_ASSEMBLY.diary_service().sync_status.get_day_summary(
+                "2026-09-07"
+            )["entry_count"],
             0,
         )
 
@@ -1930,7 +1931,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             proposal["id"], "synthetic-session"
         )
 
-        with self.assertRaises(server.AppError) as rejected:
+        with self.assertRaises(AppError) as rejected:
             server.COACH_PROPOSALS.execution_service().execute(
                 confirmation["action_token"],
                 "synthetic-session",

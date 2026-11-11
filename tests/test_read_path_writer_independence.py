@@ -136,11 +136,13 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
             "weather_local": lambda: public.weather_state_service().state(
                 local_only=True
             ),
-            "nutrition_day": lambda: diary().get_day_summary(day),
+            "nutrition_day": lambda: diary().sync_status.get_day_summary(day),
             "nutrition_range": lambda: diary().get_range_summary(day, day),
-            "nutrition_week": lambda: diary().get_week_summary(),
+            "nutrition_week": lambda: diary().sync_status.get_week_summary(),
             "nutrition_templates": lambda: library().list_templates(),
-            "nutrition_products": lambda: library().list_products(query=""),
+            "nutrition_products": lambda: library().product_catalog.list_products(
+                query=""
+            ),
             "chat_status": lambda: (
                 server.COACH_BACKGROUND_JOBS.job_submission_service().stream_status(
                     "csrf-hash"

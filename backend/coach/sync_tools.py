@@ -118,7 +118,7 @@ class CoachSyncToolService:
             raise AppError(
                 409, "Der freigegebene Ern\u00e4hrungszeitraum ist ung\u00fcltig."
             )
-        if self._nutrition_diary.approval_manifest(dates=dates) != manifest:
+        if self._nutrition_diary.sync_status.approval_manifest(dates=dates) != manifest:
             raise AppError(
                 409,
                 "Die Ern\u00e4hrungsdaten haben sich seit der Freigabe ge\u00e4ndert.",

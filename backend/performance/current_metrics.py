@@ -100,16 +100,6 @@ def coach_thresholds(
     return result
 
 
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
-
-
 def as_number(value: Any) -> float | int | None:
     """Return a finite number parsed from a provider value, or None."""
     try:
@@ -139,23 +129,6 @@ def metric(
         ),
         "note": note if number is not None else "",
     }
-
-
-def _canonical_metric(observation: Observation, unit: str) -> dict[str, Any]:
-    """Return a metric for a canonical observation, labelled as the legacy view."""
-    return metric(
-        observation.value.value,
-        unit,
-        observation_source_label(observation, SourceView.CURRENT_METRIC),
-        provider=observation.provenance.provider,
-    )
-
-
-def _observation_metric(observation: Observation | None, unit: str) -> dict[str, Any]:
-    """Return the canonical metric of an observation, or an empty metric."""
-    if observation is None:
-        return metric(None, unit, None)
-    return _canonical_metric(observation, unit)
 
 
 def _activity_max_hr(activity: Any) -> tuple[float, ProviderId] | None:
@@ -262,12 +235,6 @@ def _max_hr_metric(
     )
 
 
-def _pace_seconds(observation: Observation | None) -> float | int | None:
-    """Return a canonical pace in metres per second as seconds per kilometre."""
-    speed = None if observation is None else observation.value.value
-    return None if not speed or speed <= 0 else round(1000 / speed)
-
-
 def _height_in_cm(value: Any) -> float | int | None:
     number = as_number(value)
     if number is not None and 1.2 <= float(number) <= 2.5:
@@ -285,19 +252,6 @@ def _first_performance_source(
             if as_number(value) is not None
         ),
         (None, None, None),
-    )
-
-
-def _observation_source(
-    observation: Observation | None,
-) -> tuple[Any, str | None, ProviderId | None]:
-    """Return a canonical observation's value, label and provider, else empties."""
-    if observation is None:
-        return None, None, None
-    return (
-        observation.value.value,
-        observation_source_label(observation, SourceView.CURRENT_METRIC),
-        observation.provenance.provider,
     )
 
 

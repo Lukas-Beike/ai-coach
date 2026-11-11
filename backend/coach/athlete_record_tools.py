@@ -255,9 +255,9 @@ class CoachAthleteRecordToolService:
         if product_id:
             require_coach_scope(intent, f"nutrition_product:{product_id}")
         product = (
-            nutrition.update_product(product_id, payload)
+            nutrition.product_catalog.update_product(product_id, payload)
             if product_id
-            else nutrition.save_product(payload)
+            else nutrition.product_catalog.save_product(payload)
         )
         return {"ok": True, "product": product}
 

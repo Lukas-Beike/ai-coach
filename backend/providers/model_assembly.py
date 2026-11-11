@@ -10,7 +10,8 @@ from typing import Any
 from backend.config import Config
 from backend.observability import DiagnosticCapture
 from backend.providers import audio as audio_provider
-from backend.providers import openai as openai_provider
+from backend.providers import http as provider_http
+from backend.providers import openai_requests, openai_stream
 from backend.providers.http import JsonHttpClient
 from backend.providers.openai_requests import ResponsesClock
 from backend.providers.state import ProviderStateService
@@ -117,9 +118,9 @@ class ModelTransportAssembly:
             provider_state=self._provider_state_service(),
         )
 
-    def openai_responses_client(self) -> openai_provider.OpenAIResponsesClient:
+    def openai_responses_client(self) -> openai_requests.OpenAIResponsesClient:
         config = self._config()
-        return openai_provider.OpenAIResponsesClient(
+        return openai_requests.OpenAIResponsesClient(
             api_key=config.openai_api_key,
             base_url=config.openai_base_url,
             default_base_url=self._default_openai_base_url,
@@ -135,10 +136,10 @@ class ModelTransportAssembly:
             service_tier=self._service_tier,
         )
 
-    def openai_stream_client(self) -> openai_provider.OpenAIStreamClient:
+    def openai_stream_client(self) -> openai_stream.OpenAIStreamClient:
         config = self._config()
-        return openai_provider.OpenAIStreamClient(
-            openai_provider.OpenAIStreamConfig(
+        return openai_stream.OpenAIStreamClient(
+            openai_stream.OpenAIStreamConfig(
                 api_key=config.openai_api_key,
                 base_url=config.openai_base_url,
                 default_base_url=self._default_openai_base_url,
@@ -148,7 +149,7 @@ class ModelTransportAssembly:
                 app_version=self._app_version,
                 media_type=self._json_media_type,
             ),
-            openai_provider.OpenAIStreamTelemetry(
+            openai_stream.OpenAIStreamTelemetry(
                 self._provider_state_service(),
                 self._diagnostic_capture,
                 self._logger,
@@ -156,7 +157,7 @@ class ModelTransportAssembly:
                 self._utc_now,
             ),
             self._selected_thinking_level,
-            opener=openai_provider.urlopen,
+            opener=provider_http.urlopen,
             wait=self._wait,
             service_tier=self._service_tier,
         )

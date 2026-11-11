@@ -19,8 +19,10 @@ from backend.nutrition.catalog import ProductCatalogService
 from backend.nutrition.components import MealComponentCalculator
 from backend.nutrition.food_database import NUTRIENTS, FoodDatabaseService
 from backend.nutrition.models import normalize_nutrition_entry
-from backend.nutrition.photo import NutritionPhotoExtractionService
-from backend.nutrition.photo_service import PhotoExtractionService
+from backend.nutrition.photo import (
+    NutritionPhotoExtractionService,
+    validate_packaging_extraction,
+)
 
 SAVED_MEAL_NOT_FOUND = "Gespeicherte Mahlzeit nicht gefunden."
 TEMPLATE_ENTITY_TYPE = "nutrition_template"
@@ -71,28 +73,15 @@ class NutritionMealLibraryService:
             self.food_database,
             self._component_calculator,
         )
-        self._photo_service = PhotoExtractionService(photo_extractor)
+        self._photo_extractor = photo_extractor
 
     @property
     def product_catalog(self) -> ProductCatalogService:
         return self._product_catalog
 
-    def list_products(
-        self,
-        *,
-        query: str | None = None,
-        barcode: str | None = None,
-        include_archived: bool = False,
-        limit: int = 50,
-        favorites_first: bool = False,
-    ) -> list[dict[str, Any]]:
-        return self._product_catalog.list_products(
-            query=query,
-            barcode=barcode,
-            include_archived=include_archived,
-            limit=limit,
-            favorites_first=favorites_first,
-        )
+    @property
+    def component_calculator(self) -> MealComponentCalculator:
+        return self._component_calculator
 
     def list_database_foods(self, query: str | None = None) -> list[dict[str, Any]]:
         return self.food_database.stored_foods(query)
@@ -101,54 +90,20 @@ class NutritionMealLibraryService:
         self.food_database.forget(food_id)
         return {"ok": True, "id": food_id, "status": "removed"}
 
-    def get_product(self, product_id: str) -> dict[str, Any]:
-        return self._product_catalog.get_product(product_id)
-
-    def save_product(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._product_catalog.save_product(payload)
-
-    def update_product(
-        self, product_id: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        return self._product_catalog.update_product(product_id, payload)
-
-    def set_product_favorite(self, product_id: str, favorite: Any) -> dict[str, Any]:
-        return self._product_catalog.set_favorite(product_id, favorite)
-
-    def archive_product(self, product_id: str) -> dict[str, Any]:
-        return self._product_catalog.archive_product(product_id)
-
-    def lookup_product(
-        self, arguments: dict[str, Any], *, online_fallback: bool = True
-    ) -> dict[str, Any]:
-        return self._product_catalog.lookup_product(
-            arguments, online_fallback=online_fallback
-        )
-
     def extract_packaging_photo(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._photo_service.extract_packaging_photo(payload)
-
-    def calculate_product(
-        self, product_id: str, amount: Any, unit: str
-    ) -> dict[str, Any]:
-        return self._product_catalog.calculate_product(product_id, amount, unit)
-
-    def calculate_components(self, components: Any) -> dict[str, Any]:
-        """Resolve a meal recipe into immutable, trusted nutrient snapshots."""
-        return self._product_catalog.calculate_components(components)
-
-    def prepare_component_resolutions(
-        self, components: Any
-    ) -> dict[int, dict[str, Any]]:
-        return self._component_calculator.prepare_resolutions(components)
-
-    def calculate_components_in_transaction(
-        self,
-        db: Any,
-        components: Any,
-        resolutions: dict[int, dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        return self._component_calculator.calculate(db, components, resolutions)
+        if not isinstance(payload, dict):
+            raise AppError(400, "Ungültiger Fotoinhalt.")
+        if payload.get("image_data_url"):
+            if not self._photo_extractor:
+                raise AppError(
+                    503,
+                    "Fotoerkennung ist nicht verfügbar.",
+                    reason="provider_unavailable",
+                )
+            result = self._photo_extractor.extract(payload["image_data_url"])
+        else:
+            result = validate_packaging_extraction(payload)
+        return {**result, "extraction": result["candidate"]}
 
     def prepare_values(
         self,
@@ -200,7 +155,7 @@ class NutritionMealLibraryService:
         prepared = payload
         template_id = str(payload.get("id") or "").strip()
         resolved_database = (
-            self.prepare_component_resolutions(payload["components"])
+            self._component_calculator.prepare_resolutions(payload["components"])
             if "components" in payload
             else None
         )
@@ -214,7 +169,7 @@ class NutritionMealLibraryService:
                 validate_component_payload(payload)
                 prepared = {
                     **payload,
-                    **self.calculate_components_in_transaction(
+                    **self._component_calculator.calculate(
                         db, payload["components"], resolved_database
                     ),
                 }

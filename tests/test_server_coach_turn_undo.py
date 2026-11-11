@@ -11,6 +11,7 @@ from server_test_support import ServerTestCase, server
 
 from backend import change_history
 from backend.coach.change_receipts import change_summary
+from backend.errors import AppError
 
 _ROUTE = "/api/change-history/undo-turn"
 
@@ -106,7 +107,7 @@ class CoachTurnUndoTests(ServerTestCase):
         self.assertEqual(
             self._messages(turn_id)[1]["coach_changes"], result["coach_changes"]
         )
-        with self.assertRaises(server.AppError) as repeated:
+        with self.assertRaises(AppError) as repeated:
             self._undo(turn_id)
         self.assertEqual(repeated.exception.status, 409)
 
@@ -114,7 +115,7 @@ class CoachTurnUndoTests(ServerTestCase):
         turn_id = self._coach_turn()
         server.ATHLETE_DATA.profile().save({"name": "Cleo", "weight_kg": "72"})
 
-        with self.assertRaises(server.AppError) as stale:
+        with self.assertRaises(AppError) as stale:
             self._undo(turn_id)
 
         self.assertEqual(stale.exception.status, 409)
@@ -132,7 +133,7 @@ class CoachTurnUndoTests(ServerTestCase):
         turn_id = self._coach_turn(track_library=False)
         self.assertFalse(self._messages(turn_id)[1]["coach_changes"]["undoable"])
 
-        with self.assertRaises(server.AppError) as refused:
+        with self.assertRaises(AppError) as refused:
             self._undo(turn_id)
 
         self.assertEqual(refused.exception.status, 409)
@@ -143,7 +144,7 @@ class CoachTurnUndoTests(ServerTestCase):
         for turn_id, status in (("", 400), ("x" * 121, 400), ("turn-missing", 404)):
             with (
                 self.subTest(turn_id=turn_id[:10]),
-                self.assertRaises(server.AppError) as rejected,
+                self.assertRaises(AppError) as rejected,
             ):
                 self._undo(turn_id)
             self.assertEqual(rejected.exception.status, status)

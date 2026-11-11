@@ -16,7 +16,7 @@ from backend.errors import AppError
 class NutritionReviewRegressionTests(unittest.TestCase):
     def test_explicit_text_source_bypasses_local_products(self) -> None:
         meal_library = Mock()
-        meal_library.list_products.return_value = []
+        meal_library.product_catalog.list_products.return_value = []
         meal_library.food_database.lookup.return_value = {
             "ok": True,
             "foods": [{"id": "bls:123"}],
@@ -44,7 +44,7 @@ class NutritionReviewRegressionTests(unittest.TestCase):
         meal_library.food_database.lookup.assert_called_once_with(
             {"query": "Haferflocken", "source": "bls"}
         )
-        meal_library.lookup_product.assert_not_called()
+        meal_library.product_catalog.lookup_product.assert_not_called()
         self.assertNotIn("local_products", result)
 
     def test_explicit_text_source_still_returns_matching_saved_products(self) -> None:
@@ -55,7 +55,7 @@ class NutritionReviewRegressionTests(unittest.TestCase):
             "source": "bls",
         }
         saved = [{"id": f"local-oats-{index}"} for index in range(12)]
-        meal_library.list_products.return_value = saved
+        meal_library.product_catalog.list_products.return_value = saved
         service = CoachReadToolService(
             Mock(),
             Mock(),
@@ -77,14 +77,16 @@ class NutritionReviewRegressionTests(unittest.TestCase):
         self.assertEqual(result["source"], "bls")
         # Same saved matches as a lookup without an explicit source.
         self.assertEqual(result["local_products"], saved)
-        meal_library.list_products.assert_called_once_with(query="Haferflocken")
+        meal_library.product_catalog.list_products.assert_called_once_with(
+            query="Haferflocken"
+        )
 
     def test_explicit_source_outage_still_returns_saved_products(self) -> None:
         meal_library = Mock()
         meal_library.food_database.lookup.side_effect = AppError(
             429, "Lebensmitteldatenbank ist vorübergehend ausgelastet."
         )
-        meal_library.list_products.return_value = [{"id": "local-oats"}]
+        meal_library.product_catalog.list_products.return_value = [{"id": "local-oats"}]
         service = CoachReadToolService(
             Mock(),
             Mock(),
@@ -105,7 +107,7 @@ class NutritionReviewRegressionTests(unittest.TestCase):
         assert isinstance(result, dict)
         self.assertEqual(result["foods"], [])
         self.assertEqual(result["local_products"], [{"id": "local-oats"}])
-        meal_library.lookup_product.assert_not_called()
+        meal_library.product_catalog.lookup_product.assert_not_called()
         meal_library.food_database.lookup.assert_called_once_with(
             {"query": "Skyr", "source": "open_food_facts"}
         )
@@ -119,7 +121,7 @@ class NutritionReviewRegressionTests(unittest.TestCase):
                 self.assertEqual(fallback["local_products"], [{"id": "local-oats"}])
                 self.assertIn("Fehler.", fallback["notice"])
 
-        meal_library.list_products.return_value = []
+        meal_library.product_catalog.list_products.return_value = []
         with self.assertRaises(AppError):
             service.execute("lookup_food", {"query": "Haferflocken", "source": "bls"})
 
@@ -135,7 +137,7 @@ class NutritionReviewRegressionTests(unittest.TestCase):
                 )
             return {"ok": True, "foods": [{"id": f"local-{arguments['query']}"}]}
 
-        meal_library.lookup_product.side_effect = lookup
+        meal_library.product_catalog.lookup_product.side_effect = lookup
         service = CoachReadToolService(
             Mock(),
             Mock(),
@@ -171,10 +173,14 @@ class NutritionReviewRegressionTests(unittest.TestCase):
             },
         )
         # Without a source each term keeps the local-first product lookup.
-        meal_library.lookup_product.assert_any_call({"query": "Zucchini"})
+        meal_library.product_catalog.lookup_product.assert_any_call(
+            {"query": "Zucchini"}
+        )
         meal_library.food_database.lookup.assert_not_called()
 
-        meal_library.lookup_product.side_effect = AppError(429, "Ausgelastet.")
+        meal_library.product_catalog.lookup_product.side_effect = AppError(
+            429, "Ausgelastet."
+        )
         with self.assertRaises(AppError):
             service.execute("lookup_food", {"queries": ["Reis", "Zucchini"]})
         for arguments in (
@@ -188,7 +194,7 @@ class NutritionReviewRegressionTests(unittest.TestCase):
 
     def test_barcode_source_keeps_local_first_lookup(self) -> None:
         meal_library = Mock()
-        meal_library.lookup_product.return_value = {
+        meal_library.product_catalog.lookup_product.return_value = {
             "ok": True,
             "product": {"id": "local-product"},
             "source": "local",
@@ -212,7 +218,7 @@ class NutritionReviewRegressionTests(unittest.TestCase):
 
         assert isinstance(result, dict)
         self.assertEqual(result["source"], "local")
-        meal_library.lookup_product.assert_called_once_with(
+        meal_library.product_catalog.lookup_product.assert_called_once_with(
             {"barcode": "4006381333931", "source": "off"}
         )
         meal_library.food_database.lookup.assert_not_called()
@@ -265,7 +271,7 @@ class NutritionReviewRegressionTests(unittest.TestCase):
             lambda: "2026-10-05T12:00:00+00:00",
             lambda: datetime(2026, 10, 5, tzinfo=UTC),
         )
-        product = meal_library.save_product(
+        product = meal_library.product_catalog.save_product(
             {
                 "name": "Synthetic whey",
                 "brand": "Synthetic",
@@ -279,10 +285,12 @@ class NutritionReviewRegressionTests(unittest.TestCase):
                 "source": "packaging_label",
             }
         )
-        meal_library.archive_product(product["id"])
+        meal_library.product_catalog.archive_product(product["id"])
 
         for operation in (
-            lambda: meal_library.calculate_product(product["id"], 50, "g"),
+            lambda: meal_library.product_catalog.calculate_product(
+                product["id"], 50, "g"
+            ),
             lambda: diary.log_product(product["id"], 50, "g"),
         ):
             with (

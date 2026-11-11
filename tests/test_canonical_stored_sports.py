@@ -19,7 +19,6 @@ from backend.canonical.stored_sports import (
 from backend.canonical.vocabulary import Environment, Sport
 from backend.planning.competitions import (
     COMPETITION_SPORTS,
-    competition_canonical_sport,
     competition_normalized_text_fields,
     competition_stored_sport,
 )
@@ -105,23 +104,6 @@ class StoredCompetitionSportTests(unittest.TestCase):
             set(COMPETITION_SPORTS.values()), set(LEGACY_COMPETITION_TOKENS)
         )
 
-    def test_competition_accessor_reads_canonical_and_legacy_values(self) -> None:
-        stored = {
-            "ride": Sport.RIDE,
-            "Ride": Sport.RIDE,
-            "Cycling": Sport.RIDE,
-            "Rad": Sport.RIDE,
-            "Virtual Ride": Sport.RIDE,
-            "rad indoor": Sport.RIDE,
-            "Running": Sport.RUN,
-            "Lauf": Sport.RUN,
-            "Strength": Sport.STRENGTH,
-            "Krafttraining": Sport.STRENGTH,
-        }
-        for token, sport in stored.items():
-            with self.subTest(token=token):
-                self.assertIs(competition_canonical_sport({"sport": token}), sport)
-
     def test_virtual_ride_keeps_its_environment_and_provider_type(self) -> None:
         stored = resolve_competition_sport("VirtualRide")
         assert stored is not None
@@ -134,20 +116,6 @@ class StoredCompetitionSportTests(unittest.TestCase):
     def test_default_competition_sport_is_canonical(self) -> None:
         self.assertNotIn("sport", competition_normalized_text_fields({}))
         self.assertEqual(competition_stored_sport({}), StoredSport(Sport.RIDE, UNKNOWN))
-
-    def test_competition_accessor_does_not_guess_from_substrings(self) -> None:
-        unknown: list[Any] = [
-            None,
-            "",
-            "Swim",
-            "Other",
-            "Weight Training",
-            "Running race",
-            untyped(7),
-        ]
-        for token in unknown:
-            with self.subTest(token=token):
-                self.assertIsNone(competition_canonical_sport({"sport": token}))
 
     def test_unsupported_competition_text_is_kept_losslessly(self) -> None:
         self.assertEqual(

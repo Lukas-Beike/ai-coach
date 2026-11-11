@@ -28,7 +28,7 @@ class FavoritesAndMealAdditionTests(unittest.TestCase):
         )
 
     def product(self, name: str, **changes):
-        return self.library.save_product(
+        return self.library.product_catalog.save_product(
             {
                 "name": name,
                 "basis_amount": 100,
@@ -47,35 +47,53 @@ class FavoritesAndMealAdditionTests(unittest.TestCase):
         hafer = self.product("Haferflocken")
         self.assertEqual(skyr["favorite"], 0)
         self.assertEqual(
-            [p["name"] for p in self.library.list_products(favorites_first=True)],
+            [
+                p["name"]
+                for p in self.library.product_catalog.list_products(
+                    favorites_first=True
+                )
+            ],
             ["Haferflocken", "Skyr"],
         )
 
         self.assertEqual(
-            self.library.set_product_favorite(skyr["id"], True)["favorite"], 1
+            self.library.product_catalog.set_favorite(skyr["id"], True)["favorite"], 1
         )
         self.assertEqual(
-            [p["name"] for p in self.library.list_products(favorites_first=True)],
+            [
+                p["name"]
+                for p in self.library.product_catalog.list_products(
+                    favorites_first=True
+                )
+            ],
             ["Skyr", "Haferflocken"],
         )
 
-        self.library.update_product(skyr["id"], {"kcal": 120})
-        self.library.save_product({**skyr, "kcal": 130})
-        self.assertEqual(self.library.get_product(skyr["id"])["favorite"], 1)
-        self.assertEqual(self.library.get_product(skyr["id"])["kcal"], 130)
+        self.library.product_catalog.update_product(skyr["id"], {"kcal": 120})
+        self.library.product_catalog.save_product({**skyr, "kcal": 130})
+        self.assertEqual(
+            self.library.product_catalog.get_product(skyr["id"])["favorite"], 1
+        )
+        self.assertEqual(
+            self.library.product_catalog.get_product(skyr["id"])["kcal"], 130
+        )
 
-        self.library.set_product_favorite(skyr["id"], False)
-        self.assertEqual(self.library.get_product(skyr["id"])["favorite"], 0)
-        self.assertEqual(self.library.get_product(hafer["id"])["favorite"], 0)
+        self.library.product_catalog.set_favorite(skyr["id"], False)
+        self.assertEqual(
+            self.library.product_catalog.get_product(skyr["id"])["favorite"], 0
+        )
+        self.assertEqual(
+            self.library.product_catalog.get_product(hafer["id"])["favorite"], 0
+        )
 
     def test_favorite_needs_a_known_product_and_a_boolean(self) -> None:
         product = self.product("Skyr")
         with self.assertRaises(AppError) as unknown:
-            self.library.set_product_favorite("missing", True)
+            self.library.product_catalog.set_favorite("missing", True)
         self.assertEqual(unknown.exception.status, 404)
         for value in (1, "true", None):
             with self.subTest(value=value), self.assertRaises(AppError) as invalid:
-                self.library.set_product_favorite(product["id"], value)
+                self.library.product_catalog.set_favorite(product["id"], value)
             self.assertEqual(invalid.exception.status, 400)
 
     def test_adding_a_product_turns_a_single_product_meal_into_a_composite(
@@ -130,7 +148,7 @@ class FavoritesAndMealAdditionTests(unittest.TestCase):
         self.assertEqual(missing.exception.status, 404)
         with self.assertRaises(AppError):
             self.diary.add_product_to_meal(entry["id"], skyr["id"], 100, "ml")
-        self.library.archive_product(skyr["id"])
+        self.library.product_catalog.archive_product(skyr["id"])
         with self.assertRaises(AppError) as archived:
             self.diary.add_product_to_meal(entry["id"], skyr["id"], 100, "g")
         self.assertEqual(archived.exception.status, 409)
@@ -142,7 +160,7 @@ class FavoritesAndMealAdditionTests(unittest.TestCase):
         entry = self.diary.log_product(skyr["id"], 250, "g")
         self.diary.add_product_to_meal(entry["id"], banana["id"], 100, "g")
 
-        day = self.diary.get_day_summary("2026-11-04")
+        day = self.diary.sync_status.get_day_summary("2026-11-04")
         self.assertEqual(day["total_sugar_g"], 22)
         self.assertEqual(day["total_salt_g"], 0.2)
 
@@ -158,9 +176,9 @@ class FavoritesAndMealAdditionTests(unittest.TestCase):
     def test_default_listing_stays_most_recent_first(self) -> None:
         skyr = self.product("Skyr")
         self.product("Haferflocken")
-        self.library.set_product_favorite(skyr["id"], True)
+        self.library.product_catalog.set_favorite(skyr["id"], True)
         self.assertEqual(
-            [p["name"] for p in self.library.list_products()],
+            [p["name"] for p in self.library.product_catalog.list_products()],
             ["Haferflocken", "Skyr"],
         )
 

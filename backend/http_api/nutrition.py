@@ -38,7 +38,7 @@ class NutritionGetRoutes:
         self._macro_context = macro_context
 
     def _day_summary(self, date_param: str) -> dict[str, Any]:
-        summary = self._diary_service().get_day_summary(date_param)
+        summary = self._diary_service().sync_status.get_day_summary(date_param)
         if self._macro_context is None:
             return summary
         try:
@@ -60,10 +60,12 @@ class NutritionGetRoutes:
         if query.get("source", [None])[0] == "database":
             return {"ok": True, "foods": meal_library.list_database_foods(term)}
         if barcode:
-            return meal_library.lookup_product({"barcode": barcode})
+            return meal_library.product_catalog.lookup_product({"barcode": barcode})
         return {
             "ok": True,
-            "products": meal_library.list_products(query=term, favorites_first=True),
+            "products": meal_library.product_catalog.list_products(
+                query=term, favorites_first=True
+            ),
         }
 
     def routes(self) -> list[Route]:
@@ -85,7 +87,8 @@ class NutritionGetRoutes:
         except ValueError:
             raise AppError(400, "Ungültiger Zeitraum.") from None
         handler.send_json(
-            200, {"ok": True, **self._diary_service().get_week_summary(days)}
+            200,
+            {"ok": True, **self._diary_service().sync_status.get_week_summary(days)},
         )
 
     def _product_list(self, handler: Any, request: RouteRequest) -> None:
@@ -177,7 +180,7 @@ class NutritionPostRoutes:
                 payload.get("date") or self._local_now().date().isoformat()
             )
             expenditure = self._refresh_provider("daily_stats", meal_date, meal_date)
-            summary = self._diary_service().get_day_summary(meal_date)
+            summary = self._diary_service().sync_status.get_day_summary(meal_date)
             if expenditure.get("status") != "ok":
                 summary["energy_expenditure"]["freshness"] = "partial"
             handler.send_json(
@@ -193,7 +196,7 @@ class NutritionPostRoutes:
             )
             return
         if area == "products":
-            products = self._meal_library_service().list_products()
+            products = self._meal_library_service().product_catalog.list_products()
             handler.send_json(
                 200,
                 {"ok": True, "area": area, "status": "local", "products": products},
@@ -245,14 +248,16 @@ class NutritionPostRoutes:
                 reason="confirmation_required",
             )
         with change_history.collect_changes() as changes:
-            saved = self._meal_library_service().save_product(product)
+            saved = self._meal_library_service().product_catalog.save_product(product)
         handler.send_json(
             200, {"ok": True, "product": saved, **_change(changes, PRODUCT_ENTITY)}
         )
 
     def _lookup_product(self, handler: Any) -> None:
         payload = _read_object(handler)
-        handler.send_json(200, self._meal_library_service().lookup_product(payload))
+        handler.send_json(
+            200, self._meal_library_service().product_catalog.lookup_product(payload)
+        )
 
     def _extract_product(self, handler: Any) -> None:
         payload = _read_object(handler, PHOTO_REQUEST_MAX_BYTES)
@@ -277,7 +282,7 @@ class NutritionPostRoutes:
 
     def _favorite_product(self, handler: Any) -> None:
         payload = _read_object(handler)
-        product = self._meal_library_service().set_product_favorite(
+        product = self._meal_library_service().product_catalog.set_favorite(
             str(payload.get("id") or ""), payload.get("favorite")
         )
         handler.send_json(200, {"ok": True, "product": product})
@@ -291,7 +296,7 @@ class NutritionPostRoutes:
                 reason="confirmation_required",
             )
         with change_history.collect_changes() as changes:
-            archived = self._meal_library_service().archive_product(
+            archived = self._meal_library_service().product_catalog.archive_product(
                 str(payload.get("id") or "")
             )
         handler.send_json(
@@ -326,7 +331,9 @@ class NutritionPutRoutes:
         if not product_id:
             raise AppError(400, "id ist erforderlich zum Aktualisieren.")
         with change_history.collect_changes() as changes:
-            updated = self._meal_library_service().update_product(product_id, payload)
+            updated = self._meal_library_service().product_catalog.update_product(
+                product_id, payload
+            )
         handler.send_json(
             200,
             {"ok": True, "product": updated, **_change(changes, PRODUCT_ENTITY)},

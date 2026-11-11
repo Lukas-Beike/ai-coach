@@ -5,6 +5,7 @@ import json
 import unittest
 from unittest.mock import Mock
 
+from nutrition_service_support import build_nutrition_services
 from test_nutrition_api_and_sync import GLOBAL_BODY_BYTES, json_route_handler
 
 from backend.errors import AppError
@@ -14,7 +15,6 @@ from backend.nutrition.photo import (
     PHOTO_REQUEST_MAX_BYTES,
     NutritionPhotoExtractionService,
 )
-from backend.nutrition.photo_service import PhotoExtractionService
 
 EXTRACT_PATH = f"{NUTRITION_PRODUCTS_PATH}/extract"
 
@@ -140,10 +140,9 @@ class NutritionPhotoRouteBodyTests(unittest.TestCase):
         extractor = NutritionPhotoExtractionService(
             selected_model=lambda: "gpt-6-luna", openai_request=self.request
         )
-        library = Mock()
-        library.extract_packaging_photo = PhotoExtractionService(
-            extractor
-        ).extract_packaging_photo
+        _, library = build_nutrition_services(
+            Mock(), Mock(), Mock(), Mock(), photo_extractor=extractor
+        )
         self.routes = NutritionPostRoutes(Mock, lambda: library)
 
     def test_compressed_and_largest_valid_photos_are_extracted_once(self):

@@ -38,7 +38,7 @@ class NutritionCompositionTests(unittest.TestCase):
         )
 
     def test_sugar_and_salt_follow_consumption_snapshots_and_unknowns(self):
-        product = self.library.save_product(
+        product = self.library.product_catalog.save_product(
             {
                 "name": "Synthetic food",
                 "basis_amount": 100,
@@ -53,18 +53,22 @@ class NutritionCompositionTests(unittest.TestCase):
         )
         entry = self.service.log_product(product["id"], 50, "g")
         day = entry["meal_date"]
-        summary = self.service.get_day_summary(day)
+        summary = self.service.sync_status.get_day_summary(day)
         self.assertEqual(summary["total_sugar_g"], 6)
         self.assertEqual(summary["total_salt_g"], 0.6)
-        self.library.update_product(product["id"], {"sugar_g": 20, "salt_g": 2})
+        self.library.product_catalog.update_product(
+            product["id"], {"sugar_g": 20, "salt_g": 2}
+        )
         self._make_service()
-        self.assertEqual(self.service.get_day_summary(day)["total_sugar_g"], 6)
+        self.assertEqual(
+            self.service.sync_status.get_day_summary(day)["total_sugar_g"], 6
+        )
         self.service.log_meal({"description": "Unknown nutrients", "kcal": 100})
-        summary = self.service.get_day_summary(day)
+        summary = self.service.sync_status.get_day_summary(day)
         self.assertIsNone(summary["total_sugar_g"])
         self.assertIsNone(summary["total_salt_g"])
         self.assertEqual(summary["known_intake_totals"], {"sugar_g": 6, "salt_g": 0.6})
-        empty = self.service.get_day_summary("2026-09-23")
+        empty = self.service.sync_status.get_day_summary("2026-09-23")
         self.assertIsNone(empty["total_sugar_g"])
 
     def test_database_intake_uses_frozen_ingredients_and_partial_components(self):
@@ -114,13 +118,13 @@ class NutritionCompositionTests(unittest.TestCase):
                 ],
             }
         )
-        summary = self.service.get_day_summary("2026-09-24")
+        summary = self.service.sync_status.get_day_summary("2026-09-24")
         self.assertIsNone(summary["total_sugar_g"])
         self.assertIsNone(summary["total_salt_g"])
         self.assertEqual(summary["known_intake_totals"], {"sugar_g": 6, "salt_g": 0.8})
 
     def test_composite_salt_sugar_scale_with_template_portions_and_week_coverage(self):
-        product = self.library.save_product(
+        product = self.library.product_catalog.save_product(
             {
                 "name": "Synthetic food",
                 "basis_amount": 100,
@@ -148,15 +152,15 @@ class NutritionCompositionTests(unittest.TestCase):
             }
         )
         self.service.log_template(template["id"], 0.5, meal_date="2026-09-23")
-        summary = self.service.get_day_summary("2026-09-23")
+        summary = self.service.sync_status.get_day_summary("2026-09-23")
         self.assertEqual(summary["total_sugar_g"], 0)
         self.assertEqual(summary["total_salt_g"], 0.5)
-        week = self.service.get_week_summary(14)
+        week = self.service.sync_status.get_week_summary(14)
         self.assertEqual(week["averages"]["sugar_g"], {"value": 0, "days": 1})
         self.assertEqual(week["averages"]["salt_g"], {"value": 0.5, "days": 1})
 
     def test_composite_components_resolve_and_freeze_mixed_sources(self):
-        product = self.library.save_product(
+        product = self.library.product_catalog.save_product(
             {
                 "name": "Synthetic whey",
                 "basis_amount": 100,
@@ -186,7 +190,7 @@ class NutritionCompositionTests(unittest.TestCase):
                 "fat_g": 0,
             },
         ]
-        result = self.library.calculate_components(components)
+        result = self.library.product_catalog.calculate_components(components)
         self.assertEqual(result["nutrition_basis"]["kind"], "composite")
         self.assertEqual(
             [item["kind"] for item in result["nutrition_basis"]["components"]],
@@ -199,9 +203,10 @@ class NutritionCompositionTests(unittest.TestCase):
         self.assertEqual(entry["nutrition_basis"], result["nutrition_basis"])
         self.assertEqual(entry["kcal"], result["kcal"])
         self.assertEqual(
-            self.service.get_day_summary(entry["meal_date"])["entry_count"], 1
+            self.service.sync_status.get_day_summary(entry["meal_date"])["entry_count"],
+            1,
         )
-        self.library.update_product(product["id"], {"kcal": 400})
+        self.library.product_catalog.update_product(product["id"], {"kcal": 400})
         self.assertEqual(self.service.get_meal(entry["id"])["kcal"], result["kcal"])
 
     def test_composite_rejects_forged_authoritative_values_and_unknown_macros_propagate(
@@ -228,7 +233,7 @@ class NutritionCompositionTests(unittest.TestCase):
             },
         ):
             with self.subTest(component=component), self.assertRaises(AppError):
-                self.library.calculate_components([component])
+                self.library.product_catalog.calculate_components([component])
         estimated = {
             "kind": "estimate",
             "name": "Unknown carbs",
@@ -244,10 +249,14 @@ class NutritionCompositionTests(unittest.TestCase):
         )
         self.assertIsNone(entry["carbs_g"])
         self.assertIsNone(
-            self.service.get_day_summary(entry["meal_date"])["total_carbs_g"]
+            self.service.sync_status.get_day_summary(entry["meal_date"])[
+                "total_carbs_g"
+            ]
         )
         self.assertIsNone(
-            self.service.get_sync_snapshot(entry["meal_date"])["total_carbs_g"]
+            self.service.sync_status.get_sync_snapshot(entry["meal_date"])[
+                "total_carbs_g"
+            ]
         )
         self.assertIsNone(
             self.service.get_range_summary(entry["meal_date"], entry["meal_date"])[0][
@@ -268,7 +277,7 @@ class NutritionCompositionTests(unittest.TestCase):
                 "fat_g": 0,
             }
         ]
-        calculation = self.library.calculate_components(components)
+        calculation = self.library.product_catalog.calculate_components(components)
         template = self.library.save_template(
             {"name": "Gel", "description": "Race gel", "components": components},
             expected_calculation=calculation,
@@ -406,7 +415,7 @@ class NutritionCompositionTests(unittest.TestCase):
                 {"name": "Too many", "description": "Invalid", "components": many}
             )
         self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
-        product = self.library.save_product(
+        product = self.library.product_catalog.save_product(
             {
                 "name": "Archive test",
                 "basis_amount": 100,
@@ -430,7 +439,7 @@ class NutritionCompositionTests(unittest.TestCase):
                 ],
             }
         )
-        self.library.archive_product(product["id"])
+        self.library.product_catalog.archive_product(product["id"])
         renamed = self.service.update_meal(consumed["id"], {"description": "Renamed"})
         self.assertEqual(renamed["nutrition_basis"], consumed["nutrition_basis"])
 
@@ -447,9 +456,11 @@ class NutritionCompositionTests(unittest.TestCase):
         }
         for field, value in (("kind", []), ("unit", {})):
             with self.subTest(field=field), self.assertRaises(AppError):
-                self.library.calculate_components([{**valid, field: value}])
+                self.library.product_catalog.calculate_components(
+                    [{**valid, field: value}]
+                )
         with self.assertRaises(AppError):
-            self.library.calculate_components(
+            self.library.product_catalog.calculate_components(
                 [{"kind": "database", "food_id": [], "amount": 1, "unit": "g"}]
             )
 
@@ -466,7 +477,7 @@ class NutritionCompositionTests(unittest.TestCase):
             "protein_g": 0,
             "fat_g": 0,
         }
-        mixed = self.library.calculate_components(
+        mixed = self.library.product_catalog.calculate_components(
             [valid, {**valid, "name": "Unknown", "carbs_g": None}]
         )
         self.assertIsNone(mixed["carbs_g"])
@@ -481,7 +492,9 @@ class NutritionCompositionTests(unittest.TestCase):
             )
         self.assertEqual(self.service.get_today_summary()["entry_count"], 0)
         with self.assertRaises(AppError):
-            self.library.calculate_components([{**valid, "kcal": 10001}])
+            self.library.product_catalog.calculate_components(
+                [{**valid, "kcal": 10001}]
+            )
 
     def test_restart_and_database_backup_keep_composite_entries_and_templates(
         self,
@@ -577,9 +590,9 @@ class NutritionCompositionTests(unittest.TestCase):
         first = self.service.log_meal({"description": "Known", "components": [known]})
         self.service.log_meal({"description": "Unknown", "components": [unknown]})
         for summary in (
-            self.service.get_day_summary(first["meal_date"]),
+            self.service.sync_status.get_day_summary(first["meal_date"]),
             self.service.get_range_summary(first["meal_date"], first["meal_date"])[0],
-            self.service.get_sync_snapshot(first["meal_date"]),
+            self.service.sync_status.get_sync_snapshot(first["meal_date"]),
         ):
             self.assertEqual(summary["entry_count"], 2)
             self.assertEqual(summary["total_kcal"], 60)
@@ -617,7 +630,7 @@ class NutritionCompositionTests(unittest.TestCase):
     def test_local_product_requires_calories_and_rejects_archived_products(
         self,
     ) -> None:
-        product = self.library.save_product(
+        product = self.library.product_catalog.save_product(
             {
                 "name": "Incomplete",
                 "basis_amount": 100,
@@ -634,9 +647,11 @@ class NutritionCompositionTests(unittest.TestCase):
             "unit": "g",
         }
         with self.assertRaises(AppError):
-            self.library.calculate_components([component])
-        complete = self.library.update_product(product["id"], {"kcal": 10})
+            self.library.product_catalog.calculate_components([component])
+        complete = self.library.product_catalog.update_product(
+            product["id"], {"kcal": 10}
+        )
         self.assertEqual(complete["kcal"], 10)
-        self.library.archive_product(product["id"])
+        self.library.product_catalog.archive_product(product["id"])
         with self.assertRaises(AppError):
-            self.library.calculate_components([component])
+            self.library.product_catalog.calculate_components([component])

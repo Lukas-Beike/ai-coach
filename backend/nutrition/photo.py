@@ -18,7 +18,6 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 # Body cap of the extract route: the base64 data URL of the largest accepted
 # photo plus room for the JSON around it. Other JSON routes keep the global cap.
 PHOTO_REQUEST_MAX_BYTES = 4 * math.ceil(MAX_IMAGE_BYTES / 3) + 64 * 1024
-ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _DATA_URL = re.compile(r"^data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$")
 INVALID_BASIS_AMOUNT = "Ungültige Bezugsmenge."
 

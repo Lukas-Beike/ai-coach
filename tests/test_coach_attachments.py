@@ -17,6 +17,7 @@ from backend.coach.attachments import (
     model_input,
     validate_attachments,
 )
+from backend.errors import AppError
 from backend.providers.fit_file import _fit_crc16, _fit_data_record
 
 GPX = b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt><trkpt lat="0" lon="0.01"><ele>20</ele></trkpt></trkseg></trk></gpx>'
@@ -430,7 +431,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         )
 
     def test_invalid_upload_does_not_create_a_command(self):
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
                 "Analyze",
                 "invalid-turn",
@@ -442,7 +443,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
     def test_attachment_storage_quota_prevents_backup_growth(self):
         with (
             patch.object(coach_attachments, "MAX_ATTACHMENT_STORAGE_BYTES", 10),
-            self.assertRaises(server.AppError) as error,
+            self.assertRaises(AppError) as error,
         ):
             server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
                 "Analyze",
@@ -478,7 +479,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         )
         with (
             patch.object(coach_attachments, "MAX_REQUEST_BYTES", outgoing - 1),
-            self.assertRaises(server.AppError) as error,
+            self.assertRaises(AppError) as error,
         ):
             server.COACH_BACKGROUND_JOBS.job_submission_service().enqueue(
                 "Analyze",
@@ -734,7 +735,7 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
         )
 
         def broken(_):
-            raise server.AppError(
+            raise AppError(
                 502, "Synthetic provider failure", reason="conversation_state_invalid"
             )
 

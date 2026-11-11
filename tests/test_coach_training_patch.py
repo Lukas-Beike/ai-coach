@@ -8,6 +8,7 @@ import unittest
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach import limits as coach_limits
+from backend.errors import AppError
 from backend.planning.training_plans import COACH_PLAN_CONSTRAINTS_PREFIX
 
 
@@ -61,7 +62,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
         action = self.action("training_plan:plan-a", f"planned_unit:{unit_b}")
         action["request"]["constraints"] = ["Synthetic no intensity"]
         before = self.state()
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                 self.rename(unit_b), action
             )
@@ -108,7 +109,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
             },
         ):
             with self.subTest(changes=bool(arguments["changes"])):
-                with self.assertRaises(server.AppError) as error:
+                with self.assertRaises(AppError) as error:
                     server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                         arguments, action
                     )
@@ -156,7 +157,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
 
     def test_stale_revision_does_not_create_workout(self):
         before = self.state()
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                 {
                     "expected_revision": before["planning_revision"] - 1,
@@ -183,7 +184,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
             "starts_at_local": "2026-09-08T08:30:00",
             "duration_minutes": 30,
         }
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                 {
                     "expected_revision": before,
@@ -242,7 +243,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
         )
 
     def test_addition_requires_local_plan_scope(self):
-        with self.assertRaises(server.AppError) as error:
+        with self.assertRaises(AppError) as error:
             server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                 {
                     "expected_revision": self.state()["planning_revision"],
@@ -266,7 +267,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
         ):
             with (
                 self.subTest(size=len(arguments["workouts"])),
-                self.assertRaises(server.AppError) as error,
+                self.assertRaises(AppError) as error,
             ):
                 service.apply(arguments, self.action("local_plan"))
             self.assertEqual(error.exception.reason, "change_limit")

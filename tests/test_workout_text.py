@@ -9,6 +9,7 @@ from unittest.mock import patch
 from server_test_support import ServerTestCase, server
 from support import parsed_workout_fixture
 
+from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 
 
@@ -35,7 +36,7 @@ class WorkoutTextTests(ServerTestCase):
         }
 
     def assert_invalid(self, workout, reason):
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             planning_workouts.validate_workout_description(workout)
         self.assertEqual(raised.exception.reason, reason)
 
@@ -61,7 +62,7 @@ class WorkoutTextTests(ServerTestCase):
                     today=server.ATHLETE_CLOCK.now().date(),
                 ),
             ):
-                with self.assertRaises(server.AppError):
+                with self.assertRaises(AppError):
                     operation()
             folder.assert_not_called()
             post.assert_not_called()
@@ -144,7 +145,7 @@ class WorkoutTextTests(ServerTestCase):
         broken_steps = [
             step for index, step in enumerate(steps) if index not in {5, 6, 7}
         ]
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             planning_workouts.validate_intervals_workout_result(
                 workout,
                 {
@@ -296,7 +297,7 @@ class WorkoutTextTests(ServerTestCase):
                 planning_workouts.validate_intervals_workout_result(
                     normalized, {"type": sport, "moving_time": 1800}
                 )
-                with self.assertRaises(server.AppError):
+                with self.assertRaises(AppError):
                     planning_workouts.validate_intervals_workout_result(
                         normalized, {"type": "Run"}
                     )
@@ -311,7 +312,7 @@ class WorkoutTextTests(ServerTestCase):
 
     def test_run_cannot_be_confirmed_as_weight_training(self):
         workout = self.workout("- 30m Z1 HR", 30, sport="Run")
-        with self.assertRaises(server.AppError) as raised:
+        with self.assertRaises(AppError) as raised:
             planning_workouts.validate_intervals_workout_result(
                 workout,
                 parsed_workout_fixture(
@@ -372,7 +373,7 @@ class WorkoutTextTests(ServerTestCase):
         for reply in invalid:
             with (
                 self.subTest(reply=reply),
-                self.assertRaises(server.AppError) as raised,
+                self.assertRaises(AppError) as raised,
             ):
                 planning_workouts.validate_intervals_workout_result(workout, reply)
             self.assertEqual(
@@ -393,7 +394,7 @@ class WorkoutTextTests(ServerTestCase):
         }
         planning_workouts.validate_intervals_workout_result(workout, reply)
         reply["workout_doc"]["steps"][0]["steps"] = list(reversed(steps))
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             planning_workouts.validate_intervals_workout_result(workout, reply)
 
 

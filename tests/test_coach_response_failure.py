@@ -6,7 +6,8 @@ from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
 
-from backend.providers import openai as openai_provider
+from backend.errors import AppError
+from backend.providers import openai_requests
 from backend.sync import queue as sync_queue
 
 server = dialogue.server
@@ -61,7 +62,7 @@ class CoachResponseFailureTests(unittest.TestCase):
                     "status": "completed",
                 }
             if len(payloads) == 2:
-                raise server.AppError(429, "rate limited", reason="rate_limit_exceeded")
+                raise AppError(429, "rate limited", reason="rate_limit_exceeded")
             return {
                 "id": "resp_final",
                 "status": "completed",
@@ -79,7 +80,7 @@ class CoachResponseFailureTests(unittest.TestCase):
                 return_value="Synthetic local context",
             ),
             patch.object(
-                openai_provider.OpenAIResponsesClient, "background", side_effect=create
+                openai_requests.OpenAIResponsesClient, "background", side_effect=create
             ),
             patch.object(server.time, "sleep"),
             patch.object(
@@ -158,7 +159,7 @@ class CoachResponseFailureTests(unittest.TestCase):
                 return_value="Synthetic local context",
             ),
             patch.object(
-                openai_provider.OpenAIResponsesClient, "background", side_effect=create
+                openai_requests.OpenAIResponsesClient, "background", side_effect=create
             ),
             patch.object(
                 sync_queue.SyncJobQueueService,
@@ -219,7 +220,7 @@ class CoachResponseFailureTests(unittest.TestCase):
         ):
             with (
                 self.subTest(code_type=type(code).__name__),
-                self.assertRaises(server.AppError) as raised,
+                self.assertRaises(AppError) as raised,
             ):
                 server.provider_state_service().validate_openai_response(
                     "/responses",

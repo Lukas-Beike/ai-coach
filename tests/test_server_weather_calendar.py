@@ -23,6 +23,7 @@ from backend.activities import calendar_projection as activity_calendar_projecti
 from backend.calendar import canonical as calendar_canonical
 from backend.calendar import local as calendar_local
 from backend.coach.context import CoachIntervalsContextService
+from backend.errors import AppError
 from backend.http_api.public_weather import PublicWeatherStateService
 from backend.planning import adaptive_preview_service
 from backend.planning import planned_unit_service as planning_planned_unit_service
@@ -227,7 +228,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         with patch.object(
             weather_provider.WeatherClient,
             "fetch",
-            side_effect=[server.AppError(503, "upstream"), forecast],
+            side_effect=[AppError(503, "upstream"), forecast],
         ) as fetch:
             first = server.WEATHER_ASSEMBLY.service().state(refresh=True)
             second = server.WEATHER_ASSEMBLY.service().state(refresh=True)
@@ -1008,7 +1009,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 [{"id": "synthetic-event", **parsed_workout_fixture()}],
             ],
         ) as upsert:
-            with self.assertRaises(server.AppError):
+            with self.assertRaises(AppError):
                 server.PLANNED_CALENDAR_SYNC.sync_service().sync_entry(entry["id"])
             failed = server.PLANNING_DATA.planned_unit().list()[0]
             self.assertEqual(failed["sync_status"], "sync_error")
@@ -1168,9 +1169,9 @@ class ServerWeatherCalendarTests(ServerTestCase):
             server.SETTINGS.calendar_display_settings(),
             {"past_weeks": 3, "future_weeks": 12},
         )
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.SETTINGS.save_calendar_display_settings({"past_weeks": -1})
-        with self.assertRaises(server.AppError):
+        with self.assertRaises(AppError):
             server.SETTINGS.save_calendar_display_settings({"future_weeks": 53})
         server.key_value_service().set("calendar_display_past_weeks", "invalid")
         self.assertEqual(server.SETTINGS.calendar_display_settings()["past_weeks"], 1)
@@ -1448,7 +1449,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 "fetch_calendar_feed",
                 return_value=b"not an ical feed",
             ),
-            self.assertRaises(server.AppError),
+            self.assertRaises(AppError),
         ):
             server.EXTERNAL_CALENDAR.sync_service().sync("test")
         self.assertEqual(
@@ -1570,9 +1571,9 @@ class ServerWeatherCalendarTests(ServerTestCase):
             patch.object(
                 calendar_provider,
                 "fetch_calendar_feed",
-                side_effect=server.AppError(502, "upstream unavailable"),
+                side_effect=AppError(502, "upstream unavailable"),
             ),
-            self.assertRaises(server.AppError),
+            self.assertRaises(AppError),
         ):
             server.EXTERNAL_CALENDAR.sync_service().sync("test")
         self.assertEqual(

@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
@@ -612,34 +612,3 @@ def undoable(row: Mapping[str, Any]) -> bool:
     except TypeError, ValueError:
         return True
     return not (isinstance(diff, dict) and diff.get(_UNDOABLE_FIELD) is False)
-
-
-def mark_not_undoable(
-    db: Any, entity_type: str, *, change_ids: Sequence[str] | None = None
-) -> int:
-    """Keep recorded changes of one entity type listed but never undone.
-
-    ``change_ids`` limits it to those rows; undo rows are left as they are.
-    Returns the number of rows newly marked.
-    """
-    where = (
-        "entity_type = ? AND action <> 'undo' AND json_valid(diff) "
-        "AND json_type(diff, ?) IS NOT 'false'"
-    )
-    path = f"$.{_UNDOABLE_FIELD}"
-    if change_ids is None:
-        batches: list[list[str]] = [[]]
-    else:
-        unique = sorted(set(change_ids))
-        batches = [unique[start : start + 500] for start in range(0, len(unique), 500)]
-    marked = 0
-    for batch in batches:
-        ids = f" AND id IN ({', '.join('?' * len(batch))})" if batch else ""
-        marked += int(
-            db.execute(
-                f"UPDATE change_history SET diff = json_set(diff, ?, json('false')) "
-                f"WHERE {where}{ids}",
-                (path, entity_type, path, *batch),
-            ).rowcount
-        )
-    return marked
