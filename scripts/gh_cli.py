@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,12 @@ class CliError(RuntimeError):
     """A failed command or a refused input; the message is safe to print."""
 
 
-def run(program: str, *args: str, cwd: Path | None = None) -> str:
+def run(
+    program: str,
+    *args: str,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str:
     try:
         done = subprocess.run(
             [program, *args],
@@ -33,6 +39,7 @@ def run(program: str, *args: str, cwd: Path | None = None) -> str:
             text=True,
             encoding="utf-8",
             cwd=cwd,
+            env=env,
         )
     except FileNotFoundError as exc:
         raise CliError(f"{program} is not installed.") from exc
@@ -55,8 +62,10 @@ def gh_json(*args: str) -> Any:
         raise CliError(f"gh {' '.join(args[:2])} returned invalid JSON.") from exc
 
 
-def git(*args: str, cwd: Path | None = None) -> str:
-    return run("git", *args, cwd=cwd)
+def git(
+    *args: str, cwd: Path | None = None, env: Mapping[str, str] | None = None
+) -> str:
+    return run("git", *args, cwd=cwd, env=env)
 
 
 def read_body(path: str) -> str:
