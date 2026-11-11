@@ -50,10 +50,10 @@ OpenSpec does not replace repository review, orchestration, or validation.
 
 **Application specifications.** The [OpenSpec baseline](../openspec/README.md)
 documents the application's behavior by capability. Its
-[coverage ledger](../openspec/COVERAGE.md) and
-[Coach tool map](../openspec/COACH_TOOLS.md) are frozen snapshots of the
-baseline revision and are not maintained further. A valid document is not proof
-of runtime conformance.
+[coverage ledger](../openspec/COVERAGE.md) is a frozen snapshot of the baseline
+revision and is not maintained further; the
+[Coach tool map](../openspec/COACH_TOOLS.md) is generated from the tool specs
+and checked by a test. A valid document is not proof of runtime conformance.
 
 OpenSpec is optional. Most changes put their acceptance criteria in the PR body,
 but a behavior change still updates the affected main specs in `openspec/specs/`
