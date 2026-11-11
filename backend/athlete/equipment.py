@@ -913,7 +913,7 @@ def _equipment_amounts(payload: dict) -> dict[str, Any]:
                 400, "Anfangsstand muss ausdrücklich als Zahl angegeben werden."
             )
         if field == "lifetime_target_km" and value is not None and value <= 0:
-            raise AppError(400, "Lifetime target must be positive.")
+            raise AppError(400, "Die Ziel-Laufleistung muss größer als null sein.")
         amounts[field] = value
 
     return amounts
