@@ -8,11 +8,11 @@ from typing import Any
 
 from backend.athlete.profile import ProfileService
 from backend.coach.context import CoachContextPreviewService
-from backend.http_api.auth import SessionAuthService
 from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
 )
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.planning.competition_service import CompetitionService
 from backend.settings import SettingsService
 
@@ -25,7 +25,6 @@ class AthleteGetRoutes:
 
     def __init__(
         self,
-        session_auth_service: Callable[[], SessionAuthService],
         public_performance_state_service: Callable[[], PublicPerformanceStateService],
         profile_service: Callable[[], ProfileService],
         competition_service: Callable[[], CompetitionService],
@@ -39,7 +38,6 @@ class AthleteGetRoutes:
     ) -> None:
         self._first_threshold_service = first_threshold_service
         self._race_results = race_results
-        self._session_auth_service = session_auth_service
         self._public_performance_state_service = public_performance_state_service
         self._profile_service = profile_service
         self._competition_service = competition_service
@@ -72,36 +70,39 @@ class AthleteGetRoutes:
             )
             return None
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path not in {
-            "/api/performance",
-            "/api/profile",
-            "/api/feedback",
-            "/api/context-preview",
-            ZONES_PATH,
-        }:
-            return False
-        if path == ZONES_PATH and self._zone_service is None:
-            return False
+    def routes(self) -> list[Route]:
+        routes = [
+            Route("GET", "/api/performance", Access.SESSION, self._performance),
+            Route("GET", "/api/profile", Access.SESSION, self._profile),
+            Route("GET", "/api/feedback", Access.SESSION, self._feedback),
+            Route("GET", "/api/context-preview", Access.SESSION, self._preview),
+        ]
+        if self._zone_service is not None:
+            routes.append(Route("GET", ZONES_PATH, Access.SESSION, self._zones))
+        return routes
 
-        self._session_auth_service().require_auth(handler)
-        if path == "/api/performance":
-            payload = self._public_performance_state_service().performance_state()
-        elif path == "/api/profile":
-            payload = {
-                "profile": self._profile_service().get(),
-                "competitions": self._competitions(),
-            }
-            if self._first_threshold_service is not None:
-                payload["first_threshold_estimate"] = self._first_threshold_estimate(
-                    self._first_threshold_service
-                )
-        elif path == "/api/feedback":
-            payload = self._public_feedback_state_service().feedback_state()
-        elif path == ZONES_PATH and self._zone_service is not None:
-            payload = self._zone_service().read()
-        else:
-            payload = self._coach_context_preview_service().preview()
+    def _performance(self, handler: Any, _request: RouteRequest) -> None:
+        handler.send_json(
+            200, self._public_performance_state_service().performance_state()
+        )
 
+    def _profile(self, handler: Any, _request: RouteRequest) -> None:
+        payload: dict[str, Any] = {
+            "profile": self._profile_service().get(),
+            "competitions": self._competitions(),
+        }
+        if self._first_threshold_service is not None:
+            payload["first_threshold_estimate"] = self._first_threshold_estimate(
+                self._first_threshold_service
+            )
         handler.send_json(200, payload)
-        return True
+
+    def _feedback(self, handler: Any, _request: RouteRequest) -> None:
+        handler.send_json(200, self._public_feedback_state_service().feedback_state())
+
+    def _zones(self, handler: Any, _request: RouteRequest) -> None:
+        if self._zone_service is not None:
+            handler.send_json(200, self._zone_service().read())
+
+    def _preview(self, handler: Any, _request: RouteRequest) -> None:
+        handler.send_json(200, self._coach_context_preview_service().preview())

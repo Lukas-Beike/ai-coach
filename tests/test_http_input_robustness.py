@@ -22,6 +22,7 @@ from backend.http_api.handler import (
 )
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.response_transport import HttpResponseTransport
+from backend.http_api.route_table import RouteTable
 
 PASSWORD = "synthetic-password-123"
 LOGIN_HEADERS = b"POST /api/login HTTP/1.0\r\nContent-Type: application/json\r\n"
@@ -78,6 +79,7 @@ def make_server(*, input_timeout: float, chunk_bytes: int):
         app_version="test",
         logger=log,
         session_auth_service=lambda: request_auth,
+        route_table=RouteTable([]),
         route_dispatcher=SimpleNamespace(
             handle_put=lambda handler, _path: routes.read_and_answer(handler)
         ),

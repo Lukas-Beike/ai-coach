@@ -6,6 +6,8 @@ import socket
 import unittest
 from unittest.mock import ANY, Mock
 
+from support import dispatch_route
+
 from backend.http_api.state_events_get import (
     StateEventsGetRoutes,
     client_is_connected,
@@ -21,12 +23,11 @@ class StateEventsGetRoutesTests(unittest.TestCase):
         self.transport = Mock()
         self.routes = StateEventsGetRoutes(self.auth_factory, self.transport)
 
-    def test_recognized_path_authenticates_then_forwards_exact_transport_callbacks(
+    def test_recognized_path_forwards_exact_transport_callbacks(
         self,
     ) -> None:
-        self.assertTrue(self.routes.handle(self.handler, "/api/state/events"))
-        self.auth_factory.assert_called_once_with()
-        self.auth.require_auth.assert_called_once_with(self.handler)
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/state/events"))
+        self.auth_factory.assert_not_called()
         self.transport.handle.assert_called_once_with(
             self.handler.path,
             send_headers=self.handler.send_sse_headers,
@@ -37,7 +38,7 @@ class StateEventsGetRoutesTests(unittest.TestCase):
         )
 
     def test_session_callback_reflects_authenticated_session_lookup(self) -> None:
-        self.routes.handle(self.handler, "/api/state/events")
+        dispatch_route(self.routes, self.handler, "/api/state/events")
         session_is_active = self.transport.handle.call_args.kwargs["session_is_active"]
 
         self.auth.authenticated_session.return_value = {
@@ -50,7 +51,7 @@ class StateEventsGetRoutesTests(unittest.TestCase):
 
         self.assertEqual(self.auth.authenticated_session.call_count, 2)
         self.auth.authenticated_session.assert_called_with(self.handler)
-        self.auth.require_auth.assert_called_once_with(self.handler)
+        self.auth.require_auth.assert_not_called()
 
     def test_client_is_connected_sees_a_closed_peer_and_keeps_pending_bytes(
         self,
@@ -71,31 +72,11 @@ class StateEventsGetRoutesTests(unittest.TestCase):
         server_side.close()
         self.assertFalse(client_is_connected(server_side))
 
-    def test_auth_denial_precedes_connection_and_transport_access(self) -> None:
-        denied = RuntimeError("denied")
-        self.auth.require_auth.side_effect = denied
-        with self.assertRaisesRegex(RuntimeError, "denied") as caught:
-            self.routes.handle(self.handler, "/api/state/events")
-        self.assertIs(caught.exception, denied)
-        self.handler.connection.assert_not_called()
-        self.transport.handle.assert_not_called()
-        self.handler.send_sse_headers.assert_not_called()
-        self.handler.send_sse_event.assert_not_called()
-
     def test_unknown_path_returns_false_without_resolving_dependencies(self) -> None:
-        self.assertFalse(self.routes.handle(self.handler, "/api/state/events/extra"))
+        self.assertFalse(dispatch_route(self.routes, self.handler, "/api/state/events/extra"))
         self.auth_factory.assert_not_called()
         self.transport.handle.assert_not_called()
         self.handler.connection.assert_not_called()
-
-    def test_auth_factory_is_resolved_for_each_request(self) -> None:
-        second_auth = Mock()
-        self.auth_factory.side_effect = [self.auth, second_auth]
-        self.routes.handle(self.handler, "/api/state/events")
-        self.routes.handle(self.handler, "/api/state/events")
-        self.assertEqual(self.auth_factory.call_count, 2)
-        self.auth.require_auth.assert_called_once_with(self.handler)
-        second_auth.require_auth.assert_called_once_with(self.handler)
 
 
 if __name__ == "__main__":

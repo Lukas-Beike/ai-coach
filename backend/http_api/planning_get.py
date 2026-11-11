@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import parse_qs, urlparse
 
-from backend.http_api.auth import SessionAuthService
 from backend.http_api.library_page import LibraryPageService
 from backend.http_api.public_plan import PublicPlanStateService
 from backend.http_api.public_weather import PublicWeatherStateService
+from backend.http_api.route_table import Access, Route, RouteRequest
 
 
 class PlanningGetRoutes:
@@ -17,34 +16,42 @@ class PlanningGetRoutes:
 
     def __init__(
         self,
-        session_auth_service: Callable[[], SessionAuthService],
         public_plan_state_service: Callable[[], PublicPlanStateService],
         public_weather_state_service: Callable[[], PublicWeatherStateService],
         library_page_service: Callable[[], LibraryPageService],
     ) -> None:
-        self._session_auth_service = session_auth_service
         self._public_plan_state_service = public_plan_state_service
         self._public_weather_state_service = public_weather_state_service
         self._library_page_service = library_page_service
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path not in {"/api/plan", "/api/weather", "/api/library"}:
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route("GET", "/api/plan", Access.SESSION, self._plan),
+            Route("GET", "/api/weather", Access.SESSION, self._weather),
+            Route("GET", "/api/library", Access.SESSION, self._library),
+        ]
 
-        self._session_auth_service().require_auth(handler)
-        query = parse_qs(urlparse(handler.path).query)
-        if path == "/api/plan":
-            payload = self._public_plan_state_service().read_public(
-                local_only=query.get("local", ["0"])[0] == "1"
-            )
-        elif path == "/api/weather":
-            payload = self._public_weather_state_service().state(
-                local_only=query.get("local", ["0"])[0] == "1"
-            )
-        else:
-            payload = self._library_page_service().page(
+    def _plan(self, handler: Any, request: RouteRequest) -> None:
+        handler.send_json(
+            200,
+            self._public_plan_state_service().read_public(
+                local_only=request.query.get("local", ["0"])[0] == "1"
+            ),
+        )
+
+    def _weather(self, handler: Any, request: RouteRequest) -> None:
+        handler.send_json(
+            200,
+            self._public_weather_state_service().state(
+                local_only=request.query.get("local", ["0"])[0] == "1"
+            ),
+        )
+
+    def _library(self, handler: Any, request: RouteRequest) -> None:
+        query = request.query
+        handler.send_json(
+            200,
+            self._library_page_service().page(
                 query.get("cursor", [None])[0], query.get("limit", [None])[0]
-            )
-
-        handler.send_json(200, payload)
-        return True
+            ),
+        )

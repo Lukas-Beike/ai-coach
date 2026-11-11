@@ -12,6 +12,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 from urllib.parse import parse_qs, urlsplit
 
+from support import dispatch_route
+
 from backend.canonical.vocabulary import ProviderId
 from backend.config import load_config
 from backend.errors import AppError
@@ -446,7 +448,7 @@ class WahooRouteTests(unittest.TestCase):
             path=f"/api/wahoo/callback?{query}", send_bytes=Mock()
         )
         routes = WahooGetRoutes(lambda: self.service, self.gate)
-        self.assertTrue(routes.handle(handler, "/api/wahoo/callback"))
+        self.assertTrue(dispatch_route(routes, handler, "/api/wahoo/callback"))
         return handler.send_bytes.call_args
 
     def test_callback_redirects_to_fixed_targets_without_echo(self):
@@ -461,7 +463,9 @@ class WahooRouteTests(unittest.TestCase):
 
     def test_other_paths_are_not_handled(self):
         routes = WahooGetRoutes(lambda: self.service, self.gate)
-        self.assertFalse(routes.handle(SimpleNamespace(path="/x"), "/api/other"))
+        self.assertFalse(
+            dispatch_route(routes, SimpleNamespace(path="/x"), "/api/other")
+        )
         post = WahooPostRoutes(lambda: self.service)
         self.assertFalse(post.handle(SimpleNamespace(), "/api/other"))
 

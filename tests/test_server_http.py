@@ -27,15 +27,17 @@ from server_test_support import (
     create_test_session,
     server,
 )
-from support import store_canonical_snapshot
+from support import dispatch_route, store_canonical_snapshot
 
 from backend.coach import streams as coach_streams
 from backend.errors import ClientDisconnected, public_error_contract
 from backend.http_api import auth as http_auth
 from backend.http_api import readiness as readiness_module
 from backend.http_api import response_transport, responses
+from backend.http_api.handler import create_request_handler
 from backend.http_api.rate_limit import RateLimiter
 from backend.http_api.readiness import ReadinessService
+from backend.http_api.route_table import PUBLIC_API_ROUTES, Access, RouteTable
 from backend.http_api.state_events_get import StateEventsGetRoutes
 from backend.http_api.state_events_transport import StateEventTransport
 from backend.providers import http as provider_http
@@ -44,20 +46,6 @@ from backend.providers import weather as weather_provider
 from backend.runtime import events as runtime_events
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY
-
-# Routes that answer without a session, by design: health, readiness, login
-# state, login and the Wahoo OAuth redirect, whose single-use state is its
-# credential.
-PUBLIC_API_ROUTES = frozenset(
-    {
-        ("GET", "/api/health"),
-        ("GET", "/api/readiness"),
-        ("GET", "/api/auth/status"),
-        ("GET", "/api/wahoo/callback"),
-        ("POST", "/api/login"),
-    }
-)
-
 
 # Matches every id pattern of the routes: [^/]+ and the hex job ids.
 SAMPLE_ID = "abc-123"
@@ -72,7 +60,7 @@ def _api_route_paths() -> set[str]:
                 str(node.value).strip("^$") if isinstance(node, ast.Constant) else ""
             )
             if value.startswith("/api/"):
-                paths.add(re.sub(r"\(.*?\)", SAMPLE_ID, value).rstrip("/"))
+                paths.add(re.sub(r"\(.*?\)|\{.*?\}", SAMPLE_ID, value).rstrip("/"))
     paths.discard("/api")
     return paths | {f"{path}/{SAMPLE_ID}" for path in paths}
 
@@ -119,6 +107,53 @@ class ServerHttpTests(ServerTestCase):
             ],
             "API routes answered without a session",
         )
+
+    def test_every_table_route_checks_access_before_its_handler_runs(self):
+        # Every handler is replaced by one that fails when called, so a 401 or
+        # 403 proves the access check ran before any route code or service.
+        called = []
+
+        def refuse(handler, request):
+            called.append(request.path)
+            raise AssertionError("route handler ran before its access check")
+
+        table = server.HTTP_API.route_table
+        self.assertEqual(
+            {(r.method, r.path) for r in table.routes if r.access is Access.PUBLIC},
+            {key for key in PUBLIC_API_ROUTES if key[0] == "GET"},
+        )
+        dependencies = replace(
+            server.HTTP_API.request_handler_class().dependencies,
+            route_table=RouteTable(replace(r, handle=refuse) for r in table.routes),
+        )
+        httpd = ThreadingHTTPServer(
+            ("127.0.0.1", 0), create_request_handler(dependencies)
+        )
+        self.addCleanup(httpd.server_close)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        auth = http_auth.SessionAuthService(
+            Mock(),
+            threading.RLock(),
+            replace(server.CONFIG, app_password="synthetic-password-123"),
+            True,
+            RateLimiter(),
+        )
+        statuses = {}
+        with patch.object(server, "get_session_auth_service", return_value=auth):
+            for route in table.routes:
+                if route.access is Access.PUBLIC:
+                    continue
+                path = re.sub(r"\{.*?\}", "abc-123", route.path)
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", httpd.server_address[1], timeout=10
+                )
+                connection.request(route.method, path)
+                statuses[route.method, path] = connection.getresponse().status
+                connection.close()
+        self.assertGreater(len(statuses), 30)
+        self.assertEqual({401}, set(statuses.values()), statuses)
+        self.assertEqual([], called)
 
     def test_app_error_handler_logs_redacted_event_for_each_method(self):
         for method in ("GET", "POST", "PUT"):
@@ -221,9 +256,7 @@ class ServerHttpTests(ServerTestCase):
             first.server_version, f"Pacecraft/{initial.identity.app_version}"
         )
         self.assertEqual(second.server_version, "Pacecraft/synthetic-next")
-        self.assertIs(
-            first.dependencies.route_dispatcher, server.HTTP_API.route_dispatcher
-        )
+        self.assertIs(first.dependencies.route_table, server.HTTP_API.route_table)
         self.assertIs(
             second.dependencies.post_dispatcher, server.HTTP_API.post_dispatcher
         )
@@ -232,32 +265,24 @@ class ServerHttpTests(ServerTestCase):
         )
         self.assertIsNot(first.static_asset_service, second.static_asset_service)
 
-    def test_weather_handler_calls_public_weather_service_after_auth(self):
+    def test_weather_handler_calls_public_weather_service(self):
         handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.path = "/api/weather?local=1"
         handler.send_json = Mock()
         endpoint = Mock()
         endpoint.state.return_value = {"configured": True, "loading": True}
 
-        auth = Mock()
-        with (
-            patch.object(
-                server.HTTP_API.planning_get_routes,
-                "_session_auth_service",
-                return_value=auth,
-            ) as auth_factory,
-            patch.object(
-                server.HTTP_API.planning_get_routes,
-                "_public_weather_state_service",
-                return_value=endpoint,
-            ) as factory,
-        ):
+        with patch.object(
+            server.HTTP_API.planning_get_routes,
+            "_public_weather_state_service",
+            return_value=endpoint,
+        ) as factory:
             self.assertTrue(
-                server.HTTP_API.planning_get_routes.handle(handler, "/api/weather")
+                dispatch_route(
+                    server.HTTP_API.planning_get_routes, handler, "/api/weather"
+                )
             )
 
-        auth.require_auth.assert_called_once_with(handler)
-        auth_factory.assert_called_once_with()
         factory.assert_called_once_with()
         endpoint.state.assert_called_once_with(local_only=True)
         handler.send_json.assert_called_once_with(
@@ -296,24 +321,16 @@ class ServerHttpTests(ServerTestCase):
                 handler.send_json = Mock()
                 service = Mock()
                 service.read_public.return_value = {"plans": []}
-                auth = Mock()
-                with (
-                    patch.object(
-                        server.HTTP_API.planning_get_routes,
-                        "_session_auth_service",
-                        return_value=auth,
-                    ) as auth_factory,
-                    patch.object(
-                        server.HTTP_API.planning_get_routes,
-                        "_public_plan_state_service",
-                        return_value=service,
-                    ) as service_factory,
-                ):
+                with patch.object(
+                    server.HTTP_API.planning_get_routes,
+                    "_public_plan_state_service",
+                    return_value=service,
+                ) as service_factory:
                     self.assertTrue(
-                        server.HTTP_API.planning_get_routes.handle(handler, "/api/plan")
+                        dispatch_route(
+                            server.HTTP_API.planning_get_routes, handler, "/api/plan"
+                        )
                     )
-                auth.require_auth.assert_called_once_with(handler)
-                auth_factory.assert_called_once_with()
                 service_factory.assert_called_once_with()
                 service.read_public.assert_called_once_with(local_only=local_only)
                 handler.send_json.assert_called_once_with(200, {"plans": []})
@@ -931,58 +948,27 @@ class ServerHttpTests(ServerTestCase):
             sent[-1], ("reset", {"reason": "gap", "latest_event_id": 9}, 9)
         )
 
-    def test_state_events_route_requires_auth_before_starting_transport(self):
+    def test_state_events_route_hands_the_request_to_the_transport(self):
         handler = object.__new__(server.HTTP_API.request_handler_class())
         handler.path = "/api/state/events?since=0"
         handler.connection = Mock()
         handler.send_sse_headers = Mock()
         handler.send_sse_event = Mock()
-        auth = Mock()
         transport = Mock()
-        routes = StateEventsGetRoutes(lambda: auth, transport)
+        routes = StateEventsGetRoutes(lambda: Mock(), transport)
 
-        with patch.object(transport, "handle") as handle:
-            self.assertTrue(routes.handle(handler, "/api/state/events"))
-            auth.require_auth.assert_called_once_with(handler)
-            handle.assert_called_once_with(
-                handler.path,
-                send_headers=handler.send_sse_headers,
-                send_event=handler.send_sse_event,
-                set_connection_timeout=handler.connection.settimeout,
-                client_is_connected=ANY,
-                session_is_active=ANY,
-            )
-
-        denied = server.AppError(401, "unauthorized")
-        auth.require_auth.side_effect = denied
-        auth.require_auth.reset_mock()
-        handler.connection.settimeout.reset_mock()
-        with patch.object(transport, "handle") as handle:
-            with self.assertRaises(server.AppError) as caught:
-                routes.handle(handler, "/api/state/events")
-            self.assertIs(caught.exception, denied)
-            auth.require_auth.assert_called_once_with(handler)
-            handle.assert_not_called()
-            handler.connection.settimeout.assert_not_called()
-            handler.send_sse_headers.assert_not_called()
-            handler.send_sse_event.assert_not_called()
-
-        auth.require_auth.side_effect = None
-        auth.require_auth.reset_mock()
+        self.assertTrue(dispatch_route(routes, handler, "/api/state/events"))
+        transport.handle.assert_called_once_with(
+            handler.path,
+            send_headers=handler.send_sse_headers,
+            send_event=handler.send_sse_event,
+            set_connection_timeout=handler.connection.settimeout,
+            client_is_connected=ANY,
+            session_is_active=ANY,
+        )
         transport.handle.reset_mock()
-        self.assertFalse(routes.handle(handler, "/api/state/events/extra"))
-        auth.require_auth.assert_not_called()
+        self.assertFalse(dispatch_route(routes, handler, "/api/state/events/extra"))
         transport.handle.assert_not_called()
-        handler.connection.settimeout.assert_not_called()
-
-        second_auth = Mock()
-        auth_factory = Mock(side_effect=[auth, second_auth])
-        routes = StateEventsGetRoutes(auth_factory, transport)
-        routes.handle(handler, "/api/state/events")
-        routes.handle(handler, "/api/state/events")
-        self.assertEqual(auth_factory.call_count, 2)
-        auth.require_auth.assert_called_once_with(handler)
-        second_auth.require_auth.assert_called_once_with(handler)
 
     def test_http_response_helpers_are_dependency_light_and_preserve_headers(self):
         from backend.http_api import responses
@@ -1868,10 +1854,14 @@ class ServerHttpTests(ServerTestCase):
             ),
         ):
             self.assertTrue(
-                server.HTTP_API.public_get_routes.handle(handler, "/api/readiness")
+                dispatch_route(
+                    server.HTTP_API.public_get_routes, handler, "/api/readiness"
+                )
             )
             self.assertTrue(
-                server.HTTP_API.public_get_routes.handle(handler, "/api/readiness")
+                dispatch_route(
+                    server.HTTP_API.public_get_routes, handler, "/api/readiness"
+                )
             )
 
         self.assertEqual(seen_managers, [original_manager, switched_manager])
@@ -1891,7 +1881,9 @@ class ServerHttpTests(ServerTestCase):
             ),
         ):
             self.assertTrue(
-                server.HTTP_API.public_get_routes.handle(handler, "/api/readiness")
+                dispatch_route(
+                    server.HTTP_API.public_get_routes, handler, "/api/readiness"
+                )
             )
         status, payload = handler.send_json.call_args.args
         self.assertEqual(status, 503)

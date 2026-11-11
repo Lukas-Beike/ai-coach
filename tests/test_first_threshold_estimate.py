@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.activities.hr_cap import (
     SOURCE_ESTIMATED,
     SOURCE_MEASURED,
@@ -591,7 +593,6 @@ class ProfileReadTests(unittest.TestCase):
         competitions.list.return_value = []
         routes = AthleteGetRoutes(
             lambda: Mock(),
-            lambda: Mock(),
             lambda: profile,
             lambda: competitions,
             lambda: Mock(),
@@ -599,7 +600,7 @@ class ProfileReadTests(unittest.TestCase):
             Mock(),
             first_threshold_service=service,
         )
-        self.assertTrue(routes.handle(handler, "/api/profile"))
+        self.assertTrue(dispatch_route(routes, handler, "/api/profile"))
         return handler.send_json.call_args.args[1]
 
     def test_the_profile_read_carries_the_estimate_or_null(self) -> None:

@@ -716,12 +716,6 @@
     },
     {
       "tool": "mypy",
-      "path": "tests/test_http_public_get_routes.py",
-      "code": "func-returns-value",
-      "message_sha256": "1c5569bae0aa424d21e86781106aa6fa96bee9cb6c0a2d349395dd82c0ca0f75"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_http_sync_commands_post.py",
       "code": "func-returns-value",
       "message_sha256": "1c5569bae0aa424d21e86781106aa6fa96bee9cb6c0a2d349395dd82c0ca0f75"

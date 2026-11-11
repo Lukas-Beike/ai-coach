@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.errors import AppError
-from backend.http_api.auth import SessionAuthService
+from backend.http_api.route_table import Access, Route, RouteRequest
 
 STATUS_PATH = "/api/providers/connections"
 CHECK_PREFIX = "/api/providers/"
@@ -19,20 +19,14 @@ CHECK_SUFFIX = "/check"
 
 
 class ProviderConnectionGetRoutes:
-    def __init__(
-        self,
-        session_auth_service: Callable[[], SessionAuthService],
-        checks: Callable[[], Any],
-    ) -> None:
-        self._session_auth_service = session_auth_service
+    def __init__(self, checks: Callable[[], Any]) -> None:
         self._checks = checks
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path != STATUS_PATH:
-            return False
-        self._session_auth_service().require_auth(handler)
+    def routes(self) -> list[Route]:
+        return [Route("GET", STATUS_PATH, Access.SESSION, self._statuses)]
+
+    def _statuses(self, handler: Any, _request: RouteRequest) -> None:
         handler.send_json(200, {"providers": self._checks().statuses()})
-        return True
 
 
 class ProviderConnectionPostRoutes:

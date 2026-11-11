@@ -787,7 +787,9 @@ class ServerDatabaseTests(ServerTestCase):
         finally:
             exported_files[0].unlink(missing_ok=True)
 
-    def test_privacy_download_routes_require_auth_before_streaming(self):
+    def test_privacy_download_routes_stream_through_the_transport(self):
+        from support import dispatch_route
+
         from backend.http_api.privacy_get import PrivacyGetRoutes
 
         routes = {
@@ -798,26 +800,12 @@ class ServerDatabaseTests(ServerTestCase):
             with self.subTest(path=path):
                 handler = object.__new__(server.HTTP_API.request_handler_class())
                 handler.path = path
-                auth = Mock()
                 transport = Mock()
                 transport_factory = Mock(return_value=transport)
-                route = PrivacyGetRoutes(
-                    Mock(return_value=auth), transport_factory, Mock()
-                )
-                self.assertTrue(route.handle(handler, path))
-                auth.require_auth.assert_called_once_with(handler)
+                route = PrivacyGetRoutes(transport_factory, Mock())
+                self.assertTrue(dispatch_route(route, handler, path))
                 getattr(transport, stream_method).assert_called_once_with(handler)
                 transport_factory.assert_called_once_with()
-
-                denied = server.AppError(401, "unauthorized")
-                auth.require_auth.side_effect = denied
-                transport.reset_mock()
-                transport_factory.reset_mock()
-                with self.assertRaises(server.AppError) as caught:
-                    route.handle(handler, path)
-                self.assertIs(caught.exception, denied)
-                transport_factory.assert_not_called()
-                getattr(transport, stream_method).assert_not_called()
 
     def test_privacy_archive_export_enforces_free_space_size_timeout_and_cleanup(self):
         service = server.PRIVACY_ASSEMBLY.archive_export_service()

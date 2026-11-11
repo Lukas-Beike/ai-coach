@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.http_api.auth import SessionAuthService
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.http_api.state_events_transport import StateEventTransport
 
 
@@ -30,11 +31,10 @@ class StateEventsGetRoutes:
         self._session_auth_service = session_auth_service
         self._state_event_transport = state_event_transport
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path != "/api/state/events":
-            return False
+    def routes(self) -> list[Route]:
+        return [Route("GET", "/api/state/events", Access.SESSION, self._events)]
 
-        self._session_auth_service().require_auth(handler)
+    def _events(self, handler: Any, _request: RouteRequest) -> None:
         self._state_event_transport.handle(
             handler.path,
             send_headers=handler.send_sse_headers,
@@ -45,4 +45,3 @@ class StateEventsGetRoutes:
                 self._session_auth_service().authenticated_session(handler) is not None
             ),
         )
-        return True

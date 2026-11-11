@@ -6,11 +6,10 @@ import logging
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
-from urllib.parse import parse_qs, urlparse
 
 from backend import change_history
 from backend.errors import AppError
-from backend.http_api.auth import SessionAuthService
+from backend.http_api.route_table import Access, Route, RouteRequest
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.macro_ranges import macro_ranges
 from backend.nutrition.meal_library import NutritionMealLibraryService
@@ -28,13 +27,11 @@ class NutritionGetRoutes:
 
     def __init__(
         self,
-        session_auth_service: Callable[[], SessionAuthService],
         diary_service: Callable[[], NutritionDiaryService],
         meal_library_service: Callable[[], NutritionMealLibraryService],
         local_now: Callable[[], datetime],
         macro_context: Callable[[str], tuple[Any, Any]] | None = None,
     ) -> None:
-        self._session_auth_service = session_auth_service
         self._diary_service = diary_service
         self._meal_library_service = meal_library_service
         self._local_now = local_now
@@ -69,43 +66,36 @@ class NutritionGetRoutes:
             "products": meal_library.list_products(query=term, favorites_first=True),
         }
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path not in {
-            "/api/nutrition/yazio/status",
-            "/api/nutrition/day",
-            "/api/nutrition/week",
-            NUTRITION_PRODUCTS_PATH,
-        }:
-            return False
+    def routes(self) -> list[Route]:
+        return [
+            Route("GET", "/api/nutrition/yazio/status", Access.SESSION, self._yazio),
+            Route("GET", "/api/nutrition/day", Access.SESSION, self._day),
+            Route("GET", "/api/nutrition/week", Access.SESSION, self._week),
+            Route("GET", NUTRITION_PRODUCTS_PATH, Access.SESSION, self._product_list),
+        ]
 
-        self._session_auth_service().require_auth(handler)
-        if path == "/api/nutrition/yazio/status":
-            handler.send_json(
-                200,
-                self._meal_library_service().food_database.yazio_connection_status(),
-            )
-            return True
-        query = parse_qs(urlparse(handler.path).query)
-        if path == "/api/nutrition/week":
-            try:
-                days = int(query.get("days", ["7"])[0])
-            except ValueError:
-                raise AppError(400, "Ungültiger Zeitraum.") from None
-            handler.send_json(
-                200, {"ok": True, **self._diary_service().get_week_summary(days)}
-            )
-            return True
-        if path == NUTRITION_PRODUCTS_PATH:
-            handler.send_json(200, self._products(query))
-            return True
-        if path == "/api/nutrition/day":
-            date_param = (
-                query.get("date", [None])[0] or self._local_now().date().isoformat()
-            )
-            handler.send_json(200, {"ok": True, **self._day_summary(date_param)})
-            return True
+    def _yazio(self, handler: Any, _request: RouteRequest) -> None:
+        handler.send_json(
+            200, self._meal_library_service().food_database.yazio_connection_status()
+        )
 
-        return False
+    def _week(self, handler: Any, request: RouteRequest) -> None:
+        try:
+            days = int(request.query.get("days", ["7"])[0])
+        except ValueError:
+            raise AppError(400, "Ungültiger Zeitraum.") from None
+        handler.send_json(
+            200, {"ok": True, **self._diary_service().get_week_summary(days)}
+        )
+
+    def _product_list(self, handler: Any, request: RouteRequest) -> None:
+        handler.send_json(200, self._products(request.query))
+
+    def _day(self, handler: Any, request: RouteRequest) -> None:
+        date_param = (
+            request.query.get("date", [None])[0] or self._local_now().date().isoformat()
+        )
+        handler.send_json(200, {"ok": True, **self._day_summary(date_param)})
 
 
 class NutritionPostRoutes:

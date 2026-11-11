@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
+from support import dispatch_route
+
 from backend.http_api.diagnostics_get import DiagnosticsGetRoutes
 
 
@@ -10,16 +12,13 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.handler = Mock()
         self.handler.path = "/api/logs"
-        self.auth = Mock()
         self.logs = Mock()
         self.report = Mock()
         self.factories = {
-            "auth": Mock(return_value=self.auth),
             "logs": Mock(return_value=self.logs),
             "report": Mock(return_value=self.report),
         }
         self.routes = DiagnosticsGetRoutes(
-            self.factories["auth"],
             self.factories["logs"],
             self.factories["report"],
         )
@@ -34,7 +33,7 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
         for path, payload in cases:
             with self.subTest(path=path):
                 self.handler.reset_mock()
-                self.assertTrue(self.routes.handle(self.handler, path))
+                self.assertTrue(dispatch_route(self.routes, self.handler, path))
                 self.handler.send_json.assert_called_once_with(200, payload)
 
     def test_log_limit_defaults_clamps_and_uses_first_query_value(self) -> None:
@@ -49,16 +48,15 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
             with self.subTest(request_path=request_path):
                 self.handler.path = request_path
                 self.logs.list.reset_mock()
-                self.assertTrue(self.routes.handle(self.handler, "/api/logs"))
+                self.assertTrue(dispatch_route(self.routes, self.handler, "/api/logs"))
                 self.logs.list.assert_called_once_with(expected_limit)
 
-    def test_logs_download_sends_attachment_after_authentication(self) -> None:
+    def test_logs_download_sends_attachment(self) -> None:
         self.handler.path = "/api/logs/download"
         self.logs.download.return_value = b'{"event":"safe"}\n'
 
-        self.assertTrue(self.routes.handle(self.handler, "/api/logs/download"))
+        self.assertTrue(dispatch_route(self.routes, self.handler, "/api/logs/download"))
 
-        self.auth.require_auth.assert_called_once_with(self.handler)
         self.logs.download.assert_called_once_with()
         self.handler.send_bytes.assert_called_once_with(
             200,
@@ -69,39 +67,11 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
             },
         )
 
-    def test_auth_failure_precedes_every_service_and_capture_action(self) -> None:
-        denied = PermissionError("unauthorized")
-        self.auth.require_auth.side_effect = denied
-        for path in (
-            "/api/logs",
-            "/api/logs/download",
-            "/api/diagnostics",
-        ):
-            with self.subTest(path=path):
-                with self.assertRaises(PermissionError) as caught:
-                    self.routes.handle(self.handler, path)
-                self.assertIs(caught.exception, denied)
-        self.factories["logs"].assert_not_called()
-        self.factories["report"].assert_not_called()
-        self.handler.send_json.assert_not_called()
-
     def test_unknown_route_does_not_resolve_factories_or_capture(self) -> None:
-        self.assertFalse(self.routes.handle(self.handler, "/api/diagnostics/unknown"))
+        self.assertFalse(dispatch_route(self.routes, self.handler, "/api/diagnostics/unknown"))
         for factory in self.factories.values():
             factory.assert_not_called()
         self.handler.send_json.assert_not_called()
-
-    def test_keep_alive_requests_resolve_auth_service_for_each_request(self) -> None:
-        first_auth = Mock()
-        second_auth = Mock()
-        self.factories["auth"].side_effect = (first_auth, second_auth)
-
-        self.assertTrue(self.routes.handle(self.handler, "/api/logs"))
-        self.assertTrue(self.routes.handle(self.handler, "/api/diagnostics"))
-
-        self.assertEqual(self.factories["auth"].call_count, 2)
-        first_auth.require_auth.assert_called_once_with(self.handler)
-        second_auth.require_auth.assert_called_once_with(self.handler)
 
 
 if __name__ == "__main__":

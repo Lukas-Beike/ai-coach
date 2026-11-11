@@ -33,7 +33,7 @@ from provider_runtime_fakes import (
     acme_descriptor,
     acme_freshness_source,
 )
-from support import make_config, temp_database
+from support import dispatch_route, make_config, temp_database
 
 from backend.coach.authorization import request_target_enum
 from backend.db.manager import DatabaseManager
@@ -270,7 +270,6 @@ class AcmeOrchestrationCase(unittest.TestCase):
             running_probes={},
         )
         self.get_routes = SyncGetRoutes(
-            lambda: Mock(),
             lambda: self.queue,
             lambda: self.status,
             Mock(),
@@ -494,7 +493,9 @@ class AcmeFreshnessAndStatusTests(AcmeOrchestrationCase):
 
         status_handler = Mock()
         status_handler.path = "/api/sync/status"
-        self.assertTrue(self.get_routes.handle(status_handler, "/api/sync/status"))
+        self.assertTrue(
+            dispatch_route(self.get_routes, status_handler, "/api/sync/status")
+        )
 
         status_code, payload = status_handler.send_json.call_args.args
         self.assertEqual(status_code, 200)

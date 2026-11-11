@@ -3,40 +3,37 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import parse_qs, urlparse
 
 from backend.errors import AppError
+from backend.http_api.route_table import Access, Route, RouteRequest
 
 
 class AnalysisRoutes:
     def __init__(
         self,
-        auth: Any,
         reports: Any,
         refresh: Any = None,
     ):
-        self._auth = auth
         self._reports = reports
         self._refresh = refresh
 
-    def handle(self, handler: Any, path: str) -> bool:
-        if path not in {
-            "/api/analysis/power-profiles",
-            "/api/analysis/training-records",
-        }:
-            return False
-        self._auth().require_auth(handler)
-        values = {
-            key: value[0]
-            for key, value in parse_qs(urlparse(handler.path).query).items()
-        }
+    def routes(self) -> list[Route]:
+        return [
+            Route("GET", "/api/analysis/power-profiles", Access.SESSION, self._report),
+            Route(
+                "GET", "/api/analysis/training-records", Access.SESSION, self._report
+            ),
+        ]
+
+    def _report(self, handler: Any, request: RouteRequest) -> None:
+        path = request.path
+        values = {key: value[0] for key, value in request.query.items()}
         reports = self._reports()
         if path.endswith("/training-records"):
             payload = reports.records.training_records(values)
         else:
             payload = reports.profiles.power_profiles()
         handler.send_json(200, payload)
-        return True
 
     def handle_post(self, handler: Any, path: str) -> bool:
         if path == "/api/analysis/refresh":

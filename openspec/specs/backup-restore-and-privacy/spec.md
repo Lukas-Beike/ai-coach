@@ -68,7 +68,7 @@ The authenticated privacy export SHALL be a bounded ZIP of JSON and JSON Lines m
 - **WHEN** a privacy download is requested without a valid session
 - **THEN** authentication fails before export streaming starts
 
-Evidence: `backend/backup/export.py::PrivacyArchiveExportService`; `backend/backup/export.py::PRIVACY_EXPORT_JSONL_FILES`; `backend/http_api/privacy_get.py`. Only the archive is served. `backend/provider_credentials.py::stored_visible_settings` selects the exported provider fields. Tests: `tests/test_data_safety_coverage.py::DataKindExportTests`; `tests/test_privacy_provider_data.py::test_stored_non_secret_provider_fields_are_exported_without_secrets`; `tests/test_server_database.py::test_privacy_export_zip_streams_collections_and_contains_complete_manifest`; `tests/test_privacy_provider_data.py`; `tests/test_server_database.py::test_privacy_download_routes_require_auth_before_streaming`.
+Evidence: `backend/backup/export.py::PrivacyArchiveExportService`; `backend/backup/export.py::PRIVACY_EXPORT_JSONL_FILES`; `backend/http_api/privacy_get.py`. Only the archive is served. `backend/provider_credentials.py::stored_visible_settings` selects the exported provider fields. Tests: `tests/test_data_safety_coverage.py::DataKindExportTests`; `tests/test_privacy_provider_data.py::test_stored_non_secret_provider_fields_are_exported_without_secrets`; `tests/test_server_database.py::test_privacy_export_zip_streams_collections_and_contains_complete_manifest`; `tests/test_privacy_provider_data.py`; `tests/test_server_database.py::test_privacy_download_routes_stream_through_the_transport`.
 
 ### Requirement: Coverage guards for stored data kinds
 

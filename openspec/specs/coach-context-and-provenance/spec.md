@@ -197,7 +197,7 @@ The system SHALL expose an authenticated preview of the full Coach context (not 
 - **WHEN** preview describes the Responses conversation chain
 - **THEN** it explains dialogue continuity independently from authoritative local profile and competition facts.
 
-Evidence: `backend/http_api/athlete_get.py:AthleteGetRoutes.handle`; `backend/coach/context.py:CoachContextPreviewService.preview`; `tests/test_coach_context_preview.py:test_preview_layout_snapshot_last_message_and_read_calls`, `tests/test_coach_context_preview.py:test_projection_bounds_and_privacy`, `tests/test_coach_context_preview.py:test_conversation_preview_documents_responses_chain`.
+Evidence: `backend/http_api/athlete_get.py:AthleteGetRoutes.routes`; `backend/coach/context.py:CoachContextPreviewService.preview`; `tests/test_coach_context_preview.py:test_preview_layout_snapshot_last_message_and_read_calls`, `tests/test_coach_context_preview.py:test_projection_bounds_and_privacy`, `tests/test_coach_context_preview.py:test_conversation_preview_documents_responses_chain`.
 
 ### Requirement: Coach activity context uses neutral activity summaries
 The Coach context SHALL list recent activities from the neutral activity summaries of every provider, one per session, with the local session id, canonical sport and environment, neutral value keys, `load_model` and source labels, and SHALL NOT expose provider field names or type names.

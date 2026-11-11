@@ -48,8 +48,8 @@ REGISTERED_ELSEWHERE = {
         "provider_connections.py",
         'CHECK_PREFIX = "/api/providers/"',
     ),
-    # Matched by regular expressions over the id segment.
-    "/api/activities/{id}": ("sync_get.py", '"^/api/activities/([^/]+)$"'),
+    # Matched by regular expressions or route-table patterns over the id segment.
+    "/api/activities/{id}": ("sync_get.py", '"/api/activities/{id}"'),
     "/api/activities/{id}/feedback": (
         "feedback_post.py",
         '"/api/activities/([^/]+)/feedback"',
@@ -66,7 +66,7 @@ REGISTERED_ELSEWHERE = {
         "planned_unit_focus_post.py",
         '"/api/planned-units/([^/]+)/focus"',
     ),
-    "/api/sync/jobs/{id}": ("sync_get.py", '"^/api/sync/jobs/([0-9a-f-]+)$"'),
+    "/api/sync/jobs/{id}": ("sync_get.py", '"/api/sync/jobs/{id:[0-9a-f-]+}"'),
 }
 # Former aliases the document names as no longer registered.
 RETIRED_ALIASES = {"/api/logs/clear", "/api/diagnostics/clear"}

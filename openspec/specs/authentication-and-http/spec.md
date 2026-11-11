@@ -160,4 +160,4 @@ The server SHALL return API not-found errors for unmatched API paths, restrict s
 - **WHEN** an API response is formatted with the default response policy
 - **THEN** it includes Cache-Control=no-store, nosniff and DENY framing protection
 
-Evidence: `backend/http_api/route_dispatch.py::HttpRouteDispatcher`; `backend/http_api/static_assets.py::StaticAssetService.render`; `backend/http_api/responses.py::response_headers`. Tests: `tests/test_http_route_dispatch.py`; `tests/test_server_frontend.py::test_static_files_reject_path_traversal`; `tests/test_server_frontend.py::test_unknown_static_asset_falls_back_to_index_with_security_headers`.
+Evidence: `backend/http_api/route_table.py::RouteTable`; `backend/http_api/handler.py::RequestHandler._get`; `backend/http_api/route_dispatch.py::HttpRouteDispatcher`; `backend/http_api/static_assets.py::StaticAssetService.render`; `backend/http_api/responses.py::response_headers`. Tests: `tests/test_http_route_dispatch.py`; `tests/test_server_frontend.py::test_static_files_reject_path_traversal`; `tests/test_server_frontend.py::test_unknown_static_asset_falls_back_to_index_with_security_headers`.
